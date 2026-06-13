@@ -1,0 +1,102 @@
+import { useParams } from "@tanstack/react-router";
+import { Row, RowDivider, Section } from "../components/SettingsSection.js";
+import { Skeleton } from "../components/Skeleton.js";
+import { Toggle } from "../components/Toggle.js";
+import type { FeatureCapability } from "../lib/api.js";
+import { useUpdateCapabilities } from "../lib/mutations.js";
+import { useCanvas } from "../lib/queries.js";
+
+/**
+ * Backend-group features (plan 006). Mirrors the shared capability taxonomy — the
+ * dashboard bundle is intentionally free of workspace `shared` imports, so the
+ * labels live here; the server is authoritative for stored + effective state.
+ */
+const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: string }[] = [
+  {
+    key: "kv",
+    label: "Key–value storage",
+    description: "Per-canvas and per-user key–value store for durable state.",
+  },
+  {
+    key: "files",
+    label: "File storage",
+    description: "Upload, list, and serve files from the canvas.",
+  },
+  {
+    key: "ai",
+    label: "AI",
+    description: "Server-side LLM proxy (no provider keys in the browser).",
+  },
+  {
+    key: "realtime",
+    label: "Realtime",
+    description: "Ephemeral pub/sub + presence over WebSockets.",
+  },
+];
+
+/**
+ * Capabilities tab (plan 006). One "Backend" group: a master switch plus the four
+ * backend features. Feature toggles are disabled while backend is off; a feature
+ * the operator has globally disabled shows a hint. Identity (`me()`) is always on
+ * when backend is enabled. Toggles are optimistic (useUpdateCapabilities).
+ */
+export default function Capabilities() {
+  const { id } = useParams({ strict: false }) as { id: string };
+  const { data: canvas, isLoading } = useCanvas(id);
+  const update = useUpdateCapabilities(id);
+
+  if (isLoading || !canvas) {
+    return <Skeleton className="h-64" />;
+  }
+
+  const backendOn = canvas.backendEnabled;
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <Section
+        id="backend"
+        title="Backend"
+        description="Give this canvas backend capability so its code can store data, serve files, call AI, and sync in realtime. You can change this any time."
+      >
+        <Toggle
+          label="Enable backend"
+          description="Off by default — a canvas is static until you turn this on."
+          checked={backendOn}
+          onChange={(next) => update.mutate({ backendEnabled: next })}
+        />
+        <RowDivider />
+
+        {BACKEND_FEATURES.map((f) => {
+          const storedOn = canvas.capabilities[f.key];
+          const gatedByOperator = backendOn && storedOn && !canvas.effective[f.key];
+          return (
+            <Toggle
+              key={f.key}
+              label={f.label}
+              description={
+                gatedByOperator ? (
+                  <span className="text-warning">
+                    Disabled by your administrator for this instance.
+                  </span>
+                ) : (
+                  f.description
+                )
+              }
+              checked={storedOn}
+              disabled={!backendOn}
+              onChange={(next) => update.mutate({ [f.key]: next })}
+            />
+          );
+        })}
+        <RowDivider />
+
+        <Row
+          title="Identity"
+          description="Canvas code can read the signed-in viewer via me(). Always on when backend is enabled."
+        >
+          <span className="text-xs font-medium text-muted">{backendOn ? "Always on" : "Off"}</span>
+        </Row>
+      </Section>
+    </div>
+  );
+}

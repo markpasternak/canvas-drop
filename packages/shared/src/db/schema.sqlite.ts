@@ -89,6 +89,18 @@ export const canvases = sqliteTable(
     // bumped on every password set/clear so outstanding gate cookies invalidate (U16)
     passwordVersion: c.int("password_version").notNull().default(0),
     spaFallback: c.bool("spa_fallback").notNull().default(false),
+    // Capability foundation (plan 006). `backendEnabled` is the Backend-group master
+    // switch (off by default — static-first); the cap_* flags default ON so flipping
+    // backend on yields all-features-live with no extra writes. Per-feature flags
+    // persist independently of `backendEnabled` (turning backend off never clears them).
+    // Effective state ANDs these with the operator global flags — see
+    // packages/shared/src/capabilities. Identity (`me()`) has no column: it is on iff
+    // backendEnabled. The deploy API key (`apiKeyHash`) is unrelated to this choice.
+    backendEnabled: c.bool("backend_enabled").notNull().default(false),
+    capKv: c.bool("cap_kv").notNull().default(true),
+    capFiles: c.bool("cap_files").notNull().default(true),
+    capAi: c.bool("cap_ai").notNull().default(true),
+    capRealtime: c.bool("cap_realtime").notNull().default(true),
     apiKeyHash: c.text("api_key_hash").notNull(),
     status: c.text("status").notNull().default("active"), // active | disabled | archived | deleted
     // Pointer (not an FK) to the current ready version — avoids a circular FK with

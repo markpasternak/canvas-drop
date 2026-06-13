@@ -28,6 +28,12 @@ const TABS = [
     path: (id: string) => `/canvases/${id}/settings`,
   },
   {
+    to: "/canvases/$id/capabilities",
+    label: "Capabilities",
+    exact: false,
+    path: (id: string) => `/canvases/${id}/capabilities`,
+  },
+  {
     to: "/canvases/$id/usage",
     label: "Usage",
     exact: false,

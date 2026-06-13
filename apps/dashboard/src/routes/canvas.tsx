@@ -19,7 +19,7 @@ import { useCanvas } from "../lib/queries.js";
 function contentWidth(pathname: string): string {
   if (pathname.endsWith("/editor")) return ""; // full-bleed tool surface
   if (pathname.endsWith("/settings")) return "mx-auto w-full max-w-3xl"; // forms
-  return "mx-auto w-full max-w-5xl"; // overview / versions / usage
+  return "mx-auto w-full max-w-5xl"; // overview / versions / usage / capabilities
 }
 
 /** Canvas detail shell: breadcrumb back-affordance, header, routed tabs, Outlet. */

@@ -15,6 +15,7 @@ import { CopyButton } from "../components/CopyButton.js";
 import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
+import { Toggle } from "../components/Toggle.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 
@@ -71,6 +72,9 @@ export default function CreateCanvas() {
   const initial = (METHODS.find((m) => m.id === search.method)?.id ?? "paste") as Method;
   const [method, setMethod] = useState<Method>(initial);
   const [title, setTitle] = useState("");
+  // Backend-group master switch chosen at create time (plan 006). Off by default;
+  // changeable later in the canvas Capabilities tab.
+  const [backendEnabled, setBackendEnabled] = useState(false);
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +102,7 @@ export default function CreateCanvas() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api.pasteHtml({ html, title: title || undefined });
+      const res = await api.pasteHtml({ html, title: title || undefined, backendEnabled });
       setRevealed({ apiKey: res.apiKey, id: res.id, deployed: true });
     } catch (err) {
       fail(err);
@@ -112,7 +116,7 @@ export default function CreateCanvas() {
     setProgress(0);
     const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
-      const canvas = await api.createCanvas({ title: title || undefined });
+      const canvas = await api.createCanvas({ title: title || undefined, backendEnabled });
       try {
         if (kind === "folder") {
           await api.deployFolder(canvas.id, folderFormFromFiles(files), onProgress);
@@ -138,7 +142,7 @@ export default function CreateCanvas() {
     setBusy(true);
     setError(null);
     try {
-      const canvas = await api.createCanvas({ title: title || undefined });
+      const canvas = await api.createCanvas({ title: title || undefined, backendEnabled });
       setApiResult({ id: canvas.id, apiKey: canvas.apiKey, url: canvas.url });
       setBusy(false);
     } catch (err) {
@@ -161,6 +165,17 @@ export default function CreateCanvas() {
       />
 
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+
+      {/* Capability toggle from the canvas-capabilities foundation (origin/main, #14):
+          start static or backend-enabled; changeable later in the Capabilities tab. */}
+      <Panel className="p-5">
+        <Toggle
+          label="Enable backend"
+          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in Capabilities."
+          checked={backendEnabled}
+          onChange={setBackendEnabled}
+        />
+      </Panel>
 
       <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <section
