@@ -8,8 +8,11 @@ import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { usersRepository } from "../db/repositories/users.js";
+import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
+import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
+import type { StorageDriver } from "../storage/driver.js";
 import { managementRoutes } from "./management.js";
 
 const silent = pino({ level: "silent" });
@@ -19,10 +22,33 @@ async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+function memStorage(): StorageDriver {
+  const store = new Map<string, Uint8Array>();
+  return {
+    async put(k, b) {
+      store.set(k, b);
+    },
+    async get(k) {
+      return store.get(k) ?? null;
+    },
+    async delete(k) {
+      store.delete(k);
+    },
+    async exists(k) {
+      return store.has(k);
+    },
+    async list(p) {
+      return [...store.keys()].filter((k) => k.startsWith(p)).sort();
+    },
+  };
+}
+
 /** Build a management app that authenticates as a chosen user (no gateway needed). */
 function buildApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
   const canvases = canvasesRepository(client);
+  const versions = versionsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
+  const engine = deployEngine({ config, canvases, versions, storage: memStorage(), log: silent });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
@@ -30,7 +56,7 @@ function buildApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
     c.set("clientIp", "127.0.0.1");
     await next();
   });
-  app.route("/api/canvases", managementRoutes({ config, canvases, audit }));
+  app.route("/api/canvases", managementRoutes({ config, canvases, audit, engine }));
   return app;
 }
 
@@ -187,6 +213,57 @@ describe("managementRoutes", () => {
     });
     const list = await jsonOf<{ canvases: unknown[] }>(await app.request("/api/canvases"));
     expect(list.canvases).toHaveLength(0);
+  });
+
+  it("paste-HTML create returns a new canvas with a live index.html and the key once", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases/paste",
+      {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>pasted</h1>", title: "Pasted" }),
+      },
+    );
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{
+      slug: string;
+      apiKey: string;
+      currentVersionId: string | null;
+      deploy: { version: number; fileCount: number };
+    }>(res);
+    expect(body.apiKey).toMatch(/^cd_/);
+    expect(body.deploy.version).toBe(1);
+    expect(body.deploy.fileCount).toBe(1);
+  });
+
+  it("owner can deploy via ZIP; a non-owner cannot", async () => {
+    const { zipSync } = await import("fflate");
+    const { Buffer } = await import("node:buffer");
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await jsonOf<{ id: string; slug: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const zip = Buffer.from(zipSync({ "index.html": new TextEncoder().encode("<h1>z</h1>") }));
+    const ok = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/deploy/zip`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" }, body: zip },
+    );
+    expect(ok.status).toBe(200);
+    expect((await jsonOf<{ fileCount: number }>(ok)).fileCount).toBe(1);
+
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/deploy/zip`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" }, body: zip },
+    );
+    expect(denied.status).toBe(404);
   });
 
   it("rejects a cross-site mutating request", async () => {

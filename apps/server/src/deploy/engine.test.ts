@@ -1,6 +1,5 @@
 import { Buffer } from "node:buffer";
 import { type Config, loadConfig } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
 import { zipSync } from "fflate";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";

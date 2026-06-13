@@ -59,7 +59,7 @@ export function serveCanvas(deps: ServeDeps) {
     if (!canvas.currentVersionId) return notFound(c); // never deployed
 
     const version = await deps.versions.findById(canvas.currentVersionId);
-    if (!version || version.status !== "ready" || !version.manifest) return notFound(c);
+    if (version?.status !== "ready" || !version.manifest) return notFound(c);
     const manifest = version.manifest as Manifest;
 
     const assetPath = assetPathFor(deps.config, canvas.slug, c.req.path);

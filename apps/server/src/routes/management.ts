@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
@@ -9,13 +10,17 @@ import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { DeployEngine } from "../deploy/engine.js";
+import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import { deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps {
   config: Config;
   canvases: CanvasesRepository;
   audit: AuditLog;
+  engine: DeployEngine;
 }
 
 const createSchema = z.object({
@@ -167,6 +172,66 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     return c.json({ ok: true });
+  });
+
+  // --- Deploy entry points (UI calls these; the engine + result shape is U18/U19) ---
+
+  // Paste-HTML quick create: create a canvas, then deploy a single index.html.
+  app.post("/paste", sameOrigin, async (c) => {
+    const body = z
+      .object({ html: z.string().min(1), title: z.string().max(200).optional() })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = c.get("user");
+    const slug = await generateUniqueSlug(
+      async (s) => (await deps.canvases.findBySlug(s)) !== null,
+    );
+    const apiKey = generateApiKey();
+    const cv = await deps.canvases.create({
+      ownerId: user.id,
+      slug,
+      apiKeyHash: hashApiKey(apiKey),
+      title: body.data.title,
+    });
+    deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
+    const res = await deployResponse(
+      c,
+      deps.engine,
+      deps.audit,
+      cv,
+      "paste",
+      fromPasteHtml(body.data.html),
+      user.id,
+    );
+    // On success, fold in the canvas + once-shown key; on a deploy error pass it through.
+    if (res.status >= 400) return res;
+    const deploy = (await res.json()) as Record<string, unknown>;
+    return c.json({ ...publicCanvas(deps.config, cv), apiKey, deploy }, 201);
+  });
+
+  app.post("/:id/deploy/zip", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const buf = Buffer.from(await c.req.arrayBuffer());
+    if (buf.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
+    return deployResponse(c, deps.engine, deps.audit, cv, "zip", fromZip(buf), c.get("user").id);
+  });
+
+  app.post("/:id/deploy/folder", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    // Each multipart file field's KEY is the file's canvas-relative path.
+    const form = await c.req.parseBody({ all: true });
+    const entries: DeployEntry[] = [];
+    for (const [path, value] of Object.entries(form)) {
+      const files = Array.isArray(value) ? value : [value];
+      for (const f of files) {
+        if (f instanceof File) {
+          entries.push({ path, bytes: new Uint8Array(await f.arrayBuffer()) });
+        }
+      }
+    }
+    return deployResponse(c, deps.engine, deps.audit, cv, "folder", entries, c.get("user").id);
   });
 
   return app;

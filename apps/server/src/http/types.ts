@@ -13,6 +13,8 @@ export interface AppVariables {
   clientIp?: string;
   /** The authenticated user — guaranteed set by the auth gateway on protected routes. */
   user: User;
+  /** Resolved request role (set by the app's role middleware, U11/U19). */
+  role?: "dashboard" | "auth" | "platform-api" | "canvas";
   /** Canvas slug from resolveRequest (canvas + platform-api roles). */
   canvasSlug?: string;
   /** The authorized canvas — set by canvasAccess (U15) on allow. */

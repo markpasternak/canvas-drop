@@ -1,7 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
-import type { Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
@@ -122,6 +121,4 @@ function escapeHtml(s: string): string {
   );
 }
 
-// re-export for the gate middleware's Context typing convenience
-export type { Context };
 export { GATE_COOKIE, signGrant, verifyGrant };
