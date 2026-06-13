@@ -1,0 +1,216 @@
+import { type Config, loadConfig } from "@canvas-drop/shared";
+import { pino } from "pino";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildApp } from "../app.js";
+import { createAuditLog } from "../audit/audit-log.js";
+import { devStrategy } from "../auth/dev.js";
+import { sessionService } from "../auth/session.js";
+import type { DbClient } from "../db/factory.js";
+import { auditRepository } from "../db/repositories/audit.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
+import { sessionsRepository } from "../db/repositories/sessions.js";
+import { usersRepository } from "../db/repositories/users.js";
+import { versionsRepository } from "../db/repositories/versions.js";
+import { makeTestDb } from "../db/testing.js";
+import { deployEngine } from "../deploy/engine.js";
+import { memStorage } from "../storage/mem.js";
+import { inProcessRateLimitStore } from "./rate-limit.js";
+
+// --- The in-process store (injected clock) ---
+
+describe("inProcessRateLimitStore", () => {
+  it("allows up to the limit, blocks the next, resets after the window", () => {
+    let now = 1_000_000;
+    const store = inProcessRateLimitStore(() => now);
+    const k = "k";
+    expect(store.hit(k, 2, 60_000).allowed).toBe(true);
+    expect(store.hit(k, 2, 60_000).allowed).toBe(true);
+    const blocked = store.hit(k, 2, 60_000);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfterSec).toBeGreaterThan(0);
+    // Advance past the window → fresh budget.
+    now += 60_001;
+    expect(store.hit(k, 2, 60_000).allowed).toBe(true);
+  });
+
+  it("keeps separate buckets per key", () => {
+    let now = 0;
+    const store = inProcessRateLimitStore(() => now);
+    expect(store.hit("a", 1, 1000).allowed).toBe(true);
+    expect(store.hit("a", 1, 1000).allowed).toBe(false);
+    expect(store.hit("b", 1, 1000).allowed).toBe(true); // independent
+    now += 1;
+  });
+});
+
+// --- The middleware + out-of-band throttles, end-to-end through buildApp ---
+
+const silent = pino({ level: "silent" });
+
+/** Config with tiny limits so a breach happens in a couple of requests. */
+function lowLimitConfig(overrides: Record<string, string> = {}): Config {
+  return loadConfig({
+    CANVAS_DROP_AUTH_MODE: "dev",
+    CANVAS_DROP_DEV_USER_EMAIL: "mark@example.com",
+    CANVAS_DROP_ADMIN_EMAILS: "mark@example.com",
+    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: "2",
+    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: "2",
+    CANVAS_DROP_RATELIMIT_AI_PER_MIN: "2",
+    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: "2",
+    ...overrides,
+  });
+}
+
+function app(client: DbClient, config: Config, clientIp = () => "127.0.0.1") {
+  const canvases = canvasesRepository(client);
+  const versions = versionsRepository(client);
+  const drafts = draftsRepository(client);
+  const storage = memStorage();
+  return buildApp({
+    config,
+    db: client,
+    rootLogger: silent,
+    strategy: devStrategy(config),
+    users: usersRepository(client),
+    canvases,
+    versions,
+    drafts,
+    storage,
+    engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
+    audit: createAuditLog(auditRepository(client), silent),
+    sessionSvc: sessionService(config, sessionsRepository(client)),
+    clientIp,
+  });
+}
+
+const host = { host: "localhost:3000" };
+
+describe("rate limiting (middleware + out-of-band)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** Seed a backend-enabled canvas owned by the dev user. */
+  async function seedCanvas(client: DbClient, slug = "app") {
+    // Match the dev strategy's identity (sub `dev:<email>`) so the canvas owner IS
+    // the gateway-resolved user — a different sub with the same email would 500 on
+    // the unique-email index when the gateway upserts on first request.
+    const owner = await usersRepository(client).upsert({
+      providerSub: "dev:mark@example.com",
+      email: "mark@example.com",
+      name: "Mark",
+      isAdmin: true,
+    });
+    return canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug,
+      apiKeyHash: `h-${slug}`,
+      backendEnabled: true,
+    });
+  }
+
+  it("runtime breach → 429 { code: RATE_LIMITED } (mandated)", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig());
+    await seedCanvas(client);
+    expect((await a.request("/v1/c/app/me", { headers: host })).status).toBe(200);
+    expect((await a.request("/v1/c/app/me", { headers: host })).status).toBe(200);
+    const res = await a.request("/v1/c/app/me", { headers: host });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code: string }).code).toBe("RATE_LIMITED");
+    expect(res.headers.get("retry-after")).toBeTruthy();
+  });
+
+  it("management breach → 429 { error: rate_limited } (mandated)", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig());
+    expect((await a.request("/api/canvases", { headers: host })).status).toBe(200);
+    expect((await a.request("/api/canvases", { headers: host })).status).toBe(200);
+    const res = await a.request("/api/canvases", { headers: host });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { error: string }).error).toBe("rate_limited");
+  });
+
+  it("static content + healthz are NOT throttled (not API classes)", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig());
+    for (let i = 0; i < 5; i++) {
+      expect((await a.request("/healthz")).status).toBe(200);
+    }
+    // A missing canvas content path 404s but is never 429 (content is not throttled).
+    for (let i = 0; i < 5; i++) {
+      const res = await a.request("/c/ghost/index.html", { headers: host });
+      expect(res.status).not.toBe(429);
+    }
+  });
+
+  it("the master flag disables all throttling", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig({ CANVAS_DROP_RATELIMIT_ENABLED: "false" }));
+    for (let i = 0; i < 6; i++) {
+      expect((await a.request("/api/canvases", { headers: host })).status).toBe(200);
+    }
+  });
+
+  it("login is throttled per-IP, pre-gateway (5/min default; 2 here)", async () => {
+    client = await makeTestDb("sqlite");
+    // oidc-less dev mode has no /auth/login handler, but the throttle runs first;
+    // before the limit it falls through (404), past it returns 429.
+    const a = app(client, lowLimitConfig());
+    await a.request("/auth/login", { headers: host });
+    await a.request("/auth/login", { headers: host });
+    const res = await a.request("/auth/login", { headers: host });
+    expect(res.status).toBe(429);
+  });
+
+  it("AI sub-class auto-covers /v1/c/:slug/ai/* before the route even exists", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig()); // aiPerMin = 2
+    await seedCanvas(client);
+    // /ai/chat 404s today (no AI route), but it classifies as the stricter ai
+    // class and is throttled — proving future AI routes are covered with no change.
+    await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
+    await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
+    const res = await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code: string }).code).toBe("RATE_LIMITED");
+  });
+
+  it("Bearer deploy throttled per-canvas with a valid key; no key → 401 (not 429)", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig({ CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: "1" }));
+    // Create via the management API to obtain a real Bearer key.
+    const created = (await (
+      await a.request("/api/canvases", {
+        method: "POST",
+        headers: { ...host, "content-type": "application/json", "sec-fetch-site": "same-origin" },
+        body: "{}",
+      })
+    ).json()) as { id: string; apiKey: string };
+    const bearer = { Authorization: `Bearer ${created.apiKey}` };
+
+    // No key → 401 (key validation runs before the throttle), never 429.
+    const noKey = await a.request(`/v1/canvases/${created.id}/deploy`, {
+      method: "PUT",
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(noKey.status).toBe(401);
+
+    // 1st keyed deploy passes the throttle (then fails on the junk zip — 400);
+    // 2nd exceeds the 1/min deploy limit → 429.
+    const first = await a.request(`/v1/canvases/${created.id}/deploy`, {
+      method: "PUT",
+      headers: bearer,
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(first.status).not.toBe(429);
+    const second = await a.request(`/v1/canvases/${created.id}/deploy`, {
+      method: "PUT",
+      headers: bearer,
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(second.status).toBe(429);
+  });
+});

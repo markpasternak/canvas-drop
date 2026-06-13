@@ -4,6 +4,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
+import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { verifyPassword } from "./password.js";
 
@@ -48,6 +49,8 @@ function gateCookieOptions(config: Config, slug: string) {
 export interface PasswordGateDeps {
   config: Config;
   audit: AuditLog;
+  /** Shared rate-limit store (M7) — throttles gate attempts (§12.3 5/min/user). */
+  rateLimitStore?: RateLimitStore;
 }
 
 /**
@@ -67,6 +70,19 @@ export function passwordGate(deps: PasswordGateDeps) {
 
     // Gate submission: a POST carrying the password.
     if (c.req.method === "POST") {
+      // Throttle password-gate attempts (§12.3 5/min/user/canvas) — slows brute
+      // force of a protected canvas's password (§12.0 #3).
+      if (deps.rateLimitStore && deps.config.rateLimit.enabled) {
+        const r = takeToken(
+          deps.rateLimitStore,
+          `pwgate:${c.get("user").id}:${canvas.id}`,
+          deps.config.rateLimit.passwordGatePerMin,
+        );
+        if (!r.allowed) {
+          c.header("Retry-After", String(r.retryAfterSec));
+          return c.html(gatePage(canvas.title, true), 429);
+        }
+      }
       const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
       const password = typeof form.password === "string" ? form.password : "";
       const ok = canvas.passwordHash ? await verifyPassword(canvas.passwordHash, password) : false;

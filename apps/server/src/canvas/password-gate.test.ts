@@ -7,6 +7,7 @@ import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { makeTestDb } from "../db/testing.js";
+import { inProcessRateLimitStore } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { hashPassword } from "./password.js";
 import { GATE_COOKIE, passwordGate, signGrant, verifyGrant } from "./password-gate.js";
@@ -158,5 +159,38 @@ describe("passwordGate", () => {
     const raw = res.headers.getSetCookie().find((c) => c.startsWith(GATE_COOKIE));
     expect(raw).toMatch(/HttpOnly/i);
     expect(raw).toMatch(/SameSite=Lax/i);
+  });
+
+  it("throttles gate attempts past the per-user/canvas limit → 429 (§12.3)", async () => {
+    const cv = canvas({ passwordHash: await hashPassword("right") });
+    const lowConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: "2",
+    });
+    const store = inProcessRateLimitStore();
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: "viewer" } as never);
+      c.set("clientIp", "127.0.0.1");
+      c.set("canvas", cv);
+      c.set("needsPasswordGate", true);
+      await next();
+    });
+    app.use(
+      "*",
+      passwordGate({ config: lowConfig, audit: await mkAudit(), rateLimitStore: store }),
+    );
+    app.all("*", (c) => c.text("CONTENT"));
+    const attempt = () =>
+      app.request("/c/s/index.html", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "password=wrong",
+      });
+    expect((await attempt()).status).toBe(401); // wrong password
+    expect((await attempt()).status).toBe(401);
+    const limited = await attempt(); // 3rd attempt exceeds the 2/min gate limit
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBeTruthy();
   });
 });

@@ -108,6 +108,16 @@ const rawSchema = z
     // resolved from the server module; override for non-standard layouts.
     CANVAS_DROP_DASHBOARD_DIST: z.string().optional(),
 
+    // Rate limiting (§12.3, M7). Per-class req/min defaults; admin-tunable rate
+    // limits are a follow-up (these are enforcement constants on the hot path).
+    CANVAS_DROP_RATELIMIT_ENABLED: bool(true),
+    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: num(60),
+    CANVAS_DROP_RATELIMIT_AI_PER_MIN: num(10),
+    CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: num(10),
+    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: num(60),
+    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: num(5),
+    CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: num(5),
+
     // Database
     CANVAS_DROP_DB: z.enum(["sqlite", "postgres"]).optional().default("sqlite"),
     CANVAS_DROP_SQLITE_PATH: z.string().optional().default("./data/canvasdrop.db"),
@@ -343,6 +353,16 @@ const rawSchema = z
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
       allowMultiUserPathMode: r.CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE,
       dashboardDist: r.CANVAS_DROP_DASHBOARD_DIST,
+
+      rateLimit: {
+        enabled: r.CANVAS_DROP_RATELIMIT_ENABLED,
+        canvasApiPerMin: r.CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN,
+        aiPerMin: r.CANVAS_DROP_RATELIMIT_AI_PER_MIN,
+        deployPerMin: r.CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN,
+        managementPerMin: r.CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN,
+        loginPerMin: r.CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN,
+        passwordGatePerMin: r.CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN,
+      },
 
       db:
         r.CANVAS_DROP_DB === "postgres"

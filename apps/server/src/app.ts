@@ -27,6 +27,12 @@ import type { DeployEngine } from "./deploy/engine.js";
 import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
+import {
+  inProcessRateLimitStore,
+  type RateLimitStore,
+  rateLimit,
+  takeToken,
+} from "./http/rate-limit.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
@@ -56,6 +62,8 @@ export interface BuildAppDeps {
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the peer-IP extractor (tests inject a fixed IP). */
   clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
+  /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
+  rateLimitStore?: RateLimitStore;
 }
 
 /**
@@ -84,6 +92,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     config: deps.config,
   });
 
+  // One shared in-process rate-limit store (§9.7, M7) — used by the broad
+  // post-gateway middleware AND the out-of-band mount points (Bearer deploy,
+  // login, password-gate) so MAX_KEYS bounds everything. Per-buildApp = per-test
+  // isolation.
+  const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
+
   app.use("*", requestLogger(deps.rootLogger));
 
   // Resolve the client IP for trusted-proxy checks (§12.5). MUST be the real TCP
@@ -101,6 +115,21 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
 
+  // Login throttle (§12.3 5/min/IP) — pre-gateway, keyed by the socket-peer IP
+  // (never XFF). Defends the credential surface (§12.0 #1). Path-scoped to the
+  // login endpoint, which is the only unauthenticated credential entry point.
+  app.use("/auth/login", async (c, next) => {
+    if (deps.config.rateLimit.enabled) {
+      const ip = c.get("clientIp") ?? "unknown";
+      const r = takeToken(rlStore, `login:${ip}`, deps.config.rateLimit.loginPerMin);
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return c.json({ error: "rate_limited" }, 429);
+      }
+    }
+    await next();
+  });
+
   // Public session-login routes.
   app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
 
@@ -113,6 +142,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       engine: deps.engine,
       audit: deps.audit,
+      rateLimitStore: rlStore,
     }),
   );
 
@@ -141,6 +171,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     if (canvasSlug) c.set("canvasSlug", canvasSlug);
     await next();
   });
+
+  // Broad route-class rate limiting (§6.11.2, §12.3, M7). AFTER the gateway +
+  // role middleware so `user`/`canvasSlug` are server-resolved (the keys are
+  // never client-asserted, §12.0 #1), BEFORE the route handlers. One path-first
+  // classifier covers every runtime + management API class and auto-covers any
+  // future AI/realtime HTTP routes.
+  app.use("*", rateLimit(rlStore, deps.config));
 
   // Canvas-facing runtime API (areas F/G/I — KV, files, me). Path-mounted so it
   // handles `/v1/c/:slug/*` ahead of the canvas-content chain; isolation + CORS +
@@ -223,7 +260,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     createMiddleware<AppEnv>((c, next) => (c.get("role") === "canvas" ? mw(c, next) : next()));
 
   app.use("*", onlyCanvas(canvasAccess({ canvases: deps.canvases })));
-  app.use("*", onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit })));
+  app.use(
+    "*",
+    onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit, rateLimitStore: rlStore })),
+  );
   app.use(
     "*",
     onlyCanvas(
