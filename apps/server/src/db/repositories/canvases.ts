@@ -15,6 +15,21 @@ export interface CreateCanvasInput {
   apiKeyHash: string;
   title?: string;
   description?: string | null;
+  /** Backend-group master switch (plan 006). Defaults off; cap_* columns default on. */
+  backendEnabled?: boolean;
+}
+
+/**
+ * Capability patch (plan 006). Undefined fields are left unchanged. Turning
+ * `backendEnabled` off does NOT clear the feature flags — they persist so
+ * re-enabling backend restores the prior per-feature choices (KTD-2).
+ */
+export interface CanvasCapabilitiesPatch {
+  backendEnabled?: boolean;
+  kv?: boolean;
+  files?: boolean;
+  ai?: boolean;
+  realtime?: boolean;
 }
 
 /** Mutable settings (§6.3). Undefined fields are left unchanged. */
@@ -54,6 +69,9 @@ export function canvasesRepository(client: DbClient) {
           galleryListed: false,
           passwordVersion: 0,
           spaFallback: false,
+          // Capability defaults: backend off unless requested; cap_* fall back to
+          // their column defaults (all on), so an enabled canvas has all features on.
+          backendEnabled: input.backendEnabled ?? false,
           apiKeyHash: input.apiKeyHash,
           status: "active",
           currentVersionId: null,
@@ -116,6 +134,21 @@ export function canvasesRepository(client: DbClient) {
         set.shared = patch.shared;
         set.sharedAt = patch.shared ? Date.now() : null;
       }
+      const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
+      return rows[0] as Canvas;
+    },
+
+    /**
+     * Update capability flags (plan 006). Writes only the fields present in the
+     * patch; turning backend off never clears the feature flags (KTD-2).
+     */
+    async updateCapabilities(id: string, patch: CanvasCapabilitiesPatch): Promise<Canvas> {
+      const set: Record<string, unknown> = { updatedAt: Date.now() };
+      if (patch.backendEnabled !== undefined) set.backendEnabled = patch.backendEnabled;
+      if (patch.kv !== undefined) set.capKv = patch.kv;
+      if (patch.files !== undefined) set.capFiles = patch.files;
+      if (patch.ai !== undefined) set.capAi = patch.ai;
+      if (patch.realtime !== undefined) set.capRealtime = patch.realtime;
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       return rows[0] as Canvas;
     },
