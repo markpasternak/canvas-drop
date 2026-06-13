@@ -1,6 +1,9 @@
 import type { Canvas } from "@canvas-drop/shared/db";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { type AccessUser, decideCanvasAccess } from "./authorization.js";
+import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { AppEnv } from "../http/types.js";
+import { type AccessUser, canvasAccess, decideCanvasAccess } from "./authorization.js";
 
 const NOW = 1_000_000;
 
@@ -144,5 +147,59 @@ describe("decideCanvasAccess — allows", () => {
     expect(
       decideCanvasAccess(canvas({ shared: true, sharedExpiresAt: NOW + 1000 }), other, NOW).action,
     ).toBe("allow");
+  });
+});
+
+// --- canvasAccess middleware: the disabled-page rendering (U5, §6.10.2) ---
+
+describe("canvasAccess — disabled-canvas rendering", () => {
+  /** Minimal app: inject slug + user, run canvasAccess over a fake repo. */
+  function appFor(cv: Canvas | null, user: AccessUser) {
+    const canvases = {
+      async findBySlug() {
+        return cv;
+      },
+    } as unknown as CanvasesRepository;
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("canvasSlug", "s");
+      c.set("user", { id: user.id, isAdmin: user.isAdmin } as never);
+      await next();
+    });
+    app.use("*", canvasAccess({ canvases }));
+    app.get("*", (c) => c.text("CANVAS CONTENT")); // only reached on allow
+    return app;
+  }
+
+  it("browser gets a 403 HTML 'disabled' page (no reason interpolated)", async () => {
+    const app = appFor(canvas({ status: "disabled", disabledReason: "secret op note" }), other);
+    const res = await app.request("/", { headers: { accept: "text/html" } });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("secret op note"); // reason never on the public page
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("programmatic client gets 403 JSON { error: disabled }", async () => {
+    const app = appFor(canvas({ status: "disabled" }), other);
+    const res = await app.request("/", { headers: { accept: "application/json" } });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "disabled" });
+  });
+
+  it("an ADMIN is not exempted — the disabled page is served, never the content (§12.0 #5)", async () => {
+    const app = appFor(canvas({ status: "disabled" }), admin);
+    const res = await app.request("/", { headers: { accept: "text/html" } });
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain("CANVAS CONTENT");
+  });
+
+  it("an active canvas still serves content (no regression)", async () => {
+    const app = appFor(canvas({ status: "active", ownerId: "owner" }), owner);
+    const res = await app.request("/");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("CANVAS CONTENT");
   });
 });

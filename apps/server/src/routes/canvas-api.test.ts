@@ -98,6 +98,19 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     expect((await jsonOf<{ code: string }>(res)).code).toBe("CAPABILITY_DISABLED");
   });
 
+  it("runtime API on a DISABLED canvas → 403 { code: DISABLED }, admin not exempted (§12.0 #5)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await canvas(true);
+    await canvasesRepository(client).setDisabled(cv.id, "policy");
+    // Owner/admin alike are denied — disabled fires before owner/admin.
+    const asOwner = await buildApi(client, { id: owner.id }).request("/v1/c/app/me");
+    expect(asOwner.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asOwner)).code).toBe("DISABLED");
+    const asAdmin = await buildApi(client, { id: owner.id, isAdmin: true }).request("/v1/c/app/me");
+    expect(asAdmin.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asAdmin)).code).toBe("DISABLED");
+  });
+
   it("404s a nonexistent / hidden canvas (no existence leak)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client);
