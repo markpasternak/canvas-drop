@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -259,6 +260,8 @@ export function managementRoutes(deps: ManagementDeps) {
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
         current: v.id === cv.currentVersionId,
+        // What this version serves at the canvas root (entry file / why not).
+        entry: rootEntry((v.manifest ?? {}) as Manifest),
       })),
     });
   });

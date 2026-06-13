@@ -5,7 +5,7 @@ import { createMiddleware } from "hono/factory";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { soleHtmlEntry } from "./manifest.js";
+import { rootEntry } from "./manifest.js";
 import { mimeFor } from "./mime.js";
 import { versionStorageKey } from "./storage-keys.js";
 
@@ -30,28 +30,33 @@ export function assetPathFor(config: Config, slug: string, reqPath: string): str
 }
 
 /**
- * Resolve a request to a manifest entry path: exact hit → directory/root index →
- * SPA fallback → null. Pure so the resolution table is unit-testable.
+ * Resolve a request to a manifest entry path: exact hit → directory index →
+ * root entry → SPA fallback → null. Pure so the resolution table is unit-testable.
+ *
+ * The canvas "root entry" is index.html, or — forgiving a one-file deploy whose
+ * page isn't named index.html — the single HTML file ({@link rootEntry}). The
+ * root request and the SPA fallback both resolve to that SAME entry, so a
+ * single-page app with a non-index entry works at the root AND for deep client
+ * routes when SPA fallback is on. With several HTML files and no index, the
+ * entry is undefined and both 404 (there's no way to pick the home page).
  */
 export function resolveAsset(
   manifest: Manifest,
   assetPath: string,
   spaFallback: boolean,
 ): { path: string } | null {
+  // Exact file hit (non-root).
   if (assetPath !== "" && manifest[assetPath]) return { path: assetPath };
-  // directory or root → index.html
-  const indexCandidate =
-    assetPath === "" ? "index.html" : `${assetPath.replace(/\/$/, "")}/index.html`;
-  if (manifest[indexCandidate]) return { path: indexCandidate };
-  // Root with no index.html but a single HTML file → serve it. Forgives a
-  // one-file deploy whose page isn't named index.html (e.g. a saved web page),
-  // which would otherwise 404 at the root.
-  if (assetPath === "") {
-    const sole = soleHtmlEntry(manifest);
-    if (sole) return { path: sole };
+  // Directory request → its own index.html.
+  if (assetPath !== "") {
+    const dirIndex = `${assetPath.replace(/\/$/, "")}/index.html`;
+    if (manifest[dirIndex]) return { path: dirIndex };
   }
-  // SPA fallback → root index.html
-  if (spaFallback && manifest["index.html"]) return { path: "index.html" };
+  const entry = rootEntry(manifest).path;
+  // Root → the entry.
+  if (assetPath === "" && entry) return { path: entry };
+  // SPA fallback → the entry for any unmatched path (client-side routing).
+  if (spaFallback && entry) return { path: entry };
   return null;
 }
 

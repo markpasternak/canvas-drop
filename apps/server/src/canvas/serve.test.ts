@@ -70,6 +70,24 @@ describe("resolveAsset", () => {
     };
     expect(resolveAsset(many, "", false)).toBeNull();
   });
+  it("SPA fallback serves the root entry for unknown paths — index.html or a lone HTML file", () => {
+    // Classic SPA: index.html shell.
+    expect(resolveAsset(manifest, "route/deep", true)?.path).toBe("index.html");
+    // Single-page app whose entry isn't index.html → SPA fallback serves it too,
+    // matching what the root serves (so deep client routes work).
+    const single: Manifest = {
+      "app.html": { size: 1, hash: "h", mime: "text/html" },
+      "main.js": { size: 1, hash: "h2", mime: "text/javascript" },
+    };
+    expect(resolveAsset(single, "route/deep", false)).toBeNull(); // off → 404
+    expect(resolveAsset(single, "route/deep", true)?.path).toBe("app.html");
+    // Ambiguous (several HTML, no index) → SPA fallback can't pick → still 404.
+    const many: Manifest = {
+      "a.html": { size: 1, hash: "h1", mime: "text/html" },
+      "b.html": { size: 1, hash: "h2", mime: "text/html" },
+    };
+    expect(resolveAsset(many, "route/deep", true)).toBeNull();
+  });
 });
 
 describe("serveCanvas (integration)", () => {

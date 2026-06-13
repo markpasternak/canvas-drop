@@ -44,6 +44,13 @@ export interface LastDeploy {
 
 export type CanvasListItem = Canvas & { lastDeploy: LastDeploy | null };
 
+/** What a version serves at the canvas root (computed server-side). `path` is
+ *  the entry file; null with reason "ambiguous"/"none" means the root 404s. */
+export interface RootEntry {
+  path: string | null;
+  reason: "index" | "single" | "ambiguous" | "none";
+}
+
 export interface VersionInfo {
   number: number;
   source: string;
@@ -53,6 +60,7 @@ export interface VersionInfo {
   fileCount: number;
   totalBytes: number;
   current: boolean;
+  entry: RootEntry;
 }
 
 export interface DeployResult {
@@ -60,7 +68,7 @@ export interface DeployResult {
   version: number;
   fileCount: number;
   totalBytes: number;
-  warnings?: string[];
+  warnings: string[];
 }
 
 export interface CanvasSettings {
@@ -191,15 +199,28 @@ function xhrUpload<T>(
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         if (xhr.status === 204 || !xhr.responseText) return resolve(undefined as T);
+        // Mirror request()'s isAuthExpiry: a 2xx response whose body isn't JSON
+        // means a proxy served its HTML login page (KTD-8).
+        const ct = xhr.getResponseHeader("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          onAuthExpired();
+          reject(new ApiError("unauthorized", "Session expired", undefined, xhr.status));
+          return;
+        }
         try {
           return resolve(JSON.parse(xhr.responseText) as T);
         } catch {
-          return resolve(undefined as T);
+          onAuthExpired();
+          reject(new ApiError("unauthorized", "Session expired", undefined, xhr.status));
+          return;
         }
       }
       reject(errorFromBody(xhr.status, xhr.statusText, xhr.responseText));
     };
     xhr.onerror = () => reject(new ApiError("network_error", "Network error"));
+    xhr.timeout = 300_000;
+    xhr.ontimeout = () =>
+      reject(new ApiError("timeout", "Upload timed out — check your connection and try again."));
     xhr.send(body);
   });
 }
