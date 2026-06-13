@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { StatusBadge } from "../components/Badge.js";
+import { Badge, StatusBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -9,14 +9,51 @@ import { relativeTime } from "../lib/format.js";
 import { useCanvases } from "../lib/queries.js";
 import Onboarding from "./onboarding.js";
 
+function LockIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="11"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      aria-hidden
+    >
+      <rect x="3.25" y="7" width="9.5" height="6.5" rx="1.5" />
+      <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+    </svg>
+  );
+}
+
+/** Row indicators. "Active" is the boring default — only badge what's notable:
+ * a disabled (admin takedown) status, plus the access signals (shared, password).
+ * A private, unprotected canvas shows no pills. */
+function RowBadges({ canvas }: { canvas: CanvasListItem }) {
+  return (
+    <>
+      {canvas.status !== "active" && <StatusBadge status={canvas.status} />}
+      {canvas.shared && <Badge tone="accent">Shared</Badge>}
+      {canvas.hasPassword && (
+        <Badge tone="neutral">
+          <LockIcon />
+          Protected
+        </Badge>
+      )}
+    </>
+  );
+}
+
 function Row({ canvas }: { canvas: CanvasListItem }) {
   const title = canvas.title?.trim() || canvas.slug;
   return (
     <li className="group flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong">
       <Link to="/canvases/$id" params={{ id: canvas.id }} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium text-fg">{title}</span>
-          <StatusBadge status={canvas.status} />
+          <span className="min-w-0 truncate text-sm font-medium text-fg">{title}</span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <RowBadges canvas={canvas} />
+          </span>
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
           <span className="truncate font-mono">{canvas.slug}</span>
