@@ -1,7 +1,7 @@
 ---
 title: "feat: Admin panel + hardening (M7, areas K + L)"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 milestone: M7
 areas: [K, L]
