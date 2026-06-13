@@ -1,8 +1,11 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
+import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import { filesService, MAX_CANVAS_BYTES } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
+import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { kvRepository } from "../db/repositories/kv.js";
@@ -13,9 +16,16 @@ import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { canvasApiRoutes } from "./canvas-api.js";
 
+const noopAudit: AuditLog = { recordAudit() {}, flush: async () => {}, record() {} };
+
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
-function buildApi(client: DbClient, userId: string, storage = memStorage()) {
+function buildApi(
+  client: DbClient,
+  userId: string,
+  storage = memStorage(),
+  audit: AuditLog = noopAudit,
+) {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("user", {
@@ -35,6 +45,7 @@ function buildApi(client: DbClient, userId: string, storage = memStorage()) {
       kv: kvRepository(client),
       files: filesService({ files: filesRepository(client), storage }),
       usage: usageEventsRepository(client),
+      audit,
     }),
   );
   return app;
@@ -179,5 +190,25 @@ describe("canvas Files routes", () => {
     const up = await app.request("/v1/c/app/files", upload("a.txt", "text/plain", "secret"));
     const { id } = (await up.json()) as { id: string };
     expect((await app.request(`/v1/c/other/files/${id}/content`)).status).toBe(404);
+  });
+
+  it("audits file upload + delete but NOT reads (§12.1.8, M7)", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    const audit = createAuditLog(auditRepository(client), pino({ level: "silent" }));
+    const app = buildApi(client, ownerId, memStorage(), audit);
+    const up = await app.request("/v1/c/app/files", upload("a.txt", "text/plain", "hi"));
+    const { id } = (await up.json()) as { id: string };
+    await app.request("/v1/c/app/files"); // list (read — not audited)
+    await app.request(`/v1/c/app/files/${id}/content`); // download (read — not audited)
+    await app.request(`/v1/c/app/files/${id}`, { method: "DELETE" }); // delete
+    await audit.flush();
+
+    const rows = (await auditRepository(client).recent(50)) as Array<{ action: string }>;
+    const actions = rows
+      .map((r) => r.action)
+      .filter((a) => a.startsWith("file_"))
+      .sort();
+    expect(actions).toEqual(["file_delete", "file_upload"]);
   });
 });

@@ -4,6 +4,7 @@ import type { Json } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { QuotaResolver } from "../admin/settings-service.js";
+import type { AuditLog } from "../audit/audit-log.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { KvNotNumericError, type KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
@@ -20,6 +21,8 @@ export interface CanvasKvDeps {
   config: Config;
   kv: KvRepository;
   usage: UsageEventsRepository;
+  /** Audit sink (M7) — KV mutations recorded for the §12.1.8 security trail. */
+  audit: AuditLog;
   /** Admin-tunable quota resolver (M7). Absent → the hard constants above. */
   quota?: QuotaResolver;
 }
@@ -39,6 +42,16 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
     void deps.usage
       .record({ canvasId: canvasId(c), userId: c.get("user").id, type: "kv_op", meta: { op } })
       .catch(() => {});
+  };
+  // Audit (security trail, §12.1.8) — distinct from `meter` (metering for stats).
+  // Only MUTATIONS are audited (set/delete/increment); reads are not (volume).
+  const auditMutation = (c: Context<AppEnv>, op: string, scope: string) => {
+    deps.audit.recordAudit({
+      action: "kv_mutation",
+      actorId: c.get("user").id,
+      targetId: canvasId(c),
+      meta: { op, scope: scope === "shared" ? "shared" : "user" },
+    });
   };
 
   /** Reject a new key that would exceed the per-scope key-count limit (§6.4.5).
@@ -93,12 +106,15 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
       if (await overKeyLimit(canvasId(c), scope, key)) return c.json({ code: "KEY_LIMIT" }, 409);
       await deps.kv.set(canvasId(c), scope, key, value, c.get("user").id);
       meter(c, "set");
+      auditMutation(c, "set", scope);
       return c.json({ ok: true });
     });
 
     app.delete(`${prefix}/:key`, async (c) => {
-      await deps.kv.delete(canvasId(c), scopeOf(c), c.req.param("key"));
+      const scope = scopeOf(c);
+      await deps.kv.delete(canvasId(c), scope, c.req.param("key"));
       meter(c, "delete");
+      auditMutation(c, "delete", scope);
       return c.json({ ok: true });
     });
 
@@ -114,6 +130,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
       try {
         const value = await deps.kv.increment(canvasId(c), scope, key, by, c.get("user").id);
         meter(c, "increment");
+        auditMutation(c, "increment", scope);
         return c.json({ value });
       } catch (err) {
         if (err instanceof KvNotNumericError) return c.json({ code: "NOT_NUMERIC" }, 409);

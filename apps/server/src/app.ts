@@ -200,6 +200,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         quota: settingsSvc.effectiveQuota,
       }),
       usage: usageEventsRepository(deps.db),
+      audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
     }),
   );

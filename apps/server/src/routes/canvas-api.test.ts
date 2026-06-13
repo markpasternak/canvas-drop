@@ -1,6 +1,7 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
+import type { AuditLog } from "../audit/audit-log.js";
 import { filesService } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
@@ -12,6 +13,8 @@ import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { canvasApiRoutes } from "./canvas-api.js";
+
+const noopAudit: AuditLog = { recordAudit() {}, flush: async () => {}, record() {} };
 
 const devConfig: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" }); // path mode
 const subConfig: Config = loadConfig({
@@ -54,6 +57,7 @@ function buildApi(
       kv: kvRepository(client),
       files: filesService({ files: filesRepository(client), storage: memStorage() }),
       usage: usageEventsRepository(client),
+      audit: noopAudit,
     }),
   );
   return app;
