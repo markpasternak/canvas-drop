@@ -14,6 +14,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Fail loudly if 5173 is taken instead of silently hopping to 5174 — a
+    // surprise port usually means a stale dev server (or another project) is
+    // still running, which is exactly what you want to know about.
+    strictPort: true,
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: false },
       "/auth": { target: "http://localhost:3000", changeOrigin: false },
