@@ -253,6 +253,26 @@ describe("RealtimeHub", () => {
     expect(adminSock.closed).toBeNull();
   });
 
+  it("a throwing socket in a broadcast does not starve the other subscribers", () => {
+    const hub = makeHub();
+    // First subscriber's send throws (dead socket); second must still receive.
+    const deadSock = new FakeSocket();
+    deadSock.send = () => {
+      throw new Error("WebSocket is not open");
+    };
+    const liveSock = new FakeSocket();
+    const dead = mc(hub, "c1", user("dead"), deadSock);
+    const live = mc(hub, "c1", user("live"), liveSock);
+    const publisher = mc(hub, "c1", user("pub"), new FakeSocket());
+    hub.handleMessage(dead, JSON.stringify({ type: "subscribe", channel: "room" }));
+    hub.handleMessage(live, JSON.stringify({ type: "subscribe", channel: "room" }));
+    hub.handleMessage(
+      publisher,
+      JSON.stringify({ type: "publish", channel: "room", event: "x", data: 1 }),
+    );
+    expect(liveSock.ofType("message")).toHaveLength(1); // not starved by the dead socket
+  });
+
   it("disconnect emits a leave to remaining channel members", () => {
     const hub = makeHub();
     const sa = new FakeSocket();

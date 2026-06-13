@@ -32,6 +32,8 @@ function buildApp(
   client: DbClient,
   actor: { id: string; isAdmin: boolean },
   storage = memStorage(),
+  // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
+  hub?: any,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -57,6 +59,7 @@ function buildApp(
       usage: usageEventsRepository(client),
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
+      hub,
     }),
   );
   return app;
@@ -884,5 +887,84 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}/usage`,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("management realtime revoke hooks (D-RT-6)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  function spyHub() {
+    const calls: Array<{ method: string; canvasId: string }> = [];
+    return {
+      calls,
+      revalidateCanvas: async (id: string) => {
+        calls.push({ method: "revalidateCanvas", canvasId: id });
+      },
+      dropGatedNonOwners: async (id: string) => {
+        calls.push({ method: "dropGatedNonOwners", canvasId: id });
+      },
+      dropCanvas: (id: string) => {
+        calls.push({ method: "dropCanvas", canvasId: id });
+      },
+    };
+  }
+
+  const mutate = (app: ReturnType<typeof buildApp>, method: string, path: string, body?: unknown) =>
+    app.request(path, {
+      method,
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  async function setup() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const cv = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "app",
+      apiKeyHash: "h-app",
+    });
+    const hub = spyHub();
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, memStorage(), hub);
+    return { owner, cv, hub, app };
+  }
+
+  it("PATCH settings (un-share) revalidates; with a new password also drops gated non-owners", async () => {
+    const { cv, hub, app } = await setup();
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/settings`, { shared: false })).status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    expect(hub.calls.some((c) => c.method === "dropGatedNonOwners")).toBe(false);
+
+    hub.calls.length = 0;
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/settings`, { password: "hunter2pass" }))
+        .status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    expect(hub.calls).toContainEqual({ method: "dropGatedNonOwners", canvasId: cv.id });
+  });
+
+  it("PATCH capabilities (realtime off) revalidates", async () => {
+    const { cv, hub, app } = await setup();
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/capabilities`, { realtime: false }))
+        .status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+  });
+
+  it("regenerate-slug drops the whole canvas; delete revalidates", async () => {
+    const { cv, hub, app } = await setup();
+    expect((await mutate(app, "POST", `/api/canvases/${cv.id}/regenerate-slug`)).status).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "dropCanvas", canvasId: cv.id });
+
+    hub.calls.length = 0;
+    expect((await mutate(app, "DELETE", `/api/canvases/${cv.id}`)).status).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
   });
 });

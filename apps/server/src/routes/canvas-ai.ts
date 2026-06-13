@@ -13,6 +13,8 @@ import type { AppEnv } from "../http/types.js";
 /** AI output limits (§6.6). Default modest; hard cap so one call can't run away. */
 export const AI_DEFAULT_MAX_TOKENS = 1024;
 export const AI_MAX_TOKENS = 8192;
+/** Max wait for the provider's usage promise before recording with 0 tokens. */
+export const USAGE_SETTLE_TIMEOUT_MS = 5_000;
 
 export interface CanvasAiDeps {
   config: Config;
@@ -60,6 +62,16 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     if (!deps.config.ai.models.includes(model)) {
       return c.json({ code: "MODEL_NOT_ALLOWED" }, 400);
     }
+    // Fail closed on an allowlisted-but-unpriced model: cost would be recorded as
+    // $0, so the USD quota windows would never grow and spend would be unbounded
+    // (adversarial review). Reject until the operator adds a pricing entry.
+    if (!isPricedModel(model)) {
+      c.get("log")?.error(
+        { model },
+        "ai: model is allowlisted but has no pricing entry; rejecting to protect the spend quota",
+      );
+      return c.json({ code: "MODEL_NOT_ALLOWED" }, 400);
+    }
 
     const canvas = requireCanvas(c);
     const user = c.get("user");
@@ -75,13 +87,6 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       canvasMonthlyUsd: deps.config.ai.canvasMonthlyUsd,
     });
     if (!quota.ok) return c.json({ code: "QUOTA_EXCEEDED", scope: quota.scope }, 429);
-
-    if (!isPricedModel(model)) {
-      c.get("log")?.warn(
-        { model },
-        "ai: allowlisted model has no pricing entry; cost recorded as 0",
-      );
-    }
 
     const chat = deps.provider.streamChat({
       model,
@@ -99,7 +104,16 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       const persist = async () => {
         if (recorded) return { inputTokens: 0, outputTokens: 0, cost: 0 };
         recorded = true;
-        const u = await chat.usage.catch(() => ({ inputTokens: 0, outputTokens: 0 }));
+        // Race the provider's usage promise against a timeout: on a client abort the
+        // upstream usage promise may never settle, which would hang the recording and
+        // re-open the abandon-and-retry quota bypass. Record whatever we have within
+        // the window (0 tokens worst case — the call is still counted).
+        const u = await Promise.race([
+          chat.usage.catch(() => ({ inputTokens: 0, outputTokens: 0 })),
+          new Promise<{ inputTokens: number; outputTokens: number }>((resolve) =>
+            setTimeout(() => resolve({ inputTokens: 0, outputTokens: 0 }), USAGE_SETTLE_TIMEOUT_MS),
+          ),
+        ]);
         const cost = costUsd(model, u.inputTokens, u.outputTokens);
         await deps.aiUsage
           .record({

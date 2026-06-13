@@ -251,8 +251,8 @@ export function managementRoutes(deps: ManagementDeps) {
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost
     // access; a newly-set password drops gated non-owners (no re-verified grant).
     if (deps.hub) {
-      await deps.hub.revalidateCanvas(cv.id);
-      if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id);
+      await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
     }
     return c.json(publicCanvas(deps.config, updated));
   });
@@ -273,7 +273,7 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Turning realtime (or the backend group) off must drop live sockets — the
     // heartbeat would too, but this makes it instant (D-RT-6).
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
     return c.json(publicCanvas(deps.config, updated));
   });
 
@@ -306,7 +306,7 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     // Deleted → everyone (incl. owner) loses access; drop their live sockets.
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
     return c.json({ ok: true });
   });
 
@@ -323,7 +323,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
     });
     // Archived → offline for everyone; drop live sockets (D-RT-6).
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
     return c.json(publicCanvas(deps.config, { ...cv, status: "archived" }));
   });
 

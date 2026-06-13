@@ -140,6 +140,54 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     expect(((await res.json()) as { code: string }).code).toBe("MODEL_NOT_ALLOWED");
   });
 
+  it("rejects an allowlisted-but-unpriced model (fail closed to protect the spend quota)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeCanvas(client);
+    // Allowlist a model with no pricing entry — it must NOT be served (cost would
+    // be $0 and the quota would never trip → unbounded spend).
+    const cfg = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_AI_API_KEY: "test-key",
+      CANVAS_DROP_AI_MODELS: "made-up-model-v9",
+    });
+    const res = await post(buildApi(client, owner.id, fakeProvider({ deltas: ["x"] }), cfg), {
+      model: "made-up-model-v9",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("MODEL_NOT_ALLOWED");
+  });
+
+  it("rejects when the per-canvas monthly quota is already met (429 scope canvas_monthly)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await makeCanvas(client);
+    // Seed canvas spend to the monthly limit under a DIFFERENT user so the daily
+    // (per-user) window stays clear and the monthly (per-canvas) window trips.
+    const other = await usersRepository(client).upsert({
+      providerSub: "other",
+      email: "other@example.com",
+      name: "Other",
+      isAdmin: false,
+    });
+    await aiUsageRepository(client).record({
+      canvasId: cv.id,
+      userId: other.id,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 50, // exactly the canvas monthly limit
+    });
+    const res = await post(buildApi(client, owner.id, fakeProvider({ deltas: ["x"] })), {
+      model: "claude-haiku-4-5",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; scope: string };
+    expect(body.code).toBe("QUOTA_EXCEEDED");
+    expect(body.scope).toBe("canvas_monthly");
+  });
+
   it("rejects when the per-user daily quota is already met (429 QUOTA_EXCEEDED)", async () => {
     client = await makeTestDb("sqlite");
     const { owner, cv } = await makeCanvas(client);

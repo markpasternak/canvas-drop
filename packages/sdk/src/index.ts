@@ -346,25 +346,35 @@ function aiNamespace(opts: Required<ClientOptions>, base: (p: string) => string)
   return {
     async *stream(messages, options) {
       const res = await open(messages, options);
+      let terminal = false;
       for await (const frame of readSSE(res)) {
         if (frame.type === "delta") yield String(frame.text ?? "");
         else if (frame.type === "error") throw aiErrorFromFrame(frame);
-        else if (frame.type === "done") return;
+        else if (frame.type === "done") {
+          terminal = true;
+          return;
+        }
       }
+      // Stream ended without a done/error frame → truncated (proxy cut, server
+      // tear-down). Surface it rather than silently returning a partial result.
+      if (!terminal) throw new CanvasdropError("AI_STREAM_TRUNCATED", 502, "stream ended early");
     },
     async chat(messages, options) {
       const res = await open(messages, options);
       let text = "";
       let usage: AiUsage = { inputTokens: 0, outputTokens: 0 };
       let cost = 0;
+      let terminal = false;
       for await (const frame of readSSE(res)) {
         if (frame.type === "delta") text += String(frame.text ?? "");
         else if (frame.type === "error") throw aiErrorFromFrame(frame);
         else if (frame.type === "done") {
+          terminal = true;
           usage = (frame.usage as AiUsage) ?? usage;
           cost = typeof frame.cost === "number" ? frame.cost : 0;
         }
       }
+      if (!terminal) throw new CanvasdropError("AI_STREAM_TRUNCATED", 502, "stream ended early");
       return { text, usage, cost };
     },
   };
@@ -382,6 +392,9 @@ interface ChannelState {
   onLeave: Array<(u: RealtimeUser) => void>;
   presenceWaiters: Array<{ resolve: (u: RealtimeUser[]) => void; reject: (e: unknown) => void }>;
 }
+
+/** Max buffered outbound frames while disconnected (drop-oldest beyond this). */
+const MAX_OUTBOX = 256;
 
 /** ws:// (or wss://) base derived from the HTTP apiBase (D-RT-7 — same host). */
 function wsBaseFrom(apiBase: string): string {
@@ -416,7 +429,12 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
   function rawSend(frame: unknown): void {
     const data = JSON.stringify(frame);
     if (ws && !terminal && ws.readyState === 1) ws.send(data);
-    else if (!terminal) outbox.push(data);
+    else if (!terminal) {
+      // Bound the buffer: during a prolonged outage a high-frequency publisher
+      // (cursors, pings) would otherwise grow this without limit. Drop oldest.
+      outbox.push(data);
+      if (outbox.length > MAX_OUTBOX) outbox.splice(0, outbox.length - MAX_OUTBOX);
+    }
   }
 
   function flush(): void {
@@ -425,12 +443,17 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
     for (const d of pending) ws?.send(d);
   }
 
-  function failTerminal(err: CanvasdropError): void {
-    terminal = err;
+  /** Reject any in-flight presence() waiters so callers never hang on a dropped socket. */
+  function rejectPendingPresence(err: unknown): void {
     for (const s of channels.values()) {
       for (const w of s.presenceWaiters) w.reject(err);
       s.presenceWaiters = [];
     }
+  }
+
+  function failTerminal(err: CanvasdropError): void {
+    terminal = err;
+    rejectPendingPresence(err);
   }
 
   function handleFrame(frame: SseFrame): void {
@@ -474,6 +497,15 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
     const sock = opts.WebSocketImpl(url);
     sock.onopen = () => {
       connecting = false;
+      // All channels were closed while we were connecting → don't keep an orphan.
+      if (channels.size === 0) {
+        try {
+          sock.close(1000, "no channels");
+        } catch {
+          /* already closed */
+        }
+        return;
+      }
       ws = sock;
       backoff = opts.reconnectBaseMs;
       // Re-subscribe every channel (covers reconnect), then flush queued sends.
@@ -491,10 +523,15 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
     sock.onclose = (ev) => {
       ws = null;
       connecting = false;
-      // 4403 capability-off / 4401 unauthorized → terminal, no reconnect.
+      // Terminal closes (no reconnect): 4403 capability-off, 4401 unauthorized,
+      // 4429 connection/rate limit. Each rejects pending presence() waiters.
       if (ev.code === 4403) failTerminal(new CapabilityDisabledError("realtime"));
       else if (ev.code === 4401) failTerminal(new NotAuthenticatedError());
+      else if (ev.code === 4429) failTerminal(new QuotaExceededError("CONNECTION_LIMIT", 429));
       if (terminal || channels.size === 0) return;
+      // Transient close: reject in-flight presence() so callers retry instead of
+      // hanging, then reconnect with capped backoff (channels re-subscribe on open).
+      rejectPendingPresence(new CanvasdropError("DISCONNECTED", 0, "connection dropped; retry"));
       const delay = backoff;
       backoff = Math.min(backoff * 2, 10_000);
       setTimeout(connect, delay);

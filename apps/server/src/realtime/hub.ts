@@ -63,9 +63,19 @@ export interface HubDeps {
 
 type PresenceUser = { id: string; name: string };
 
+/**
+ * Send to one connection. A real WebSocket `.send()` throws synchronously on a
+ * half-closed/broken socket — guard it so a single dead socket can't abort a
+ * broadcast loop and starve the other subscribers (reliability review). On throw,
+ * mark the conn closed so the caller's loop skips it and the next sweep removes it.
+ */
 function send(conn: Conn, obj: unknown): void {
   if (conn.closed) return;
-  conn.socket.send(JSON.stringify(obj));
+  try {
+    conn.socket.send(JSON.stringify(obj));
+  } catch {
+    conn.closed = true;
+  }
 }
 
 export function createHub(deps: HubDeps) {
@@ -170,7 +180,13 @@ export function createHub(deps: HubDeps) {
     for (const channel of [...conn.channels]) doUnsubscribe(conn, channel);
     conn.closed = true;
     conns(conn.canvasId).delete(conn);
-    conn.socket.close(code, reason);
+    // Guard close() too: a throwing socket must not abort closeAll/dropCanvas/
+    // revalidateCanvas iteration over the remaining sockets.
+    try {
+      conn.socket.close(code, reason);
+    } catch {
+      /* socket already torn down */
+    }
   }
 
   return {

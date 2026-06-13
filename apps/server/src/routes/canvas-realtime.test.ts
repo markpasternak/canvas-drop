@@ -238,6 +238,16 @@ describe("realtime WebSocket route", () => {
     await expect(c.opened).rejects.toMatchObject({ status: 404 });
   });
 
+  it("refuses the upgrade (no 101) for an owner-only canvas hit by a non-owner — authorization denied pre-upgrade", async () => {
+    client = await makeTestDb("sqlite");
+    // Owner-only (not shared) canvas; a non-owner viewer must be denied the upgrade
+    // by decideCanvasAccess in the resolve middleware, before any 101.
+    await seedCanvas(client, { slug: "app", shared: false });
+    server = await startInjectedApp(client);
+    const c = track(connect(server.port, "app", { "x-test-user": "viewer" }));
+    await expect(c.opened).rejects.toMatchObject({ status: 404 }); // owner_only → 404
+  });
+
   it("capability-off: upgrades then closes 4403 with a CAPABILITY_DISABLED frame", async () => {
     client = await makeTestDb("sqlite");
     await seedCanvas(client, { slug: "app", capRealtime: false });

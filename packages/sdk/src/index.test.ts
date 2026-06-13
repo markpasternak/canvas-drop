@@ -204,6 +204,14 @@ describe("ai", () => {
     ).rejects.toBeInstanceOf(CanvasdropError);
   });
 
+  it("throws AI_STREAM_TRUNCATED when the stream ends without a done/error frame", async () => {
+    const fetch = fetchMock(async () => sseRes([{ type: "delta", text: "partial" }])); // no done
+    const client = createClient({ context: ctx, fetch });
+    await expect(
+      client.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toMatchObject({ code: "AI_STREAM_TRUNCATED" });
+  });
+
   it("maps a pre-stream 403 to CapabilityDisabledError, 429 to QuotaExceededError", async () => {
     const offClient = createClient({
       context: ctx,
@@ -324,6 +332,38 @@ describe("realtime", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(FakeWS.instances).toHaveLength(1); // did not reconnect
     await expect(ch.presence()).rejects.toBeInstanceOf(CapabilityDisabledError);
+  });
+
+  it("a 4401 close is terminal — presence rejects with NotAuthenticatedError, no reconnect", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    lastWs().serverClose(4401);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(FakeWS.instances).toHaveLength(1);
+    await expect(ch.presence()).rejects.toBeInstanceOf(NotAuthenticatedError);
+  });
+
+  it("a 4429 connection-limit close is terminal (no infinite reconnect)", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    lastWs().serverClose(4429);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(FakeWS.instances).toHaveLength(1); // terminal, did not reconnect
+    await expect(ch.presence()).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+
+  it("a transient (non-terminal) close rejects in-flight presence() instead of hanging", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    const p = ch.presence(); // in flight
+    lastWs().serverClose(1006); // transient → reconnect, but waiter must not hang
+    await expect(p).rejects.toBeInstanceOf(CanvasdropError);
   });
 
   it("close() then publish() does not reconnect", async () => {
