@@ -6,6 +6,7 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { mimeFor } from "../canvas/mime.js";
 import type { AppEnv } from "../http/types.js";
+import type { Logger } from "../log/logger.js";
 
 /**
  * Resolve the built dashboard `dist/`. Default is relative to THIS module (so a
@@ -44,10 +45,16 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Cross-Origin-Opener-Policy": "same-origin",
 };
 
-async function read(path: string): Promise<Uint8Array | null> {
+async function read(path: string, log?: Logger): Promise<Uint8Array | null> {
   try {
     return await readFile(path);
-  } catch {
+  } catch (err) {
+    // A missing file is the normal not-found / history-fallback path. Anything
+    // else (EACCES, EISDIR on a weird request, ENOMEM) is worth an operator's
+    // attention — don't swallow it silently.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      log?.warn({ err, path }, "serveSpa: unexpected asset read error");
+    }
     return null;
   }
 }
@@ -59,9 +66,10 @@ async function read(path: string): Promise<Uint8Array | null> {
  * shell itself (§12.1.1). Real hashed assets get an immutable cache; the SPA
  * history fallback serves `index.html` (no-cache) so deploys are instantly live.
  */
-export function serveSpa(deps: { config: Config }) {
+export function serveSpa(deps: { config: Config; log?: Logger }) {
   const distDir = resolveDistDir(deps.config);
   const indexPath = join(distDir, "index.html");
+  const log = deps.log;
 
   function indexResponse(c: Context<AppEnv>, body: Uint8Array) {
     const headers = new Headers(SECURITY_HEADERS);
@@ -90,7 +98,7 @@ export function serveSpa(deps: { config: Config }) {
     // Vite emits content-hashed, immutable filenames under /assets/.
     const isHashedAsset = rel.startsWith("/assets/");
 
-    const fileBody = isFileReq ? await read(candidate) : null;
+    const fileBody = isFileReq ? await read(candidate, log) : null;
     if (fileBody !== null) {
       const headers = new Headers(SECURITY_HEADERS);
       headers.set("Content-Type", mimeFor(candidate).contentType);
@@ -109,9 +117,13 @@ export function serveSpa(deps: { config: Config }) {
     if (isHashedAsset) return c.json({ error: "not_found" }, 404);
 
     // History fallback → index.html (SPA routing).
-    const index = await read(indexPath);
+    const index = await read(indexPath, log);
     if (index === null) {
       // The SPA isn't built (dev runs it via Vite; prod must `pnpm build`).
+      log?.warn(
+        { distDir, indexPath },
+        "serveSpa: dashboard index.html not found — is the SPA built? (pnpm build)",
+      );
       return c.json({ error: "dashboard_not_built", message: "dashboard dist not found" }, 503);
     }
     return indexResponse(c, index);

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../http/types.js";
 import { serveSpa } from "./serve-spa.js";
 
@@ -92,5 +92,25 @@ describe("serveSpa", () => {
     });
     const res = await appFor(missing).request("/");
     expect(res.status).toBe(503);
+  });
+
+  it("logs a warning (not just a silent 503) when the SPA isn't built", async () => {
+    const warn = vi.fn();
+    // biome-ignore lint/suspicious/noExplicitAny: minimal logger stub for the test
+    const log = { warn } as any;
+    const missing = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DASHBOARD_DIST: join(dist, "does-not-exist"),
+    });
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("role", "dashboard" as never);
+      await next();
+    });
+    const dashboard = serveSpa({ config: missing, log });
+    app.use("*", (c, next) => dashboard(c, next));
+    const res = await app.request("/");
+    expect(res.status).toBe(503);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
