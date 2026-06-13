@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "purge": "tsx scripts/purge-deleted.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1067.0",

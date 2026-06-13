@@ -71,19 +71,23 @@ tooling (v1.1).
 ### Deferred to Follow-Up Work
 
 - **Soft-delete purge + restore (BUILD_BRIEF §6.1 #14, §6.10 #5 — both [v1],
-  currently unbuilt).** Delete is only a soft-delete today: the server sets
-  `status = "deleted"` and writes `deletedAt` (`canvases.ts:147`), but
-  `deletedAt` is **never read again** — there is no prune/cron job, no retention
-  config, and the dashboard's "purged permanently after 30 days" copy
-  (`canvas.settings.tsx`) describes behavior the server does not yet deliver.
-  The dashboard is intentionally built *as if* the purge exists (copy left
-  intact) so this becomes a pure backend follow-up. Needed: (a) a scheduled job
-  that hard-deletes canvases whose `deletedAt` is older than the retention
-  window, cascading to their versions **and object storage** (files/assets), with
-  the window driven by typed config (no scattered `process.env`, no magic `30`);
-  (b) the admin restore path (§6.10 #5) that flips `status` back before the
-  window elapses. The "30 days" figure is the copy's promise — make config and
-  copy agree when built.
+  partially built).** Delete is a soft-delete (`status = "deleted"` + `deletedAt`,
+  `canvases.ts:147`). The **purge sweep now exists** as a manual maintenance
+  command: `pnpm purge [days] [dry-run]` (`apps/server/scripts/purge-deleted.ts`
+  → `purgeDeletedCanvases` in `apps/server/src/canvas/purge.ts`). It hard-deletes
+  soft-deleted canvases — storage objects, then version rows, then the canvas row
+  (FK order matters; no cascade) — with a retention-window arg (`0`/default =
+  everything, `N` = deleted ≥ N days ago), a `dry-run` mode, and per-canvas
+  failure isolation so a storage error leaves that canvas intact for retry.
+  Dual-dialect tested (`purge.test.ts`). What remains: (a) **invoke it
+  automatically** — a scheduled job/cron so retention is enforced without a human
+  running the command (the script is the building block; nothing calls it on a
+  timer yet); (b) **drive the window from typed config** instead of a CLI arg, so
+  the dashboard's "30 days" copy (`canvas.settings.tsx`) maps to a real default
+  (no scattered `process.env`, no magic `30`); (c) the **admin restore path**
+  (§6.10 #5) that flips `status` back before the window elapses. Until (a)+(b)
+  land, the "recoverable for 30 days, then purged" copy is built *as if* enforced;
+  make config and copy agree when the scheduler lands.
 - Usage/analytics tab content + list sparkline (area L: `usage_events`,
   `usage_daily`, stats query endpoints).
 - Asset file manager + in-browser CodeMirror editor (§6.9.12, §6.2.4–5 — v1.1).

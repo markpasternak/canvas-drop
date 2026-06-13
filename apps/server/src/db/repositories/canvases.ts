@@ -5,7 +5,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, exists, ne, sql } from "drizzle-orm";
+import { and, desc, eq, exists, lte, ne, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -187,6 +187,29 @@ export function canvasesRepository(client: DbClient) {
         )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
+    },
+
+    /**
+     * Soft-deleted canvases eligible for a purge sweep. `cutoffMs === null`
+     * returns every deleted canvas; a number returns only those soft-deleted at
+     * or before the cutoff (the retention window). Oldest deletions first.
+     */
+    async listDeletedBefore(cutoffMs: number | null): Promise<Canvas[]> {
+      const where =
+        cutoffMs === null
+          ? eq(t.status, "deleted")
+          : and(eq(t.status, "deleted"), lte(t.deletedAt, cutoffMs));
+      return (await db.select().from(t).where(where).orderBy(t.deletedAt)) as Canvas[];
+    },
+
+    /**
+     * Hard-delete the canvas row (purge — irreversible). The caller must remove
+     * the canvas's versions and storage objects first: `versions.canvas_id`
+     * references `canvases.id` with no cascade, so deleting the canvas while
+     * versions remain violates the FK on both dialects.
+     */
+    async hardDelete(id: string): Promise<void> {
+      await db.delete(t).where(eq(t.id, id));
     },
 
     /** Find by API key hash (Bearer-key deploy API); active canvases only. */
