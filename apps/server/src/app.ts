@@ -1,4 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
@@ -38,10 +39,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   app.use("*", requestLogger(deps.rootLogger));
 
-  // Resolve the real peer IP for trusted-proxy checks (§12.5). Tests override.
-  const extractIp =
-    deps.clientIp ??
-    ((c) => c.req.header("x-real-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim());
+  // Resolve the client IP for trusted-proxy checks (§12.5). MUST be the real TCP
+  // socket peer — NOT X-Forwarded-For / X-Real-IP, which are client-settable and
+  // would let an attacker spoof a trusted hop and assert an identity header.
+  // Behind a proxy the socket peer *is* the proxy, which is exactly the hop we
+  // check against CANVAS_DROP_TRUSTED_PROXY_IPS. Tests inject a fixed IP.
+  const extractIp = deps.clientIp ?? ((c) => getConnInfo(c).remote.address);
   app.use("*", async (c, next) => {
     const ip = extractIp(c);
     if (ip) c.set("clientIp", ip);
