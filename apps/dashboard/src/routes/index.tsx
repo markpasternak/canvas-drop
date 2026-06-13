@@ -5,7 +5,7 @@ import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
 import type { CanvasListItem } from "../lib/api.js";
-import { relativeTime } from "../lib/format.js";
+import { formatBytes, relativeTime } from "../lib/format.js";
 import { useCanvases } from "../lib/queries.js";
 import Onboarding from "./onboarding.js";
 
@@ -60,7 +60,7 @@ function Row({ canvas }: { canvas: CanvasListItem }) {
           <span aria-hidden>·</span>
           <span>
             {canvas.lastDeploy
-              ? `v${canvas.lastDeploy.version} · ${relativeTime(canvas.lastDeploy.createdAt)}`
+              ? `v${canvas.lastDeploy.version} · ${relativeTime(canvas.lastDeploy.createdAt)} · ${formatBytes(canvas.lastDeploy.totalBytes)} · ${canvas.lastDeploy.fileCount} ${canvas.lastDeploy.fileCount === 1 ? "file" : "files"}`
               : "Never deployed"}
           </span>
         </div>
