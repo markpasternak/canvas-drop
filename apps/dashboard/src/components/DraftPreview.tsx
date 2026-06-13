@@ -99,7 +99,7 @@ export function DraftPreview({
       key={refreshKey}
       title="Draft preview"
       src={src}
-      className="h-full w-full bg-white"
+      className="h-full w-full bg-surface"
       sandbox="allow-scripts allow-forms"
     />
   );

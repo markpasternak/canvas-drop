@@ -2,6 +2,7 @@ import { DownloadSimple, UploadSimple } from "@phosphor-icons/react";
 import type { DraftFile } from "../lib/api.js";
 import { fileLabel, isImage, type NonEditableReason } from "../lib/file-kind.js";
 import { formatBytes } from "../lib/format.js";
+import { Button } from "./Button.js";
 import { FileKindIcon } from "./FileTree.js";
 
 export interface NonEditableFileViewProps {
@@ -74,14 +75,10 @@ export function NonEditableFileView({
             <DownloadSimple size={16} weight="bold" aria-hidden />
             Download file
           </a>
-          <button
-            type="button"
-            onClick={onReplace}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border-strong bg-surface-raised px-4 text-sm font-medium text-fg transition-colors hover:bg-surface-hover"
-          >
+          <Button variant="secondary" onClick={onReplace}>
             <UploadSimple size={16} weight="bold" aria-hidden />
             Replace file
-          </button>
+          </Button>
         </div>
       </div>
     </div>

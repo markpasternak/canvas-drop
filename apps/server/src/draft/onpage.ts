@@ -18,6 +18,11 @@
  */
 const ON_PAGE_SHIM = `<script data-cd-edit>
 (function () {
+  // Capture OUR injected <script> at initial execution (document.currentScript is
+  // only set now, not inside the deferred ready() callback). We strip exactly our
+  // own injected nodes BY REFERENCE on serialize — never by an attribute query, so
+  // a user's own markup is never deleted even if it uses the same data-* attribute.
+  var selfScript = document.currentScript;
   function ready(fn) {
     if (document.readyState !== "loading") fn();
     else document.addEventListener("DOMContentLoaded", fn);
@@ -27,10 +32,22 @@ const ON_PAGE_SHIM = `<script data-cd-edit>
 
     var timer;
     function serialize() {
-      var root = document.documentElement.cloneNode(true);
-      var injected = root.querySelectorAll("[data-cd-edit]");
-      for (var i = 0; i < injected.length; i++) injected[i].remove();
-      return "<!doctype html>\\n" + root.outerHTML;
+      // Detach our injected nodes, serialize the clean live document, re-attach.
+      // Synchronous, so no intermediate paint; reference-based, so collision-proof.
+      var nodes = [selfScript, bar];
+      var slots = [];
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        if (n && n.parentNode) {
+          slots.push({ node: n, parent: n.parentNode, next: n.nextSibling });
+          n.parentNode.removeChild(n);
+        }
+      }
+      var html = "<!doctype html>\\n" + document.documentElement.outerHTML;
+      for (var j = slots.length - 1; j >= 0; j--) {
+        slots[j].parent.insertBefore(slots[j].node, slots[j].next);
+      }
+      return html;
     }
     function save() {
       clearTimeout(timer);
@@ -40,9 +57,8 @@ const ON_PAGE_SHIM = `<script data-cd-edit>
     }
     document.addEventListener("input", save);
 
-    // Floating formatting toolbar (data-cd-edit → excluded from saved HTML).
+    // Floating formatting toolbar (stripped from saved HTML by reference in serialize).
     var bar = document.createElement("div");
-    bar.setAttribute("data-cd-edit", "");
     bar.setAttribute("contenteditable", "false");
     bar.style.cssText =
       "position:fixed;z-index:2147483647;display:none;gap:2px;padding:4px;border-radius:8px;" +
@@ -97,7 +113,8 @@ const ON_PAGE_SHIM = `<script data-cd-edit>
       });
       bar.appendChild(b);
     });
-    document.body.appendChild(bar);
+    // Fall back to documentElement when the page has no <body> (fragment docs).
+    (document.body || document.documentElement).appendChild(bar);
 
     function position() {
       var sel = document.getSelection();

@@ -60,7 +60,7 @@ export function OnPageEditor({ canvasId, htmlPath, saving, onSave }: OnPageEdito
         // allow-modals lets the formatting toolbar's link prompt() run; still no
         // allow-same-origin, so the page stays in an opaque origin (can't touch the session).
         sandbox="allow-scripts allow-forms allow-modals"
-        className="h-full w-full bg-white"
+        className="h-full w-full bg-surface"
       />
     </WorkspacePane>
   );

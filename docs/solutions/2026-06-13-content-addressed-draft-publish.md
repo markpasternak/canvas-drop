@@ -96,3 +96,50 @@ concurrency.
   idempotent re-write to self-heal, so this ordering matters.
 - **WYSIWYG/visual HTML editing is deferred to its own milestone** — HTML round-tripping +
   sanitization is a large surface; the live preview pane is the v1 "what you get" loop.
+
+## On-page text editing (M5 polish) — how it works and its caveats
+
+The editor gained a **Code / On-page** toggle. On-page mode makes the rendered single-HTML
+page editable in place (server injects a shim when the draft preview is requested with
+`?edit=1`), with a floating `execCommand` formatting toolbar. Non-obvious bits worth keeping:
+
+- **Availability is MIME-gated to a single HTML page.** `singleHtmlFile()` keys on the
+  manifest `mime` being `text/html` — the SAME signal the server's `rootEntry`/`soleHtmlEntry`
+  uses to pick the preview entry — so the dashboard never offers on-page mode for a file the
+  preview can't render as the page (e.g. a lone `.xhtml` the server downgrades to `text/plain`).
+  Keep these two in lockstep; an extension-based check would drift from the server.
+- **Sandbox + postMessage, not same-origin.** The on-page iframe is `sandbox="allow-scripts
+  allow-forms allow-modals"` — **no `allow-same-origin`**, so the page runs in an opaque origin
+  and can't touch the dashboard session. `allow-modals` is added (vs the read-only preview)
+  only so the link toolbar's `prompt()` works; it grants no same-origin/navigation. The shim
+  `postMessage`s to `parent` with targetOrigin `"*"` (the opaque frame can't know the parent
+  origin); the parent validates by **`e.source === iframe.contentWindow`**, NOT `e.origin`
+  (which is `"null"` for every opaque frame). That source check is the sole authenticity gate —
+  it has a regression test (`onpage-editor.test.tsx`).
+- **Strip injected nodes BY REFERENCE, never by attribute query.** The shim captures its own
+  `<script>` via `document.currentScript` at load and the toolbar element it creates, then on
+  serialize detaches exactly those two nodes (synchronously, no paint), reads
+  `documentElement.outerHTML`, and re-attaches. A `querySelectorAll("[data-cd-edit]")` strip
+  would **delete the user's own markup** if their HTML ever used that attribute — a real
+  data-loss bug a review caught.
+- **Invalidate the code editor's `draft-file` query after an on-page save.** On-page writes the
+  HTML file directly; if you don't `qc.invalidateQueries(["draft-file", id, htmlFile.path])`,
+  switching back to Code shows the stale pre-on-page buffer and the next code edit silently
+  **overwrites the on-page edits**. (`useSaveDraftFile` deliberately does NOT invalidate
+  draft-file — that would reset the buffer mid-typing during code autosave; only `onPageSave`
+  invalidates.)
+- **Accepted caveat — the round-trip reformats HTML.** On-page saves the re-serialized
+  `documentElement.outerHTML` (not a patch of source bytes), so `designMode` normalization
+  (attribute reordering/re-quoting, void-tag rewriting, entity re-encoding, an implicit `<head>`,
+  dropped pre-`<html>` comments) **accumulates** across edit→save→reload. Fine for a generated /
+  pasted single page (the use case); lossy for hand-tuned multi-file markup — which is why on-page
+  is gated to a single static HTML page. Document, don't "fix" (a true fix needs structural
+  diff/patch, out of scope).
+
+## Tab layout (M5 polish)
+
+All canvas detail tabs run the **full width** of the shell (the app shell + breadcrumb + tab
+chrome are the constant). `TabContentFrame` is just `space-y-4 + className`; a tab wanting a
+narrower column does it with its own `className` (e.g. Settings' `lg:grid-cols-[180px_minmax(0,1fr)]`).
+Earlier per-tab `tabWidths` variants were removed after they all collapsed to full-width (dead,
+misleading config).

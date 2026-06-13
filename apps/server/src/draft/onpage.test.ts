@@ -34,8 +34,10 @@ describe("injectOnPageEditor", () => {
     ]) {
       expect(out).toContain(cmd);
     }
-    // The toolbar element is tagged data-cd-edit so it's stripped from saved HTML.
-    expect(out).toContain('setAttribute("data-cd-edit"');
+    // Injected nodes are stripped from the saved HTML BY REFERENCE (selfScript + bar),
+    // never by an attribute query — so a user's own data-* attribute is never deleted.
+    expect(out).toContain("document.currentScript");
+    expect(out).not.toContain('querySelectorAll("[data-cd-edit]")');
   });
 
   it("is case-insensitive about the body tag", () => {

@@ -1,4 +1,5 @@
 import { useParams } from "@tanstack/react-router";
+import { TabContentFrame } from "../components/CanvasDetail.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { Toggle } from "../components/Toggle.js";
@@ -52,7 +53,7 @@ export default function Capabilities() {
   const backendOn = canvas.backendEnabled;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <TabContentFrame>
       <Section
         id="backend"
         title="Backend"
@@ -97,6 +98,6 @@ export default function Capabilities() {
           <span className="text-xs font-medium text-muted">{backendOn ? "Always on" : "Off"}</span>
         </Row>
       </Section>
-    </div>
+    </TabContentFrame>
   );
 }

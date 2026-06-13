@@ -120,42 +120,31 @@ export function CanvasDetailChrome({
   );
 }
 
-type TabWidth = "standard" | "narrow" | "settings" | "full";
-
-const tabWidths: Record<TabWidth, string> = {
-  standard: "max-w-6xl",
-  narrow: "max-w-5xl",
-  settings: "max-w-[70rem]",
-  full: "",
-};
-
+// Every canvas tab runs the full width of the shell (consistent across tabs); a tab
+// that wants a narrower column does so with its own className (e.g. Settings' grid).
 export function TabContentFrame({
-  width = "standard",
   className,
   children,
 }: {
-  width?: TabWidth;
   className?: string;
   children: ReactNode;
 }) {
-  return <div className={cn("space-y-4", tabWidths[width], className)}>{children}</div>;
+  return <div className={cn("space-y-4", className)}>{children}</div>;
 }
 
 export function TabEmptyState({
-  width = "standard",
   title,
   description,
   action,
   className,
 }: {
-  width?: TabWidth;
   title: string;
   description?: ReactNode;
   action?: ReactNode;
   className?: string;
 }) {
   return (
-    <TabContentFrame width={width}>
+    <TabContentFrame>
       <EmptyState
         title={title}
         description={description}

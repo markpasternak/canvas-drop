@@ -95,10 +95,7 @@ export default function Settings() {
   }
 
   return (
-    <TabContentFrame
-      width="settings"
-      className="lg:grid lg:grid-cols-[180px_minmax(0,56rem)] lg:items-start lg:gap-8"
-    >
+    <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
       <div className="space-y-6">
         <Section id="details" title="Details">

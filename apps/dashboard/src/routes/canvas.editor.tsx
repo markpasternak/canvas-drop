@@ -6,7 +6,7 @@ import {
   Trash,
   UploadSimple,
 } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -75,6 +75,7 @@ export default function Editor() {
   const rename = useRenameDraftFile(id);
   const publish = usePublishDraft(id);
   const toast = useToast();
+  const qc = useQueryClient();
   const replaceInputRef = useRef<HTMLInputElement>(null);
 
   // Autosave buffer is bound to its file (bufferPathRef) + dirty-tracked, so a flush
@@ -246,6 +247,10 @@ export default function Editor() {
     if (!htmlFile) return;
     try {
       await save.mutateAsync({ path: htmlFile.path, content: html });
+      // The HTML file changed underneath the Code editor — invalidate its content
+      // query so switching back to Code shows the on-page edits (not a stale buffer
+      // that would otherwise overwrite them on the next code edit).
+      qc.invalidateQueries({ queryKey: ["draft-file", id, htmlFile.path] });
       setRefreshKey((k) => k + 1);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
@@ -481,7 +486,7 @@ export default function Editor() {
     ) : null;
 
   return (
-    <TabContentFrame width="full" className="space-y-3">
+    <TabContentFrame className="space-y-3">
       <PublishBar
         dirty={draft.dirty}
         stale={draft.stale}
