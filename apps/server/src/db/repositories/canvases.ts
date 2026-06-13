@@ -6,7 +6,21 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, exists, lte, ne, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  exists,
+  gt,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -46,6 +60,26 @@ export interface CanvasSettingsPatch {
 }
 
 /**
+ * Options for the opt-in gallery listing (plan 008 / M8). Pagination is
+ * offset-based; `now` is supplied by the caller (one timestamp at the route) so
+ * the expiry clause is deterministic and testable, mirroring `decideCanvasAccess`.
+ */
+export interface GalleryListOptions {
+  now: number;
+  q?: string;
+  tag?: string;
+  limit: number;
+  offset: number;
+}
+
+/** A gallery row: the full canvas plus the owner's display identity (name + avatar). */
+export interface GalleryRow {
+  canvas: Canvas;
+  ownerName: string;
+  ownerAvatarUrl: string | null;
+}
+
+/**
  * Canvases repository (§10). Dual-dialect seam typed `any` (KTD-1); inputs and
  * the {@link Canvas} row shape stay strongly typed.
  */
@@ -54,6 +88,7 @@ export function canvasesRepository(client: DbClient) {
   const db = client.db as any;
   const t = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
   const versionsT = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
+  const usersT = client.dialect === "sqlite" ? sqliteSchema.users : pgSchema.users;
 
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
@@ -346,6 +381,70 @@ export function canvasesRepository(client: DbClient) {
         .where(and(eq(t.apiKeyHash, apiKeyHash), eq(t.status, "active")))
         .limit(1);
       return (rows[0] as Canvas | undefined) ?? null;
+    },
+
+    /**
+     * Opt-in gallery listing (plan 008 / M8). Returns only canvases that are
+     * simultaneously active, shared, gallery-listed, unexpired, AND have a
+     * published version — the §12 visibility predicate, evaluated per request with
+     * no cached grants, so revoke / expiry / archive / disable / delete / un-list
+     * remove a canvas from the gallery on the very next call. The
+     * `current_version_id IS NOT NULL` clause keeps a never-deployed (or
+     * fully-pruned) canvas out of the gallery so it never renders as a dead link.
+     *
+     * Joins `users` for the owner's display identity (name + avatar only — no
+     * email / internal flags reach this layer). Ordered most-recently-published
+     * first with a stable `id` tiebreak. Returns the page plus the total count
+     * under the same predicate for "showing X of N" pagination.
+     */
+    async listGallery(opts: GalleryListOptions): Promise<{ items: GalleryRow[]; total: number }> {
+      const filters = [
+        eq(t.status, "active"),
+        eq(t.shared, true),
+        eq(t.galleryListed, true),
+        or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, opts.now)),
+        isNotNull(t.currentVersionId),
+      ];
+
+      const q = opts.q?.trim().toLowerCase();
+      if (q) {
+        // Portable case-insensitive substring match. LIKE metacharacters in the
+        // user's text are escaped (ESCAPE '\') so a literal % / _ doesn't widen
+        // the search — an accident-class concern, right-sized per the trust model.
+        const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+        filters.push(
+          or(
+            sql`lower(${t.title}) like ${pattern} escape '\\'`,
+            sql`lower(${t.gallerySummary}) like ${pattern} escape '\\'`,
+          ),
+        );
+      }
+
+      if (opts.tag) {
+        // JSON-array membership is the one genuinely dialect-divergent query.
+        filters.push(
+          client.dialect === "sqlite"
+            ? sql`exists (select 1 from json_each(${t.galleryTags}) where value = ${opts.tag})`
+            : sql`${t.galleryTags} @> ${JSON.stringify([opts.tag])}::jsonb`,
+        );
+      }
+
+      const where = and(...filters);
+
+      const rows = (await db
+        .select({ canvas: t, ownerName: usersT.name, ownerAvatarUrl: usersT.avatarUrl })
+        .from(t)
+        .innerJoin(usersT, eq(t.ownerId, usersT.id))
+        .where(where)
+        .orderBy(desc(t.galleryPublishedAt), desc(t.id))
+        .limit(opts.limit)
+        .offset(opts.offset)) as GalleryRow[];
+
+      const totalRows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
+        value: number;
+      }>;
+
+      return { items: rows, total: totalRows[0]?.value ?? 0 };
     },
   };
 }

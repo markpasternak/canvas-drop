@@ -22,7 +22,7 @@ export interface CanvasKvDeps {
   kv: KvRepository;
   usage: UsageEventsRepository;
   /** Audit sink (M7) — KV mutations recorded for the §12.1.8 security trail. */
-  audit: AuditLog;
+  audit?: AuditLog;
   /** Admin-tunable quota resolver (M7). Absent → the hard constants above. */
   quota?: QuotaResolver;
 }
@@ -46,7 +46,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
   // Audit (security trail, §12.1.8) — distinct from `meter` (metering for stats).
   // Only MUTATIONS are audited (set/delete/increment); reads are not (volume).
   const auditMutation = (c: Context<AppEnv>, op: string, scope: string) => {
-    deps.audit.recordAudit({
+    deps.audit?.recordAudit({
       action: "kv_mutation",
       actorId: c.get("user").id,
       targetId: canvasId(c),

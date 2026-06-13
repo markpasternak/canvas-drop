@@ -2,7 +2,9 @@ import type { Config } from "@canvas-drop/shared";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
+import type { UpgradeWebSocket } from "hono/ws";
 import { adminSettingsService } from "./admin/settings-service.js";
+import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import { authRoutes } from "./auth/routes.js";
@@ -15,6 +17,7 @@ import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
+import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
@@ -37,10 +40,12 @@ import { securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
+import type { RealtimeHub } from "./realtime/hub.js";
 import { adminRoutes } from "./routes/admin.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
+import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
@@ -65,6 +70,16 @@ export interface BuildAppDeps {
   clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
+  /** AI model provider (default Anthropic from config; tests inject a fake). */
+  aiProvider?: ModelProvider;
+  /** Shared realtime hub (constructed in index.ts; used by the WS route + revoke hooks). */
+  hub?: RealtimeHub;
+  /**
+   * Called once with the composed app to obtain the WebSocket upgrade helper
+   * (`@hono/node-ws`). Returns `upgradeWebSocket`; the caller (index.ts) captures
+   * `injectWebSocket` via closure to attach after `serve()`. Omitted → no realtime.
+   */
+  registerWebSocket?: (app: Hono<AppEnv>) => UpgradeWebSocket;
 }
 
 /**
@@ -98,6 +113,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // login, password-gate) so MAX_KEYS bounds everything. Per-buildApp = per-test
   // isolation.
   const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
+  // Obtain the WebSocket upgrade helper for THIS app instance (chicken-and-egg:
+  // @hono/node-ws needs the app; the route needs the helper). Realtime is wired
+  // only when both the helper and the hub are present.
+  const upgradeWebSocket = deps.registerWebSocket?.(app);
+  const realtime = upgradeWebSocket && deps.hub ? { hub: deps.hub, upgradeWebSocket } : undefined;
 
   app.use("*", requestLogger(deps.rootLogger));
 
@@ -206,6 +226,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       usage: usageEventsRepository(deps.db),
       audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
+      aiUsage: aiUsageRepository(deps.db),
+      aiProvider: deps.aiProvider ?? anthropicProvider(deps.config),
+      realtime,
     }),
   );
 
@@ -215,6 +238,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Current-user identity for the SPA — its own router (NOT under /api/canvases,
   // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.
   app.route("/api/me", meRoutes());
+
+  // Opt-in gallery browse (M8) — its own router (NOT under /api/canvases, whose
+  // /:id would shadow a literal `gallery` segment). Behind the gateway; the §12
+  // visibility predicate runs per request inside the repo.
+  app.route("/api/gallery", galleryRoutes({ config: deps.config, canvases: deps.canvases }));
 
   // Session-authenticated management API.
   app.route(
@@ -227,6 +255,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       engine: deps.engine,
       usage: usageEventsRepository(deps.db),
       files: filesRepository(deps.db),
+      aiUsage: aiUsageRepository(deps.db),
+      hub: deps.hub,
     }),
   );
 

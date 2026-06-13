@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { type AdminCanvasStatus, api } from "./api.js";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { type AdminCanvasStatus, api, type GalleryQuery } from "./api.js";
 
 export const keys = {
   me: ["me"] as const,
@@ -13,6 +13,7 @@ export const keys = {
   adminOverview: ["admin", "overview"] as const,
   adminModels: ["admin", "models"] as const,
   adminQuotas: ["admin", "quotas"] as const,
+  gallery: (query: GalleryQuery) => ["gallery", query] as const,
 };
 
 export function useMe() {
@@ -62,4 +63,14 @@ export function useAdminModels() {
 
 export function useAdminQuotas() {
   return useQuery({ queryKey: keys.adminQuotas, queryFn: api.admin.getQuotas });
+}
+
+export function useGallery(query: GalleryQuery) {
+  return useQuery({
+    queryKey: keys.gallery(query),
+    queryFn: () => api.listGallery(query),
+    // Keep the previous page on screen while the next page / search loads so
+    // paging and typing don't flash an empty grid.
+    placeholderData: keepPreviousData,
+  });
 }

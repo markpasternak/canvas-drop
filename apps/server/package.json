@@ -5,17 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node --conditions=node-dist dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "purge": "tsx scripts/purge-deleted.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.84",
     "@aws-sdk/client-s3": "^3.1067.0",
     "@canvas-drop/sdk": "workspace:*",
     "@canvas-drop/shared": "workspace:*",
     "@hono/node-server": "^2.0.4",
+    "@hono/node-ws": "^1.3.1",
     "@node-rs/argon2": "^2.0.2",
+    "@opentelemetry/api": "^1.9.1",
+    "ai": "^6.0.203",
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.25",
@@ -33,8 +37,10 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.3",
     "@types/pg": "^8.20.0",
+    "@types/ws": "^8.18.1",
     "@types/yauzl": "^3.3.0",
     "fflate": "^0.8.3",
-    "tsx": "^4.22.4"
+    "tsx": "^4.22.4",
+    "ws": "^8.21.0"
   }
 }

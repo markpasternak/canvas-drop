@@ -14,7 +14,7 @@ export interface CanvasFilesDeps {
   files: FilesService;
   usage: UsageEventsRepository;
   /** Audit sink (M7) — file upload/delete recorded for the §12.1.8 security trail. */
-  audit: AuditLog;
+  audit?: AuditLog;
 }
 
 /**
@@ -53,7 +53,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
         userId: c.get("user").id,
       });
       meter(c, "upload");
-      deps.audit.recordAudit({
+      deps.audit?.recordAudit({
         action: "file_upload",
         actorId: c.get("user").id,
         targetId: cv.id,
@@ -94,7 +94,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
     const ok = await deps.files.delete(canvas(c).id, id);
     meter(c, "delete");
     if (!ok) return c.json({ code: "NOT_FOUND" }, 404);
-    deps.audit.recordAudit({
+    deps.audit?.recordAudit({
       action: "file_delete",
       actorId: c.get("user").id,
       targetId: canvas(c).id,

@@ -178,15 +178,30 @@ describe("rate limiting (middleware + out-of-band)", () => {
     expect(res.status).toBe(429);
   });
 
-  it("AI sub-class auto-covers /v1/c/:slug/ai/* before the route even exists", async () => {
+  it("AI sub-class throttles M9's /v1/c/:slug/ai/* (10/min/user; 2 here)", async () => {
     client = await makeTestDb("sqlite");
     const a = app(client, lowLimitConfig()); // aiPerMin = 2
     await seedCanvas(client);
-    // /ai/chat 404s today (no AI route), but it classifies as the stricter ai
-    // class and is throttled — proving future AI routes are covered with no change.
+    // The rate-limit middleware runs BEFORE the AI handler, so the 3rd request
+    // 429s regardless of the handler outcome — proving the broad classifier
+    // covers M9's real AI route via the stricter ai sub-class.
     await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
     await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
     const res = await a.request("/v1/c/app/ai/chat", { method: "POST", headers: host });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code: string }).code).toBe("RATE_LIMITED");
+  });
+
+  it("M9's realtime handshake /v1/c/:slug/realtime counts against the canvas class", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig()); // canvasApiPerMin = 2
+    await seedCanvas(client);
+    // The WS upgrade is an HTTP GET under /v1/c/:slug/* (not /ai/), so it
+    // classifies as the canvas class and shares that 60s bucket — the broad
+    // middleware runs on the upgrade request before any handler. The 3rd hit 429s.
+    await a.request("/v1/c/app/realtime", { headers: host });
+    await a.request("/v1/c/app/realtime", { headers: host });
+    const res = await a.request("/v1/c/app/realtime", { headers: host });
     expect(res.status).toBe(429);
     expect(((await res.json()) as { code: string }).code).toBe("RATE_LIMITED");
   });

@@ -2,9 +2,11 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeProvider } from "../ai/testing.js";
 import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import { filesService } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
@@ -41,6 +43,8 @@ function buildApi(client: DbClient, userId: string) {
       files: filesService({ files: filesRepository(client), storage: memStorage() }),
       usage: usageEventsRepository(client),
       audit: noopAudit,
+      aiUsage: aiUsageRepository(client),
+      aiProvider: fakeProvider({ deltas: ["ok"] }),
     }),
   );
   return app;
@@ -214,6 +218,8 @@ describe("canvas KV routes", () => {
         files: filesService({ files: filesRepository(client), storage: memStorage() }),
         usage: usageEventsRepository(client),
         audit: noopAudit,
+        aiUsage: aiUsageRepository(client),
+        aiProvider: fakeProvider({ deltas: ["ok"] }),
       }),
     );
     const res = await app.request("/v1/c/app/kv/brand-new-key", json(1));
@@ -248,6 +254,8 @@ describe("canvas KV routes", () => {
         usage: usageEventsRepository(client),
         audit: noopAudit,
         quota,
+        aiUsage: aiUsageRepository(client),
+        aiProvider: fakeProvider({ deltas: ["ok"] }),
       }),
     );
     // First shared key is fine; the second exceeds the admin-lowered limit of 1.
@@ -275,6 +283,8 @@ describe("canvas KV routes", () => {
         files: filesService({ files: filesRepository(client), storage: memStorage() }),
         usage: usageEventsRepository(client),
         audit,
+        aiUsage: aiUsageRepository(client),
+        aiProvider: fakeProvider({ deltas: ["ok"] }),
       }),
     );
     await app.request("/v1/c/app/kv/k", json(1)); // set

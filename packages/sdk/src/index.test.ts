@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   type CanvasContext,
+  CanvasdropError,
   CapabilityDisabledError,
   createClient,
   detectContext,
@@ -9,6 +10,8 @@ import {
   NotAuthenticatedError,
   NotFoundError,
   QuotaExceededError,
+  type RealtimeMessage,
+  type WebSocketLike,
 } from "./index.js";
 
 function res(status: number, body: unknown): Response {
@@ -133,5 +136,244 @@ describe("createClient", () => {
     const client = createClient({ context: ctx, fetch });
     const result = await client.files.upload(new File(["abc"], "a.txt", { type: "text/plain" }));
     expect(result.url).toBe("https://canvases.example.com/v1/c/foo/files/abc/content");
+  });
+});
+
+// --- AI ----------------------------------------------------------------------
+
+/** An SSE Response streaming the given frames as `data:` lines. */
+function sseRes(frames: object[]): Response {
+  const body = frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join("");
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(body));
+        c.close();
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+describe("ai", () => {
+  it("chat() accumulates deltas and returns usage + cost", async () => {
+    const fetch = fetchMock(async () =>
+      sseRes([
+        { type: "delta", text: "Hel" },
+        { type: "delta", text: "lo" },
+        { type: "done", usage: { inputTokens: 5, outputTokens: 3 }, cost: 0.0123 },
+      ]),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const r = await client.ai.chat([{ role: "user", content: "hi" }], {
+      model: "claude-haiku-4-5",
+    });
+    expect(r.text).toBe("Hello");
+    expect(r.usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+    expect(r.cost).toBeCloseTo(0.0123, 6);
+  });
+
+  it("stream() yields the text deltas", async () => {
+    const fetch = fetchMock(async () =>
+      sseRes([
+        { type: "delta", text: "a" },
+        { type: "delta", text: "b" },
+        { type: "done", usage: { inputTokens: 1, outputTokens: 1 }, cost: 0 },
+      ]),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const out: string[] = [];
+    for await (const d of client.ai.stream([{ role: "user", content: "hi" }], {
+      model: "claude-haiku-4-5",
+    })) {
+      out.push(d);
+    }
+    expect(out).toEqual(["a", "b"]);
+  });
+
+  it("maps an in-stream error frame to a typed error", async () => {
+    const fetch = fetchMock(async () =>
+      sseRes([
+        { type: "delta", text: "x" },
+        { type: "error", code: "AI_UPSTREAM_ERROR", message: "boom" },
+      ]),
+    );
+    const client = createClient({ context: ctx, fetch });
+    await expect(
+      client.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toBeInstanceOf(CanvasdropError);
+  });
+
+  it("throws AI_STREAM_TRUNCATED when the stream ends without a done/error frame", async () => {
+    const fetch = fetchMock(async () => sseRes([{ type: "delta", text: "partial" }])); // no done
+    const client = createClient({ context: ctx, fetch });
+    await expect(
+      client.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toMatchObject({ code: "AI_STREAM_TRUNCATED" });
+  });
+
+  it("maps a pre-stream 403 to CapabilityDisabledError, 429 to QuotaExceededError", async () => {
+    const offClient = createClient({
+      context: ctx,
+      fetch: fetchMock(async () => res(403, { code: "CAPABILITY_DISABLED", capability: "ai" })),
+    });
+    await expect(
+      offClient.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toBeInstanceOf(CapabilityDisabledError);
+
+    const quotaClient = createClient({
+      context: ctx,
+      fetch: fetchMock(async () => res(429, { code: "QUOTA_EXCEEDED", scope: "user_daily" })),
+    });
+    await expect(
+      quotaClient.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+});
+
+// --- Realtime ----------------------------------------------------------------
+
+class FakeWS implements WebSocketLike {
+  static instances: FakeWS[] = [];
+  readyState = 0;
+  sent: Array<Record<string, unknown>> = [];
+  onopen: ((ev: unknown) => void) | null = null;
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
+  onclose: ((ev: { code: number; reason?: string }) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  constructor(public url: string) {
+    FakeWS.instances.push(this);
+  }
+  send(data: string): void {
+    this.sent.push(JSON.parse(data));
+  }
+  close(code?: number, reason?: string): void {
+    this.readyState = 3;
+    this.onclose?.({ code: code ?? 1000, reason });
+  }
+  // test controls
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.({});
+  }
+  emit(frame: object): void {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+  serverClose(code: number): void {
+    this.readyState = 3;
+    this.onclose?.({ code });
+  }
+}
+
+function realtimeClient() {
+  FakeWS.instances = [];
+  const client = createClient({
+    context: ctx,
+    fetch: fetchMock(),
+    WebSocketImpl: (u) => new FakeWS(u),
+    reconnectBaseMs: 1,
+  });
+  return client;
+}
+const lastWs = () => FakeWS.instances[FakeWS.instances.length - 1] as FakeWS;
+
+describe("realtime", () => {
+  it("derives a wss URL from the apiBase, on the same host", () => {
+    const client = realtimeClient();
+    client.realtime.channel("room").subscribe(() => {});
+    expect(lastWs().url).toBe("wss://canvases.example.com/v1/c/foo/realtime");
+  });
+
+  it("subscribe + incoming message round-trip", async () => {
+    const client = realtimeClient();
+    const got: RealtimeMessage[] = [];
+    client.realtime.channel("room").subscribe((m) => got.push(m));
+    lastWs().open();
+    expect(lastWs().sent).toContainEqual({ type: "subscribe", channel: "room" });
+    lastWs().emit({
+      type: "message",
+      channel: "room",
+      event: "ping",
+      data: 1,
+      from: { id: "u", name: "U" },
+    });
+    expect(got).toEqual([{ event: "ping", data: 1, from: { id: "u", name: "U" } }]);
+  });
+
+  it("presence() resolves with the server's snapshot", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    const p = ch.presence();
+    lastWs().open();
+    lastWs().emit({ type: "presence", channel: "room", users: [{ id: "a", name: "A" }] });
+    await expect(p).resolves.toEqual([{ id: "a", name: "A" }]);
+  });
+
+  it("re-subscribes after a transient reconnect", async () => {
+    const client = realtimeClient();
+    client.realtime.channel("room").subscribe(() => {});
+    lastWs().open();
+    const first = lastWs();
+    first.serverClose(1006); // abnormal close → reconnect
+    await new Promise((r) => setTimeout(r, 10));
+    const second = lastWs();
+    expect(second).not.toBe(first);
+    second.open();
+    expect(second.sent).toContainEqual({ type: "subscribe", channel: "room" });
+  });
+
+  it("a 4403 close is terminal — presence rejects with CapabilityDisabledError, no reconnect", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    const sock = lastWs();
+    sock.serverClose(4403);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(FakeWS.instances).toHaveLength(1); // did not reconnect
+    await expect(ch.presence()).rejects.toBeInstanceOf(CapabilityDisabledError);
+  });
+
+  it("a 4401 close is terminal — presence rejects with NotAuthenticatedError, no reconnect", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    lastWs().serverClose(4401);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(FakeWS.instances).toHaveLength(1);
+    await expect(ch.presence()).rejects.toBeInstanceOf(NotAuthenticatedError);
+  });
+
+  it("a 4429 connection-limit close is terminal (no infinite reconnect)", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    lastWs().serverClose(4429);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(FakeWS.instances).toHaveLength(1); // terminal, did not reconnect
+    await expect(ch.presence()).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+
+  it("a transient (non-terminal) close rejects in-flight presence() instead of hanging", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    const p = ch.presence(); // in flight
+    lastWs().serverClose(1006); // transient → reconnect, but waiter must not hang
+    await expect(p).rejects.toBeInstanceOf(CanvasdropError);
+  });
+
+  it("close() then publish() does not reconnect", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    ch.close();
+    const count = FakeWS.instances.length;
+    ch.publish("x", 1);
+    expect(FakeWS.instances.length).toBe(count); // no new socket for a closed channel
   });
 });

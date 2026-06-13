@@ -162,12 +162,11 @@ const rawSchema = z
     CANVAS_DROP_DEV_USER_EMAIL: z.email().optional().default("dev@example.com"),
     CANVAS_DROP_DEV_USER_NAME: z.string().optional().default("Dev User"),
 
-    // AI (validated even though the AI primitive ships in a later area, so the
-    // config surface stays whole — see plan KTD-7).
+    // AI (primitive ships in M9, plan 009; the config surface predated it).
     CANVAS_DROP_AI_PROVIDER: z.string().optional().default("anthropic"),
     CANVAS_DROP_AI_API_KEY: z.string().optional(),
     CANVAS_DROP_AI_BASE_URL: z.url().optional(),
-    CANVAS_DROP_AI_MODELS: csv(["claude-fast", "claude-smart"]),
+    CANVAS_DROP_AI_MODELS: csv(["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"]),
     CANVAS_DROP_AI_USER_DAILY_USD: num(5),
     CANVAS_DROP_AI_CANVAS_MONTHLY_USD: num(50),
 
@@ -417,7 +416,10 @@ const rawSchema = z
 
       ai: {
         provider: r.CANVAS_DROP_AI_PROVIDER,
-        apiKey: r.CANVAS_DROP_AI_API_KEY,
+        // Coerce an empty/whitespace key to undefined so AI is treated as
+        // unconfigured (CANVAS_DROP_AI_API_KEY= must NOT enable the capability —
+        // otherwise every call 401s upstream). `aiEnabled` keys off undefined.
+        apiKey: r.CANVAS_DROP_AI_API_KEY?.trim() ? r.CANVAS_DROP_AI_API_KEY.trim() : undefined,
         baseUrl: r.CANVAS_DROP_AI_BASE_URL,
         models: r.CANVAS_DROP_AI_MODELS,
         userDailyUsd: r.CANVAS_DROP_AI_USER_DAILY_USD,

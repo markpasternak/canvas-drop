@@ -2,9 +2,11 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeProvider } from "../ai/testing.js";
 import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import { filesService, MAX_CANVAS_BYTES } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
@@ -46,6 +48,8 @@ function buildApi(
       files: filesService({ files: filesRepository(client), storage }),
       usage: usageEventsRepository(client),
       audit,
+      aiUsage: aiUsageRepository(client),
+      aiProvider: fakeProvider({ deltas: ["ok"] }),
     }),
   );
   return app;

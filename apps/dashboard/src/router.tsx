@@ -6,6 +6,7 @@ import { AppLayout } from "./app-layout.js";
 // LCP / route-transition budgets — area E, U2).
 const IndexRoute = lazy(() => import("./routes/index.js"));
 const ArchivedRoute = lazy(() => import("./routes/archived.js"));
+const GalleryRoute = lazy(() => import("./routes/gallery.js"));
 const NewRoute = lazy(() => import("./routes/new.js"));
 const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
 const CanvasLayout = lazy(() => import("./routes/canvas.js"));
@@ -29,6 +30,22 @@ const archivedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/archived",
   component: ArchivedRoute,
+});
+/** Gallery browse search params (shared with the gallery view). */
+export interface GallerySearch {
+  q?: string;
+  tag?: string;
+  page?: number;
+}
+const galleryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/gallery",
+  validateSearch: (s: Record<string, unknown>): GallerySearch => ({
+    q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
+    tag: typeof s.tag === "string" && s.tag.length > 0 ? s.tag : undefined,
+    page: typeof s.page === "number" ? s.page : Number(s.page) || undefined,
+  }),
+  component: GalleryRoute,
 });
 const newRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -100,6 +117,7 @@ const usageRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   archivedRoute,
+  galleryRoute,
   newRoute,
   onboardingRoute,
   adminRoute,

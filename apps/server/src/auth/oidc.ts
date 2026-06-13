@@ -83,12 +83,19 @@ export function makeOidc(deps: OidcDeps) {
       let claims: Record<string, unknown> | undefined;
       try {
         const cfg = await deps.getConfig();
-        const tokens = await client.authorizationCodeGrant(cfg, currentUrl, {
+        // Behind a TLS-terminating proxy the inbound request is plain http on an
+        // internal host, so currentUrl (from c.req.url) has the wrong scheme/
+        // origin. The token exchange's redirect_uri MUST byte-match the one sent
+        // in the auth request (built from baseUrl) — rebuild it from baseUrl and
+        // carry over the IdP response query params.
+        const exchangeUrl = callbackUrl(deps.config.baseUrl, currentUrl);
+        const tokens = await client.authorizationCodeGrant(cfg, exchangeUrl, {
           pkceCodeVerifier: tx.verifier,
           expectedState: tx.state,
         });
         claims = tokens.claims() as Record<string, unknown> | undefined;
-      } catch {
+      } catch (err) {
+        c.get("log")?.error({ err }, "oidc token exchange failed");
         return c.json({ error: "token_exchange_failed" }, 400);
       }
 
@@ -97,6 +104,20 @@ export function makeOidc(deps: OidcDeps) {
       return completeLogin(deps, c, identity);
     },
   };
+}
+
+/**
+ * Reconstruct the OIDC callback URL from the configured base URL, carrying over
+ * the IdP's response query params (code/state/iss). This is the redirect_uri the
+ * token exchange sends to the IdP, and it MUST byte-match the one used in the auth
+ * request — which is built from `baseUrl`. Using the raw request URL instead would
+ * leak the proxy's internal scheme/host (e.g. http://localhost:3000) and the
+ * exchange would fail. See the proxy/subdomain deployment notes.
+ */
+export function callbackUrl(baseUrl: string, requestUrl: URL | string): URL {
+  const url = new URL("/auth/callback", baseUrl);
+  url.search = new URL(requestUrl).search;
+  return url;
 }
 
 /**
