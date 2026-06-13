@@ -79,14 +79,46 @@ async function main() {
     );
   });
 
+  // Fail loud and readable on a bound port instead of letting the underlying
+  // http.Server emit an unhandled 'error' event (which crashes with a raw stack
+  // trace). The usual dev cause is a previous server that never exited — see the
+  // graceful-shutdown note below.
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      // Human-facing startup hint → stderr directly, matching the fatal handler
+      // below (pino mangles multi-line string messages).
+      process.stderr.write(
+        `Port ${config.port} is already in use — another canvas-drop server is probably still running.\n` +
+          `  Find it:  lsof -nP -iTCP:${config.port} -sTCP:LISTEN\n` +
+          `  Then kill the PID, or set CANVAS_DROP_PORT to a free port.\n`,
+      );
+    } else {
+      rootLogger.error({ err }, "server failed to start");
+    }
+    process.exit(1);
+  });
+
   // Graceful shutdown: stop accepting connections and let in-flight requests
   // finish BEFORE flushing audit writes and closing the DB pool — otherwise a
   // request mid-handler loses its connection and its audit row.
+  //
+  // Critically, we must drop *idle* keep-alive sockets ourselves: server.close()
+  // waits for every connection to end, and browsers / the Vite dev proxy hold
+  // keep-alive sockets open indefinitely. Without this the process never exits,
+  // the port stays bound, and you get EADDRINUSE on the next start *and* failed
+  // tsx-watch reloads. The force timer is the backstop for genuinely slow
+  // in-flight requests.
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if ("closeIdleConnections" in server) server.closeIdleConnections();
+    const force = setTimeout(() => {
+      if ("closeAllConnections" in server) server.closeAllConnections();
+    }, 5_000);
+    force.unref?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    clearTimeout(force);
     await audit.flush();
     await db.close();
     process.exit(0);

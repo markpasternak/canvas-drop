@@ -11,16 +11,31 @@ Requires **Node 24** and **pnpm**.
 ```bash
 pnpm install
 cp .env.example .env      # defaults: path mode + SQLite + local storage + dev auth
-pnpm dev                  # http://localhost:3000
+pnpm dev                  # starts BOTH apps in watch mode (Ctrl-C to stop)
 ```
 
-`dev` auth auto-logs-in a fake local user, zero setup. Check it's alive:
+`pnpm dev` runs the server and the dashboard together. Open:
+
+- **http://localhost:5173** — the dashboard, with hot-reload (Vite HMR for the
+  frontend; `tsx watch` restarts the server on backend changes). Use this while developing.
+- **http://localhost:3000** — the Hono server: the API, the deploy endpoints, and
+  hosted canvases. The dashboard at :5173 proxies `/api`, `/auth`, and `/v1` here.
+
+Stop everything with a single **Ctrl-C** — both apps shut down cleanly. `dev` auth
+auto-logs-in a fake local user, zero setup. Check the server is alive:
 
 ```bash
 curl http://localhost:3000/healthz      # → {"status":"ok","db":"ok","version":"0.0.0"}
 ```
 
 To log in as yourself in dev mode, set `CANVAS_DROP_DEV_USER_EMAIL` in `.env`.
+
+> **Port already in use?** A `EADDRINUSE` on :3000 (or a strict-port error on
+> :5173) means a previous dev server is still running. Find and stop it:
+> ```bash
+> lsof -nP -iTCP:3000 -sTCP:LISTEN     # note the PID, then: kill <PID>
+> ```
+> Or run on a different port: `CANVAS_DROP_PORT=3001 pnpm dev`.
 
 ## Configuration
 
@@ -38,7 +53,7 @@ Swapping any driver is a config change, never a code change. The blessed product
 ## Commands
 
 ```bash
-pnpm dev          # run the server (path + sqlite + local + dev auth)
+pnpm dev          # run server + dashboard in watch mode (Ctrl-C to stop)
 pnpm test         # full test suite — runs BOTH dialects (sqlite + pglite)
 pnpm test:sqlite  # sqlite leg
 pnpm test:pg      # postgres leg
