@@ -14,6 +14,12 @@ export interface StorageDriver {
   get(key: string): Promise<Uint8Array | null>;
   /** Remove `key`; a no-op if it does not exist. */
   delete(key: string): Promise<void>;
+  /**
+   * Remove many keys, batching where the backend supports it (S3 deletes up to
+   * 1000 per request; local/memory loop). A no-op on an empty list. Missing keys
+   * are ignored, matching {@link delete}.
+   */
+  deleteMany(keys: string[]): Promise<void>;
   /** Whether an object exists at `key`. */
   exists(key: string): Promise<boolean>;
   /** Keys beginning with `prefix`. */

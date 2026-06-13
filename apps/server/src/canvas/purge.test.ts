@@ -169,15 +169,17 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     await canvases.setStatus(okId, "deleted");
     await canvases.setStatus(badId, "deleted");
 
-    // The "bad" canvas's version prefix — deleting any object under it throws,
-    // so its purge aborts mid-way while the healthy canvas still purges.
+    // Deleting the "bad" canvas's objects throws, so its purge aborts while the
+    // healthy canvas still reclaims.
     const [badVersion] = await versions.listByCanvas(badId);
     if (!badVersion) throw new Error("seed failed: bad canvas has no version");
     const guarded: StorageDriver = {
       ...storage,
-      delete: async (key: string) => {
-        if (key.startsWith(versionPrefix(badVersion.id))) throw new Error("storage down");
-        return storage.delete(key);
+      deleteMany: async (keys: string[]) => {
+        if (keys.some((k) => k.startsWith(versionPrefix(badVersion.id)))) {
+          throw new Error("storage down");
+        }
+        return storage.deleteMany(keys);
       },
     };
 

@@ -20,6 +20,9 @@ export function memStorage(failOnPut?: number): StorageDriver {
     async delete(key) {
       store.delete(key);
     },
+    async deleteMany(keys) {
+      for (const key of keys) store.delete(key);
+    },
     async exists(key) {
       return store.has(key);
     },

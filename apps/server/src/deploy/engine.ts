@@ -32,6 +32,16 @@ export interface DeployEngineDeps {
 const KEEP_VERSIONS = 10;
 
 /**
+ * How many file uploads run concurrently within one deploy. Each storage `put`
+ * is a network round-trip on S3; uploading in parallel turns an N-round-trip
+ * deploy into ~N/this. Capped so peak memory stays bounded (at most this many
+ * file buffers in flight — the streaming zip reader still pulls one at a time;
+ * see ingest `fromZip` / KTD-2) and so one deploy can't monopolize the client's
+ * S3 connection pool.
+ */
+const PUT_CONCURRENCY = 8;
+
+/**
  * The deploy engine (§9.5, KTD-3/4). Turns a stream of entries (from any of the
  * three ingestion adapters) into a new immutable version with an atomic pointer
  * swap and async pruning. Buffers at most one file at a time (KTD-2): each entry
@@ -54,6 +64,23 @@ export function deployEngine(deps: DeployEngineDeps) {
       const warnings: string[] = [];
       let fileCount = 0;
       let totalBytes = 0;
+
+      // Uploads run in bounded-concurrency batches: validation stays sequential
+      // (the running totals gate zip-bombs in order), but the slow part — the
+      // storage `put` round-trips — fans out PUT_CONCURRENCY at a time. `flush`
+      // waits for the whole batch to SETTLE before surfacing any error, so no
+      // upload can still be in flight when cleanupPending runs.
+      let batch: Array<{ key: string; bytes: Uint8Array }> = [];
+      const flush = async (): Promise<void> => {
+        if (batch.length === 0) return;
+        const current = batch;
+        batch = [];
+        const results = await Promise.allSettled(
+          current.map((f) => deps.storage.put(f.key, f.bytes)),
+        );
+        const failed = results.find((r) => r.status === "rejected");
+        if (failed) throw (failed as PromiseRejectedResult).reason;
+      };
 
       try {
         for await (const entry of entries) {
@@ -83,8 +110,10 @@ export function deployEngine(deps: DeployEngineDeps) {
 
           const hash = createHash("sha256").update(entry.bytes).digest("hex");
           manifest[path] = { size, hash, mime: mime.contentType };
-          await deps.storage.put(versionStorageKey(version.id, path), entry.bytes);
+          batch.push({ key: versionStorageKey(version.id, path), bytes: entry.bytes });
+          if (batch.length >= PUT_CONCURRENCY) await flush();
         }
+        await flush();
 
         if (fileCount === 0) {
           throw new DeployError("EMPTY_DEPLOY", "no deployable files");
@@ -139,9 +168,8 @@ export function deployEngine(deps: DeployEngineDeps) {
 
     /** Delete the storage objects written for a failed pending version. */
     async cleanupPending(versionId: string, manifest: Manifest): Promise<void> {
-      for (const path of Object.keys(manifest)) {
-        await deps.storage.delete(versionStorageKey(versionId, path)).catch(() => {});
-      }
+      const keys = Object.keys(manifest).map((path) => versionStorageKey(versionId, path));
+      await deps.storage.deleteMany(keys).catch(() => {});
     },
 
     /** Prune ready versions beyond the newest N; log-and-continue on failure. */
@@ -151,12 +179,10 @@ export function deployEngine(deps: DeployEngineDeps) {
         // concurrent rollback's current version is never pruned (prune-vs-rollback
         // race); no pre-read snapshot needed here.
         const dropped = await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS);
-        for (const v of dropped) {
-          const manifest = (v.manifest ?? {}) as Manifest;
-          for (const path of Object.keys(manifest)) {
-            await deps.storage.delete(versionStorageKey(v.id, path)).catch(() => {});
-          }
-        }
+        const keys = dropped.flatMap((v) =>
+          Object.keys((v.manifest ?? {}) as Manifest).map((path) => versionStorageKey(v.id, path)),
+        );
+        await deps.storage.deleteMany(keys).catch(() => {});
       } catch (err) {
         deps.log.error({ err, canvasId }, "version prune failed (live version unaffected)");
       }

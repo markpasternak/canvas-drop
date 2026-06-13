@@ -57,6 +57,12 @@ export class LocalDriver implements StorageDriver {
     }
   }
 
+  async deleteMany(keys: string[]): Promise<void> {
+    // Local disk has no batch primitive; loop through delete so each removal
+    // also prunes its now-empty parent dirs.
+    for (const key of keys) await this.delete(key);
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       await access(this.pathFor(key));

@@ -1,12 +1,16 @@
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   type S3Client,
 } from "@aws-sdk/client-s3";
-import type { PutOptions, StorageDriver } from "./driver.js";
+import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
+
+/** S3 DeleteObjects accepts at most 1000 keys per request. */
+const DELETE_BATCH = 1000;
 
 /**
  * S3-compatible storage driver — AWS S3, MinIO, Cloudflare R2, or any
@@ -44,6 +48,27 @@ export class S3Driver implements StorageDriver {
 
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async deleteMany(keys: string[]): Promise<void> {
+    for (let i = 0; i < keys.length; i += DELETE_BATCH) {
+      const chunk = keys.slice(i, i + DELETE_BATCH);
+      const res = await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: this.bucket,
+          Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: true },
+        }),
+      );
+      // S3 reports per-key failures in the body rather than throwing; surface
+      // them so the caller (purge) treats the canvas as not fully reclaimed.
+      if (res.Errors && res.Errors.length > 0) {
+        const first = res.Errors[0];
+        throw new StorageError(
+          `failed to delete ${res.Errors.length} object(s); first: ${first?.Key} (${first?.Code})`,
+          "delete_failed",
+        );
+      }
+    }
   }
 
   async exists(key: string): Promise<boolean> {

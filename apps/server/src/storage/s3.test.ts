@@ -32,6 +32,11 @@ function fakeS3Client(): S3Client {
       case "DeleteObjectCommand":
         store.delete(key as string);
         return {};
+      case "DeleteObjectsCommand": {
+        const del = cmd.input.Delete as { Objects: { Key: string }[] };
+        for (const o of del.Objects) store.delete(o.Key);
+        return { Deleted: del.Objects, Errors: [] };
+      }
       case "ListObjectsV2Command": {
         const prefix = (cmd.input.Prefix as string) ?? "";
         const keys = [...store.keys()].filter((k) => k.startsWith(prefix));

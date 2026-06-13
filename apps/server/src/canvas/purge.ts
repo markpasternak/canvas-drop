@@ -77,17 +77,19 @@ export async function purgeDeletedCanvases(
       // Nothing reclaimable — leave the tombstone untouched and don't count it.
       if (versions.length === 0) continue;
 
-      let objects = 0;
+      // Collect every object across the canvas's versions, then delete in one
+      // batched call (S3 removes up to 1000 per request instead of one network
+      // round-trip per file).
+      const keys: string[] = [];
       for (const version of versions) {
-        for (const key of await deps.storage.list(versionPrefix(version.id))) {
-          if (!dryRun) await deps.storage.delete(key);
-          objects++;
-        }
+        keys.push(...(await deps.storage.list(versionPrefix(version.id))));
       }
       if (!dryRun) {
+        await deps.storage.deleteMany(keys);
         await deps.versions.deleteByCanvas(canvas.id);
         await deps.canvases.clearCurrentVersion(canvas.id);
       }
+      const objects = keys.length;
       summary.canvasesPurged++;
       summary.versionsPurged += versions.length;
       summary.objectsDeleted += objects;
