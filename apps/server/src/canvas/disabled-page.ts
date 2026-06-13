@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 
 /**
@@ -27,12 +28,10 @@ export function disabledResponse(c: Context<AppEnv>): Response {
   return c.body(body, 403, Object.fromEntries(headers));
 }
 
-/** §12.4 baseline headers (consolidated into the shared helper by U8). */
+/** §12.4 baseline (shared helper) + the content-surface frame-ancestors. */
 function securityHeaders(headers: Headers): void {
-  headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Referrer-Policy", "same-origin");
+  baseSecurityHeaders(headers);
   headers.set("Content-Security-Policy", "frame-ancestors 'none'");
-  headers.set("Cross-Origin-Opener-Policy", "same-origin");
 }
 
 /** A tiny, dependency-free, org-agnostic "disabled" page (light + dark). No canvas

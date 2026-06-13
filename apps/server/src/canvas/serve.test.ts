@@ -146,12 +146,13 @@ describe("serveCanvas (integration)", () => {
     expect(second.status).toBe(304);
   });
 
-  it("sets the §12.4 security headers", async () => {
+  it("sets the §12.4 security headers (incl. COOP, added M7)", async () => {
     const { app } = await setup();
     const res = await app.request("/c/s/index.html");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
     expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(res.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
   });
 
   it("404 when the manifest references a hash whose blob is missing from storage", async () => {

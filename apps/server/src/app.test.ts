@@ -81,6 +81,9 @@ describe("buildApp", () => {
     const res = await app(client).request("/api/canvases", { headers: { host: "localhost:3000" } });
     expect(res.status).toBe(200);
     expect((await jsonOf<{ canvases: unknown[] }>(res)).canvases).toEqual([]);
+    // §12.4 baseline now reaches JSON API responses (M7) — previously absent.
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
   });
 
   it("an unknown canvas slug 404s on both the content path and the runtime API (no existence leak)", async () => {

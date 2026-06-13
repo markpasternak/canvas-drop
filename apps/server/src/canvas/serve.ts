@@ -3,6 +3,7 @@ import type { Canvas, Manifest, ManifestEntry } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { assetPathFor, resolveAsset } from "./asset-resolver.js";
@@ -71,8 +72,9 @@ function cacheHeaders(path: string, etag: string): Record<string, string> {
 }
 
 function securityHeaders(headers: Headers): void {
-  headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Referrer-Policy", "same-origin");
+  // Shared §12.4 baseline (nosniff, Referrer-Policy, COOP — COOP newly added for
+  // canvas content, M7 audit), plus the canvas-content-specific frame-ancestors.
+  baseSecurityHeaders(headers);
   headers.set("Content-Security-Policy", "frame-ancestors 'none'");
 }
 

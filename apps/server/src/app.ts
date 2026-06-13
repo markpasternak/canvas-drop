@@ -33,6 +33,7 @@ import {
   rateLimit,
   takeToken,
 } from "./http/rate-limit.js";
+import { securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
@@ -99,6 +100,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
 
   app.use("*", requestLogger(deps.rootLogger));
+
+  // §12.4 baseline security headers for JSON/text API responses (M7). Set before
+  // the handlers so `c.json` inherits them; self-Response surfaces (canvas serve,
+  // SPA, file serving, disabled page) call `baseSecurityHeaders` directly.
+  app.use("*", securityHeadersMiddleware());
 
   // Resolve the client IP for trusted-proxy checks (§12.5). MUST be the real TCP
   // socket peer — NOT X-Forwarded-For / X-Real-IP (client-settable).
