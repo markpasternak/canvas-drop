@@ -85,6 +85,7 @@ const HINTS: Record<string, string> = {
   ZIP_BOMB_REJECTED: "The ZIP's declared size is implausibly large.",
   INVALID_ZIP: "The file isn't a valid ZIP archive.",
   INVALID_PATH: "A path or version was invalid.",
+  VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",

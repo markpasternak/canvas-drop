@@ -5,7 +5,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, exists, ne, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -37,6 +37,7 @@ export function canvasesRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
   const t = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
+  const versionsT = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
 
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
@@ -152,6 +153,40 @@ export function canvasesRepository(client: DbClient) {
         .update(t)
         .set({ currentVersionId: versionId, updatedAt: Date.now() })
         .where(eq(t.id, id));
+    },
+
+    /**
+     * Point the canvas at `versionId` ONLY if that version is currently ready —
+     * the swap and the readiness check are one atomic UPDATE (`WHERE id=? AND
+     * EXISTS(ready version)`). Returns false when the target vanished (a
+     * concurrent prune deleted it), so the rollback caller surfaces a clean error
+     * instead of writing a pointer to a missing version. Pairs with
+     * `versionsRepository.pruneBeyond`'s live-pointer guard to close the
+     * rollback-vs-prune race without a cross-dialect transaction.
+     */
+    async setCurrentVersionIfReady(id: string, versionId: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({ currentVersionId: versionId, updatedAt: Date.now() })
+        .where(
+          and(
+            eq(t.id, id),
+            exists(
+              db
+                .select({ ok: sql`1` })
+                .from(versionsT)
+                .where(
+                  and(
+                    eq(versionsT.id, versionId),
+                    eq(versionsT.canvasId, id),
+                    eq(versionsT.status, "ready"),
+                  ),
+                ),
+            ),
+          ),
+        )
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
     },
 
     /** Find by API key hash (Bearer-key deploy API); active canvases only. */

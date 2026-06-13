@@ -95,10 +95,11 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     expect(found.map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
   });
 
-  it("pruneBeyond keeps newest N, never drops the current version", async () => {
+  it("pruneBeyond keeps newest N, never drops the live current version", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seedCanvas(client);
     const repo = versionsRepository(client);
+    const canvases = canvasesRepository(client);
     const ids: string[] = [];
     for (let n = 1; n <= 12; n++) {
       const v = await repo.createPending({ canvasId, number: n, createdBy: userId, source: "api" });
@@ -106,14 +107,54 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
       ids.push(v.id);
     }
     // current = version 12 (newest); pruneBeyond(10) drops the 2 oldest (1, 2)
-    const dropped = await repo.pruneBeyond(canvasId, 10, ids[11] as string);
+    await canvases.setCurrentVersion(canvasId, ids[11] as string);
+    const dropped = await repo.pruneBeyond(canvasId, 10);
     expect(dropped.map((v) => v.number).sort((a, b) => a - b)).toEqual([1, 2]);
     expect(await repo.findById(ids[0] as string)).toBeNull();
     expect((await repo.listByCanvas(canvasId)).length).toBe(10);
 
-    // if the current version is old, it is never pruned
-    const dropped2 = await repo.pruneBeyond(canvasId, 5, ids[5] as string); // current = #6
+    // if the current version is old (still present: 3..12), it is never pruned
+    await canvases.setCurrentVersion(canvasId, ids[5] as string); // current = #6
+    const dropped2 = await repo.pruneBeyond(canvasId, 5);
     expect(dropped2.find((v) => v.id === ids[5])).toBeUndefined();
     expect(await repo.findById(ids[5] as string)).not.toBeNull();
+  });
+
+  it("rollback-vs-prune race: pruneBeyond spares a version a concurrent rollback just made current", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const canvases = canvasesRepository(client);
+    const ids: string[] = [];
+    for (let n = 1; n <= 12; n++) {
+      const v = await repo.createPending({ canvasId, number: n, createdBy: userId, source: "api" });
+      await repo.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+      ids.push(v.id);
+    }
+    // A rollback makes v1 (oldest — in the prune drop range for keep=10) current,
+    // racing a concurrent deploy's prune. The atomic live-pointer re-read inside
+    // the DELETE must spare v1, even though a stale snapshot would have dropped it.
+    await canvases.setCurrentVersion(canvasId, ids[0] as string);
+    const dropped = await repo.pruneBeyond(canvasId, 10);
+    // Only v2 (beyond newest-10 AND not current) is dropped; v1 survives.
+    expect(dropped.map((v) => v.number)).toEqual([2]);
+    expect(await repo.findById(ids[0] as string)).not.toBeNull();
+    // The pointer is NOT dangling — it still resolves to a ready version.
+    const live = await canvases.findById(canvasId);
+    const cur = live?.currentVersionId ? await repo.findById(live.currentVersionId) : null;
+    expect(cur?.status).toBe("ready");
+  });
+
+  it("pruneBeyond handles a canvas with no current version (no NULL poisoning)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    for (let n = 1; n <= 12; n++) {
+      const v = await repo.createPending({ canvasId, number: n, createdBy: userId, source: "api" });
+      await repo.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+    }
+    // currentVersionId is null → the notInArray subquery is empty → all candidates drop.
+    const dropped = await repo.pruneBeyond(canvasId, 10);
+    expect(dropped.map((v) => v.number).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 });
