@@ -1,37 +1,34 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
-import type { Manifest } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
-import { type CanvasSettingsPatch, canvasesRepository } from "../db/repositories/canvases.js";
-import { usersRepository } from "../db/repositories/users.js";
-import { versionsRepository } from "../db/repositories/versions.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import {
+  seedListed,
+  seedPublishedCanvas,
+  seedUndeployedCanvas,
+  seedUser,
+} from "../db/repositories/gallery-test-helpers.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
+import type { GalleryPageDto } from "./gallery.js";
 import { galleryRoutes } from "./gallery.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
-const MANIFEST: Manifest = { "index.html": { size: 10, hash: "abc", mime: "text/html" } };
 
-interface GalleryItem {
-  id: string;
-  slug: string;
-  url: string;
-  title: string;
-  summary: string | null;
-  tags: string[];
-  hasPassword: boolean;
-  publishedAt: number | null;
-  owner: { name: string; avatarUrl: string | null };
-}
-interface GalleryPage {
-  items: GalleryItem[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-let seq = 0;
+// The exact public shape of a gallery item — asserted against so a future spread
+// or new field can't silently widen the projection.
+const ITEM_KEYS = [
+  "id",
+  "slug",
+  "url",
+  "title",
+  "summary",
+  "tags",
+  "hasPassword",
+  "publishedAt",
+  "owner",
+].sort();
 
 /** Build a gallery app authenticated as some member (the gateway is stubbed). */
 function buildApp(client: DbClient, actor = { id: "viewer", isAdmin: false }) {
@@ -44,51 +41,12 @@ function buildApp(client: DbClient, actor = { id: "viewer", isAdmin: false }) {
   return app;
 }
 
-async function seedUser(client: DbClient, name: string) {
-  return usersRepository(client).upsert({
-    providerSub: `sub-${seq++}`,
-    email: `${name}@example.com`,
-    name,
-    avatarUrl: `https://avatars.example/${name}.png`,
-    isAdmin: false,
-  });
-}
-
-async function seedPublished(client: DbClient, ownerId: string): Promise<string> {
-  const canvases = canvasesRepository(client);
-  const versions = versionsRepository(client);
-  const n = seq++;
-  const cv = await canvases.create({ ownerId, slug: `slug-${n}`, apiKeyHash: `key-${n}` });
-  const v = await versions.createPending({
-    canvasId: cv.id,
-    number: 1,
-    createdBy: ownerId,
-    source: "folder",
-  });
-  await versions.markReady(v.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
-  await canvases.setCurrentVersion(cv.id, v.id);
-  return cv.id;
-}
-
-async function seedListed(
+async function get(
   client: DbClient,
-  ownerId: string,
-  patch: CanvasSettingsPatch = {},
-): Promise<string> {
-  const id = await seedPublished(client, ownerId);
-  await canvasesRepository(client).updateSettings(id, {
-    shared: true,
-    galleryListed: true,
-    gallerySummary: "A canvas",
-    galleryTags: ["charts"],
-    ...patch,
-  });
-  return id;
-}
-
-async function get(client: DbClient, path: string): Promise<{ status: number; body: GalleryPage }> {
+  path: string,
+): Promise<{ status: number; body: GalleryPageDto }> {
   const res = await buildApp(client).request(path);
-  return { status: res.status, body: (await res.json()) as GalleryPage };
+  return { status: res.status, body: (await res.json()) as GalleryPageDto };
 }
 
 describe("galleryRoutes", () => {
@@ -105,11 +63,17 @@ describe("galleryRoutes", () => {
 
     const listed = await seedListed(client, alice.id);
     await seedListed(client, bob.id); // a second owner's listed canvas
-    await repo.updateSettings(await seedPublished(client, alice.id), { galleryListed: true }); // not shared
-    await repo.updateSettings(await seedPublished(client, alice.id), { shared: true }); // not listed
+    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), { galleryListed: true }); // not shared
+    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), { shared: true }); // not listed
     await repo.setStatus(await seedListed(client, alice.id), "disabled");
+    await repo.setStatus(await seedListed(client, alice.id), "deleted");
     await repo.archive(await seedListed(client, alice.id));
     await seedListed(client, alice.id, { sharedExpiresAt: 1 }); // long expired
+    // never deployed (listed+shared but no current version → would be a dead link)
+    await repo.updateSettings(await seedUndeployedCanvas(client, alice.id), {
+      shared: true,
+      galleryListed: true,
+    });
 
     const { status, body } = await get(client, "/api/gallery");
     expect(status).toBe(200);
@@ -128,18 +92,16 @@ describe("galleryRoutes", () => {
     await seedListed(client, owner.id);
 
     const res = await buildApp(client).request("/api/gallery");
-    const body = (await res.json()) as GalleryPage;
+    const body = (await res.json()) as GalleryPageDto;
     const item = body.items[0];
     expect(item).toBeDefined();
     if (!item) return;
-    // Top-level canvas fields that must never appear.
-    for (const k of ["apiKeyHash", "passwordHash", "ownerId", "currentVersionId", "status"]) {
-      expect(item).not.toHaveProperty(k);
-    }
-    // Owner sub-object is display-only — no email / internal flags.
-    for (const k of ["email", "providerSub", "isAdmin", "isBlocked", "id"]) {
-      expect(item.owner).not.toHaveProperty(k);
-    }
+    // The item carries EXACTLY the public field set — a future spread or new field
+    // (e.g. apiKeyHash/passwordHash/ownerId/status from the full canvas row, which
+    // listGallery selects into memory) fails this rather than leaking silently.
+    expect(Object.keys(item).sort()).toEqual(ITEM_KEYS);
+    // Owner sub-object is display-only — no email / internal flags / id.
+    expect(Object.keys(item.owner).sort()).toEqual(["avatarUrl", "name"]);
   });
 
   it("paginates with a stable total and echoes limit/offset", async () => {

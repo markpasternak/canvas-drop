@@ -9,12 +9,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useGallery } from "../lib/queries.js";
-
-interface GallerySearch {
-  q?: string;
-  tag?: string;
-  page?: number;
-}
+import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
@@ -53,7 +48,13 @@ function GalleryCard({ item }: { item: GalleryItem }) {
             <button
               key={tag}
               type="button"
-              onClick={() => navigate({ to: "/gallery", search: { tag, page: 1 } })}
+              onClick={() =>
+                navigate({
+                  to: "/gallery",
+                  // Merge, not replace — keep any active search when filtering by tag.
+                  search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
+                })
+              }
               className="rounded-md border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-muted transition-colors hover:text-fg"
             >
               {tag}
@@ -137,20 +138,22 @@ export default function Gallery() {
     return () => clearTimeout(id);
   }, [text, q, navigate]);
 
-  const { data, isLoading, isError, refetch } = useGallery({
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useGallery({
     q,
     tag,
     limit: GALLERY_PAGE_SIZE,
     offset,
   });
 
-  // A refetch that drops below the current page (e.g. an item was un-listed while
-  // on the last page) snaps back to page 1 rather than showing an empty page.
+  // A fresh refetch that drops below the current page (e.g. an item was un-listed
+  // while on the last page) snaps back to page 1 rather than showing an empty page.
+  // Gated on !isPlaceholderData so a stale keepPreviousData total from the prior
+  // query can't trigger a spurious reset mid-navigation.
   useEffect(() => {
-    if (data && data.total > 0 && offset >= data.total) {
+    if (!isPlaceholderData && data && data.total > 0 && offset >= data.total) {
       navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, page: 1 }) });
     }
-  }, [data, offset, navigate]);
+  }, [data, isPlaceholderData, offset, navigate]);
 
   function clearTag() {
     navigate({
@@ -171,7 +174,9 @@ export default function Gallery() {
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
   const from = total === 0 ? 0 : offset + 1;
-  const to = offset + items.length;
+  // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
+  // "Showing 49–49 of 5" before the page snaps back.
+  const to = Math.min(offset + items.length, total);
   const hasPrev = page > 1;
   const hasNext = offset + items.length < total;
   const filtering = Boolean(q || tag);

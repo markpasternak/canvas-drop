@@ -1,60 +1,13 @@
-import type { Manifest } from "@canvas-drop/shared/db";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
-import { type CanvasSettingsPatch, canvasesRepository } from "./canvases.js";
-import { usersRepository } from "./users.js";
-import { versionsRepository } from "./versions.js";
-
-const MANIFEST: Manifest = { "index.html": { size: 10, hash: "abc", mime: "text/html" } };
-
-let slugSeq = 0;
-let subSeq = 0;
-
-async function seedUser(client: DbClient, name: string) {
-  return usersRepository(client).upsert({
-    providerSub: `sub-${subSeq++}`,
-    email: `${name}@example.com`,
-    name,
-    avatarUrl: `https://avatars.example/${name}.png`,
-    isAdmin: false,
-  });
-}
-
-/** Create a canvas owned by `ownerId` and give it a ready, current version (so it
- *  counts as "published"). Returns the canvas id. */
-async function seedPublishedCanvas(client: DbClient, ownerId: string): Promise<string> {
-  const canvases = canvasesRepository(client);
-  const versions = versionsRepository(client);
-  const n = slugSeq++;
-  const cv = await canvases.create({ ownerId, slug: `slug-${n}`, apiKeyHash: `key-${n}` });
-  const v = await versions.createPending({
-    canvasId: cv.id,
-    number: 1,
-    createdBy: ownerId,
-    source: "folder",
-  });
-  await versions.markReady(v.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
-  await canvases.setCurrentVersion(cv.id, v.id);
-  return cv.id;
-}
-
-/** Make a published canvas and list it in the gallery with the given settings. */
-async function seedListed(
-  client: DbClient,
-  ownerId: string,
-  patch: CanvasSettingsPatch = {},
-): Promise<string> {
-  const id = await seedPublishedCanvas(client, ownerId);
-  await canvasesRepository(client).updateSettings(id, {
-    shared: true,
-    galleryListed: true,
-    gallerySummary: "A useful canvas",
-    galleryTags: ["charts"],
-    ...patch,
-  });
-  return id;
-}
+import { canvasesRepository } from "./canvases.js";
+import {
+  seedListed,
+  seedPublishedCanvas,
+  seedUndeployedCanvas,
+  seedUser,
+} from "./gallery-test-helpers.js";
 
 describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
   let client: DbClient;
@@ -108,13 +61,8 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     // expired in the past
     await seedListed(client, owner.id, { sharedExpiresAt: NOW - 1 });
     // never deployed (listed+shared but currentVersionId IS NULL → would be a dead link)
-    const undeployedN = slugSeq++;
-    const undeployed = await canvasesRepository(client).create({
-      ownerId: owner.id,
-      slug: `slug-${undeployedN}`,
-      apiKeyHash: `key-${undeployedN}`,
-    });
-    await repo.updateSettings(undeployed.id, { shared: true, galleryListed: true });
+    const undeployed = await seedUndeployedCanvas(client, owner.id);
+    await repo.updateSettings(undeployed, { shared: true, galleryListed: true });
 
     const { items, total } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
     expect(total).toBe(1);
@@ -206,9 +154,12 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     await seedListed(client, owner.id, { title: "Other", gallerySummary: "team Dashboard here" });
     // A literal percent in the title must only match a literal-percent query.
     const percent = await seedListed(client, owner.id, { title: "100% coverage" });
+    // A literal underscore must match literally, not as a single-char wildcard.
+    const underscore = await seedListed(client, owner.id, { title: "Q1_Revenue" });
 
     const byTitle = await repo.listGallery({ now: NOW, q: "revenue", limit: 24, offset: 0 });
-    expect(byTitle.items.map((i) => i.canvas.id)).toEqual([titled]);
+    // "revenue" matches both "Quarterly Revenue" and "Q1_Revenue".
+    expect(byTitle.items.map((i) => i.canvas.id).sort()).toEqual([titled, underscore].sort());
 
     const bySummary = await repo.listGallery({ now: NOW, q: "DASHBOARD", limit: 24, offset: 0 });
     expect(bySummary.total).toBe(1);
@@ -216,6 +167,11 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     // `%` is escaped → it does NOT act as a wildcard matching everything.
     const literalPercent = await repo.listGallery({ now: NOW, q: "100%", limit: 24, offset: 0 });
     expect(literalPercent.items.map((i) => i.canvas.id)).toEqual([percent]);
+
+    // `_` is escaped → "Q1_R" matches only the literal underscore, not "Q1XR".
+    await seedListed(client, owner.id, { title: "Q1XRevenue" });
+    const literalUnderscore = await repo.listGallery({ now: NOW, q: "q1_r", limit: 24, offset: 0 });
+    expect(literalUnderscore.items.map((i) => i.canvas.id)).toEqual([underscore]);
   });
 
   it("filters by exact tag membership (dialect-branched JSON query)", async () => {

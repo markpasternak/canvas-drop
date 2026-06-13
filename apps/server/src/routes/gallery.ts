@@ -26,18 +26,44 @@ const querySchema = z.object({
   offset: z.coerce.number().int().catch(0),
 });
 
+/** One canvas as the gallery API returns it — display-only. */
+export interface GalleryItemDto {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  summary: string | null;
+  tags: string[];
+  hasPassword: boolean;
+  publishedAt: number | null;
+  owner: { name: string; avatarUrl: string | null };
+}
+
+export interface GalleryPageDto {
+  items: GalleryItemDto[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 /** Display-only projection of a gallery row — explicit field list, never a spread
  *  of the canvas/user row, so api_key_hash / password_hash / owner email / internal
  *  flags can never leak (§12.0 #1). */
-function galleryItem(config: Config, row: GalleryRow) {
+function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
   const cv = row.canvas;
+  // gallery_tags is a JSON column; it is only ever written via the settings route
+  // (validated as string[]), but project defensively so the string[] contract holds
+  // even against legacy/hand-edited data.
+  const tags = Array.isArray(cv.galleryTags)
+    ? cv.galleryTags.filter((t): t is string => typeof t === "string")
+    : [];
   return {
     id: cv.id,
     slug: cv.slug,
     url: canvasUrl(config, cv.slug),
     title: cv.title,
     summary: cv.gallerySummary,
-    tags: (cv.galleryTags as string[] | null) ?? [],
+    tags,
     hasPassword: cv.passwordHash !== null,
     publishedAt: cv.galleryPublishedAt,
     owner: { name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
@@ -58,14 +84,16 @@ export function galleryRoutes(deps: GalleryDeps) {
     const parsed = querySchema.safeParse(c.req.query());
     // safeParse only fails on a non-coercible shape; fall back to all-defaults so a
     // browse never errors on a malformed query string.
-    const params = parsed.success ? parsed.data : { limit: DEFAULT_LIMIT, offset: 0 };
-    const limit = Math.min(Math.max(params.limit, 1), MAX_LIMIT);
-    const offset = Math.max(params.offset, 0);
+    const data = parsed.success
+      ? parsed.data
+      : { q: undefined, tag: undefined, limit: DEFAULT_LIMIT, offset: 0 };
+    const limit = Math.min(Math.max(data.limit, 1), MAX_LIMIT);
+    const offset = Math.max(data.offset, 0);
 
     const { items, total } = await deps.canvases.listGallery({
       now: Date.now(),
-      q: "q" in params ? params.q : undefined,
-      tag: "tag" in params ? params.tag : undefined,
+      q: data.q,
+      tag: data.tag,
       limit,
       offset,
     });

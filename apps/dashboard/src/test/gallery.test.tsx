@@ -148,6 +148,41 @@ describe("Gallery view", () => {
     await waitFor(() => expect(calls.some((c) => !c.get("tag"))).toBe(true));
   });
 
+  it("clicking a tag while a search is active preserves the search (merge, not replace)", async () => {
+    const calls = stubGallery((p) =>
+      page([item({ title: p.get("tag") ? "Filtered" : "All", tags: ["charts"] })]),
+    );
+    renderGallery("/gallery?q=budget");
+    await screen.findByRole("link", { name: "All" });
+
+    await userEvent.click(screen.getByRole("button", { name: "charts" }));
+    // The tag-filtered request still carries the original q.
+    await waitFor(() =>
+      expect(calls.some((c) => c.get("tag") === "charts" && c.get("q") === "budget")).toBe(true),
+    );
+  });
+
+  it("resets to page 1 (offset 0) when a filter changes while on a later page", async () => {
+    const calls = stubGallery((p) =>
+      page([item({ title: p.get("q") ? "Filtered" : "Page two" })], {
+        total: 50,
+        limit: 24,
+        offset: Number(p.get("offset") ?? 0),
+      }),
+    );
+    renderGallery("/gallery?page=2");
+    await screen.findByRole("link", { name: "Page two" });
+    expect(calls.some((c) => c.get("offset") === "24")).toBe(true);
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search the gallery" }), "revenue");
+    // The search request goes out at offset 0, not the stale page-2 offset.
+    await waitFor(() =>
+      expect(calls.some((c) => c.get("q") === "revenue" && (c.get("offset") ?? "0") === "0")).toBe(
+        true,
+      ),
+    );
+  });
+
   it("paginates: derives range from the response and advances offset", async () => {
     const items = Array.from({ length: 24 }, (_, i) => item({ id: `c${i}`, title: `Canvas ${i}` }));
     const calls = stubGallery((p) => {
