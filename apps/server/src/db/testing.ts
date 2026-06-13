@@ -6,6 +6,7 @@ import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import type { DbClient } from "./factory.js";
+import { resolveMigrationsDir } from "./migrations-dir.js";
 
 export type Dialect = "sqlite" | "postgres";
 
@@ -29,7 +30,7 @@ export async function makeTestDb(dialect: Dialect): Promise<DbClient> {
       dialect: "sqlite",
       db,
       migrate: async () => {
-        migrateSqlite(db, { migrationsFolder: "drizzle/sqlite" });
+        migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
       },
       close: async () => {
         sqlite.close();
@@ -45,7 +46,7 @@ export async function makeTestDb(dialect: Dialect): Promise<DbClient> {
     dialect: "postgres",
     db,
     migrate: async () => {
-      await migratePglite(db, { migrationsFolder: "drizzle/pg" });
+      await migratePglite(db, { migrationsFolder: resolveMigrationsDir("pg") });
     },
     close: async () => {
       await pglite.close();

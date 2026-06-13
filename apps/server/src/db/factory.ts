@@ -9,6 +9,7 @@ import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import { migrate as migratePg } from "drizzle-orm/node-postgres/migrator";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
+import { resolveMigrationsDir } from "./migrations-dir.js";
 
 /**
  * A database client for the active dialect (KTD-1). Production builds either a
@@ -46,7 +47,7 @@ export function makeDb(config: Config): DbClient {
       dialect: "sqlite",
       db,
       migrate: async () => {
-        migrateSqlite(db, { migrationsFolder: "drizzle/sqlite" });
+        migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
       },
       close: async () => {
         sqlite.close();
@@ -60,7 +61,7 @@ export function makeDb(config: Config): DbClient {
     dialect: "postgres",
     db,
     migrate: async () => {
-      await migratePg(db, { migrationsFolder: "drizzle/pg" });
+      await migratePg(db, { migrationsFolder: resolveMigrationsDir("pg") });
     },
     close: async () => {
       await pool.end();
