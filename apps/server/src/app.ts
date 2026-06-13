@@ -30,6 +30,7 @@ import { requestLogger } from "./log/middleware.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
+import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
@@ -150,6 +151,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Current-user identity for the SPA — its own router (NOT under /api/canvases,
   // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.
   app.route("/api/me", meRoutes());
+
+  // Opt-in gallery browse (M8) — its own router (NOT under /api/canvases, whose
+  // /:id would shadow a literal `gallery` segment). Behind the gateway; the §12
+  // visibility predicate runs per request inside the repo.
+  app.route("/api/gallery", galleryRoutes({ config: deps.config, canvases: deps.canvases }));
 
   // Session-authenticated management API.
   app.route(
