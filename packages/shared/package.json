@@ -7,6 +7,14 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./db": {
+      "types": "./src/db/index.ts",
+      "default": "./src/db/index.ts"
+    },
+    "./config": {
+      "types": "./src/config/env.ts",
+      "default": "./src/config/env.ts"
     }
   },
   "types": "./src/index.ts",
