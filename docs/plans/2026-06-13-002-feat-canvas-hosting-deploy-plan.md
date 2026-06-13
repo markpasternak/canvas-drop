@@ -1,7 +1,7 @@
 ---
 title: "feat: Canvas hosting + deploy pipeline (areas C + D)"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 depth: deep
 origin: BUILD_BRIEF.md

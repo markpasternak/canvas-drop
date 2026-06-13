@@ -2,7 +2,7 @@
 
 A self-hostable platform where authenticated members of an organization deploy and share small web artifacts ("canvases") in seconds. Open-source (MIT), deployment-agnostic, no telemetry.
 
-> **Status: foundation complete.** This repo is being built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md). The **foundation layer** — config, the four pluggable abstractions (database, storage, URL mode, auth), structured logging, the audit log, and the auth gateway — is done and on `main` (`pnpm dev` gives a logged-in instance; CI green on both dialects). Next: canvas hosting + the deploy pipeline, then the five primitives (KV, files, AI, identity, realtime) and the dashboard (see [`docs/plans/`](docs/plans/)).
+> **Status: hosting + deploy complete.** This repo is being built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md). The **foundation layer** — config, the four pluggable abstractions (database, storage, URL mode, auth), structured logging, the audit log, and the auth gateway — and **canvas hosting + the deploy pipeline** (areas C+D — create/serve/deploy a canvas via folder, ZIP, paste-HTML, or the Bearer-key API, with versioning + rollback) are done and on `main` (CI green on both dialects). Next: the dashboard SPA (area E), then the five primitives (KV, files, AI, identity, realtime) — see [`docs/plans/`](docs/plans/).
 
 ## Quickstart (local dev)
 
