@@ -87,6 +87,7 @@ const HINTS: Record<string, string> = {
   INVALID_PATH: "A path or version was invalid.",
   VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
+  NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
 };
@@ -238,6 +239,9 @@ export const api = {
   listCanvases: () =>
     request<{ canvases: CanvasListItem[] }>("/api/canvases").then((r) => r.canvases),
 
+  listArchivedCanvases: () =>
+    request<{ canvases: CanvasListItem[] }>("/api/canvases/archived").then((r) => r.canvases),
+
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
 
   createCanvas: (body: { title?: string; description?: string }) =>
@@ -268,6 +272,11 @@ export const api = {
     request<{ apiKey: string }>(`/api/canvases/${id}/regenerate-key`, { method: "POST" }),
 
   deleteCanvas: (id: string) => request<{ ok: true }>(`/api/canvases/${id}`, { method: "DELETE" }),
+
+  archiveCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}/archive`, { method: "POST" }),
+
+  unarchiveCanvas: (id: string) =>
+    request<Canvas>(`/api/canvases/${id}/unarchive`, { method: "POST" }),
 
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),

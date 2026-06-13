@@ -55,15 +55,88 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(await repo.findById(cv.id)).not.toBeNull(); // still findable by id
   });
 
-  it("lists a user's canvases newest-first, excluding deleted", async () => {
+  it("lists a user's canvases newest-first, excluding deleted and archived", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const a = await repo.create({ ownerId, slug: "a", apiKeyHash: "ha" });
     const b = await repo.create({ ownerId, slug: "b", apiKeyHash: "hb" });
+    const c = await repo.create({ ownerId, slug: "c", apiKeyHash: "hc" });
     await repo.setStatus(a.id, "deleted");
+    await repo.archive(c.id);
     const list = await repo.listByOwner(ownerId);
-    expect(list.map((c) => c.id)).toEqual([b.id]);
+    expect(list.map((cv) => cv.id)).toEqual([b.id]); // not deleted, not archived
+  });
+
+  it("archives an active canvas without touching deletedAt; archive-view lists it", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    expect(await repo.archive(cv.id)).toBe(true);
+    const after = await repo.findById(cv.id);
+    expect(after?.status).toBe("archived");
+    expect(after?.deletedAt).toBeNull(); // archive is not delete
+    const archived = await repo.listArchivedByOwner(ownerId);
+    expect(archived.map((c) => c.id)).toEqual([cv.id]);
+    expect(await repo.listByOwner(ownerId)).toEqual([]); // gone from the active view
+  });
+
+  it("archives a disabled canvas (last transition wins)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await repo.setStatus(cv.id, "disabled");
+    expect(await repo.archive(cv.id)).toBe(true);
+    expect((await repo.findById(cv.id))?.status).toBe("archived");
+  });
+
+  it("does not archive a deleted canvas (no tombstone resurrection)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await repo.setStatus(cv.id, "deleted");
+    expect(await repo.archive(cv.id)).toBe(false);
+    expect((await repo.findById(cv.id))?.status).toBe("deleted");
+  });
+
+  it("unarchives back to active, preserving settings", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await repo.updateSettings(cv.id, { shared: true });
+    await repo.setPassword(cv.id, "argon2hash");
+    await repo.archive(cv.id);
+    expect(await repo.unarchive(cv.id)).toBe(true);
+    const after = await repo.findById(cv.id);
+    expect(after?.status).toBe("active");
+    expect(after?.shared).toBe(true); // share + password survive the round-trip
+    expect(after?.passwordHash).toBe("argon2hash");
+    expect(after?.slug).toBe("s");
+  });
+
+  it("unarchive on a non-archived canvas is a guarded no-op (false)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    expect(await repo.unarchive(cv.id)).toBe(false); // active, not archived
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+    await repo.setStatus(cv.id, "disabled");
+    expect(await repo.unarchive(cv.id)).toBe(false); // disabled is not archived
+    expect((await repo.findById(cv.id))?.status).toBe("disabled");
+  });
+
+  it("findByApiKeyHash excludes archived (deploys blocked while archived)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "k" });
+    await repo.archive(cv.id);
+    expect(await repo.findByApiKeyHash("k")).toBeNull();
   });
 
   it("updates settings: shared toggle sets shared_at; expiry persists", async () => {

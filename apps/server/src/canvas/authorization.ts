@@ -23,11 +23,13 @@ export interface AccessUser {
  * Pure decision table — no HTTP, no I/O — so every branch is exhaustively
  * unit-testable. Order matters (KTD-6):
  *   1. deleted            → 404 (gone; don't distinguish from never-existed)
- *   2. disabled           → 403 (owner/admin still learn why; others get 403 too)
- *   3. owner or admin      → allow (owner always reaches their own canvas)
- *   4. not shared          → 404 (owner-only; don't confirm existence to others)
- *   5. share expired       → 404 (treat as revoked)
- *   6. shared & live        → allow, deferring to the password gate if set
+ *   2. archived           → 404 (owner-retired & offline; gone on the public path,
+ *                                 restorable from the dashboard — opaque even to the owner)
+ *   3. disabled           → 403 (owner/admin still learn why; others get 403 too)
+ *   4. owner or admin      → allow (owner always reaches their own canvas)
+ *   5. not shared          → 404 (owner-only; don't confirm existence to others)
+ *   6. share expired       → 404 (treat as revoked)
+ *   7. shared & live        → allow, deferring to the password gate if set
  */
 export function decideCanvasAccess(
   canvas: Canvas | null,
@@ -36,6 +38,11 @@ export function decideCanvasAccess(
 ): AccessDecision {
   if (!canvas || canvas.status === "deleted") {
     return { action: "deny", status: 404, reason: "not_found" };
+  }
+  if (canvas.status === "archived") {
+    // Offline & restorable. Checked before owner/admin so the live URL is opaque
+    // to everyone; the owner manages/unarchives it via the dashboard, not the slug.
+    return { action: "deny", status: 404, reason: "archived" };
   }
   if (canvas.status === "disabled") {
     return { action: "deny", status: 403, reason: "disabled" };

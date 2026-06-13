@@ -8,6 +8,13 @@
       "when": 1781362620438,
       "tag": "0000_colorful_ink",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781364066952,
+      "tag": "0001_sweet_santa_claus",
+      "breakpoints": true
     }
   ]
 }

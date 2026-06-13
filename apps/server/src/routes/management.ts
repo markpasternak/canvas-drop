@@ -107,15 +107,14 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ ...publicCanvas(deps.config, cv), apiKey }, 201);
   });
 
-  // List the caller's own canvases, each enriched with its last-deploy summary.
-  app.get("/", async (c) => {
-    const list = await deps.canvases.listByOwner(c.get("user").id);
-    // One batched lookup of current versions → no N+1.
+  /** Enrich a canvas list with each canvas's last-deploy summary in one batched
+   *  version lookup (no N+1). Shared by the active list and the archived list. */
+  async function withLastDeploy(list: Canvas[]) {
     const currentIds = list
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
-    const canvases = list.map((cv) => {
+    return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
         ...publicCanvas(deps.config, cv),
@@ -129,6 +128,20 @@ export function managementRoutes(deps: ManagementDeps) {
           : null,
       };
     });
+  }
+
+  // List the caller's own ACTIVE canvases (excludes archived + deleted), each
+  // enriched with its last-deploy summary.
+  app.get("/", async (c) => {
+    const canvases = await withLastDeploy(await deps.canvases.listByOwner(c.get("user").id));
+    return c.json({ canvases });
+  });
+
+  // List the caller's own ARCHIVED canvases — the dedicated Archive view (§6.9.1).
+  app.get("/archived", async (c) => {
+    const canvases = await withLastDeploy(
+      await deps.canvases.listArchivedByOwner(c.get("user").id),
+    );
     return c.json({ canvases });
   });
 
@@ -197,6 +210,37 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     return c.json({ ok: true });
+  });
+
+  // Archive (owner-initiated, reversible) — takes the canvas offline (its public
+  // URL 404s) and moves it to the Archive view. The guarded repo transition
+  // returns false only for an already-deleted row, which ownedCanvas already 404s.
+  app.post("/:id/archive", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (!(await deps.canvases.archive(cv.id))) return c.json({ error: "not_found" }, 404);
+    deps.audit.recordAudit({
+      action: "canvas_archive",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+    });
+    return c.json(publicCanvas(deps.config, { ...cv, status: "archived" }));
+  });
+
+  // Unarchive — restore an archived canvas to active. A 409 on an invalid
+  // transition (the canvas isn't archived) rather than silently flipping status.
+  app.post("/:id/unarchive", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (!(await deps.canvases.unarchive(cv.id))) {
+      return c.json({ code: "NOT_ARCHIVED", message: "canvas is not archived" }, 409);
+    }
+    deps.audit.recordAudit({
+      action: "canvas_unarchive",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+    });
+    return c.json(publicCanvas(deps.config, { ...cv, status: "active" }));
   });
 
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions

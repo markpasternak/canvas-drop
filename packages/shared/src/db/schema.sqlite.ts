@@ -90,7 +90,7 @@ export const canvases = sqliteTable(
     passwordVersion: c.int("password_version").notNull().default(0),
     spaFallback: c.bool("spa_fallback").notNull().default(false),
     apiKeyHash: c.text("api_key_hash").notNull(),
-    status: c.text("status").notNull().default("active"), // active | disabled | deleted
+    status: c.text("status").notNull().default("active"), // active | disabled | archived | deleted
     // Pointer (not an FK) to the current ready version — avoids a circular FK with
     // versions.canvas_id; nullable until the first deploy lands.
     currentVersionId: c.text("current_version_id"),
@@ -106,7 +106,7 @@ export const canvases = sqliteTable(
     uniqueIndex("canvases_api_key_hash_uq").on(t.apiKeyHash),
     // Soft-delete purge sweep: WHERE status='deleted' AND deleted_at <= cutoff.
     index("canvases_status_deleted_idx").on(t.status, t.deletedAt),
-    check("canvases_status_chk", sql`${t.status} in ('active', 'disabled', 'deleted')`),
+    check("canvases_status_chk", sql`${t.status} in ('active', 'disabled', 'archived', 'deleted')`),
   ],
 );
 

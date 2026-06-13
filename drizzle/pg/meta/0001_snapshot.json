@@ -1,6 +1,6 @@
 {
-  "id": "451b5a79-1c49-4ec9-931c-d786ec9ecc93",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "b57f7d73-f147-4589-907d-a191e5c894fc",
+  "prevId": "451b5a79-1c49-4ec9-931c-d786ec9ecc93",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -309,7 +309,7 @@
       "checkConstraints": {
         "canvases_status_chk": {
           "name": "canvases_status_chk",
-          "value": "\"canvases\".\"status\" in ('active', 'disabled', 'deleted')"
+          "value": "\"canvases\".\"status\" in ('active', 'disabled', 'archived', 'deleted')"
         }
       },
       "isRLSEnabled": false

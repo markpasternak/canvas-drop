@@ -205,6 +205,124 @@ describe("managementRoutes", () => {
     expect(list.canvases).toHaveLength(0);
   });
 
+  it("archive moves a canvas out of the active list and into the archive list", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("archived");
+
+    const active = await jsonOf<{ canvases: unknown[] }>(await app.request("/api/canvases"));
+    expect(active.canvases).toHaveLength(0); // gone from the active view
+
+    const archived = await jsonOf<{ canvases: { id: string }[] }>(
+      await app.request("/api/canvases/archived"),
+    );
+    expect(archived.canvases.map((c) => c.id)).toEqual([created.id]);
+  });
+
+  it("unarchive restores a canvas to the active list", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    const res = await app.request(`/api/canvases/${created.id}/unarchive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("active");
+
+    const active = await jsonOf<{ canvases: { id: string }[] }>(await app.request("/api/canvases"));
+    expect(active.canvases.map((c) => c.id)).toEqual([created.id]);
+    const archived = await jsonOf<{ canvases: unknown[] }>(
+      await app.request("/api/canvases/archived"),
+    );
+    expect(archived.canvases).toHaveLength(0);
+  });
+
+  it("unarchive on a non-archived canvas → 409", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/unarchive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("a non-owner cannot archive (404, no existence leak); an admin can", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "intruder");
+    const admin = await seedUser(client, "admin", true);
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/archive`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(denied.status).toBe(404);
+
+    const asAdmin = await buildApp(client, { id: admin.id, isAdmin: true }).request(
+      `/api/canvases/${created.id}/archive`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(asAdmin.status).toBe(200);
+  });
+
+  it("archive/unarchive require same-origin", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("paste-HTML create returns a new canvas with a live index.html and the key once", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

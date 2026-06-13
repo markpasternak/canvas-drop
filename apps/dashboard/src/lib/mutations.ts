@@ -113,3 +113,37 @@ export function useDeleteCanvas(id: string) {
     },
   });
 }
+
+/** Invalidate every surface a lifecycle change moves a canvas between: the
+ *  canvas detail, the active list, and the archive list. (`keys.canvases` is a
+ *  prefix of `keys.archivedCanvases`, but we invalidate both explicitly so the
+ *  intent survives any future key reshaping.) */
+function invalidateLifecycle(qc: ReturnType<typeof useQueryClient>, id: string) {
+  qc.invalidateQueries({ queryKey: keys.canvas(id) });
+  qc.invalidateQueries({ queryKey: keys.canvases });
+  qc.invalidateQueries({ queryKey: keys.archivedCanvases });
+}
+
+/** Archive — await; takes the canvas offline and moves it to the Archive view. */
+export function useArchiveCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.archiveCanvas(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      invalidateLifecycle(qc, id);
+    },
+  });
+}
+
+/** Unarchive — await; restores the canvas to active and back into the main list. */
+export function useUnarchiveCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.unarchiveCanvas(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      invalidateLifecycle(qc, id);
+    },
+  });
+}

@@ -5,6 +5,7 @@ import { AppLayout } from "./app-layout.js";
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
 const IndexRoute = lazy(() => import("./routes/index.js"));
+const ArchivedRoute = lazy(() => import("./routes/archived.js"));
 const NewRoute = lazy(() => import("./routes/new.js"));
 const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
 const CanvasLayout = lazy(() => import("./routes/canvas.js"));
@@ -19,6 +20,11 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: IndexRoute,
+});
+const archivedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/archived",
+  component: ArchivedRoute,
 });
 const newRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -65,6 +71,7 @@ const usageRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
+  archivedRoute,
   newRoute,
   onboardingRoute,
   canvasRoute.addChildren([overviewRoute, versionsRoute, settingsRoute, usageRoute]),

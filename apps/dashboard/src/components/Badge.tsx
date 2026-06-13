@@ -29,6 +29,7 @@ export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { tone: Tone; label: string }> = {
     active: { tone: "success", label: "Active" },
     disabled: { tone: "danger", label: "Disabled" },
+    archived: { tone: "warning", label: "Archived" },
     deleted: { tone: "neutral", label: "Deleted" },
   };
   const s = map[status] ?? { tone: "neutral" as Tone, label: status };

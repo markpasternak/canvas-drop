@@ -8,6 +8,13 @@
       "when": 1781362621090,
       "tag": "0000_wealthy_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781364067579,
+      "tag": "0001_blue_nicolaos",
+      "breakpoints": true
     }
   ]
 }

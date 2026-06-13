@@ -6,15 +6,18 @@ import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { Field, TextareaField } from "../components/Field.js";
+import { PasswordField } from "../components/PasswordField.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import {
+  useArchiveCanvas,
   useDeleteCanvas,
   useRegenerateKey,
   useRegenerateSlug,
+  useUnarchiveCanvas,
   useUpdateSettings,
 } from "../lib/mutations.js";
 import { useCanvas } from "../lib/queries.js";
@@ -25,9 +28,27 @@ const SECTIONS = [
   { id: "sharing", label: "Sharing" },
   { id: "protection", label: "Protection" },
   { id: "url-key", label: "URL & key" },
+  { id: "archive", label: "Archive" },
   { id: "danger", label: "Danger zone" },
 ] as const;
 const SECTION_IDS = SECTIONS.map((s) => s.id);
+
+/** A strong, shareable password from an unambiguous alphabet (no 0/O/1/l/I).
+ *  Uses the CSPRNG with rejection sampling so the distribution stays uniform. */
+function generatePassword(length = 20): string {
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const max = Math.floor(256 / alphabet.length) * alphabet.length;
+  const out: string[] = [];
+  while (out.length < length) {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    for (const b of bytes) {
+      if (out.length >= length) break;
+      if (b < max) out.push(alphabet[b % alphabet.length] as string);
+    }
+  }
+  return out.join("");
+}
 
 /** A titled card grouping related controls. `tone="danger"` tints it for
  *  destructive actions (red border + heading), matching the danger token. */
@@ -183,11 +204,14 @@ export default function Settings() {
   const update = useUpdateSettings(id);
   const regenSlug = useRegenerateSlug(id);
   const regenKey = useRegenerateKey(id);
+  const archive = useArchiveCanvas(id);
+  const unarchive = useUnarchiveCanvas(id);
   const del = useDeleteCanvas(id);
 
   const [password, setPassword] = useState("");
+  const [revealPassword, setRevealPassword] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<null | "slug" | "key" | "delete">(null);
+  const [confirm, setConfirm] = useState<null | "slug" | "key" | "archive" | "delete">(null);
   const urlCopyRef = useRef<HTMLButtonElement>(null);
 
   // Local mirrors for text fields (saved on blur).
@@ -219,6 +243,7 @@ export default function Settings() {
     try {
       await update.mutateAsync({ password: next });
       setPassword("");
+      setRevealPassword(false);
       toast(next ? "Password set" : "Password cleared");
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't update password", "error");
@@ -317,13 +342,31 @@ export default function Settings() {
 
         <Section id="protection" title="Protection">
           <div className="space-y-2">
-            <Field
+            <PasswordField
               label="Password"
-              type="password"
-              placeholder={canvas.hasPassword ? "•••••••• (set)" : "No password"}
+              autoComplete="new-password"
+              placeholder={canvas.hasPassword ? "•••••••••• (a password is set)" : "No password"}
               value={password}
+              revealed={revealPassword}
+              onRevealedChange={setRevealPassword}
               onChange={(e) => setPassword(e.target.value)}
-              description="Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted."
+              hint={
+                <button
+                  type="button"
+                  className="text-accent hover:underline"
+                  onClick={() => {
+                    setPassword(generatePassword());
+                    setRevealPassword(true);
+                  }}
+                >
+                  Generate
+                </button>
+              }
+              description={
+                canvas.hasPassword
+                  ? "Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted. We store it hashed, so it can't be shown back to you — type a new one to change it."
+                  : "Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted. We store it hashed and can't show it again, so copy it now if you need to share it."
+              }
             />
             {canvas.hasPassword && !canvas.shared && (
               <p className="rounded-md bg-warning-subtle px-3 py-2 text-xs text-warning">
@@ -384,6 +427,44 @@ export default function Settings() {
           </Row>
         </Section>
 
+        <Section
+          id="archive"
+          title="Archive"
+          description="Retire a canvas without deleting it. Archiving takes it offline (its link stops working) but keeps every file and setting — restore it anytime."
+        >
+          {canvas.status === "archived" ? (
+            <Row
+              title="This canvas is archived"
+              description="It's offline and hidden from your main list. Restore it to bring it back live at the same URL."
+            >
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={unarchive.isPending}
+                onClick={async () => {
+                  try {
+                    await unarchive.mutateAsync();
+                    toast("Canvas unarchived");
+                  } catch (err) {
+                    toast(err instanceof ApiError ? err.hint : "Couldn't unarchive", "error");
+                  }
+                }}
+              >
+                Unarchive
+              </Button>
+            </Row>
+          ) : (
+            <Row
+              title="Archive canvas"
+              description="Takes it offline and moves it to your Archived view. Reversible."
+            >
+              <Button size="sm" variant="secondary" onClick={() => setConfirm("archive")}>
+                Archive canvas
+              </Button>
+            </Row>
+          )}
+        </Section>
+
         <Section id="danger" title="Danger zone" tone="danger">
           <Row
             title="Delete canvas"
@@ -435,6 +516,27 @@ export default function Settings() {
         loading={regenKey.isPending}
       >
         The current key stops working immediately. The new key is shown once.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirm === "archive"}
+        onClose={() => setConfirm(null)}
+        onConfirm={async () => {
+          try {
+            await archive.mutateAsync();
+            setConfirm(null);
+            toast("Canvas archived");
+          } catch (err) {
+            toast(err instanceof ApiError ? err.hint : "Couldn't archive", "error");
+          }
+        }}
+        title="Archive this canvas?"
+        actionLabel="Archive"
+        loading={archive.isPending}
+      >
+        It goes offline immediately
+        {canvas.shared ? ", including the link you've shared with others" : ""}, and moves to your
+        Archived view. Its files and settings are kept — unarchive anytime to bring it back.
       </ConfirmDialog>
 
       <ConfirmDialog

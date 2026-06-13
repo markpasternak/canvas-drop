@@ -26,15 +26,37 @@ export function AppLayout() {
     <div className="min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-border bg-canvas/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-sm font-semibold tracking-tight text-fg"
-          >
-            <span className="grid size-6 place-items-center rounded-md bg-accent text-accent-fg">
-              <span className="size-2 rounded-[3px] bg-accent-fg" />
-            </span>
-            canvas-drop
-          </Link>
+          <div className="flex items-center gap-5">
+            <Link
+              to="/"
+              className="flex items-center gap-2 text-sm font-semibold tracking-tight text-fg"
+            >
+              <span className="grid size-6 place-items-center rounded-md bg-accent text-accent-fg">
+                <span className="size-2 rounded-[3px] bg-accent-fg" />
+              </span>
+              canvas-drop
+            </Link>
+            {/* Primary section nav — the first secondary navigation in the shell.
+                "Canvases" matches only the list root (exact) so it isn't lit on
+                canvas detail pages; "Archived" lights on /archived. */}
+            <nav className="flex items-center gap-1 text-[0.8125rem]" aria-label="Sections">
+              <Link
+                to="/"
+                activeOptions={{ exact: true }}
+                className="rounded-md px-2.5 py-1 font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg aria-[current=page]:text-fg"
+                activeProps={{ "aria-current": "page" }}
+              >
+                Canvases
+              </Link>
+              <Link
+                to="/archived"
+                className="rounded-md px-2.5 py-1 font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg aria-[current=page]:text-fg"
+                activeProps={{ "aria-current": "page" }}
+              >
+                Archived
+              </Link>
+            </nav>
+          </div>
           <nav className="flex items-center gap-1">
             <Link
               to="/new"
