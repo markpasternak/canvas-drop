@@ -10,6 +10,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
+import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
@@ -19,6 +20,10 @@ export interface DeployApiDeps {
   versions: VersionsRepository;
   engine: DeployEngine;
   audit: AuditLog;
+  /** Shared rate-limit store (M7). The broad post-gateway middleware never sees
+   *  this pre-gateway mount, so the deploy class (§12.3 10/min/canvas) is applied
+   *  here, keyed by canvasId resolved after the Bearer key is verified. */
+  rateLimitStore?: RateLimitStore;
 }
 
 /**
@@ -39,9 +44,26 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     return canvas;
   }
 
+  /** Deploy-class throttle (§12.3 10/min/canvas), keyed by canvasId AFTER the
+   *  Bearer key is verified — there is no user on this pre-gateway path. Returns a
+   *  429 Response when over the limit, else null. */
+  function deployThrottle(c: Context<AppEnv>, canvasId: string): Response | null {
+    if (!deps.rateLimitStore || !deps.config.rateLimit.enabled) return null;
+    const r = takeToken(
+      deps.rateLimitStore,
+      `deploy:${canvasId}`,
+      deps.config.rateLimit.deployPerMin,
+    );
+    if (r.allowed) return null;
+    c.header("Retry-After", String(r.retryAfterSec));
+    return c.json({ error: "rate_limited" }, 429);
+  }
+
   app.put("/:id/deploy", deployBodyLimit, async (c) => {
     const auth = await authCanvas(c);
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+    const limited = deployThrottle(c, auth.id);
+    if (limited) return limited;
     const body = Buffer.from(await c.req.arrayBuffer());
     if (body.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
     // Key-authenticated deploy: attribute to the canvas owner (no user session).
@@ -82,6 +104,8 @@ export function deployApiRoutes(deps: DeployApiDeps) {
   app.post("/:id/rollback", async (c) => {
     const auth = await authCanvas(c);
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+    const limited = deployThrottle(c, auth.id);
+    if (limited) return limited;
     const body = (await c.req.json().catch(() => ({}))) as { version?: number };
     if (typeof body.version !== "number") {
       return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);

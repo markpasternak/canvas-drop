@@ -232,16 +232,18 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Archive a canvas (owner-initiated, reversible). Guarded so a deleted
-     * tombstone is never resurrected: only a non-deleted row transitions. Returns
-     * false when the row is missing or already deleted, so the route can 404/409
+     * Archive a canvas (owner-initiated, reversible). Guarded to fire ONLY from
+     * `active`: archiving a `disabled` row would let an owner archive→unarchive
+     * back to active and silently reverse an admin takedown (§12.0 #5, M7
+     * adversarial review). A deleted tombstone is likewise never resurrected.
+     * Returns false when the row is missing or not active, so the route 409s
      * instead of silently no-opping. Does NOT touch `deletedAt`.
      */
     async archive(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
         .set({ status: "archived", updatedAt: Date.now() })
-        .where(and(eq(t.id, id), ne(t.status, "deleted")))
+        .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },
@@ -257,6 +259,52 @@ export function canvasesRepository(client: DbClient) {
         .update(t)
         .set({ status: "active", updatedAt: Date.now() })
         .where(and(eq(t.id, id), eq(t.status, "archived")))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Admin takedown (§6.10.2, M7). Guarded to fire ONLY from `active` (an
+     * archived/deleted canvas already 404s publicly — disabling it adds nothing,
+     * and the guard keeps the state machine honest). Stores the owner-facing
+     * `disabledReason`. Returns false for any non-active row so the route 409s
+     * `NOT_ACTIVE`.
+     */
+    async setDisabled(id: string, reason: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({ status: "disabled", disabledReason: reason, updatedAt: Date.now() })
+        .where(and(eq(t.id, id), eq(t.status, "active")))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Admin re-enable of a disabled canvas. Guarded to a currently `disabled`
+     * row; clears `disabledReason` so no stale takedown note survives. Returns
+     * false for a non-disabled row.
+     */
+    async enable(id: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({ status: "active", disabledReason: null, updatedAt: Date.now() })
+        .where(and(eq(t.id, id), eq(t.status, "disabled")))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Admin restore of a soft-deleted canvas (§6.10.5, M7). Guarded to a
+     * currently `deleted` row; clears `deletedAt` so the row leaves the purge
+     * sweep and is live again. Returns false for a non-deleted row.
+     */
+    async restore(id: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        // Clear disabledReason too — a deleted canvas that was previously disabled
+        // must not carry a stale takedown note onto the restored (active) row.
+        .set({ status: "active", deletedAt: null, disabledReason: null, updatedAt: Date.now() })
+        .where(and(eq(t.id, id), eq(t.status, "deleted")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
     },

@@ -294,3 +294,51 @@ export function useUnarchiveCanvas(id: string) {
     },
   });
 }
+
+// --- Admin (§6.10, M7). Confirm-and-await (not optimistic) — takedown/restore
+//     are consequential. Each invalidates the admin list + overview. ---
+
+function invalidateAdmin(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["admin"] });
+}
+
+export function useAdminDisableCanvas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.admin.disableCanvas(id, reason),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useAdminEnableCanvas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.admin.enableCanvas(id),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useAdminRestoreCanvas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.admin.restoreCanvas(id),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useAdminSetModels() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (models: string[]) => api.admin.setModels(models),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminModels }),
+  });
+}
+
+export function useAdminSetQuotas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (quotas: Record<string, number>) => api.admin.setQuotas(quotas),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminQuotas }),
+  });
+}

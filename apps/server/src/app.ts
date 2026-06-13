@@ -3,6 +3,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { UpgradeWebSocket } from "hono/ws";
+import { adminSettingsService } from "./admin/settings-service.js";
 import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
@@ -15,11 +16,13 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
+import { adminRepository } from "./db/repositories/admin.js";
 import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { settingsRepository } from "./db/repositories/settings.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
@@ -27,10 +30,18 @@ import type { DeployEngine } from "./deploy/engine.js";
 import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
+import {
+  inProcessRateLimitStore,
+  type RateLimitStore,
+  rateLimit,
+  takeToken,
+} from "./http/rate-limit.js";
+import { securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import type { RealtimeHub } from "./realtime/hub.js";
+import { adminRoutes } from "./routes/admin.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
@@ -57,6 +68,8 @@ export interface BuildAppDeps {
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the peer-IP extractor (tests inject a fixed IP). */
   clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
+  /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
+  rateLimitStore?: RateLimitStore;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
   aiProvider?: ModelProvider;
   /** Shared realtime hub (constructed in index.ts; used by the WS route + revoke hooks). */
@@ -87,6 +100,19 @@ export interface BuildAppDeps {
 export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
+  // `effectiveQuota` is the resolver the KV/files primitives read (settings
+  // override ?? their hard constant); admin reads/writes go through the same svc.
+  const settingsSvc = adminSettingsService({
+    settings: settingsRepository(deps.db),
+    config: deps.config,
+  });
+
+  // One shared in-process rate-limit store (§9.7, M7) — used by the broad
+  // post-gateway middleware AND the out-of-band mount points (Bearer deploy,
+  // login, password-gate) so MAX_KEYS bounds everything. Per-buildApp = per-test
+  // isolation.
+  const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
   // Obtain the WebSocket upgrade helper for THIS app instance (chicken-and-egg:
   // @hono/node-ws needs the app; the route needs the helper). Realtime is wired
   // only when both the helper and the hub are present.
@@ -94,6 +120,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const realtime = upgradeWebSocket && deps.hub ? { hub: deps.hub, upgradeWebSocket } : undefined;
 
   app.use("*", requestLogger(deps.rootLogger));
+
+  // §12.4 baseline security headers for JSON/text API responses (M7). Set before
+  // the handlers so `c.json` inherits them; self-Response surfaces (canvas serve,
+  // SPA, file serving, disabled page) call `baseSecurityHeaders` directly.
+  app.use("*", securityHeadersMiddleware());
 
   // Resolve the client IP for trusted-proxy checks (§12.5). MUST be the real TCP
   // socket peer — NOT X-Forwarded-For / X-Real-IP (client-settable).
@@ -110,6 +141,25 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
 
+  // Login throttle (§12.3 5/min/IP) — pre-gateway, keyed by the socket-peer IP
+  // (never XFF). Defends the credential surface (§12.0 #1). Path-scoped to the
+  // login endpoint (oidc-only; a 404 no-op in proxy/dev mode). KNOWN LIMITATION:
+  // behind a shared reverse-proxy/LB the socket peer is the proxy, so all clients
+  // share one bucket — acceptable here since `/auth/login` is an OIDC *redirect*
+  // (no app-side password to brute-force) and proxy mode has no login endpoint at
+  // all; a per-real-client login throttle would belong at the IAP, not here.
+  app.use("/auth/login", async (c, next) => {
+    if (deps.config.rateLimit.enabled) {
+      const ip = c.get("clientIp") ?? "unknown";
+      const r = takeToken(rlStore, `login:${ip}`, deps.config.rateLimit.loginPerMin);
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return c.json({ error: "rate_limited" }, 429);
+      }
+    }
+    await next();
+  });
+
   // Public session-login routes.
   app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
 
@@ -122,6 +172,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       engine: deps.engine,
       audit: deps.audit,
+      rateLimitStore: rlStore,
     }),
   );
 
@@ -151,6 +202,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     await next();
   });
 
+  // Broad route-class rate limiting (§6.11.2, §12.3, M7). AFTER the gateway +
+  // role middleware so `user`/`canvasSlug` are server-resolved (the keys are
+  // never client-asserted, §12.0 #1), BEFORE the route handlers. One path-first
+  // classifier covers every runtime + management API class and auto-covers any
+  // future AI/realtime HTTP routes.
+  app.use("*", rateLimit(rlStore, deps.config));
+
   // Canvas-facing runtime API (areas F/G/I — KV, files, me). Path-mounted so it
   // handles `/v1/c/:slug/*` ahead of the canvas-content chain; isolation + CORS +
   // capability gating live inside it (§11.4, plan 007 / M6).
@@ -160,8 +218,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       config: deps.config,
       canvases: deps.canvases,
       kv: kvRepository(deps.db),
-      files: filesService({ files: filesRepository(deps.db), storage: deps.storage }),
+      files: filesService({
+        files: filesRepository(deps.db),
+        storage: deps.storage,
+        quota: settingsSvc.effectiveQuota,
+      }),
       usage: usageEventsRepository(deps.db),
+      audit: deps.audit,
+      quota: settingsSvc.effectiveQuota,
       aiUsage: aiUsageRepository(deps.db),
       aiProvider: deps.aiProvider ?? anthropicProvider(deps.config),
       realtime,
@@ -196,6 +260,22 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     }),
   );
 
+  // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
+  // (server-resolved isAdmin) gates the whole router. Distinct base from /api/canvases.
+  app.route(
+    "/api/admin",
+    adminRoutes({
+      config: deps.config,
+      admin: adminRepository(deps.db),
+      canvases: deps.canvases,
+      versions: deps.versions,
+      users: deps.users,
+      files: filesRepository(deps.db),
+      settings: settingsSvc,
+      audit: deps.audit,
+    }),
+  );
+
   // In-browser editor / draft API (M5) — same base, distinct paths.
   app.route(
     "/api/canvases",
@@ -221,7 +301,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     createMiddleware<AppEnv>((c, next) => (c.get("role") === "canvas" ? mw(c, next) : next()));
 
   app.use("*", onlyCanvas(canvasAccess({ canvases: deps.canvases })));
-  app.use("*", onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit })));
+  app.use(
+    "*",
+    onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit, rateLimitStore: rlStore })),
+  );
   app.use(
     "*",
     onlyCanvas(

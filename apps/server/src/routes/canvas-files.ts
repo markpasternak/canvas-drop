@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import type { AuditLog } from "../audit/audit-log.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { safeServeHeaders } from "../canvas/file-serving.js";
 import { FilesQuotaError, type FilesService, FileTooLargeError } from "../canvas/files-service.js";
@@ -12,6 +13,8 @@ export interface CanvasFilesDeps {
   config: Config;
   files: FilesService;
   usage: UsageEventsRepository;
+  /** Audit sink (M7) — file upload/delete recorded for the §12.1.8 security trail. */
+  audit?: AuditLog;
 }
 
 /**
@@ -50,6 +53,12 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
         userId: c.get("user").id,
       });
       meter(c, "upload");
+      deps.audit?.recordAudit({
+        action: "file_upload",
+        actorId: c.get("user").id,
+        targetId: cv.id,
+        meta: { fileId: row.id, size: row.sizeBytes },
+      });
       return c.json(
         {
           id: row.id,
@@ -81,9 +90,16 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   });
 
   app.delete("/:id", async (c) => {
-    const ok = await deps.files.delete(canvas(c).id, c.req.param("id"));
+    const id = c.req.param("id");
+    const ok = await deps.files.delete(canvas(c).id, id);
     meter(c, "delete");
     if (!ok) return c.json({ code: "NOT_FOUND" }, 404);
+    deps.audit?.recordAudit({
+      action: "file_delete",
+      actorId: c.get("user").id,
+      targetId: canvas(c).id,
+      meta: { fileId: id },
+    });
     return c.json({ ok: true });
   });
 

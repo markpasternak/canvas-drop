@@ -1,5 +1,5 @@
 import { pgSchema, sqliteSchema, type User } from "@canvas-drop/shared/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -34,6 +34,23 @@ export function usersRepository(client: DbClient) {
     async findByProviderSub(providerSub: string): Promise<User | null> {
       const rows = await db.select().from(t).where(eq(t.providerSub, providerSub)).limit(1);
       return (rows[0] as User | undefined) ?? null;
+    },
+
+    /** Batched lookup for enriching the admin all-canvases list (M7) — no N+1. */
+    async findByIds(ids: readonly string[]): Promise<User[]> {
+      if (ids.length === 0) return [];
+      return (await db
+        .select()
+        .from(t)
+        .where(inArray(t.id, [...ids]))) as User[];
+    },
+
+    /** Total user count for the platform overview (M7, §6.10.6). */
+    async count(): Promise<number> {
+      const rows = (await db.select({ count: sql<number>`count(*)` }).from(t)) as Array<{
+        count: number;
+      }>;
+      return Number(rows[0]?.count ?? 0);
     },
 
     /**

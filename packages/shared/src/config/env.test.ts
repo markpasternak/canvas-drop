@@ -17,6 +17,35 @@ describe("loadConfig", () => {
     expect(config.log.format).toBe("pretty"); // non-production default
   });
 
+  it("defaults the rate-limit config to the §12.3 values, enabled", () => {
+    const config = loadConfig({});
+    expect(config.rateLimit.enabled).toBe(true);
+    expect(config.rateLimit.canvasApiPerMin).toBe(60);
+    expect(config.rateLimit.aiPerMin).toBe(10);
+    expect(config.rateLimit.deployPerMin).toBe(10);
+    expect(config.rateLimit.managementPerMin).toBe(60);
+    expect(config.rateLimit.loginPerMin).toBe(5);
+    expect(config.rateLimit.passwordGatePerMin).toBe(5);
+  });
+
+  it("honors rate-limit overrides and the master disable flag", () => {
+    const config = loadConfig({
+      CANVAS_DROP_RATELIMIT_ENABLED: "false",
+      CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: "120",
+    });
+    expect(config.rateLimit.enabled).toBe(false);
+    expect(config.rateLimit.canvasApiPerMin).toBe(120);
+  });
+
+  it("rejects a zero/negative rate-limit value at boot (fail loud, not a bricked class)", () => {
+    expect(() => loadConfig({ CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: "0" })).toThrowError(
+      ConfigError,
+    );
+    expect(() => loadConfig({ CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: "-5" })).toThrowError(
+      ConfigError,
+    );
+  });
+
   it("derives dev allowed-domain and admin from the dev user email", () => {
     const config = loadConfig(devEnv({ CANVAS_DROP_DEV_USER_EMAIL: "mark@example.org" }));
     expect(config.auth.allowedEmailDomains).toEqual(["example.org"]);

@@ -1,5 +1,5 @@
 import { type FileRow, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 export interface NewFileInput {
@@ -72,6 +72,23 @@ export function filesRepository(client: DbClient) {
         .from(t)
         .where(eq(t.canvasId, canvasId))) as Array<{ count: number }>;
       return Number(rows[0]?.count ?? 0);
+    },
+
+    /**
+     * Batched file-byte totals for the admin all-canvases list (M7, U2): one
+     * `groupBy(canvasId) sum(size)` over the given ids, returned as a Map (no
+     * N+1). `coalesce`+`Number()` for the dual-dialect aggregate (pg returns sum
+     * as a string; canvases with no files are simply absent from the map → 0).
+     * An empty id list short-circuits (avoids an `IN ()` that differs by dialect).
+     */
+    async bytesByCanvas(canvasIds: readonly string[]): Promise<Map<string, number>> {
+      if (canvasIds.length === 0) return new Map();
+      const rows = (await db
+        .select({ canvasId: t.canvasId, total: sql<number>`coalesce(sum(${t.sizeBytes}), 0)` })
+        .from(t)
+        .where(inArray(t.canvasId, [...canvasIds]))
+        .groupBy(t.canvasId)) as Array<{ canvasId: string; total: number }>;
+      return new Map(rows.map((r) => [r.canvasId, Number(r.total)]));
     },
   };
 }

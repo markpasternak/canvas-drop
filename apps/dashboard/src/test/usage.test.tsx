@@ -22,6 +22,7 @@ const BASE = {
   capabilities: { kv: true, files: true, ai: true, realtime: true },
   effective: { identity: true, kv: true, files: true, ai: false, realtime: true },
   status: "active",
+  disabledReason: null,
   currentVersionId: null,
   createdAt: 0,
   updatedAt: 0,

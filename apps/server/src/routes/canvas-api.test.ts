@@ -2,6 +2,7 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProvider } from "../ai/testing.js";
+import type { AuditLog } from "../audit/audit-log.js";
 import { filesService } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -14,6 +15,8 @@ import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { canvasApiRoutes } from "./canvas-api.js";
+
+const noopAudit: AuditLog = { recordAudit() {}, flush: async () => {}, record() {} };
 
 const devConfig: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" }); // path mode
 const subConfig: Config = loadConfig({
@@ -56,6 +59,7 @@ function buildApi(
       kv: kvRepository(client),
       files: filesService({ files: filesRepository(client), storage: memStorage() }),
       usage: usageEventsRepository(client),
+      audit: noopAudit,
       aiUsage: aiUsageRepository(client),
       aiProvider: fakeProvider({ deltas: ["ok"] }),
     }),
@@ -100,6 +104,19 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     const res = await buildApi(client, { id: owner.id }).request("/v1/c/app/me");
     expect(res.status).toBe(403);
     expect((await jsonOf<{ code: string }>(res)).code).toBe("CAPABILITY_DISABLED");
+  });
+
+  it("runtime API on a DISABLED canvas → 403 { code: DISABLED }, admin not exempted (§12.0 #5)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await canvas(true);
+    await canvasesRepository(client).setDisabled(cv.id, "policy");
+    // Owner/admin alike are denied — disabled fires before owner/admin.
+    const asOwner = await buildApi(client, { id: owner.id }).request("/v1/c/app/me");
+    expect(asOwner.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asOwner)).code).toBe("DISABLED");
+    const asAdmin = await buildApi(client, { id: owner.id, isAdmin: true }).request("/v1/c/app/me");
+    expect(asAdmin.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asAdmin)).code).toBe("DISABLED");
   });
 
   it("404s a nonexistent / hidden canvas (no existence leak)", async () => {

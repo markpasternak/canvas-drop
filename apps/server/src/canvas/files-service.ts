@@ -1,9 +1,10 @@
 import type { FileRow } from "@canvas-drop/shared/db";
 import { v7 as uuidv7 } from "uuid";
+import type { QuotaResolver } from "../admin/settings-service.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { StorageDriver } from "../storage/driver.js";
 
-/** Files primitive limits (§6.5.5). */
+/** Files primitive limits (§6.5.5). Admin-tunable defaults (M7). */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB/file
 export const MAX_CANVAS_BYTES = 1024 * 1024 * 1024; // 1 GB/canvas
 
@@ -42,14 +43,23 @@ export function fileStorageKey(canvasId: string, id: string): string {
  * cleans up the orphan blob if the row insert fails. Quota is best-effort
  * (check-then-write; KTD-4) — acceptable on the trusted-org model.
  */
-export function filesService(deps: { files: FilesRepository; storage: StorageDriver }) {
-  const { files, storage } = deps;
+export function filesService(deps: {
+  files: FilesRepository;
+  storage: StorageDriver;
+  /** Admin-tunable quota resolver (M7). Absent → the hard constants above. */
+  quota?: QuotaResolver;
+}) {
+  const { files, storage, quota } = deps;
 
   return {
     async create(input: CreateFileInput): Promise<FileRow> {
-      if (input.bytes.byteLength > MAX_FILE_BYTES) throw new FileTooLargeError();
+      const fileMax = quota ? await quota("files.bytes.file", MAX_FILE_BYTES) : MAX_FILE_BYTES;
+      const canvasMax = quota
+        ? await quota("files.bytes.canvas", MAX_CANVAS_BYTES)
+        : MAX_CANVAS_BYTES;
+      if (input.bytes.byteLength > fileMax) throw new FileTooLargeError();
       const used = await files.totalBytes(input.canvasId);
-      if (used + input.bytes.byteLength > MAX_CANVAS_BYTES) throw new FilesQuotaError();
+      if (used + input.bytes.byteLength > canvasMax) throw new FilesQuotaError();
 
       const id = uuidv7();
       const storageKey = fileStorageKey(input.canvasId, id);

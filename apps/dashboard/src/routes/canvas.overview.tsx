@@ -96,6 +96,20 @@ export default function Overview() {
         </InlineNotice>
       )}
 
+      {/* Admin takedown (§6.10.2 R3 — "owner sees why"). The public URL shows a
+          disabled page with no reason; the owner learns why here. */}
+      {canvas.status === "disabled" && (
+        <InlineNotice tone="danger">
+          An administrator disabled this canvas, so its public URL is offline.
+          {canvas.disabledReason ? (
+            <>
+              {" "}
+              Reason: <span className="font-medium">{canvas.disabledReason}</span>
+            </>
+          ) : null}
+        </InlineNotice>
+      )}
+
       {current && <EntryNotice entry={current.entry} spaFallback={canvas.spaFallback} />}
 
       <Panel>

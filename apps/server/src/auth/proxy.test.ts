@@ -20,11 +20,18 @@ const JWT_HEADER = config.auth.proxy.jwtHeader;
 const EMAIL_HEADER = config.auth.proxy.emailHeader;
 
 /** Minimal Context stub exposing only what the strategy reads. */
-function ctx(opts: { headers?: Record<string, string>; clientIp?: string }): Context<AppEnv> {
+function ctx(opts: {
+  headers?: Record<string, string>;
+  clientIp?: string;
+  warnings?: string[];
+}): Context<AppEnv> {
   const headers = new Headers(opts.headers ?? {});
+  const log = opts.warnings
+    ? { warn: (_obj: unknown, msg: string) => opts.warnings?.push(msg) }
+    : undefined;
   return {
     req: { header: (n: string) => headers.get(n) ?? undefined },
-    get: (k: string) => (k === "clientIp" ? opts.clientIp : undefined),
+    get: (k: string) => (k === "clientIp" ? opts.clientIp : k === "log" ? log : undefined),
   } as unknown as Context<AppEnv>;
 }
 
@@ -101,6 +108,36 @@ describe("proxyStrategy — JWT path", () => {
     );
     expect(id).toBeNull();
   });
+
+  it("logs a stray identity header that arrives WITHOUT a JWT (downgrade probe, §12.5)", async () => {
+    const warnings: string[] = [];
+    const id = await proxyStrategy(config, jwks).resolveIdentity(
+      ctx({ headers: { [EMAIL_HEADER]: "mallory@example.com" }, warnings }),
+    );
+    expect(id).toBeNull();
+    expect(warnings.some((w) => w.includes("without a JWT in JWKS mode"))).toBe(true);
+  });
+
+  it("logs the stray identity header even when the JWT FAILS verification (§12.5, M7)", async () => {
+    // The most dangerous case: a forged/expired JWT + a forged identity header.
+    // The old code logged only the JWT failure, never the stray header.
+    const warnings: string[] = [];
+    const badToken = await sign({ email: "ada@example.com" }, { key: otherKey }); // wrong key
+    const id = await proxyStrategy(config, jwks).resolveIdentity(
+      ctx({
+        headers: { [JWT_HEADER]: badToken, [EMAIL_HEADER]: "mallory@example.com" },
+        warnings,
+      }),
+    );
+    expect(id).toBeNull();
+    expect(warnings.some((w) => w.includes("verification failed"))).toBe(true);
+  });
+
+  it("does NOT log a stray-header event when no identity header is present", async () => {
+    const warnings: string[] = [];
+    await proxyStrategy(config, jwks).resolveIdentity(ctx({ warnings })); // no JWT, no header
+    expect(warnings).toEqual([]);
+  });
 });
 
 // Header-only config: no JWKS, so the trusted-header path is the active trust path.
@@ -135,6 +172,18 @@ describe("proxyStrategy — trusted-header path (§12.5, no JWKS)", () => {
   it("ignores a client-supplied header when no client IP is known", async () => {
     const id = await proxyStrategy(headerOnlyConfig).resolveIdentity(
       ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" } }),
+    );
+    expect(id).toBeNull();
+  });
+
+  it("gates on the SOCKET peer (c.get clientIp), never X-Forwarded-For (§12.5)", async () => {
+    // A spoofable X-Forwarded-For claiming a trusted hop must NOT grant trust —
+    // the gate reads only the real socket peer from context, which is untrusted here.
+    const id = await proxyStrategy(headerOnlyConfig).resolveIdentity(
+      ctx({
+        headers: { [EMAIL_HEADER]: "grace@example.com", "x-forwarded-for": "10.1.2.3" },
+        clientIp: "8.8.8.8", // untrusted socket peer
+      }),
     );
     expect(id).toBeNull();
   });

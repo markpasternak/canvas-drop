@@ -30,7 +30,22 @@ export function proxyStrategy(config: Config, jwks?: JWTVerifyGetKey): AuthStrat
       // this is the ONLY path; we never fall through to header trust.
       if (jwks) {
         const token = c.req.header(p.jwtHeader);
-        if (!token) return null;
+        // Defense-in-depth (§12.5, M7): in JWKS mode the identity header is NEVER
+        // honored. If one is present without a valid JWT, that's a downgrade-probe
+        // shape worth logging — the request still resolves to anonymous, but an
+        // operator scanning logs sees the spoof attempt, not just a bare 401. Fire
+        // in BOTH the no-JWT and verify-failure paths (the failure path is the
+        // dangerous case the old code logged nowhere).
+        const strayIdentityHeader = c.req.header(p.emailHeader) !== undefined;
+        if (!token) {
+          if (strayIdentityHeader) {
+            c.get("log")?.warn(
+              { header: p.emailHeader },
+              "identity header present without a JWT in JWKS mode — ignored (§12.5)",
+            );
+          }
+          return null;
+        }
         try {
           const { payload } = await jwtVerify(token, jwks, {
             issuer: p.jwtIssuer,
@@ -40,9 +55,10 @@ export function proxyStrategy(config: Config, jwks?: JWTVerifyGetKey): AuthStrat
         } catch (err) {
           // A verification failure (bad signature / iss / aud / expired) and a
           // JWKS-endpoint fetch failure both land here. Log so operators can tell
-          // "bad token" from "IdP/JWKS down" instead of silent 401s.
+          // "bad token" from "IdP/JWKS down" instead of silent 401s, and flag a
+          // stray identity header riding along with the failed token.
           c.get("log")?.warn(
-            { err: (err as Error).message },
+            { err: (err as Error).message, strayIdentityHeader },
             "proxy JWT verification failed (§12.5)",
           );
           return null;

@@ -2,6 +2,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { createMiddleware } from "hono/factory";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { AppEnv } from "../http/types.js";
+import { disabledResponse } from "./disabled-page.js";
 
 /**
  * Canvas authorization (BUILD_BRIEF.md §12.0 invariant 3/5, §12.2). The single
@@ -80,6 +81,11 @@ export function canvasAccess(deps: CanvasAccessDeps) {
 
     if (decision.action === "deny") {
       if (decision.status === 403) {
+        // `disabled` is the only 403 the decision table produces (§6.10.2). Render
+        // the content-negotiated "disabled" page (HTML for browsers); the admin is
+        // NOT exempted (the disabled branch fires before owner/admin), so even an
+        // admin's slug load shows the page, never the content (§12.0 #5).
+        if (decision.reason === "disabled") return disabledResponse(c);
         return c.json({ error: decision.reason }, 403);
       }
       return c.json({ error: "not_found" }, 404);

@@ -1,0 +1,1 @@
+ALTER TABLE "canvases" ADD COLUMN "disabled_reason" text;

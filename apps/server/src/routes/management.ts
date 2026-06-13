@@ -69,7 +69,14 @@ const settingsSchema = z.object({
   galleryTags: z.array(z.string()).optional(),
 });
 
-/** Public canvas view (never leaks `api_key_hash` / `password_hash`). */
+/**
+ * OWNER/ADMIN canvas view (never leaks `api_key_hash` / `password_hash`). Every
+ * caller of this projection is gated by `ownedCanvas` (owner/admin) or
+ * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
+ * sees why"). It is NOT a public/shared projection: any future non-owner-facing
+ * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
+ * and other owner-only fields. Misnamed "public" for historical reasons.
+ */
 function publicCanvas(config: Config, cv: Canvas) {
   return {
     id: cv.id,
@@ -92,6 +99,8 @@ function publicCanvas(config: Config, cv: Canvas) {
     capabilities: storedCapabilities(cv),
     effective: effectiveCapabilities(cv, capabilityGlobals(config)),
     status: cv.status,
+    // Admin takedown reason (§6.10.2, M7). Owner/admin-only — see the doc above.
+    disabledReason: cv.disabledReason,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
     updatedAt: cv.updatedAt,
@@ -303,6 +312,15 @@ export function managementRoutes(deps: ManagementDeps) {
   app.delete("/:id", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    // An OWNER cannot delete a canvas an admin has taken down (§12.0 #5): deleting
+    // then having an admin restore it would launder the takedown into an active
+    // canvas. The admin must `enable` it first, or an admin can delete it directly.
+    if (cv.status === "disabled" && !c.get("user").isAdmin) {
+      return c.json(
+        { code: "DISABLED", message: "this canvas was disabled by an administrator" },
+        409,
+      );
+    }
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     // Deleted → everyone (incl. owner) loses access; drop their live sockets.

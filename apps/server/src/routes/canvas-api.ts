@@ -4,7 +4,9 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { UpgradeWebSocket } from "hono/ws";
+import type { QuotaResolver } from "../admin/settings-service.js";
 import type { ModelProvider } from "../ai/provider.js";
+import type { AuditLog } from "../audit/audit-log.js";
 import { decideCanvasAccess } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
@@ -27,6 +29,12 @@ export interface CanvasApiDeps {
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
+  /** Audit sink (M7) — KV/file MUTATIONS are recorded for the §12.1.8 security
+   *  trail. Optional so an AI/realtime-only suite needn't wire it; app.ts always
+   *  provides it in production. */
+  audit?: AuditLog;
+  /** Admin-tunable quota resolver (M7) — threaded to the KV route's key-limit check. */
+  quota?: QuotaResolver;
   aiUsage: AiUsageRepository;
   /** Model provider for the AI primitive (default Anthropic; tests inject a fake). */
   aiProvider: ModelProvider;
