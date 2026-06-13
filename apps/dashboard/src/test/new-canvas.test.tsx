@@ -68,7 +68,7 @@ describe("create flow — backend choice", () => {
 
     await user.click(await screen.findByRole("switch", { name: "Enable backend" }));
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
-    await user.click(screen.getByRole("button", { name: /create & deploy/i }));
+    await user.click(screen.getByRole("button", { name: /create and deploy/i }));
 
     await vi.waitFor(() => {
       const post = calls.find((c) => c.url === "/api/canvases/paste");
@@ -86,7 +86,7 @@ describe("create flow — backend choice", () => {
 
     await user.click(await screen.findByRole("switch", { name: "Enable backend" }));
     await user.click(screen.getByRole("button", { name: /use the api/i }));
-    await user.click(screen.getByRole("button", { name: /create & get a key/i }));
+    await user.click(screen.getByRole("button", { name: /create key/i }));
 
     await vi.waitFor(() => {
       const post = calls.find((c) => c.url === "/api/canvases");
@@ -104,7 +104,7 @@ describe("create flow — backend choice", () => {
     renderNew();
 
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
-    await user.click(screen.getByRole("button", { name: /create & deploy/i }));
+    await user.click(screen.getByRole("button", { name: /create and deploy/i }));
 
     await vi.waitFor(() => {
       const post = calls.find((c) => c.url === "/api/canvases/paste");

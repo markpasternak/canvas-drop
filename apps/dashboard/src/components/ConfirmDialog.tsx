@@ -9,8 +9,8 @@ import { HoldButton } from "./HoldButton.js";
  * `destructive` variant styles the action in the danger token, not the accent.
  *
  * One opt-in friction mode: `holdToConfirm` swaps the action for a
- * press-and-hold button — lighter friction for recoverable destructive actions.
- * (The old `confirmPhrase` type-to-confirm path was removed — the delete flow
+ * press-and-hold button for lighter friction on recoverable destructive actions.
+ * (The old `confirmPhrase` type-to-confirm path was removed. The delete flow
  * switched to press-and-hold and no production caller uses it.)
  */
 export function ConfirmDialog({

@@ -224,6 +224,34 @@ describe("draftApiRoutes", () => {
     expect(live).not.toBeNull();
   });
 
+  it("preview ?edit=1 injects the on-page editing shim into the HTML entry, not other files", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<!doctype html><html><body><h1>edit me</h1></body></html>"),
+    });
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=style.css`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("body{color:red}"),
+    });
+
+    const edited = await app.request(`/api/canvases/${canvas.id}/preview/?edit=1`);
+    const html = await edited.text();
+    expect(html).toContain("edit me");
+    expect(html).toContain("data-cd-edit"); // shim injected into the HTML entry
+
+    // Without ?edit=1, no shim.
+    const plain = await app.request(`/api/canvases/${canvas.id}/preview/`);
+    expect(await plain.text()).not.toContain("data-cd-edit");
+
+    // CSS is never rewritten, even with ?edit=1.
+    const css = await app.request(`/api/canvases/${canvas.id}/preview/style.css?edit=1`);
+    expect(await css.text()).toBe("body{color:red}");
+  });
+
   it("a non-owner cannot preview a draft (404)", async () => {
     const { appAs, owner, other, canvas } = await setup();
     await appAs(owner.id).request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {

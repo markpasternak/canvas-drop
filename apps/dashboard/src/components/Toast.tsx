@@ -30,7 +30,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             className={
-              "pointer-events-auto rounded-lg border px-3.5 py-2 text-sm shadow-lg " +
+              "pointer-events-auto rounded-lg border px-3.5 py-2 text-sm shadow-[var(--shadow-popover)] " +
               (t.tone === "error"
                 ? "border-danger/30 bg-danger-subtle text-danger"
                 : "border-border bg-surface-raised text-fg")

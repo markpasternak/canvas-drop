@@ -117,6 +117,17 @@ describe("Editor route", () => {
     expect(screen.getByText(/unpublished changes/i)).toBeInTheDocument();
   });
 
+  it("shows a published state and disables Publish draft when the draft is clean", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+    });
+    renderEditor();
+    expect(await screen.findByText(/all changes published/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Publish draft" })).toBeDisabled();
+  });
+
   it("publishes the draft via the publish endpoint", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
@@ -126,7 +137,7 @@ describe("Editor route", () => {
         json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
     });
     renderEditor();
-    const publishBtn = await screen.findByRole("button", { name: "Publish" });
+    const publishBtn = await screen.findByRole("button", { name: "Publish draft" });
     await userEvent.click(publishBtn);
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
@@ -164,7 +175,7 @@ describe("Editor route", () => {
     );
   });
 
-  it("renders a non-editable preview for a binary file instead of the text editor", async () => {
+  it("renders an image preview (with Download) instead of the text editor", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/draft": () =>
@@ -172,9 +183,57 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText("logo.png")).toBeInTheDocument();
-    expect(await screen.findByText(/can.t be edited as text/i)).toBeInTheDocument();
+    expect((await screen.findAllByRole("link", { name: "Download file" })).length).toBeGreaterThan(
+      0,
+    );
     // The text editor is never mounted for a binary file.
     expect(screen.queryByTestId("code-editor")).not.toBeInTheDocument();
+  });
+
+  it("never opens a spreadsheet in the text editor — shows the can't-edit card (xlsx-crash class)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      // The server downgrades unknown extensions to text/plain; the allowlist must
+      // still keep .xlsx out of CodeMirror (otherwise the bytes hang the tab).
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ files: [{ path: "report.xlsx", size: 800_000, mime: "text/plain" }] })),
+    });
+    renderEditor();
+    expect(await screen.findByText(/can.t edit this file type/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("code-editor")).not.toBeInTheDocument();
+    // It also never fetches the bytes for the text editor.
+    // (No GET to /draft/file is mocked; a request would 500 and surface — but none fires.)
+  });
+
+  it("offers Page text editing for a single-HTML draft", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()), // one index.html
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+    });
+    renderEditor();
+    const onPage = (await screen.findByRole("button", { name: "Page text" })) as HTMLButtonElement;
+    expect(onPage.disabled).toBe(false);
+  });
+
+  it("disables Page text editing when the draft has several HTML files (explicit)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({
+            files: [
+              { path: "a.html", size: 10, mime: "text/html" },
+              { path: "b.html", size: 10, mime: "text/html" },
+            ],
+          }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+    });
+    renderEditor();
+    const onPage = (await screen.findByRole("button", { name: "Page text" })) as HTMLButtonElement;
+    expect(onPage.disabled).toBe(true);
+    expect(onPage.title).toMatch(/single HTML page \(this draft has 2\)/i);
   });
 
   it("shows an error state when a file's content can't be loaded", async () => {

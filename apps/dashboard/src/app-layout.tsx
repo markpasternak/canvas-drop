@@ -1,21 +1,43 @@
+import { Monitor, MoonStars, Plus, Sun } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
+import { BrandMark } from "./components/Brand.js";
 import { cn } from "./lib/cn.js";
 import { useTheme } from "./lib/theme.js";
 
 function ThemeSwitch() {
   const { choice, setChoice } = useTheme();
-  const order = ["system", "light", "dark"] as const;
-  const next = order[(order.indexOf(choice) + 1) % order.length] ?? "system";
-  const label = { system: "Auto", light: "Light", dark: "Dark" }[choice];
+  const options = [
+    { id: "system", label: "System", icon: Monitor },
+    { id: "light", label: "Light", icon: Sun },
+    { id: "dark", label: "Dark", icon: MoonStars },
+  ] as const;
+
   return (
-    <button
-      type="button"
-      onClick={() => setChoice(next)}
-      className="rounded-md px-2.5 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-subtle hover:text-fg"
-      title={`Theme: ${label} (click to change)`}
+    <fieldset
+      aria-label="Theme"
+      className="m-0 grid grid-cols-3 rounded-lg border border-border bg-surface-sunken p-0.5"
     >
-      {label}
-    </button>
+      {options.map((option) => {
+        const Icon = option.icon;
+        const active = choice === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setChoice(option.id)}
+            aria-pressed={active}
+            aria-label={`Use ${option.label.toLowerCase()} theme`}
+            title={`Theme: ${option.label}`}
+            className={cn(
+              "grid size-8 place-items-center rounded-md text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg active:translate-y-px",
+              active && "bg-surface text-fg shadow-[0_1px_3px_hsl(var(--shadow-color)/0.14)]",
+            )}
+          >
+            <Icon size={16} weight={active ? "fill" : "regular"} aria-hidden />
+          </button>
+        );
+      })}
+    </fieldset>
   );
 }
 
@@ -23,55 +45,64 @@ function ThemeSwitch() {
  * content. The wordmark is org-agnostic and re-skinnable. */
 export function AppLayout() {
   return (
-    <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b border-border bg-canvas/80 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
-          <div className="flex items-center gap-5">
+    <div className="min-h-dvh bg-canvas">
+      <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78">
+        <div className="mx-auto flex h-16 max-w-[112rem] items-center justify-between gap-4 px-5">
+          <div className="flex min-w-0 items-center gap-5">
             <Link
               to="/"
-              className="flex items-center gap-2 text-sm font-semibold tracking-tight text-fg"
+              aria-label="Canvasdrop home"
+              className="group flex min-w-0 items-center gap-2.5 text-fg"
             >
-              <span className="grid size-6 place-items-center rounded-md bg-accent text-accent-fg">
-                <span className="size-2 rounded-[3px] bg-accent-fg" />
+              <BrandMark className="size-8" />
+              <span className="truncate text-[0.9375rem] font-semibold tracking-tight">
+                Canvasdrop
               </span>
-              canvas-drop
             </Link>
-            {/* Primary section nav — the first secondary navigation in the shell.
+            {/* Primary section nav: the first secondary navigation in the shell.
                 "Canvases" matches only the list root (exact) so it isn't lit on
                 canvas detail pages; "Archived" lights on /archived. */}
-            <nav className="flex items-center gap-1 text-[0.8125rem]" aria-label="Sections">
+            <nav
+              className="hidden items-center gap-1 rounded-lg border border-border bg-surface-sunken p-1 text-[0.8125rem] md:flex"
+              aria-label="Sections"
+            >
               <Link
                 to="/"
                 activeOptions={{ exact: true }}
-                className="rounded-md px-2.5 py-1 font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg aria-[current=page]:text-fg"
+                className="rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
                 activeProps={{ "aria-current": "page" }}
               >
                 Canvases
               </Link>
               <Link
                 to="/archived"
-                className="rounded-md px-2.5 py-1 font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg aria-[current=page]:text-fg"
+                className="rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
                 activeProps={{ "aria-current": "page" }}
               >
                 Archived
               </Link>
             </nav>
           </div>
-          <nav className="flex items-center gap-1">
+          <nav className="flex shrink-0 items-center gap-2" aria-label="Primary actions">
             <Link
               to="/new"
+              aria-label="Create canvas"
+              title="Create canvas"
               className={cn(
-                "rounded-md bg-accent px-3 py-1.5 text-[0.8125rem] font-medium text-accent-fg",
-                "transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover",
+                "inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[0.8125rem] font-semibold text-accent-fg",
+                "shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px",
               )}
             >
-              Create canvas
+              <Plus size={16} weight="bold" aria-hidden />
+              <span>
+                Create <span className="hidden sm:inline">canvas</span>
+              </span>
             </Link>
             <ThemeSwitch />
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-5 py-8">
+      <main className="mx-auto max-w-[112rem] px-5 py-6">
         <Outlet />
       </main>
     </div>

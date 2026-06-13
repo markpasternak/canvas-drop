@@ -1,11 +1,33 @@
+import {
+  CaretDown,
+  File,
+  FileArchive,
+  FileCode,
+  FileCss,
+  FileCsv,
+  FileDoc,
+  FileHtml,
+  FileImage,
+  FileJs,
+  FileMd,
+  FilePdf,
+  FileSvg,
+  FileText,
+  FileTs,
+  FileXls,
+  FolderSimple,
+  type Icon,
+} from "@phosphor-icons/react";
 import { useMemo } from "react";
 import type { DraftFile } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import { fileLabel, isImage } from "../lib/file-kind.js";
 
 interface TreeNode {
   name: string;
   path: string; // full path for files; "" for the synthetic root
   isDir: boolean;
+  file?: DraftFile; // present on leaf nodes
   children: TreeNode[];
 }
 
@@ -20,7 +42,13 @@ function buildTree(files: DraftFile[]): TreeNode {
       const full = segments.slice(0, i + 1).join("/");
       let child = node.children.find((c) => c.name === seg && c.isDir !== isLeaf);
       if (!child) {
-        child = { name: seg, path: full, isDir: !isLeaf, children: [] };
+        child = {
+          name: seg,
+          path: full,
+          isDir: !isLeaf,
+          children: [],
+          file: isLeaf ? file : undefined,
+        };
         node.children.push(child);
       }
       node = child;
@@ -47,10 +75,16 @@ export interface FileTreeProps {
 export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
   if (files.length === 0) {
-    return <p className="px-2 py-3 text-xs text-subtle">No files yet — add one to begin.</p>;
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-surface-sunken px-3 py-8 text-center">
+        <FilePlusPlaceholder />
+        <p className="mt-3 text-xs font-medium text-fg">No draft files</p>
+        <p className="mt-1 text-xs text-subtle">Add or upload a file to begin.</p>
+      </div>
+    );
   }
   return (
-    <ul className="space-y-0.5 text-sm" aria-label="Draft files">
+    <ul className="space-y-1 text-sm" aria-label="Draft files">
       {tree.children.map((node) => (
         <TreeRow key={node.path} node={node} depth={0} selected={selected} onSelect={onSelect} />
       ))}
@@ -74,13 +108,14 @@ function TreeRow({
     return (
       <li>
         <div
-          className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-subtle"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-subtle"
           style={pad}
         >
-          <span aria-hidden>▾</span>
+          <CaretDown size={12} weight="bold" aria-hidden />
+          <FolderSimple size={14} weight="duotone" aria-hidden />
           {node.name}/
         </div>
-        <ul className="space-y-0.5">
+        <ul className="space-y-1">
           {node.children.map((child) => (
             <TreeRow
               key={child.path}
@@ -103,15 +138,72 @@ function TreeRow({
         style={pad}
         aria-current={active ? "true" : undefined}
         className={cn(
-          "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left transition-colors",
-          active ? "bg-accent-subtle text-accent" : "text-fg hover:bg-canvas",
+          "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+          active ? "bg-accent-subtle text-accent" : "text-fg hover:bg-surface-hover",
         )}
       >
-        <span aria-hidden className="text-subtle">
-          ▪
+        {node.file && <FileKindIcon file={node.file} active={active} />}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-mono text-xs">{node.name}</span>
+          {node.file && (
+            <span className="block text-[0.625rem] font-medium text-subtle group-aria-[current=true]:text-accent/70">
+              {fileLabel(node.file)}
+            </span>
+          )}
         </span>
-        <span className="truncate font-mono text-xs">{node.name}</span>
       </button>
     </li>
+  );
+}
+
+function iconForFile(file: Pick<DraftFile, "path" | "mime">): Icon {
+  const ext = file.path.slice(file.path.lastIndexOf(".") + 1).toLowerCase();
+  if (isImage(file)) return FileImage;
+  if (["html", "htm", "xhtml"].includes(ext)) return FileHtml;
+  if (["css", "scss", "sass", "less"].includes(ext)) return FileCss;
+  if (["js", "mjs", "cjs", "jsx"].includes(ext)) return FileJs;
+  if (["ts", "tsx"].includes(ext)) return FileTs;
+  if (ext === "svg") return FileSvg;
+  if (["md", "markdown", "mdx"].includes(ext)) return FileMd;
+  if (["json", "jsonc", "json5", "yaml", "yml", "toml", "xml"].includes(ext)) return FileCode;
+  if (["csv", "tsv"].includes(ext)) return FileCsv;
+  if (["xlsx", "xls"].includes(ext)) return FileXls;
+  if (["doc", "docx"].includes(ext)) return FileDoc;
+  if (ext === "pdf") return FilePdf;
+  if (["zip", "gz", "tar", "rar", "7z"].includes(ext)) return FileArchive;
+  if (["txt", "text", "log"].includes(ext)) return FileText;
+  return File;
+}
+
+export function FileKindIcon({
+  file,
+  active = false,
+  size = 18,
+}: {
+  file: Pick<DraftFile, "path" | "mime">;
+  active?: boolean;
+  size?: number;
+}) {
+  const Icon = iconForFile(file);
+  return (
+    <span
+      className={cn(
+        "grid size-7 shrink-0 place-items-center rounded-md border",
+        active
+          ? "border-accent/20 bg-accent/10 text-accent"
+          : "border-border bg-surface-raised text-muted group-hover:text-fg",
+      )}
+      aria-hidden
+    >
+      <Icon size={size} weight="duotone" />
+    </span>
+  );
+}
+
+function FilePlusPlaceholder() {
+  return (
+    <span className="mx-auto grid size-10 place-items-center rounded-lg border border-border bg-surface-raised text-subtle">
+      <FileText size={18} weight="duotone" aria-hidden />
+    </span>
   );
 }

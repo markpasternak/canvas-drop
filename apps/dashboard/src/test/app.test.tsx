@@ -24,7 +24,10 @@ function renderApp(initialPath: string) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("dashboard app", () => {
   it("renders the shell and, with zero canvases, the onboarding first-run page", async () => {
@@ -40,7 +43,7 @@ describe("dashboard app", () => {
     );
     renderApp("/");
     // shell chrome
-    expect(await screen.findByText("canvas-drop")).toBeInTheDocument();
+    expect(await screen.findByText("Canvasdrop")).toBeInTheDocument();
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();

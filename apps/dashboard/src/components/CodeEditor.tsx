@@ -4,9 +4,22 @@ import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
-import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  indentOnInput,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import { EditorState, type Extension } from "@codemirror/state";
-import { drawSelection, EditorView, keymap, lineNumbers } from "@codemirror/view";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
 import { useEffect, useRef } from "react";
 
 /** Pick a CodeMirror language extension from a file path's extension (R17). */
@@ -39,14 +52,56 @@ function languageFor(path: string): Extension[] {
 const baseExtensions: Extension[] = [
   lineNumbers(),
   foldGutter(),
+  highlightActiveLineGutter(),
   history(),
   drawSelection(),
   indentOnInput(),
   bracketMatching(),
+  highlightActiveLine(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
+  EditorView.lineWrapping,
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
   EditorView.theme({
-    "&": { height: "100%", fontSize: "13px" },
-    ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
+    "&": {
+      height: "100%",
+      backgroundColor: "var(--surface)",
+      color: "var(--fg)",
+      fontSize: "12.5px",
+    },
+    "&.cm-focused": { outline: "none" },
+    ".cm-scroller": {
+      fontFamily: "var(--font-mono, ui-monospace, monospace)",
+      lineHeight: "1.64",
+      scrollbarWidth: "thin",
+      scrollbarColor: "var(--border-strong) transparent",
+    },
+    ".cm-content": { padding: "14px 0 18px", caretColor: "var(--accent)" },
+    ".cm-line": { padding: "0 18px" },
+    ".cm-gutters": {
+      backgroundColor: "var(--surface-sunken)",
+      color: "var(--subtle)",
+      borderRight: "1px solid var(--border)",
+    },
+    ".cm-lineNumbers .cm-gutterElement": {
+      minWidth: "3.25rem",
+      padding: "0 12px 0 10px",
+    },
+    ".cm-foldGutter .cm-gutterElement": { padding: "0 6px" },
+    ".cm-activeLine": {
+      backgroundColor: "color-mix(in srgb, var(--accent-subtle) 58%, transparent)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "var(--accent-subtle)",
+      color: "var(--accent)",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "color-mix(in srgb, var(--accent) 28%, transparent)",
+    },
+    ".cm-matchingBracket, .cm-nonmatchingBracket": {
+      backgroundColor: "var(--accent-subtle)",
+      color: "var(--fg)",
+      outline: "1px solid var(--border-strong)",
+    },
   }),
 ];
 
@@ -90,11 +145,5 @@ export function CodeEditor({ path, value, readOnly = false, onChange }: CodeEdit
     return () => view.destroy();
   }, [path, readOnly]);
 
-  return (
-    <div
-      ref={host}
-      data-testid="code-editor"
-      className="h-full overflow-hidden rounded-md border border-border bg-surface"
-    />
-  );
+  return <div ref={host} data-testid="code-editor" className="h-full overflow-hidden bg-surface" />;
 }

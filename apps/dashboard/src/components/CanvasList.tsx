@@ -1,3 +1,4 @@
+import { LockSimple } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
@@ -5,23 +6,6 @@ import { formatBytes, relativeTime } from "../lib/format.js";
 import { Badge, StatusBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
-
-function LockIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="11"
-      height="11"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      aria-hidden="true"
-    >
-      <rect x="3.25" y="7" width="9.5" height="6.5" rx="1.5" />
-      <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
-    </svg>
-  );
-}
 
 /** Row indicators. "Active" is the boring default — only badge what's notable:
  * a non-active status (admin takedown, archived), plus the access signals
@@ -33,7 +17,7 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       {canvas.shared && <Badge tone="accent">Shared</Badge>}
       {canvas.hasPassword && (
         <Badge tone="neutral">
-          <LockIcon />
+          <LockSimple size={12} weight="bold" aria-hidden />
           Protected
         </Badge>
       )}
@@ -50,7 +34,7 @@ export function DefaultRowActions({ canvas }: { canvas: CanvasListItem }) {
         href={canvas.url}
         target="_blank"
         rel="noreferrer"
-        className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-subtle hover:text-accent"
+        className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-accent"
       >
         Open
       </a>
@@ -64,7 +48,7 @@ export function DefaultRowActions({ canvas }: { canvas: CanvasListItem }) {
 export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions?: ReactNode }) {
   const title = canvas.title?.trim() || canvas.slug;
   return (
-    <li className="group flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong">
+    <li className="group flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised">
       <Link to="/canvases/$id" params={{ id: canvas.id }} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="min-w-0 truncate text-sm font-medium text-fg">{title}</span>
@@ -72,14 +56,20 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
             <RowBadges canvas={canvas} />
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-subtle">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
           <span className="truncate font-mono">{canvas.slug}</span>
-          <span aria-hidden>·</span>
-          <span>
-            {canvas.lastDeploy
-              ? `v${canvas.lastDeploy.version} · ${relativeTime(canvas.lastDeploy.createdAt)} · ${formatBytes(canvas.lastDeploy.totalBytes)} · ${canvas.lastDeploy.fileCount} ${canvas.lastDeploy.fileCount === 1 ? "file" : "files"}`
-              : "Never deployed"}
-          </span>
+          {canvas.lastDeploy ? (
+            <>
+              <span>v{canvas.lastDeploy.version}</span>
+              <span>{relativeTime(canvas.lastDeploy.createdAt)}</span>
+              <span>{formatBytes(canvas.lastDeploy.totalBytes)}</span>
+              <span>
+                {canvas.lastDeploy.fileCount} {canvas.lastDeploy.fileCount === 1 ? "file" : "files"}
+              </span>
+            </>
+          ) : (
+            <span>Never deployed</span>
+          )}
         </div>
       </Link>
       <div className="flex shrink-0 items-center gap-1">
@@ -95,7 +85,7 @@ export function ListSkeleton() {
       {[0, 1, 2].map((i) => (
         <li
           key={i}
-          className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3"
+          className="flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3"
         >
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-40" />

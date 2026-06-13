@@ -75,14 +75,14 @@ export function Dialog({
         if (dismissable && e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" aria-hidden />
+      <div className="absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]" aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-md rounded-xl border border-border bg-surface-raised p-6 shadow-2xl outline-none"
+        className="relative w-full max-w-md rounded-xl border border-border bg-surface-raised p-6 shadow-[var(--shadow-popover)] outline-none"
       >
         <h2 id={titleId} className="text-base font-semibold text-fg">
           {title}

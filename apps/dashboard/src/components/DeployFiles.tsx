@@ -50,7 +50,7 @@ export function FileDrop({
 
   // Drag accepts files AND folders together; react-dropzone's file-selector does
   // the cross-browser directory traversal. The native CLICK picker can't offer
-  // both at once (OS limit), so we expose two explicit choices instead — hence
+  // both at once (OS limit), so we expose two explicit choices instead, hence
   // `noClick` on the zone.
   const onDrop = useCallback(
     (accepted: File[]) => {
@@ -76,12 +76,14 @@ export function FileDrop({
       {...getRootProps()}
       className={cn(
         "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-        isDragActive ? "border-accent bg-accent-subtle/40" : "border-border-strong bg-canvas",
+        isDragActive
+          ? "border-accent bg-accent-subtle/40"
+          : "border-border-strong bg-surface-sunken",
         busy && "pointer-events-none opacity-60",
       )}
     >
       <span className="text-sm font-medium text-fg">
-        {busy ? "Deploying…" : isDragActive ? "Drop to upload" : label}
+        {busy ? "Deploying..." : isDragActive ? "Drop to upload" : label}
       </span>
       {!busy && (
         <div className="flex flex-wrap items-center justify-center gap-1.5 text-xs text-muted">
@@ -151,7 +153,7 @@ export function DeployProgress({ pct }: { pct: number | null }) {
     <div className="space-y-3 py-3" aria-live="polite">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-fg">
-          {uploading ? "Uploading files…" : "Finishing deploy…"}
+          {uploading ? "Uploading files..." : "Finishing deploy..."}
         </span>
         {uploading && <span className="font-mono text-xs text-muted">{pct}%</span>}
       </div>
@@ -173,7 +175,7 @@ export function DeployProgress({ pct }: { pct: number | null }) {
       <p className="text-xs text-muted">
         {uploading
           ? "Sending your files to the server."
-          : "Extracting and publishing your canvas — almost there."}
+          : "Extracting and publishing your canvas. Almost there."}
       </p>
     </div>
   );
