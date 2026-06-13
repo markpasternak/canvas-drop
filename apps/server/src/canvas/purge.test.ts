@@ -1,6 +1,8 @@
+import type { Manifest } from "@canvas-drop/shared/db";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -8,7 +10,7 @@ import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { purgeDeletedCanvases } from "./purge.js";
-import { versionPrefix, versionStorageKey } from "./storage-keys.js";
+import { blobKey, canvasBlobPrefix } from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const log = { info() {}, error() {} } as unknown as Logger;
@@ -19,7 +21,15 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     await client?.close();
   });
 
-  /** A canvas with one ready version and one stored file under that version. */
+  const deps = (storage: StorageDriver) => ({
+    canvases: canvasesRepository(client),
+    versions: versionsRepository(client),
+    drafts: draftsRepository(client),
+    storage,
+    log,
+  });
+
+  /** A canvas with one ready version pointing at one content-addressed blob. */
   async function seedCanvas(
     client: DbClient,
     storage: StorageDriver,
@@ -29,14 +39,16 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
     const cv = await canvases.create({ ownerId, slug, apiKeyHash: `k-${slug}` });
+    const hash = `hash-${slug}`;
+    const manifest: Manifest = { "index.html": { size: 5, hash, mime: "text/html" } };
     const v = await versions.createPending({
       canvasId: cv.id,
       number: 1,
       createdBy: ownerId,
       source: "api",
     });
-    await versions.markReady(v.id, { fileCount: 1, totalBytes: 5, manifest: {} });
-    await storage.put(versionStorageKey(v.id, "index.html"), new TextEncoder().encode("hello"));
+    await versions.markReady(v.id, { fileCount: 1, totalBytes: 5, manifest });
+    await storage.put(blobKey(cv.id, hash), new TextEncoder().encode("hello"));
     return cv.id;
   }
 
@@ -50,7 +62,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     return u.id;
   }
 
-  it("reclaims files + versions of soft-deleted canvases, keeps the row, leaves active ones untouched", async () => {
+  it("reclaims blobs + versions of soft-deleted canvases, keeps the row, leaves active ones untouched", async () => {
     client = await makeTestDb(dialect);
     const storage = memStorage();
     const ownerId = await seedOwner(client);
@@ -60,12 +72,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     const liveId = await seedCanvas(client, storage, ownerId, "alive");
     await canvases.setStatus(deletedId, "deleted");
 
-    const summary = await purgeDeletedCanvases({
-      canvases,
-      versions: versionsRepository(client),
-      storage,
-      log,
-    });
+    const summary = await purgeDeletedCanvases(deps(storage));
 
     expect(summary).toMatchObject({
       canvasesPurged: 1,
@@ -73,36 +80,53 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
       objectsDeleted: 1,
       failed: 0,
     });
-    // The canvas ROW survives as a soft-deleted tombstone — but its version,
-    // its file, and its current-version pointer are gone.
     const tombstone = await canvases.findById(deletedId);
     expect(tombstone).not.toBeNull();
     expect(tombstone?.status).toBe("deleted");
     expect(tombstone?.currentVersionId).toBeNull();
     expect(await versionsRepository(client).listByCanvas(deletedId)).toEqual([]);
-    expect(await storage.list("versions/")).toHaveLength(1); // only the live canvas's object remains
-    // The active canvas is fully intact.
+    // The deleted canvas's blobs are gone; the live canvas's remain.
+    expect(await storage.list(canvasBlobPrefix(deletedId))).toHaveLength(0);
+    expect(await storage.list(canvasBlobPrefix(liveId))).toHaveLength(1);
     expect(await canvases.findById(liveId)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(liveId)).toHaveLength(1);
   });
 
-  it("is idempotent: a canvas with no versions is skipped and a second sweep reclaims nothing", async () => {
+  it("reclaims a canvas's draft row too (drafted, soft-deleted)", async () => {
     client = await makeTestDb(dialect);
     const storage = memStorage();
     const ownerId = await seedOwner(client);
     const canvases = canvasesRepository(client);
-    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
 
-    // A soft-deleted canvas that was never deployed (no versions) is left alone.
+    const id = await seedCanvas(client, storage, ownerId, "drafted");
+    await drafts.create({
+      canvasId: id,
+      manifest: { "index.html": { size: 5, hash: "hash-drafted", mime: "text/html" } },
+      baseVersionId: null,
+    });
+    await canvases.setStatus(id, "deleted");
+
+    const summary = await purgeDeletedCanvases(deps(storage));
+    expect(summary.canvasesPurged).toBe(1);
+    expect(await drafts.getByCanvas(id)).toBeNull();
+    expect(await storage.list(canvasBlobPrefix(id))).toHaveLength(0);
+  });
+
+  it("is idempotent: a never-deployed canvas is skipped and a second sweep reclaims nothing", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const canvases = canvasesRepository(client);
+
     const neverDeployed = await canvases.create({ ownerId, slug: "bare", apiKeyHash: "k" });
     await canvases.setStatus(neverDeployed.id, "deleted");
     const deployed = await seedCanvas(client, storage, ownerId, "had-files");
     await canvases.setStatus(deployed, "deleted");
 
-    const first = await purgeDeletedCanvases({ canvases, versions, storage, log });
-    expect(first.canvasesPurged).toBe(1); // only the one with versions
-    // Re-running finds nothing reclaimable — both rows still exist as tombstones.
-    const second = await purgeDeletedCanvases({ canvases, versions, storage, log });
+    const first = await purgeDeletedCanvases(deps(storage));
+    expect(first.canvasesPurged).toBe(1); // only the one with blobs/versions
+    const second = await purgeDeletedCanvases(deps(storage));
     expect(second).toMatchObject({ canvasesPurged: 0, versionsPurged: 0, objectsDeleted: 0 });
     expect(await canvases.findById(neverDeployed.id)).not.toBeNull();
     expect(await canvases.findById(deployed)).not.toBeNull();
@@ -118,22 +142,20 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     await canvases.setStatus(id, "deleted");
     const deletedAt = (await canvases.findById(id))?.deletedAt as number;
 
-    // 30-day window, evaluated one day after deletion → still within retention.
-    const recent = await purgeDeletedCanvases(
-      { canvases, versions: versionsRepository(client), storage, log },
-      { olderThanDays: 30, now: deletedAt + DAY_MS },
-    );
+    const recent = await purgeDeletedCanvases(deps(storage), {
+      olderThanDays: 30,
+      now: deletedAt + DAY_MS,
+    });
     expect(recent.canvasesPurged).toBe(0);
-    expect(await versionsRepository(client).listByCanvas(id)).toHaveLength(1); // untouched
+    expect(await versionsRepository(client).listByCanvas(id)).toHaveLength(1);
 
-    // Same window, evaluated 31 days later → now past retention, reclaimed.
-    const aged = await purgeDeletedCanvases(
-      { canvases, versions: versionsRepository(client), storage, log },
-      { olderThanDays: 30, now: deletedAt + 31 * DAY_MS },
-    );
+    const aged = await purgeDeletedCanvases(deps(storage), {
+      olderThanDays: 30,
+      now: deletedAt + 31 * DAY_MS,
+    });
     expect(aged.canvasesPurged).toBe(1);
-    expect(await canvases.findById(id)).not.toBeNull(); // tombstone kept
-    expect(await versionsRepository(client).listByCanvas(id)).toEqual([]); // files + versions gone
+    expect(await canvases.findById(id)).not.toBeNull();
+    expect(await versionsRepository(client).listByCanvas(id)).toEqual([]);
   });
 
   it("dry-run reports what would be purged but deletes nothing", async () => {
@@ -145,23 +167,18 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     const id = await seedCanvas(client, storage, ownerId, "gone");
     await canvases.setStatus(id, "deleted");
 
-    const summary = await purgeDeletedCanvases(
-      { canvases, versions: versionsRepository(client), storage, log },
-      { dryRun: true },
-    );
+    const summary = await purgeDeletedCanvases(deps(storage), { dryRun: true });
 
     expect(summary).toMatchObject({ canvasesPurged: 1, versionsPurged: 1, objectsDeleted: 1 });
-    // Nothing was actually removed.
     expect(await canvases.findById(id)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(id)).toHaveLength(1);
-    expect(await storage.list("versions/")).toHaveLength(1);
+    expect(await storage.list(canvasBlobPrefix(id))).toHaveLength(1);
   });
 
   it("isolates a per-canvas failure: rows stay intact for retry, others still purge", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const canvases = canvasesRepository(client);
-    const versions = versionsRepository(client);
 
     const storage = memStorage();
     const okId = await seedCanvas(client, storage, ownerId, "ok");
@@ -169,27 +186,23 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     await canvases.setStatus(okId, "deleted");
     await canvases.setStatus(badId, "deleted");
 
-    // Deleting the "bad" canvas's objects throws, so its purge aborts while the
+    // Deleting the "bad" canvas's blobs throws, so its purge aborts while the
     // healthy canvas still reclaims.
-    const [badVersion] = await versions.listByCanvas(badId);
-    if (!badVersion) throw new Error("seed failed: bad canvas has no version");
     const guarded: StorageDriver = {
       ...storage,
       deleteMany: async (keys: string[]) => {
-        if (keys.some((k) => k.startsWith(versionPrefix(badVersion.id)))) {
+        if (keys.some((k) => k.startsWith(canvasBlobPrefix(badId)))) {
           throw new Error("storage down");
         }
         return storage.deleteMany(keys);
       },
     };
 
-    const summary = await purgeDeletedCanvases({ canvases, versions, storage: guarded, log }, {});
+    const summary = await purgeDeletedCanvases(deps(guarded));
 
     expect(summary.canvasesPurged).toBe(1);
     expect(summary.failed).toBe(1);
-    // The failed canvas is fully intact (row + version), safe to retry.
     expect(await versionsRepository(client).listByCanvas(badId)).toHaveLength(1);
-    // The healthy one was reclaimed: row kept as a tombstone, versions gone.
     expect(await canvases.findById(okId)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(okId)).toEqual([]);
   });

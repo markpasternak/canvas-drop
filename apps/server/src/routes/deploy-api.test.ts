@@ -9,6 +9,7 @@ import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -36,8 +37,16 @@ describe("deployApiRoutes (Bearer key)", () => {
     const users = usersRepository(client);
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
     const audit = createAuditLog(auditRepository(client), silent);
-    const engine = deployEngine({ config, canvases, versions, storage: memStorage(), log: silent });
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage: memStorage(),
+      log: silent,
+    });
     const owner = await users.upsert({
       providerSub: "o",
       email: "o@e.com",

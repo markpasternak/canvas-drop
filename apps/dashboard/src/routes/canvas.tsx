@@ -8,6 +8,7 @@ import { useCanvas } from "../lib/queries.js";
 
 const TABS = [
   { to: "/canvases/$id", label: "Overview", exact: true },
+  { to: "/canvases/$id/editor", label: "Edit", exact: false },
   { to: "/canvases/$id/versions", label: "Versions", exact: false },
   { to: "/canvases/$id/settings", label: "Settings", exact: false },
   { to: "/canvases/$id/usage", label: "Usage", exact: false },

@@ -7,6 +7,7 @@ export const keys = {
   archivedCanvases: ["canvases", "archived"] as const,
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
+  draft: (id: string) => ["draft", id] as const,
 };
 
 export function useMe() {
@@ -27,4 +28,8 @@ export function useCanvas(id: string) {
 
 export function useVersions(id: string) {
   return useQuery({ queryKey: keys.versions(id), queryFn: () => api.listVersions(id) });
+}
+
+export function useDraft(id: string) {
+  return useQuery({ queryKey: keys.draft(id), queryFn: () => api.getDraft(id) });
 }

@@ -135,6 +135,29 @@ export const versions = sqliteTable(
     // number (history, prune, nextNumber's max). No separate created_at index needed.
     uniqueIndex("versions_canvas_number_uq").on(t.canvasId, t.number),
     check("versions_status_chk", sql`${t.status} in ('pending', 'ready')`),
-    check("versions_source_chk", sql`${t.source} in ('folder', 'zip', 'paste', 'api')`),
+    check("versions_source_chk", sql`${t.source} in ('folder', 'zip', 'paste', 'api', 'editor')`),
+  ],
+);
+
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    // path -> { size, hash, mime }; the working set of files, empty by default.
+    manifest: c.json("manifest").notNull(),
+    // The published version this draft was derived from (null for a never-published canvas).
+    baseVersionId: c.text("base_version_id"),
+    // Set when a direct publish (deploy API / re-upload) landed under this draft (M5 R15/F3).
+    stale: c.bool("stale").notNull().default(false),
+    createdAt: c.epochMs("created_at").notNull(),
+    updatedAt: c.epochMs("updated_at").notNull(),
+  },
+  (t) => [
+    // Exactly one draft per canvas (R10).
+    uniqueIndex("drafts_canvas_id_uq").on(t.canvasId),
   ],
 );

@@ -13,14 +13,17 @@ import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
+import type { DraftsRepository } from "./db/repositories/drafts.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
+import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
+import { draftApiRoutes } from "./routes/draft-api.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { resolveRequest } from "./routing/resolve-request.js";
@@ -34,6 +37,7 @@ export interface BuildAppDeps {
   users: UsersRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  drafts: DraftsRepository;
   storage: StorageDriver;
   engine: DeployEngine;
   audit: AuditLog;
@@ -128,6 +132,26 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       audit: deps.audit,
       engine: deps.engine,
+    }),
+  );
+
+  // In-browser editor / draft API (M5) — same base, distinct paths.
+  app.route(
+    "/api/canvases",
+    draftApiRoutes({
+      config: deps.config,
+      canvases: deps.canvases,
+      versions: deps.versions,
+      storage: deps.storage,
+      drafts: draftService({
+        config: deps.config,
+        canvases: deps.canvases,
+        versions: deps.versions,
+        drafts: deps.drafts,
+        storage: deps.storage,
+        audit: deps.audit,
+        log: deps.rootLogger,
+      }),
     }),
   );
 

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { folderFormFromFiles } from "../components/DeployFiles.js";
-import { api, type Canvas, type CanvasSettings } from "./api.js";
+import { api, type Canvas, type CanvasSettings, type DraftView } from "./api.js";
 import { keys } from "./queries.js";
 
 /**
@@ -83,6 +83,90 @@ export function useRollback(id: string) {
       qc.invalidateQueries({ queryKey: keys.versions(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
     },
+  });
+}
+
+// --- In-browser editor / draft (M5) ---
+
+/** Save a draft file (autosaved by the editor). Updates the draft cache in place. */
+export function useSaveDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    // Serialize draft writes for this canvas so overlapping autosaves settle in order.
+    scope: { id: `draft-${id}` },
+    mutationFn: (input: { path: string; content: string }) =>
+      api.putDraftFile(id, input.path, input.content),
+    onSuccess: (draft) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
+/** Replace/upload a single draft file with raw bytes (binary-safe). */
+export function useUploadDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `draft-${id}` },
+    mutationFn: (input: { path: string; file: Blob }) =>
+      api.uploadDraftFile(id, input.path, input.file),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
+/**
+ * Upload many files into the draft (drag-drop / picker add). Sequential by design:
+ * each draft write is a full-manifest overwrite server-side, so parallel uploads
+ * would race and lose entries. Returns the count uploaded; invalidates the draft.
+ */
+export function useUploadDraftFiles(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `draft-${id}` },
+    mutationFn: async (files: Array<{ path: string; file: Blob }>) => {
+      for (const f of files) await api.uploadDraftFile(id, f.path, f.file);
+      return files.length;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.draft(id) }),
+  });
+}
+
+/** Delete a draft file. */
+export function useDeleteDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) => api.deleteDraftFile(id, path),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
+/** Rename/move a draft file. */
+export function useRenameDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { from: string; to: string }) =>
+      api.renameDraftFile(id, input.from, input.to),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
+/** Publish the draft as a new live version — invalidates the canvas, versions, and draft. */
+export function usePublishDraft(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.publishDraft(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.versions(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+      qc.invalidateQueries({ queryKey: keys.draft(id) });
+    },
+  });
+}
+
+/** Restore a published version into the draft — replaces the draft cache. */
+export function useRestoreToDraft(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (version: number) => api.restoreToDraft(id, version),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
   });
 }
 

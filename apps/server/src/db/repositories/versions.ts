@@ -110,9 +110,12 @@ export function versionsRepository(client: DbClient) {
     },
 
     /**
-     * Prune ready versions beyond the newest `keep`, never the live current one.
-     * Returns the rows actually deleted so the caller cleans up exactly their
-     * storage objects.
+     * Prune ready version **rows** beyond the newest `keep`, never the live
+     * current one. Returns the rows actually deleted so the caller knows which
+     * versions are gone. Storage is NOT touched here: under content-addressed
+     * blobs (M5), a version's bytes may be shared with surviving versions or the
+     * draft, so blob reclamation is a separate per-canvas mark-sweep GC (KTD-4),
+     * never a per-version prefix delete.
      *
      * The live current pointer is re-read ATOMICALLY inside the DELETE (a
      * correlated subquery on `canvases.current_version_id`), NOT from a snapshot —

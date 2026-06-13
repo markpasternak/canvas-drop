@@ -3,9 +3,10 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { zipSync } from "fflate";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
-import { versionStorageKey } from "../canvas/storage-keys.js";
+import { blobKey, canvasBlobPrefix } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -34,6 +35,7 @@ describe("deployEngine", () => {
     const users = usersRepository(client);
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
     const owner = await users.upsert({
       providerSub: "o",
       email: "o@e.com",
@@ -41,8 +43,8 @@ describe("deployEngine", () => {
       isAdmin: false,
     });
     const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
-    const engine = deployEngine({ config, canvases, versions, storage, log: silent });
-    return { engine, canvases, versions, storage, canvas: cv, ownerId: owner.id };
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    return { engine, canvases, versions, drafts, storage, canvas: cv, ownerId: owner.id };
   }
 
   // --- ATOMICITY FIRST (execution note) ---
@@ -71,8 +73,11 @@ describe("deployEngine", () => {
     expect(after?.currentVersionId).toBeTruthy();
     const v = await versions.findById(after?.currentVersionId as string);
     expect(v?.status).toBe("ready");
-    expect(Object.keys(v?.manifest ?? {}).sort()).toEqual(["a/b.css", "app.js", "index.html"]);
-    expect(await storage.get(versionStorageKey(v?.id as string, "index.html"))).not.toBeNull();
+    const manifest = (v?.manifest ?? {}) as Record<string, { hash: string }>;
+    expect(Object.keys(manifest).sort()).toEqual(["a/b.css", "app.js", "index.html"]);
+    // Bytes live at the content-addressed blob key, not a per-version path.
+    const indexHash = manifest["index.html"]?.hash as string;
+    expect(await storage.get(blobKey(canvas.id, indexHash))).not.toBeNull();
 
     // a second deploy → version 2, pointer moves
     const r2 = await engine.deploy(canvas, "paste", folder({ "index.html": "y" }), ownerId);
@@ -223,16 +228,43 @@ describe("deployEngine", () => {
     expect(await versions.findById(ids[1] as string)).toBeNull(); // v2 pruned (oldest non-current)
   });
 
-  it("prune storage-delete failure is swallowed (deploy still returns cleanly)", async () => {
+  it("blob GC deleteMany failure is swallowed (deploy still returns cleanly)", async () => {
     const storage = memStorage();
-    storage.delete = async () => {
-      throw new Error("storage delete down");
+    storage.deleteMany = async () => {
+      throw new Error("storage deleteMany down");
     };
     const { engine, canvas, ownerId } = await setup(storage);
     for (let i = 0; i < 11; i++) {
       const r = await engine.deploy(canvas, "api", folder({ "index.html": `v${i}` }), ownerId);
-      expect(r.version).toBe(i + 1); // deploy unaffected by prune-delete failures
+      expect(r.version).toBe(i + 1); // deploy unaffected by GC-delete failures
     }
+  });
+
+  // --- CONTENT-ADDRESSED DEDUP (M5, AE1) ---
+  it("a redeploy changing one file of twenty writes exactly one new blob (AE1)", async () => {
+    const { engine, canvas, storage, ownerId } = await setup();
+    const base: Record<string, string> = {};
+    for (let i = 0; i < 20; i++) base[`f${i}.html`] = `<h1>file ${i}</h1>`;
+    await engine.deploy(canvas, "folder", folder(base), ownerId);
+    const afterFirst = (await storage.list(canvasBlobPrefix(canvas.id))).length;
+    expect(afterFirst).toBe(20); // 20 distinct files → 20 blobs
+
+    // Change exactly one file; the other 19 are byte-identical → reuse their blobs.
+    const edited = { ...base, "f7.html": "<h1>file 7 — edited</h1>" };
+    await engine.deploy(canvas, "folder", folder(edited), ownerId);
+    const afterSecond = (await storage.list(canvasBlobPrefix(canvas.id))).length;
+    expect(afterSecond).toBe(21); // exactly one NEW blob written (19 reused, old f7 still referenced by v1)
+  });
+
+  it("identical bytes at two paths in one deploy upload a single blob", async () => {
+    const { engine, canvas, storage, ownerId } = await setup();
+    await engine.deploy(
+      canvas,
+      "folder",
+      folder({ "a.html": "<h1>same</h1>", "b.html": "<h1>same</h1>" }),
+      ownerId,
+    );
+    expect((await storage.list(canvasBlobPrefix(canvas.id))).length).toBe(1);
   });
 
   it("prunes ready versions beyond the newest 10 (async), keeping the current", async () => {

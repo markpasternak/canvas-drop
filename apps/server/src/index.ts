@@ -8,6 +8,7 @@ import { makeDb } from "./db/factory.js";
 import { runMigrations } from "./db/migrate.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
+import { draftsRepository } from "./db/repositories/drafts.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
@@ -36,8 +37,9 @@ async function main() {
   const users = usersRepository(db);
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
+  const drafts = draftsRepository(db);
   const audit = createAuditLog(auditRepository(db), rootLogger);
-  const engine = deployEngine({ config, canvases, versions, storage, log: rootLogger });
+  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: rootLogger });
   const { strategy, sessionSvc } = setupAuth(config, {
     users,
     sessions: (await import("./db/repositories/sessions.js")).sessionsRepository(db),
@@ -59,6 +61,7 @@ async function main() {
     users,
     canvases,
     versions,
+    drafts,
     storage,
     engine,
     audit,

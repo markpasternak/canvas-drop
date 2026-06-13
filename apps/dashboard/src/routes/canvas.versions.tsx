@@ -1,4 +1,4 @@
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
@@ -9,7 +9,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
-import { useRollback } from "../lib/mutations.js";
+import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
 
 /** Versions tab: deploy history (newest first), forward "Deploy new version", and
@@ -20,6 +20,8 @@ export default function Versions() {
   const { data: versions, isLoading, isError } = useVersions(id);
   const { data: canvas } = useCanvas(id);
   const rollback = useRollback(id);
+  const restore = useRestoreToDraft(id);
+  const navigate = useNavigate();
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
   // Deploy + make-live target the live canvas — disabled while archived/disabled.
@@ -62,6 +64,16 @@ export default function Versions() {
     }
   }
 
+  async function restoreToDraft(version: number) {
+    try {
+      await restore.mutateAsync(version);
+      toast(`Version ${version} loaded into the draft`);
+      navigate({ to: "/canvases/$id/editor", params: { id } });
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't restore to the draft", "error");
+    }
+  }
+
   return (
     <>
       <p className="mb-4 text-sm text-muted">
@@ -88,10 +100,22 @@ export default function Versions() {
                 {formatBytes(v.totalBytes)}
               </div>
             </div>
-            {!v.current && v.status === "ready" && isActive && (
-              <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
-                Make live
-              </Button>
+            {v.status === "ready" && isActive && (
+              <div className="flex gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => restoreToDraft(v.number)}
+                  title="Load this version's files into the editable draft"
+                >
+                  Restore to draft
+                </Button>
+                {!v.current && (
+                  <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
+                    Make live
+                  </Button>
+                )}
+              </div>
             )}
           </li>
         ))}

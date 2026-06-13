@@ -5,9 +5,9 @@ import { createMiddleware } from "hono/factory";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { rootEntry } from "./manifest.js";
+import { assetPathFor, resolveAsset } from "./asset-resolver.js";
 import { mimeFor } from "./mime.js";
-import { versionStorageKey } from "./storage-keys.js";
+import { blobKey } from "./storage-keys.js";
 
 /** Filenames that look content-hashed (e.g. app.a1b2c3d4.js) get immutable caching. */
 const CONTENT_HASH_RE = /\.[0-9a-f]{8,}\.[a-z0-9]+$/i;
@@ -16,48 +16,6 @@ export interface ServeDeps {
   config: Config;
   versions: VersionsRepository;
   storage: StorageDriver;
-}
-
-/** Extract the asset path (after the slug) from the request path. */
-export function assetPathFor(config: Config, slug: string, reqPath: string): string {
-  let p = reqPath;
-  if (config.urlMode === "path") {
-    const prefix = `/c/${slug}`;
-    p = p.startsWith(prefix) ? p.slice(prefix.length) : p;
-  }
-  p = p.replace(/^\/+/, ""); // strip leading slash
-  return p;
-}
-
-/**
- * Resolve a request to a manifest entry path: exact hit → directory index →
- * root entry → SPA fallback → null. Pure so the resolution table is unit-testable.
- *
- * The canvas "root entry" is index.html, or — forgiving a one-file deploy whose
- * page isn't named index.html — the single HTML file ({@link rootEntry}). The
- * root request and the SPA fallback both resolve to that SAME entry, so a
- * single-page app with a non-index entry works at the root AND for deep client
- * routes when SPA fallback is on. With several HTML files and no index, the
- * entry is undefined and both 404 (there's no way to pick the home page).
- */
-export function resolveAsset(
-  manifest: Manifest,
-  assetPath: string,
-  spaFallback: boolean,
-): { path: string } | null {
-  // Exact file hit (non-root).
-  if (assetPath !== "" && manifest[assetPath]) return { path: assetPath };
-  // Directory request → its own index.html.
-  if (assetPath !== "") {
-    const dirIndex = `${assetPath.replace(/\/$/, "")}/index.html`;
-    if (manifest[dirIndex]) return { path: dirIndex };
-  }
-  const entry = rootEntry(manifest).path;
-  // Root → the entry.
-  if (assetPath === "" && entry) return { path: entry };
-  // SPA fallback → the entry for any unmatched path (client-side routing).
-  if (spaFallback && entry) return { path: entry };
-  return null;
 }
 
 /**
@@ -91,7 +49,7 @@ export function serveCanvas(deps: ServeDeps) {
       return new Response(null, { status: 304, headers });
     }
 
-    const bytes = await deps.storage.get(versionStorageKey(version.id, resolved.path));
+    const bytes = await deps.storage.get(blobKey(canvas.id, entry.hash));
     if (!bytes) return notFound(c, "missing");
 
     const { contentType } = mimeFor(resolved.path);
