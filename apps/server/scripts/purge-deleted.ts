@@ -27,9 +27,13 @@ import { purgeDeletedCanvases } from "../src/canvas/purge.js";
 import { makeDb } from "../src/db/factory.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { canvasesRepository } from "../src/db/repositories/canvases.js";
+import { usageEventsRepository } from "../src/db/repositories/usage-events.js";
 import { versionsRepository } from "../src/db/repositories/versions.js";
 import { createLogger } from "../src/log/logger.js";
 import { makeStorage } from "../src/storage/factory.js";
+
+/** Retention window for the metering table (plan 007 KTD-7). Stats only need ~30d. */
+const USAGE_EVENTS_RETENTION_DAYS = 90;
 
 function parseArgs(argv: string[]): { olderThanDays: number; dryRun: boolean } {
   const words = argv.filter((a) => !a.startsWith("-"));
@@ -71,6 +75,22 @@ async function main() {
     );
     if (summary.failed > 0) {
       log.warn({ failed: summary.failed }, "some canvases were skipped; rerun to retry them");
+    }
+
+    // Retention prune for the metering table (KTD-7) — bounds usage_events growth
+    // since every primitive op appends a row and rate limiting is deferred (M7).
+    const usageCutoff = Date.now() - USAGE_EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    if (dryRun) {
+      log.info(
+        { retentionDays: USAGE_EVENTS_RETENTION_DAYS },
+        "dry run: usage_events prune skipped",
+      );
+    } else {
+      const pruned = await usageEventsRepository(db).pruneBefore(usageCutoff);
+      log.info(
+        { pruned, retentionDays: USAGE_EVENTS_RETENTION_DAYS },
+        `pruned ${pruned} usage_events older than ${USAGE_EVENTS_RETENTION_DAYS}d`,
+      );
     }
   } finally {
     await db.close();

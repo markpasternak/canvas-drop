@@ -111,6 +111,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1067.0
         version: 3.1067.0
+      '@canvas-drop/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@canvas-drop/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -176,7 +179,11 @@ importers:
         specifier: ^4.22.4
         version: 4.22.4
 
-  packages/sdk: {}
+  packages/sdk:
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
 
   packages/shared:
     dependencies:

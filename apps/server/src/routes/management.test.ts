@@ -8,6 +8,8 @@ import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { filesRepository } from "../db/repositories/files.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -43,7 +45,18 @@ function buildApp(
     await next();
   });
   app.route("/api/me", meRoutes());
-  app.route("/api/canvases", managementRoutes({ config, canvases, versions, audit, engine }));
+  app.route(
+    "/api/canvases",
+    managementRoutes({
+      config,
+      canvases,
+      versions,
+      audit,
+      engine,
+      usage: usageEventsRepository(client),
+      files: filesRepository(client),
+    }),
+  );
   return app;
 }
 
@@ -797,5 +810,49 @@ describe("managementRoutes", () => {
       body: JSON.stringify({ kv: false }),
     });
     expect(res.status).toBe(403);
+  });
+
+  // --- Usage stats (U10) ---
+
+  it("GET /:id/usage returns KV op + file storage figures for the owner", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await createCanvas(app, { backendEnabled: true });
+    // Seed a KV op + a file row directly through the repos.
+    await usageEventsRepository(client).record({
+      canvasId: created.id,
+      userId: owner.id,
+      type: "kv_op",
+      meta: { op: "set" },
+    });
+    await filesRepository(client).insert({
+      id: "f1",
+      canvasId: created.id,
+      filename: "a.txt",
+      mime: "text/plain",
+      sizeBytes: 1234,
+      storageKey: `files/${created.id}/f1`,
+      uploadedBy: owner.id,
+    });
+    const res = await app.request(`/api/canvases/${created.id}/usage`);
+    expect(res.status).toBe(200);
+    expect(await jsonOf<{ kvOps: number; fileCount: number; fileBytes: number }>(res)).toEqual({
+      kvOps: 1,
+      fileOps: 0,
+      fileCount: 1,
+      fileBytes: 1234,
+    });
+  });
+
+  it("GET /:id/usage is 404 for a non-owner", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }), {});
+    const res = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/usage`,
+    );
+    expect(res.status).toBe(404);
   });
 });

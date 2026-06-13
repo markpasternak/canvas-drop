@@ -95,6 +95,14 @@ export interface DeployResult {
   warnings: string[];
 }
 
+/** Per-canvas usage figures (D24, M6) — KV ops + file storage. */
+export interface CanvasUsage {
+  kvOps: number;
+  fileOps: number;
+  fileCount: number;
+  fileBytes: number;
+}
+
 /** One file in the draft (no bytes — those load on demand via getDraftFile). */
 export interface DraftFile {
   path: string;
@@ -312,6 +320,8 @@ export const api = {
     request<{ canvases: CanvasListItem[] }>("/api/canvases/archived").then((r) => r.canvases),
 
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
+
+  getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),
 
   createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
