@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { Config } from "@canvas-drop/shared";
+import { type Config, effectiveCapabilities, storedCapabilities } from "@canvas-drop/shared";
 import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -30,6 +30,17 @@ export interface ManagementDeps {
 const createSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
+  // Backend-group master switch chosen at create time (plan 006). Off by default.
+  backendEnabled: z.boolean().optional(),
+});
+
+/** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
+const capabilitiesSchema = z.object({
+  backendEnabled: z.boolean().optional(),
+  kv: z.boolean().optional(),
+  files: z.boolean().optional(),
+  ai: z.boolean().optional(),
+  realtime: z.boolean().optional(),
 });
 
 const settingsSchema = z.object({
@@ -43,6 +54,11 @@ const settingsSchema = z.object({
   gallerySummary: z.string().max(500).nullable().optional(),
   galleryTags: z.array(z.string()).optional(),
 });
+
+/** Operator global switches the capability helper ANDs against (plan 006). */
+function capabilityGlobals(config: Config) {
+  return { realtimeEnabled: config.realtimeEnabled, aiEnabled: config.ai.apiKey !== undefined };
+}
 
 /** Public canvas view (never leaks `api_key_hash` / `password_hash`). */
 function publicCanvas(config: Config, cv: Canvas) {
@@ -60,6 +76,12 @@ function publicCanvas(config: Config, cv: Canvas) {
     gallerySummary: cv.gallerySummary,
     // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
     galleryTags: cv.galleryTags as string[] | null,
+    // Capability model (plan 006): the master switch, the raw stored feature flags,
+    // and the effective state after ANDing operator globals (so the dashboard can
+    // explain a feature that's off because the operator disabled it).
+    backendEnabled: cv.backendEnabled,
+    capabilities: storedCapabilities(cv),
+    effective: effectiveCapabilities(cv, capabilityGlobals(config)),
     status: cv.status,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
@@ -110,6 +132,7 @@ export function managementRoutes(deps: ManagementDeps) {
       apiKeyHash: hashApiKey(apiKey),
       title: body.data.title,
       description: body.data.description,
+      backendEnabled: body.data.backendEnabled,
     });
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // apiKey is returned ONCE and never again.
@@ -190,6 +213,23 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { shared: p.shared },
       });
     }
+    return c.json(publicCanvas(deps.config, updated));
+  });
+
+  app.patch("/:id/capabilities", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = capabilitiesSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const patch = body.data;
+    if (Object.keys(patch).length === 0) return c.json(publicCanvas(deps.config, cv));
+    const updated = await deps.canvases.updateCapabilities(cv.id, patch);
+    deps.audit.recordAudit({
+      action: "capabilities_update",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { changed: Object.keys(patch) },
+    });
     return c.json(publicCanvas(deps.config, updated));
   });
 
@@ -319,7 +359,11 @@ export function managementRoutes(deps: ManagementDeps) {
   // Paste-HTML quick create: create a canvas, then deploy a single index.html.
   app.post("/paste", sameOrigin, deployBodyLimit, async (c) => {
     const body = z
-      .object({ html: z.string().min(1), title: z.string().max(200).optional() })
+      .object({
+        html: z.string().min(1),
+        title: z.string().max(200).optional(),
+        backendEnabled: z.boolean().optional(),
+      })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
@@ -332,6 +376,7 @@ export function managementRoutes(deps: ManagementDeps) {
       slug,
       apiKeyHash: hashApiKey(apiKey),
       title: body.data.title,
+      backendEnabled: body.data.backendEnabled,
     });
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // Deploy directly (typed result) rather than re-parsing a Response body. If
