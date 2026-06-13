@@ -48,6 +48,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:sqlite
 
+  # Dashboard leg: the React/jsdom suite. Dialect-agnostic, so it runs ONCE here
+  # rather than under both DB legs. Typecheck + build are covered by the lint and
+  # build jobs (root `typecheck`/`build` include the dashboard).
+  test-dashboard:
+    name: Test (dashboard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:dashboard
+
   # Postgres leg: same suite, plus real-infrastructure smoke tests against a live
   # postgres:16 (node-postgres driver) and MinIO (real S3Driver) — coverage the
   # in-process drivers can't give.
