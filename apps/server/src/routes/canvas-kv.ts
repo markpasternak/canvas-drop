@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { KvNotNumericError, type KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
+import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 
 /** KV limits (§6.4.3–5). */
@@ -30,12 +31,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("*", requireCapability("kv", deps.config));
 
-  // `canvas` is guaranteed set by the upstream resolve middleware (canvas-api.ts).
-  const canvasId = (c: Context<AppEnv>) => {
-    const cv = c.get("canvas");
-    if (!cv) throw new Error("canvas not resolved");
-    return cv.id;
-  };
+  const canvasId = (c: Context<AppEnv>) => requireCanvas(c).id;
   const meter = (c: Context<AppEnv>, op: string) => {
     void deps.usage
       .record({ canvasId: canvasId(c), userId: c.get("user").id, type: "kv_op", meta: { op } })
@@ -68,7 +64,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
     app.get(`${prefix}/:key`, async (c) => {
       const value = await deps.kv.get(canvasId(c), scopeOf(c), c.req.param("key"));
       meter(c, "get");
-      if (value === null) return c.json({ error: "not_found" }, 404);
+      if (value === null) return c.json({ code: "NOT_FOUND" }, 404);
       return c.json({ value });
     });
 
@@ -81,7 +77,7 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
       try {
         value = (await c.req.json()) as Json;
       } catch {
-        return c.json({ error: "invalid_body" }, 400);
+        return c.json({ code: "INVALID_BODY" }, 400);
       }
       if (Buffer.byteLength(JSON.stringify(value ?? null)) > KV_MAX_VALUE_BYTES) {
         return c.json({ code: "VALUE_TOO_LARGE" }, 413);

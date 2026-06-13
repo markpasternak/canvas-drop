@@ -75,6 +75,18 @@ describe.each(DIALECTS)("kvRepository [%s]", (dialect) => {
     expect(await kv.get(canvasId, "shared", "votes")).toBe(50);
   });
 
+  it("increment: fractional values accumulate identically on both dialects (no truncation)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const kv = kvRepository(client);
+    await kv.set(canvasId, "shared", "balance", 2.5, userId);
+    expect(await kv.increment(canvasId, "shared", "balance", 0.25, userId)).toBe(2.75);
+    expect(await kv.get(canvasId, "shared", "balance")).toBe(2.75);
+    // integer increments still read back as integers
+    expect(await kv.increment(canvasId, "shared", "n", 5, userId)).toBe(5);
+    expect(await kv.get(canvasId, "shared", "n")).toBe(5);
+  });
+
   it("increment: present non-numeric value is rejected", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

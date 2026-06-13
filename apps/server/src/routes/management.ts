@@ -189,15 +189,15 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id/usage", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const counts = await deps.usage.countByType(cv.id, null);
-    const [fileBytes, files] = await Promise.all([
+    const [counts, fileBytes, fileCount] = await Promise.all([
+      deps.usage.countByType(cv.id, null),
       deps.files.totalBytes(cv.id),
-      deps.files.list(cv.id),
+      deps.files.countFiles(cv.id),
     ]);
     return c.json({
       kvOps: counts.kv_op ?? 0,
       fileOps: counts.file_op ?? 0,
-      fileCount: files.length,
+      fileCount,
       fileBytes,
     });
   });

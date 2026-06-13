@@ -123,7 +123,7 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
       headers: { origin: "https://evil.canvases.example.com" },
     });
     expect(res.status).toBe(403);
-    expect((await jsonOf<{ error: string }>(res)).error).toBe("cross_canvas_forbidden");
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("CROSS_CANVAS_FORBIDDEN");
   });
 
   it("path mode: a cross-site Sec-Fetch-Site is rejected (best-effort §12.2)", async () => {
@@ -133,6 +133,40 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
       headers: { "sec-fetch-site": "cross-site" },
     });
     expect(res.status).toBe(403);
+  });
+
+  it("path mode: a Referer for a prefix-sharing canvas is rejected (segment boundary)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await canvas(true); // slug "app"
+    // Same-origin request, but the page is canvas "app-evil" calling /v1/c/app.
+    const res = await buildApi(client, { id: owner.id }).request("/v1/c/app/me", {
+      headers: {
+        "sec-fetch-site": "same-origin",
+        referer: "http://localhost/c/app-evil/index.html",
+      },
+    });
+    expect(res.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("CROSS_CANVAS_FORBIDDEN");
+  });
+
+  it("a password-protected shared canvas's API stays closed without a gate grant (§12.0 #3)", async () => {
+    client = await makeTestDb("sqlite");
+    const { cv } = await canvas(true);
+    await canvasesRepository(client).updateSettings(cv.id, { shared: true });
+    await canvasesRepository(client).setPassword(cv.id, "argon2hash");
+    const other = await usersRepository(client).upsert({
+      providerSub: "viewer",
+      email: "v@x.com",
+      name: "V",
+      isAdmin: false,
+    });
+    // Non-owner viewer with no gate cookie → blocked.
+    const blocked = await buildApi(client, { id: other.id }).request("/v1/c/app/me");
+    expect(blocked.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(blocked)).code).toBe("PASSWORD_REQUIRED");
+    // Owner bypasses the gate.
+    const ownerRes = await buildApi(client, { id: cv.ownerId }).request("/v1/c/app/me");
+    expect(ownerRes.status).toBe(200);
   });
 
   it("path mode: same-origin request is allowed", async () => {

@@ -84,6 +84,7 @@ export function detectContext(loc: {
   pathname: string;
   origin: string;
   protocol: string;
+  port?: string;
 }): CanvasContext {
   const pathMatch = PATH_RE.exec(loc.pathname);
   if (pathMatch) {
@@ -91,11 +92,12 @@ export function detectContext(loc: {
     return { slug: pathMatch[1] as string, apiBase: loc.origin };
   }
   // Subdomain mode: `{slug}.{base}` — slug is the first label; the API lives on
-  // the base host (first label stripped).
+  // the base host (first label stripped), preserving any non-default port.
   const labels = loc.hostname.split(".");
   const slug = labels[0] as string;
   const baseHost = labels.slice(1).join(".");
-  return { slug, apiBase: `${loc.protocol}//${baseHost}` };
+  const port = loc.port ? `:${loc.port}` : "";
+  return { slug, apiBase: `${loc.protocol}//${baseHost}${port}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,7 @@ export interface FileMeta {
   name: string;
   size: number;
   mime?: string;
+  createdAt?: number;
 }
 
 export interface KvList {
@@ -228,7 +231,10 @@ export function createClient(options: ClientOptions): CanvasdropClient {
           body: form,
         });
         if (!res.ok) throw errorFromResponse(res.status, await res.json().catch(() => null));
-        return (await res.json()) as { id: string; name: string; size: number; url: string };
+        const json = (await res.json()) as { id: string; name: string; size: number };
+        // Build an absolute, mode-correct content URL (the server's `url` is
+        // root-relative and would resolve to the canvas subdomain in subdomain mode).
+        return { ...json, url: base(`/files/${encodeURIComponent(json.id)}/content`) };
       },
       async list() {
         const r = await request<{ files: FileMeta[] }>(opts, "GET", "/files");

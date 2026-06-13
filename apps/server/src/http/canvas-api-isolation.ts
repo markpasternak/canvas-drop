@@ -1,8 +1,20 @@
 import type { Config } from "@canvas-drop/shared";
+import type { Canvas } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { canvasUrl } from "../canvas/url.js";
 import type { AppEnv } from "./types.js";
+
+/**
+ * The canvas resolved by the runtime router's resolve middleware. Throws if a
+ * handler runs without it (a wiring error — every primitive route is mounted
+ * behind the resolver). Shared by the kv/files/me handlers (avoids per-file dupes).
+ */
+export function requireCanvas(c: Context<AppEnv>): Canvas {
+  const cv = c.get("canvas");
+  if (!cv) throw new Error("canvas not resolved — runtime router resolve middleware did not run");
+  return cv;
+}
 
 /**
  * Cross-canvas isolation for the `/v1/c/:slug/*` runtime API (§12.0 #4, §9.4).
@@ -62,7 +74,7 @@ export function canvasApiIsolation(config: Config) {
       // a non-browser/programmatic caller (no ambient cross-canvas authority).
       if (origin) {
         if (!expected || origin !== expected) {
-          return c.json({ error: "cross_canvas_forbidden" }, 403);
+          return c.json({ code: "CROSS_CANVAS_FORBIDDEN" }, 403);
         }
         applyCors(c, origin);
       }
@@ -70,14 +82,18 @@ export function canvasApiIsolation(config: Config) {
       // Path mode: best-effort per §12.2 (reduced isolation, documented).
       const sfs = c.req.header("sec-fetch-site");
       if (sfs && sfs !== "same-origin" && sfs !== "none") {
-        return c.json({ error: "cross_site_forbidden" }, 403);
+        return c.json({ code: "CROSS_SITE_FORBIDDEN" }, 403);
       }
       const referer = c.req.header("referer");
       if (referer && slug) {
         try {
           const path = new URL(referer).pathname;
-          if (!path.includes(`/c/${slug}`)) {
-            return c.json({ error: "cross_canvas_forbidden" }, 403);
+          // Segment-boundary match (NOT substring): `/c/app` must not satisfy a
+          // request for slug `ap`, and slug `app` must not be satisfied by a
+          // referer for `/c/app-evil`.
+          const onThisCanvas = path === `/c/${slug}` || path.startsWith(`/c/${slug}/`);
+          if (!onThisCanvas) {
+            return c.json({ code: "CROSS_CANVAS_FORBIDDEN" }, 403);
           }
         } catch {
           // unparseable Referer → ignore (best-effort)

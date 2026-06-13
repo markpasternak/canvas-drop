@@ -1,11 +1,11 @@
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { safeServeHeaders } from "../canvas/file-serving.js";
 import { FilesQuotaError, type FilesService, FileTooLargeError } from "../canvas/files-service.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
+import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 
 export interface CanvasFilesDeps {
@@ -24,11 +24,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("*", requireCapability("files", deps.config));
 
-  const canvas = (c: Context<AppEnv>): Canvas => {
-    const cv = c.get("canvas");
-    if (!cv) throw new Error("canvas not resolved");
-    return cv;
-  };
+  const canvas = (c: Context<AppEnv>) => requireCanvas(c);
   const meter = (c: Context<AppEnv>, op: string) => {
     void deps.usage
       .record({ canvasId: canvas(c).id, userId: c.get("user").id, type: "file_op", meta: { op } })
@@ -41,9 +37,9 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
     try {
       file = (await c.req.formData()).get("file");
     } catch {
-      return c.json({ error: "invalid_body" }, 400);
+      return c.json({ code: "INVALID_BODY" }, 400);
     }
-    if (!(file instanceof File)) return c.json({ error: "invalid_body" }, 400);
+    if (!(file instanceof File)) return c.json({ code: "INVALID_BODY" }, 400);
     const bytes = new Uint8Array(await file.arrayBuffer());
     try {
       const row = await deps.files.create({
@@ -87,13 +83,13 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
   app.delete("/:id", async (c) => {
     const ok = await deps.files.delete(canvas(c).id, c.req.param("id"));
     meter(c, "delete");
-    if (!ok) return c.json({ error: "not_found" }, 404);
+    if (!ok) return c.json({ code: "NOT_FOUND" }, 404);
     return c.json({ ok: true });
   });
 
   app.get("/:id/content", async (c) => {
     const got = await deps.files.content(canvas(c).id, c.req.param("id"));
-    if (!got) return c.json({ error: "not_found" }, 404);
+    if (!got) return c.json({ code: "NOT_FOUND" }, 404);
     meter(c, "download");
     return new Response(new Uint8Array(got.bytes), {
       headers: safeServeHeaders(got.row.mime, got.row.filename),

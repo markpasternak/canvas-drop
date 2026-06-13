@@ -113,9 +113,11 @@ export function kvRepository(client: DbClient) {
       if (existing !== null && typeof existing !== "number") throw new KvNotNumericError();
 
       const now = Date.now();
-      // Dialect-specific atomic numeric expression on the row's own value.
+      // Dialect-specific atomic numeric expression on the row's own value. Use a
+      // REAL cast on SQLite (NOT INTEGER) so fractional values aren't truncated —
+      // keeps both dialects in lockstep for float counters (pg uses ::numeric).
       const nextExpr = isSqlite
-        ? sql`CAST(${t.value} AS INTEGER) + ${by}`
+        ? sql`CAST(${t.value} AS REAL) + ${by}`
         : sql`to_jsonb((${t.value}::text::numeric) + ${by})`;
       const rows = (await db
         .insert(t)

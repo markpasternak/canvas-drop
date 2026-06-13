@@ -93,7 +93,7 @@ describe("buildApp", () => {
     // and 404s with not_found — same no-existence-leak behavior as the content path.
     const platform = await a.request("/v1/c/abc/kv/x", { headers: { host: "localhost:3000" } });
     expect(platform.status).toBe(404);
-    expect((await jsonOf<{ error: string }>(platform)).error).toBe("not_found");
+    expect((await jsonOf<{ code: string }>(platform)).code).toBe("NOT_FOUND");
   });
 
   it("end-to-end: create → deploy ZIP → the canvas is live at its URL", async () => {

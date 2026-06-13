@@ -1,7 +1,7 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
-import { filesService } from "../canvas/files-service.js";
+import { filesService, MAX_CANVAS_BYTES } from "../canvas/files-service.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
@@ -139,6 +139,31 @@ describe("canvas Files routes", () => {
     const { ownerId } = await setup(client, true, false);
     const app = buildApi(client, ownerId);
     expect((await app.request("/v1/c/app/files")).status).toBe(403);
+  });
+
+  it("403s when backend is off entirely", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client, false);
+    const app = buildApi(client, ownerId);
+    expect((await app.request("/v1/c/app/files")).status).toBe(403);
+  });
+
+  it("upload exceeding the canvas quota → 409 QUOTA_EXCEEDED", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId, canvasId } = await setup(client);
+    await filesRepository(client).insert({
+      id: "seed",
+      canvasId,
+      filename: "big",
+      mime: "application/octet-stream",
+      sizeBytes: MAX_CANVAS_BYTES,
+      storageKey: `files/${canvasId}/seed`,
+      uploadedBy: ownerId,
+    });
+    const app = buildApi(client, ownerId);
+    const res = await app.request("/v1/c/app/files", upload("more.txt", "text/plain", "x"));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("QUOTA_EXCEEDED");
   });
 
   it("files are isolated across canvases", async () => {

@@ -172,4 +172,45 @@ describe("canvas KV routes", () => {
     await app.request("/v1/c/app/kv/secret", json("A"));
     expect((await app.request("/v1/c/other/kv/secret")).status).toBe(404);
   });
+
+  it("increment on a non-numeric value → 409 NOT_NUMERIC", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    const app = buildApi(client, ownerId);
+    await app.request("/v1/c/app/kv/label", json("hello"));
+    const res = await app.request("/v1/c/app/kv/label/increment", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("NOT_NUMERIC");
+  });
+
+  it("a new key past the per-scope limit → 409 KEY_LIMIT", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    // Stub countKeys at the cap so a new key is rejected (seeding 10k rows is impractical).
+    const kv = { ...kvRepository(client), countKeys: async () => 10_000 };
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("user", {
+        id: ownerId,
+        email: "o@x.com",
+        name: "o",
+        avatarUrl: null,
+        isAdmin: false,
+      } as never);
+      await next();
+    });
+    app.route(
+      "/v1/c/:slug",
+      canvasApiRoutes({
+        config,
+        canvases: canvasesRepository(client),
+        kv,
+        files: filesService({ files: filesRepository(client), storage: memStorage() }),
+        usage: usageEventsRepository(client),
+      }),
+    );
+    const res = await app.request("/v1/c/app/kv/brand-new-key", json(1));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("KEY_LIMIT");
+  });
 });

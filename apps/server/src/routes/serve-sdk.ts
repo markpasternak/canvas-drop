@@ -76,11 +76,14 @@ export function serveSdkRoutes(opts: ServeSdkOptions = {}): Hono<AppEnv> {
       const path = defaultBundlePath();
       return path ? readFileSync(path, "utf8") : null;
     });
-  let cached: string | null | undefined;
+  // Only a successful (string) load is cached. A failed load stays uncached so a
+  // build completed while the server is live is picked up on the next request
+  // (no restart needed) — and a partial first-request never sticks.
+  let cached: string | undefined;
 
   const app = new Hono<AppEnv>();
   app.get("/sdk/v1.js", (c) => {
-    if (cached === undefined) cached = load();
+    if (cached === undefined) cached = load() ?? undefined;
     if (!cached) {
       return c.text(
         "SDK bundle not built — run `pnpm build` (or `pnpm --filter @canvas-drop/sdk build`).",

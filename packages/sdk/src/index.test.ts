@@ -44,6 +44,18 @@ describe("detectContext", () => {
       }),
     ).toEqual({ slug: "foo", apiBase: "https://canvases.example.com" });
   });
+
+  it("subdomain mode preserves a non-default port in the API base", () => {
+    expect(
+      detectContext({
+        hostname: "foo.canvases.localhost",
+        pathname: "/",
+        origin: "http://foo.canvases.localhost:3000",
+        protocol: "http:",
+        port: "3000",
+      }),
+    ).toEqual({ slug: "foo", apiBase: "http://canvases.localhost:3000" });
+  });
 });
 
 describe("errorFromResponse", () => {
@@ -112,5 +124,14 @@ describe("createClient", () => {
   it("files.url() builds the content path synchronously", () => {
     const client = createClient({ context: ctx, fetch: fetchMock() });
     expect(client.files.url("abc")).toBe("https://canvases.example.com/v1/c/foo/files/abc/content");
+  });
+
+  it("files.upload() returns an absolute content url (not the server's root-relative one)", async () => {
+    const fetch = fetchMock(async () =>
+      res(201, { id: "abc", name: "a.txt", size: 3, url: "/v1/c/foo/files/abc/content" }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const result = await client.files.upload(new File(["abc"], "a.txt", { type: "text/plain" }));
+    expect(result.url).toBe("https://canvases.example.com/v1/c/foo/files/abc/content");
   });
 });

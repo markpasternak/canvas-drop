@@ -65,6 +65,14 @@ export function filesRepository(client: DbClient) {
         .where(eq(t.canvasId, canvasId))) as Array<{ total: number }>;
       return Number(rows[0]?.total ?? 0);
     },
+
+    async countFiles(canvasId: string): Promise<number> {
+      const rows = (await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(eq(t.canvasId, canvasId))) as Array<{ count: number }>;
+      return Number(rows[0]?.count ?? 0);
+    },
   };
 }
 
