@@ -368,8 +368,7 @@ describe("managementRoutes", () => {
         body: "{}",
       }),
     );
-    const zip = (n: string) =>
-      Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
+    const zip = (n: string) => Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
     for (const n of ["<h1>1</h1>", "<h1>2</h1>"]) {
       await app.request(`/api/canvases/${created.id}/deploy/zip`, {
         method: "POST",
@@ -396,8 +395,7 @@ describe("managementRoutes", () => {
     const owner = await seedUser(client, "owner");
     const other = await seedUser(client, "other");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
-    const zip = (n: string) =>
-      Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
+    const zip = (n: string) => Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
     const created = await jsonOf<{ id: string }>(
       await app.request("/api/canvases", {
         method: "POST",
