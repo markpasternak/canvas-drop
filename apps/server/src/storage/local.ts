@@ -1,0 +1,78 @@
+import type { Dirent } from "node:fs";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
+
+/**
+ * Local filesystem storage driver. Keys map to files under a single root; any
+ * key that would escape the root (e.g. `../`, absolute paths) is rejected.
+ */
+export class LocalDriver implements StorageDriver {
+  private readonly root: string;
+
+  constructor(root: string) {
+    this.root = resolve(root);
+  }
+
+  /** Resolve a key to an absolute path, rejecting anything outside the root. */
+  private pathFor(key: string): string {
+    const target = resolve(this.root, key);
+    if (target !== this.root && !target.startsWith(this.root + sep)) {
+      throw new StorageError(`key escapes storage root: ${key}`, "invalid_key");
+    }
+    return target;
+  }
+
+  async put(key: string, bytes: Uint8Array, _opts?: PutOptions): Promise<void> {
+    const target = this.pathFor(key);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    try {
+      return await readFile(this.pathFor(key));
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    await rm(this.pathFor(key), { force: true });
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      await access(this.pathFor(key));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    for await (const full of this.walk(this.root)) {
+      const key = relative(this.root, full).split(sep).join("/");
+      if (key.startsWith(prefix)) out.push(key);
+    }
+    return out.sort();
+  }
+
+  private async *walk(dir: string): AsyncGenerator<string> {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [] as Dirent[]);
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        yield* this.walk(full);
+      } else {
+        yield full;
+      }
+    }
+  }
+}
+
+function isNotFound(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "ENOENT";
+}
