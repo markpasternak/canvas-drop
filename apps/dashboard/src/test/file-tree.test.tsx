@@ -9,7 +9,7 @@ const f = (path: string): DraftFile => ({ path, size: 1, mime: "text/plain" });
 describe("FileTree", () => {
   it("renders an empty hint when there are no files", () => {
     render(<FileTree files={[]} selected={null} onSelect={() => {}} />);
-    expect(screen.getByText(/no files yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no draft files/i)).toBeInTheDocument();
   });
 
   it("nests paths into directories and lists files", () => {

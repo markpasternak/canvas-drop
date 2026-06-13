@@ -1,4 +1,4 @@
-import { Link, Outlet } from "@tanstack/react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { cn } from "./lib/cn.js";
 import { useTheme } from "./lib/theme.js";
 
@@ -22,10 +22,19 @@ function ThemeSwitch() {
 /** The root shell: a slim top bar (wordmark + create + theme) over the routed
  * content. The wordmark is org-agnostic and re-skinnable. */
 export function AppLayout() {
+  const isEditor = useRouterState({
+    select: (state) => state.location.pathname.endsWith("/editor"),
+  });
+
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-border bg-canvas/80 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
+        <div
+          className={cn(
+            "mx-auto flex h-14 items-center justify-between px-5",
+            isEditor ? "max-w-[112rem]" : "max-w-5xl",
+          )}
+        >
           <div className="flex items-center gap-5">
             <Link
               to="/"
@@ -39,7 +48,10 @@ export function AppLayout() {
             {/* Primary section nav — the first secondary navigation in the shell.
                 "Canvases" matches only the list root (exact) so it isn't lit on
                 canvas detail pages; "Archived" lights on /archived. */}
-            <nav className="flex items-center gap-1 text-[0.8125rem]" aria-label="Sections">
+            <nav
+              className="hidden items-center gap-1 text-[0.8125rem] sm:flex"
+              aria-label="Sections"
+            >
               <Link
                 to="/"
                 activeOptions={{ exact: true }}
@@ -71,7 +83,7 @@ export function AppLayout() {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-5 py-8">
+      <main className={cn("mx-auto px-5", isEditor ? "max-w-[112rem] py-4" : "max-w-5xl py-8")}>
         <Outlet />
       </main>
     </div>

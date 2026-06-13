@@ -6,7 +6,14 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
 import { EditorState, type Extension } from "@codemirror/state";
-import { drawSelection, EditorView, keymap, lineNumbers } from "@codemirror/view";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
 import { useEffect, useRef } from "react";
 
 /** Pick a CodeMirror language extension from a file path's extension (R17). */
@@ -39,14 +46,51 @@ function languageFor(path: string): Extension[] {
 const baseExtensions: Extension[] = [
   lineNumbers(),
   foldGutter(),
+  highlightActiveLineGutter(),
   history(),
   drawSelection(),
   indentOnInput(),
   bracketMatching(),
+  highlightActiveLine(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
+  EditorView.lineWrapping,
   EditorView.theme({
-    "&": { height: "100%", fontSize: "13px" },
-    ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
+    "&": {
+      height: "100%",
+      backgroundColor: "var(--surface)",
+      color: "var(--fg)",
+      fontSize: "13px",
+    },
+    "&.cm-focused": { outline: "none" },
+    ".cm-scroller": {
+      fontFamily: "var(--font-mono, ui-monospace, monospace)",
+      lineHeight: "1.62",
+    },
+    ".cm-content": { padding: "12px 0", caretColor: "var(--accent)" },
+    ".cm-line": { padding: "0 16px" },
+    ".cm-gutters": {
+      backgroundColor: "var(--canvas)",
+      color: "var(--subtle)",
+      borderRight: "1px solid var(--border)",
+    },
+    ".cm-lineNumbers .cm-gutterElement": {
+      minWidth: "3.25rem",
+      padding: "0 12px 0 10px",
+    },
+    ".cm-foldGutter .cm-gutterElement": { padding: "0 6px" },
+    ".cm-activeLine": { backgroundColor: "var(--accent-subtle)" },
+    ".cm-activeLineGutter": {
+      backgroundColor: "var(--accent-subtle)",
+      color: "var(--accent)",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "color-mix(in srgb, var(--accent) 28%, transparent)",
+    },
+    ".cm-matchingBracket, .cm-nonmatchingBracket": {
+      backgroundColor: "var(--accent-subtle)",
+      color: "var(--fg)",
+      outline: "1px solid var(--border-strong)",
+    },
   }),
 ];
 
@@ -94,7 +138,7 @@ export function CodeEditor({ path, value, readOnly = false, onChange }: CodeEdit
     <div
       ref={host}
       data-testid="code-editor"
-      className="h-full overflow-hidden rounded-md border border-border bg-surface"
+      className="h-full overflow-hidden rounded-xl border border-border bg-surface shadow-sm shadow-black/5"
     />
   );
 }

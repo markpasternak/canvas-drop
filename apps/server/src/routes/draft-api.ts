@@ -9,6 +9,7 @@ import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { DeployError } from "../deploy/errors.js";
+import { injectOnPageEditor } from "../draft/onpage.js";
 import type { DraftService } from "../draft/service.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
@@ -191,7 +192,12 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     const draft = await deps.drafts.getOrCreate(cv);
     const manifest = draft.manifest as Manifest;
-    const assetPath = (c.req.param("*") ?? "").replace(/^\/+/, "");
+    // Derive the asset sub-path from the URL (Hono doesn't populate param("*") for
+    // a trailing wildcard) by stripping the `/api/canvases/:id/preview` prefix.
+    const prefix = `/api/canvases/${c.req.param("id")}/preview`;
+    const assetPath = (
+      c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : ""
+    ).replace(/^\/+/, "");
     const resolved = resolveAsset(manifest, assetPath, cv.spaFallback);
     if (!resolved) return previewNotFound(c);
 
@@ -199,10 +205,18 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     if (!entry) return previewNotFound(c);
     const bytes = await deps.storage.get(blobKey(cv.id, entry.hash));
     if (!bytes) return previewNotFound(c);
-    return new Response(new Uint8Array(bytes), {
+
+    const contentType = mimeFor(resolved.path).contentType;
+    // On-page editing (?edit=1): inject the editing shim into the entry HTML only.
+    // Sub-resources (css/img) are served untouched so the rendered page is faithful.
+    let out: Uint8Array = new Uint8Array(bytes);
+    if (c.req.query("edit") === "1" && contentType.startsWith("text/html")) {
+      out = new TextEncoder().encode(injectOnPageEditor(new TextDecoder().decode(bytes)));
+    }
+    return new Response(out, {
       status: 200,
       headers: {
-        "Content-Type": mimeFor(resolved.path).contentType,
+        "Content-Type": contentType,
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "same-origin",

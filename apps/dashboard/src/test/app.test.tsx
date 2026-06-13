@@ -24,7 +24,10 @@ function renderApp(initialPath: string) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("dashboard app", () => {
   it("renders the shell and, with zero canvases, the onboarding first-run page", async () => {
