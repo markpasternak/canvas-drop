@@ -55,7 +55,7 @@ export default function CanvasLayout() {
           ) : (
             <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           )}
-          {canvas && <DeployButton canvasId={id} variant="secondary" />}
+          {canvas && <DeployButton canvasId={id} />}
         </div>
         {canvas && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted">

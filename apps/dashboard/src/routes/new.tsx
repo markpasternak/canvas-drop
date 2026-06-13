@@ -11,7 +11,7 @@ import { cn } from "../lib/cn.js";
 type Method = "paste" | "folder" | "zip" | "api";
 const METHODS: { id: Method; label: string; blurb: string }[] = [
   { id: "paste", label: "Paste HTML", blurb: "Fastest — live in seconds" },
-  { id: "folder", label: "Drop a folder", blurb: "Upload static files" },
+  { id: "folder", label: "Files or folder", blurb: "Drag in files or a folder" },
   { id: "zip", label: "Upload a ZIP", blurb: "A zipped site" },
   { id: "api", label: "Use the API", blurb: "Deploy programmatically" },
 ];
@@ -169,7 +169,7 @@ export default function CreateCanvas() {
             <DeployProgress pct={progress} />
           ) : (
             <FileDrop
-              label="Drag a folder or files here"
+              label="Drag files or a folder here"
               variant="folder"
               busy={busy}
               onFiles={(files) => createWithUpload("folder", files)}

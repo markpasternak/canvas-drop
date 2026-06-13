@@ -57,12 +57,10 @@ export default function Versions() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          {versions.length} {versions.length === 1 ? "version" : "versions"}
-        </p>
-        <DeployButton canvasId={id} />
-      </div>
+      <p className="mb-4 text-sm text-muted">
+        {versions.length} {versions.length === 1 ? "version" : "versions"} · deploy a new one from
+        the button above.
+      </p>
 
       <ul className="space-y-2">
         {versions.map((v) => (

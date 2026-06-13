@@ -11,7 +11,7 @@ import { useToast } from "./Toast.js";
 type Method = "paste" | "folder" | "zip";
 const METHODS: { id: Method; label: string }[] = [
   { id: "paste", label: "Paste HTML" },
-  { id: "folder", label: "Folder" },
+  { id: "folder", label: "Files or folder" },
   { id: "zip", label: "ZIP" },
 ];
 
@@ -133,7 +133,7 @@ export function DeployButton({
             </div>
           ) : method === "folder" ? (
             <FileDrop
-              label="Drag a folder or files here"
+              label="Drag files or a folder here"
               variant="folder"
               busy={busy}
               onFiles={(files) => run({ kind: "folder", files })}
