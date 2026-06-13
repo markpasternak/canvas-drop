@@ -19,7 +19,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @canvas-drop/dashboard typecheck"
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @canvas-drop/sdk typecheck && pnpm --filter @canvas-drop/dashboard typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

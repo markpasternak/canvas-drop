@@ -32,6 +32,7 @@ import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
+import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import type { StorageDriver } from "./storage/driver.js";
 
@@ -142,6 +143,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       usage: usageEventsRepository(deps.db),
     }),
   );
+
+  // Served browser SDK (GET /sdk/v1.js) — behind the gateway (§12.0 #1).
+  app.route("/", serveSdkRoutes());
 
   // Current-user identity for the SPA — its own router (NOT under /api/canvases,
   // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.

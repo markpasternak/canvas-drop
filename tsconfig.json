@@ -4,8 +4,8 @@
     "noEmit": true
   },
   "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
-  // The dashboard (React/JSX, DOM lib) is type-checked by its own tsconfig
-  // (apps/dashboard/tsconfig.json), invoked by the root `typecheck` script.
+  // The dashboard (React/JSX, DOM lib) and the browser SDK (DOM lib) are
+  // type-checked by their own tsconfigs, invoked by the root `typecheck` script.
   // Excluded here so the server never inherits a DOM lib.
-  "exclude": ["apps/dashboard"]
+  "exclude": ["apps/dashboard", "packages/sdk"]
 }
