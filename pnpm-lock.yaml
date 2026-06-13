@@ -67,6 +67,9 @@ importers:
       yauzl:
         specifier: ^3.4.0
         version: 3.4.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@electric-sql/pglite':
         specifier: ^0.5.2
