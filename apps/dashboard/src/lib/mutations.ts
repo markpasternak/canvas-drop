@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { folderFormFromFiles } from "../components/DeployFiles.js";
-import { api, type Canvas, type CanvasSettings, type DraftView } from "./api.js";
+import {
+  api,
+  type Canvas,
+  type CanvasCapabilitiesPatch,
+  type CanvasSettings,
+  type DraftView,
+} from "./api.js";
 import { keys } from "./queries.js";
 
 /**
@@ -29,6 +35,63 @@ export function useUpdateSettings(id: string) {
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
+        qc.setQueryData(keys.canvas(id), optimistic);
+      }
+      return { prev };
+    },
+    onError: (_err, _patch, ctx) => {
+      if (ctx?.prev) qc.setQueryData(keys.canvas(id), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/**
+ * Capability update (plan 006) — OPTIMISTIC, mirroring useUpdateSettings. Applies
+ * the master/feature flags to the cached `capabilities`/`backendEnabled` and
+ * recomputes `effective` so disabled-feature hints update without a round-trip.
+ * The server is authoritative; onSettled re-syncs (e.g. operator-global gating).
+ */
+export function useUpdateCapabilities(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `capabilities-${id}` },
+    mutationFn: (patch: CanvasCapabilitiesPatch) => api.updateCapabilities(id, patch),
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: keys.canvas(id) });
+      const prev = qc.getQueryData<Canvas>(keys.canvas(id));
+      if (prev) {
+        const backendEnabled = patch.backendEnabled ?? prev.backendEnabled;
+        const capabilities = {
+          kv: patch.kv ?? prev.capabilities.kv,
+          files: patch.files ?? prev.capabilities.files,
+          ai: patch.ai ?? prev.capabilities.ai,
+          realtime: patch.realtime ?? prev.capabilities.realtime,
+        };
+        // Optimistic `effective`: kv/files have no operator global, so backend &&
+        // flag is authoritative. ai/realtime are ALSO gated by an operator global
+        // the browser can't see, so we NEVER optimistically turn them ON — we cap
+        // at the prior effective state and let onSettled confirm any upward
+        // transition. This keeps the "disabled by administrator" hint from briefly
+        // clearing when a globally-disabled feature is toggled on (the server
+        // remains authoritative either way).
+        const localOn = (feature: keyof typeof capabilities) =>
+          backendEnabled && capabilities[feature];
+        const optimistic: Canvas = {
+          ...prev,
+          backendEnabled,
+          capabilities,
+          effective: {
+            identity: backendEnabled,
+            kv: localOn("kv"),
+            files: localOn("files"),
+            ai: localOn("ai") && prev.effective.ai,
+            realtime: localOn("realtime") && prev.effective.realtime,
+          },
+        };
         qc.setQueryData(keys.canvas(id), optimistic);
       }
       return { prev };

@@ -15,6 +15,10 @@
     "./config": {
       "types": "./src/config/env.ts",
       "default": "./src/config/env.ts"
+    },
+    "./capabilities": {
+      "types": "./src/capabilities/index.ts",
+      "default": "./src/capabilities/index.ts"
     }
   },
   "types": "./src/index.ts",

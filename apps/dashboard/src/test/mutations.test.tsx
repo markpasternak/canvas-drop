@@ -4,7 +4,12 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Canvas } from "../lib/api.js";
 import { api } from "../lib/api.js";
-import { useArchiveCanvas, useUnarchiveCanvas, useUpdateSettings } from "../lib/mutations.js";
+import {
+  useArchiveCanvas,
+  useUnarchiveCanvas,
+  useUpdateCapabilities,
+  useUpdateSettings,
+} from "../lib/mutations.js";
 import { keys } from "../lib/queries.js";
 
 const CANVAS: Canvas = {
@@ -20,6 +25,9 @@ const CANVAS: Canvas = {
   galleryListed: false,
   gallerySummary: null,
   galleryTags: null,
+  backendEnabled: false,
+  capabilities: { kv: true, files: true, ai: true, realtime: true },
+  effective: { identity: false, kv: false, files: false, ai: false, realtime: false },
   status: "active",
   currentVersionId: null,
   createdAt: 0,
@@ -74,6 +82,78 @@ describe("useUpdateSettings (optimistic)", () => {
     // The cache converges to the LAST intent (false), not a stale rollback.
     await waitFor(() => expect(api.updateSettings).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.shared).toBe(false));
+  });
+});
+
+describe("useUpdateCapabilities (optimistic)", () => {
+  const ON: Canvas = {
+    ...CANVAS,
+    backendEnabled: true,
+    capabilities: { kv: true, files: true, ai: true, realtime: true },
+    effective: { identity: true, kv: true, files: true, ai: true, realtime: true },
+  };
+
+  it("flips a feature flag + effective immediately, then rolls back on error", async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    qc.setQueryData(keys.canvas("c1"), ON);
+    let reject: (e: Error) => void = () => {};
+    vi.spyOn(api, "updateCapabilities").mockReturnValue(
+      new Promise((_res, rej) => {
+        reject = rej;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateCapabilities("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ kv: false });
+
+    await waitFor(() => {
+      const cv = qc.getQueryData<Canvas>(keys.canvas("c1"));
+      expect(cv?.capabilities.kv).toBe(false);
+      expect(cv?.effective.kv).toBe(false);
+    });
+    reject(new Error("boom"));
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.capabilities.kv).toBe(true),
+    );
+  });
+
+  it("never optimistically turns an operator-gated feature ON (adversarial regression)", async () => {
+    // Backend on, AI flag stored ON but operator has globally disabled AI, so
+    // effective.ai is false (the "disabled by administrator" state).
+    const gated: Canvas = { ...ON, effective: { ...ON.effective, ai: false } };
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    qc.setQueryData(keys.canvas("c1"), gated);
+    vi.spyOn(api, "updateCapabilities").mockReturnValue(new Promise(() => {})); // never settles
+
+    const { result } = renderHook(() => useUpdateCapabilities("c1"), { wrapper: wrapper(qc) });
+    // Toggle an UNRELATED feature; the operator-gated AI hint must not clear.
+    result.current.mutate({ kv: false });
+
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.effective.kv).toBe(false),
+    );
+    expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.effective.ai).toBe(false);
+  });
+
+  it("toggling an operator-gated feature ON does not optimistically show it effective", async () => {
+    // AI flag stored OFF and operator-disabled (effective.ai false).
+    const gated: Canvas = {
+      ...ON,
+      capabilities: { ...ON.capabilities, ai: false },
+      effective: { ...ON.effective, ai: false },
+    };
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    qc.setQueryData(keys.canvas("c1"), gated);
+    vi.spyOn(api, "updateCapabilities").mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useUpdateCapabilities("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ ai: true });
+
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.capabilities.ai).toBe(true),
+    );
+    // stored flag flips, but effective stays false until the server confirms the global
+    expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.effective.ai).toBe(false);
   });
 });
 

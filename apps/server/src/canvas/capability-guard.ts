@@ -1,0 +1,61 @@
+import {
+  type Capability,
+  type CapabilityGlobals,
+  type Config,
+  isCapabilityEnabled,
+} from "@canvas-drop/shared";
+import type { Canvas } from "@canvas-drop/shared/db";
+import { createMiddleware } from "hono/factory";
+import type { AppEnv } from "../http/types.js";
+
+/**
+ * Capability runtime guard (plan 006). This is the seam the future backend
+ * primitives (KV/Files/AI/Realtime in M6/M9, and the runtime `me()` identity
+ * endpoint) plug into: each primitive route group runs `requireCapability(cap,
+ * config)` after `canvasAccess` (U15) has resolved + authorized the canvas, and
+ * gets a typed 403 when the capability is off.
+ *
+ * No primitive routes exist yet — this module ships the guard and its tests so
+ * the primitives are a thin handler behind one shared check rather than
+ * scattered, retrofitted gating.
+ */
+
+/** Stable error body returned when a capability is disabled (maps to a typed SDK error). */
+export const CAPABILITY_DISABLED = "CAPABILITY_DISABLED" as const;
+
+/** Translate the server Config into the narrow globals the capability rule needs. */
+export function capabilityGlobals(config: Config): CapabilityGlobals {
+  return {
+    realtimeEnabled: config.realtimeEnabled,
+    aiEnabled: config.ai.apiKey !== undefined,
+  };
+}
+
+/** Pure check: is `capability` effective for this canvas under the given config? */
+export function assertCapability(canvas: Canvas, capability: Capability, config: Config): boolean {
+  return isCapabilityEnabled(canvas, capability, capabilityGlobals(config));
+}
+
+/**
+ * Middleware factory. Must run AFTER `canvasAccess` populates `c.get("canvas")`.
+ * Returns 403 `CAPABILITY_DISABLED` when the capability is off for the resolved
+ * canvas; 500 if wired before the canvas is resolved (a programming error, not a
+ * client one).
+ */
+export function requireCapability(capability: Capability, config: Config) {
+  return createMiddleware<AppEnv>(async (c, next) => {
+    const canvas = c.get("canvas");
+    if (!canvas) {
+      // Contract violation: requireCapability ran before canvasAccess.
+      c.get("log")?.error(
+        { capability },
+        "requireCapability ran without a resolved canvas in context",
+      );
+      return c.json({ error: "canvas_not_resolved" }, 500);
+    }
+    if (!assertCapability(canvas, capability, config)) {
+      return c.json({ code: CAPABILITY_DISABLED, capability }, 403);
+    }
+    await next();
+  });
+}

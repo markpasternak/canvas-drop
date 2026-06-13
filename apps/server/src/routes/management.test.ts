@@ -666,4 +666,136 @@ describe("managementRoutes", () => {
     const v1 = await versionsRepository(client).findReadyByNumber(created.id, 1);
     expect((await canvasesRepository(client).findById(created.id))?.currentVersionId).toBe(v1?.id);
   });
+
+  // --- Capabilities (plan 006) ---
+
+  type CapView = {
+    id: string;
+    apiKey?: string;
+    backendEnabled: boolean;
+    capabilities: { kv: boolean; files: boolean; ai: boolean; realtime: boolean };
+    effective: { identity: boolean; kv: boolean; files: boolean; ai: boolean; realtime: boolean };
+  };
+
+  async function createCanvas(
+    app: ReturnType<typeof buildApp>,
+    payload: Record<string, unknown> = {},
+  ): Promise<CapView> {
+    const res = await app.request("/api/canvases", {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(201);
+    return jsonOf<CapView>(res);
+  }
+
+  it("create default: backend off, all feature flags stored on, nothing effective", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const body = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }));
+    expect(body.backendEnabled).toBe(false);
+    expect(body.capabilities).toEqual({ kv: true, files: true, ai: true, realtime: true });
+    // backend off → nothing effective, including identity
+    expect(body.effective.identity).toBe(false);
+    expect(body.effective.kv).toBe(false);
+  });
+
+  it("create with backendEnabled:true → backend on, key still shown once (KTD-5)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const body = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }), {
+      title: "App",
+      backendEnabled: true,
+    });
+    expect(body.backendEnabled).toBe(true);
+    expect(body.apiKey).toMatch(/^cd_/); // capability choice does NOT gate the key
+    expect(body.effective.identity).toBe(true);
+    expect(body.effective.kv).toBe(true);
+  });
+
+  it("effective ANDs the operator global: AI off when no provider configured", async () => {
+    // Default test config has no CANVAS_DROP_AI_API_KEY, so ai is globally off.
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const body = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }), {
+      backendEnabled: true,
+    });
+    expect(body.capabilities.ai).toBe(true); // stored flag is on
+    expect(body.effective.ai).toBe(false); // but not effective (no provider)
+    expect(body.effective.realtime).toBe(true); // realtime defaults on globally
+  });
+
+  it("public view never leaks the key/password hashes", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const body = (await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }))) as Record<
+      string,
+      unknown
+    >;
+    expect(body.apiKeyHash).toBeUndefined();
+    expect(body.passwordHash).toBeUndefined();
+  });
+
+  it("PATCH /capabilities toggles a feature, persists, and audits", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await createCanvas(app, { backendEnabled: true });
+    const res = await app.request(`/api/canvases/${created.id}/capabilities`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ ai: false, backendEnabled: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf<CapView>(res);
+    expect(body.capabilities.ai).toBe(false);
+    expect(body.capabilities.kv).toBe(true);
+    const stored = await canvasesRepository(client).findById(created.id);
+    expect(stored?.capAi).toBe(false);
+  });
+
+  it("PATCH /capabilities rejects an invalid body (400)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await createCanvas(app, { backendEnabled: true });
+    const res = await app.request(`/api/canvases/${created.id}/capabilities`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ kv: "yes" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /capabilities is 404 for a non-owner (no existence leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }), {
+      backendEnabled: true,
+    });
+    const res = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/capabilities`,
+      {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ kv: false }),
+      },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH /capabilities requires same-origin", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await createCanvas(app, { backendEnabled: true });
+    const res = await app.request(`/api/canvases/${created.id}/capabilities`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "cross-site", "content-type": "application/json" },
+      body: JSON.stringify({ kv: false }),
+    });
+    expect(res.status).toBe(403);
+  });
 });

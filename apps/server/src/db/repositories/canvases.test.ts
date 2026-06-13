@@ -191,6 +191,72 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(await repo.findByApiKeyHash("k")).toBeNull();
   });
 
+  it("create defaults: backend off, all feature flags on (plan 006)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "caps-default", apiKeyHash: "h" });
+    expect(cv.backendEnabled).toBe(false);
+    expect(cv.capKv).toBe(true);
+    expect(cv.capFiles).toBe(true);
+    expect(cv.capAi).toBe(true);
+    expect(cv.capRealtime).toBe(true);
+  });
+
+  it("create honors backendEnabled:true (features still default on)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId,
+      slug: "caps-on",
+      apiKeyHash: "h",
+      backendEnabled: true,
+    });
+    expect(cv.backendEnabled).toBe(true);
+    expect(cv.capKv).toBe(true);
+    expect(cv.capRealtime).toBe(true);
+  });
+
+  it("updateCapabilities toggles a single feature, leaving others intact", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId,
+      slug: "caps-patch",
+      apiKeyHash: "h",
+      backendEnabled: true,
+    });
+    const updated = await repo.updateCapabilities(cv.id, { ai: false });
+    expect(updated.capAi).toBe(false);
+    expect(updated.capKv).toBe(true);
+    expect(updated.capFiles).toBe(true);
+    expect(updated.capRealtime).toBe(true);
+    expect(updated.backendEnabled).toBe(true);
+    expect(updated.updatedAt).toBeGreaterThanOrEqual(cv.updatedAt);
+  });
+
+  it("turning backend off preserves feature flags (KTD-2)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId,
+      slug: "caps-ktd2",
+      apiKeyHash: "h",
+      backendEnabled: true,
+    });
+    await repo.updateCapabilities(cv.id, { kv: false });
+    const off = await repo.updateCapabilities(cv.id, { backendEnabled: false });
+    expect(off.backendEnabled).toBe(false);
+    expect(off.capKv).toBe(false); // preserved, not reset
+    expect(off.capFiles).toBe(true);
+    // re-enabling restores the prior per-feature choices
+    const back = await repo.updateCapabilities(cv.id, { backendEnabled: true });
+    expect(back.capKv).toBe(false);
+  });
+
   it("setCurrentVersionIfReady swaps to a ready version, refuses a pending/missing one", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
