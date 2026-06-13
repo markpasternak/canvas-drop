@@ -313,10 +313,10 @@ export const api = {
 
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
 
-  createCanvas: (body: { title?: string; description?: string }) =>
+  createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
 
-  pasteHtml: (body: { html: string; title?: string }) =>
+  pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(
       "/api/canvases/paste",
       jsonBody(body),
