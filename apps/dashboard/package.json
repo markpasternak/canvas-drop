@@ -11,6 +11,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.9",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.1",
     "@fontsource-variable/geist": "^5.2.5",
     "@fontsource-variable/geist-mono": "^5.2.5",
     "@tanstack/react-query": "^5.66.0",

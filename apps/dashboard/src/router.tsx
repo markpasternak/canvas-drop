@@ -10,6 +10,7 @@ const NewRoute = lazy(() => import("./routes/new.js"));
 const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
 const CanvasLayout = lazy(() => import("./routes/canvas.js"));
 const OverviewRoute = lazy(() => import("./routes/canvas.overview.js"));
+const EditorRoute = lazy(() => import("./routes/canvas.editor.js"));
 const VersionsRoute = lazy(() => import("./routes/canvas.versions.js"));
 const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
@@ -53,6 +54,11 @@ const overviewRoute = createRoute({
   }),
   component: OverviewRoute,
 });
+const editorRoute = createRoute({
+  getParentRoute: () => canvasRoute,
+  path: "/editor",
+  component: EditorRoute,
+});
 const versionsRoute = createRoute({
   getParentRoute: () => canvasRoute,
   path: "/versions",
@@ -74,7 +80,7 @@ export const routeTree = rootRoute.addChildren([
   archivedRoute,
   newRoute,
   onboardingRoute,
-  canvasRoute.addChildren([overviewRoute, versionsRoute, settingsRoute, usageRoute]),
+  canvasRoute.addChildren([overviewRoute, editorRoute, versionsRoute, settingsRoute, usageRoute]),
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });

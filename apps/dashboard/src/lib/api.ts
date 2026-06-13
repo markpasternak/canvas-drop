@@ -71,6 +71,30 @@ export interface DeployResult {
   warnings: string[];
 }
 
+/** One file in the draft (no bytes — those load on demand via getDraftFile). */
+export interface DraftFile {
+  path: string;
+  size: number;
+  mime: string;
+}
+
+/** Editor draft state (M5): file list + publish/stale flags. */
+export interface DraftView {
+  files: DraftFile[];
+  stale: boolean;
+  baseVersionId: string | null;
+  updatedAt: number;
+  /** The draft differs from the live published version (unpublished changes). */
+  dirty: boolean;
+}
+
+export interface PublishResult {
+  version: number;
+  versionId: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
 export interface CanvasSettings {
   title?: string;
   description?: string | null;
@@ -304,4 +328,47 @@ export const api = {
 
   rollback: (id: string, version: number) =>
     request<Canvas & { version: number }>(`/api/canvases/${id}/rollback`, jsonBody({ version })),
+
+  // --- In-browser editor / draft (M5) ---
+  getDraft: (id: string) => request<DraftView>(`/api/canvases/${id}/draft`),
+
+  /**
+   * Load a draft file's text content (owner-only, never cached). Unlike JSON
+   * endpoints, the body is legitimately non-JSON (HTML/CSS/JS), so auth-expiry is
+   * narrowed to 401 / a redirect to login — NOT the generic "2xx non-JSON" rule,
+   * which would misread every successful file load as a session expiry.
+   */
+  getDraftFile: async (id: string, path: string): Promise<string> => {
+    const res = await fetch(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
+      credentials: "include",
+    });
+    if (res.status === 401 || res.redirected) {
+      onAuthExpired();
+      throw new ApiError("unauthorized", "Session expired", undefined, res.status);
+    }
+    if (!res.ok) throw await parseError(res);
+    return res.text();
+  },
+
+  /** Write/replace a draft file (raw text body). Returns the refreshed draft view. */
+  putDraftFile: (id: string, path: string, content: string) =>
+    request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/octet-stream" },
+      body: content,
+    }),
+
+  deleteDraftFile: (id: string, path: string) =>
+    request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
+      method: "DELETE",
+    }),
+
+  renameDraftFile: (id: string, from: string, to: string) =>
+    request<DraftView>(`/api/canvases/${id}/draft/rename`, jsonBody({ from, to })),
+
+  publishDraft: (id: string) =>
+    request<PublishResult>(`/api/canvases/${id}/publish`, { method: "POST" }),
+
+  restoreToDraft: (id: string, version: number) =>
+    request<DraftView>(`/api/canvases/${id}/restore`, jsonBody({ version })),
 };
