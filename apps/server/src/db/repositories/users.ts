@@ -43,29 +43,12 @@ export function usersRepository(client: DbClient) {
      */
     async upsert(input: UpsertUserInput): Promise<User> {
       const now = Date.now();
-      const existing = await db
-        .select()
-        .from(t)
-        .where(eq(t.providerSub, input.providerSub))
-        .limit(1);
-      const current = existing[0] as User | undefined;
-
-      if (current) {
-        const updated = await db
-          .update(t)
-          .set({
-            email: input.email,
-            name: input.name,
-            avatarUrl: input.avatarUrl ?? null,
-            isAdmin: input.isAdmin,
-            lastSeenAt: now,
-          })
-          .where(eq(t.id, current.id))
-          .returning();
-        return updated[0] as User;
-      }
-
-      const inserted = await db
+      // Atomic INSERT ... ON CONFLICT DO UPDATE on both dialects — avoids the
+      // read-then-write race where two concurrent first-logins for the same
+      // provider_sub both INSERT and the second 500s on the unique constraint.
+      // is_blocked and created_at are intentionally NOT in the update set, so a
+      // login never resurrects a blocked user or rewrites the creation time.
+      const rows = await db
         .insert(t)
         .values({
           id: uuidv7(),
@@ -78,8 +61,18 @@ export function usersRepository(client: DbClient) {
           createdAt: now,
           lastSeenAt: now,
         })
+        .onConflictDoUpdate({
+          target: t.providerSub,
+          set: {
+            email: input.email,
+            name: input.name,
+            avatarUrl: input.avatarUrl ?? null,
+            isAdmin: input.isAdmin,
+            lastSeenAt: now,
+          },
+        })
         .returning();
-      return inserted[0] as User;
+      return rows[0] as User;
     },
 
     async touchLastSeen(id: string): Promise<void> {

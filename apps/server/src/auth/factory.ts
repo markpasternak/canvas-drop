@@ -4,12 +4,19 @@ import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import { devStrategy } from "./dev.js";
 import { proxyStrategy } from "./proxy.js";
-import { type SessionService, sessionBackedStrategy, sessionService } from "./session.js";
+import {
+  type SessionAuditSink,
+  type SessionService,
+  sessionBackedStrategy,
+  sessionService,
+} from "./session.js";
 import type { AuthStrategy } from "./strategy.js";
 
 export interface AuthDeps {
   users: UsersRepository;
   sessions: SessionsRepository;
+  /** Optional audit sink so session_create / session_revoke are recorded (§12.1.8). */
+  audit?: SessionAuditSink;
 }
 
 export interface AuthSetup {
@@ -25,7 +32,10 @@ export interface AuthSetup {
  */
 export function setupAuth(config: Config, deps: AuthDeps): AuthSetup {
   if (config.auth.mode === "dev") {
-    return { strategy: devStrategy(config), sessionSvc: sessionService(config, deps.sessions) };
+    return {
+      strategy: devStrategy(config),
+      sessionSvc: sessionService(config, deps.sessions, deps.audit),
+    };
   }
 
   if (config.auth.mode === "proxy") {
@@ -35,6 +45,6 @@ export function setupAuth(config: Config, deps: AuthDeps): AuthSetup {
   }
 
   // oidc: identity comes from the app session; login routes establish it (U11)
-  const sessionSvc = sessionService(config, deps.sessions);
+  const sessionSvc = sessionService(config, deps.sessions, deps.audit);
   return { strategy: sessionBackedStrategy(sessionSvc, deps.users), sessionSvc };
 }

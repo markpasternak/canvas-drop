@@ -48,7 +48,11 @@ export function createAuditLog(repo: AuditRepository, log: Logger): AuditLog {
   return {
     recordAudit: write,
     async flush() {
-      await Promise.all([...pending]);
+      // Drain in a loop: a write() can be enqueued while we await the current
+      // batch, so keep draining until the set is empty.
+      while (pending.size > 0) {
+        await Promise.all([...pending]);
+      }
     },
     record(event: AuthEvent) {
       write({

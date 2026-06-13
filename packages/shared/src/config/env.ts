@@ -25,14 +25,28 @@ const csv = (def: string[] = []) =>
         : def,
     );
 
-/** Loose boolean: "1" | "true" | "on" | "yes" (case-insensitive) → true. */
+const TRUTHY = ["1", "true", "on", "yes"];
+const FALSY = ["0", "false", "off", "no"];
+
+/**
+ * Strict boolean: only the recognized truthy/falsy tokens are accepted. An
+ * unrecognized value fails loud rather than silently coercing to a default —
+ * honoring the §8.1 fail-loud contract for operator-flippable flags.
+ */
 const bool = (def: boolean) =>
   z
     .string()
     .optional()
-    .transform((s) => {
+    .transform((s, ctx) => {
       if (s === undefined || s === "") return def;
-      return ["1", "true", "on", "yes"].includes(s.toLowerCase());
+      const v = s.toLowerCase();
+      if (TRUTHY.includes(v)) return true;
+      if (FALSY.includes(v)) return false;
+      ctx.addIssue({
+        code: "custom",
+        message: `must be one of ${[...TRUTHY, ...FALSY].join(", ")} (got "${s}")`,
+      });
+      return z.NEVER;
     });
 
 /** Numeric env var with a default, validated finite. */
@@ -47,6 +61,33 @@ const domainOf = (email: string): string => email.slice(email.lastIndexOf("@") +
 
 const isLocalhost = (host: string): boolean =>
   host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+
+/**
+ * Validate a trusted-proxy entry as a sane IPv4 address or CIDR. The trusted-IP
+ * gate is the §12.5 anti-impersonation control, so this rejects:
+ *   - `0.0.0.0/0` and any `/0` (would trust every source IP — turns the gate off)
+ *   - malformed addresses / prefix lengths
+ *   - IPv6 (not yet supported by the matcher — fail loud at boot rather than
+ *     silently never-matching at runtime; use the JWT trust path for IPv6)
+ * Returns an error string, or null when valid.
+ */
+function validateTrustedProxyEntry(entry: string): string | null {
+  if (entry.includes(":")) {
+    return `IPv6 trusted-proxy entries are not supported yet ("${entry}"); use the JWT trust path (CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL) for IPv6 proxies`;
+  }
+  const [addr, prefix] = entry.split("/");
+  const octets = (addr ?? "").split(".");
+  if (octets.length !== 4 || octets.some((o) => !/^\d{1,3}$/.test(o) || Number(o) > 255)) {
+    return `invalid IPv4 address in trusted-proxy entry "${entry}"`;
+  }
+  if (prefix !== undefined) {
+    const bits = Number(prefix);
+    if (!Number.isInteger(bits) || bits < 1 || bits > 32) {
+      return `trusted-proxy CIDR "${entry}" must use a prefix length between /1 and /32 (/0 would trust every source IP)`;
+    }
+  }
+  return null;
+}
 
 // --- raw schema (keys are the real env var names, so error paths name the
 //     exact variable to fix) -------------------------------------------------
@@ -121,6 +162,19 @@ const rawSchema = z
     const devMode = r.CANVAS_DROP_AUTH_MODE === "dev";
     const isProd = r.NODE_ENV === "production";
 
+    // dev auth auto-logs-in a fake admin with zero credentials — it must never
+    // run in production, where it would authenticate every anonymous request as
+    // the bootstrap admin. `dev` is the schema default, so this guard is the
+    // backstop against a prod deploy that forgot to set CANVAS_DROP_AUTH_MODE.
+    if (devMode && isProd) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CANVAS_DROP_AUTH_MODE"],
+        message:
+          "dev auth mode auto-logs-in a fake admin and must not run in production; set CANVAS_DROP_AUTH_MODE=proxy or oidc",
+      });
+    }
+
     // subdomain mode requires a real (non-localhost) base URL
     if (r.CANVAS_DROP_URL_MODE === "subdomain") {
       const host = new URL(r.CANVAS_DROP_BASE_URL).hostname;
@@ -171,6 +225,16 @@ const rawSchema = z
             message: `${key} is required when CANVAS_DROP_STORAGE=s3`,
           });
         }
+      }
+    }
+
+    // Trusted-proxy IPs gate header-asserted identity (§12.5). Validate every
+    // entry in any mode they're set: reject /0, malformed v4, and unsupported
+    // v6 — a bad entry here silently disables the anti-impersonation control.
+    for (const entry of r.CANVAS_DROP_TRUSTED_PROXY_IPS) {
+      const err = validateTrustedProxyEntry(entry);
+      if (err) {
+        ctx.addIssue({ code: "custom", path: ["CANVAS_DROP_TRUSTED_PROXY_IPS"], message: err });
       }
     }
 

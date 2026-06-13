@@ -1,4 +1,6 @@
 import { getTableColumns } from "drizzle-orm";
+import { getTableConfig as getPgTableConfig } from "drizzle-orm/pg-core";
+import { getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
 import * as pg from "./schema.pg.js";
 import * as sq from "./schema.sqlite.js";
@@ -36,5 +38,42 @@ describe("dual-dialect schema parity (KTD-1)", () => {
       expect(s?.notNull, `${key}.${col} notNull`).toBe(p?.notNull);
       expect(s?.primary, `${key}.${col} primary`).toBe(p?.primary);
     }
+  });
+
+  // Indexes/uniqueness/FKs are security-relevant (e.g. sessions_token_hash_uq
+  // underpins findLiveByToken). getTableColumns misses them, so assert them
+  // explicitly — otherwise a uniqueIndex dropped on one dialect drifts silently.
+  it.each(TABLE_KEYS)("%s has identical indexes and foreign keys across dialects", (key) => {
+    const pgCfg = getPgTableConfig(pgTables[key]);
+    const sqCfg = getSqliteTableConfig(sqliteTables[key]);
+
+    const indexShape = (
+      indexes: Array<{ config: { name?: string; unique?: boolean; columns: unknown[] } }>,
+    ) =>
+      indexes
+        .map((i) => {
+          const cols = (i.config.columns as Array<{ name?: string }>)
+            .map((c) => c.name ?? String(c))
+            .join(",");
+          return `${i.config.name}:${i.config.unique ? "uniq" : "idx"}:${cols}`;
+        })
+        .sort();
+
+    expect(indexShape(sqCfg.indexes as never), `${key} indexes`).toEqual(
+      indexShape(pgCfg.indexes as never),
+    );
+
+    const fkShape = (fks: Array<{ reference: () => { columns: Array<{ name: string }> } }>) =>
+      fks
+        .map((fk) =>
+          fk
+            .reference()
+            .columns.map((c) => c.name)
+            .join(","),
+        )
+        .sort();
+    expect(fkShape(sqCfg.foreignKeys as never), `${key} foreign keys`).toEqual(
+      fkShape(pgCfg.foreignKeys as never),
+    );
   });
 });

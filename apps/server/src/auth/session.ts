@@ -21,7 +21,16 @@ export interface SessionService {
   revoke(c: Context<AppEnv>): Promise<void>;
 }
 
-export function sessionService(config: Config, sessions: SessionsRepository): SessionService {
+/** Minimal audit sink for session lifecycle events (§12.1.8). Implemented by AuditLog. */
+export interface SessionAuditSink {
+  recordAudit(input: { action: string; actorId?: string | null; ip?: string | null }): void;
+}
+
+export function sessionService(
+  config: Config,
+  sessions: SessionsRepository,
+  audit?: SessionAuditSink,
+): SessionService {
   // HttpOnly always; Secure in production; SameSite=Lax. Subdomain mode scopes
   // the cookie to `.{baseHost}` so canvases share it; path mode is host-only.
   const cookie = () => ({
@@ -43,6 +52,7 @@ export function sessionService(config: Config, sessions: SessionsRepository): Se
         userAgent: c.req.header("user-agent") ?? null,
       });
       setCookie(c, SESSION_COOKIE, token, { ...cookie(), maxAge: Math.floor(TTL_MS / 1000) });
+      audit?.recordAudit({ action: "session_create", actorId: userId, ip: c.get("clientIp") });
     },
 
     async resolveUserId(c) {
@@ -57,7 +67,18 @@ export function sessionService(config: Config, sessions: SessionsRepository): Se
 
     async revoke(c) {
       const token = getCookie(c, SESSION_COOKIE);
-      if (token) await sessions.revokeByToken(token);
+      if (token) {
+        // Resolve the owner before revoking so the audit row is attributed.
+        const session = await sessions.findLiveByToken(token);
+        await sessions.revokeByToken(token);
+        if (session) {
+          audit?.recordAudit({
+            action: "session_revoke",
+            actorId: session.userId,
+            ip: c.get("clientIp"),
+          });
+        }
+      }
       deleteCookie(c, SESSION_COOKIE, cookie());
     },
   };

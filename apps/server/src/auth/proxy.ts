@@ -1,14 +1,18 @@
 import type { Config } from "@canvas-drop/shared";
-import { type JWTPayload, type JWTVerifyGetKey, jwtVerify } from "jose";
+import { type JWTVerifyGetKey, jwtVerify } from "jose";
+import { claimsToIdentity } from "./identity-mapping.js";
 import type { AuthStrategy, ResolvedIdentity } from "./strategy.js";
 
 /**
  * Proxy auth strategy (D16, §9.2, §12.5 — "invariant #1 lives or dies here").
  *
- * Two trust paths, in order of preference:
- *   (a) verify the IAP's signed identity JWT against its JWKS (iss/aud/exp);
- *   (b) trust a forwarded identity header, but ONLY when the request's immediate
- *       hop is in CANVAS_DROP_TRUSTED_PROXY_IPS.
+ * Exactly ONE trust path is active, chosen by config — they do not compose:
+ *   (a) JWKS configured → verify the IAP's signed identity JWT (iss/aud/exp).
+ *       The header path is disabled; a request without a valid JWT is anonymous.
+ *       (Composing them would let an attacker omit the JWT to downgrade to the
+ *       weaker header path.)
+ *   (b) no JWKS → trust a forwarded identity header, but ONLY when the request's
+ *       immediate hop is in CANVAS_DROP_TRUSTED_PROXY_IPS.
  *
  * An identity header arriving from an untrusted source is ignored and logged —
  * a client cannot become another user by setting it. The boot guard (U2) makes
@@ -22,24 +26,30 @@ export function proxyStrategy(config: Config, jwks?: JWTVerifyGetKey): AuthStrat
 
   return {
     async resolveIdentity(c): Promise<ResolvedIdentity | null> {
-      // (a) JWT path — cryptographic, preferred.
+      // (a) JWT trust path — cryptographic, preferred. When JWKS is configured
+      // this is the ONLY path; we never fall through to header trust.
       if (jwks) {
         const token = c.req.header(p.jwtHeader);
-        if (token) {
-          try {
-            const { payload } = await jwtVerify(token, jwks, {
-              issuer: p.jwtIssuer,
-              audience: p.jwtAudience,
-            });
-            return identityFromClaims(payload);
-          } catch {
-            // invalid signature / wrong iss or aud / expired → no identity
-            return null;
-          }
+        if (!token) return null;
+        try {
+          const { payload } = await jwtVerify(token, jwks, {
+            issuer: p.jwtIssuer,
+            audience: p.jwtAudience,
+          });
+          return claimsToIdentity(payload as Record<string, unknown>, "proxy");
+        } catch (err) {
+          // A verification failure (bad signature / iss / aud / expired) and a
+          // JWKS-endpoint fetch failure both land here. Log so operators can tell
+          // "bad token" from "IdP/JWKS down" instead of silent 401s.
+          c.get("log")?.warn(
+            { err: (err as Error).message },
+            "proxy JWT verification failed (§12.5)",
+          );
+          return null;
         }
       }
 
-      // (b) trusted-hop header path.
+      // (b) trusted-hop header path (only when no JWKS is configured).
       if (p.trustedProxyIps.length > 0) {
         const email = c.req.header(p.emailHeader);
         if (email) {
@@ -60,14 +70,6 @@ export function proxyStrategy(config: Config, jwks?: JWTVerifyGetKey): AuthStrat
   };
 }
 
-function identityFromClaims(payload: JWTPayload): ResolvedIdentity | null {
-  const email = typeof payload.email === "string" ? payload.email : undefined;
-  if (!email) return null;
-  const sub = typeof payload.sub === "string" && payload.sub.length > 0 ? payload.sub : email;
-  const name = typeof payload.name === "string" ? payload.name : undefined;
-  return { sub, email, name };
-}
-
 /** True when `ip` falls within any of the given IPv4 CIDRs or exact addresses. */
 export function ipAllowed(ip: string, ranges: readonly string[]): boolean {
   const normalized = normalizeIp(ip);
@@ -80,10 +82,12 @@ function matchOne(ip: string, range: string): boolean {
   const bits = Number(bitsStr);
   const ipNum = ipv4ToInt(ip);
   const baseNum = ipv4ToInt(base ?? "");
-  if (ipNum === null || baseNum === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+  // Reject /0 here too (config validation already blocks it) — a /0 would trust
+  // every source IP and silently disable the §12.5 anti-impersonation gate.
+  if (ipNum === null || baseNum === null || !Number.isInteger(bits) || bits < 1 || bits > 32) {
     return false;
   }
-  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
   return (ipNum & mask) === (baseNum & mask);
 }
 

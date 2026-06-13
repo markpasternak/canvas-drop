@@ -111,6 +111,34 @@ describe("sessionService", () => {
     expect((await jsonOf<{ uid: string | null }>(after)).uid).toBeNull();
   });
 
+  it("records session_create and session_revoke audit events when a sink is provided", async () => {
+    client = await makeTestDb("sqlite");
+    const uid = await seedUser(client);
+    const events: Array<{ action: string; actorId?: string | null }> = [];
+    const svc = sessionService(pathConfig, sessionsRepository(client), {
+      recordAudit: (e) => events.push(e),
+    });
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("clientIp", "127.0.0.1");
+      await next();
+    });
+    app.get("/issue", async (c) => {
+      await svc.issue(c, uid);
+      return c.text("ok");
+    });
+    app.get("/logout", async (c) => {
+      await svc.revoke(c);
+      return c.text("bye");
+    });
+
+    const token = cookieToken(await app.request("/issue")) as string;
+    await app.request("/logout", { headers: { Cookie: `${SESSION_COOKIE}=${token}` } });
+
+    expect(events.map((e) => e.action)).toEqual(["session_create", "session_revoke"]);
+    expect(events.every((e) => e.actorId === uid)).toBe(true);
+  });
+
   it("scopes the cookie to the base domain in subdomain mode, host-only in path mode", async () => {
     client = await makeTestDb("sqlite");
     const uid = await seedUser(client);

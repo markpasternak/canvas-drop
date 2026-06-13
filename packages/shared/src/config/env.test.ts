@@ -117,6 +117,48 @@ describe("loadConfig", () => {
     expect(config.log.format).toBe("json"); // production default
   });
 
+  it("refuses dev auth mode in production (no anonymous-admin in prod)", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      }),
+    ).toThrowError(/CANVAS_DROP_AUTH_MODE/);
+  });
+
+  it("rejects a /0 trusted-proxy CIDR (would trust every source IP)", () => {
+    expect(() =>
+      loadConfig({
+        CANVAS_DROP_AUTH_MODE: "proxy",
+        CANVAS_DROP_URL_MODE: "subdomain",
+        CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+        CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+        CANVAS_DROP_TRUSTED_PROXY_IPS: "0.0.0.0/0",
+      }),
+    ).toThrowError(/CANVAS_DROP_TRUSTED_PROXY_IPS/);
+  });
+
+  it("rejects an IPv6 trusted-proxy entry with a clear message (fail loud, not silent)", () => {
+    expect(() =>
+      loadConfig({
+        CANVAS_DROP_AUTH_MODE: "proxy",
+        CANVAS_DROP_URL_MODE: "subdomain",
+        CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+        CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+        CANVAS_DROP_TRUSTED_PROXY_IPS: "::1",
+      }),
+    ).toThrowError(/IPv6/);
+  });
+
+  it("rejects a typo'd boolean env value instead of silently coercing to false", () => {
+    expect(() => loadConfig(devEnv({ CANVAS_DROP_S3_FORCE_PATH_STYLE: "tru" }))).toThrowError(
+      /CANVAS_DROP_S3_FORCE_PATH_STYLE/,
+    );
+  });
+
   it("reports every failing field at once, not just the first", () => {
     try {
       loadConfig({

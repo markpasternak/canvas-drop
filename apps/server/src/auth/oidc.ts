@@ -4,7 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import * as client from "openid-client";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
-import { isEmailDomainAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import { claimsToIdentity, isEmailDomainAllowed, mapIdentityToUser } from "./identity-mapping.js";
 import type { SessionService } from "./session.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
@@ -19,17 +19,25 @@ export interface OidcDeps {
   getConfig: () => Promise<client.Configuration>;
 }
 
-/** Build the openid-client configuration (discovery), caching the promise. */
+/**
+ * Build the openid-client configuration (discovery), caching only on SUCCESS.
+ * A failed discovery (IdP unreachable, transient network error) must not be
+ * cached — otherwise one hiccup at first login would permanently break OIDC for
+ * the process lifetime. The next call retries.
+ */
 export function makeOidcConfigLoader(config: Config): () => Promise<client.Configuration> {
   let cached: Promise<client.Configuration> | undefined;
   const { issuer, clientId, clientSecret } = config.auth.oidc;
   return () => {
-    cached ??= client.discovery(
-      new URL(issuer as string),
-      clientId as string,
-      clientSecret as string,
-    );
-    return cached;
+    if (cached) return cached;
+    const pending = client
+      .discovery(new URL(issuer as string), clientId as string, clientSecret as string)
+      .catch((err) => {
+        cached = undefined; // allow retry on the next call
+        throw err;
+      });
+    cached = pending;
+    return pending;
   };
 }
 
@@ -84,7 +92,7 @@ export function makeOidc(deps: OidcDeps) {
         return c.json({ error: "token_exchange_failed" }, 400);
       }
 
-      const identity = claims ? identityFromClaims(claims) : null;
+      const identity = claims ? claimsToIdentity(claims, "oidc") : null;
       if (!identity) return c.json({ error: "no_email_claim" }, 400);
       return completeLogin(deps, c, identity);
     },
@@ -108,14 +116,6 @@ export async function completeLogin(
   if (user.isBlocked) return c.json({ error: "forbidden" }, 403);
   await deps.sessionSvc.issue(c, user.id);
   return c.redirect("/");
-}
-
-function identityFromClaims(claims: Record<string, unknown>): ResolvedIdentity | null {
-  const email = typeof claims.email === "string" ? claims.email : undefined;
-  if (!email) return null;
-  const sub = typeof claims.sub === "string" && claims.sub.length > 0 ? claims.sub : email;
-  const name = typeof claims.name === "string" ? claims.name : undefined;
-  return { sub: `oidc:${sub}`, email, name };
 }
 
 function readTx(c: Context<AppEnv>): { state: string; verifier: string } | null {

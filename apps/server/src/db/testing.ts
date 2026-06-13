@@ -1,6 +1,7 @@
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import { PGlite } from "@electric-sql/pglite";
 import Database from "better-sqlite3";
+import { sql } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
@@ -10,8 +11,14 @@ import { resolveMigrationsDir } from "./migrations-dir.js";
 
 export type Dialect = "sqlite" | "postgres";
 
-/** The dialects the suite runs against. CI parameterizes the leg per matrix job. */
-export const DIALECTS: readonly Dialect[] = ["sqlite", "postgres"];
+/**
+ * The dialects the suite runs against. When CANVAS_DROP_DB is set (the CI matrix
+ * legs and the test:sqlite / test:pg scripts), run only that dialect so the legs
+ * are genuinely split; otherwise (bare `pnpm test`) run both in-process.
+ */
+const envDialect = process.env.CANVAS_DROP_DB as Dialect | undefined;
+export const DIALECTS: readonly Dialect[] =
+  envDialect === "sqlite" || envDialect === "postgres" ? [envDialect] : ["sqlite", "postgres"];
 
 /**
  * Build an ephemeral, migrated database for tests:
@@ -32,6 +39,9 @@ export async function makeTestDb(dialect: Dialect): Promise<DbClient> {
       migrate: async () => {
         migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
       },
+      ping: async () => {
+        db.run(sql`SELECT 1`);
+      },
       close: async () => {
         sqlite.close();
       },
@@ -47,6 +57,9 @@ export async function makeTestDb(dialect: Dialect): Promise<DbClient> {
     db,
     migrate: async () => {
       await migratePglite(db, { migrationsFolder: resolveMigrationsDir("pg") });
+    },
+    ping: async () => {
+      await db.execute(sql`SELECT 1`);
     },
     close: async () => {
       await pglite.close();

@@ -33,6 +33,7 @@ async function main() {
   const { strategy, sessionSvc } = setupAuth(config, {
     users,
     sessions: (await import("./db/repositories/sessions.js")).sessionsRepository(db),
+    audit,
   });
 
   // 3. OIDC login routes (oidc mode only).
@@ -44,7 +45,7 @@ async function main() {
   // 4. Compose and serve.
   const app = buildApp({ config, db, rootLogger, strategy, users, audit, sessionSvc, oidc });
 
-  serve({ fetch: app.fetch, port: config.port }, (info) => {
+  const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     rootLogger.info(
       {
         port: info.port,
@@ -57,7 +58,14 @@ async function main() {
     );
   });
 
+  // Graceful shutdown: stop accepting connections and let in-flight requests
+  // finish BEFORE flushing audit writes and closing the DB pool — otherwise a
+  // request mid-handler loses its connection and its audit row.
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await audit.flush();
     await db.close();
     process.exit(0);

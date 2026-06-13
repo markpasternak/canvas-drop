@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { Config } from "@canvas-drop/shared";
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import Database from "better-sqlite3";
+import { sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
@@ -22,6 +23,8 @@ export interface SqliteClient {
   dialect: "sqlite";
   db: BetterSQLite3Database<typeof sqliteSchema>;
   migrate(): Promise<void>;
+  /** Cheap connectivity check for /healthz — keeps dialect logic out of callers. */
+  ping(): Promise<void>;
   close(): Promise<void>;
 }
 export interface PgClient {
@@ -29,6 +32,7 @@ export interface PgClient {
   // biome-ignore lint/suspicious/noExplicitAny: base PgDatabase HKT so node-postgres AND pglite both satisfy it
   db: PgDatabase<any, typeof pgSchema>;
   migrate(): Promise<void>;
+  ping(): Promise<void>;
   close(): Promise<void>;
 }
 export type DbClient = SqliteClient | PgClient;
@@ -49,19 +53,31 @@ export function makeDb(config: Config): DbClient {
       migrate: async () => {
         migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
       },
+      ping: async () => {
+        db.run(sql`SELECT 1`);
+      },
       close: async () => {
         sqlite.close();
       },
     };
   }
 
-  const pool = new Pool({ connectionString: config.db.url });
+  // Bounded timeouts so a saturated/partitioned Postgres fails fast instead of
+  // hanging request handlers indefinitely (default connectionTimeoutMillis is 0).
+  const pool = new Pool({
+    connectionString: config.db.url,
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 30_000,
+  });
   const db = drizzlePg(pool, { schema: pgSchema });
   return {
     dialect: "postgres",
     db,
     migrate: async () => {
       await migratePg(db, { migrationsFolder: resolveMigrationsDir("pg") });
+    },
+    ping: async () => {
+      await db.execute(sql`SELECT 1`);
     },
     close: async () => {
       await pool.end();
