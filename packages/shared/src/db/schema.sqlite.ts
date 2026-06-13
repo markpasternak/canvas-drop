@@ -65,3 +65,63 @@ export const auditLog = sqliteTable(
   },
   (t) => [index("audit_log_created_at_idx").on(t.createdAt)],
 );
+
+export const canvases = sqliteTable(
+  "canvases",
+  {
+    id: c.text("id").primaryKey(),
+    slug: c.text("slug").notNull(),
+    title: c.text("title").notNull().default(""),
+    description: c.text("description"),
+    ownerId: c
+      .text("owner_id")
+      .notNull()
+      .references(() => users.id),
+    shared: c.bool("shared").notNull().default(false),
+    sharedAt: c.epochMs("shared_at"),
+    sharedExpiresAt: c.epochMs("shared_expires_at"),
+    galleryListed: c.bool("gallery_listed").notNull().default(false),
+    gallerySummary: c.text("gallery_summary"),
+    galleryTags: c.json("gallery_tags"),
+    galleryPublishedAt: c.epochMs("gallery_published_at"),
+    passwordHash: c.text("password_hash"),
+    // bumped on every password set/clear so outstanding gate cookies invalidate (U16)
+    passwordVersion: c.int("password_version").notNull().default(0),
+    spaFallback: c.bool("spa_fallback").notNull().default(false),
+    apiKeyHash: c.text("api_key_hash").notNull(),
+    status: c.text("status").notNull().default("active"), // active | disabled | deleted
+    // Pointer (not an FK) to the current ready version — avoids a circular FK with
+    // versions.canvas_id; nullable until the first deploy lands.
+    currentVersionId: c.text("current_version_id"),
+    createdAt: c.epochMs("created_at").notNull(),
+    updatedAt: c.epochMs("updated_at").notNull(),
+    deletedAt: c.epochMs("deleted_at"),
+  },
+  (t) => [uniqueIndex("canvases_slug_uq").on(t.slug), index("canvases_owner_id_idx").on(t.ownerId)],
+);
+
+export const versions = sqliteTable(
+  "versions",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    number: c.int("number").notNull(), // per-canvas sequence
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    source: c.text("source").notNull(), // folder | zip | paste | api
+    status: c.text("status").notNull().default("pending"), // pending | ready
+    fileCount: c.int("file_count").notNull().default(0),
+    totalBytes: c.int("total_bytes").notNull().default(0),
+    manifest: c.json("manifest"), // path -> { size, hash, mime }; null until ready
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("versions_canvas_number_uq").on(t.canvasId, t.number),
+    index("versions_canvas_created_idx").on(t.canvasId, t.createdAt),
+  ],
+);

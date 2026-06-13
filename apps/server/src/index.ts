@@ -7,8 +7,12 @@ import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
 import { makeDb } from "./db/factory.js";
 import { runMigrations } from "./db/migrate.js";
 import { auditRepository } from "./db/repositories/audit.js";
+import { canvasesRepository } from "./db/repositories/canvases.js";
 import { usersRepository } from "./db/repositories/users.js";
+import { versionsRepository } from "./db/repositories/versions.js";
+import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
+import { makeStorage } from "./storage/factory.js";
 
 async function main() {
   // 1. Config — the only process.env reader; fail loud on invalid combos.
@@ -28,8 +32,12 @@ async function main() {
   // 2. Drivers (DB, storage, auth) — all behind config-selected factories.
   const db = makeDb(config);
   await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
+  const storage = makeStorage(config);
   const users = usersRepository(db);
+  const canvases = canvasesRepository(db);
+  const versions = versionsRepository(db);
   const audit = createAuditLog(auditRepository(db), rootLogger);
+  const engine = deployEngine({ config, canvases, versions, storage, log: rootLogger });
   const { strategy, sessionSvc } = setupAuth(config, {
     users,
     sessions: (await import("./db/repositories/sessions.js")).sessionsRepository(db),
@@ -43,7 +51,20 @@ async function main() {
       : undefined;
 
   // 4. Compose and serve.
-  const app = buildApp({ config, db, rootLogger, strategy, users, audit, sessionSvc, oidc });
+  const app = buildApp({
+    config,
+    db,
+    rootLogger,
+    strategy,
+    users,
+    canvases,
+    versions,
+    storage,
+    engine,
+    audit,
+    sessionSvc,
+    oidc,
+  });
 
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
     rootLogger.info(

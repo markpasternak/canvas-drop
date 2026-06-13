@@ -8,6 +8,13 @@
       "when": 1781341804120,
       "tag": "0000_simple_the_fallen",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781347658430,
+      "tag": "0001_funny_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

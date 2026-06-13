@@ -1,0 +1,107 @@
+import type { Manifest } from "@canvas-drop/shared/db";
+import { afterEach, describe, expect, it } from "vitest";
+import type { DbClient } from "../factory.js";
+import { DIALECTS, makeTestDb } from "../testing.js";
+import { canvasesRepository } from "./canvases.js";
+import { usersRepository } from "./users.js";
+import { versionsRepository } from "./versions.js";
+
+const MANIFEST: Manifest = { "index.html": { size: 10, hash: "abc", mime: "text/html" } };
+
+async function seedCanvas(client: DbClient): Promise<{ canvasId: string; userId: string }> {
+  const u = await usersRepository(client).upsert({
+    providerSub: "o",
+    email: "o@example.com",
+    name: "O",
+    isAdmin: false,
+  });
+  const cv = await canvasesRepository(client).create({
+    ownerId: u.id,
+    slug: "s",
+    apiKeyHash: "h",
+  });
+  return { canvasId: cv.id, userId: u.id };
+}
+
+describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("nextNumber returns 1 for a fresh canvas, then max+1", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    expect(await repo.nextNumber(canvasId)).toBe(1);
+    await repo.createPending({ canvasId, number: 1, createdBy: userId, source: "folder" });
+    expect(await repo.nextNumber(canvasId)).toBe(2);
+  });
+
+  it("createPending → markReady persists manifest, counts, and status", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const v = await repo.createPending({ canvasId, number: 1, createdBy: userId, source: "zip" });
+    expect(v.status).toBe("pending");
+    const ready = await repo.markReady(v.id, { fileCount: 1, totalBytes: 10, manifest: MANIFEST });
+    expect(ready.status).toBe("ready");
+    expect(ready.fileCount).toBe(1);
+    expect(ready.manifest).toEqual(MANIFEST);
+  });
+
+  it("number uniqueness is per-canvas (same number allowed across canvases)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    await repo.createPending({ canvasId, number: 1, createdBy: userId, source: "folder" });
+    await expect(
+      repo.createPending({ canvasId, number: 1, createdBy: userId, source: "folder" }),
+    ).rejects.toThrow();
+    // a different canvas may reuse number 1
+    const other = await canvasesRepository(client).create({
+      ownerId: userId,
+      slug: "s2",
+      apiKeyHash: "h",
+    });
+    await expect(
+      repo.createPending({ canvasId: other.id, number: 1, createdBy: userId, source: "folder" }),
+    ).resolves.toBeDefined();
+  });
+
+  it("lists deploy history newest-first and finds ready versions by number", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    for (const n of [1, 2, 3]) {
+      const v = await repo.createPending({ canvasId, number: n, createdBy: userId, source: "api" });
+      await repo.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+    }
+    const history = await repo.listByCanvas(canvasId);
+    expect(history.map((v) => v.number)).toEqual([3, 2, 1]);
+    expect((await repo.findReadyByNumber(canvasId, 2))?.number).toBe(2);
+    expect(await repo.findReadyByNumber(canvasId, 99)).toBeNull();
+  });
+
+  it("pruneBeyond keeps newest N, never drops the current version", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const ids: string[] = [];
+    for (let n = 1; n <= 12; n++) {
+      const v = await repo.createPending({ canvasId, number: n, createdBy: userId, source: "api" });
+      await repo.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+      ids.push(v.id);
+    }
+    // current = version 12 (newest); pruneBeyond(10) drops the 2 oldest (1, 2)
+    const dropped = await repo.pruneBeyond(canvasId, 10, ids[11] as string);
+    expect(dropped.map((v) => v.number).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(await repo.findById(ids[0] as string)).toBeNull();
+    expect((await repo.listByCanvas(canvasId)).length).toBe(10);
+
+    // if the current version is old, it is never pruned
+    const dropped2 = await repo.pruneBeyond(canvasId, 5, ids[5] as string); // current = #6
+    expect(dropped2.find((v) => v.id === ids[5])).toBeUndefined();
+    expect(await repo.findById(ids[5] as string)).not.toBeNull();
+  });
+});
