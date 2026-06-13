@@ -3,14 +3,17 @@ import { useEffect, useState } from "react";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 import { Field } from "./Field.js";
+import { HoldButton } from "./HoldButton.js";
 
 /**
  * Confirm a discrete action. Anatomy per the area-E conventions: a title, a
  * context slot, and a VERB-labeled action button (never "Confirm"/"OK"). The
  * `destructive` variant styles the action in the danger token, not the accent.
  *
- * `confirmPhrase` opts into type-to-confirm (Delete uses the canvas slug): the
- * action stays disabled until the typed value matches.
+ * Two opt-in friction modes (mutually exclusive): `confirmPhrase` is
+ * type-to-confirm (the action stays disabled until the typed value matches);
+ * `holdToConfirm` swaps the action for a press-and-hold button (the gesture is
+ * the confirmation) — lighter friction for recoverable destructive actions.
  */
 export function ConfirmDialog({
   open,
@@ -23,6 +26,7 @@ export function ConfirmDialog({
   loading = false,
   confirmPhrase,
   confirmPhraseLabel,
+  holdToConfirm = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -34,6 +38,7 @@ export function ConfirmDialog({
   loading?: boolean;
   confirmPhrase?: string;
   confirmPhraseLabel?: string;
+  holdToConfirm?: boolean;
 }) {
   const [typed, setTyped] = useState("");
   useEffect(() => {
@@ -61,16 +66,22 @@ export function ConfirmDialog({
           <Button variant="ghost" size="sm" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button
-            variant={destructive ? "danger" : "primary"}
-            size="sm"
-            onClick={onConfirm}
-            loading={loading}
-            disabled={!phraseSatisfied}
-            data-autofocus={confirmPhrase ? undefined : true}
-          >
-            {actionLabel}
-          </Button>
+          {holdToConfirm ? (
+            <HoldButton onComplete={onConfirm} loading={loading}>
+              {actionLabel}
+            </HoldButton>
+          ) : (
+            <Button
+              variant={destructive ? "danger" : "primary"}
+              size="sm"
+              onClick={onConfirm}
+              loading={loading}
+              disabled={!phraseSatisfied}
+              data-autofocus={confirmPhrase ? undefined : true}
+            >
+              {actionLabel}
+            </Button>
+          )}
         </div>
       </div>
     </Dialog>

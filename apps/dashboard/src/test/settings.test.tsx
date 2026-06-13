@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HOLD_MS } from "../components/HoldButton.js";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -67,7 +68,10 @@ function renderSettings() {
   return router;
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("settings route — confirm-and-await flows", () => {
   it("sets a password via PATCH", async () => {
@@ -127,7 +131,7 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/save your canvas key/i)).toBeInTheDocument();
   });
 
-  it("delete confirms with a single click, then DELETEs", async () => {
+  it("delete confirms with a press-and-hold, then DELETEs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "DELETE /api/canvases/c1": () => json({ ok: true }),
@@ -138,15 +142,20 @@ describe("settings route — confirm-and-await flows", () => {
 
     await user.click(await screen.findByRole("button", { name: /delete canvas/i }));
     const dialog = await screen.findByRole("dialog");
-    // No type-to-confirm gate: delete is a recoverable soft-delete, so the
-    // action is enabled immediately (no textbox in the dialog).
+    // No type-to-confirm gate: the press-and-hold gesture is the confirmation.
     expect(within(dialog).queryByRole("textbox")).toBeNull();
-    const action = within(dialog).getByRole("button", { name: "Delete canvas" });
-    expect(action).toBeEnabled();
-    await user.click(action);
+    const action = within(dialog).getByRole("button", { name: /hold to delete/i });
 
-    await vi.waitFor(() =>
-      expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1")).toBe(true),
+    // A click (press + immediate release) must NOT delete — releasing early cancels.
+    await user.click(action);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    // Holding past the threshold fires the delete (real timers — HOLD_MS wall time).
+    fireEvent.pointerDown(action);
+    await waitFor(
+      () =>
+        expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1")).toBe(true),
+      { timeout: HOLD_MS + 1500 },
     );
   });
 });

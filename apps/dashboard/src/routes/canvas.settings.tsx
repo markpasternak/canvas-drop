@@ -311,8 +311,9 @@ export default function Settings() {
           }
         }}
         title="Delete this canvas?"
-        actionLabel="Delete canvas"
+        actionLabel="Hold to delete"
         destructive
+        holdToConfirm
         loading={del.isPending}
       >
         This takes the canvas offline immediately and removes it from your list. It's recoverable
