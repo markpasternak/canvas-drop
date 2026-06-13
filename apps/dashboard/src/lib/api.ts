@@ -132,12 +132,14 @@ function isAuthExpiry(res: Response): boolean {
   return res.status === 401 || res.redirected || (res.ok && !isJson(res));
 }
 
-async function parseError(res: Response): Promise<ApiError> {
-  let code = `http_${res.status}`;
-  let message = res.statusText || "Request failed";
+/** Map a (possibly JSON) error body to a typed ApiError. Shared by the fetch and
+ * XHR paths so the stable-code → hint contract is identical for both. */
+function errorFromBody(status: number, statusText: string, text: string): ApiError {
+  let code = `http_${status}`;
+  let message = statusText || "Request failed";
   let path: string | undefined;
   try {
-    const body = (await res.json()) as {
+    const body = JSON.parse(text) as {
       code?: string;
       error?: string;
       message?: string;
@@ -149,7 +151,56 @@ async function parseError(res: Response): Promise<ApiError> {
   } catch {
     /* non-JSON error body */
   }
-  return new ApiError(code, message, path, res.status);
+  return new ApiError(code, message, path, status);
+}
+
+async function parseError(res: Response): Promise<ApiError> {
+  return errorFromBody(res.status, res.statusText, await res.text().catch(() => ""));
+}
+
+/**
+ * Upload via XMLHttpRequest so the deploy can report byte-level UPLOAD progress
+ * (`fetch` has no upload-progress API). `onProgress` reports the fraction sent
+ * (0–1); the server's extract/publish phase isn't streamed, so the caller shows
+ * an indeterminate state once it reaches 1. Mirrors `request`'s auth-expiry +
+ * stable-error-code handling.
+ */
+function xhrUpload<T>(
+  method: string,
+  path: string,
+  body: XMLHttpRequestBodyInit,
+  onProgress?: (fraction: number) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, path);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Accept", "application/json");
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded / e.total);
+      };
+      xhr.upload.onload = () => onProgress(1); // bytes sent; server now processing
+    }
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        onAuthExpired();
+        reject(new ApiError("unauthorized", "Session expired", undefined, 401));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (xhr.status === 204 || !xhr.responseText) return resolve(undefined as T);
+        try {
+          return resolve(JSON.parse(xhr.responseText) as T);
+        } catch {
+          return resolve(undefined as T);
+        }
+      }
+      reject(errorFromBody(xhr.status, xhr.statusText, xhr.responseText));
+    };
+    xhr.onerror = () => reject(new ApiError("network_error", "Network error"));
+    xhr.send(body);
+  });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -198,11 +249,11 @@ export const api = {
       jsonBody(body),
     ),
 
-  deployZip: (id: string, zip: ArrayBuffer) =>
-    request<DeployResult>(`/api/canvases/${id}/deploy/zip`, { method: "POST", body: zip }),
+  deployZip: (id: string, zip: ArrayBuffer, onProgress?: (fraction: number) => void) =>
+    xhrUpload<DeployResult>("POST", `/api/canvases/${id}/deploy/zip`, zip, onProgress),
 
-  deployFolder: (id: string, form: FormData) =>
-    request<DeployResult>(`/api/canvases/${id}/deploy/folder`, { method: "POST", body: form }),
+  deployFolder: (id: string, form: FormData, onProgress?: (fraction: number) => void) =>
+    xhrUpload<DeployResult>("POST", `/api/canvases/${id}/deploy/folder`, form, onProgress),
 
   updateSettings: (id: string, patch: CanvasSettings) =>
     request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),

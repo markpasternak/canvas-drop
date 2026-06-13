@@ -68,15 +68,9 @@ export default function CanvasList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">Your canvases</h1>
-        <Link
-          to="/new"
-          className="rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-fg transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover"
-        >
-          Create canvas
-        </Link>
-      </div>
+      {/* The dominant create action lives once, in the top bar (available on every
+          page). No duplicate here. */}
+      <h1 className="text-xl font-semibold tracking-tight">Your canvases</h1>
 
       {isLoading && <ListSkeleton />}
 

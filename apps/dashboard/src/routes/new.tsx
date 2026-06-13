@@ -1,5 +1,6 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useDropzone } from "react-dropzone";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
 import { CopyButton } from "../components/CopyButton.js";
@@ -15,15 +16,19 @@ const METHODS: { id: Method; label: string; blurb: string }[] = [
   { id: "api", label: "Use the API", blurb: "Deploy programmatically" },
 ];
 
-/** Build multipart form from a directory picker, keying each file by its path
- * relative to the canvas root (the selected top folder is stripped). */
-function folderForm(files: FileList): FormData {
+/** Canvas-relative path for an uploaded file. react-dropzone's file-selector adds
+ * `path` for both dragged folders and the directory picker (the directory picker
+ * also sets webkitRelativePath). Strip a leading slash and the top folder segment
+ * so a dropped/selected folder deploys its contents at the canvas root. */
+function canvasRelativePath(file: File): string {
+  const withPath = file as File & { path?: string };
+  const raw = (withPath.path || file.webkitRelativePath || file.name).replace(/^\/+/, "");
+  return raw.includes("/") ? raw.slice(raw.indexOf("/") + 1) : raw;
+}
+
+function folderFormFromFiles(files: File[]): FormData {
   const form = new FormData();
-  for (const file of Array.from(files)) {
-    const rel = file.webkitRelativePath || file.name;
-    const path = rel.includes("/") ? rel.slice(rel.indexOf("/") + 1) : rel;
-    form.set(path, file);
-  }
+  for (const file of files) form.set(canvasRelativePath(file), file);
   return form;
 }
 
@@ -37,6 +42,9 @@ export default function CreateCanvas() {
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Upload progress: null = not uploading; 0–100 = % of bytes sent (100 = sent,
+  // server now extracting/publishing).
+  const [progress, setProgress] = useState<number | null>(null);
 
   // Post-create state: key to reveal, and where to go on dismiss.
   const [revealed, setRevealed] = useState<{
@@ -51,6 +59,7 @@ export default function CreateCanvas() {
   function fail(err: unknown) {
     setError(err instanceof ApiError ? err.hint : "Something went wrong. Try again.");
     setBusy(false);
+    setProgress(null);
   }
 
   async function createPaste() {
@@ -64,19 +73,21 @@ export default function CreateCanvas() {
     }
   }
 
-  async function createWithUpload(kind: "folder" | "zip", files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function createWithUpload(kind: "folder" | "zip", files: File[]) {
+    if (files.length === 0) return;
     setBusy(true);
     setError(null);
+    setProgress(0);
+    const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
       const canvas = await api.createCanvas({ title: title || undefined });
       try {
         if (kind === "folder") {
-          await api.deployFolder(canvas.id, folderForm(files));
+          await api.deployFolder(canvas.id, folderFormFromFiles(files), onProgress);
         } else {
           const first = files[0];
           if (!first) return;
-          await api.deployZip(canvas.id, await first.arrayBuffer());
+          await api.deployZip(canvas.id, await first.arrayBuffer(), onProgress);
         }
       } catch (deployErr) {
         // Deploy failed after the canvas was created — soft-delete the orphan so
@@ -169,23 +180,29 @@ export default function CreateCanvas() {
           </div>
         )}
 
-        {method === "folder" && (
-          <FileDrop
-            label="Choose a folder of static files"
-            directory
-            busy={busy}
-            onPick={(files) => createWithUpload("folder", files)}
-          />
-        )}
+        {method === "folder" &&
+          (busy ? (
+            <DeployProgress pct={progress} />
+          ) : (
+            <FileDrop
+              label="Drag a folder or files here"
+              variant="folder"
+              busy={busy}
+              onFiles={(files) => createWithUpload("folder", files)}
+            />
+          ))}
 
-        {method === "zip" && (
-          <FileDrop
-            label="Choose a .zip of your site"
-            accept=".zip"
-            busy={busy}
-            onPick={(files) => createWithUpload("zip", files)}
-          />
-        )}
+        {method === "zip" &&
+          (busy ? (
+            <DeployProgress pct={progress} />
+          ) : (
+            <FileDrop
+              label="Drag a .zip here"
+              variant="zip"
+              busy={busy}
+              onFiles={(files) => createWithUpload("zip", files)}
+            />
+          ))}
 
         {method === "api" &&
           (apiResult ? (
@@ -215,38 +232,138 @@ export default function CreateCanvas() {
   );
 }
 
+/** A click-affordance styled as an inline accent link. */
+function PickLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded font-medium text-accent transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+    >
+      {children}
+    </button>
+  );
+}
+
 function FileDrop({
   label,
-  accept,
-  directory,
+  variant,
   busy,
-  onPick,
+  onFiles,
 }: {
   label: string;
-  accept?: string;
-  directory?: boolean;
+  variant: "folder" | "zip";
   busy: boolean;
-  onPick: (files: FileList | null) => void;
+  onFiles: (files: File[]) => void;
 }) {
+  const filesRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+
+  // Drag accepts files AND folders together; react-dropzone's file-selector does
+  // the cross-browser directory traversal. The native CLICK picker can't offer
+  // both at once (OS limit), so we expose two explicit choices instead — hence
+  // `noClick` on the zone.
+  const onDrop = useCallback(
+    (accepted: File[]) => {
+      if (accepted.length > 0) onFiles(accepted);
+    },
+    [onFiles],
+  );
+  const { getRootProps, isDragActive } = useDropzone({
+    onDrop,
+    noClick: true,
+    noKeyboard: true,
+    disabled: busy,
+  });
+
+  const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = ""; // allow re-selecting the same path
+    if (files.length > 0) onFiles(files);
+  };
+
   return (
-    <label
+    <div
+      {...getRootProps()}
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-canvas px-6 py-12 text-center transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-accent",
+        "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+        isDragActive ? "border-accent bg-accent-subtle/40" : "border-border-strong bg-canvas",
         busy && "pointer-events-none opacity-60",
       )}
     >
-      <span className="text-sm font-medium text-fg">{label}</span>
-      <span className="text-xs text-muted">{busy ? "Deploying…" : "Click to browse"}</span>
+      <span className="text-sm font-medium text-fg">
+        {busy ? "Deploying…" : isDragActive ? "Drop to upload" : label}
+      </span>
+      {!busy && (
+        <div className="flex flex-wrap items-center justify-center gap-1.5 text-xs text-muted">
+          {variant === "folder" ? (
+            <>
+              <PickLink onClick={() => filesRef.current?.click()}>Choose files</PickLink>
+              <span>or</span>
+              <PickLink onClick={() => folderRef.current?.click()}>choose a folder</PickLink>
+            </>
+          ) : (
+            <PickLink onClick={() => filesRef.current?.click()}>Choose a .zip file</PickLink>
+          )}
+        </div>
+      )}
+      {/* Files picker (and the zip picker, restricted to .zip). */}
       <input
+        ref={filesRef}
         type="file"
-        accept={accept}
-        multiple
         className="hidden"
-        // webkitdirectory is non-standard; cast on the element.
-        {...(directory ? { webkitdirectory: "" } : {})}
-        onChange={(e) => onPick(e.target.files)}
+        multiple={variant === "folder"}
+        accept={variant === "zip" ? ".zip" : undefined}
+        onChange={pick}
       />
-    </label>
+      {/* Folder picker (directory mode) — folder variant only. */}
+      {variant === "folder" && (
+        <input
+          ref={folderRef}
+          type="file"
+          className="hidden"
+          multiple
+          {...{ webkitdirectory: "" }}
+          onChange={pick}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Deploy progress: a real upload bar (0–100% of bytes sent), then an
+ * indeterminate "finishing" pulse while the server extracts/publishes. */
+function DeployProgress({ pct }: { pct: number | null }) {
+  const uploading = pct !== null && pct < 100;
+  return (
+    <div className="space-y-3 py-3" aria-live="polite">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-fg">
+          {uploading ? "Uploading files…" : "Finishing deploy…"}
+        </span>
+        {uploading && <span className="font-mono text-xs text-muted">{pct}%</span>}
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-border"
+        role="progressbar"
+        aria-valuenow={uploading ? (pct ?? 0) : undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div
+          className={cn(
+            "h-full rounded-full bg-accent transition-[width] duration-150 [transition-timing-function:var(--ease-out)]",
+            !uploading && "w-full animate-pulse",
+          )}
+          style={uploading ? { width: `${pct ?? 0}%` } : undefined}
+        />
+      </div>
+      <p className="text-xs text-muted">
+        {uploading
+          ? "Sending your files to the server."
+          : "Extracting and publishing your canvas — almost there."}
+      </p>
+    </div>
   );
 }
 
