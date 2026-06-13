@@ -166,10 +166,10 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
+    // Created oldest→newest. gallery_published_at is newest-first; on a same-ms tie
+    // the `desc(id)` tiebreak (uuidv7 is monotonic) keeps newest-first too.
     const first = await seedListed(client, owner.id);
-    await new Promise((r) => setTimeout(r, 2));
     const second = await seedListed(client, owner.id);
-    await new Promise((r) => setTimeout(r, 2));
     const third = await seedListed(client, owner.id);
 
     const { items } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
@@ -182,7 +182,6 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     const repo = canvasesRepository(client);
     for (let i = 0; i < 5; i++) {
       await seedListed(client, owner.id);
-      await new Promise((r) => setTimeout(r, 2));
     }
 
     const page1 = await repo.listGallery({ now: NOW, limit: 2, offset: 0 });

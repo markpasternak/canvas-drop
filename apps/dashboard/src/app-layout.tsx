@@ -81,6 +81,13 @@ export function AppLayout() {
               >
                 Archived
               </Link>
+              <Link
+                to="/gallery"
+                className="rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
+                activeProps={{ "aria-current": "page" }}
+              >
+                Gallery
+              </Link>
             </nav>
           </div>
           <nav className="flex shrink-0 items-center gap-2" aria-label="Primary actions">

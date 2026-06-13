@@ -139,6 +139,39 @@ export interface CanvasSettings {
   galleryTags?: string[];
 }
 
+/** One canvas as it appears in the opt-in gallery (M8) — display-only fields. */
+export interface GalleryItem {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  summary: string | null;
+  tags: string[];
+  hasPassword: boolean;
+  publishedAt: number | null;
+  owner: { name: string; avatarUrl: string | null };
+}
+
+/** A page of gallery results. `limit`/`offset` are echoed by the server so the
+ *  view derives "showing X–Y of N" from the authoritative values, not a guess. */
+export interface GalleryPage {
+  items: GalleryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface GalleryQuery {
+  q?: string;
+  tag?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Gallery page size: the client's `limit` AND the page→offset divisor. One
+ *  constant so the page math can never desync from the requested page size. */
+export const GALLERY_PAGE_SIZE = 24;
+
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {
   EMPTY_DEPLOY: "The upload was empty — add at least an index.html.",
@@ -312,6 +345,17 @@ function jsonBody(body: unknown): RequestInit {
 
 export const api = {
   me: () => request<Me>("/api/me"),
+
+  /** Browse the opt-in gallery (M8). Empty params are omitted from the query string. */
+  listGallery: (query: GalleryQuery = {}) => {
+    const sp = new URLSearchParams();
+    if (query.q) sp.set("q", query.q);
+    if (query.tag) sp.set("tag", query.tag);
+    if (query.limit !== undefined) sp.set("limit", String(query.limit));
+    if (query.offset !== undefined) sp.set("offset", String(query.offset));
+    const qs = sp.toString();
+    return request<GalleryPage>(`/api/gallery${qs ? `?${qs}` : ""}`);
+  },
 
   listCanvases: () =>
     request<{ canvases: CanvasListItem[] }>("/api/canvases").then((r) => r.canvases),
