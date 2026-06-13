@@ -1,24 +1,34 @@
 import { useParams } from "@tanstack/react-router";
+import { TabContentFrame } from "../components/CanvasDetail.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { MetaGrid, MetaItem, Panel } from "../components/Surface.js";
 import { formatBytes } from "../lib/format.js";
 import { useCanvas, useUsage } from "../lib/queries.js";
 
-/** Tiles that light up in later milestones (views = C/E, AI/realtime = M9). */
-const COMING_SOON = ["Unique & total viewers", "AI tokens & cost", "Peak realtime connections"];
+/** Stats that light up in later milestones (per-visitor views = C/E). */
+const COMING_SOON = ["Unique & total viewers"];
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/** Compact USD: extra precision for small AI costs. */
+function formatUsd(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+/** A metric value with an optional muted sub-line, matching the overview tab. */
+function Metric({ value, sub }: { value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-5">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-tight text-fg">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
-    </div>
+    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="text-base font-semibold tracking-tight text-fg">{value}</span>
+      {sub && <span className="text-muted">{sub}</span>}
+    </span>
   );
 }
 
-/** Usage tab (D24, M6): real KV-op + file-storage figures from usage_events/files.
- *  View/AI/realtime tiles remain "coming soon" (later milestones). */
+/** Usage tab (D24): KV ops + file storage (M6), AI tokens/cost + realtime connects
+ *  (M9), from usage_events / files / ai_usage. Per-visitor view stats remain "coming
+ *  soon". Realtime is ephemeral, so we show connect count, not peak connections. */
 export default function Usage() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
@@ -26,7 +36,13 @@ export default function Usage() {
   const backendOn = canvas?.backendEnabled ?? false;
   const { data: usage, isLoading: usageLoading } = useUsage(id);
 
-  if (canvasLoading || !canvas) return <Skeleton className="h-48" />;
+  if (canvasLoading || !canvas) {
+    return (
+      <TabContentFrame>
+        <Skeleton className="h-40" />
+      </TabContentFrame>
+    );
+  }
 
   if (!backendOn) {
     return (
@@ -34,28 +50,49 @@ export default function Usage() {
         title="No backend usage yet"
         description={
           <span className="block">
-            Turn on <strong>Backend</strong> in the Capabilities tab so this canvas can use KV and
-            file storage — usage will appear here once it does.
+            Turn on <strong>Backend</strong> in the Capabilities tab so this canvas can use KV,
+            files, AI, and realtime — usage will appear here once it does.
           </span>
         }
       />
     );
   }
 
-  if (usageLoading || !usage) return <Skeleton className="h-48" />;
+  if (usageLoading || !usage) {
+    return (
+      <TabContentFrame>
+        <Skeleton className="h-40" />
+      </TabContentFrame>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Stat label="KV operations" value={usage.kvOps.toLocaleString()} />
-        <Stat
-          label="File storage"
-          value={formatBytes(usage.fileBytes)}
-          sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
-        />
-      </div>
+    <TabContentFrame>
+      <Panel>
+        <MetaGrid>
+          <MetaItem label="KV operations">
+            <Metric value={usage.kvOps.toLocaleString()} />
+          </MetaItem>
+          <MetaItem label="File storage">
+            <Metric
+              value={formatBytes(usage.fileBytes)}
+              sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+            />
+          </MetaItem>
+          <MetaItem label="AI usage">
+            <Metric
+              value={formatUsd(usage.aiCostUsd)}
+              sub={`${usage.aiTokens.toLocaleString()} tokens · ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
+            />
+          </MetaItem>
+          <MetaItem label="Realtime connections">
+            <Metric value={usage.realtimeConnects.toLocaleString()} sub="total connects" />
+          </MetaItem>
+        </MetaGrid>
+      </Panel>
+
       <div className="space-y-2">
-        <p className="text-xs font-medium text-muted">Coming soon</p>
+        <p className="text-[0.6875rem] font-medium text-subtle">Coming soon</p>
         <div className="flex flex-wrap gap-1.5">
           {COMING_SOON.map((m) => (
             <span
@@ -67,6 +104,6 @@ export default function Usage() {
           ))}
         </div>
       </div>
-    </div>
+    </TabContentFrame>
   );
 }

@@ -66,16 +66,28 @@ function renderUsage() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("usage tab", () => {
-  it("renders real KV-op + file-storage figures when backend is on", async () => {
+  it("renders KV-op, file-storage, AI and realtime figures when backend is on", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: true }),
       "GET /api/canvases/c1/usage": () =>
-        json({ kvOps: 1280, fileOps: 12, fileCount: 3, fileBytes: 2048 }),
+        json({
+          kvOps: 1280,
+          fileOps: 12,
+          fileCount: 3,
+          fileBytes: 2048,
+          aiCalls: 4,
+          aiTokens: 5120,
+          aiCostUsd: 0.0034,
+          realtimeConnects: 9,
+        }),
     });
     renderUsage();
     expect(await screen.findByText("1,280")).toBeInTheDocument(); // KV ops
     expect(await screen.findByText("2.0 KB")).toBeInTheDocument(); // file storage
     expect(screen.getByText(/3 files/)).toBeInTheDocument();
+    expect(screen.getByText("$0.0034")).toBeInTheDocument(); // AI cost (sub-cent precision)
+    expect(screen.getByText(/5,120 tokens/)).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument(); // realtime connects
   });
 
   it("shows the empty state (pointing at Capabilities) when backend is off", async () => {

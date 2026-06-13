@@ -2,6 +2,8 @@ import type { Config } from "@canvas-drop/shared";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
+import type { UpgradeWebSocket } from "hono/ws";
+import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import { authRoutes } from "./auth/routes.js";
@@ -13,6 +15,7 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
+import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
@@ -27,6 +30,7 @@ import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
+import type { RealtimeHub } from "./realtime/hub.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
@@ -53,6 +57,16 @@ export interface BuildAppDeps {
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the peer-IP extractor (tests inject a fixed IP). */
   clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
+  /** AI model provider (default Anthropic from config; tests inject a fake). */
+  aiProvider?: ModelProvider;
+  /** Shared realtime hub (constructed in index.ts; used by the WS route + revoke hooks). */
+  hub?: RealtimeHub;
+  /**
+   * Called once with the composed app to obtain the WebSocket upgrade helper
+   * (`@hono/node-ws`). Returns `upgradeWebSocket`; the caller (index.ts) captures
+   * `injectWebSocket` via closure to attach after `serve()`. Omitted → no realtime.
+   */
+  registerWebSocket?: (app: Hono<AppEnv>) => UpgradeWebSocket;
 }
 
 /**
@@ -72,6 +86,12 @@ export interface BuildAppDeps {
  */
 export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // Obtain the WebSocket upgrade helper for THIS app instance (chicken-and-egg:
+  // @hono/node-ws needs the app; the route needs the helper). Realtime is wired
+  // only when both the helper and the hub are present.
+  const upgradeWebSocket = deps.registerWebSocket?.(app);
+  const realtime = upgradeWebSocket && deps.hub ? { hub: deps.hub, upgradeWebSocket } : undefined;
 
   app.use("*", requestLogger(deps.rootLogger));
 
@@ -142,6 +162,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       kv: kvRepository(deps.db),
       files: filesService({ files: filesRepository(deps.db), storage: deps.storage }),
       usage: usageEventsRepository(deps.db),
+      aiUsage: aiUsageRepository(deps.db),
+      aiProvider: deps.aiProvider ?? anthropicProvider(deps.config),
+      realtime,
     }),
   );
 
@@ -168,6 +191,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       engine: deps.engine,
       usage: usageEventsRepository(deps.db),
       files: filesRepository(deps.db),
+      aiUsage: aiUsageRepository(deps.db),
+      hub: deps.hub,
     }),
   );
 

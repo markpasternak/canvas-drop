@@ -26,6 +26,7 @@ import { loadConfig } from "@canvas-drop/shared";
 import { purgeDeletedCanvases } from "../src/canvas/purge.js";
 import { makeDb } from "../src/db/factory.js";
 import { runMigrations } from "../src/db/migrate.js";
+import { aiUsageRepository } from "../src/db/repositories/ai-usage.js";
 import { canvasesRepository } from "../src/db/repositories/canvases.js";
 import { usageEventsRepository } from "../src/db/repositories/usage-events.js";
 import { versionsRepository } from "../src/db/repositories/versions.js";
@@ -90,6 +91,11 @@ async function main() {
       log.info(
         { pruned, retentionDays: USAGE_EVENTS_RETENTION_DAYS },
         `pruned ${pruned} usage_events older than ${USAGE_EVENTS_RETENTION_DAYS}d`,
+      );
+      const aiPruned = await aiUsageRepository(db).pruneBefore(usageCutoff);
+      log.info(
+        { pruned: aiPruned, retentionDays: USAGE_EVENTS_RETENTION_DAYS },
+        `pruned ${aiPruned} ai_usage rows older than ${USAGE_EVENTS_RETENTION_DAYS}d`,
       );
     }
   } finally {

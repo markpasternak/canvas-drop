@@ -27,7 +27,9 @@ export const CAPABILITY_DISABLED = "CAPABILITY_DISABLED" as const;
 export function capabilityGlobals(config: Config): CapabilityGlobals {
   return {
     realtimeEnabled: config.realtimeEnabled,
-    aiEnabled: config.ai.apiKey !== undefined,
+    // Truthy check (not `!== undefined`): an empty-string key must not enable AI.
+    // Config also coerces a blank key to undefined; this is belt-and-suspenders.
+    aiEnabled: !!config.ai.apiKey,
   };
 }
 

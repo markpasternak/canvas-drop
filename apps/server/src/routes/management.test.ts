@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { verifyPassword } from "../canvas/password.js";
 import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
@@ -31,6 +32,8 @@ function buildApp(
   client: DbClient,
   actor: { id: string; isAdmin: boolean },
   storage = memStorage(),
+  // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
+  hub?: any,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -55,6 +58,8 @@ function buildApp(
       engine,
       usage: usageEventsRepository(client),
       files: filesRepository(client),
+      aiUsage: aiUsageRepository(client),
+      hub,
     }),
   );
   return app;
@@ -814,17 +819,22 @@ describe("managementRoutes", () => {
 
   // --- Usage stats (U10) ---
 
-  it("GET /:id/usage returns KV op + file storage figures for the owner", async () => {
+  it("GET /:id/usage returns KV op, file storage, AI and realtime figures for the owner", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const created = await createCanvas(app, { backendEnabled: true });
-    // Seed a KV op + a file row directly through the repos.
+    // Seed a KV op + a realtime connect + a file row + an AI call.
     await usageEventsRepository(client).record({
       canvasId: created.id,
       userId: owner.id,
       type: "kv_op",
       meta: { op: "set" },
+    });
+    await usageEventsRepository(client).record({
+      canvasId: created.id,
+      userId: owner.id,
+      type: "rt_connect",
     });
     await filesRepository(client).insert({
       id: "f1",
@@ -835,13 +845,36 @@ describe("managementRoutes", () => {
       storageKey: `files/${created.id}/f1`,
       uploadedBy: owner.id,
     });
+    await aiUsageRepository(client).record({
+      canvasId: created.id,
+      userId: owner.id,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 0.0125,
+    });
     const res = await app.request(`/api/canvases/${created.id}/usage`);
     expect(res.status).toBe(200);
-    expect(await jsonOf<{ kvOps: number; fileCount: number; fileBytes: number }>(res)).toEqual({
+    expect(
+      await jsonOf<{
+        kvOps: number;
+        fileCount: number;
+        fileBytes: number;
+        aiCalls: number;
+        aiTokens: number;
+        aiCostUsd: number;
+        realtimeConnects: number;
+      }>(res),
+    ).toEqual({
       kvOps: 1,
       fileOps: 0,
       fileCount: 1,
       fileBytes: 1234,
+      aiCalls: 1,
+      aiTokens: 150,
+      aiCostUsd: 0.0125,
+      realtimeConnects: 1,
     });
   });
 
@@ -854,5 +887,84 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}/usage`,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("management realtime revoke hooks (D-RT-6)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  function spyHub() {
+    const calls: Array<{ method: string; canvasId: string }> = [];
+    return {
+      calls,
+      revalidateCanvas: async (id: string) => {
+        calls.push({ method: "revalidateCanvas", canvasId: id });
+      },
+      dropGatedNonOwners: async (id: string) => {
+        calls.push({ method: "dropGatedNonOwners", canvasId: id });
+      },
+      dropCanvas: (id: string) => {
+        calls.push({ method: "dropCanvas", canvasId: id });
+      },
+    };
+  }
+
+  const mutate = (app: ReturnType<typeof buildApp>, method: string, path: string, body?: unknown) =>
+    app.request(path, {
+      method,
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  async function setup() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const cv = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "app",
+      apiKeyHash: "h-app",
+    });
+    const hub = spyHub();
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, memStorage(), hub);
+    return { owner, cv, hub, app };
+  }
+
+  it("PATCH settings (un-share) revalidates; with a new password also drops gated non-owners", async () => {
+    const { cv, hub, app } = await setup();
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/settings`, { shared: false })).status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    expect(hub.calls.some((c) => c.method === "dropGatedNonOwners")).toBe(false);
+
+    hub.calls.length = 0;
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/settings`, { password: "hunter2pass" }))
+        .status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    expect(hub.calls).toContainEqual({ method: "dropGatedNonOwners", canvasId: cv.id });
+  });
+
+  it("PATCH capabilities (realtime off) revalidates", async () => {
+    const { cv, hub, app } = await setup();
+    expect(
+      (await mutate(app, "PATCH", `/api/canvases/${cv.id}/capabilities`, { realtime: false }))
+        .status,
+    ).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+  });
+
+  it("regenerate-slug drops the whole canvas; delete revalidates", async () => {
+    const { cv, hub, app } = await setup();
+    expect((await mutate(app, "POST", `/api/canvases/${cv.id}/regenerate-slug`)).status).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "dropCanvas", canvasId: cv.id });
+
+    hub.calls.length = 0;
+    expect((await mutate(app, "DELETE", `/api/canvases/${cv.id}`)).status).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
   });
 });

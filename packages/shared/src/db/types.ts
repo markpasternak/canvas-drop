@@ -1,4 +1,5 @@
 import type {
+  aiUsage,
   auditLog,
   canvases,
   drafts,
@@ -39,6 +40,8 @@ export type KvEntry = typeof kvEntries.$inferSelect;
 export type NewKvEntry = typeof kvEntries.$inferInsert;
 export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
+export type AiUsage = typeof aiUsage.$inferSelect;
+export type NewAiUsage = typeof aiUsage.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

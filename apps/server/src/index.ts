@@ -1,5 +1,6 @@
 import { ConfigError, loadConfig } from "@canvas-drop/shared";
 import { serve } from "@hono/node-server";
+import { createNodeWebSocket } from "@hono/node-ws";
 import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
 import { setupAuth } from "./auth/factory.js";
@@ -13,7 +14,11 @@ import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
+import { createHub } from "./realtime/hub.js";
 import { makeStorage } from "./storage/factory.js";
+
+/** Periodic realtime re-authorization (D-RT-6 backstop, §9.7 default 60s). */
+const REALTIME_HEARTBEAT_MS = 60_000;
 
 async function main() {
   // 1. Config — the only process.env reader; fail loud on invalid combos.
@@ -52,7 +57,21 @@ async function main() {
       ? makeOidc({ config, users, sessionSvc, getConfig: makeOidcConfigLoader(config) })
       : undefined;
 
-  // 4. Compose and serve.
+  // 4. Realtime hub (single-process, in-memory). Re-fetches the canvas + user for
+  //    live re-authorization (revoke-drops-socket + heartbeat).
+  const hub = createHub({
+    config,
+    resolveCanvas: (id) => canvases.findById(id),
+    isUserActive: async (id) => {
+      const u = await users.findById(id);
+      return !!u && !u.isBlocked;
+    },
+  });
+
+  // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS
+  //    route needs its upgradeWebSocket helper — resolve the cycle by handing
+  //    buildApp a registerWebSocket callback and capturing injectWebSocket here.
+  let injectWebSocket: ((server: ReturnType<typeof serve>) => void) | undefined;
   const app = buildApp({
     config,
     db,
@@ -67,6 +86,12 @@ async function main() {
     audit,
     sessionSvc,
     oidc,
+    hub,
+    registerWebSocket: (honoApp) => {
+      const nodeWs = createNodeWebSocket({ app: honoApp, baseUrl: config.baseUrl });
+      injectWebSocket = nodeWs.injectWebSocket as typeof injectWebSocket;
+      return nodeWs.upgradeWebSocket;
+    },
   });
 
   const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
@@ -81,6 +106,18 @@ async function main() {
       `canvas-drop listening on http://localhost:${info.port}`,
     );
   });
+
+  // Attach the WebSocket upgrade handler to the underlying http.Server (realtime
+  // primitive). MUST run after serve() returns the server.
+  injectWebSocket?.(server);
+
+  // Realtime heartbeat backstop: re-authorize live sockets so time-based expiry
+  // and admin block/delete (which fire no mutation hook) drop within one tick.
+  const heartbeat = setInterval(() => {
+    for (const id of hub.activeCanvasIds()) {
+      void hub.revalidateCanvas(id).catch(() => {});
+    }
+  }, REALTIME_HEARTBEAT_MS);
 
   // Fail loud and readable on a bound port instead of letting the underlying
   // http.Server emit an unhandled 'error' event (which crashes with a raw stack
@@ -115,6 +152,8 @@ async function main() {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(heartbeat);
+    hub.closeAll(); // close live WebSockets before draining HTTP
     if ("closeIdleConnections" in server) server.closeIdleConnections();
     const force = setTimeout(() => {
       if ("closeAllConnections" in server) server.closeAllConnections();
