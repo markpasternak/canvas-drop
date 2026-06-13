@@ -4,6 +4,7 @@ type: feat
 status: complete
 date: 2026-06-13
 origin: docs/brainstorms/2026-06-13-build-resequence-editor-version-model-requirements.md
+issue: 12
 milestone: M5
 ---
 
