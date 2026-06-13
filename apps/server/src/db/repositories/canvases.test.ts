@@ -59,8 +59,8 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
-    const a = await repo.create({ ownerId, slug: "a", apiKeyHash: "h" });
-    const b = await repo.create({ ownerId, slug: "b", apiKeyHash: "h" });
+    const a = await repo.create({ ownerId, slug: "a", apiKeyHash: "ha" });
+    const b = await repo.create({ ownerId, slug: "b", apiKeyHash: "hb" });
     await repo.setStatus(a.id, "deleted");
     const list = await repo.listByOwner(ownerId);
     expect(list.map((c) => c.id)).toEqual([b.id]);
