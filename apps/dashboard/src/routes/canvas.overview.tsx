@@ -27,6 +27,45 @@ function EntryFile({ entry }: { entry: RootEntry }) {
   );
 }
 
+/**
+ * Explains the canvas root when it's not the obvious index.html: reassures when
+ * a lone file is being served as the home page (it works — here's the source),
+ * and clearly warns when the root won't load at all. Nothing for the normal
+ * index.html case.
+ */
+function EntryNotice({ entry, spaFallback }: { entry: RootEntry; spaFallback: boolean }) {
+  if (entry.reason === "index") return null;
+
+  if (entry.reason === "single") {
+    return (
+      <div className="rounded-lg border border-border bg-canvas px-4 py-3 text-sm text-muted">
+        No <code className="text-fg">index.html</code> in this deploy, so{" "}
+        <code className="text-fg">{entry.path}</code> is being served as the home page — your link
+        works.
+        {spaFallback && " Deep links resolve to it too (SPA fallback is on)."} Rename it to{" "}
+        <code className="text-fg">index.html</code> to make the entry point explicit.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning">
+      {entry.reason === "ambiguous" ? (
+        <>
+          This deploy has several pages but no <code>index.html</code>, so the canvas root (your
+          share link) won't load — there's no way to know which page is the home page. Rename the
+          main one to <code>index.html</code> and deploy again.
+        </>
+      ) : (
+        <>
+          This deploy has no HTML page, so the canvas root won't load. Add an{" "}
+          <code>index.html</code> and deploy again.
+        </>
+      )}
+    </div>
+  );
+}
+
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -65,13 +104,7 @@ export default function Overview() {
         </div>
       )}
 
-      {current && current.entry.path === null && (
-        <div className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning">
-          {current.entry.reason === "ambiguous"
-            ? "This deploy has no index.html and several pages, so the canvas root (your share link) won't load — there's no way to know which page is the home page. Rename your main page to index.html and deploy again."
-            : "This deploy has no HTML page, so the canvas root won't load. Add an index.html and deploy again."}
-        </div>
-      )}
+      {current && <EntryNotice entry={current.entry} spaFallback={canvas.spaFallback} />}
 
       <dl className="grid gap-5 rounded-xl border border-border bg-surface p-5 sm:grid-cols-2">
         <Stat label="Status">
