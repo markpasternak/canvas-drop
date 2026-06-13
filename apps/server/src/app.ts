@@ -146,7 +146,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   // Dashboard SPA (area E): serve the built assets for the dashboard role, behind
   // the auth gateway above (login-on-every-request holds for the shell itself).
-  const dashboard = serveSpa({ config: deps.config });
+  const dashboard = serveSpa({ config: deps.config, log: deps.rootLogger });
   app.use("*", (c, next) => (c.get("role") === "dashboard" ? dashboard(c, next) : next()));
 
   // Anything still unhandled (platform-api roles F–R) — not built yet.

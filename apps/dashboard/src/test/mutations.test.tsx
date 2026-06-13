@@ -56,4 +56,23 @@ describe("useUpdateSettings (optimistic)", () => {
     reject(new Error("boom"));
     await waitFor(() => expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.shared).toBe(false));
   });
+
+  it("rapid overlapping toggles converge to the last intent (scope-serialized)", async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    qc.setQueryData(keys.canvas("c1"), CANVAS);
+    // Echo the patch back as the server would; mutations for this canvas are
+    // scope-serialized, so they can't snapshot each other's optimistic state.
+    vi.spyOn(api, "updateSettings").mockImplementation(async (_id, patch) => ({
+      ...CANVAS,
+      ...patch,
+    }));
+
+    const { result } = renderHook(() => useUpdateSettings("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ shared: true });
+    result.current.mutate({ shared: false });
+
+    // The cache converges to the LAST intent (false), not a stale rollback.
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.shared).toBe(false));
+  });
 });

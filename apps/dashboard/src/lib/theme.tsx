@@ -19,6 +19,12 @@ function apply(choice: ThemeChoice) {
  * override. Both themes are first-class (§14.3). */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [choice, setChoiceState] = useState<ThemeChoice>(() => {
+    // A `?theme=light|dark` query param wins (shareable themed links); otherwise
+    // the persisted manual choice; otherwise follow the OS.
+    if (typeof location !== "undefined") {
+      const param = new URLSearchParams(location.search).get("theme");
+      if (param === "light" || param === "dark") return param;
+    }
     const stored = typeof localStorage !== "undefined" ? localStorage.getItem(KEY) : null;
     return stored === "light" || stored === "dark" ? stored : "system";
   });
