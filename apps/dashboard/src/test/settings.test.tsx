@@ -94,6 +94,21 @@ describe("settings route — confirm-and-await flows", () => {
     });
   });
 
+  it("Generate fills a strong password and reveals it for copying", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    const user = userEvent.setup();
+    renderSettings();
+
+    const input = (await screen.findByLabelText("Password")) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    // a non-trivial value appears and is shown (not masked) so it can be copied
+    expect(input.value.length).toBeGreaterThanOrEqual(16);
+    expect(input.type).toBe("text");
+  });
+
   it("regenerate-slug confirms, then POSTs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
