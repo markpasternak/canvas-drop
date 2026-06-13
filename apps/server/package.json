@@ -1,0 +1,13 @@
+{
+  "name": "@canvas-drop/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --eval \"console.log('server dev entrypoint lands in U11')\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@canvas-drop/shared": "workspace:*"
+  }
+}
