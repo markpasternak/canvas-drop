@@ -85,6 +85,11 @@ export function usersRepository(client: DbClient) {
     async touchLastSeen(id: string): Promise<void> {
       await db.update(t).set({ lastSeenAt: Date.now() }).where(eq(t.id, id));
     },
+
+    /** Block or unblock a user (admin user-management; gateway rejects blocked users). */
+    async setBlocked(id: string, isBlocked: boolean): Promise<void> {
+      await db.update(t).set({ isBlocked }).where(eq(t.id, id));
+    },
   };
 }
 
