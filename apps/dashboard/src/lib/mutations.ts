@@ -71,27 +71,25 @@ export function useUpdateCapabilities(id: string) {
           ai: patch.ai ?? prev.capabilities.ai,
           realtime: patch.realtime ?? prev.capabilities.realtime,
         };
-        // Optimistic `effective` reflects only backend && flag — the operator
-        // global gating (ai/realtime) lives server-side and is re-synced by
-        // onSettled. A feature already gated off by the operator stays shown that
-        // way: keep the prior effective when the patch didn't change its inputs.
-        const eff = (feature: keyof typeof capabilities): boolean => {
-          const localOn = backendEnabled && capabilities[feature];
-          const inputsUnchanged =
-            backendEnabled === prev.backendEnabled &&
-            capabilities[feature] === prev.capabilities[feature];
-          return inputsUnchanged ? prev.effective[feature] : localOn;
-        };
+        // Optimistic `effective`: kv/files have no operator global, so backend &&
+        // flag is authoritative. ai/realtime are ALSO gated by an operator global
+        // the browser can't see, so we NEVER optimistically turn them ON — we cap
+        // at the prior effective state and let onSettled confirm any upward
+        // transition. This keeps the "disabled by administrator" hint from briefly
+        // clearing when a globally-disabled feature is toggled on (the server
+        // remains authoritative either way).
+        const localOn = (feature: keyof typeof capabilities) =>
+          backendEnabled && capabilities[feature];
         const optimistic: Canvas = {
           ...prev,
           backendEnabled,
           capabilities,
           effective: {
             identity: backendEnabled,
-            kv: eff("kv"),
-            files: eff("files"),
-            ai: eff("ai"),
-            realtime: eff("realtime"),
+            kv: localOn("kv"),
+            files: localOn("files"),
+            ai: localOn("ai") && prev.effective.ai,
+            realtime: localOn("realtime") && prev.effective.realtime,
           },
         };
         qc.setQueryData(keys.canvas(id), optimistic);

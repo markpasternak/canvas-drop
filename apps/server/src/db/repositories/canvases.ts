@@ -1,3 +1,4 @@
+import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
   type Canvas,
   type CanvasStatus,
@@ -145,10 +146,12 @@ export function canvasesRepository(client: DbClient) {
     async updateCapabilities(id: string, patch: CanvasCapabilitiesPatch): Promise<Canvas> {
       const set: Record<string, unknown> = { updatedAt: Date.now() };
       if (patch.backendEnabled !== undefined) set.backendEnabled = patch.backendEnabled;
-      if (patch.kv !== undefined) set.capKv = patch.kv;
-      if (patch.files !== undefined) set.capFiles = patch.files;
-      if (patch.ai !== undefined) set.capAi = patch.ai;
-      if (patch.realtime !== undefined) set.capRealtime = patch.realtime;
+      // Map each present feature flag to its column via the shared taxonomy, so the
+      // cap→column mapping has one source of truth (FEATURE_COLUMN).
+      for (const cap of FEATURE_CAPABILITIES) {
+        const value = patch[cap];
+        if (value !== undefined) set[FEATURE_COLUMN[cap]] = value;
+      }
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       return rows[0] as Canvas;
     },

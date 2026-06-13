@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPABILITIES,
-  CAPABILITY_GROUPS,
   type CanvasCapabilityState,
   effectiveCapabilities,
   FEATURE_CAPABILITIES,
@@ -86,10 +85,8 @@ describe("storedCapabilities", () => {
 });
 
 describe("taxonomy", () => {
-  it("the Backend group covers exactly the four feature capabilities", () => {
-    const backend = CAPABILITY_GROUPS.find((g) => g.key === "backend");
-    expect(backend?.features).toEqual([...FEATURE_CAPABILITIES]);
-    expect(backend?.alwaysOn).toEqual(["identity"]);
+  it("the four feature capabilities are exactly kv/files/ai/realtime", () => {
+    expect([...FEATURE_CAPABILITIES]).toEqual(["kv", "files", "ai", "realtime"]);
   });
 
   it("every feature capability maps to a real canvas column", () => {

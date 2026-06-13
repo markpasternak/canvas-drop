@@ -57,56 +57,6 @@ export const FEATURE_COLUMN = {
   realtime: "capRealtime",
 } as const satisfies Record<FeatureCapability, keyof CanvasCapabilityState>;
 
-/** UI labels/blurbs for each capability (consumed by the dashboard Capabilities tab). */
-export const CAPABILITY_META: Record<Capability, { label: string; description: string }> = {
-  identity: {
-    label: "Identity",
-    description:
-      "Canvas code can read the signed-in viewer via me(). Always on when backend is enabled.",
-  },
-  kv: {
-    label: "Key–value storage",
-    description: "Per-canvas and per-user key–value store for durable state.",
-  },
-  files: {
-    label: "File storage",
-    description: "Upload, list, and serve files from the canvas.",
-  },
-  ai: {
-    label: "AI",
-    description: "Server-side LLM proxy (no provider keys in the browser).",
-  },
-  realtime: {
-    label: "Realtime",
-    description: "Ephemeral pub/sub + presence over WebSockets.",
-  },
-};
-
-/** A grouping of capabilities for the settings UI. The taxonomy anticipates future groups. */
-export interface CapabilityGroup {
-  key: string;
-  label: string;
-  description: string;
-  /** The master switch column gating this whole group. */
-  master: keyof CanvasCapabilityState;
-  /** Toggleable features within the group. */
-  features: FeatureCapability[];
-  /** Capabilities implied by the master (rendered read-only "always on"). */
-  alwaysOn: Capability[];
-}
-
-export const CAPABILITY_GROUPS: CapabilityGroup[] = [
-  {
-    key: "backend",
-    label: "Backend",
-    description:
-      "Give this canvas backend capability so its code can store data, serve files, call AI, and sync in realtime.",
-    master: "backendEnabled",
-    features: ["kv", "files", "ai", "realtime"],
-    alwaysOn: ["identity"],
-  },
-];
-
 /** The raw stored per-feature flags (independent of backend/global state). */
 export function storedCapabilities(canvas: CanvasCapabilityState): StoredCapabilities {
   return {

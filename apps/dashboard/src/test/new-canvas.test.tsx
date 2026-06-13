@@ -76,6 +76,25 @@ describe("create flow — backend choice", () => {
     });
   });
 
+  it("the API (blank-create) path threads backendEnabled to POST /api/canvases", async () => {
+    const calls = mockFetch({
+      "POST /api/canvases": () =>
+        json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_k" }),
+    });
+    const user = userEvent.setup();
+    renderNew();
+
+    await user.click(await screen.findByRole("switch", { name: "Enable backend" }));
+    await user.click(screen.getByRole("button", { name: /use the api/i }));
+    await user.click(screen.getByRole("button", { name: /create & get a key/i }));
+
+    await vi.waitFor(() => {
+      const post = calls.find((c) => c.url === "/api/canvases");
+      expect(post?.method).toBe("POST");
+      expect(post?.body).toContain('"backendEnabled":true');
+    });
+  });
+
   it("creating via paste without enabling backend sends backendEnabled:false", async () => {
     const calls = mockFetch({
       "POST /api/canvases/paste": () =>
