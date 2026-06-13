@@ -33,7 +33,8 @@ export interface DeployEngineDeps {
   log: Logger;
 }
 
-const KEEP_VERSIONS = 10;
+/** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
+export const KEEP_VERSIONS = 10;
 
 /**
  * How many file uploads run concurrently within one deploy. Each storage `put`
@@ -148,21 +149,28 @@ export function deployEngine(deps: DeployEngineDeps) {
         // with the live version, so they are NEVER deleted inline — any blob this
         // failed attempt wrote that nothing references is reclaimed by the next GC
         // (KTD-4). The pending version row stays `pending` (not ready, not served).
+        deps.log.warn(
+          { err, canvasId: canvas.id },
+          "deploy failed before publish (live unaffected)",
+        );
         throw err;
       }
 
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
-      // swap is the commit — a crash before it leaves the old version live.
+      // swap is the commit — a crash before it leaves the old version live. If the
+      // swap throws, the version is ready-but-not-current (orphaned): its blobs may
+      // be shared with the live version so they're left for GC, and the orphaned
+      // ready row is pruned by keep-10. Nothing is served from it (never current).
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
-      try {
-        await deps.canvases.setCurrentVersion(canvas.id, version.id);
-      } catch (err) {
-        // markReady already ran — the version is ready-but-not-current (orphaned).
-        // Its blobs may be shared with the live version, so we don't delete them;
-        // the orphaned ready row is pruned by keep-10 and its unreferenced blobs by
-        // GC. Nothing is served from it (it never became current).
-        throw err;
-      }
+      await deps.canvases.setCurrentVersion(canvas.id, version.id);
+
+      // A direct publish (deploy API / folder / ZIP / paste) supersedes any held
+      // in-browser draft: keep the draft but flag it stale so the editor shows the
+      // "a newer version was published" notice (M5 R15/F3/AE5). No-op when there's
+      // no draft. Best-effort — never fail the deploy over the stale flag.
+      await deps.drafts
+        .markStale(canvas.id)
+        .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "markStale failed"));
 
       // Prune old version rows + reclaim unreferenced blobs, asynchronously —
       // never block or fail the deploy. `.catch` guards against an unhandled
