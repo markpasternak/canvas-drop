@@ -2,10 +2,11 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { DeployButton } from "../components/DeployButton.js";
-import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
@@ -13,8 +14,8 @@ import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
 
 /** Versions tab: deploy history (newest first), forward "Deploy new version", and
- * per-version "Make live" (re-point the live version in either direction —
- * confirm-and-await, not optimistic, since it changes the live canvas for all). */
+ * per-version "Make live" (re-point the live version in either direction).
+ * Confirm-and-await, not optimistic, since it changes the live canvas for all. */
 export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: versions, isLoading, isError } = useVersions(id);
@@ -24,24 +25,24 @@ export default function Versions() {
   const navigate = useNavigate();
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
-  // Deploy + make-live target the live canvas — disabled while archived/disabled.
+  // Deploy + make-live target the live canvas. Disabled while archived/disabled.
   const isActive = canvas?.status === "active";
 
   if (isLoading) {
     return (
-      <div className="space-y-2">
+      <TabContentFrame>
         {[0, 1].map((i) => (
           <Skeleton key={i} className="h-14" />
         ))}
-      </div>
+      </TabContentFrame>
     );
   }
   if (isError) {
-    return <EmptyState title="Couldn't load versions" description="Please try again." />;
+    return <TabEmptyState title="Couldn't load versions" description="Please try again." />;
   }
   if (!versions || versions.length === 0) {
     return (
-      <EmptyState
+      <TabEmptyState
         title="No versions yet"
         description={
           isActive
@@ -75,48 +76,53 @@ export default function Versions() {
   }
 
   return (
-    <>
-      <p className="mb-4 text-sm text-muted">
+    <TabContentFrame>
+      <InlineNotice tone={isActive ? "neutral" : "warning"}>
         {versions.length} {versions.length === 1 ? "version" : "versions"}
         {isActive
-          ? " · deploy a new one from the button above."
-          : " · unarchive to deploy or change the live version."}
-      </p>
+          ? ". Deploy a new one from the button above."
+          : ". Unarchive to deploy or change the live version."}
+      </InlineNotice>
 
       <ul className="space-y-2">
         {versions.map((v) => (
-          <li
-            key={v.number}
-            className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
-                {v.current && <Badge tone="accent">Live</Badge>}
-                <Badge tone="neutral">{v.source}</Badge>
-              </div>
-              <div className="mt-0.5 text-xs text-subtle" title={fullTime(v.createdAt)}>
-                {relativeTime(v.createdAt)} · {v.fileCount} {v.fileCount === 1 ? "file" : "files"} ·{" "}
-                {formatBytes(v.totalBytes)}
-              </div>
-            </div>
-            {v.status === "ready" && isActive && (
-              <div className="flex gap-1.5">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => restoreToDraft(v.number)}
-                  title="Load this version's files into the editable draft"
+          <li key={v.number}>
+            <Panel className="flex items-center gap-4 p-4 sm:p-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
+                  {v.current && <Badge tone="accent">Live</Badge>}
+                  <Badge tone="neutral">{v.source}</Badge>
+                </div>
+                <div
+                  className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-subtle"
+                  title={fullTime(v.createdAt)}
                 >
-                  Restore to draft
-                </Button>
-                {!v.current && (
-                  <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
-                    Make live
-                  </Button>
-                )}
+                  <span>{relativeTime(v.createdAt)}</span>
+                  <span>
+                    {v.fileCount} {v.fileCount === 1 ? "file" : "files"}
+                  </span>
+                  <span>{formatBytes(v.totalBytes)}</span>
+                </div>
               </div>
-            )}
+              {v.status === "ready" && isActive && (
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => restoreToDraft(v.number)}
+                    title="Load this version's files into the editable draft"
+                  >
+                    Restore to draft
+                  </Button>
+                  {!v.current && (
+                    <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
+                      Make live
+                    </Button>
+                  )}
+                </div>
+              )}
+            </Panel>
           </li>
         ))}
       </ul>
@@ -132,6 +138,6 @@ export default function Versions() {
         This replaces the live version for all visitors immediately. You can switch to any version
         in the history at any time.
       </ConfirmDialog>
-    </>
+    </TabContentFrame>
   );
 }

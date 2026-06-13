@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
+import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { Field, TextareaField } from "../components/Field.js";
@@ -9,6 +10,7 @@ import { PasswordField } from "../components/PasswordField.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { InlineNotice } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
@@ -24,7 +26,7 @@ import { generatePassword } from "../lib/password.js";
 import { useCanvas } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
-/** In-page section anchors — drive both the section ids and the floating nav. */
+/** In-page section anchors drive both the section ids and the floating nav. */
 const SECTIONS = [
   { id: "details", label: "Details" },
   { id: "sharing", label: "Sharing" },
@@ -93,7 +95,10 @@ export default function Settings() {
   }
 
   return (
-    <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
+    <TabContentFrame
+      width="settings"
+      className="lg:grid lg:grid-cols-[180px_minmax(0,56rem)] lg:items-start lg:gap-8"
+    >
       <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
       <div className="space-y-6">
         <Section id="details" title="Details">
@@ -144,7 +149,7 @@ export default function Settings() {
                   if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });
                 }}
               />
-              {/* Gallery: only meaningful for shared canvases — hidden until shared. */}
+              {/* Gallery is only meaningful for shared canvases, so it stays hidden until shared. */}
               <div className="space-y-4 border-t border-border pt-4">
                 <Toggle
                   label="List in the gallery"
@@ -206,15 +211,15 @@ export default function Settings() {
               }
               description={
                 canvas.hasPassword
-                  ? "Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted. We store it hashed, so it can't be shown back to you — type a new one to change it."
+                  ? "Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted. We store it hashed, so type a new one to change it."
                   : "Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted. We store it hashed and can't show it again, so copy it now if you need to share it."
               }
             />
             {canvas.hasPassword && !canvas.shared && (
-              <p className="rounded-md bg-warning-subtle px-3 py-2 text-xs text-warning">
-                This password has no effect until the canvas is shared — private canvases are
+              <InlineNotice tone="warning" className="py-2 text-xs">
+                This password has no effect until the canvas is shared. Private canvases are
                 owner-only.
-              </p>
+              </InlineNotice>
             )}
             <div className="flex gap-2">
               <Button
@@ -236,7 +241,7 @@ export default function Settings() {
           <div className="border-t border-border pt-4">
             <Toggle
               label="Single-page app mode"
-              description="Serve your home page for any unknown URL, so a JavaScript app's own routing works on reload and deep links. Leave off for multi-page sites — otherwise mistyped or dead links quietly show the home page instead of “not found.”"
+              description="Serve your home page for any unknown URL, so a JavaScript app's own routing works on reload and deep links. Leave off for multi-page sites, otherwise mistyped links show the home page instead of “not found.”"
               checked={canvas.spaFallback}
               onChange={(spaFallback) => save({ spaFallback })}
             />
@@ -272,7 +277,7 @@ export default function Settings() {
         <Section
           id="archive"
           title="Archive"
-          description="Retire a canvas without deleting it. Archiving takes it offline (its link stops working) but keeps every file and setting — restore it anytime."
+          description="Retire a canvas without deleting it. Archiving takes it offline but keeps every file and setting."
         >
           {canvas.status === "archived" ? (
             <Row
@@ -378,7 +383,7 @@ export default function Settings() {
       >
         It goes offline immediately
         {canvas.shared ? ", including the link you've shared with others" : ""}, and moves to your
-        Archived view. Its files and settings are kept — unarchive anytime to bring it back.
+        Archived view. Its files and settings are kept.
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -404,6 +409,6 @@ export default function Settings() {
       </ConfirmDialog>
 
       {revealedKey && <ApiKeyReveal apiKey={revealedKey} onClose={() => setRevealedKey(null)} />}
-    </div>
+    </TabContentFrame>
   );
 }

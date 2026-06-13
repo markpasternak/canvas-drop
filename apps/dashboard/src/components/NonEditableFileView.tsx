@@ -16,7 +16,7 @@ export interface NonEditableFileViewProps {
 /**
  * A draft file that can't be edited as text (binary media, or text too large for
  * the editor). Images get an inline preview; everything else a typed file card with
- * a clear "can't edit" message and the two actions you actually want here — Download
+ * a clear "can't edit" message and the two actions you actually want here: Download
  * and Replace. Structure adapted from the file-detail mockup.
  */
 export function NonEditableFileView({
@@ -35,16 +35,16 @@ export function NonEditableFileView({
       : `${fileLabel(file)} files can’t be edited as text. Download it to view, or replace it with a new version.`;
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 rounded-xl border border-border bg-surface p-6 text-center shadow-sm shadow-black/5">
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-surface p-6 text-center">
       {isImage(file) ? (
         <img
           src={src}
           alt={file.path}
-          className="max-h-[18rem] max-w-full rounded-lg border border-border bg-canvas object-contain"
+          className="max-h-[18rem] max-w-full rounded-lg border border-border bg-surface-sunken object-contain"
         />
       ) : (
         <>
-          <div className="rounded-2xl border border-border bg-canvas p-4">
+          <div className="rounded-xl border border-border bg-surface-sunken p-4">
             <FileKindIcon file={file} size={34} />
           </div>
           <div className="space-y-1">
@@ -58,14 +58,18 @@ export function NonEditableFileView({
         <div className="space-y-0.5">
           <p className="break-all font-mono text-xs text-fg">{file.path}</p>
           <p className="text-xs text-subtle">
-            {fileLabel(file)} · {formatBytes(file.size)}
+            {fileLabel(file)}
+            <span className="mx-2 text-border-strong" aria-hidden>
+              /
+            </span>
+            {formatBytes(file.size)}
           </p>
         </div>
         <div className="flex justify-center gap-2">
           <a
             href={src}
             download={downloadName}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-accent-fg shadow-[var(--shadow-panel)] transition-colors hover:bg-accent-hover"
           >
             <DownloadSimple size={16} weight="bold" aria-hidden />
             Download file
@@ -73,7 +77,7 @@ export function NonEditableFileView({
           <button
             type="button"
             onClick={onReplace}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-fg transition-colors hover:bg-canvas"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border-strong bg-surface-raised px-4 text-sm font-medium text-fg transition-colors hover:bg-surface-hover"
           >
             <UploadSimple size={16} weight="bold" aria-hidden />
             Replace file

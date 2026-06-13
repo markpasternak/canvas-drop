@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 308 72" fill="none">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --frame: #111418;
+      --drop: #2563eb;
+      --word: #111418;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --frame: #f4f4f5;
+        --drop: #60a5fa;
+        --word: #f4f4f5;
+      }
+    }
+  </style>
+  <g transform="translate(8 12)">
+    <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+    <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+    <path d="M18 40h12" stroke="var(--drop)" stroke-linecap="round" stroke-width="4.75"/>
+  </g>
+  <text x="72" y="46" fill="var(--word)" font-family="Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="520" letter-spacing="-1.05">Canvasdrop</text>
+</svg>

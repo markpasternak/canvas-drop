@@ -3,7 +3,7 @@ import { useId } from "react";
 import { cn } from "../lib/cn.js";
 
 const control =
-  "w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg " +
+  "w-full rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-fg " +
   "placeholder:text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "focus:border-accent focus:outline-none focus-visible:outline-none " +
   "focus:ring-2 focus:ring-accent/30 disabled:opacity-50";

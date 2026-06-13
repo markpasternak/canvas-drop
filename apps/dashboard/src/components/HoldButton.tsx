@@ -96,7 +96,7 @@ export function HoldButton({
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-0 bg-black/25"
+        className="pointer-events-none absolute inset-y-0 left-0 bg-danger-hover/35"
         style={{
           width: holding ? "100%" : "0%",
           transition: `width ${holding ? holdMs : 150}ms linear`,

@@ -11,6 +11,7 @@ import { useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "../components/Button.js";
+import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { CodeEditor } from "../components/CodeEditor.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { canvasRelativePath } from "../components/DeployFiles.js";
@@ -24,6 +25,7 @@ import { NonEditableFileView } from "../components/NonEditableFileView.js";
 import { OnPageEditor } from "../components/OnPageEditor.js";
 import { type EditorPane, PublishBar } from "../components/PublishBar.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, api, type DraftFile } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -262,15 +264,21 @@ export default function Editor() {
 
   if (canvas && canvas.status !== "active") {
     return (
-      <EmptyState
+      <TabEmptyState
         title="Editing is paused"
         description="Unarchive this canvas to edit and publish its draft."
       />
     );
   }
-  if (isLoading) return <Skeleton className="h-96" />;
+  if (isLoading) {
+    return (
+      <TabContentFrame>
+        <Skeleton className="h-64" />
+      </TabContentFrame>
+    );
+  }
   if (isError || !draft) {
-    return <EmptyState title="Couldn't load the editor" description="Please try again." />;
+    return <TabEmptyState title="Couldn't load the editor" description="Please try again." />;
   }
 
   const body =
@@ -305,7 +313,7 @@ export default function Editor() {
     );
 
   const canPublish = draft.files.length > 0 && (draft.dirty || draft.stale);
-  const workspaceHeight = "h-[calc(100dvh-21.5rem)] min-h-[30rem]";
+  const workspaceHeight = "h-[calc(100dvh-18.5rem)] min-h-[34rem]";
   const paneVisible = (target: EditorPane) => pane === target;
 
   const changePane = (next: EditorPane) => {
@@ -315,10 +323,10 @@ export default function Editor() {
   };
 
   const fileRail = (
-    <aside
+    <WorkspacePane
       {...dropzone.getRootProps({
         className: cn(
-          "min-h-0 flex-col rounded-xl border border-border bg-surface p-2 shadow-sm shadow-black/5 transition-colors",
+          "flex-col transition-colors",
           "h-full min-w-0",
           paneVisible("files") ? "flex" : "hidden",
           "lg:flex",
@@ -327,21 +335,25 @@ export default function Editor() {
       })}
     >
       <input {...dropzone.getInputProps()} />
-      <div className="flex items-center justify-between gap-2 px-1 pb-2">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-fg">Files</p>
-          <p className="text-[0.6875rem] text-subtle">{draft.files.length} in draft</p>
-        </div>
-        <div className="flex gap-1">
-          <IconButton label="Add file" onClick={() => setAddOpen(true)}>
-            <Plus size={15} weight="bold" aria-hidden />
-          </IconButton>
-          <IconButton label="Upload files" onClick={dropzone.open} disabled={uploadMany.isPending}>
-            <UploadSimple size={15} weight="bold" aria-hidden />
-          </IconButton>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto pr-1">
+      <PaneHeader
+        title="Files"
+        description={`${draft.files.length} in draft`}
+        actions={
+          <>
+            <IconButton label="Add file" onClick={() => setAddOpen(true)}>
+              <Plus size={15} weight="bold" aria-hidden />
+            </IconButton>
+            <IconButton
+              label="Upload files"
+              onClick={dropzone.open}
+              disabled={uploadMany.isPending}
+            >
+              <UploadSimple size={15} weight="bold" aria-hidden />
+            </IconButton>
+          </>
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
         {dropzone.isDragActive ? (
           <p className="rounded-lg border border-dashed border-accent/50 px-2 py-12 text-center text-xs font-medium text-accent">
             Drop files to upload
@@ -360,7 +372,7 @@ export default function Editor() {
           e.target.value = "";
         }}
       />
-    </aside>
+    </WorkspacePane>
   );
 
   const selectedActions =
@@ -370,14 +382,14 @@ export default function Editor() {
           href={rawUrl(id, selected)}
           download={baseName(selected)}
           label="Download file"
-          className="border-border bg-surface-raised/70"
+          className="border-border bg-surface-raised"
         >
           <DownloadSimple size={15} weight="bold" aria-hidden />
         </IconLink>
         <IconButton
           label="Replace file"
           onClick={() => replaceInputRef.current?.click()}
-          className="border-border bg-surface-raised/70"
+          className="border-border bg-surface-raised"
         >
           <UploadSimple size={15} weight="bold" aria-hidden />
         </IconButton>
@@ -387,7 +399,7 @@ export default function Editor() {
             setRenaming(selected);
             setRenameTo(selected);
           }}
-          className="border-border bg-surface-raised/70"
+          className="border-border bg-surface-raised"
         >
           <PencilSimple size={15} weight="bold" aria-hidden />
         </IconButton>
@@ -395,7 +407,7 @@ export default function Editor() {
           label="Delete file"
           tone="danger"
           onClick={() => setDeleting(selected)}
-          className="border-border bg-surface-raised/70"
+          className="border-border bg-surface-raised"
         >
           <Trash size={15} weight="bold" aria-hidden />
         </IconButton>
@@ -404,34 +416,30 @@ export default function Editor() {
 
   const editorPane =
     mode === "code" ? (
-      <section
+      <WorkspacePane
         className={cn(
-          "min-h-0 flex-col rounded-xl border border-border bg-surface p-2 shadow-sm shadow-black/5",
+          "flex-col",
           "h-full min-w-0",
           paneVisible("code") ? "flex" : "hidden",
           "lg:flex",
         )}
       >
-        <div className="flex min-h-10 items-center justify-between gap-2 px-1 pb-2">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-xs font-medium text-fg">
-              {selected ?? "No file selected"}
-            </p>
-            <p className="text-[0.6875rem] text-subtle">
-              {editable ? "Autosaves to draft" : "Asset preview"}
-            </p>
-          </div>
-          <div className="flex items-center gap-1">
-            {selectedActions}
-            {!previewVisible && (
-              <IconButton label="Show preview" onClick={() => setPreviewVisible(true)}>
-                <Eye size={15} weight="bold" aria-hidden />
-              </IconButton>
-            )}
-          </div>
-        </div>
+        <PaneHeader
+          title={<span className="font-mono">{selected ?? "No file selected"}</span>}
+          description={editable ? "Autosaves to draft" : "Asset preview"}
+          actions={
+            <>
+              {selectedActions}
+              {!previewVisible && (
+                <IconButton label="Show preview" onClick={() => setPreviewVisible(true)}>
+                  <Eye size={15} weight="bold" aria-hidden />
+                </IconButton>
+              )}
+            </>
+          }
+        />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{body}</div>
-      </section>
+      </WorkspacePane>
     ) : null;
 
   const previewPane =
@@ -473,7 +481,7 @@ export default function Editor() {
     ) : null;
 
   return (
-    <div className="space-y-3">
+    <TabContentFrame width="full" className="space-y-3">
       <PublishBar
         dirty={draft.dirty}
         stale={draft.stale}
@@ -593,6 +601,6 @@ export default function Editor() {
       >
         This removes the file from the draft. It won’t affect the live version until you publish.
       </ConfirmDialog>
-    </div>
+    </TabContentFrame>
   );
 }

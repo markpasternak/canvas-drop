@@ -4,7 +4,13 @@ import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
-import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  indentOnInput,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import { EditorState, type Extension } from "@codemirror/state";
 import {
   drawSelection,
@@ -54,22 +60,25 @@ const baseExtensions: Extension[] = [
   highlightActiveLine(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
   EditorView.lineWrapping,
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
   EditorView.theme({
     "&": {
       height: "100%",
       backgroundColor: "var(--surface)",
       color: "var(--fg)",
-      fontSize: "13px",
+      fontSize: "12.5px",
     },
     "&.cm-focused": { outline: "none" },
     ".cm-scroller": {
       fontFamily: "var(--font-mono, ui-monospace, monospace)",
-      lineHeight: "1.62",
+      lineHeight: "1.64",
+      scrollbarWidth: "thin",
+      scrollbarColor: "var(--border-strong) transparent",
     },
-    ".cm-content": { padding: "12px 0", caretColor: "var(--accent)" },
-    ".cm-line": { padding: "0 16px" },
+    ".cm-content": { padding: "14px 0 18px", caretColor: "var(--accent)" },
+    ".cm-line": { padding: "0 18px" },
     ".cm-gutters": {
-      backgroundColor: "var(--canvas)",
+      backgroundColor: "var(--surface-sunken)",
       color: "var(--subtle)",
       borderRight: "1px solid var(--border)",
     },
@@ -78,7 +87,9 @@ const baseExtensions: Extension[] = [
       padding: "0 12px 0 10px",
     },
     ".cm-foldGutter .cm-gutterElement": { padding: "0 6px" },
-    ".cm-activeLine": { backgroundColor: "var(--accent-subtle)" },
+    ".cm-activeLine": {
+      backgroundColor: "color-mix(in srgb, var(--accent-subtle) 58%, transparent)",
+    },
     ".cm-activeLineGutter": {
       backgroundColor: "var(--accent-subtle)",
       color: "var(--accent)",
@@ -134,11 +145,5 @@ export function CodeEditor({ path, value, readOnly = false, onChange }: CodeEdit
     return () => view.destroy();
   }, [path, readOnly]);
 
-  return (
-    <div
-      ref={host}
-      data-testid="code-editor"
-      className="h-full overflow-hidden rounded-xl border border-border bg-surface shadow-sm shadow-black/5"
-    />
-  );
+  return <div ref={host} data-testid="code-editor" className="h-full overflow-hidden bg-surface" />;
 }

@@ -10,7 +10,7 @@ const base =
   "disabled:pointer-events-none disabled:opacity-40";
 
 const tones: Record<Tone, string> = {
-  default: "border-transparent text-muted hover:bg-accent-subtle hover:text-fg",
+  default: "border-transparent text-muted hover:bg-surface-hover hover:text-fg",
   accent: "border-transparent bg-accent text-accent-fg hover:bg-accent-hover",
   danger: "border-transparent text-danger hover:bg-danger-subtle hover:text-danger",
 };

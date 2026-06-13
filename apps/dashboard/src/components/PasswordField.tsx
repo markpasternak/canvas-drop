@@ -1,54 +1,8 @@
+import { Check, CopySimple, Eye, EyeSlash } from "@phosphor-icons/react";
 import type { InputHTMLAttributes, ReactNode } from "react";
 import { useId, useState } from "react";
 import { cn } from "../lib/cn.js";
 import { useToast } from "./Toast.js";
-
-function EyeIcon({ off }: { off?: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="15"
-      height="15"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      aria-hidden="true"
-    >
-      <path d="M1.5 8S3.9 3.5 8 3.5 14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" />
-      <circle cx="8" cy="8" r="2" />
-      {off && <path d="M2.5 2.5l11 11" />}
-    </svg>
-  );
-}
-
-function CopyIcon({ done }: { done?: boolean }) {
-  return done ? (
-    <svg
-      viewBox="0 0 16 16"
-      width="15"
-      height="15"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      aria-hidden="true"
-    >
-      <path d="M3.5 8.5l3 3 6-7" />
-    </svg>
-  ) : (
-    <svg
-      viewBox="0 0 16 16"
-      width="15"
-      height="15"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      aria-hidden="true"
-    >
-      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-      <path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
-    </svg>
-  );
-}
 
 /** Trailing icon button living inside the input's right edge. */
 function Adornment({
@@ -90,7 +44,7 @@ export interface PasswordFieldProps extends Omit<InputHTMLAttributes<HTMLInputEl
 /**
  * Password input with best-practice affordances: an inline show/hide toggle and
  * a copy button, both acting on what you're typing right now. Stored passwords
- * are hashed at rest and can never be read back — so the only chance to see or
+ * are hashed at rest and can never be read back, so the only chance to see or
  * copy a password is while you set it (same model as the canvas key, §6.9.5).
  */
 export function PasswordField({
@@ -121,7 +75,7 @@ export function PasswordField({
       toast("Password copied");
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast("Couldn't copy — copy it manually", "error");
+      toast("Couldn't copy. Copy it manually.", "error");
     }
   }
 
@@ -141,7 +95,7 @@ export function PasswordField({
           type={revealed ? "text" : "password"}
           value={value}
           className={cn(
-            "w-full rounded-md border border-border-strong bg-surface py-2 pl-3 pr-[4.5rem] text-sm text-fg",
+            "w-full rounded-md border border-border-strong bg-surface-raised py-2 pl-3 pr-[4.5rem] text-sm text-fg",
             "placeholder:text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
             "focus:border-accent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50",
             revealed && "font-mono",
@@ -155,14 +109,22 @@ export function PasswordField({
             onClick={copy}
             disabled={!value}
           >
-            <CopyIcon done={copied} />
+            {copied ? (
+              <Check size={15} weight="bold" aria-hidden />
+            ) : (
+              <CopySimple size={15} weight="bold" aria-hidden />
+            )}
           </Adornment>
           <Adornment
             label={revealed ? "Hide password" : "Show password"}
             onClick={() => setRevealed(!revealed)}
             disabled={!value}
           >
-            <EyeIcon off={revealed} />
+            {revealed ? (
+              <EyeSlash size={15} weight="bold" aria-hidden />
+            ) : (
+              <Eye size={15} weight="bold" aria-hidden />
+            )}
           </Adornment>
         </div>
       </div>

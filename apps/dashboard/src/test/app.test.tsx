@@ -43,7 +43,7 @@ describe("dashboard app", () => {
     );
     renderApp("/");
     // shell chrome
-    expect(await screen.findByText("canvas-drop")).toBeInTheDocument();
+    expect(await screen.findByText("Canvasdrop")).toBeInTheDocument();
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();

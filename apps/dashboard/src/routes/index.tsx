@@ -1,6 +1,7 @@
 import { Button } from "../components/Button.js";
 import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type CanvasListItem } from "../lib/api.js";
 import { useArchiveCanvas } from "../lib/mutations.js";
@@ -48,7 +49,10 @@ export default function CanvasList() {
     <div className="space-y-6">
       {/* The dominant create action lives once, in the top bar (available on every
           page). No duplicate here. */}
-      <h1 className="text-xl font-semibold tracking-tight">Your canvases</h1>
+      <PageHeader
+        title="Your canvases"
+        description="Manage drafts, published versions, sharing, and settings from one place."
+      />
 
       {isLoading && <ListSkeleton />}
 

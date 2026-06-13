@@ -43,27 +43,41 @@ describe("isEditableFile (allowlist + size cap)", () => {
 });
 
 describe("singleHtmlFile (on-page editing availability)", () => {
-  it("returns the lone HTML page when there's exactly one (assets allowed)", () => {
+  it("finds the one HTML page among many asset types of every kind", () => {
     const files = [
       f("index.html", "text/html"),
       f("style.css", "text/css"),
-      f("a.png", "image/png"),
+      f("app.js", "text/javascript"),
+      f("data.json", "application/json"),
+      f("logo.png", "image/png"),
+      f("hero.jpg", "image/jpeg"),
+      f("font.woff2", "font/woff2"),
+      f("clip.mp4", "video/mp4"),
+      f("report.pdf", "application/pdf"),
     ];
     expect(singleHtmlFile(files)?.path).toBe("index.html");
   });
 
+  it("works when the single HTML page isn't named index.html", () => {
+    const files = [f("page.htm", "text/html"), f("style.css", "text/css")];
+    expect(singleHtmlFile(files)?.path).toBe("page.htm");
+  });
+
   it("returns null with zero HTML files (nothing to edit on-page)", () => {
-    expect(singleHtmlFile([f("style.css", "text/css")])).toBeNull();
+    expect(singleHtmlFile([f("style.css", "text/css"), f("a.png", "image/png")])).toBeNull();
   });
 
   it("returns null with several HTML files (ambiguous which page)", () => {
     expect(singleHtmlFile([f("a.html", "text/html"), f("b.htm", "text/html")])).toBeNull();
   });
 
-  it("isHtmlFile recognizes html/htm/xhtml only", () => {
+  it("keys on MIME (text/html), matching the server's entry resolution — not the extension", () => {
     expect(isHtmlFile(f("a.html", "text/html"))).toBe(true);
-    expect(isHtmlFile(f("a.htm", "text/html"))).toBe(true);
     expect(isHtmlFile(f("a.css", "text/css"))).toBe(false);
+    // A lone .xhtml the server downgrades to text/plain is NOT offered for on-page
+    // editing (the preview couldn't render it as the entry) — client/server agree.
+    expect(isHtmlFile(f("page.xhtml", "text/plain"))).toBe(false);
+    expect(singleHtmlFile([f("page.xhtml", "text/plain"), f("style.css", "text/css")])).toBeNull();
   });
 });
 

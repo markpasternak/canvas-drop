@@ -116,18 +116,26 @@ export function fileLabel(file: Pick<DraftFile, "path">): string {
   return extOf(file.path).toUpperCase() || "FILE";
 }
 
-/** True for an HTML page file (the kind on-page editing operates on). */
-export function isHtmlFile(file: Pick<DraftFile, "path">): boolean {
-  return ["html", "htm", "xhtml"].includes(extOf(file.path));
+/**
+ * True for an HTML page the server renders as the canvas entry. Keyed on MIME
+ * (`text/html`) — NOT the extension — so the dashboard's on-page availability
+ * matches the server's entry resolution exactly (rootEntry/soleHtmlEntry also key
+ * on `text/html`). Keeping these in lockstep means on-page mode is never offered
+ * for a file the preview can't actually render as the page (e.g. a lone `.xhtml`,
+ * which the server downgrades to `text/plain`).
+ */
+export function isHtmlFile(file: Pick<DraftFile, "mime">): boolean {
+  return file.mime.toLowerCase().startsWith("text/html");
 }
 
 /**
  * The single HTML page in a draft, or null when there are zero or several. On-page
  * text editing is only offered for a single static HTML page — with 0 or 2+ HTML
  * files there's no unambiguous page to edit, and JS-rendered SPAs keep their text
- * in scripts (not editable on the page).
+ * in scripts (not editable on the page). Any number of non-HTML assets is fine —
+ * they render around the page; only the HTML count matters.
  */
-export function singleHtmlFile<T extends Pick<DraftFile, "path">>(files: T[]): T | null {
+export function singleHtmlFile<T extends Pick<DraftFile, "mime">>(files: T[]): T | null {
   const html = files.filter(isHtmlFile);
   return html.length === 1 ? (html[0] ?? null) : null;
 }

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
+import { ActionRow, Panel } from "./Surface.js";
 
 /** A titled card grouping related controls. `tone="danger"` tints it for
  *  destructive actions (red border + heading), matching the danger token. */
@@ -17,13 +18,10 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section
+    <Panel
       id={id}
       // Clear the sticky top bar (h-14) when jumped to via the section nav.
-      className={cn(
-        "scroll-mt-20 rounded-xl border bg-surface p-5 sm:p-6",
-        tone === "danger" ? "border-danger/40" : "border-border",
-      )}
+      className={cn("scroll-mt-20", tone === "danger" ? "border-danger/40" : "border-border")}
     >
       <div className="mb-5 space-y-1">
         <h2 className={cn("text-sm font-semibold", tone === "danger" ? "text-danger" : "text-fg")}>
@@ -32,7 +30,7 @@ export function Section({
         {description && <p className="text-xs text-muted">{description}</p>}
       </div>
       <div className="space-y-4">{children}</div>
-    </section>
+    </Panel>
   );
 }
 
@@ -48,13 +46,9 @@ export function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-sm font-medium text-fg">{title}</p>
-        {description && <div className="text-xs text-muted">{description}</div>}
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">{children}</div>
-    </div>
+    <ActionRow title={title} description={description}>
+      {children}
+    </ActionRow>
   );
 }
 

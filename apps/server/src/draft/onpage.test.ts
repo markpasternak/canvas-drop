@@ -18,6 +18,26 @@ describe("injectOnPageEditor", () => {
     expect(out).toContain("data-cd-edit");
   });
 
+  it("includes the floating formatting toolbar with the full action set", () => {
+    const out = injectOnPageEditor("<body>hi</body>");
+    for (const cmd of [
+      "bold",
+      "italic",
+      "underline",
+      "strikeThrough",
+      "formatBlock",
+      "insertUnorderedList",
+      "insertOrderedList",
+      "createLink",
+      "unlink",
+      "removeFormat",
+    ]) {
+      expect(out).toContain(cmd);
+    }
+    // The toolbar element is tagged data-cd-edit so it's stripped from saved HTML.
+    expect(out).toContain('setAttribute("data-cd-edit"');
+  });
+
   it("is case-insensitive about the body tag", () => {
     const out = injectOnPageEditor("<HTML><BODY>x</BODY></HTML>");
     expect(out.indexOf("data-cd-edit")).toBeLessThan(out.toLowerCase().indexOf("</body>"));

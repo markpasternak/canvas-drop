@@ -3,6 +3,7 @@ import { Button } from "../components/Button.js";
 import { CanvasRow, ListSkeleton } from "../components/CanvasList.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type CanvasListItem } from "../lib/api.js";
 import { useUnarchiveCanvas } from "../lib/mutations.js";
@@ -47,7 +48,10 @@ export default function ArchivedList() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold tracking-tight">Archived</h1>
+      <PageHeader
+        title="Archived"
+        description="Offline canvases keep their files, settings, and reserved URLs until restored or deleted."
+      />
 
       {isLoading && <ListSkeleton />}
 
@@ -66,10 +70,10 @@ export default function ArchivedList() {
       {data && data.length === 0 && (
         <EmptyState
           title="Nothing archived"
-          description="Archived canvases go offline but keep their files. Archive one from its settings to retire it without deleting — you can restore it here anytime."
+          description="Archived canvases go offline but keep their files. Archive one from settings to retire it without deleting."
           action={
             <Link to="/" className="text-sm font-medium text-accent">
-              ← Back to your canvases
+              Back to your canvases
             </Link>
           }
         />

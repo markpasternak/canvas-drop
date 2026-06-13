@@ -6,6 +6,7 @@ import { Button } from "./Button.js";
 import { FileDropOrProgress } from "./DeployFiles.js";
 import { Dialog } from "./Dialog.js";
 import { TextareaField } from "./Field.js";
+import { InlineNotice } from "./Surface.js";
 import { useToast } from "./Toast.js";
 
 type Method = "paste" | "folder" | "zip";
@@ -16,7 +17,7 @@ const METHODS: { id: Method; label: string }[] = [
 ];
 
 /**
- * "Deploy new version" — opens a dialog that pushes a new version to an EXISTING
+ * "Deploy new version" opens a dialog that pushes a new version to an EXISTING
  * canvas (paste / folder / ZIP), the forward counterpart to the Versions tab's
  * "Make live". Self-contained: bundles the trigger, dialog, uploader, and the
  * deploy mutation (which invalidates the canvas + version queries on success).
@@ -90,7 +91,7 @@ export function DeployButton({
                   "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:opacity-50",
                   method === m.id
                     ? "border-accent bg-accent-subtle/50 text-fg"
-                    : "border-border text-muted hover:border-border-strong",
+                    : "border-border bg-surface-raised text-muted hover:border-border-strong hover:bg-surface-hover",
                 )}
               >
                 {m.label}
@@ -98,11 +99,7 @@ export function DeployButton({
             ))}
           </div>
 
-          {error && (
-            <div className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger">
-              {error}
-            </div>
-          )}
+          {error && <InlineNotice tone="danger">{error}</InlineNotice>}
 
           {method === "paste" ? (
             <div className="space-y-3">

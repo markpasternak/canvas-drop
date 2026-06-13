@@ -1,4 +1,4 @@
-import { EmptyState } from "../components/EmptyState.js";
+import { TabEmptyState } from "../components/CanvasDetail.js";
 
 const METRICS = [
   "Unique & total viewers",
@@ -14,7 +14,7 @@ const METRICS = [
  * primitives land. No network request. */
 export default function Usage() {
   return (
-    <EmptyState
+    <TabEmptyState
       title="Usage analytics are coming soon"
       description={
         <span className="space-y-3 block">
@@ -25,7 +25,7 @@ export default function Usage() {
             {METRICS.map((m) => (
               <span
                 key={m}
-                className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs text-muted"
+                className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-muted"
               >
                 {m}
               </span>

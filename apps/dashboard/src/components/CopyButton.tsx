@@ -28,7 +28,7 @@ export function CopyButton({
       toast(toastMessage);
       setTimeout(() => setDone(false), 1500);
     } catch {
-      toast("Couldn't copy — copy it manually", "error");
+      toast("Couldn't copy. Copy it manually.", "error");
     }
   }
 
@@ -38,7 +38,7 @@ export function CopyButton({
       type="button"
       onClick={copy}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-subtle hover:text-accent",
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-accent",
         className,
       )}
     >

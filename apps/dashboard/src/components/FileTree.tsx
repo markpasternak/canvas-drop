@@ -76,7 +76,7 @@ export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
   if (files.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-canvas/40 px-3 py-8 text-center">
+      <div className="rounded-lg border border-dashed border-border bg-surface-sunken px-3 py-8 text-center">
         <FilePlusPlaceholder />
         <p className="mt-3 text-xs font-medium text-fg">No draft files</p>
         <p className="mt-1 text-xs text-subtle">Add or upload a file to begin.</p>
@@ -139,16 +139,14 @@ function TreeRow({
         aria-current={active ? "true" : undefined}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-          active
-            ? "bg-accent-subtle text-accent shadow-sm shadow-black/5"
-            : "text-fg hover:bg-canvas",
+          active ? "bg-accent-subtle text-accent" : "text-fg hover:bg-surface-hover",
         )}
       >
         {node.file && <FileKindIcon file={node.file} active={active} />}
         <span className="min-w-0 flex-1">
           <span className="block truncate font-mono text-xs">{node.name}</span>
           {node.file && (
-            <span className="block text-[0.625rem] font-medium uppercase tracking-wide text-subtle group-aria-[current=true]:text-accent/70">
+            <span className="block text-[0.625rem] font-medium text-subtle group-aria-[current=true]:text-accent/70">
               {fileLabel(node.file)}
             </span>
           )}
@@ -204,7 +202,7 @@ export function FileKindIcon({
 
 function FilePlusPlaceholder() {
   return (
-    <span className="mx-auto grid size-10 place-items-center rounded-lg border border-border bg-surface text-subtle">
+    <span className="mx-auto grid size-10 place-items-center rounded-lg border border-border bg-surface-raised text-subtle">
       <FileText size={18} weight="duotone" aria-hidden />
     </span>
   );

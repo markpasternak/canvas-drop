@@ -13,13 +13,13 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const base =
   "inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap " +
-  "transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
+  "transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px " +
   "disabled:opacity-50 disabled:pointer-events-none select-none";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg hover:bg-accent-hover",
-  secondary: "bg-surface text-fg border border-border-strong hover:bg-canvas",
-  ghost: "text-muted hover:text-fg hover:bg-accent-subtle",
+  primary: "bg-accent text-accent-fg shadow-[var(--shadow-panel)] hover:bg-accent-hover",
+  secondary: "bg-surface-raised text-fg border border-border-strong hover:bg-surface-hover",
+  ghost: "text-muted hover:text-fg hover:bg-surface-hover",
   danger: "bg-danger text-danger-fg hover:bg-danger-hover",
 };
 

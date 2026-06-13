@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "../lib/cn.js";
 import { IconButton, IconLink } from "./IconButton.js";
+import { PaneHeader, WorkspacePane } from "./Surface.js";
 
 export interface DraftPreviewProps {
   canvasId: string;
@@ -20,8 +21,7 @@ export interface DraftPreviewProps {
   onHide?: () => void;
 }
 
-const iconBtn =
-  "border-border bg-surface-raised/70 text-muted hover:bg-accent-subtle hover:text-fg";
+const iconBtn = "border-border bg-surface-raised text-muted hover:bg-surface-hover hover:text-fg";
 
 /**
  * Owner-only draft preview (R13) of the **whole draft site** (its entry/index) — not
@@ -75,25 +75,23 @@ export function DraftPreview({
   );
 
   const header = (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-raised px-3 py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-canvas text-subtle">
+    <PaneHeader
+      leading={
+        <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-sunken text-subtle">
           <Browser size={15} weight="duotone" aria-hidden />
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-xs font-semibold text-fg">Preview</span>
-            <span className="rounded border border-border bg-canvas px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-subtle">
-              draft
-            </span>
-          </div>
-          <p className="truncate font-mono text-[0.6875rem] text-subtle">
-            /api/canvases/{canvasId}/preview/
-          </p>
-        </div>
-      </div>
-      {controls}
-    </div>
+      }
+      title={
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <span>Preview</span>
+          <span className="rounded border border-border bg-surface-sunken px-1.5 py-0.5 text-[0.625rem] font-medium text-subtle">
+            Draft
+          </span>
+        </span>
+      }
+      description={<span className="font-mono">/api/canvases/{canvasId}/preview/</span>}
+      actions={controls}
+    />
   );
 
   const frame = (
@@ -109,7 +107,7 @@ export function DraftPreview({
   if (fullscreen) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 p-4 backdrop-blur-sm">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/30">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-popover)]">
           {header}
           <div className="min-h-0 flex-1">{frame}</div>
         </div>
@@ -118,13 +116,9 @@ export function DraftPreview({
   }
 
   return (
-    <div
-      className={cn(
-        "flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-sm shadow-black/5",
-      )}
-    >
+    <WorkspacePane className={cn("flex h-full min-w-0 flex-col")}>
       {header}
       <div className="min-h-0 flex-1">{frame}</div>
-    </div>
+    </WorkspacePane>
   );
 }

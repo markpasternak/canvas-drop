@@ -57,11 +57,13 @@ export function PublishBar({
     ? { label: "Saving...", tone: "text-subtle", icon: FloppyDisk }
     : dirty
       ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
-      : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
+      : stale
+        ? { label: "Draft behind live", tone: "text-warning", icon: WarningCircle }
+        : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
   const StatusIcon = status.icon;
 
   return (
-    <div className="sticky top-14 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-lg shadow-black/10 backdrop-blur supports-[backdrop-filter]:bg-surface/85 md:mx-0">
+    <div className="sticky top-14 z-20 -mx-2 rounded-xl border border-border bg-surface/95 px-3 py-2 shadow-[var(--shadow-panel)] backdrop-blur supports-[backdrop-filter]:bg-surface/85 md:mx-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           {stale && (
@@ -84,7 +86,7 @@ export function PublishBar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-border bg-canvas p-0.5">
+          <div className="inline-flex rounded-lg border border-border bg-surface-sunken p-0.5">
             <ModeButton active={surface === "code"} onClick={onCodeMode}>
               <Code size={15} weight="bold" aria-hidden />
               Code
@@ -160,7 +162,9 @@ function ModeButton({
       type="button"
       className={cn(
         "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
-        active ? "bg-surface text-fg shadow-sm shadow-black/5" : "text-muted hover:text-fg",
+        active
+          ? "bg-surface-raised text-fg shadow-[var(--shadow-panel)]"
+          : "text-muted hover:text-fg",
         className,
       )}
       {...props}
@@ -183,7 +187,7 @@ function PaneButton({
         "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
         active
           ? "bg-accent-subtle text-accent"
-          : "border border-border bg-surface text-muted hover:text-fg",
+          : "border border-border bg-surface text-muted hover:bg-surface-hover hover:text-fg",
         className,
       )}
       {...props}
