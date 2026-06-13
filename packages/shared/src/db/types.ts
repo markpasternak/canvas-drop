@@ -2,6 +2,7 @@ import type {
   auditLog,
   canvases,
   drafts,
+  kvEntries,
   sessions,
   settings,
   usageEvents,
@@ -33,6 +34,8 @@ export type Draft = typeof drafts.$inferSelect;
 export type NewDraft = typeof drafts.$inferInsert;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;
+export type KvEntry = typeof kvEntries.$inferSelect;
+export type NewKvEntry = typeof kvEntries.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

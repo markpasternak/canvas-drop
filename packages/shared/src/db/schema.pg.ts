@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, index, pgTable, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
 import { pg as c } from "./columns.js";
 
 /**
@@ -199,4 +199,27 @@ export const usageEvents = pgTable(
     // Stats aggregation + retention prune both filter by canvas + created_at.
     index("usage_events_canvas_created_idx").on(t.canvasId, t.createdAt),
   ],
+);
+
+// KV primitive (§6.4, plan 007 / M6). `scope` is 'shared' for kv.* or the userId
+// for kv.user.*; the composite PK (canvas_id, scope, key) also serves the
+// (canvas_id, scope) prefix list. `value` is JSON (≤64 KB enforced at the
+// boundary). Every write carries attribution (updated_by, updated_at).
+export const kvEntries = pgTable(
+  "kv_entries",
+  {
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    scope: c.text("scope").notNull(), // 'shared' | <userId>
+    key: c.text("key").notNull(),
+    value: c.json("value").notNull(),
+    updatedBy: c
+      .text("updated_by")
+      .notNull()
+      .references(() => users.id),
+    updatedAt: c.epochMs("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.scope, t.key] })],
 );
