@@ -2,6 +2,14 @@
 
 The concrete loop both Claude and Codex follow. `AGENTS.md` is the summary; this is the detail.
 
+## Status
+
+The **foundation** (config, abstractions, auth gateway, audit, CI) is **done** — issue #1
+closed, plan `2026-06-13-001-feat-foundation-config-auth-plan.md` complete, merged to `main`.
+Next up: **areas C (canvas hosting) + D (deploy pipeline)** — write the plan with `/ce-plan`,
+open its tracking issue, then resume the loop below. The foundation round's learnings are in
+`docs/solutions/` — read the relevant ones before starting (see AGENTS.md "Read first").
+
 ## The loop, step by step
 
 ```
@@ -48,28 +56,26 @@ Capture a learning whenever you hit something the next agent (or future you) wou
 
 It writes to `docs/solutions/` with frontmatter so `ce-learnings-researcher` surfaces it before related work. **This is the compounding mechanism — use it generously.**
 
-## Dependency order for the foundation
+## Dependency order
 
-```
-U1 (monorepo) ──┬─> U2 (env) ──┬─> U3 (logging)
-                │              ├─> U4 (db) ──┬─> U7 (auth core) ─> U8 (proxy)
-                │              │             ├─> U9 (oidc)
-                │              │             └─> U10 (audit)
-                │              ├─> U5 (storage)
-                │              └─> U6 (routing) ─> U7
-                └────────────────────────────────> U11 (assembly) ─> U12 (CI)
-```
+Each plan's units carry explicit `Dependencies:` (by U-ID) and the plan's
+High-Level Technical Design shows the graph. The rule that held in the foundation
+round and generalizes:
 
-- **U1 is the gate.** Merge it to `main` before anyone starts U2+.
-- The auth units (U7/U9/U10) need **U2 and U4** merged first. Watch issue #1 for those landing.
-- U11 wires everything; U12 is the CI matrix. Any agent takes them once their inputs exist.
+- The **scaffold/contract unit is the gate** — merge it to `main` before fan-out
+  (foundation: U1 monorepo; future rounds: whatever defines the shared types/interfaces).
+- Units that **read another unit's tables or interface** wait for it to merge.
+- Independent units (no shared `Files:`) are fair to claim in parallel.
 
-Ownership is **dynamic** — claim whatever unit is free and unblocked. Nothing is reserved for a specific tool.
+*(Foundation reference graph, now complete: U1 → U2/U3 → U4 → U6 → U7 → U8/U9/U10; U5
+alongside; U11 assembles U2–U10; U12 is CI.)*
 
 ## Before every unit
 
-1. `git pull` and check issue #1 — is this unit already claimed (assignee / `status:claimed` / recent comment)? If so, pick another.
+1. `git pull` and check the **active plan's tracking issue** — is this unit already
+   claimed (assignee / `status:claimed` / recent comment)? If so, pick another.
 2. Claim it: comment "taking U<N>" and/or add `status:claimed`.
-3. Read the unit in `docs/plans/2026-06-13-001-feat-foundation-config-auth-plan.md`.
-4. Skim `docs/solutions/` (or let compound-engineering surface relevant learnings).
+3. Read the unit in the active plan under `docs/plans/`.
+4. **Read the relevant `docs/solutions/` learnings** (see AGENTS.md "Read first" — auth work
+   especially has a required checklist), or let compound-engineering surface them.
 5. Confirm your dependency gates are merged, then open your worktree + branch.

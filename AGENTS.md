@@ -10,8 +10,8 @@ canvas-drop is an open-source (MIT), self-hostable platform where authenticated 
 
 Both agents follow the same compound-engineering loop:
 
-1. **Plan** — work comes from a plan in `docs/plans/`. The active one is `2026-06-13-001-feat-foundation-config-auth-plan.md`. Don't free-style features that aren't in a plan.
-2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation = issue #1). Tick a unit's box when its PR merges.
+1. **Plan** — work comes from a plan in `docs/plans/`. The foundation plan (`2026-06-13-001-…`) is **complete**; the next plan is areas C+D (canvas hosting + deploy). Don't free-style features that aren't in a plan.
+2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation was #1, now closed). Tick a unit's box when its PR merges.
 3. **Branch in your worktree** — never work in the shared checkout. Branch name: `feat/u<N>-<slug>` (e.g. `feat/u7-auth-core`).
 4. **Implement one unit at a time**, with its test scenarios from the plan. Tests are not optional for feature-bearing units.
 5. **Capture learnings** — run `/ce-compound` (or write to `docs/solutions/`) whenever you hit something non-obvious: a gotcha, a decision, a pattern, a workflow fix. This is how knowledge compounds across Claude **and** Codex.
@@ -37,7 +37,7 @@ Create one with `git worktree add ../canvas-drop-u<N> -b feat/u<N>-<slug>` (or `
 
 **Claim before you start, so no two instances grab the same unit:**
 
-1. `git pull` and check issue #1 — is the unit already claimed (assignee, `status:claimed` label, or a recent "taking U<N>" comment)?
+1. `git pull` and check the active plan's tracking issue — is the unit already claimed (assignee, `status:claimed` label, or a recent "taking U<N>" comment)?
 2. If free, claim it: comment "taking U<N>" on the issue and/or add the `status:claimed` label. Pick any unit whose dependency gates are merged — ownership is **dynamic**, not pre-assigned to any tool.
 3. Open your worktree + branch and go.
 
@@ -83,14 +83,37 @@ Learnings live in **git**, not in any agent's private memory:
 - `docs/agent-workflow.md` — the full loop, branch naming, worktree commands.
 - `apps/server`, `apps/dashboard`, `packages/shared`, `packages/sdk` — the workspace (created in U1).
 
-## Commands (after U1 lands)
+## Commands
 
 ```
-pnpm install        # resolve workspace
-pnpm dev            # run server (path + sqlite + local + dev auth)
-pnpm test           # vitest (default dialect)
-pnpm test:sqlite    # tests on sqlite
-pnpm test:pg        # tests on postgres
-pnpm lint           # biome
-pnpm typecheck      # tsc
+pnpm install        # resolve workspace (approves native builds via pnpm-workspace.yaml)
+cp .env.example .env && pnpm dev   # logged-in instance on localhost (path+sqlite+local+dev)
+pnpm test           # vitest — runs BOTH dialects in-process (sqlite + pglite)
+pnpm test:sqlite    # sqlite leg only (sets CANVAS_DROP_DB)
+pnpm test:pg        # postgres leg only
+pnpm lint           # biome check
+pnpm format         # biome check --write (also sorts imports — plain `format` does not)
+pnpm typecheck      # tsc --noEmit
+pnpm build          # compile the server
 ```
+
+## Before pushing / merging
+
+- **CI must be green on both dialects before merge.** The matrix (`.github/workflows/ci.yml`)
+  runs lint, typecheck, test-sqlite, test-postgres (+ real Postgres/MinIO), and build.
+- **Enable the local pre-push gate once per clone:** `git config core.hooksPath .githooks`.
+  It runs lint+typecheck+test before any push to `main` (`--no-verify` to bypass in an
+  emergency). This is the interim stand-in for server-side branch protection, which
+  GitHub gates behind Pro for private repos — real protection arrives when the repo goes
+  public (BUILD_BRIEF OPEN-8) or on Pro.
+
+## Read first when working in these areas
+
+Institutional learnings live in `docs/solutions/` — skim the index, and especially:
+
+- **Any auth / permissions / proxy / session / config-guard work** → read
+  `docs/solutions/2026-06-13-auth-invariant-checklist.md` first. It lists the §12 failure
+  modes a review caught past green tests, with a reusable checklist. Run `/ce-code-review`
+  before opening a PR on auth/payment/migration-shaped changes.
+- **Anything touching the DB / dual-dialect schema** → `…dual-dialect-drizzle-seam.md`.
+- **CI / test infra changes** → `…ci-and-test-infra-gotchas.md`.

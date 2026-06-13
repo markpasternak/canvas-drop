@@ -1,7 +1,7 @@
 ---
 title: "feat: canvas-drop Foundation — config, abstractions, and auth gateway"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 depth: deep
 origin: BUILD_BRIEF.md

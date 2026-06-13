@@ -49,3 +49,20 @@ The migrator's `migrationsFolder` is **cwd-relative**. Tests run from the repo r
 `drizzle/sqlite` resolves; `pnpm dev` runs from `apps/server` (via `--filter`) and it
 does not. `resolveMigrationsDir()` walks up from cwd to find `drizzle/<dialect>` — works
 from root, the package dir, and a built image. See [[agent-workflow]] for the unit order.
+
+## What a code review added to this seam (2026-06-13 review round)
+
+- **`onConflictDoUpdate` works on both dialects** — use it for atomic upsert instead
+  of read-then-write (which races into a unique-constraint 500 under concurrency).
+  Exclude immutable/security columns (`created_at`, `is_blocked`) from the update set.
+- **Put the dialect branch behind a method on `DbClient`, not in callers.** The health
+  check originally branched `client.dialect` + `as any` to pick `.run()` (sqlite) vs
+  `.execute()` (pg). That's the seam leaking out of `db/`. Adding `ping()` to the
+  `DbClient` interface (implemented per-dialect in the factory) closed it — callers get
+  zero-any, zero-branch. Apply the same move for any future cross-dialect primitive.
+- **The parity test must check indexes/uniqueness/FKs, not just columns.**
+  `getTableColumns` misses them; `getTableConfig` (from `drizzle-orm/pg-core` and
+  `drizzle-orm/sqlite-core`) exposes the index + FK arrays. `sessions_token_hash_uq`
+  underpins `findLiveByToken`'s security contract — a uniqueIndex dropped on one dialect
+  would otherwise drift silently. See [[auth-invariant-checklist]] and
+  [[ci-and-test-infra-gotchas]].

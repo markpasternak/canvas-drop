@@ -26,4 +26,6 @@ Claude Code's private per-project memory is **not shared with Codex**. Anything 
 
 ## Index
 
-- [Dual-dialect Drizzle seam + pglite testing](2026-06-13-dual-dialect-drizzle-seam.md) — per-dialect schemas, the typed `any` repo seam, pglite for the PG test leg, migration-folder resolution.
+- [Dual-dialect Drizzle seam + pglite testing](2026-06-13-dual-dialect-drizzle-seam.md) — per-dialect schemas, the typed `any` repo seam, atomic upsert, `ping()` on DbClient, index/FK parity, pglite for the PG test leg, migration-folder resolution.
+- [Auth/security invariant checklist](2026-06-13-auth-invariant-checklist.md) — **read before any auth/permission work.** The §12 failure modes (dev-in-prod, /0 CIDR, JWKS downgrade, XFF-spoofed IP, upsert race) a multi-agent review caught past self-review, plus a reusable checklist.
+- [CI + test-infra gotchas](2026-06-13-ci-and-test-infra-gotchas.md) — pnpm native-build approval, pglite vs real PG, MinIO-as-a-step in Actions, dialect-split, Biome import-sort, private-repo branch-protection limits.
