@@ -13,6 +13,7 @@ import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
+import type { DraftsRepository } from "./db/repositories/drafts.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
@@ -34,6 +35,7 @@ export interface BuildAppDeps {
   users: UsersRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  drafts: DraftsRepository;
   storage: StorageDriver;
   engine: DeployEngine;
   audit: AuditLog;

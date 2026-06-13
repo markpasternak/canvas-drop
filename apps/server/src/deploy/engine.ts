@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, DeploySource, Manifest, Version } from "@canvas-drop/shared/db";
 import { looksLikeApiKey } from "../canvas/api-key.js";
+import { collectGarbage } from "../canvas/blob-gc.js";
 import { soleHtmlEntry } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
-import { versionStorageKey } from "../canvas/storage-keys.js";
+import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { DraftsRepository } from "../db/repositories/drafts.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -26,6 +28,7 @@ export interface DeployEngineDeps {
   config: Config;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
 }
@@ -65,19 +68,28 @@ export function deployEngine(deps: DeployEngineDeps) {
       const warnings: string[] = [];
       let fileCount = 0;
       let totalBytes = 0;
+      // Content hashes already enqueued/written this deploy — identical bytes (same
+      // path or different) upload at most once (content-addressed dedup, KTD-1).
+      const seen = new Set<string>();
 
       // Uploads run in bounded-concurrency batches: validation stays sequential
       // (the running totals gate zip-bombs in order), but the slow part — the
-      // storage `put` round-trips — fans out PUT_CONCURRENCY at a time. `flush`
-      // waits for the whole batch to SETTLE before surfacing any error, so no
-      // upload can still be in flight when cleanupPending runs.
+      // storage round-trips — fans out PUT_CONCURRENCY at a time. Each blob is
+      // written only if absent (content-addressed: an identical blob from a prior
+      // version is reused, so a one-file edit writes one blob, AE1). `flush` waits
+      // for the whole batch to SETTLE before surfacing any error, so no upload can
+      // still be in flight when the failure path runs.
       let batch: Array<{ key: string; bytes: Uint8Array }> = [];
+      const putBlobIfAbsent = async (key: string, bytes: Uint8Array): Promise<void> => {
+        if (await deps.storage.exists(key)) return;
+        await deps.storage.put(key, bytes);
+      };
       const flush = async (): Promise<void> => {
         if (batch.length === 0) return;
         const current = batch;
         batch = [];
         const results = await Promise.allSettled(
-          current.map((f) => deps.storage.put(f.key, f.bytes)),
+          current.map((f) => putBlobIfAbsent(f.key, f.bytes)),
         );
         const failed = results.find((r) => r.status === "rejected");
         if (failed) throw (failed as PromiseRejectedResult).reason;
@@ -111,8 +123,11 @@ export function deployEngine(deps: DeployEngineDeps) {
 
           const hash = createHash("sha256").update(entry.bytes).digest("hex");
           manifest[path] = { size, hash, mime: mime.contentType };
-          batch.push({ key: versionStorageKey(version.id, path), bytes: entry.bytes });
-          if (batch.length >= PUT_CONCURRENCY) await flush();
+          if (!seen.has(hash)) {
+            seen.add(hash);
+            batch.push({ key: blobKey(canvas.id, hash), bytes: entry.bytes });
+            if (batch.length >= PUT_CONCURRENCY) await flush();
+          }
         }
         await flush();
 
@@ -129,8 +144,10 @@ export function deployEngine(deps: DeployEngineDeps) {
         }
       } catch (err) {
         // Validation/storage failure: the pointer is untouched, so the live
-        // version is unaffected. Best-effort clean up the orphaned pending writes.
-        await this.cleanupPending(version.id, manifest).catch(() => {});
+        // version is unaffected. Blobs are content-addressed and may be shared
+        // with the live version, so they are NEVER deleted inline — any blob this
+        // failed attempt wrote that nothing references is reclaimed by the next GC
+        // (KTD-4). The pending version row stays `pending` (not ready, not served).
         throw err;
       }
 
@@ -140,14 +157,16 @@ export function deployEngine(deps: DeployEngineDeps) {
       try {
         await deps.canvases.setCurrentVersion(canvas.id, version.id);
       } catch (err) {
-        // markReady already ran — clean up the orphaned ready-but-uncurrent version
-        // and its storage objects so nothing is left dangling.
-        await this.cleanupPending(version.id, manifest);
+        // markReady already ran — the version is ready-but-not-current (orphaned).
+        // Its blobs may be shared with the live version, so we don't delete them;
+        // the orphaned ready row is pruned by keep-10 and its unreferenced blobs by
+        // GC. Nothing is served from it (it never became current).
         throw err;
       }
 
-      // Prune beyond the last 10, asynchronously — never block or fail the deploy.
-      // `.catch` guards against an unhandled rejection if prune throws synchronously.
+      // Prune old version rows + reclaim unreferenced blobs, asynchronously —
+      // never block or fail the deploy. `.catch` guards against an unhandled
+      // rejection if prune throws synchronously.
       this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
 
       return {
@@ -182,34 +201,26 @@ export function deployEngine(deps: DeployEngineDeps) {
       throw lastErr;
     },
 
-    /** Delete the storage objects written for a failed pending version. */
-    async cleanupPending(versionId: string, manifest: Manifest): Promise<void> {
-      const keys = Object.keys(manifest).map((path) => versionStorageKey(versionId, path));
-      await deps.storage
-        .deleteMany(keys)
-        .catch((err) =>
-          deps.log.warn({ err, versionId }, "cleanupPending storage delete failed (best-effort)"),
-        );
-    },
-
-    /** Prune ready versions beyond the newest N; log-and-continue on failure. */
+    /**
+     * Prune old version *rows* (keep the newest N), then reclaim blobs no
+     * surviving version or the draft still references (per-canvas mark-sweep,
+     * KTD-4). Log-and-continue on failure — the live version is never affected.
+     */
     async prune(canvasId: string): Promise<void> {
       try {
         // pruneBeyond re-reads the live pointer atomically inside its DELETE, so a
         // concurrent rollback's current version is never pruned (prune-vs-rollback
-        // race); no pre-read snapshot needed here.
-        const dropped = await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS);
-        const keys = dropped.flatMap((v) =>
-          Object.keys((v.manifest ?? {}) as Manifest).map((path) => versionStorageKey(v.id, path)),
-        );
-        await deps.storage
-          .deleteMany(keys)
-          .catch((err) =>
-            deps.log.warn({ err, canvasId }, "prune storage delete failed (best-effort)"),
-          );
+        // race); no pre-read snapshot needed here. It deletes ROWS only.
+        await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS);
       } catch (err) {
-        deps.log.error({ err, canvasId }, "version prune failed (live version unaffected)");
+        deps.log.error({ err, canvasId }, "version row prune failed (live version unaffected)");
       }
+      // Blob GC runs after row-pruning so dropped versions are out of the live set.
+      // Best-effort and self-contained (logs its own failures).
+      await collectGarbage(
+        { versions: deps.versions, drafts: deps.drafts, storage: deps.storage, log: deps.log },
+        canvasId,
+      );
     },
   };
 }

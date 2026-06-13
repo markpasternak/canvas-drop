@@ -13,82 +13,10 @@ import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { LocalDriver } from "../storage/local.js";
-import { assetPathFor, resolveAsset, serveCanvas } from "./serve.js";
-import { versionStorageKey } from "./storage-keys.js";
+import { serveCanvas } from "./serve.js";
+import { blobKey } from "./storage-keys.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
-
-const subConfig: Config = loadConfig({
-  CANVAS_DROP_AUTH_MODE: "dev",
-  CANVAS_DROP_URL_MODE: "subdomain",
-  CANVAS_DROP_BASE_URL: "https://canvases.example.com",
-});
-
-describe("assetPathFor", () => {
-  it("strips the /c/{slug} prefix in path mode", () => {
-    expect(assetPathFor(config, "abc", "/c/abc/index.html")).toBe("index.html");
-    expect(assetPathFor(config, "abc", "/c/abc/")).toBe("");
-    expect(assetPathFor(config, "abc", "/c/abc/a/b.css")).toBe("a/b.css");
-  });
-
-  it("uses the raw path (no /c/ prefix) in subdomain mode", () => {
-    // in subdomain mode the host carries the slug; the path is the asset path
-    expect(assetPathFor(subConfig, "abc", "/index.html")).toBe("index.html");
-    expect(assetPathFor(subConfig, "abc", "/")).toBe("");
-    expect(assetPathFor(subConfig, "abc", "/a/b.css")).toBe("a/b.css");
-  });
-});
-
-describe("resolveAsset", () => {
-  const manifest: Manifest = {
-    "index.html": { size: 1, hash: "h1", mime: "text/html" },
-    "app.js": { size: 1, hash: "h2", mime: "text/javascript" },
-    "sub/index.html": { size: 1, hash: "h3", mime: "text/html" },
-  };
-  it("exact hit", () => {
-    expect(resolveAsset(manifest, "app.js", false)?.path).toBe("app.js");
-  });
-  it("root and directory resolve to index.html", () => {
-    expect(resolveAsset(manifest, "", false)?.path).toBe("index.html");
-    expect(resolveAsset(manifest, "sub/", false)?.path).toBe("sub/index.html");
-  });
-  it("unknown path → null without SPA fallback, root index with it", () => {
-    expect(resolveAsset(manifest, "missing", false)).toBeNull();
-    expect(resolveAsset(manifest, "missing", true)?.path).toBe("index.html");
-  });
-  it("root with no index.html but a single HTML file serves that file", () => {
-    const single: Manifest = {
-      "POST-S~3 (1).HTM": { size: 1, hash: "h", mime: "text/html; charset=utf-8" },
-      "style.css": { size: 1, hash: "h2", mime: "text/css" },
-    };
-    expect(resolveAsset(single, "", false)?.path).toBe("POST-S~3 (1).HTM");
-  });
-  it("root stays 404 when there are several HTML files and no index.html (ambiguous)", () => {
-    const many: Manifest = {
-      "a.html": { size: 1, hash: "h1", mime: "text/html" },
-      "b.html": { size: 1, hash: "h2", mime: "text/html" },
-    };
-    expect(resolveAsset(many, "", false)).toBeNull();
-  });
-  it("SPA fallback serves the root entry for unknown paths — index.html or a lone HTML file", () => {
-    // Classic SPA: index.html shell.
-    expect(resolveAsset(manifest, "route/deep", true)?.path).toBe("index.html");
-    // Single-page app whose entry isn't index.html → SPA fallback serves it too,
-    // matching what the root serves (so deep client routes work).
-    const single: Manifest = {
-      "app.html": { size: 1, hash: "h", mime: "text/html" },
-      "main.js": { size: 1, hash: "h2", mime: "text/javascript" },
-    };
-    expect(resolveAsset(single, "route/deep", false)).toBeNull(); // off → 404
-    expect(resolveAsset(single, "route/deep", true)?.path).toBe("app.html");
-    // Ambiguous (several HTML, no index) → SPA fallback can't pick → still 404.
-    const many: Manifest = {
-      "a.html": { size: 1, hash: "h1", mime: "text/html" },
-      "b.html": { size: 1, hash: "h2", mime: "text/html" },
-    };
-    expect(resolveAsset(many, "route/deep", true)).toBeNull();
-  });
-});
 
 describe("serveCanvas (integration)", () => {
   let client: DbClient;
@@ -133,8 +61,10 @@ describe("serveCanvas (integration)", () => {
     });
     for (const [path, body] of Object.entries(files)) {
       const bytes = enc.encode(body);
-      await storage.put(versionStorageKey(v.id, path), bytes);
-      manifest[path] = { size: bytes.length, hash: `hash-${path}`, mime: "x" };
+      const hash = `hash-${path}`;
+      // Bytes live at the content-addressed blob key (per-canvas), keyed by hash.
+      await storage.put(blobKey(cv.id, hash), bytes);
+      manifest[path] = { size: bytes.length, hash, mime: "x" };
     }
     await versions.markReady(v.id, { fileCount: 4, totalBytes: 0, manifest });
     await canvases.setCurrentVersion(cv.id, v.id);

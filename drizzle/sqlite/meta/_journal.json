@@ -15,6 +15,13 @@
       "when": 1781364066952,
       "tag": "0001_sweet_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781368462597,
+      "tag": "0002_m5_drafts",
+      "breakpoints": true
     }
   ]
 }

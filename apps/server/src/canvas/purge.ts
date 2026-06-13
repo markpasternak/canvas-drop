@@ -1,14 +1,16 @@
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { DraftsRepository } from "../db/repositories/drafts.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { versionPrefix } from "./storage-keys.js";
+import { canvasBlobPrefix } from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface PurgeDeps {
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
 }
@@ -74,20 +76,21 @@ export async function purgeDeletedCanvases(
   for (const canvas of doomed) {
     try {
       const versions = await deps.versions.listByCanvas(canvas.id);
-      // Nothing reclaimable — leave the tombstone untouched and don't count it.
-      if (versions.length === 0) continue;
+      const draft = await deps.drafts.getByCanvas(canvas.id);
+      // Under content-addressing every blob for the canvas lives under one
+      // per-canvas prefix, so a single list+deleteMany reclaims them all (the
+      // canvas dies whole — no refcounting needed, KTD-1). Includes draft-only
+      // blobs (a canvas drafted but never published).
+      const keys = await deps.storage.list(canvasBlobPrefix(canvas.id));
 
-      // Collect every object across the canvas's versions, then delete in one
-      // batched call (S3 removes up to 1000 per request instead of one network
-      // round-trip per file). List all versions concurrently to reduce latency.
-      const keys: string[] = [];
-      const keyArrays = await Promise.all(
-        versions.map((v) => deps.storage.list(versionPrefix(v.id))),
-      );
-      keys.push(...keyArrays.flat());
+      // Nothing reclaimable — leave the tombstone untouched and don't count it
+      // (keeps re-runs idempotent: a second pass reports zero).
+      if (versions.length === 0 && draft === null && keys.length === 0) continue;
+
       if (!dryRun) {
         await deps.storage.deleteMany(keys);
         await deps.versions.deleteByCanvas(canvas.id);
+        await deps.drafts.deleteByCanvas(canvas.id);
         await deps.canvases.clearCurrentVersion(canvas.id);
       }
       const objects = keys.length;

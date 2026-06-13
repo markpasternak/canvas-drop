@@ -15,6 +15,13 @@
       "when": 1781364067579,
       "tag": "0001_blue_nicolaos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781368463197,
+      "tag": "0002_m5_drafts",
+      "breakpoints": true
     }
   ]
 }

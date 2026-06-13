@@ -8,6 +8,7 @@ import { sessionService } from "./auth/session.js";
 import type { DbClient } from "./db/factory.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
+import { draftsRepository } from "./db/repositories/drafts.js";
 import { sessionsRepository } from "./db/repositories/sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
@@ -29,6 +30,7 @@ async function jsonOf<T>(res: Response): Promise<T> {
 function app(client: DbClient, config: Config = devConfig) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
+  const drafts = draftsRepository(client);
   const storage = memStorage();
   return buildApp({
     config,
@@ -38,8 +40,9 @@ function app(client: DbClient, config: Config = devConfig) {
     users: usersRepository(client),
     canvases,
     versions,
+    drafts,
     storage,
-    engine: deployEngine({ config, canvases, versions, storage, log: silent }),
+    engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
     audit: createAuditLog(auditRepository(client), silent),
     sessionSvc: sessionService(config, sessionsRepository(client)),
     clientIp: () => "127.0.0.1",
@@ -148,6 +151,7 @@ describe("buildApp", () => {
     const { proxyStrategy } = await import("./auth/proxy.js");
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
     const storage = memStorage();
     const a = buildApp({
       config: proxyConfig,
@@ -157,8 +161,16 @@ describe("buildApp", () => {
       users: usersRepository(client),
       canvases,
       versions,
+      drafts,
       storage,
-      engine: deployEngine({ config: proxyConfig, canvases, versions, storage, log: silent }),
+      engine: deployEngine({
+        config: proxyConfig,
+        canvases,
+        versions,
+        drafts,
+        storage,
+        log: silent,
+      }),
       audit: createAuditLog(auditRepository(client), silent),
       clientIp: () => "8.8.8.8",
     });

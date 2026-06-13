@@ -7,6 +7,7 @@ import { verifyPassword } from "../canvas/password.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -31,8 +32,9 @@ function buildApp(
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
+  const drafts = draftsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
-  const engine = deployEngine({ config, canvases, versions, storage, log: silent });
+  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
