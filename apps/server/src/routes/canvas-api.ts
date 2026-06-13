@@ -3,15 +3,18 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
+import type { ModelProvider } from "../ai/provider.js";
 import { decideCanvasAccess } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
 import { GATE_COOKIE, verifyGrant } from "../canvas/password-gate.js";
+import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { canvasApiIsolation } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+import { canvasAiRoutes } from "./canvas-ai.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 
@@ -21,6 +24,9 @@ export interface CanvasApiDeps {
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
+  aiUsage: AiUsageRepository;
+  /** Model provider for the AI primitive (default Anthropic; tests inject a fake). */
+  aiProvider: ModelProvider;
 }
 
 /**
@@ -71,6 +77,12 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
   // KV primitive (U6) and Files primitive (U7).
   app.route("/kv", canvasKvRoutes(deps));
   app.route("/files", canvasFilesRoutes(deps));
+
+  // AI primitive (M9, area H). Behind requireCapability("ai") inside the router.
+  app.route(
+    "/ai",
+    canvasAiRoutes({ config: deps.config, aiUsage: deps.aiUsage, provider: deps.aiProvider }),
+  );
 
   return app;
 }

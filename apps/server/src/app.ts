@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
+import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import { authRoutes } from "./auth/routes.js";
@@ -13,6 +14,7 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
+import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
@@ -52,6 +54,8 @@ export interface BuildAppDeps {
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the peer-IP extractor (tests inject a fixed IP). */
   clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
+  /** AI model provider (default Anthropic from config; tests inject a fake). */
+  aiProvider?: ModelProvider;
 }
 
 /**
@@ -141,6 +145,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       kv: kvRepository(deps.db),
       files: filesService({ files: filesRepository(deps.db), storage: deps.storage }),
       usage: usageEventsRepository(deps.db),
+      aiUsage: aiUsageRepository(deps.db),
+      aiProvider: deps.aiProvider ?? anthropicProvider(deps.config),
     }),
   );
 
