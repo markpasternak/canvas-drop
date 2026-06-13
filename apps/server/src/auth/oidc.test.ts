@@ -6,7 +6,7 @@ import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
-import { completeLogin, makeOidc, type OidcDeps } from "./oidc.js";
+import { callbackUrl, completeLogin, makeOidc, type OidcDeps } from "./oidc.js";
 import { SESSION_COOKIE, sessionService } from "./session.js";
 
 async function jsonOf<T>(res: Response): Promise<T> {
@@ -72,6 +72,30 @@ describe("oidc callback — pre-exchange guards", () => {
     });
     expect(res.status).toBe(400);
     expect((await jsonOf<{ error: string }>(res)).error).toBe("state_mismatch");
+  });
+});
+
+describe("oidc callbackUrl — proxy redirect_uri reconstruction", () => {
+  it("builds the token-exchange redirect_uri from the base URL, not the proxied request scheme/host", () => {
+    // Behind Caddy the app sees plain http on an internal host; the exchange
+    // redirect_uri must still be the public https origin Google was given.
+    const u = callbackUrl(
+      "https://canvases.example.com",
+      "http://localhost:3000/auth/callback?code=abc&state=s1&iss=https%3A%2F%2Fidp",
+    );
+    expect(`${u.origin}${u.pathname}`).toBe("https://canvases.example.com/auth/callback");
+    expect(u.searchParams.get("code")).toBe("abc");
+    expect(u.searchParams.get("state")).toBe("s1");
+    expect(u.searchParams.get("iss")).toBe("https://idp");
+  });
+
+  it("accepts a URL object and preserves only the query (no path/host leakage)", () => {
+    const u = callbackUrl(
+      "https://canvases.example.com",
+      new URL("https://evil.example.net/auth/callback/../../wat?code=x&state=y"),
+    );
+    expect(`${u.origin}${u.pathname}`).toBe("https://canvases.example.com/auth/callback");
+    expect(u.searchParams.get("code")).toBe("x");
   });
 });
 
