@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
 
@@ -39,7 +39,22 @@ export class LocalDriver implements StorageDriver {
   }
 
   async delete(key: string): Promise<void> {
-    await rm(this.pathFor(key), { force: true });
+    const target = this.pathFor(key);
+    await rm(target, { force: true });
+    // Prune now-empty parent directories up to (never including) the root, so
+    // reclaiming a version's files leaves no empty dir skeletons behind. S3 has
+    // no directories; this keeps the local driver's on-disk state equivalent.
+    // `rmdir` throws ENOTEMPTY on a dir that still holds files — that's the
+    // signal to stop walking up.
+    let dir = dirname(target);
+    while (dir !== this.root && dir.startsWith(this.root + sep)) {
+      try {
+        await rmdir(dir);
+      } catch {
+        break;
+      }
+      dir = dirname(dir);
+    }
   }
 
   async exists(key: string): Promise<boolean> {

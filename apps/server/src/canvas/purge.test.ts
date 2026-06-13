@@ -50,7 +50,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     return u.id;
   }
 
-  it("purges every soft-deleted canvas by default, leaving active ones untouched", async () => {
+  it("reclaims files + versions of soft-deleted canvases, keeps the row, leaves active ones untouched", async () => {
     client = await makeTestDb(dialect);
     const storage = memStorage();
     const ownerId = await seedOwner(client);
@@ -73,13 +73,39 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
       objectsDeleted: 1,
       failed: 0,
     });
-    // Deleted canvas, its version, and its object are all gone.
-    expect(await canvases.findById(deletedId)).toBeNull();
+    // The canvas ROW survives as a soft-deleted tombstone — but its version,
+    // its file, and its current-version pointer are gone.
+    const tombstone = await canvases.findById(deletedId);
+    expect(tombstone).not.toBeNull();
+    expect(tombstone?.status).toBe("deleted");
+    expect(tombstone?.currentVersionId).toBeNull();
     expect(await versionsRepository(client).listByCanvas(deletedId)).toEqual([]);
     expect(await storage.list("versions/")).toHaveLength(1); // only the live canvas's object remains
     // The active canvas is fully intact.
     expect(await canvases.findById(liveId)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(liveId)).toHaveLength(1);
+  });
+
+  it("is idempotent: a canvas with no versions is skipped and a second sweep reclaims nothing", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+
+    // A soft-deleted canvas that was never deployed (no versions) is left alone.
+    const neverDeployed = await canvases.create({ ownerId, slug: "bare", apiKeyHash: "k" });
+    await canvases.setStatus(neverDeployed.id, "deleted");
+    const deployed = await seedCanvas(client, storage, ownerId, "had-files");
+    await canvases.setStatus(deployed, "deleted");
+
+    const first = await purgeDeletedCanvases({ canvases, versions, storage, log });
+    expect(first.canvasesPurged).toBe(1); // only the one with versions
+    // Re-running finds nothing reclaimable — both rows still exist as tombstones.
+    const second = await purgeDeletedCanvases({ canvases, versions, storage, log });
+    expect(second).toMatchObject({ canvasesPurged: 0, versionsPurged: 0, objectsDeleted: 0 });
+    expect(await canvases.findById(neverDeployed.id)).not.toBeNull();
+    expect(await canvases.findById(deployed)).not.toBeNull();
   });
 
   it("honors the retention window: too-recent deletions survive, old ones are purged", async () => {
@@ -98,15 +124,16 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
       { olderThanDays: 30, now: deletedAt + DAY_MS },
     );
     expect(recent.canvasesPurged).toBe(0);
-    expect(await canvases.findById(id)).not.toBeNull();
+    expect(await versionsRepository(client).listByCanvas(id)).toHaveLength(1); // untouched
 
-    // Same window, evaluated 31 days later → now past retention, purged.
+    // Same window, evaluated 31 days later → now past retention, reclaimed.
     const aged = await purgeDeletedCanvases(
       { canvases, versions: versionsRepository(client), storage, log },
       { olderThanDays: 30, now: deletedAt + 31 * DAY_MS },
     );
     expect(aged.canvasesPurged).toBe(1);
-    expect(await canvases.findById(id)).toBeNull();
+    expect(await canvases.findById(id)).not.toBeNull(); // tombstone kept
+    expect(await versionsRepository(client).listByCanvas(id)).toEqual([]); // files + versions gone
   });
 
   it("dry-run reports what would be purged but deletes nothing", async () => {
@@ -159,9 +186,9 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     expect(summary.canvasesPurged).toBe(1);
     expect(summary.failed).toBe(1);
     // The failed canvas is fully intact (row + version), safe to retry.
-    expect(await canvases.findById(badId)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(badId)).toHaveLength(1);
-    // The healthy one was purged.
-    expect(await canvases.findById(okId)).toBeNull();
+    // The healthy one was reclaimed: row kept as a tombstone, versions gone.
+    expect(await canvases.findById(okId)).not.toBeNull();
+    expect(await versionsRepository(client).listByCanvas(okId)).toEqual([]);
   });
 });

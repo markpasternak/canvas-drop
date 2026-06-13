@@ -1,24 +1,26 @@
 /**
- * Purge soft-deleted canvases permanently (BUILD_BRIEF §6.1 #14).
+ * Reclaim storage from soft-deleted canvases (BUILD_BRIEF §6.1 #14).
  *
- * Deleting a canvas in the dashboard is only a soft-delete (status + deletedAt);
- * this is the maintenance sweep that actually reclaims the rows, their versions,
- * and their storage objects. It reads the same typed config as the server, so it
+ * Deleting a canvas in the dashboard is only a soft-delete (status + deletedAt).
+ * This maintenance sweep hard-deletes the heavy, reclaimable data — each
+ * canvas's deployed **files** (storage objects, the whole point) and its
+ * **version rows** (file metadata) — while keeping the canvas row itself as a
+ * soft-deleted tombstone. It reads the same typed config as the server, so it
  * acts on whichever DB + storage your environment is wired to.
  *
  * Run (from the repo root):
- *   pnpm purge                 # purge EVERY soft-deleted canvas (default)
- *   pnpm purge 30              # purge only those soft-deleted 30+ days ago
- *   pnpm purge 30 dry-run      # report what 30 days would remove, delete nothing
+ *   pnpm purge                 # reclaim EVERY soft-deleted canvas (default)
+ *   pnpm purge 30              # only those soft-deleted 30+ days ago
+ *   pnpm purge 30 dry-run      # report what 30 days would reclaim, delete nothing
  *
  * Or scoped to the server workspace:
- *   pnpm --filter @canvas-drop/server purge [days] [dry-run]
+ *   pnpm --filter @canvas-drop/server run purge [days] [dry-run]
  *
  * Arguments are positional words (not --flags), so they forward cleanly through
  * pnpm without being swallowed as pnpm's own options. The days argument is the
  * retention window: 0 (the default) means everything, a positive integer keeps
- * anything deleted more recently than that. This is irreversible — pass the
- * `dry-run` word first if unsure.
+ * anything deleted more recently than that. Reclaiming files is irreversible —
+ * pass the `dry-run` word first if unsure.
  */
 import { loadConfig } from "@canvas-drop/shared";
 import { purgeDeletedCanvases } from "../src/canvas/purge.js";
@@ -64,8 +66,8 @@ async function main() {
     log.info(
       summary,
       dryRun
-        ? `dry run: ${summary.canvasesPurged} canvas(es) would be purged`
-        : `purged ${summary.canvasesPurged} canvas(es)`,
+        ? `dry run: ${summary.canvasesPurged} canvas(es) would be reclaimed (${summary.objectsDeleted} files, ${summary.versionsPurged} versions)`
+        : `reclaimed ${summary.canvasesPurged} canvas(es): ${summary.objectsDeleted} files + ${summary.versionsPurged} versions deleted, rows kept as tombstones`,
     );
     if (summary.failed > 0) {
       log.warn({ failed: summary.failed }, "some canvases were skipped; rerun to retry them");

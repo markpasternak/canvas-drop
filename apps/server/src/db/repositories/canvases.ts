@@ -203,13 +203,13 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Hard-delete the canvas row (purge — irreversible). The caller must remove
-     * the canvas's versions and storage objects first: `versions.canvas_id`
-     * references `canvases.id` with no cascade, so deleting the canvas while
-     * versions remain violates the FK on both dialects.
+     * Clear the current-version pointer (purge). After a sweep hard-deletes a
+     * soft-deleted canvas's versions, the row is kept as a tombstone but its
+     * `currentVersionId` would dangle at a removed version — null it so nothing
+     * references a row that no longer exists.
      */
-    async hardDelete(id: string): Promise<void> {
-      await db.delete(t).where(eq(t.id, id));
+    async clearCurrentVersion(id: string): Promise<void> {
+      await db.update(t).set({ currentVersionId: null, updatedAt: Date.now() }).where(eq(t.id, id));
     },
 
     /** Find by API key hash (Bearer-key deploy API); active canvases only. */

@@ -27,27 +27,35 @@ export interface PurgeOptions {
 }
 
 export interface PurgeSummary {
-  /** Canvases whose rows were (or would be) removed. */
+  /** Soft-deleted canvases whose files + versions were (or would be) reclaimed. */
   canvasesPurged: number;
-  /** Version rows removed across all purged canvases. */
+  /** Version rows hard-deleted across all reclaimed canvases. */
   versionsPurged: number;
-  /** Storage objects deleted across all purged canvases. */
+  /** Storage objects deleted across all reclaimed canvases. */
   objectsDeleted: number;
   /** Canvases skipped because a step threw — left fully intact for the next run. */
   failed: number;
 }
 
 /**
- * Permanently purge soft-deleted canvases (BUILD_BRIEF §6.1 #14). Soft-delete
- * only flips `status` + stamps `deletedAt`; this is the sweep that actually
- * reclaims the row, its versions, and their storage objects.
+ * Reclaim the heavy data of soft-deleted canvases (BUILD_BRIEF §6.1 #14).
  *
- * Order per canvas is load-bearing: storage objects, then version rows, then the
- * canvas row — `versions.canvas_id` references `canvases.id` with no cascade, so
- * the canvas row cannot go first. Each canvas is purged independently and
- * storage-first: if any step throws, that canvas is logged and skipped with its
- * rows untouched, so a transient storage failure is safe to retry rather than
- * orphaning objects whose owning rows are already gone.
+ * Deleting a canvas only flips `status = "deleted"` + stamps `deletedAt`. This
+ * sweep hard-deletes the reclaimable parts — every version's **storage objects**
+ * (the deployed files; the whole point) and its **version rows** (file
+ * metadata) — but intentionally **keeps the canvas row** as a soft-deleted
+ * tombstone (its identity/audit record). The canvas's `currentVersionId` is
+ * cleared so it no longer dangles at a removed version.
+ *
+ * Order per canvas is load-bearing: storage objects, then version rows —
+ * `versions.canvas_id` references `canvases.id` with no cascade, and we remove
+ * the version rows before clearing the pointer. Each canvas is processed
+ * independently and storage-first: if any step throws, it is logged and skipped
+ * with its rows untouched, so a transient storage failure is safe to retry
+ * rather than orphaning objects whose owning rows are already gone.
+ *
+ * Canvases with no version rows are skipped (never deployed, or already swept on
+ * a prior run), so re-running is idempotent — a second pass reports zero.
  */
 export async function purgeDeletedCanvases(
   deps: PurgeDeps,
@@ -66,6 +74,9 @@ export async function purgeDeletedCanvases(
   for (const canvas of doomed) {
     try {
       const versions = await deps.versions.listByCanvas(canvas.id);
+      // Nothing reclaimable — leave the tombstone untouched and don't count it.
+      if (versions.length === 0) continue;
+
       let objects = 0;
       for (const version of versions) {
         for (const key of await deps.storage.list(versionPrefix(version.id))) {
@@ -75,14 +86,14 @@ export async function purgeDeletedCanvases(
       }
       if (!dryRun) {
         await deps.versions.deleteByCanvas(canvas.id);
-        await deps.canvases.hardDelete(canvas.id);
+        await deps.canvases.clearCurrentVersion(canvas.id);
       }
       summary.canvasesPurged++;
       summary.versionsPurged += versions.length;
       summary.objectsDeleted += objects;
       deps.log.info(
         { canvasId: canvas.id, slug: canvas.slug, versions: versions.length, objects, dryRun },
-        dryRun ? "would purge soft-deleted canvas" : "purged soft-deleted canvas",
+        dryRun ? "would reclaim soft-deleted canvas" : "reclaimed soft-deleted canvas",
       );
     } catch (err) {
       summary.failed++;
