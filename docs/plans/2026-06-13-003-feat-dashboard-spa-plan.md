@@ -70,6 +70,33 @@ tooling (v1.1).
 
 ### Deferred to Follow-Up Work
 
+- **Soft-delete purge + restore (BUILD_BRIEF §6.1 #14, §6.10 #5 — both [v1],
+  partially built).** Delete is a soft-delete (`status = "deleted"` + `deletedAt`,
+  `canvases.ts:147`). The **reclaim sweep now exists** as a manual maintenance
+  command: `pnpm purge [days] [dry-run]` (`apps/server/scripts/purge-deleted.ts`
+  → `purgeDeletedCanvases` in `apps/server/src/canvas/purge.ts`). Model: it
+  hard-deletes the *reclaimable* data — each soft-deleted canvas's storage objects
+  (files) and version rows (metadata), then clears `currentVersionId` — but
+  **keeps the canvas row as a tombstone** (the DB record is soft-deleted only; the
+  heavy data is reclaimed). Storage-first ordering + per-canvas failure isolation
+  make it idempotent and retry-safe; canvases with no versions are skipped, so a
+  second sweep reports zero. Retention-window arg (`0`/default = everything, `N` =
+  deleted ≥ N days ago) + `dry-run`. Dual-dialect tested (`purge.test.ts`). The
+  local storage driver now prunes empty dirs on delete so reclaiming leaves no
+  on-disk skeletons (`local.ts`); S3 has no dirs. Storage I/O is S3-efficient:
+  `StorageDriver.deleteMany` batches deletes (S3 `DeleteObjects`, ≤1000/call;
+  local/mem loop) and the purge collects a canvas's objects into one call;
+  deploys upload with bounded concurrency (`PUT_CONCURRENCY`, `engine.ts`) and
+  `cleanupPending`/`prune` batch their deletes. What remains: (a) **invoke it
+  automatically** — a scheduled job/cron so retention is enforced without a human
+  running the command (the script is the building block; nothing calls it on a
+  timer yet); (b) **drive the window from typed config** instead of a CLI arg, so
+  the dashboard's "30 days" copy (`canvas.settings.tsx`) maps to a real default
+  (no scattered `process.env`, no magic `30`); (c) the **admin restore path**
+  (§6.10 #5) that flips `status` back — note it only restores the record, not the
+  reclaimed files, so it's meaningful only *before* the window elapses. Until
+  (a)+(b) land, the "recoverable for 30 days, then purged" copy is built *as if*
+  enforced; make config and copy agree when the scheduler lands.
 - Usage/analytics tab content + list sparkline (area L: `usage_events`,
   `usage_daily`, stats query endpoints).
 - Asset file manager + in-browser CodeMirror editor (§6.9.12, §6.2.4–5 — v1.1).

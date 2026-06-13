@@ -100,13 +100,16 @@ export function gatePage(title: string, error: boolean): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Password required</title>
 <style>
-:root{color-scheme:light dark}
-body{font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#0b0b0c;color:#e8e8ea}
-.card{max-width:22rem;width:90%;padding:2rem;border:1px solid #2a2a2e;border-radius:12px;background:#141417}
-h1{font-size:1.1rem;margin:0 0 .25rem}p{margin:.25rem 0 1rem;color:#a0a0a8}
-input{width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid #34343a;border-radius:8px;background:#0e0e10;color:inherit;margin-bottom:.75rem}
-button{width:100%;padding:.6rem;border:0;border-radius:8px;background:#e8e8ea;color:#0b0b0c;font-weight:600;cursor:pointer}
-.err{color:#ff8585;font-size:.875rem;margin-bottom:.5rem}
+:root{color-scheme:light dark;--bg:#0a0a0c;--card:#141417;--fg:#f4f4f5;--muted:#a1a1aa;--border:#27272b;--accent:#6366f1;--accent-fg:#fff;--err:#f05252}
+@media (prefers-color-scheme:light){:root{--bg:#fbfbfc;--card:#fff;--fg:#1a1a1e;--muted:#56565f;--border:#e7e7ea;--accent:#4f46e5;--err:#dc2626}}
+body{font:16px/1.5 ui-sans-serif,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--fg)}
+.card{max-width:22rem;width:90%;padding:2rem;border:1px solid var(--border);border-radius:12px;background:var(--card)}
+h1{font-size:1.1rem;margin:0 0 .25rem}p{margin:.25rem 0 1rem;color:var(--muted)}
+input{width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;margin-bottom:.75rem}
+input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-color:var(--accent)}
+button{width:100%;padding:.6rem;border:0;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-weight:600;cursor:pointer}
+button:hover{filter:brightness(1.08)}
+.err{color:var(--err);font-size:.875rem;margin-bottom:.5rem}
 </style></head><body>
 <form class="card" method="POST">
 <h1>${name} is password-protected</h1>

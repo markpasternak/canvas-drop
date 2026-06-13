@@ -1,6 +1,6 @@
 {
-  "id": "013f3bb8-21c5-40ad-9918-a4a95f45456d",
-  "prevId": "b85b5eab-96d8-4c78-9cfa-d467585cc403",
+  "id": "b57f7d73-f147-4589-907d-a191e5c894fc",
+  "prevId": "451b5a79-1c49-4ec9-931c-d786ec9ecc93",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -234,11 +234,53 @@
           "method": "btree",
           "with": {}
         },
-        "canvases_owner_id_idx": {
-          "name": "canvases_owner_id_idx",
+        "canvases_owner_created_idx": {
+          "name": "canvases_owner_created_idx",
           "columns": [
             {
               "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "canvases_api_key_hash_uq": {
+          "name": "canvases_api_key_hash_uq",
+          "columns": [
+            {
+              "expression": "api_key_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "canvases_status_deleted_idx": {
+          "name": "canvases_status_deleted_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "deleted_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -264,7 +306,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "canvases_status_chk": {
+          "name": "canvases_status_chk",
+          "value": "\"canvases\".\"status\" in ('active', 'disabled', 'archived', 'deleted')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.sessions": {
@@ -583,27 +630,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "versions_canvas_created_idx": {
-          "name": "versions_canvas_created_idx",
-          "columns": [
-            {
-              "expression": "canvas_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -629,7 +655,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "versions_status_chk": {
+          "name": "versions_status_chk",
+          "value": "\"versions\".\"status\" in ('pending', 'ready')"
+        },
+        "versions_source_chk": {
+          "name": "versions_source_chk",
+          "value": "\"versions\".\"source\" in ('folder', 'zip', 'paste', 'api')"
+        }
+      },
       "isRLSEnabled": false
     }
   },

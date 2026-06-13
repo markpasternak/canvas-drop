@@ -34,6 +34,20 @@ export function storageContract(makeDriver: () => StorageDriver | Promise<Storag
     await expect(d.delete("never-existed")).resolves.toBeUndefined();
   });
 
+  it("deleteMany removes the listed keys, ignores missing ones, and leaves the rest", async () => {
+    const d = await makeDriver();
+    await d.put("k/1", new Uint8Array([1]));
+    await d.put("k/2", new Uint8Array([2]));
+    await d.put("k/3", new Uint8Array([3]));
+
+    await expect(d.deleteMany([])).resolves.toBeUndefined(); // empty is a no-op
+    await d.deleteMany(["k/1", "k/2", "k/missing"]);
+
+    expect(await d.exists("k/1")).toBe(false);
+    expect(await d.exists("k/2")).toBe(false);
+    expect(await d.exists("k/3")).toBe(true);
+  });
+
   it("lists keys by prefix", async () => {
     const d = await makeDriver();
     await d.put("p/1.txt", new Uint8Array([1]));

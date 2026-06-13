@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { folderFormFromFiles } from "../components/DeployFiles.js";
 import { api, type Canvas, type CanvasSettings } from "./api.js";
 import { keys } from "./queries.js";
 
@@ -42,6 +43,36 @@ export function useUpdateSettings(id: string) {
   });
 }
 
+/** A new deploy to an existing canvas, by method. ZIP/folder report upload
+ *  progress (0–1); paste is a small JSON request. */
+export type DeployInput =
+  | { kind: "paste"; html: string }
+  | { kind: "folder"; files: File[] }
+  | { kind: "zip"; file: File };
+
+/** Deploy a new version to an existing canvas — await + invalidate (changes the
+ *  live canvas and adds to its version history). */
+export function useDeploy(id: string, onProgress?: (fraction: number) => void) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeployInput) => {
+      switch (input.kind) {
+        case "paste":
+          return api.deployPaste(id, input.html);
+        case "folder":
+          return api.deployFolder(id, folderFormFromFiles(input.files), onProgress);
+        case "zip":
+          return api.deployZip(id, await input.file.arrayBuffer(), onProgress);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.versions(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
 /** Rollback — await + invalidate (not optimistic; changes the live canvas). */
 export function useRollback(id: string) {
   const qc = useQueryClient();
@@ -79,6 +110,40 @@ export function useDeleteCanvas(id: string) {
     mutationFn: () => api.deleteCanvas(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/** Invalidate every surface a lifecycle change moves a canvas between: the
+ *  canvas detail, the active list, and the archive list. (`keys.canvases` is a
+ *  prefix of `keys.archivedCanvases`, but we invalidate both explicitly so the
+ *  intent survives any future key reshaping.) */
+function invalidateLifecycle(qc: ReturnType<typeof useQueryClient>, id: string) {
+  qc.invalidateQueries({ queryKey: keys.canvas(id) });
+  qc.invalidateQueries({ queryKey: keys.canvases });
+  qc.invalidateQueries({ queryKey: keys.archivedCanvases });
+}
+
+/** Archive — await; takes the canvas offline and moves it to the Archive view. */
+export function useArchiveCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.archiveCanvas(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      invalidateLifecycle(qc, id);
+    },
+  });
+}
+
+/** Unarchive — await; restores the canvas to active and back into the main list. */
+export function useUnarchiveCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.unarchiveCanvas(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      invalidateLifecycle(qc, id);
     },
   });
 }

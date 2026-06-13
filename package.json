@@ -15,6 +15,7 @@
     "test:sqlite": "CANVAS_DROP_DB=sqlite vitest run",
     "test:pg": "CANVAS_DROP_DB=postgres vitest run",
     "test:dashboard": "pnpm --filter @canvas-drop/dashboard test",
+    "purge": "pnpm --filter @canvas-drop/server run purge",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",

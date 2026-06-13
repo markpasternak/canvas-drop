@@ -8,16 +8,48 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/** Minimal XMLHttpRequest stand-in for the XHR upload path (deployZip/Folder). */
+class FakeXHR {
+  static status = 200;
+  static body = "{}";
+  static contentType = "application/json";
+  upload: { onprogress?: (e: ProgressEvent) => void; onload?: () => void } = {};
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  timeout = 0;
+  status = 0;
+  statusText = "";
+  responseText = "";
+  withCredentials = false;
+  open() {}
+  setRequestHeader() {}
+  getResponseHeader(name: string): string | null {
+    if (name === "content-type") return FakeXHR.contentType;
+    return null;
+  }
+  send() {
+    this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 } as ProgressEvent);
+    this.upload.onprogress?.({ lengthComputable: true, loaded: 10, total: 10 } as ProgressEvent);
+    this.upload.onload?.();
+    this.status = FakeXHR.status;
+    this.responseText = FakeXHR.body;
+    this.onload?.();
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
+  FakeXHR.status = 200;
+  FakeXHR.body = "{}";
+  FakeXHR.contentType = "application/json";
 });
 
 describe("api error handling", () => {
-  it("maps a stable deploy error code to a typed ApiError with a hint", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse({ code: "ZIP_SLIP_REJECTED", message: "bad path" }, 400)),
-    );
+  it("deploy upload (XHR) maps a stable error code to a typed ApiError with a hint", async () => {
+    FakeXHR.status = 400;
+    FakeXHR.body = JSON.stringify({ code: "ZIP_SLIP_REJECTED", message: "bad path" });
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
     await expect(api.deployZip("c1", new ArrayBuffer(4))).rejects.toMatchObject({
       code: "ZIP_SLIP_REJECTED",
     });
@@ -27,6 +59,33 @@ describe("api error handling", () => {
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).hint).toMatch(/unsafe path/i);
     }
+  });
+
+  it("deploy upload (XHR) reports byte progress and resolves the deploy result", async () => {
+    FakeXHR.status = 200;
+    FakeXHR.body = JSON.stringify({ url: "u", version: 1, fileCount: 1, totalBytes: 10 });
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
+    const seen: number[] = [];
+    const result = await api.deployZip("c1", new ArrayBuffer(4), (f) => seen.push(f));
+    expect(result.version).toBe(1);
+    expect(seen).toContain(0.5); // 5/10 bytes
+    expect(seen).toContain(1); // upload complete → server processing
+  });
+
+  it("deployPaste posts the html to the canvas's deploy/paste endpoint", async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, method: init?.method, body: init?.body as string });
+        return jsonResponse({ url: "u", version: 2, fileCount: 1, totalBytes: 9 });
+      }),
+    );
+    const res = await api.deployPaste("c1", "<h1>v2</h1>");
+    expect(res.version).toBe(2);
+    expect(calls[0]?.url).toBe("/api/canvases/c1/deploy/paste");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toContain("v2");
   });
 
   it("distinguishes 404 not_found from 403 cross_origin_forbidden", async () => {
@@ -105,5 +164,29 @@ describe("api error handling", () => {
     );
     await expect(api.me()).rejects.toMatchObject({ code: "unauthorized" });
     expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("XHR upload: status 401 fires auth-expiry handler and rejects with code 'unauthorized'", async () => {
+    const onExpired = vi.fn();
+    setAuthExpiredHandler(onExpired);
+    FakeXHR.status = 401;
+    FakeXHR.body = "";
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
+    await expect(api.deployZip("c1", new ArrayBuffer(4))).rejects.toMatchObject({
+      code: "unauthorized",
+    });
+    expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("XHR upload: onerror rejects with code 'network_error'", async () => {
+    class ErrorXHR extends FakeXHR {
+      override send() {
+        this.onerror?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", ErrorXHR);
+    await expect(api.deployZip("c1", new ArrayBuffer(4))).rejects.toMatchObject({
+      code: "network_error",
+    });
   });
 });

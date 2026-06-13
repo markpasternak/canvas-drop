@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -86,6 +87,14 @@ export function managementRoutes(deps: ManagementDeps) {
     return cv;
   }
 
+  /** 409 body for deploy/rollback on a non-active (archived/disabled) canvas.
+   *  Publishing to a canvas whose public URL 404s is incoherent — make the caller
+   *  bring it back first. Settings/regenerate/delete stay allowed while archived. */
+  const NOT_ACTIVE = {
+    code: "NOT_ACTIVE",
+    message: "Unarchive this canvas before deploying or changing its live version.",
+  } as const;
+
   // Create → slug + API key (shown once).
   app.post("/", sameOrigin, async (c) => {
     const body = createSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -107,15 +116,14 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ ...publicCanvas(deps.config, cv), apiKey }, 201);
   });
 
-  // List the caller's own canvases, each enriched with its last-deploy summary.
-  app.get("/", async (c) => {
-    const list = await deps.canvases.listByOwner(c.get("user").id);
-    // One batched lookup of current versions → no N+1.
+  /** Enrich a canvas list with each canvas's last-deploy summary in one batched
+   *  version lookup (no N+1). Shared by the active list and the archived list. */
+  async function withLastDeploy(list: Canvas[]) {
     const currentIds = list
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
-    const canvases = list.map((cv) => {
+    return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
         ...publicCanvas(deps.config, cv),
@@ -129,6 +137,20 @@ export function managementRoutes(deps: ManagementDeps) {
           : null,
       };
     });
+  }
+
+  // List the caller's own ACTIVE canvases (excludes archived + deleted), each
+  // enriched with its last-deploy summary.
+  app.get("/", async (c) => {
+    const canvases = await withLastDeploy(await deps.canvases.listByOwner(c.get("user").id));
+    return c.json({ canvases });
+  });
+
+  // List the caller's own ARCHIVED canvases — the dedicated Archive view (§6.9.1).
+  app.get("/archived", async (c) => {
+    const canvases = await withLastDeploy(
+      await deps.canvases.listArchivedByOwner(c.get("user").id),
+    );
     return c.json({ canvases });
   });
 
@@ -199,6 +221,37 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ ok: true });
   });
 
+  // Archive (owner-initiated, reversible) — takes the canvas offline (its public
+  // URL 404s) and moves it to the Archive view. The guarded repo transition
+  // returns false only for an already-deleted row, which ownedCanvas already 404s.
+  app.post("/:id/archive", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (!(await deps.canvases.archive(cv.id))) return c.json({ error: "not_found" }, 404);
+    deps.audit.recordAudit({
+      action: "canvas_archive",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+    });
+    return c.json(publicCanvas(deps.config, { ...cv, status: "archived" }));
+  });
+
+  // Unarchive — restore an archived canvas to active. A 409 on an invalid
+  // transition (the canvas isn't archived) rather than silently flipping status.
+  app.post("/:id/unarchive", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (!(await deps.canvases.unarchive(cv.id))) {
+      return c.json({ code: "NOT_ARCHIVED", message: "canvas is not archived" }, 409);
+    }
+    deps.audit.recordAudit({
+      action: "canvas_unarchive",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+    });
+    return c.json(publicCanvas(deps.config, { ...cv, status: "active" }));
+  });
+
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
   // endpoint — owner/admin only, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
@@ -215,6 +268,8 @@ export function managementRoutes(deps: ManagementDeps) {
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
         current: v.id === cv.currentVersionId,
+        // What this version serves at the canvas root (entry file / why not).
+        entry: rootEntry((v.manifest ?? {}) as Manifest),
       })),
     });
   });
@@ -224,6 +279,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/rollback", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const body = (await c.req.json().catch(() => ({}))) as { version?: number };
     if (typeof body.version !== "number") {
       return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);
@@ -302,6 +358,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/deploy/zip", sameOrigin, deployBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const buf = Buffer.from(await c.req.arrayBuffer());
     if (buf.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
     return deployResponse(c, deps.engine, deps.audit, cv, "zip", fromZip(buf), c.get("user").id);
@@ -310,6 +367,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/deploy/folder", sameOrigin, deployBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     // Each multipart file field's KEY is the file's canvas-relative path.
     const form = await c.req.parseBody({ all: true });
     const entries: DeployEntry[] = [];
@@ -322,6 +380,27 @@ export function managementRoutes(deps: ManagementDeps) {
       }
     }
     return deployResponse(c, deps.engine, deps.audit, cv, "folder", entries, c.get("user").id);
+  });
+
+  // Paste a new index.html as the next version of an EXISTING canvas (the
+  // same-origin sibling of /paste, which is create-only). Mirrors zip/folder.
+  app.post("/:id/deploy/paste", sameOrigin, deployBodyLimit, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
+    const body = z
+      .object({ html: z.string().min(1) })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return deployResponse(
+      c,
+      deps.engine,
+      deps.audit,
+      cv,
+      "paste",
+      fromPasteHtml(body.data.html),
+      c.get("user").id,
+    );
   });
 
   return app;

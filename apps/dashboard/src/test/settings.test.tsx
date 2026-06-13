@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HOLD_MS } from "../components/HoldButton.js";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -67,7 +68,10 @@ function renderSettings() {
   return router;
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("settings route — confirm-and-await flows", () => {
   it("sets a password via PATCH", async () => {
@@ -88,6 +92,21 @@ describe("settings route — confirm-and-await flows", () => {
       expect(patch).toBeTruthy();
       expect(patch?.body).toContain("hunter2");
     });
+  });
+
+  it("Generate fills a strong password and reveals it for copying", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    const user = userEvent.setup();
+    renderSettings();
+
+    const input = (await screen.findByLabelText("Password")) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    // a non-trivial value appears and is shown (not masked) so it can be copied
+    expect(input.value.length).toBeGreaterThanOrEqual(16);
+    expect(input.type).toBe("text");
   });
 
   it("regenerate-slug confirms, then POSTs", async () => {
@@ -127,7 +146,7 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/save your canvas key/i)).toBeInTheDocument();
   });
 
-  it("delete is gated by type-to-confirm the slug, then DELETEs", async () => {
+  it("delete confirms with a press-and-hold, then DELETEs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "DELETE /api/canvases/c1": () => json({ ok: true }),
@@ -138,18 +157,20 @@ describe("settings route — confirm-and-await flows", () => {
 
     await user.click(await screen.findByRole("button", { name: /delete canvas/i }));
     const dialog = await screen.findByRole("dialog");
-    const action = within(dialog).getByRole("button", { name: "Delete canvas" });
-    // disabled until the slug is typed exactly
-    expect(action).toBeDisabled();
-    await user.type(within(dialog).getByRole("textbox"), "wrong");
-    expect(action).toBeDisabled();
-    await user.clear(within(dialog).getByRole("textbox"));
-    await user.type(within(dialog).getByRole("textbox"), "quiet-otter");
-    expect(action).toBeEnabled();
-    await user.click(action);
+    // No type-to-confirm gate: the press-and-hold gesture is the confirmation.
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    const action = within(dialog).getByRole("button", { name: /hold to delete/i });
 
-    await vi.waitFor(() =>
-      expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1")).toBe(true),
+    // A click (press + immediate release) must NOT delete — releasing early cancels.
+    await user.click(action);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    // Holding past the threshold fires the delete (real timers — HOLD_MS wall time).
+    fireEvent.pointerDown(action);
+    await waitFor(
+      () =>
+        expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1")).toBe(true),
+      { timeout: HOLD_MS + 1500 },
     );
   });
 });

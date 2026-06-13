@@ -3,22 +3,27 @@ import { useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { DeployButton } from "../components/DeployButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useRollback } from "../lib/mutations.js";
-import { useVersions } from "../lib/queries.js";
+import { useCanvas, useVersions } from "../lib/queries.js";
 
-/** Versions tab: deploy history (newest first) + one-click rollback. Rollback is
- * confirm-and-await (not optimistic) — it changes the live canvas for everyone. */
+/** Versions tab: deploy history (newest first), forward "Deploy new version", and
+ * per-version "Make live" (re-point the live version in either direction —
+ * confirm-and-await, not optimistic, since it changes the live canvas for all). */
 export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: versions, isLoading, isError } = useVersions(id);
+  const { data: canvas } = useCanvas(id);
   const rollback = useRollback(id);
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
+  // Deploy + make-live target the live canvas — disabled while archived/disabled.
+  const isActive = canvas?.status === "active";
 
   if (isLoading) {
     return (
@@ -36,24 +41,36 @@ export default function Versions() {
     return (
       <EmptyState
         title="No versions yet"
-        description="Deploy this canvas to see its history here."
+        description={
+          isActive
+            ? "Deploy this canvas to see its history here."
+            : "Unarchive this canvas to deploy and start its history."
+        }
+        action={isActive ? <DeployButton canvasId={id} /> : undefined}
       />
     );
   }
 
-  async function confirmRollback() {
+  async function confirmMakeLive() {
     if (!target) return;
     try {
       await rollback.mutateAsync(target.number);
-      toast(`Rolled back to version ${target.number}`);
+      toast(`Version ${target.number} is now live`);
       setTarget(null);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Rollback failed", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't change the live version", "error");
     }
   }
 
   return (
     <>
+      <p className="mb-4 text-sm text-muted">
+        {versions.length} {versions.length === 1 ? "version" : "versions"}
+        {isActive
+          ? " · deploy a new one from the button above."
+          : " · unarchive to deploy or change the live version."}
+      </p>
+
       <ul className="space-y-2">
         {versions.map((v) => (
           <li
@@ -63,7 +80,7 @@ export default function Versions() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
-                {v.current && <Badge tone="accent">Current</Badge>}
+                {v.current && <Badge tone="accent">Live</Badge>}
                 <Badge tone="neutral">{v.source}</Badge>
               </div>
               <div className="mt-0.5 text-xs text-subtle" title={fullTime(v.createdAt)}>
@@ -71,9 +88,9 @@ export default function Versions() {
                 {formatBytes(v.totalBytes)}
               </div>
             </div>
-            {!v.current && v.status === "ready" && (
+            {!v.current && v.status === "ready" && isActive && (
               <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
-                Roll back
+                Make live
               </Button>
             )}
           </li>
@@ -83,13 +100,13 @@ export default function Versions() {
       <ConfirmDialog
         open={target !== null}
         onClose={() => setTarget(null)}
-        onConfirm={confirmRollback}
-        title={`Roll back to version ${target?.number ?? ""}?`}
-        actionLabel="Roll back"
+        onConfirm={confirmMakeLive}
+        title={`Make version ${target?.number ?? ""} live?`}
+        actionLabel="Make live"
         loading={rollback.isPending}
       >
-        This replaces the live version for all visitors immediately. You can roll forward again from
-        the history afterwards.
+        This replaces the live version for all visitors immediately. You can switch to any version
+        in the history at any time.
       </ConfirmDialog>
     </>
   );

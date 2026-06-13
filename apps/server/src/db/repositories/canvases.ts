@@ -5,7 +5,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, exists, ne, sql } from "drizzle-orm";
+import { and, desc, eq, exists, lte, ne, notInArray, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -79,12 +79,24 @@ export function canvasesRepository(client: DbClient) {
       return (rows[0] as Canvas | undefined) ?? null;
     },
 
-    /** Canvases owned by a user, newest first, excluding soft-deleted. */
+    /**
+     * Active-view list: a user's canvases newest-first, excluding soft-deleted
+     * AND archived. Archived canvases live in their own view ({@link listArchivedByOwner}).
+     */
     async listByOwner(ownerId: string): Promise<Canvas[]> {
       return (await db
         .select()
         .from(t)
-        .where(and(eq(t.ownerId, ownerId), ne(t.status, "deleted")))
+        .where(and(eq(t.ownerId, ownerId), notInArray(t.status, ["deleted", "archived"])))
+        .orderBy(desc(t.createdAt))) as Canvas[];
+    },
+
+    /** Archive-view list: a user's archived canvases, newest-first. */
+    async listArchivedByOwner(ownerId: string): Promise<Canvas[]> {
+      return (await db
+        .select()
+        .from(t)
+        .where(and(eq(t.ownerId, ownerId), eq(t.status, "archived")))
         .orderBy(desc(t.createdAt))) as Canvas[];
     },
 
@@ -148,6 +160,36 @@ export function canvasesRepository(client: DbClient) {
       await db.update(t).set(set).where(eq(t.id, id));
     },
 
+    /**
+     * Archive a canvas (owner-initiated, reversible). Guarded so a deleted
+     * tombstone is never resurrected: only a non-deleted row transitions. Returns
+     * false when the row is missing or already deleted, so the route can 404/409
+     * instead of silently no-opping. Does NOT touch `deletedAt`.
+     */
+    async archive(id: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({ status: "archived", updatedAt: Date.now() })
+        .where(and(eq(t.id, id), ne(t.status, "deleted")))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Unarchive a canvas back to active. Guarded to only apply to a currently
+     * archived row — unarchiving a non-archived canvas returns false so the route
+     * can reject the invalid transition rather than flipping an active/disabled
+     * canvas's status out from under it.
+     */
+    async unarchive(id: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({ status: "active", updatedAt: Date.now() })
+        .where(and(eq(t.id, id), eq(t.status, "archived")))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
     async setCurrentVersion(id: string, versionId: string): Promise<void> {
       await db
         .update(t)
@@ -187,6 +229,29 @@ export function canvasesRepository(client: DbClient) {
         )
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
+    },
+
+    /**
+     * Soft-deleted canvases eligible for a purge sweep. `cutoffMs === null`
+     * returns every deleted canvas; a number returns only those soft-deleted at
+     * or before the cutoff (the retention window). Oldest deletions first.
+     */
+    async listDeletedBefore(cutoffMs: number | null): Promise<Canvas[]> {
+      const where =
+        cutoffMs === null
+          ? eq(t.status, "deleted")
+          : and(eq(t.status, "deleted"), lte(t.deletedAt, cutoffMs));
+      return (await db.select().from(t).where(where).orderBy(t.deletedAt)) as Canvas[];
+    },
+
+    /**
+     * Clear the current-version pointer (purge). After a sweep hard-deletes a
+     * soft-deleted canvas's versions, the row is kept as a tombstone but its
+     * `currentVersionId` would dangle at a removed version — null it so nothing
+     * references a row that no longer exists.
+     */
+    async clearCurrentVersion(id: string): Promise<void> {
+      await db.update(t).set({ currentVersionId: null, updatedAt: Date.now() }).where(eq(t.id, id));
     },
 
     /** Find by API key hash (Bearer-key deploy API); active canvases only. */

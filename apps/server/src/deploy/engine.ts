@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, DeploySource, Manifest, Version } from "@canvas-drop/shared/db";
 import { looksLikeApiKey } from "../canvas/api-key.js";
+import { soleHtmlEntry } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { versionStorageKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -32,6 +33,16 @@ export interface DeployEngineDeps {
 const KEEP_VERSIONS = 10;
 
 /**
+ * How many file uploads run concurrently within one deploy. Each storage `put`
+ * is a network round-trip on S3; uploading in parallel turns an N-round-trip
+ * deploy into ~N/this. Capped so peak memory stays bounded (at most this many
+ * file buffers in flight — the streaming zip reader still pulls one at a time;
+ * see ingest `fromZip` / KTD-2) and so one deploy can't monopolize the client's
+ * S3 connection pool.
+ */
+const PUT_CONCURRENCY = 8;
+
+/**
  * The deploy engine (§9.5, KTD-3/4). Turns a stream of entries (from any of the
  * three ingestion adapters) into a new immutable version with an atomic pointer
  * swap and async pruning. Buffers at most one file at a time (KTD-2): each entry
@@ -54,6 +65,23 @@ export function deployEngine(deps: DeployEngineDeps) {
       const warnings: string[] = [];
       let fileCount = 0;
       let totalBytes = 0;
+
+      // Uploads run in bounded-concurrency batches: validation stays sequential
+      // (the running totals gate zip-bombs in order), but the slow part — the
+      // storage `put` round-trips — fans out PUT_CONCURRENCY at a time. `flush`
+      // waits for the whole batch to SETTLE before surfacing any error, so no
+      // upload can still be in flight when cleanupPending runs.
+      let batch: Array<{ key: string; bytes: Uint8Array }> = [];
+      const flush = async (): Promise<void> => {
+        if (batch.length === 0) return;
+        const current = batch;
+        batch = [];
+        const results = await Promise.allSettled(
+          current.map((f) => deps.storage.put(f.key, f.bytes)),
+        );
+        const failed = results.find((r) => r.status === "rejected");
+        if (failed) throw (failed as PromiseRejectedResult).reason;
+      };
 
       try {
         for await (const entry of entries) {
@@ -83,11 +111,21 @@ export function deployEngine(deps: DeployEngineDeps) {
 
           const hash = createHash("sha256").update(entry.bytes).digest("hex");
           manifest[path] = { size, hash, mime: mime.contentType };
-          await deps.storage.put(versionStorageKey(version.id, path), entry.bytes);
+          batch.push({ key: versionStorageKey(version.id, path), bytes: entry.bytes });
+          if (batch.length >= PUT_CONCURRENCY) await flush();
         }
+        await flush();
 
         if (fileCount === 0) {
           throw new DeployError("EMPTY_DEPLOY", "no deployable files");
+        }
+        // Warn when the canvas root won't resolve: no index.html and not the
+        // single-HTML-file case the serve resolver forgives. (One stray HTML
+        // file IS served at the root, so that case isn't flagged.)
+        if (!manifest["index.html"] && !soleHtmlEntry(manifest)) {
+          warnings.push(
+            "No index.html — visitors to the canvas root will get a 404. Name your entry file index.html.",
+          );
         }
       } catch (err) {
         // Validation/storage failure: the pointer is untouched, so the live
@@ -99,7 +137,14 @@ export function deployEngine(deps: DeployEngineDeps) {
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
       // swap is the commit — a crash before it leaves the old version live.
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
-      await deps.canvases.setCurrentVersion(canvas.id, version.id);
+      try {
+        await deps.canvases.setCurrentVersion(canvas.id, version.id);
+      } catch (err) {
+        // markReady already ran — clean up the orphaned ready-but-uncurrent version
+        // and its storage objects so nothing is left dangling.
+        await this.cleanupPending(version.id, manifest);
+        throw err;
+      }
 
       // Prune beyond the last 10, asynchronously — never block or fail the deploy.
       // `.catch` guards against an unhandled rejection if prune throws synchronously.
@@ -139,9 +184,12 @@ export function deployEngine(deps: DeployEngineDeps) {
 
     /** Delete the storage objects written for a failed pending version. */
     async cleanupPending(versionId: string, manifest: Manifest): Promise<void> {
-      for (const path of Object.keys(manifest)) {
-        await deps.storage.delete(versionStorageKey(versionId, path)).catch(() => {});
-      }
+      const keys = Object.keys(manifest).map((path) => versionStorageKey(versionId, path));
+      await deps.storage
+        .deleteMany(keys)
+        .catch((err) =>
+          deps.log.warn({ err, versionId }, "cleanupPending storage delete failed (best-effort)"),
+        );
     },
 
     /** Prune ready versions beyond the newest N; log-and-continue on failure. */
@@ -151,12 +199,14 @@ export function deployEngine(deps: DeployEngineDeps) {
         // concurrent rollback's current version is never pruned (prune-vs-rollback
         // race); no pre-read snapshot needed here.
         const dropped = await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS);
-        for (const v of dropped) {
-          const manifest = (v.manifest ?? {}) as Manifest;
-          for (const path of Object.keys(manifest)) {
-            await deps.storage.delete(versionStorageKey(v.id, path)).catch(() => {});
-          }
-        }
+        const keys = dropped.flatMap((v) =>
+          Object.keys((v.manifest ?? {}) as Manifest).map((path) => versionStorageKey(v.id, path)),
+        );
+        await deps.storage
+          .deleteMany(keys)
+          .catch((err) =>
+            deps.log.warn({ err, canvasId }, "prune storage delete failed (best-effort)"),
+          );
       } catch (err) {
         deps.log.error({ err, canvasId }, "version prune failed (live version unaffected)");
       }

@@ -1,6 +1,7 @@
 import type { S3Client } from "@aws-sdk/client-s3";
-import { describe } from "vitest";
+import { describe, expect, it } from "vitest";
 import { storageContract } from "./contract.js";
+import { StorageError } from "./driver.js";
 import { S3Driver } from "./s3.js";
 
 /**
@@ -32,6 +33,11 @@ function fakeS3Client(): S3Client {
       case "DeleteObjectCommand":
         store.delete(key as string);
         return {};
+      case "DeleteObjectsCommand": {
+        const del = cmd.input.Delete as { Objects: { Key: string }[] };
+        for (const o of del.Objects) store.delete(o.Key);
+        return { Deleted: del.Objects, Errors: [] };
+      }
       case "ListObjectsV2Command": {
         const prefix = (cmd.input.Prefix as string) ?? "";
         const keys = [...store.keys()].filter((k) => k.startsWith(prefix));
@@ -46,4 +52,30 @@ function fakeS3Client(): S3Client {
 
 describe("S3Driver (in-memory fake)", () => {
   storageContract(() => new S3Driver(fakeS3Client(), "test-bucket"));
+});
+
+describe("S3Driver deleteMany error handling", () => {
+  it("rejects with StorageError when S3 returns per-key Errors in the response", async () => {
+    const errorClient: S3Client = {
+      send: async (cmd: { constructor: { name: string } }) => {
+        if (cmd.constructor.name === "DeleteObjectsCommand") {
+          return {
+            Deleted: [],
+            Errors: [{ Key: "k/1", Code: "AccessDenied", Message: "Access Denied" }],
+          };
+        }
+        return {};
+      },
+    } as unknown as S3Client;
+
+    const driver = new S3Driver(errorClient, "test-bucket");
+    await expect(driver.deleteMany(["k/1"])).rejects.toBeInstanceOf(StorageError);
+    await expect(driver.deleteMany(["k/1"])).rejects.toMatchObject({
+      code: "delete_failed",
+      message: expect.stringContaining("k/1"),
+    });
+    await expect(driver.deleteMany(["k/1"])).rejects.toMatchObject({
+      message: expect.stringContaining("AccessDenied"),
+    });
+  });
 });

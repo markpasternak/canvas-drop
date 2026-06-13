@@ -1,5 +1,6 @@
 import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { CopyButton } from "../components/CopyButton.js";
+import { DeployButton } from "../components/DeployButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { cn } from "../lib/cn.js";
@@ -48,11 +49,16 @@ export default function CanvasLayout() {
       </nav>
 
       <header className="space-y-2">
-        {isLoading ? (
-          <Skeleton className="h-7 w-48" />
-        ) : (
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        )}
+        <div className="flex items-start justify-between gap-3">
+          {isLoading ? (
+            <Skeleton className="h-7 w-48" />
+          ) : (
+            <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+          )}
+          {/* Deploy targets the live canvas — hidden while archived/disabled
+              (the server also 409s these; this just keeps the UI coherent). */}
+          {canvas?.status === "active" && <DeployButton canvasId={id} />}
+        </div>
         {canvas && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
             <a

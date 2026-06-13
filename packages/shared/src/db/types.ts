@@ -26,6 +26,6 @@ export type ManifestEntry = { size: number; hash: string; mime: string };
 export type Manifest = Record<string, ManifestEntry>;
 
 /** Canvas status values (stored as text, validated by zod at the boundary). */
-export type CanvasStatus = "active" | "disabled" | "deleted";
+export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 /** Deploy source values. */
 export type DeploySource = "folder" | "zip" | "paste" | "api";

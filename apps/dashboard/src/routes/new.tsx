@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
 import { CopyButton } from "../components/CopyButton.js";
+import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -10,22 +11,10 @@ import { cn } from "../lib/cn.js";
 type Method = "paste" | "folder" | "zip" | "api";
 const METHODS: { id: Method; label: string; blurb: string }[] = [
   { id: "paste", label: "Paste HTML", blurb: "Fastest — live in seconds" },
-  { id: "folder", label: "Drop a folder", blurb: "Upload static files" },
+  { id: "folder", label: "Files or folder", blurb: "Drag in files or a folder" },
   { id: "zip", label: "Upload a ZIP", blurb: "A zipped site" },
   { id: "api", label: "Use the API", blurb: "Deploy programmatically" },
 ];
-
-/** Build multipart form from a directory picker, keying each file by its path
- * relative to the canvas root (the selected top folder is stripped). */
-function folderForm(files: FileList): FormData {
-  const form = new FormData();
-  for (const file of Array.from(files)) {
-    const rel = file.webkitRelativePath || file.name;
-    const path = rel.includes("/") ? rel.slice(rel.indexOf("/") + 1) : rel;
-    form.set(path, file);
-  }
-  return form;
-}
 
 export default function CreateCanvas() {
   const search = useSearch({ strict: false }) as { method?: string };
@@ -37,6 +26,9 @@ export default function CreateCanvas() {
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Upload progress: null = not uploading; 0–100 = % of bytes sent (100 = sent,
+  // server now extracting/publishing).
+  const [progress, setProgress] = useState<number | null>(null);
 
   // Post-create state: key to reveal, and where to go on dismiss.
   const [revealed, setRevealed] = useState<{
@@ -51,6 +43,7 @@ export default function CreateCanvas() {
   function fail(err: unknown) {
     setError(err instanceof ApiError ? err.hint : "Something went wrong. Try again.");
     setBusy(false);
+    setProgress(null);
   }
 
   async function createPaste() {
@@ -64,19 +57,21 @@ export default function CreateCanvas() {
     }
   }
 
-  async function createWithUpload(kind: "folder" | "zip", files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function createWithUpload(kind: "folder" | "zip", files: File[]) {
+    if (files.length === 0) return;
     setBusy(true);
     setError(null);
+    setProgress(0);
+    const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
       const canvas = await api.createCanvas({ title: title || undefined });
       try {
         if (kind === "folder") {
-          await api.deployFolder(canvas.id, folderForm(files));
+          await api.deployFolder(canvas.id, folderFormFromFiles(files), onProgress);
         } else {
           const first = files[0];
           if (!first) return;
-          await api.deployZip(canvas.id, await first.arrayBuffer());
+          await api.deployZip(canvas.id, await first.arrayBuffer(), onProgress);
         }
       } catch (deployErr) {
         // Deploy failed after the canvas was created — soft-delete the orphan so
@@ -170,20 +165,22 @@ export default function CreateCanvas() {
         )}
 
         {method === "folder" && (
-          <FileDrop
-            label="Choose a folder of static files"
-            directory
+          <FileDropOrProgress
             busy={busy}
-            onPick={(files) => createWithUpload("folder", files)}
+            pct={progress}
+            label="Drag files or a folder here"
+            variant="folder"
+            onFiles={(files) => createWithUpload("folder", files)}
           />
         )}
 
         {method === "zip" && (
-          <FileDrop
-            label="Choose a .zip of your site"
-            accept=".zip"
+          <FileDropOrProgress
             busy={busy}
-            onPick={(files) => createWithUpload("zip", files)}
+            pct={progress}
+            label="Drag a .zip here"
+            variant="zip"
+            onFiles={(files) => createWithUpload("zip", files)}
           />
         )}
 
@@ -212,41 +209,6 @@ export default function CreateCanvas() {
         />
       )}
     </div>
-  );
-}
-
-function FileDrop({
-  label,
-  accept,
-  directory,
-  busy,
-  onPick,
-}: {
-  label: string;
-  accept?: string;
-  directory?: boolean;
-  busy: boolean;
-  onPick: (files: FileList | null) => void;
-}) {
-  return (
-    <label
-      className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-canvas px-6 py-12 text-center transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-accent",
-        busy && "pointer-events-none opacity-60",
-      )}
-    >
-      <span className="text-sm font-medium text-fg">{label}</span>
-      <span className="text-xs text-muted">{busy ? "Deploying…" : "Click to browse"}</span>
-      <input
-        type="file"
-        accept={accept}
-        multiple
-        className="hidden"
-        // webkitdirectory is non-standard; cast on the element.
-        {...(directory ? { webkitdirectory: "" } : {})}
-        onChange={(e) => onPick(e.target.files)}
-      />
-    </label>
   );
 }
 

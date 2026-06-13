@@ -32,13 +32,13 @@ Do not relitigate during build without flagging.
 | D2 | URL / isolation model | **Configurable: `subdomain` or `path` mode.** Subdomain mode (`{slug}.canvases.example.com`, wildcard DNS + wildcard cert) gives full browser-origin isolation and is the recommended multi-user production config. Path mode (`host/c/{slug}/`) runs on one hostname — required for localhost and acceptable for trusted own-hosting/single-user use. Multi-user path mode is allowed only with an explicit unsafe opt-in and prominent warning because reduced isolation is real (§12.2). |
 | D3 | Canvas naming | **Fully random slug** (readable-random, e.g. `quiet-otter-x7k2`). Unguessable by design; regenerable to rotate a leaked URL. No custom names in v1. |
 | D4 | Visibility | **Owner-only by default.** Owner flips a canvas to "shared" → any authenticated org member with the link can open and use it, including the canvas-facing API calls the app makes. Optional password gate on top. **Shares are revocable at any time (access dies immediately) and can carry an optional expiry.** Owners may additionally opt a shared canvas into a small gallery with metadata; there is no automatic org-wide directory in v1. |
-| D5 | Deploy/edit (v1) | v1 proves the fastest paths: drag-drop folder/ZIP upload, paste-HTML quick create, and HTTP deploy API (agent-usable from day one). In-browser file manager + CodeMirror editor are v1.1. CLI and installable agent skills come next. |
+| D5 | Deploy/edit (v1) | v1 proves the fastest paths: drag-drop folder/ZIP upload, paste-HTML quick create, and HTTP deploy API (agent-usable from day one). In-browser file manager + CodeMirror editor are the **next milestone (M5)**, now backed by a draft/explicit-publish version model on content-addressed storage (D11). CLI and installable agent skills come later. |
 | D6 | Infrastructure | **Agnostic, Docker-first.** No cloud-vendor assumptions. **One application image** + composed off-the-shelf deps (§8.3); runs on any VPS/PaaS/k8s, fronted by an identity-aware proxy. Generic deploy guide in §8.4 (no specific cloud assumed). Dev = bare `npm run dev`, no containers. |
 | D7 | Canvas → API auth | **Proxy-verified identity + auto canvas ID.** Canvas code carries no secrets: the *who* comes from the IAP-verified identity on the request (an app session only in `oidc`/`dev` modes); the canvas is identified from the URL (subdomain or path segment), verified server-side against `Origin` in subdomain mode. The per-canvas **secret API key is for programmatic access only** (deploy API, scripts, agents, future CLI) and must never appear in canvas files. |
 | D8 | KV scoping | **Both shared and per-user:** `kv.*` (canvas-global) and `kv.user.*` (auto-scoped to current viewer). All writes attributed. |
 | D9 | Stack shape | **Single Node/TypeScript server (Hono) + Vite/React SPA dashboard.** One process, one deploy. Drizzle ORM. |
 | D10 | Database | **Configurable: SQLite or Postgres** behind one Drizzle schema. SQLite = localhost default and viable for small single-instance prods; Postgres = recommended production. Schema written dialect-portable (§10). |
-| D11 | Versioning | **Immutable versions, keep last 10, one-click rollback.** |
+| D11 | Versioning | **Draft + immutable published versions.** Each canvas has one mutable draft (working copy); the in-browser editor/file-manager edit the draft and autosave, creating no version. An explicit **Publish** snapshots the draft into an immutable version (keep last 10) and swaps the live pointer; one-click rollback restores a prior published version. The deploy API and folder/ZIP re-upload **publish a live version directly** (the "deploy = live" agent contract, §4.5) — the draft loop is editor-only; concurrency is last-publish-wins. Editing an old version = restore it into the draft, then republish. Storage is **content-addressed** (blobs keyed by hash), so versions and the draft are manifests over shared blobs — only changed files are ever written. |
 | D12 | LLM proxy (v1) | **Anthropic-first behind a Vercel AI SDK abstraction.** v1 ships one server-side Anthropic proxy; the server boundary is shaped so OpenAI/OpenRouter/Google or another AI-SDK provider can be added later without changing canvas code. Admin-defined model allowlist, **streaming (SSE)**, **per-user + per-canvas quotas**, **usage dashboard**. Structured-output helper and multi-provider support are deferred. |
 | D13 | Scale assumption | **~50–150 users per deployment.** Single instance is plenty; generous quotas; trivial cost. |
 | D14 | Admin scope (v1) | **Minimal admin panel:** all-canvases list with usage, disable/takedown, model allowlist, global quota defaults. Admins bootstrapped via env (`CANVAS_DROP_ADMIN_EMAILS`). |
@@ -150,8 +150,8 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 11. Immutable deploy versions, keep last 10 [v1]
 12. One-click rollback [v1]
 13. Version metadata: who, when, file count, total size [v1]
-14. Delete canvas (soft delete, 30-day purge) [v1]
-15. Archive canvas (friendly "archived" page) [v1.1]
+14. Delete canvas (soft delete, 30-day purge) [v1] [done]
+15. Archive canvas (friendly "archived" page) [v1] [done — pulled forward in the canvas-management round]
 16. Clone canvas [v1.1]
 17. Canvas title + description (metadata, not part of URL) [v1]
 18. Limits: 100 MB/canvas, 25 MB/file, 2,000 files [v1]
@@ -163,8 +163,8 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 1. Drag-and-drop folder upload (directory picker + drop zone) [v1]
 2. ZIP upload with server-side extraction (zip-slip safe) [v1]
 3. Paste-HTML quick create (textarea → live canvas in one step) [v1]
-4. In-browser file manager: tree view, add, rename, delete, replace [v1.1]
-5. In-browser code editor (CodeMirror 6), save = new version [v1.1]
+4. In-browser file manager: tree view, add, rename, delete, replace — operates on the draft [next milestone]
+5. In-browser code editor (CodeMirror 6); **edits save to the mutable draft, explicit Publish creates a new immutable version** (D11) [next milestone]
 6. HTTP deploy API: `PUT /v1/canvases/:id/deploy`, Bearer secret key, ZIP/tar body [v1]
 7. Machine-readable deploy result (URL, version, warnings) and stable error codes [v1]
 8. Deploy progress indicator [v1]
@@ -326,7 +326,7 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 | L. Hardening & ops | Rate limits, audit, headers, monitoring, backups, security review | P0–P2 continuous |
 | M. OSS packaging | Docker, compose, docs, CI matrix, license, repo hygiene | P1–P2 release readiness |
 
-Sequencing: A → B → C → D → E make "folder → URL" real on localhost (SQLite, path mode, dev auth). F–J + R make canvases *apps*. K–M make the project operationally and OSS-ready as continuous work.
+Sequencing (see §16 for the full milestone order, re-ordered 2026-06-13): A → B → C → D → E made "folder → URL" real and gave it an excellent management dashboard (M1–M4, done). **Next, an editor + draft/publish version model on content-addressed storage make iterating a canvas great (M5).** Then F, G, I + J make canvases *apps* (M6); K + L harden (M7); the gallery (M8) and AI + realtime R/H (M9) follow; deployment/ops/packaging M close out last (M10). Realtime (R) is grouped with AI rather than the first primitives batch.
 
 ---
 
@@ -671,19 +671,29 @@ Backup/restore documented and drilled per driver (SQLite snapshot, pg_dump, S3 v
 
 ## 16. Build sequence (8 weeks, 1–2 engineers + Mark)
 
-**Weeks 1–2 — Foundation (A, B, L-start).** Monorepo; zod-validated config; DB factory (SQLite+Postgres) with portable schema + dual migrations; storage factory (local+S3/MinIO); URL-mode router; auth modes (dev first, then `proxy`/forward-auth with JWT + trusted-header verification, then optional built-in OIDC); identity mapping + email-domain check; audit log; CI running tests on both dialects. *Result: `npm run dev` gives a working logged-in instance on localhost (path, SQLite, dev auth); staging runs subdomain+Postgres+S3.*
+This sequence was **re-ordered after dashboard core** (2026-06-13) to match where the build actually went and the owner's priorities: get *core canvas management* excellent (editor + a sane version model) before turning canvases into apps; defer AI and realtime; push deployment/ops hardening to the very end. The reasoning lives in `docs/brainstorms/2026-06-13-build-resequence-editor-version-model-requirements.md`. The whole build is **greenfield** — data is clearable, so schema/storage-layout changes need no migration pre-v1.
 
-**Weeks 3–4 — Hosting + deploy (C, D).** Version model, slug serving in both modes, cache strategy for arbitrary uploads, staged deploy writes, folder/ZIP ingestion + validation, paste-HTML flow, deploy API with key auth, rollback. *Result: canvas live via folder/ZIP, paste-HTML, and API deploy paths in path-mode dev and subdomain staging; rollback works.*
+**M1 — Foundation (A, B, L-start). [done]** Monorepo; zod-validated config; DB factory (SQLite+Postgres) with portable schema + dual migrations; storage factory (local+S3/MinIO); URL-mode router; auth modes (dev, `proxy`/forward-auth with JWT + trusted-header verification, optional built-in OIDC); identity mapping + email-domain check; audit log; CI on both dialects.
 
-**Week 5 — Dashboard core (E).** My-canvases first with a dominant create action, create flow, detail (versions, stats tab, settings incl. shared/revoke/expiry/password/gallery/slug-regen/key-regen). *Result: full lifecycle without touching the API directly; sharing can be revoked, given an expiry, and optionally listed in the gallery from the UI.*
+**M2 — Hosting + deploy (C, D). [done]** Slug serving in both modes, cache strategy for arbitrary uploads, staged deploy writes, folder/ZIP ingestion + validation, paste-HTML flow, deploy API with key auth, rollback.
 
-**Week 6 — Primitives (F, G, I, R, J).** KV (shared/user/increment), files, `me()`, realtime (channels/publish/subscribe/presence with handshake auth + revoke-drops-socket), browser SDK with mode auto-detection + docs + llms.txt. *Result: pasted poll demo updates live for two simultaneous users on staging via realtime; revoking the share drops the second user instantly.*
+**M3 — Dashboard core (E). [done]** My-canvases first with a dominant create action, create flow, detail (versions, stats tab, settings incl. shared/revoke/expiry/password/gallery/slug-regen/key-regen).
 
-**Week 7 — AI + usage (H).** Anthropic proxy with streaming, allowlist, quotas, metering; usage tabs. *Result: AI chat demo streams; quota exhaustion renders friendly error.*
+**M4 — Canvas-management depth. [done — formalized retroactively]** The polish round that followed dashboard core: archive/unarchive, soft-delete purge with file/version reclaim, deploy-a-new-version from the UI + clearer version actions, settings redesign + section nav, password reveal/copy + theme-aware gate, list/overview stats (size, file count, deploy method, gallery indicator), and storage/DB perf passes. *Result: managing and iterating a canvas from the dashboard is excellent.*
 
-**Week 8 — Admin + hardening + packaging (K, L, M).** Admin panel; rate limits everywhere; headers review; trusted-proxy/IAP verification hardening (§12.5); load test on a single modest VPS; backup/restore drill; security review; Docker image + compose + deploy docs; README/quickstart; 3 starter examples; pilot with 10–15 colleagues. *Result: pilot running behind an IAP; repo is release-shaped.*
+**M5 — Editor + draft/publish version model (next). [F-of-management]** Flip storage to **content-addressed** (blobs by hash; versions/drafts are manifests over shared blobs); introduce the **mutable draft + explicit Publish** model (D11), restore-old-version-into-draft, draft preview, refcount/mark-sweep pruning; in-browser **file manager + CodeMirror editor** over the draft (§6.2.4/5); agents/uploads still publish directly with a stale-draft notice. *Result: edit files in the browser without version spam, publish deliberately, and old versions are editable by restoring them — with no duplicated blobs.*
 
-Post-v1 (rough order): CLI → agent skill → in-browser file manager/editor → structured-output AI helper → archive/clone → search → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history (build on the v1 realtime primitive) → comments → warehouse.
+**M6 — Primitives (F, G, I, J).** KV (shared/user/increment), files, `me()`, browser SDK with mode auto-detection + docs + llms.txt. *(Realtime moves to M9 with AI.)* *Result: canvases become apps — pasted poll/form demos persist and read identity, zero-config.*
+
+**M7 — Admin + hardening (K, L).** Admin panel (takedown/disable/restore, usage overview, quota defaults); rate limits everywhere; headers review; audit completeness; trusted-proxy/IAP verification hardening (§12.5). Lands after the primitive API surface exists so it hardens the real thing. *(Deployment, backup/restore, and load testing are deliberately NOT here — see M10.)*
+
+**M8 — Gallery.** Opt-in gallery browse/listing for explicitly shared canvases with owner metadata. Needs apps worth surfacing, so it follows primitives + admin.
+
+**M9 — AI proxy + realtime (R, H).** Anthropic proxy with streaming, allowlist, quotas, metering + usage tabs; realtime ephemeral pub/sub + presence (channels/publish/subscribe with handshake auth + revoke-drops-socket), SDK additions. *Result: AI chat demo streams; a poll updates live for two users and revoking the share drops the second instantly.*
+
+**M10 — Deployment + ops hardening + OSS packaging (M, L-finish). [last]** Docker image + compose + vendor-neutral deploy docs; backup/restore drill; load test on a single modest VPS; security review of the five invariants; README/quickstart; 3 starter examples; pilot with 10–15 colleagues. *Result: pilot running behind an IAP; repo is release-shaped.*
+
+Post-v1 (rough order): CLI → agent skill → structured-output AI helper → clone → search → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history → comments → warehouse.
 
 ## 17. Success metrics
 

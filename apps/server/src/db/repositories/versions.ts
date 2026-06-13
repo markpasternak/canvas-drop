@@ -122,6 +122,15 @@ export function versionsRepository(client: DbClient) {
      * cross-dialect transaction. `notInArray` over an `isNotNull`-filtered
      * subquery avoids NULL-poisoning when the canvas has no current version yet.
      */
+    /**
+     * Hard-delete every version row for a canvas (purge). The caller removes the
+     * versions' storage objects first; this clears the rows so the canvas row
+     * can then be deleted without tripping the `canvas_id` FK.
+     */
+    async deleteByCanvas(canvasId: string): Promise<void> {
+      await db.delete(t).where(eq(t.canvasId, canvasId));
+    },
+
     async pruneBeyond(canvasId: string, keep: number): Promise<Version[]> {
       const ready = (await db
         .select()

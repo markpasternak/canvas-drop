@@ -76,6 +76,29 @@ describe("decideCanvasAccess — denials", () => {
     });
   });
 
+  it("archived: 404 to everyone, checked before owner/admin (offline, restorable)", () => {
+    // the check ORDER is the invariant: archived fires before owner/admin, so even
+    // the owner sees their own archived canvas as gone on the public path.
+    const archived = canvas({ status: "archived" });
+    expect(decideCanvasAccess(archived, owner, NOW)).toEqual({
+      action: "deny",
+      status: 404,
+      reason: "archived",
+    });
+    expect(decideCanvasAccess(archived, other, NOW)).toMatchObject({ status: 404 });
+    expect(decideCanvasAccess(archived, admin, NOW)).toMatchObject({ status: 404 });
+  });
+
+  it("archived overrides share: a shared, live, archived canvas is still 404", () => {
+    // archive precedes the share/password branches — it is never evaluated against them.
+    const d = decideCanvasAccess(
+      canvas({ status: "archived", shared: true, sharedExpiresAt: NOW + 1000, passwordHash: "h" }),
+      other,
+      NOW,
+    );
+    expect(d).toEqual({ action: "deny", status: 404, reason: "archived" });
+  });
+
   it("unknown slug (null canvas): 404", () => {
     expect(decideCanvasAccess(null, owner, NOW)).toEqual({
       action: "deny",

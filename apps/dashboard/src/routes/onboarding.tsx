@@ -52,8 +52,8 @@ export default function Onboarding() {
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Ship your first canvas</h1>
         <p className="max-w-xl text-muted">
-          A canvas is a small web artifact on its own URL — paste some HTML, drop a folder, or
-          deploy from the API. Pick the fastest path; you can change everything later.
+          A canvas is a small web artifact on its own URL — paste some HTML, upload files or a
+          folder, or deploy from the API. Pick the fastest path; you can change everything later.
         </p>
       </header>
 
@@ -67,8 +67,8 @@ export default function Onboarding() {
         />
         <PathCard
           step="02"
-          title="Drop a folder or ZIP"
-          body="Upload static files exactly as they are."
+          title="Files, folder, or ZIP"
+          body="Drag in files or a whole folder, exactly as they are."
           cta="Upload"
           onClick={() => go("folder")}
         />

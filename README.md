@@ -60,7 +60,23 @@ pnpm test:pg      # postgres leg
 pnpm lint         # biome
 pnpm typecheck    # tsc
 pnpm build        # compile the server
+pnpm purge        # reclaim storage from soft-deleted canvases (see below)
 ```
+
+Deleting a canvas is a soft-delete (the row is kept as a tombstone). `pnpm purge`
+is the maintenance sweep that reclaims the heavy data — each soft-deleted
+canvas's deployed **files** and **version rows** are hard-deleted, the canvas row
+is kept. It reads the same config as the server, so it acts on whichever DB +
+storage you're wired to.
+
+```bash
+pnpm purge            # reclaim every soft-deleted canvas
+pnpm purge 30         # only those soft-deleted 30+ days ago
+pnpm purge 30 dry-run # report what 30 days would reclaim, delete nothing
+```
+
+The first argument is the retention window in days (`0`/omitted = everything);
+add the word `dry-run` to preview. Reclaiming files is irreversible.
 
 ## Layout
 

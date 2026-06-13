@@ -1,4 +1,5 @@
-import { index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { check, index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
 import { pg as c } from "./columns.js";
 
 /**
@@ -91,7 +92,7 @@ export const canvases = pgTable(
     passwordVersion: c.int("password_version").notNull().default(0),
     spaFallback: c.bool("spa_fallback").notNull().default(false),
     apiKeyHash: c.text("api_key_hash").notNull(),
-    status: c.text("status").notNull().default("active"), // active | disabled | deleted
+    status: c.text("status").notNull().default("active"), // active | disabled | archived | deleted
     // Pointer (not an FK) to the current ready version — avoids a circular FK with
     // versions.canvas_id; nullable until the first deploy lands.
     currentVersionId: c.text("current_version_id"),
@@ -99,7 +100,16 @@ export const canvases = pgTable(
     updatedAt: c.epochMs("updated_at").notNull(),
     deletedAt: c.epochMs("deleted_at"),
   },
-  (t) => [uniqueIndex("canvases_slug_uq").on(t.slug), index("canvases_owner_id_idx").on(t.ownerId)],
+  (t) => [
+    uniqueIndex("canvases_slug_uq").on(t.slug),
+    // Owner's list, ordered newest-first → composite filter+sort.
+    index("canvases_owner_created_idx").on(t.ownerId, t.createdAt),
+    // Bearer-key deploy auth (findByApiKeyHash) — hot lookup + enforces key uniqueness.
+    uniqueIndex("canvases_api_key_hash_uq").on(t.apiKeyHash),
+    // Soft-delete purge sweep: WHERE status='deleted' AND deleted_at <= cutoff.
+    index("canvases_status_deleted_idx").on(t.status, t.deletedAt),
+    check("canvases_status_chk", sql`${t.status} in ('active', 'disabled', 'archived', 'deleted')`),
+  ],
 );
 
 export const versions = pgTable(
@@ -123,7 +133,10 @@ export const versions = pgTable(
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [
+    // (canvas_id, number) covers every versions query — filter by canvas + sort by
+    // number (history, prune, nextNumber's max). No separate created_at index needed.
     uniqueIndex("versions_canvas_number_uq").on(t.canvasId, t.number),
-    index("versions_canvas_created_idx").on(t.canvasId, t.createdAt),
+    check("versions_status_chk", sql`${t.status} in ('pending', 'ready')`),
+    check("versions_source_chk", sql`${t.source} in ('folder', 'zip', 'paste', 'api')`),
   ],
 );

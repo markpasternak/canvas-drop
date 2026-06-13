@@ -62,7 +62,7 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     const other = await canvasesRepository(client).create({
       ownerId: userId,
       slug: "s2",
-      apiKeyHash: "h",
+      apiKeyHash: "h2", // distinct: api_key_hash is now unique-indexed
     });
     await expect(
       repo.createPending({ canvasId: other.id, number: 1, createdBy: userId, source: "folder" }),

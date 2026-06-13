@@ -56,6 +56,38 @@ describe("resolveAsset", () => {
     expect(resolveAsset(manifest, "missing", false)).toBeNull();
     expect(resolveAsset(manifest, "missing", true)?.path).toBe("index.html");
   });
+  it("root with no index.html but a single HTML file serves that file", () => {
+    const single: Manifest = {
+      "POST-S~3 (1).HTM": { size: 1, hash: "h", mime: "text/html; charset=utf-8" },
+      "style.css": { size: 1, hash: "h2", mime: "text/css" },
+    };
+    expect(resolveAsset(single, "", false)?.path).toBe("POST-S~3 (1).HTM");
+  });
+  it("root stays 404 when there are several HTML files and no index.html (ambiguous)", () => {
+    const many: Manifest = {
+      "a.html": { size: 1, hash: "h1", mime: "text/html" },
+      "b.html": { size: 1, hash: "h2", mime: "text/html" },
+    };
+    expect(resolveAsset(many, "", false)).toBeNull();
+  });
+  it("SPA fallback serves the root entry for unknown paths — index.html or a lone HTML file", () => {
+    // Classic SPA: index.html shell.
+    expect(resolveAsset(manifest, "route/deep", true)?.path).toBe("index.html");
+    // Single-page app whose entry isn't index.html → SPA fallback serves it too,
+    // matching what the root serves (so deep client routes work).
+    const single: Manifest = {
+      "app.html": { size: 1, hash: "h", mime: "text/html" },
+      "main.js": { size: 1, hash: "h2", mime: "text/javascript" },
+    };
+    expect(resolveAsset(single, "route/deep", false)).toBeNull(); // off → 404
+    expect(resolveAsset(single, "route/deep", true)?.path).toBe("app.html");
+    // Ambiguous (several HTML, no index) → SPA fallback can't pick → still 404.
+    const many: Manifest = {
+      "a.html": { size: 1, hash: "h1", mime: "text/html" },
+      "b.html": { size: 1, hash: "h2", mime: "text/html" },
+    };
+    expect(resolveAsset(many, "route/deep", true)).toBeNull();
+  });
 });
 
 describe("serveCanvas (integration)", () => {
@@ -139,6 +171,25 @@ describe("serveCanvas (integration)", () => {
     expect((await off.app.request("/c/s/missing")).status).toBe(404);
     const on = await setup({ spaFallback: true });
     expect((await on.app.request("/c/s/missing")).status).toBe(200);
+  });
+
+  it("404 is JSON for API clients but a friendly HTML page for browsers", async () => {
+    const { app } = await setup({ spaFallback: false });
+
+    // No Accept header (programmatic) → stable JSON, security headers intact.
+    const api = await app.request("/c/s/missing");
+    expect(api.headers.get("Content-Type")).toMatch(/application\/json/);
+    expect(await api.json()).toEqual({ error: "not_found" });
+    expect(api.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+    // Browser (Accept: text/html) → an HTML page, not raw JSON.
+    const browser = await app.request("/c/s/missing", { headers: { Accept: "text/html" } });
+    expect(browser.status).toBe(404);
+    expect(browser.headers.get("Content-Type")).toMatch(/text\/html/);
+    const html = await browser.text();
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("Page not found");
+    expect(browser.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
   });
 
   it("serves a .php file as text/plain with nosniff (never executed)", async () => {

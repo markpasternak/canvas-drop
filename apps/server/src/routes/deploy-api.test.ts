@@ -74,6 +74,18 @@ describe("deployApiRoutes (Bearer key)", () => {
     expect(res.status).toBe(401);
   });
 
+  it("a key for an archived canvas is rejected (deploys blocked while archived) — 401", async () => {
+    const { app, canvases, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    await canvases.archive(a.id);
+    const res = await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: zip(),
+    });
+    expect(res.status).toBe(401);
+  });
+
   it("rollback to an existing-but-pending version → 404 (only ready versions are targets)", async () => {
     const { app, versions, mkCanvas, ownerId } = await setup();
     const a = await mkCanvas();

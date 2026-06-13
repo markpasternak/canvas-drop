@@ -4,6 +4,7 @@ import { api } from "./api.js";
 export const keys = {
   me: ["me"] as const,
   canvases: ["canvases"] as const,
+  archivedCanvases: ["canvases", "archived"] as const,
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
 };
@@ -14,6 +15,10 @@ export function useMe() {
 
 export function useCanvases() {
   return useQuery({ queryKey: keys.canvases, queryFn: api.listCanvases });
+}
+
+export function useArchivedCanvases() {
+  return useQuery({ queryKey: keys.archivedCanvases, queryFn: api.listArchivedCanvases });
 }
 
 export function useCanvas(id: string) {

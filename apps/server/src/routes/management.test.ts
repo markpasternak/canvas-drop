@@ -205,6 +205,158 @@ describe("managementRoutes", () => {
     expect(list.canvases).toHaveLength(0);
   });
 
+  it("archive moves a canvas out of the active list and into the archive list", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("archived");
+
+    const active = await jsonOf<{ canvases: unknown[] }>(await app.request("/api/canvases"));
+    expect(active.canvases).toHaveLength(0); // gone from the active view
+
+    const archived = await jsonOf<{ canvases: { id: string }[] }>(
+      await app.request("/api/canvases/archived"),
+    );
+    expect(archived.canvases.map((c) => c.id)).toEqual([created.id]);
+  });
+
+  it("unarchive restores a canvas to the active list", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    const res = await app.request(`/api/canvases/${created.id}/unarchive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("active");
+
+    const active = await jsonOf<{ canvases: { id: string }[] }>(await app.request("/api/canvases"));
+    expect(active.canvases.map((c) => c.id)).toEqual([created.id]);
+    const archived = await jsonOf<{ canvases: unknown[] }>(
+      await app.request("/api/canvases/archived"),
+    );
+    expect(archived.canvases).toHaveLength(0);
+  });
+
+  it("unarchive on a non-archived canvas → 409", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/unarchive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("deploy and rollback on an archived canvas → 409 NOT_ACTIVE (unarchive first)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    // A session deploy to a shelved canvas is refused — its public URL 404s, so
+    // publishing to it would be incoherent. (The Bearer path already 401s archived.)
+    const deploy = await app.request(`/api/canvases/${created.id}/deploy/paste`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>hi</h1>" }),
+    });
+    expect(deploy.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(deploy)).code).toBe("NOT_ACTIVE");
+
+    const rollback = await app.request(`/api/canvases/${created.id}/rollback`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(rollback.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(rollback)).code).toBe("NOT_ACTIVE");
+  });
+
+  it("a non-owner cannot archive (404, no existence leak); an admin can", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "intruder");
+    const admin = await seedUser(client, "admin", true);
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/archive`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(denied.status).toBe(404);
+
+    const asAdmin = await buildApp(client, { id: admin.id, isAdmin: true }).request(
+      `/api/canvases/${created.id}/archive`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(asAdmin.status).toBe(200);
+  });
+
+  it("archive/unarchive require same-origin", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("paste-HTML create returns a new canvas with a live index.html and the key once", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
@@ -277,6 +429,37 @@ describe("managementRoutes", () => {
     });
     expect(res.status).toBe(200);
     expect((await jsonOf<{ fileCount: number }>(res)).fileCount).toBe(2);
+  });
+
+  it("owner can deploy a new version of an existing canvas via paste", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>v1</h1>" }),
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/deploy/paste`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>v2</h1>" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ version: number }>(res)).version).toBe(2);
+    // A non-owner cannot deploy to it.
+    const other = await seedUser(client, "intruder");
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/deploy/paste`,
+      {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>nope</h1>" }),
+      },
+    );
+    expect(denied.status).toBe(404);
   });
 
   it("paste create rolls back the canvas (no orphan) when the embedded deploy fails", async () => {

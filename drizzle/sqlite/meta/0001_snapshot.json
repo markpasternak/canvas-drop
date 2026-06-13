@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "73baf352-f714-4891-ba0f-94441c0ababc",
-  "prevId": "98014600-1d66-469d-ae05-1a8d9df32d7b",
+  "id": "bbe8188b-90aa-4942-b64b-4c065cc89c55",
+  "prevId": "019005fb-34d5-479d-ae7a-a0e4bc80f1b6",
   "tables": {
     "audit_log": {
       "name": "audit_log",
@@ -239,9 +239,19 @@
           "columns": ["slug"],
           "isUnique": true
         },
-        "canvases_owner_id_idx": {
-          "name": "canvases_owner_id_idx",
-          "columns": ["owner_id"],
+        "canvases_owner_created_idx": {
+          "name": "canvases_owner_created_idx",
+          "columns": ["owner_id", "created_at"],
+          "isUnique": false
+        },
+        "canvases_api_key_hash_uq": {
+          "name": "canvases_api_key_hash_uq",
+          "columns": ["api_key_hash"],
+          "isUnique": true
+        },
+        "canvases_status_deleted_idx": {
+          "name": "canvases_status_deleted_idx",
+          "columns": ["status", "deleted_at"],
           "isUnique": false
         }
       },
@@ -258,7 +268,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "canvases_status_chk": {
+          "name": "canvases_status_chk",
+          "value": "\"canvases\".\"status\" in ('active', 'disabled', 'archived', 'deleted')"
+        }
+      }
     },
     "sessions": {
       "name": "sessions",
@@ -539,11 +554,6 @@
           "name": "versions_canvas_number_uq",
           "columns": ["canvas_id", "number"],
           "isUnique": true
-        },
-        "versions_canvas_created_idx": {
-          "name": "versions_canvas_created_idx",
-          "columns": ["canvas_id", "created_at"],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -568,7 +578,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "versions_status_chk": {
+          "name": "versions_status_chk",
+          "value": "\"versions\".\"status\" in ('pending', 'ready')"
+        },
+        "versions_source_chk": {
+          "name": "versions_source_chk",
+          "value": "\"versions\".\"source\" in ('folder', 'zip', 'paste', 'api')"
+        }
+      }
     }
   },
   "views": {},
