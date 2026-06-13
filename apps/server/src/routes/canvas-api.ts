@@ -3,6 +3,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
+import type { UpgradeWebSocket } from "hono/ws";
 import type { ModelProvider } from "../ai/provider.js";
 import { decideCanvasAccess } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
@@ -14,9 +15,11 @@ import type { KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { canvasApiIsolation } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { canvasAiRoutes } from "./canvas-ai.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
+import { canvasRealtimeRoutes } from "./canvas-realtime.js";
 
 export interface CanvasApiDeps {
   config: Config;
@@ -27,6 +30,12 @@ export interface CanvasApiDeps {
   aiUsage: AiUsageRepository;
   /** Model provider for the AI primitive (default Anthropic; tests inject a fake). */
   aiProvider: ModelProvider;
+  /**
+   * Realtime wiring. Present only when a WebSocket adaptor is available (the Node
+   * server in index.ts, or a WS integration test). Omitted in plain unit tests —
+   * the realtime route is then simply not mounted.
+   */
+  realtime?: { hub: RealtimeHub; upgradeWebSocket: UpgradeWebSocket };
 }
 
 /**
@@ -83,6 +92,21 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     "/ai",
     canvasAiRoutes({ config: deps.config, aiUsage: deps.aiUsage, provider: deps.aiProvider }),
   );
+
+  // Realtime primitive (M9, area R). Mounted only when a WebSocket adaptor is wired
+  // (Node server / WS integration test). The handshake inherits the resolve +
+  // password-gate + isolation middleware above; capability is checked post-101.
+  if (deps.realtime) {
+    app.route(
+      "/realtime",
+      canvasRealtimeRoutes({
+        config: deps.config,
+        hub: deps.realtime.hub,
+        usage: deps.usage,
+        upgradeWebSocket: deps.realtime.upgradeWebSocket,
+      }),
+    );
+  }
 
   return app;
 }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { verifyPassword } from "../canvas/password.js";
 import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
@@ -55,6 +56,7 @@ function buildApp(
       engine,
       usage: usageEventsRepository(client),
       files: filesRepository(client),
+      aiUsage: aiUsageRepository(client),
     }),
   );
   return app;

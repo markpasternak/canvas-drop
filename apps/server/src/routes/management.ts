@@ -11,6 +11,7 @@ import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
+import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
@@ -20,6 +21,7 @@ import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps {
@@ -30,6 +32,13 @@ export interface ManagementDeps {
   engine: DeployEngine;
   usage: UsageEventsRepository;
   files: FilesRepository;
+  aiUsage: AiUsageRepository;
+  /**
+   * Realtime hub for revoke-drops-socket (D-RT-6). Optional — when present, access-
+   * changing mutations (settings, capabilities, disable, delete, slug regen) drop
+   * live sockets that lost access; a newly-set password drops gated non-owners.
+   */
+  hub?: RealtimeHub;
 }
 
 const createSchema = z.object({
@@ -232,6 +241,12 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { shared: p.shared },
       });
     }
+    // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost
+    // access; a newly-set password drops gated non-owners (no re-verified grant).
+    if (deps.hub) {
+      await deps.hub.revalidateCanvas(cv.id);
+      if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id);
+    }
     return c.json(publicCanvas(deps.config, updated));
   });
 
@@ -249,6 +264,9 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { changed: Object.keys(patch) },
     });
+    // Turning realtime (or the backend group) off must drop live sockets — the
+    // heartbeat would too, but this makes it instant (D-RT-6).
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
     return c.json(publicCanvas(deps.config, updated));
   });
 
@@ -260,6 +278,9 @@ export function managementRoutes(deps: ManagementDeps) {
     );
     const updated = await deps.canvases.regenerateSlug(cv.id, slug);
     deps.audit.recordAudit({ action: "slug_regen", actorId: c.get("user").id, targetId: cv.id });
+    // Old slug URLs are invalidated — drop all live sockets so clients reconnect
+    // under the new slug (D-RT-6 / §12.0 #5).
+    deps.hub?.dropCanvas(cv.id);
     return c.json(publicCanvas(deps.config, updated));
   });
 
@@ -277,6 +298,8 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
+    // Deleted → everyone (incl. owner) loses access; drop their live sockets.
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
     return c.json({ ok: true });
   });
 
@@ -292,6 +315,8 @@ export function managementRoutes(deps: ManagementDeps) {
       actorId: c.get("user").id,
       targetId: cv.id,
     });
+    // Archived → offline for everyone; drop live sockets (D-RT-6).
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id);
     return c.json(publicCanvas(deps.config, { ...cv, status: "archived" }));
   });
 
