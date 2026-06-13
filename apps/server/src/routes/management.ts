@@ -56,6 +56,8 @@ function publicCanvas(config: Config, cv: Canvas) {
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
     galleryListed: cv.galleryListed,
+    gallerySummary: cv.gallerySummary,
+    galleryTags: cv.galleryTags,
     status: cv.status,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
