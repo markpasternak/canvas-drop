@@ -1,7 +1,7 @@
 ---
 title: "feat: Gallery browse + listing API (M8)"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 milestone: M8
 brief: "BUILD_BRIEF.md §16 M8, §6.9 #11, §6.3 #11, OPEN-7, §12"
