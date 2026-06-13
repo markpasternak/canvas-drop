@@ -26,6 +26,8 @@ export default function Overview() {
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: versions } = useVersions(id);
   const current = versions?.find((v) => v.current);
+  // Total disk footprint = every kept (ready) version's bytes, not just the live one.
+  const totalBytes = versions?.reduce((sum, v) => sum + v.totalBytes, 0) ?? 0;
 
   if (isLoading || !canvas) {
     return (
@@ -67,11 +69,20 @@ export default function Overview() {
           {current ? (
             <span title={fullTime(current.createdAt)}>
               v{current.number} · via {sourceLabel(current.source)} ·{" "}
-              {relativeTime(current.createdAt)} · {current.fileCount}{" "}
-              {current.fileCount === 1 ? "file" : "files"} · {formatBytes(current.totalBytes)}
+              {relativeTime(current.createdAt)}
             </span>
           ) : (
             <span className="text-muted">Never deployed</span>
+          )}
+        </Stat>
+        <Stat label="Size">
+          {current ? (
+            <span>
+              {formatBytes(current.totalBytes)} · {current.fileCount}{" "}
+              {current.fileCount === 1 ? "file" : "files"}
+            </span>
+          ) : (
+            <span className="text-muted">—</span>
           )}
         </Stat>
         <Stat label="Deploys">
@@ -86,6 +97,11 @@ export default function Overview() {
           ) : (
             <span className="text-muted">None yet</span>
           )}
+        </Stat>
+        <Stat label="Total storage">
+          <span title="Across all kept versions (newest 10)">
+            {totalBytes > 0 ? formatBytes(totalBytes) : "—"}
+          </span>
         </Stat>
         <Stat label="Created">
           <span title={fullTime(canvas.createdAt)}>{relativeTime(canvas.createdAt)}</span>
