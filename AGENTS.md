@@ -10,7 +10,7 @@ canvas-drop is an open-source (MIT), self-hostable platform where authenticated 
 
 Both agents follow the same compound-engineering loop:
 
-1. **Plan** — work comes from a plan in `docs/plans/`. The foundation (`…-001-…`), canvas hosting + deploy (`…-002-…`, areas C+D), and dashboard SPA (`…-003-…`, area E) plans are **complete**; the next plan is **the primitives (areas F/G/I/R)** — KV, files, `me()`, realtime, browser SDK (BUILD_BRIEF §16 Week 6). Don't free-style features that aren't in a plan.
+1. **Plan** — work comes from a plan in `docs/plans/`. The foundation (`…-001-…`), canvas hosting + deploy (`…-002-…`, areas C+D), dashboard SPA (`…-003-…`, area E), canvas archiving (`…-004-…`), and the **editor + draft/publish version model on content-addressed storage** (`…-005-…`, M5) plans are **complete**; the next plan is **the primitives (areas F/G/I/J)** — KV, files, `me()`, browser SDK (BUILD_BRIEF §16 M6; realtime moved to M9 with AI). Don't free-style features that aren't in a plan.
 2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation = #1, C+D = #4, area E = #6, all closed). Tick a unit's box when its PR merges.
 3. **Branch in your worktree** — never work in the shared checkout. Branch name: `feat/u<N>-<slug>` (e.g. `feat/u7-auth-core`).
 4. **Implement one unit at a time**, with its test scenarios from the plan. Tests are not optional for feature-bearing units.
