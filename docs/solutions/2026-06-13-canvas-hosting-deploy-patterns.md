@@ -58,8 +58,14 @@ differ only in how they produce the `{path, bytes}` stream. Key invariants:
 - **Concurrent deploys** to one canvas race `nextNumber`; the `(canvas_id, number)`
   unique index makes a collision a constraint error → `createVersionWithRetry`
   retries instead of surfacing a 500.
-- **Prune is async + re-reads the live pointer** so a concurrent rollback's
-  current version is never deleted; storage-delete failures are log-and-continue.
+- **Prune is async + re-reads the live pointer *inside* its DELETE** (a correlated
+  `notInArray` subquery on `canvases.current_version_id`) so a concurrent
+  rollback's current version is never deleted — even one made current after
+  prune's snapshot. Paired with `setCurrentVersionIfReady` (rollback swaps only to
+  a still-ready version → `VERSION_UNAVAILABLE` 409 otherwise), this closes the
+  rollback-vs-prune race without a transaction. (An earlier pre-read of the pointer
+  was insufficient — the rollback could land between the read and the DELETE.)
+  Storage-delete failures are log-and-continue.
 - **Stable error codes** (`errors.ts`) are an API contract (§9.5.4) — agents
   repair from them. Don't rename without versioning.
 
