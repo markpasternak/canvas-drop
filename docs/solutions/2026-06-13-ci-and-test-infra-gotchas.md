@@ -59,6 +59,33 @@ CI legs run identical sets and the script names lie.
 script is aliased to `biome check --write` — otherwise `pnpm format` leaves
 import-order errors that fail `pnpm lint`.
 
+## Reuse the PGlite test DB — don't boot one per test
+
+`makeTestDb("postgres")` originally did `new PGlite()` + replay all migrations
+**inside every `it()`**. WASM boot + migration replay is a flat ~1.4s, so the
+`test:pg` leg paid it ~hundreds of times: the leg's `tests` time was 176s and the
+CI job ~4m29s, while the sqlite leg ran the same suite in ~45s (in-memory
+better-sqlite3 boot is near-free). The slowness was per-test fixed setup, not
+slow queries — the tell was every DB test costing an identical ~1.4s regardless
+of assertions.
+
+Fix (in `apps/server/src/db/testing.ts`): keep **one migrated PGlite per worker**
+and reset it between tests instead of rebuilding. Vitest isolates by file, so this
+amortises boot+migrate to once per *file*. Dropped `tests` 176s → ~37s.
+
+Gotchas that make the reuse correct:
+- **Reset on acquire, not on close.** `makeTestDb` truncates before handing the
+  client back, so a test starts clean even if its suite forgets `close()`. `close()`
+  is a no-op for the shared instance (torn down with the worker).
+- **`TRUNCATE … RESTART IDENTITY CASCADE` over `public` tables only.** Drizzle's
+  migration journal lives in the `drizzle` schema, so a public-only truncate leaves
+  it intact and a repeat `migrate()` stays a no-op (the idempotency contract).
+- **Keep a `makeFreshPgTestDb()` escape hatch.** The "applies migrations cleanly"
+  test needs a virgin DB — against the shared (already-migrated) instance, `migrate()`
+  would just no-op and the clean-apply assertion would be hollow.
+- SQLite stays fresh-per-call: in-memory boot is already free, so no reason to add
+  shared-state risk there.
+
 ## Branch protection on a private repo needs Pro
 
 GitHub gates both classic branch protection AND rulesets behind Pro for **private**

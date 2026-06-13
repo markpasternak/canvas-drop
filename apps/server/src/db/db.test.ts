@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "./factory.js";
 import { settingsRepository } from "./repositories/settings.js";
 import { usersRepository } from "./repositories/users.js";
-import { DIALECTS, makeTestDb } from "./testing.js";
+import { DIALECTS, makeFreshPgTestDb, makeTestDb } from "./testing.js";
 
 describe.each(DIALECTS)("db [%s]", (dialect) => {
   let client: DbClient;
@@ -11,7 +11,9 @@ describe.each(DIALECTS)("db [%s]", (dialect) => {
   });
 
   it("applies migrations cleanly and is idempotent", async () => {
-    client = await makeTestDb(dialect);
+    // A virgin database, not the shared/reset one, so the clean-apply assertion
+    // holds no matter how vitest pools workers.
+    client = dialect === "postgres" ? await makeFreshPgTestDb() : await makeTestDb(dialect);
     await client.migrate(); // a second run must be a no-op, not an error
     expect(await usersRepository(client).findById("does-not-exist")).toBeNull();
   });
