@@ -10,8 +10,8 @@ canvas-drop is an open-source (MIT), self-hostable platform where authenticated 
 
 Both agents follow the same compound-engineering loop:
 
-1. **Plan** — work comes from a plan in `docs/plans/`. The foundation (`…-001-…`) and canvas hosting + deploy (`…-002-…`, areas C+D) plans are **complete**; the next plan is **area E (dashboard SPA)** — the UI for the management/deploy endpoints already built. Don't free-style features that aren't in a plan.
-2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation = #1, C+D = #4, both closed). Tick a unit's box when its PR merges.
+1. **Plan** — work comes from a plan in `docs/plans/`. The foundation (`…-001-…`), canvas hosting + deploy (`…-002-…`, areas C+D), and dashboard SPA (`…-003-…`, area E) plans are **complete**; the next plan is **the primitives (areas F/G/I/R)** — KV, files, `me()`, realtime, browser SDK (BUILD_BRIEF §16 Week 6). Don't free-style features that aren't in a plan.
+2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation = #1, C+D = #4, area E = #6, all closed). Tick a unit's box when its PR merges.
 3. **Branch in your worktree** — never work in the shared checkout. Branch name: `feat/u<N>-<slug>` (e.g. `feat/u7-auth-core`).
 4. **Implement one unit at a time**, with its test scenarios from the plan. Tests are not optional for feature-bearing units.
 5. **Capture learnings** — run `/ce-compound` (or write to `docs/solutions/`) whenever you hit something non-obvious: a gotcha, a decision, a pattern, a workflow fix. This is how knowledge compounds across Claude **and** Codex.

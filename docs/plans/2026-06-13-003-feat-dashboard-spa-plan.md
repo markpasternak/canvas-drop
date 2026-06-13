@@ -1,9 +1,10 @@
 ---
 title: "feat: Dashboard SPA (area E) — canvas-drop management app"
 type: feat
-status: active
+status: complete
 date: 2026-06-13
 deepened: 2026-06-13
+merged: 2026-06-13 (PR #7)
 area: E
 origin: BUILD_BRIEF.md §6.9, §14 (no upstream brainstorm doc; planned direct)
 depends_on:
