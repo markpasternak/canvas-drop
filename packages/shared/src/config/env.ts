@@ -87,6 +87,7 @@ const rawSchema = z
       .string()
       .optional()
       .default("X-Auth-Request-Preferred-Username"),
+    CANVAS_DROP_AUTH_PROXY_JWT_HEADER: z.string().optional().default("Cf-Access-Jwt-Assertion"),
     CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL: z.url().optional(),
     CANVAS_DROP_AUTH_PROXY_JWT_ISSUER: z.string().optional(),
     CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE: z.string().optional(),
@@ -299,6 +300,7 @@ const rawSchema = z
         proxy: {
           emailHeader: r.CANVAS_DROP_AUTH_PROXY_EMAIL_HEADER,
           nameHeader: r.CANVAS_DROP_AUTH_PROXY_NAME_HEADER,
+          jwtHeader: r.CANVAS_DROP_AUTH_PROXY_JWT_HEADER,
           jwksUrl: r.CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL,
           jwtIssuer: r.CANVAS_DROP_AUTH_PROXY_JWT_ISSUER,
           jwtAudience: r.CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE,
