@@ -12,6 +12,8 @@ import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { FilesRepository } from "../db/repositories/files.js";
+import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
@@ -26,6 +28,8 @@ export interface ManagementDeps {
   versions: VersionsRepository;
   audit: AuditLog;
   engine: DeployEngine;
+  usage: UsageEventsRepository;
+  files: FilesRepository;
 }
 
 const createSchema = z.object({
@@ -177,6 +181,25 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     return c.json(publicCanvas(deps.config, cv));
+  });
+
+  // Owner usage stats (D24, plan 007 / M6): KV op count + file storage, derived
+  // from usage_events + files. Owner-or-admin only (ownedCanvas), dashboard-session
+  // gated — NOT the canvas runtime router.
+  app.get("/:id/usage", async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const counts = await deps.usage.countByType(cv.id, null);
+    const [fileBytes, files] = await Promise.all([
+      deps.files.totalBytes(cv.id),
+      deps.files.list(cv.id),
+    ]);
+    return c.json({
+      kvOps: counts.kv_op ?? 0,
+      fileOps: counts.file_op ?? 0,
+      fileCount: files.length,
+      fileBytes,
+    });
   });
 
   app.patch("/:id/settings", sameOrigin, async (c) => {

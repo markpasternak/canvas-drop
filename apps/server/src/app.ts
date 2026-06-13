@@ -160,6 +160,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       audit: deps.audit,
       engine: deps.engine,
+      usage: usageEventsRepository(deps.db),
+      files: filesRepository(deps.db),
     }),
   );
 
