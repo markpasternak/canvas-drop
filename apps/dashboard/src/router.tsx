@@ -36,7 +36,7 @@ const onboardingRoute = createRoute({
 
 const canvasRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/c/$id",
+  path: "/canvases/$id",
   component: CanvasLayout,
 });
 const overviewRoute = createRoute({

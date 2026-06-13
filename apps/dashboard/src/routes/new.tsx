@@ -96,7 +96,7 @@ export default function CreateCanvas() {
   }
 
   function finish(id: string, deployed: boolean) {
-    navigate({ to: "/c/$id", params: { id }, search: deployed ? { live: true } : {} });
+    navigate({ to: "/canvases/$id", params: { id }, search: deployed ? { live: true } : {} });
   }
 
   return (

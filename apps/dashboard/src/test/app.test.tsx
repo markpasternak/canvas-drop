@@ -83,4 +83,39 @@ describe("dashboard app", () => {
     expect(await screen.findByText("My Canvas")).toBeInTheDocument();
     expect(screen.getByText("quiet-otter")).toBeInTheDocument();
   });
+
+  it("detail lives under /canvases/:id (NOT /c/:id, which is canvas content in path mode)", async () => {
+    const canvas = {
+      id: "c1",
+      slug: "quiet-otter",
+      url: "http://x/c/quiet-otter",
+      title: "Team poll",
+      description: null,
+      shared: false,
+      sharedExpiresAt: null,
+      hasPassword: false,
+      spaFallback: false,
+      galleryListed: false,
+      gallerySummary: null,
+      galleryTags: null,
+      status: "active",
+      currentVersionId: "v1",
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const body = url.endsWith("/versions") ? { versions: [] } : canvas;
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    renderApp("/canvases/c1");
+    // the detail shell renders (breadcrumb + title), proving the route resolves
+    expect(await screen.findByText("Your canvases")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Team poll" })).toBeInTheDocument();
+  });
 });

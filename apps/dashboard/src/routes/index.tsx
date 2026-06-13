@@ -13,7 +13,7 @@ function Row({ canvas }: { canvas: CanvasListItem }) {
   const title = canvas.title?.trim() || canvas.slug;
   return (
     <li className="group flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong">
-      <Link to="/c/$id" params={{ id: canvas.id }} className="min-w-0 flex-1">
+      <Link to="/canvases/$id" params={{ id: canvas.id }} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-fg">{title}</span>
           <StatusBadge status={canvas.status} />

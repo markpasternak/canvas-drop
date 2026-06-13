@@ -6,10 +6,10 @@ import { cn } from "../lib/cn.js";
 import { useCanvas } from "../lib/queries.js";
 
 const TABS = [
-  { to: "/c/$id", label: "Overview", exact: true },
-  { to: "/c/$id/versions", label: "Versions", exact: false },
-  { to: "/c/$id/settings", label: "Settings", exact: false },
-  { to: "/c/$id/usage", label: "Usage", exact: false },
+  { to: "/canvases/$id", label: "Overview", exact: true },
+  { to: "/canvases/$id/versions", label: "Versions", exact: false },
+  { to: "/canvases/$id/settings", label: "Settings", exact: false },
+  { to: "/canvases/$id/usage", label: "Usage", exact: false },
 ] as const;
 
 /** Canvas detail shell: breadcrumb back-affordance, header, routed tabs, Outlet. */

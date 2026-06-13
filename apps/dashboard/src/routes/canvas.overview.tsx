@@ -74,7 +74,7 @@ export default function Overview() {
 
       <div className="flex gap-2">
         <Link
-          to="/c/$id/versions"
+          to="/canvases/$id/versions"
           params={{ id }}
           className="text-sm font-medium text-accent hover:underline"
         >
