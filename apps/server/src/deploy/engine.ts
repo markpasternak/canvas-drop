@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, DeploySource, Manifest, Version } from "@canvas-drop/shared/db";
 import { looksLikeApiKey } from "../canvas/api-key.js";
+import { soleHtmlEntry } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { versionStorageKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -117,6 +118,14 @@ export function deployEngine(deps: DeployEngineDeps) {
 
         if (fileCount === 0) {
           throw new DeployError("EMPTY_DEPLOY", "no deployable files");
+        }
+        // Warn when the canvas root won't resolve: no index.html and not the
+        // single-HTML-file case the serve resolver forgives. (One stray HTML
+        // file IS served at the root, so that case isn't flagged.)
+        if (!manifest["index.html"] && !soleHtmlEntry(manifest)) {
+          warnings.push(
+            "No index.html — visitors to the canvas root will get a 404. Name your entry file index.html.",
+          );
         }
       } catch (err) {
         // Validation/storage failure: the pointer is untouched, so the live

@@ -164,6 +164,29 @@ describe("deployEngine", () => {
     expect(result.warnings.some((w) => w.includes("config.js") && /API key/i.test(w))).toBe(true);
   });
 
+  it("warns about a rootless deploy (no index.html, several HTML files) but not a single-page one", async () => {
+    const { engine, canvas, ownerId } = await setup();
+    const noIndex = /no index\.html/i;
+
+    // A lone HTML page (not named index.html) is served at the root → no warning.
+    const single = await engine.deploy(
+      canvas,
+      "folder",
+      folder({ "page.html": "<h1>hi</h1>", "style.css": "body{}" }),
+      ownerId,
+    );
+    expect(single.warnings.some((w) => noIndex.test(w))).toBe(false);
+
+    // Several HTML files and no index.html → the root 404s, so warn.
+    const ambiguous = await engine.deploy(
+      canvas,
+      "folder",
+      folder({ "a.html": "<h1>a</h1>", "b.html": "<h1>b</h1>" }),
+      ownerId,
+    );
+    expect(ambiguous.warnings.some((w) => noIndex.test(w))).toBe(true);
+  });
+
   it("concurrent deploys to one canvas both succeed with distinct version numbers (no 500)", async () => {
     const { engine, canvas, versions, ownerId } = await setup();
     const [r1, r2] = await Promise.all([

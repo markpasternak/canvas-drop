@@ -56,6 +56,20 @@ describe("resolveAsset", () => {
     expect(resolveAsset(manifest, "missing", false)).toBeNull();
     expect(resolveAsset(manifest, "missing", true)?.path).toBe("index.html");
   });
+  it("root with no index.html but a single HTML file serves that file", () => {
+    const single: Manifest = {
+      "POST-S~3 (1).HTM": { size: 1, hash: "h", mime: "text/html; charset=utf-8" },
+      "style.css": { size: 1, hash: "h2", mime: "text/css" },
+    };
+    expect(resolveAsset(single, "", false)?.path).toBe("POST-S~3 (1).HTM");
+  });
+  it("root stays 404 when there are several HTML files and no index.html (ambiguous)", () => {
+    const many: Manifest = {
+      "a.html": { size: 1, hash: "h1", mime: "text/html" },
+      "b.html": { size: 1, hash: "h2", mime: "text/html" },
+    };
+    expect(resolveAsset(many, "", false)).toBeNull();
+  });
 });
 
 describe("serveCanvas (integration)", () => {

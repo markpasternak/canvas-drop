@@ -5,6 +5,7 @@ import { createMiddleware } from "hono/factory";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { soleHtmlEntry } from "./manifest.js";
 import { mimeFor } from "./mime.js";
 import { versionStorageKey } from "./storage-keys.js";
 
@@ -42,6 +43,13 @@ export function resolveAsset(
   const indexCandidate =
     assetPath === "" ? "index.html" : `${assetPath.replace(/\/$/, "")}/index.html`;
   if (manifest[indexCandidate]) return { path: indexCandidate };
+  // Root with no index.html but a single HTML file → serve it. Forgives a
+  // one-file deploy whose page isn't named index.html (e.g. a saved web page),
+  // which would otherwise 404 at the root.
+  if (assetPath === "") {
+    const sole = soleHtmlEntry(manifest);
+    if (sole) return { path: sole };
+  }
   // SPA fallback → root index.html
   if (spaFallback && manifest["index.html"]) return { path: "index.html" };
   return null;
