@@ -8,20 +8,26 @@ import { authRoutes } from "./auth/routes.js";
 import type { SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
 import { canvasAccess } from "./canvas/authorization.js";
+import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
+import { filesRepository } from "./db/repositories/files.js";
+import { kvRepository } from "./db/repositories/kv.js";
+import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
 import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
+import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
+import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
 import { managementRoutes } from "./routes/management.js";
@@ -97,6 +103,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     }),
   );
 
+  // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
+  // since preflights carry no credentials and must not 401.
+  app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
+
   // Everything below requires an org session/identity (login on every request).
   app.use(
     "*",
@@ -118,6 +128,20 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     if (canvasSlug) c.set("canvasSlug", canvasSlug);
     await next();
   });
+
+  // Canvas-facing runtime API (areas F/G/I — KV, files, me). Path-mounted so it
+  // handles `/v1/c/:slug/*` ahead of the canvas-content chain; isolation + CORS +
+  // capability gating live inside it (§11.4, plan 007 / M6).
+  app.route(
+    "/v1/c/:slug",
+    canvasApiRoutes({
+      config: deps.config,
+      canvases: deps.canvases,
+      kv: kvRepository(deps.db),
+      files: filesService({ files: filesRepository(deps.db), storage: deps.storage }),
+      usage: usageEventsRepository(deps.db),
+    }),
+  );
 
   // Current-user identity for the SPA — its own router (NOT under /api/canvases,
   // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.

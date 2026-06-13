@@ -83,15 +83,17 @@ describe("buildApp", () => {
     expect((await jsonOf<{ canvases: unknown[] }>(res)).canvases).toEqual([]);
   });
 
-  it("an unknown canvas slug 404s (canvas authorization runs), platform-api still not built", async () => {
+  it("an unknown canvas slug 404s on both the content path and the runtime API (no existence leak)", async () => {
     client = await makeTestDb("sqlite");
     const a = app(client);
     const canvas = await a.request("/c/abc/index.html", { headers: { host: "localhost:3000" } });
     expect(canvas.status).toBe(404); // canvasAccess → not_found (no existence leak)
 
+    // Platform API (M6) is now wired: an unknown slug resolves through canvasAccess
+    // and 404s with not_found — same no-existence-leak behavior as the content path.
     const platform = await a.request("/v1/c/abc/kv/x", { headers: { host: "localhost:3000" } });
     expect(platform.status).toBe(404);
-    expect((await jsonOf<{ role: string }>(platform)).role).toBe("platform-api");
+    expect((await jsonOf<{ error: string }>(platform)).error).toBe("not_found");
   });
 
   it("end-to-end: create → deploy ZIP → the canvas is live at its URL", async () => {
