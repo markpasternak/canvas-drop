@@ -127,7 +127,7 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/save your canvas key/i)).toBeInTheDocument();
   });
 
-  it("delete is gated by type-to-confirm the slug, then DELETEs", async () => {
+  it("delete confirms with a single click, then DELETEs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "DELETE /api/canvases/c1": () => json({ ok: true }),
@@ -138,13 +138,10 @@ describe("settings route — confirm-and-await flows", () => {
 
     await user.click(await screen.findByRole("button", { name: /delete canvas/i }));
     const dialog = await screen.findByRole("dialog");
+    // No type-to-confirm gate: delete is a recoverable soft-delete, so the
+    // action is enabled immediately (no textbox in the dialog).
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
     const action = within(dialog).getByRole("button", { name: "Delete canvas" });
-    // disabled until the slug is typed exactly
-    expect(action).toBeDisabled();
-    await user.type(within(dialog).getByRole("textbox"), "wrong");
-    expect(action).toBeDisabled();
-    await user.clear(within(dialog).getByRole("textbox"));
-    await user.type(within(dialog).getByRole("textbox"), "quiet-otter");
     expect(action).toBeEnabled();
     await user.click(action);
 

@@ -184,8 +184,14 @@ export default function Settings() {
             placeholder={canvas.hasPassword ? "•••••••• (set)" : "No password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            description="Visitors must enter this before the canvas loads."
+            description="Anyone you share the canvas with must enter this. You (the owner) and admins are never prompted."
           />
+          {canvas.hasPassword && !canvas.shared && (
+            <p className="rounded-md bg-warning-subtle px-3 py-2 text-xs text-warning">
+              This password has no effect until the canvas is shared — private canvases are
+              owner-only.
+            </p>
+          )}
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -308,11 +314,9 @@ export default function Settings() {
         actionLabel="Delete canvas"
         destructive
         loading={del.isPending}
-        confirmPhrase={canvas.slug}
-        confirmPhraseLabel={`Type the slug "${canvas.slug}" to confirm`}
       >
-        This soft-deletes the canvas and takes its URL offline. It's purged permanently after 30
-        days.
+        This takes the canvas offline immediately and removes it from your list. It's recoverable
+        for 30 days, then purged permanently.
       </ConfirmDialog>
 
       {revealedKey && <ApiKeyReveal apiKey={revealedKey} onClose={() => setRevealedKey(null)} />}
