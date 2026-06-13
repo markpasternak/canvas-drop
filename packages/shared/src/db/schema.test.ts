@@ -11,12 +11,16 @@ const pgTables = {
   sessions: pg.sessions,
   settings: pg.settings,
   auditLog: pg.auditLog,
+  canvases: pg.canvases,
+  versions: pg.versions,
 };
 const sqliteTables = {
   users: sq.users,
   sessions: sq.sessions,
   settings: sq.settings,
   auditLog: sq.auditLog,
+  canvases: sq.canvases,
+  versions: sq.versions,
 };
 
 const TABLE_KEYS = Object.keys(pgTables) as Array<keyof typeof pgTables>;

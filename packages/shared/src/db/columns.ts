@@ -16,6 +16,7 @@ import type { Json } from "./types.js";
 export const pg = {
   text: (name: string) => pgText(name),
   epochMs: (name: string) => bigint(name, { mode: "number" }),
+  int: (name: string) => bigint(name, { mode: "number" }),
   bool: (name: string) => boolean(name),
   json: (name: string) => jsonb(name).$type<Json>(),
 };
@@ -23,6 +24,7 @@ export const pg = {
 export const sqlite = {
   text: (name: string) => sqliteText(name),
   epochMs: (name: string) => integer(name),
+  int: (name: string) => integer(name),
   bool: (name: string) => integer(name, { mode: "boolean" }),
   json: (name: string) => sqliteText(name, { mode: "json" }).$type<Json>(),
 };
