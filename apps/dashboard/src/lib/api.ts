@@ -255,6 +255,9 @@ export const api = {
   deployFolder: (id: string, form: FormData, onProgress?: (fraction: number) => void) =>
     xhrUpload<DeployResult>("POST", `/api/canvases/${id}/deploy/folder`, form, onProgress),
 
+  deployPaste: (id: string, html: string) =>
+    request<DeployResult>(`/api/canvases/${id}/deploy/paste`, jsonBody({ html })),
+
   updateSettings: (id: string, patch: CanvasSettings) =>
     request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),
 

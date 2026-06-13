@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { folderFormFromFiles } from "../components/DeployFiles.js";
 import { api, type Canvas, type CanvasSettings } from "./api.js";
 import { keys } from "./queries.js";
 
@@ -37,6 +38,36 @@ export function useUpdateSettings(id: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/** A new deploy to an existing canvas, by method. ZIP/folder report upload
+ *  progress (0–1); paste is a small JSON request. */
+export type DeployInput =
+  | { kind: "paste"; html: string }
+  | { kind: "folder"; files: File[] }
+  | { kind: "zip"; file: File };
+
+/** Deploy a new version to an existing canvas — await + invalidate (changes the
+ *  live canvas and adds to its version history). */
+export function useDeploy(id: string, onProgress?: (fraction: number) => void) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeployInput) => {
+      switch (input.kind) {
+        case "paste":
+          return api.deployPaste(id, input.html);
+        case "folder":
+          return api.deployFolder(id, folderFormFromFiles(input.files), onProgress);
+        case "zip":
+          return api.deployZip(id, await input.file.arrayBuffer(), onProgress);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.versions(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
     },
   });

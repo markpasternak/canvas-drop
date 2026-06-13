@@ -279,6 +279,37 @@ describe("managementRoutes", () => {
     expect((await jsonOf<{ fileCount: number }>(res)).fileCount).toBe(2);
   });
 
+  it("owner can deploy a new version of an existing canvas via paste", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>v1</h1>" }),
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/deploy/paste`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>v2</h1>" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ version: number }>(res)).version).toBe(2);
+    // A non-owner cannot deploy to it.
+    const other = await seedUser(client, "intruder");
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/deploy/paste`,
+      {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>nope</h1>" }),
+      },
+    );
+    expect(denied.status).toBe(404);
+  });
+
   it("paste create rolls back the canvas (no orphan) when the embedded deploy fails", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

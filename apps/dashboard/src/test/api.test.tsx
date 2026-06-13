@@ -62,6 +62,22 @@ describe("api error handling", () => {
     expect(seen).toContain(1); // upload complete → server processing
   });
 
+  it("deployPaste posts the html to the canvas's deploy/paste endpoint", async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, method: init?.method, body: init?.body as string });
+        return jsonResponse({ url: "u", version: 2, fileCount: 1, totalBytes: 9 });
+      }),
+    );
+    const res = await api.deployPaste("c1", "<h1>v2</h1>");
+    expect(res.version).toBe(2);
+    expect(calls[0]?.url).toBe("/api/canvases/c1/deploy/paste");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toContain("v2");
+  });
+
   it("distinguishes 404 not_found from 403 cross_origin_forbidden", async () => {
     vi.stubGlobal(
       "fetch",

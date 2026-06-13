@@ -324,6 +324,26 @@ export function managementRoutes(deps: ManagementDeps) {
     return deployResponse(c, deps.engine, deps.audit, cv, "folder", entries, c.get("user").id);
   });
 
+  // Paste a new index.html as the next version of an EXISTING canvas (the
+  // same-origin sibling of /paste, which is create-only). Mirrors zip/folder.
+  app.post("/:id/deploy/paste", sameOrigin, deployBodyLimit, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = z
+      .object({ html: z.string().min(1) })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    return deployResponse(
+      c,
+      deps.engine,
+      deps.audit,
+      cv,
+      "paste",
+      fromPasteHtml(body.data.html),
+      c.get("user").id,
+    );
+  });
+
   return app;
 }
 
