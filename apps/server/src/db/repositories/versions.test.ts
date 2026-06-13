@@ -83,6 +83,18 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     expect(await repo.findReadyByNumber(canvasId, 99)).toBeNull();
   });
 
+  it("findByIds returns [] for empty input and the matching rows otherwise", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    // empty input must not hit the DB / emit `in ()`
+    expect(await repo.findByIds([])).toEqual([]);
+    const a = await repo.createPending({ canvasId, number: 1, createdBy: userId, source: "api" });
+    const b = await repo.createPending({ canvasId, number: 2, createdBy: userId, source: "api" });
+    const found = await repo.findByIds([a.id, b.id, "missing"]);
+    expect(found.map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
   it("pruneBeyond keeps newest N, never drops the current version", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seedCanvas(client);

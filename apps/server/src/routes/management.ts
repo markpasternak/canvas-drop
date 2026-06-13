@@ -10,6 +10,7 @@ import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
@@ -20,6 +21,7 @@ import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 export interface ManagementDeps {
   config: Config;
   canvases: CanvasesRepository;
+  versions: VersionsRepository;
   audit: AuditLog;
   engine: DeployEngine;
 }
@@ -54,6 +56,9 @@ function publicCanvas(config: Config, cv: Canvas) {
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
     galleryListed: cv.galleryListed,
+    gallerySummary: cv.gallerySummary,
+    // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
+    galleryTags: cv.galleryTags as string[] | null,
     status: cv.status,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
@@ -102,10 +107,29 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ ...publicCanvas(deps.config, cv), apiKey }, 201);
   });
 
-  // List the caller's own canvases.
+  // List the caller's own canvases, each enriched with its last-deploy summary.
   app.get("/", async (c) => {
     const list = await deps.canvases.listByOwner(c.get("user").id);
-    return c.json({ canvases: list.map((cv) => publicCanvas(deps.config, cv)) });
+    // One batched lookup of current versions → no N+1.
+    const currentIds = list
+      .map((cv) => cv.currentVersionId)
+      .filter((id): id is string => id !== null);
+    const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
+    const canvases = list.map((cv) => {
+      const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
+      return {
+        ...publicCanvas(deps.config, cv),
+        lastDeploy: v
+          ? {
+              version: v.number,
+              createdAt: v.createdAt,
+              fileCount: v.fileCount,
+              totalBytes: v.totalBytes,
+            }
+          : null,
+      };
+    });
+    return c.json({ canvases });
   });
 
   app.get("/:id", async (c) => {
@@ -173,6 +197,54 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     return c.json({ ok: true });
+  });
+
+  // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
+  // endpoint — owner/admin only, no existence leak. GET, so no same-origin guard.
+  app.get("/:id/versions", async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const versions = await deps.versions.listByCanvas(cv.id);
+    return c.json({
+      versions: versions.map((v) => ({
+        number: v.number,
+        source: v.source,
+        status: v.status,
+        createdBy: v.createdBy,
+        createdAt: v.createdAt,
+        fileCount: v.fileCount,
+        totalBytes: v.totalBytes,
+        current: v.id === cv.currentVersionId,
+      })),
+    });
+  });
+
+  // One-click rollback (§6.1.12). Mutation → same-origin guard. `findReadyByNumber`
+  // is canvas-scoped, so a version number from another canvas cannot resolve.
+  app.post("/:id/rollback", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { version?: number };
+    if (typeof body.version !== "number") {
+      return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);
+    }
+    const target = await deps.versions.findReadyByNumber(cv.id, body.version);
+    if (!target) {
+      return c.json({ code: "INVALID_PATH", message: `no ready version ${body.version}` }, 404);
+    }
+    await deps.canvases.setCurrentVersion(cv.id, target.id);
+    deps.audit.recordAudit({
+      action: "rollback",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { version: body.version },
+    });
+    // Reflect the swap from known-good data (target.id) rather than re-reading —
+    // avoids returning a stale snapshot if a refetch transiently fails.
+    return c.json({
+      ...publicCanvas(deps.config, { ...cv, currentVersionId: target.id }),
+      version: body.version,
+    });
   });
 
   // --- Deploy entry points (UI calls these; the engine + result shape is U18/U19) ---

@@ -8,16 +8,17 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter @canvas-drop/server dev",
+    "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @canvas-drop/dashboard test",
     "test:watch": "vitest",
     "test:sqlite": "CANVAS_DROP_DB=sqlite vitest run",
     "test:pg": "CANVAS_DROP_DB=postgres vitest run",
+    "test:dashboard": "pnpm --filter @canvas-drop/dashboard test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @canvas-drop/dashboard typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

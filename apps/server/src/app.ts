@@ -10,6 +10,7 @@ import type { AuthStrategy } from "./auth/strategy.js";
 import { canvasAccess } from "./canvas/authorization.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
+import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { UsersRepository } from "./db/repositories/users.js";
@@ -21,6 +22,7 @@ import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { managementRoutes } from "./routes/management.js";
+import { meRoutes } from "./routes/me.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import type { StorageDriver } from "./storage/driver.js";
 
@@ -52,8 +54,9 @@ export interface BuildAppDeps {
  *    gateway (login on every request, §12.1.1).
  *
  * Canvas content runs the authorization → password-gate → serve chain (U15–U17),
- * gated to the `canvas` role. Dashboard SPA (area E) and platform-api (areas F–R)
- * still answer "not built yet".
+ * gated to the `canvas` role. The dashboard SPA (area E) is served for the
+ * `dashboard` role behind the gateway; platform-api (areas F–R) still answers
+ * "not built yet".
  */
 export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -112,12 +115,17 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     await next();
   });
 
+  // Current-user identity for the SPA — its own router (NOT under /api/canvases,
+  // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.
+  app.route("/api/me", meRoutes());
+
   // Session-authenticated management API.
   app.route(
     "/api/canvases",
     managementRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      versions: deps.versions,
       audit: deps.audit,
       engine: deps.engine,
     }),
@@ -136,7 +144,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     ),
   );
 
-  // Anything still unhandled (dashboard SPA, platform-api) — not built yet.
+  // Dashboard SPA (area E): serve the built assets for the dashboard role, behind
+  // the auth gateway above (login-on-every-request holds for the shell itself).
+  const dashboard = serveSpa({ config: deps.config });
+  app.use("*", (c, next) => (c.get("role") === "dashboard" ? dashboard(c, next) : next()));
+
+  // Anything still unhandled (platform-api roles F–R) — not built yet.
   app.all("*", (c) =>
     c.json(
       {
