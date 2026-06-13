@@ -29,6 +29,27 @@
       "when": 1781372711522,
       "tag": "0003_capability_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1781378252890,
+      "tag": "0004_usage_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1781378464494,
+      "tag": "0005_kv_entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1781378710442,
+      "tag": "0006_files",
+      "breakpoints": true
     }
   ]
 }

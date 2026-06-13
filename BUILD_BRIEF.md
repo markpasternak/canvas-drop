@@ -567,7 +567,7 @@ canvasdrop.realtime.channel(name): Channel               // WebSocket under the 
   channel.close(): void
 ```
 
-Errors: typed `QuickDropError { code, message, hint }` — `hint` written for humans *and* agents.
+Errors: typed `CanvasdropError { code, status, message }` base, with `CapabilityDisabledError` / `QuotaExceededError` / `NotFoundError` / `NotAuthenticatedError` subclasses — each catchable by `instanceof` and carrying a stable `code` (M6, plan 007; name aligned to the `canvasdrop` global).
 
 ### 11.2 Platform API (session-authenticated from canvases)
 `GET /v1/c/:slug/me` · `GET|PUT|DELETE /v1/c/:slug/kv/:key` (+ list, `:key/increment`, `kv/user/...`) · `POST|GET /v1/c/:slug/files` · `DELETE /v1/c/:slug/files/:id` · `GET /v1/c/:slug/files/:id/content` · `POST /v1/c/:slug/ai/chat` (SSE-capable) · `GET /v1/c/:slug/realtime` (WebSocket upgrade; authenticated at handshake, §9.7).

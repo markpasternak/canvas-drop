@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { check, index, pgTable, primaryKey, uniqueIndex } from "drizzle-orm/pg-core";
 import { pg as c } from "./columns.js";
 
 /**
@@ -174,4 +174,76 @@ export const drafts = pgTable(
     // Exactly one draft per canvas (R10).
     uniqueIndex("drafts_canvas_id_uq").on(t.canvasId),
   ],
+);
+
+// Per-op metering substrate (D24, plan 007 / M6). Append-only; one row per
+// primitive op (kv_op | file_op; future: view | deploy | rt_connect). Stats are
+// derived by COUNT over a window; a created_at-keyed prune bounds growth.
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    type: c.text("type").notNull(), // kv_op | file_op | view | deploy | rt_connect
+    meta: c.json("meta"), // op detail, e.g. { op: 'set' }
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    // Stats aggregation + retention prune both filter by canvas + created_at.
+    index("usage_events_canvas_created_idx").on(t.canvasId, t.createdAt),
+  ],
+);
+
+// KV primitive (§6.4, plan 007 / M6). `scope` is 'shared' for kv.* or the userId
+// for kv.user.*; the composite PK (canvas_id, scope, key) also serves the
+// (canvas_id, scope) prefix list. `value` is JSON (≤64 KB enforced at the
+// boundary). Every write carries attribution (updated_by, updated_at).
+export const kvEntries = pgTable(
+  "kv_entries",
+  {
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    scope: c.text("scope").notNull(), // 'shared' | <userId>
+    key: c.text("key").notNull(),
+    value: c.json("value").notNull(),
+    updatedBy: c
+      .text("updated_by")
+      .notNull()
+      .references(() => users.id),
+    updatedAt: c.epochMs("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.scope, t.key] })],
+);
+
+// Files primitive (§6.5, plan 007 / M6). Per-canvas namespace; bytes live in the
+// storage driver under `files/<canvasId>/<id>`, metadata here. Quota (1 GB/canvas)
+// is SUM(size_bytes); 25 MB/file enforced at the upload boundary. Upload attribution.
+export const files = pgTable(
+  "files",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    filename: c.text("filename").notNull(),
+    mime: c.text("mime").notNull(),
+    sizeBytes: c.int("size_bytes").notNull(),
+    storageKey: c.text("storage_key").notNull(),
+    uploadedBy: c
+      .text("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [index("files_canvas_id_idx").on(t.canvasId)],
 );

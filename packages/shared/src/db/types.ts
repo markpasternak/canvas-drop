@@ -2,8 +2,11 @@ import type {
   auditLog,
   canvases,
   drafts,
+  files,
+  kvEntries,
   sessions,
   settings,
+  usageEvents,
   users,
   versions,
 } from "./schema.pg.js";
@@ -30,6 +33,12 @@ export type Version = typeof versions.$inferSelect;
 export type NewVersion = typeof versions.$inferInsert;
 export type Draft = typeof drafts.$inferSelect;
 export type NewDraft = typeof drafts.$inferInsert;
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type NewUsageEvent = typeof usageEvents.$inferInsert;
+export type KvEntry = typeof kvEntries.$inferSelect;
+export type NewKvEntry = typeof kvEntries.$inferInsert;
+export type FileRow = typeof files.$inferSelect;
+export type NewFileRow = typeof files.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

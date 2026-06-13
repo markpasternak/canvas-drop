@@ -1,38 +1,72 @@
-import { TabEmptyState } from "../components/CanvasDetail.js";
+import { useParams } from "@tanstack/react-router";
+import { EmptyState } from "../components/EmptyState.js";
+import { Skeleton } from "../components/Skeleton.js";
+import { formatBytes } from "../lib/format.js";
+import { useCanvas, useUsage } from "../lib/queries.js";
 
-const METRICS = [
-  "Unique & total viewers",
-  "Last viewed",
-  "KV operations",
-  "File storage",
-  "AI tokens & cost",
-  "Peak realtime connections",
-];
+/** Tiles that light up in later milestones (views = C/E, AI/realtime = M9). */
+const COMING_SOON = ["Unique & total viewers", "AI tokens & cost", "Peak realtime connections"];
 
-/** Usage tab — a deliberate, designed placeholder (§14.5). Usage analytics
- * (and the list sparkline) light up when the metering substrate and the canvas
- * primitives land. No network request. */
-export default function Usage() {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <TabEmptyState
-      title="Usage analytics are coming soon"
-      description={
-        <span className="space-y-3 block">
+    <div className="rounded-xl border border-border bg-surface p-5">
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-fg">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
+    </div>
+  );
+}
+
+/** Usage tab (D24, M6): real KV-op + file-storage figures from usage_events/files.
+ *  View/AI/realtime tiles remain "coming soon" (later milestones). */
+export default function Usage() {
+  const { id } = useParams({ strict: false }) as { id: string };
+  const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
+  // Only canvases with backend on have primitive usage; skip the query otherwise.
+  const backendOn = canvas?.backendEnabled ?? false;
+  const { data: usage, isLoading: usageLoading } = useUsage(id);
+
+  if (canvasLoading || !canvas) return <Skeleton className="h-48" />;
+
+  if (!backendOn) {
+    return (
+      <EmptyState
+        title="No backend usage yet"
+        description={
           <span className="block">
-            Once the canvas primitives are live, this tab will show how your canvas is used:
+            Turn on <strong>Backend</strong> in the Capabilities tab so this canvas can use KV and
+            file storage — usage will appear here once it does.
           </span>
-          <span className="mx-auto flex max-w-md flex-wrap justify-center gap-1.5">
-            {METRICS.map((m) => (
-              <span
-                key={m}
-                className="rounded-md border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-muted"
-              >
-                {m}
-              </span>
-            ))}
-          </span>
-        </span>
-      }
-    />
+        }
+      />
+    );
+  }
+
+  if (usageLoading || !usage) return <Skeleton className="h-48" />;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Stat label="KV operations" value={usage.kvOps.toLocaleString()} />
+        <Stat
+          label="File storage"
+          value={formatBytes(usage.fileBytes)}
+          sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+        />
+      </div>
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted">Coming soon</p>
+        <div className="flex flex-wrap gap-1.5">
+          {COMING_SOON.map((m) => (
+            <span
+              key={m}
+              className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs text-muted"
+            >
+              {m}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

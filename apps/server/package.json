@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1067.0",
+    "@canvas-drop/sdk": "workspace:*",
     "@canvas-drop/shared": "workspace:*",
     "@hono/node-server": "^2.0.4",
     "@node-rs/argon2": "^2.0.2",
