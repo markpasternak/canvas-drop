@@ -82,14 +82,16 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(await repo.listByOwner(ownerId)).toEqual([]); // gone from the active view
   });
 
-  it("archives a disabled canvas (last transition wins)", async () => {
+  it("does NOT archive a disabled canvas (admin takedown can't be self-rescued, §12.0 #5)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
-    await repo.setStatus(cv.id, "disabled");
-    expect(await repo.archive(cv.id)).toBe(true);
-    expect((await repo.findById(cv.id))?.status).toBe("archived");
+    await repo.setDisabled(cv.id, "policy");
+    // Archive is guarded to `active` only — an owner can't archive→unarchive a
+    // disabled canvas back to active and reverse the takedown.
+    expect(await repo.archive(cv.id)).toBe(false);
+    expect((await repo.findById(cv.id))?.status).toBe("disabled");
   });
 
   it("does not archive a deleted canvas (no tombstone resurrection)", async () => {
@@ -128,6 +130,58 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await repo.setStatus(cv.id, "disabled");
     expect(await repo.unarchive(cv.id)).toBe(false); // disabled is not archived
     expect((await repo.findById(cv.id))?.status).toBe("disabled");
+  });
+
+  it("setDisabled takes an active canvas down with a reason; enable clears it (M7)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    expect(await repo.setDisabled(cv.id, "abusive content")).toBe(true);
+    const down = await repo.findById(cv.id);
+    expect(down?.status).toBe("disabled");
+    expect(down?.disabledReason).toBe("abusive content");
+    expect(await repo.enable(cv.id)).toBe(true);
+    const up = await repo.findById(cv.id);
+    expect(up?.status).toBe("active");
+    expect(up?.disabledReason).toBeNull(); // reason cleared, no stale note
+  });
+
+  it("setDisabled is guarded: a non-active (archived/deleted) canvas returns false", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await repo.archive(cv.id);
+    expect(await repo.setDisabled(cv.id, "x")).toBe(false); // archived, not active
+    expect((await repo.findById(cv.id))?.status).toBe("archived");
+    const del = await repo.create({ ownerId, slug: "s2", apiKeyHash: "h2" });
+    await repo.setStatus(del.id, "deleted");
+    expect(await repo.setDisabled(del.id, "x")).toBe(false); // deleted, not active
+  });
+
+  it("enable on a non-disabled canvas is a guarded no-op (false)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    expect(await repo.enable(cv.id)).toBe(false); // active, not disabled
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+  });
+
+  it("restore brings a soft-deleted canvas back to active and clears deletedAt (M7)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await repo.setStatus(cv.id, "deleted");
+    expect((await repo.findById(cv.id))?.deletedAt).not.toBeNull();
+    expect(await repo.restore(cv.id)).toBe(true);
+    const back = await repo.findById(cv.id);
+    expect(back?.status).toBe("active");
+    expect(back?.deletedAt).toBeNull();
+    // A non-deleted canvas can't be "restored".
+    expect(await repo.restore(cv.id)).toBe(false);
   });
 
   it("findByApiKeyHash excludes archived (deploys blocked while archived)", async () => {
