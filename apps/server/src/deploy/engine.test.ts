@@ -10,6 +10,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { memStorage } from "../storage/mem.js";
 import { deployEngine } from "./engine.js";
 import type { DeployEntry } from "./ingest.js";
 import { fromZip } from "./ingest.js";
@@ -17,31 +18,6 @@ import { fromZip } from "./ingest.js";
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const silent = pino({ level: "silent" });
 const enc = (s: string) => new TextEncoder().encode(s);
-
-/** In-memory storage with an optional fail-on-Nth-put hook for the atomicity test. */
-function memStorage(failOnPut?: number): StorageDriver {
-  const store = new Map<string, Uint8Array>();
-  let puts = 0;
-  return {
-    async put(key, bytes) {
-      puts++;
-      if (failOnPut && puts === failOnPut) throw new Error("storage down");
-      store.set(key, bytes);
-    },
-    async get(key) {
-      return store.get(key) ?? null;
-    },
-    async delete(key) {
-      store.delete(key);
-    },
-    async exists(key) {
-      return store.has(key);
-    },
-    async list(prefix) {
-      return [...store.keys()].filter((k) => k.startsWith(prefix)).sort();
-    },
-  };
-}
 
 async function* folder(files: Record<string, string>): AsyncGenerator<DeployEntry> {
   for (const [path, body] of Object.entries(files)) yield { path, bytes: enc(body) };
@@ -153,6 +129,87 @@ describe("deployEngine", () => {
     const zip = Buffer.from(zipSync({ "index.html": enc("<h1>zip</h1>"), "app.js": enc("1") }));
     const result = await engine.deploy(canvas, "zip", fromZip(zip), ownerId);
     expect(result.fileCount).toBe(2);
+  });
+
+  it("rejects >100 MB total with CANVAS_TOO_LARGE and >2000 files with TOO_MANY_FILES", async () => {
+    const { engine, canvas, ownerId } = await setup();
+    // 5 files of 25 MB each = 125 MB > 100 MB cap
+    async function* tooBig(): AsyncGenerator<DeployEntry> {
+      for (let i = 0; i < 5; i++) {
+        yield { path: `f${i}.bin`, bytes: new Uint8Array(25 * 1024 * 1024 - 1) };
+      }
+    }
+    await expect(engine.deploy(canvas, "folder", tooBig(), ownerId)).rejects.toMatchObject({
+      code: "CANVAS_TOO_LARGE",
+    });
+
+    const { engine: e2, canvas: c2, ownerId: o2 } = await setup();
+    async function* tooMany(): AsyncGenerator<DeployEntry> {
+      for (let i = 0; i < 2001; i++) yield { path: `f${i}.txt`, bytes: enc("x") };
+    }
+    await expect(e2.deploy(c2, "folder", tooMany(), o2)).rejects.toMatchObject({
+      code: "TOO_MANY_FILES",
+    });
+  });
+
+  it("warns when a text file appears to contain a canvas API key (§12.1.2 lint)", async () => {
+    const { engine, canvas, ownerId } = await setup();
+    const key = `cd_${"A".repeat(50)}`;
+    const result = await engine.deploy(
+      canvas,
+      "folder",
+      folder({ "index.html": "ok", "config.js": `const KEY="${key}"` }),
+      ownerId,
+    );
+    expect(result.warnings.some((w) => w.includes("config.js") && /API key/i.test(w))).toBe(true);
+  });
+
+  it("concurrent deploys to one canvas both succeed with distinct version numbers (no 500)", async () => {
+    const { engine, canvas, versions, ownerId } = await setup();
+    const [r1, r2] = await Promise.all([
+      engine.deploy(canvas, "api", folder({ "index.html": "a" }), ownerId),
+      engine.deploy(canvas, "api", folder({ "index.html": "b" }), ownerId),
+    ]);
+    expect(new Set([r1.version, r2.version])).toEqual(new Set([1, 2])); // distinct, contiguous
+    const ready = (await versions.listByCanvas(canvas.id)).filter((v) => v.status === "ready");
+    expect(ready.length).toBe(2);
+  });
+
+  it("prune never drops the version the live pointer points to, even if it is old (re-read)", async () => {
+    const { engine, canvases, versions, canvas, ownerId } = await setup();
+    // Create 12 ready versions directly (no engine auto-prune in the loop).
+    const ids: string[] = [];
+    for (let n = 1; n <= 12; n++) {
+      const v = await versions.createPending({
+        canvasId: canvas.id,
+        number: n,
+        createdBy: ownerId,
+        source: "api",
+      });
+      await versions.markReady(v.id, {
+        fileCount: 1,
+        totalBytes: 1,
+        manifest: { "index.html": { size: 1, hash: `h${n}`, mime: "text/html" } },
+      });
+      ids.push(v.id);
+    }
+    // Live pointer is the OLDEST version (as if a rollback to v1 just landed).
+    await canvases.setCurrentVersion(canvas.id, ids[0] as string);
+    await engine.prune(canvas.id); // re-reads the pointer; must keep v1, drop only v2
+    expect(await versions.findById(ids[0] as string)).not.toBeNull(); // current (old) survives
+    expect(await versions.findById(ids[1] as string)).toBeNull(); // v2 pruned (oldest non-current)
+  });
+
+  it("prune storage-delete failure is swallowed (deploy still returns cleanly)", async () => {
+    const storage = memStorage();
+    storage.delete = async () => {
+      throw new Error("storage delete down");
+    };
+    const { engine, canvas, ownerId } = await setup(storage);
+    for (let i = 0; i < 11; i++) {
+      const r = await engine.deploy(canvas, "api", folder({ "index.html": `v${i}` }), ownerId);
+      expect(r.version).toBe(i + 1); // deploy unaffected by prune-delete failures
+    }
   });
 
   it("prunes ready versions beyond the newest 10 (async), keeping the current", async () => {

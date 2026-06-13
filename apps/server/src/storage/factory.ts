@@ -16,6 +16,9 @@ export function makeStorage(config: Config): StorageDriver {
     endpoint: s.endpoint,
     forcePathStyle: s.forcePathStyle,
     credentials: { accessKeyId: s.accessKey, secretAccessKey: s.secretKey },
+    // Bound failures: a slow/partitioned endpoint must not hang serve/deploy
+    // handlers indefinitely (SDK default requestTimeout is 0 = no timeout).
+    requestHandler: { requestTimeout: 15_000, connectionTimeout: 5_000 },
   });
   return new S3Driver(client, s.bucket);
 }

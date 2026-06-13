@@ -13,7 +13,7 @@ import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { makeTestDb } from "./db/testing.js";
 import { deployEngine } from "./deploy/engine.js";
-import type { StorageDriver } from "./storage/driver.js";
+import { memStorage } from "./storage/mem.js";
 
 const silent = pino({ level: "silent" });
 const devConfig = loadConfig({
@@ -24,27 +24,6 @@ const devConfig = loadConfig({
 
 async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
-}
-
-function memStorage(): StorageDriver {
-  const store = new Map<string, Uint8Array>();
-  return {
-    async put(k, b) {
-      store.set(k, b);
-    },
-    async get(k) {
-      return store.get(k) ?? null;
-    },
-    async delete(k) {
-      store.delete(k);
-    },
-    async exists(k) {
-      return store.has(k);
-    },
-    async list(p) {
-      return [...store.keys()].filter((k) => k.startsWith(p)).sort();
-    },
-  };
 }
 
 function app(client: DbClient, config: Config = devConfig) {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas, DeploySource, Manifest } from "@canvas-drop/shared/db";
+import type { Canvas, DeploySource, Manifest, Version } from "@canvas-drop/shared/db";
+import { looksLikeApiKey } from "../canvas/api-key.js";
 import { mimeFor } from "../canvas/mime.js";
 import { versionStorageKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -44,13 +45,10 @@ export function deployEngine(deps: DeployEngineDeps) {
       entries: AsyncIterable<DeployEntry> | Iterable<DeployEntry>,
       actorId: string,
     ): Promise<DeployResult> {
-      const number = await deps.versions.nextNumber(canvas.id);
-      const version = await deps.versions.createPending({
-        canvasId: canvas.id,
-        number,
-        createdBy: actorId,
-        source,
-      });
+      // Concurrent deploys to one canvas can race nextNumber; the unique index on
+      // (canvas_id, number) makes a collision a constraint error — retry rather
+      // than surface a raw 500.
+      const version = await this.createVersionWithRetry(canvas.id, actorId, source);
 
       const manifest: Manifest = {};
       const warnings: string[] = [];
@@ -75,11 +73,16 @@ export function deployEngine(deps: DeployEngineDeps) {
             throw new DeployError("TOO_MANY_FILES", "deploy exceeds 2000 files");
           }
 
-          const { downgraded } = mimeFor(path);
-          if (downgraded) warnings.push(`${path} will be served as text/plain`);
+          const mime = mimeFor(path);
+          if (mime.downgraded) warnings.push(`${path} will be served as text/plain`);
+          // Warn (don't block) if a text file appears to embed a canvas API key
+          // (§12.1.2 — keys are server-side only, never in canvas files).
+          if (mime.contentType.startsWith("text/") && looksLikeApiKey(decodeText(entry.bytes))) {
+            warnings.push(`${path} may contain a canvas API key — remove it before deploying`);
+          }
 
           const hash = createHash("sha256").update(entry.bytes).digest("hex");
-          manifest[path] = { size, hash, mime: mimeFor(path).contentType };
+          manifest[path] = { size, hash, mime: mime.contentType };
           await deps.storage.put(versionStorageKey(version.id, path), entry.bytes);
         }
 
@@ -99,15 +102,39 @@ export function deployEngine(deps: DeployEngineDeps) {
       await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
       // Prune beyond the last 10, asynchronously — never block or fail the deploy.
-      void this.prune(canvas.id, version.id);
+      // `.catch` guards against an unhandled rejection if prune throws synchronously.
+      this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
 
       return {
         url: canvasUrl(deps.config, canvas.slug),
-        version: number,
+        version: version.number,
         fileCount,
         totalBytes,
         warnings,
       };
+    },
+
+    /** Create the pending version, retrying on a (canvas_id, number) collision. */
+    async createVersionWithRetry(
+      canvasId: string,
+      actorId: string,
+      source: DeploySource,
+    ): Promise<Version> {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const number = await deps.versions.nextNumber(canvasId);
+        try {
+          return await deps.versions.createPending({
+            canvasId,
+            number,
+            createdBy: actorId,
+            source,
+          });
+        } catch (err) {
+          lastErr = err; // unique-constraint collision from a concurrent deploy — retry
+        }
+      }
+      throw lastErr;
     },
 
     /** Delete the storage objects written for a failed pending version. */
@@ -118,9 +145,16 @@ export function deployEngine(deps: DeployEngineDeps) {
     },
 
     /** Prune ready versions beyond the newest N; log-and-continue on failure. */
-    async prune(canvasId: string, currentVersionId: string): Promise<void> {
+    async prune(canvasId: string): Promise<void> {
       try {
-        const dropped = await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS, currentVersionId);
+        // Re-read the live pointer so a concurrent rollback's current version is
+        // never pruned out from under it (prune-vs-rollback race).
+        const fresh = await deps.canvases.findById(canvasId);
+        const dropped = await deps.versions.pruneBeyond(
+          canvasId,
+          KEEP_VERSIONS,
+          fresh?.currentVersionId ?? null,
+        );
         for (const v of dropped) {
           const manifest = (v.manifest ?? {}) as Manifest;
           for (const path of Object.keys(manifest)) {
@@ -132,6 +166,10 @@ export function deployEngine(deps: DeployEngineDeps) {
       }
     },
   };
+}
+
+function decodeText(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
 export type DeployEngine = ReturnType<typeof deployEngine>;

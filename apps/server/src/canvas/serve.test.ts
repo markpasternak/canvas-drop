@@ -18,11 +18,24 @@ import { versionStorageKey } from "./storage-keys.js";
 
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
+const subConfig: Config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_URL_MODE: "subdomain",
+  CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+});
+
 describe("assetPathFor", () => {
   it("strips the /c/{slug} prefix in path mode", () => {
     expect(assetPathFor(config, "abc", "/c/abc/index.html")).toBe("index.html");
     expect(assetPathFor(config, "abc", "/c/abc/")).toBe("");
     expect(assetPathFor(config, "abc", "/c/abc/a/b.css")).toBe("a/b.css");
+  });
+
+  it("uses the raw path (no /c/ prefix) in subdomain mode", () => {
+    // in subdomain mode the host carries the slug; the path is the asset path
+    expect(assetPathFor(subConfig, "abc", "/index.html")).toBe("index.html");
+    expect(assetPathFor(subConfig, "abc", "/")).toBe("");
+    expect(assetPathFor(subConfig, "abc", "/a/b.css")).toBe("a/b.css");
   });
 });
 

@@ -14,7 +14,7 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
-import type { StorageDriver } from "../storage/driver.js";
+import { memStorage } from "../storage/mem.js";
 import { deployApiRoutes } from "./deploy-api.js";
 
 const silent = pino({ level: "silent" });
@@ -22,27 +22,6 @@ const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 const enc = (s: string) => new TextEncoder().encode(s);
 async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
-}
-
-function memStorage(): StorageDriver {
-  const store = new Map<string, Uint8Array>();
-  return {
-    async put(k, b) {
-      store.set(k, b);
-    },
-    async get(k) {
-      return store.get(k) ?? null;
-    },
-    async delete(k) {
-      store.delete(k);
-    },
-    async exists(k) {
-      return store.has(k);
-    },
-    async list(p) {
-      return [...store.keys()].filter((k) => k.startsWith(p)).sort();
-    },
-  };
 }
 
 describe("deployApiRoutes (Bearer key)", () => {
@@ -78,10 +57,39 @@ describe("deployApiRoutes (Bearer key)", () => {
 
     const app = new Hono<AppEnv>();
     app.route("/v1/canvases", deployApiRoutes({ config, canvases, versions, engine, audit }));
-    return { app, canvases, versions, mkCanvas };
+    return { app, canvases, versions, mkCanvas, ownerId: owner.id };
   }
 
   const zip = () => Buffer.from(zipSync({ "index.html": enc("<h1>x</h1>") }));
+
+  it("a key for a disabled canvas is rejected (active-only) — 401", async () => {
+    const { app, canvases, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    await canvases.setStatus(a.id, "disabled");
+    const res = await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: zip(),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("rollback to an existing-but-pending version → 404 (only ready versions are targets)", async () => {
+    const { app, versions, mkCanvas, ownerId } = await setup();
+    const a = await mkCanvas();
+    await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: zip(),
+    });
+    await versions.createPending({ canvasId: a.id, number: 2, createdBy: ownerId, source: "api" });
+    const res = await app.request(`/v1/canvases/${a.id}/rollback`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${a.key}`, "content-type": "application/json" },
+      body: JSON.stringify({ version: 2 }),
+    });
+    expect(res.status).toBe(404);
+  });
 
   // --- BEARER-KEY ISOLATION FIRST (execution note) ---
   it("a valid key for canvas A cannot deploy to canvas B", async () => {

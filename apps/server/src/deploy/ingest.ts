@@ -14,11 +14,6 @@ export function fromPasteHtml(html: string): DeployEntry[] {
   return [{ path: "index.html", bytes: new TextEncoder().encode(html) }];
 }
 
-/** Folder upload: files already parsed into memory by the route (one per form file). */
-export function fromFolder(files: DeployEntry[]): DeployEntry[] {
-  return files;
-}
-
 /** yauzl rejects traversal/absolute entry names at the library level — map those
  *  to the stable ZIP_SLIP_REJECTED code; everything else is a malformed archive. */
 function zipError(message: string, path?: string): DeployError {

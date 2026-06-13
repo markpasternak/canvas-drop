@@ -44,10 +44,19 @@ describe("decideCanvasAccess — denials", () => {
     expect(d).toEqual({ action: "deny", status: 404, reason: "owner_only" });
   });
 
-  it("revoked share: a once-shared canvas set shared=false is 404 to non-owners now", () => {
-    const d = decideCanvasAccess(canvas({ shared: false, sharedAt: NOW - 1 }), other, NOW);
-    expect(d.action).toBe("deny");
-    expect((d as { status: number }).status).toBe(404);
+  it("revoked share: a once-shared canvas set shared=false is 404 (owner_only) to non-owners now", () => {
+    expect(decideCanvasAccess(canvas({ shared: false, sharedAt: NOW - 1 }), other, NOW)).toEqual({
+      action: "deny",
+      status: 404,
+      reason: "owner_only",
+    });
+  });
+
+  it("disabled is checked before the owner/admin bypass — owner AND admin get 403", () => {
+    // the check ORDER is the invariant: disabled (step 2) fires before owner/admin (step 3)
+    const disabled = canvas({ status: "disabled" });
+    expect(decideCanvasAccess(disabled, owner, NOW)).toMatchObject({ status: 403 });
+    expect(decideCanvasAccess(disabled, admin, NOW)).toMatchObject({ status: 403 });
   });
 
   it("expired share: 404 to non-owner once past sharedExpiresAt", () => {

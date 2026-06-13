@@ -1,11 +1,12 @@
 import {
   type DeploySource,
+  type Json,
   type Manifest,
   pgSchema,
   sqliteSchema,
   type Version,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq, inArray, max } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -65,7 +66,8 @@ export function versionsRepository(client: DbClient) {
           status: "ready",
           fileCount: data.fileCount,
           totalBytes: data.totalBytes,
-          manifest: data.manifest as never,
+          // biome-ignore lint/suspicious/noExplicitAny: Manifest is a Json subtype; cast at the dual-dialect seam (KTD-1)
+          manifest: data.manifest as any as Json,
         })
         .where(eq(t.id, id))
         .returning();
@@ -112,8 +114,13 @@ export function versionsRepository(client: DbClient) {
         .where(and(eq(t.canvasId, canvasId), eq(t.status, "ready")))
         .orderBy(desc(t.number))) as Version[];
       const drop = ready.slice(keep).filter((v) => v.id !== currentVersionId);
-      for (const v of drop) {
-        await db.delete(t).where(eq(t.id, v.id));
+      if (drop.length > 0) {
+        await db.delete(t).where(
+          inArray(
+            t.id,
+            drop.map((v) => v.id),
+          ),
+        );
       }
       return drop;
     },

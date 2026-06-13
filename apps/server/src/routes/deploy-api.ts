@@ -11,7 +11,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
 import type { AppEnv } from "../http/types.js";
-import { deployResponse } from "./deploy-common.js";
+import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface DeployApiDeps {
   config: Config;
@@ -39,7 +39,7 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     return canvas;
   }
 
-  app.put("/:id/deploy", async (c) => {
+  app.put("/:id/deploy", deployBodyLimit, async (c) => {
     const auth = await authCanvas(c);
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
     const body = Buffer.from(await c.req.arrayBuffer());

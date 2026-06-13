@@ -71,7 +71,9 @@ export function serveCanvas(deps: ServeDeps) {
 
     // Conditional GET → 304 (revalidation is cheap; the ETag is the content hash).
     if (c.req.header("if-none-match") === etag) {
-      return new Response(null, { status: 304, headers: cacheHeaders(resolved.path, etag) });
+      const headers = new Headers(cacheHeaders(resolved.path, etag));
+      securityHeaders(headers);
+      return new Response(null, { status: 304, headers });
     }
 
     const bytes = await deps.storage.get(versionStorageKey(version.id, resolved.path));

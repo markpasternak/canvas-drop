@@ -5,7 +5,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -109,12 +109,13 @@ export function canvasesRepository(client: DbClient) {
 
     /** Set or clear the password hash; bump passwordVersion to invalidate gate cookies (U16). */
     async setPassword(id: string, passwordHash: string | null): Promise<Canvas> {
-      const current = await this.findById(id);
+      // Atomic increment (no read-then-write TOCTOU): concurrent password changes
+      // never collide on a stale passwordVersion.
       const rows = await db
         .update(t)
         .set({
           passwordHash,
-          passwordVersion: (current?.passwordVersion ?? 0) + 1,
+          passwordVersion: sql`${t.passwordVersion} + 1`,
           updatedAt: Date.now(),
         })
         .where(eq(t.id, id))

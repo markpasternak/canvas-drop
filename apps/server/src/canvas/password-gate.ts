@@ -31,14 +31,17 @@ function verifyGrant(secret: string, canvas: Canvas, cookieValue: string | undef
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Cookie scope: bound to the canvas path; host-only in path mode, base-domain in subdomain mode. */
+/**
+ * Cookie scope. Subdomain mode: each canvas is its own origin, so the grant is
+ * host-only (no Domain) and never sent to sibling canvas subdomains. Path mode:
+ * all canvases share one host, so the grant is scoped to the canvas path prefix.
+ */
 function gateCookieOptions(config: Config, slug: string) {
   return {
     httpOnly: true,
     secure: config.isProduction,
     sameSite: "Lax" as const,
     path: config.urlMode === "subdomain" ? "/" : `/c/${slug}/`,
-    ...(config.urlMode === "subdomain" ? { domain: `.${new URL(config.baseUrl).hostname}` } : {}),
   };
 }
 

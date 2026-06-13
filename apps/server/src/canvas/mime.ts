@@ -76,5 +76,3 @@ export function mimeFor(path: string): MimeResult {
   // Unknown extension → safe default, downgraded.
   return { contentType: "text/plain; charset=utf-8", downgraded: true };
 }
-
-export { BLOCKED_EXECUTABLE };

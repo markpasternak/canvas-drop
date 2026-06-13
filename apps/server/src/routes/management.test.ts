@@ -12,7 +12,7 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
-import type { StorageDriver } from "../storage/driver.js";
+import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
 
 const silent = pino({ level: "silent" });
@@ -22,33 +22,16 @@ async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-function memStorage(): StorageDriver {
-  const store = new Map<string, Uint8Array>();
-  return {
-    async put(k, b) {
-      store.set(k, b);
-    },
-    async get(k) {
-      return store.get(k) ?? null;
-    },
-    async delete(k) {
-      store.delete(k);
-    },
-    async exists(k) {
-      return store.has(k);
-    },
-    async list(p) {
-      return [...store.keys()].filter((k) => k.startsWith(p)).sort();
-    },
-  };
-}
-
 /** Build a management app that authenticates as a chosen user (no gateway needed). */
-function buildApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
+function buildApp(
+  client: DbClient,
+  actor: { id: string; isAdmin: boolean },
+  storage = memStorage(),
+) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
-  const engine = deployEngine({ config, canvases, versions, storage: memStorage(), log: silent });
+  const engine = deployEngine({ config, canvases, versions, storage, log: silent });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
@@ -264,6 +247,48 @@ describe("managementRoutes", () => {
       { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" }, body: zip },
     );
     expect(denied.status).toBe(404);
+  });
+
+  it("owner can deploy via folder multipart (field key = relative path)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const form = new FormData();
+    form.set("index.html", new File(["<h1>folder</h1>"], "index.html", { type: "text/html" }));
+    form.set("assets/app.js", new File(["console.log(1)"], "app.js", { type: "text/javascript" }));
+    const res = await app.request(`/api/canvases/${created.id}/deploy/folder`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+      body: form,
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ fileCount: number }>(res)).fileCount).toBe(2);
+  });
+
+  it("paste create rolls back the canvas (no orphan) when the embedded deploy fails", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const failing = memStorage();
+    failing.put = async () => {
+      throw new Error("storage down");
+    };
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, failing);
+    const res = await app.request("/api/canvases/paste", {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>x</h1>" }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    // no orphan canvas left behind
+    const list = await jsonOf<{ canvases: unknown[] }>(await app.request("/api/canvases"));
+    expect(list.canvases).toHaveLength(0);
   });
 
   it("rejects a cross-site mutating request", async () => {
