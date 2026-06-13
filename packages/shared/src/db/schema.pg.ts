@@ -223,3 +223,27 @@ export const kvEntries = pgTable(
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.scope, t.key] })],
 );
+
+// Files primitive (§6.5, plan 007 / M6). Per-canvas namespace; bytes live in the
+// storage driver under `files/<canvasId>/<id>`, metadata here. Quota (1 GB/canvas)
+// is SUM(size_bytes); 25 MB/file enforced at the upload boundary. Upload attribution.
+export const files = pgTable(
+  "files",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    filename: c.text("filename").notNull(),
+    mime: c.text("mime").notNull(),
+    sizeBytes: c.int("size_bytes").notNull(),
+    storageKey: c.text("storage_key").notNull(),
+    uploadedBy: c
+      .text("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [index("files_canvas_id_idx").on(t.canvasId)],
+);

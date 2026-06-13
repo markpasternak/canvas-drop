@@ -16,6 +16,7 @@ const pgTables = {
   drafts: pg.drafts,
   usageEvents: pg.usageEvents,
   kvEntries: pg.kvEntries,
+  files: pg.files,
 };
 const sqliteTables = {
   users: sq.users,
@@ -27,6 +28,7 @@ const sqliteTables = {
   drafts: sq.drafts,
   usageEvents: sq.usageEvents,
   kvEntries: sq.kvEntries,
+  files: sq.files,
 };
 
 const TABLE_KEYS = Object.keys(pgTables) as Array<keyof typeof pgTables>;
