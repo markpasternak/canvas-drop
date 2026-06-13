@@ -23,3 +23,7 @@ What happened, the root cause, and how to avoid it next time.
 ## Why it matters here
 
 Claude Code's private per-project memory is **not shared with Codex**. Anything two agents both need to know lives here, in git. Keep PRs small and merge often so a learning written on one branch reaches the other agent quickly.
+
+## Index
+
+- [Dual-dialect Drizzle seam + pglite testing](2026-06-13-dual-dialect-drizzle-seam.md) — per-dialect schemas, the typed `any` repo seam, pglite for the PG test leg, migration-folder resolution.

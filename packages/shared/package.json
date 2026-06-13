@@ -7,10 +7,22 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./db": {
+      "types": "./src/db/index.ts",
+      "default": "./src/db/index.ts"
+    },
+    "./config": {
+      "types": "./src/config/env.ts",
+      "default": "./src/config/env.ts"
     }
   },
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
   }
 }
