@@ -119,6 +119,32 @@ describe("managementRoutes", () => {
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
   });
 
+  it("an OWNER cannot delete a disabled canvas (no takedown laundering via delete→restore, §12.0 #5)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await canvasesRepository(client).setDisabled(created.id, "abuse");
+    // Owner delete → 409, canvas stays disabled (the admin must enable it first).
+    const asOwner = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}`,
+      { method: "DELETE", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(asOwner.status).toBe(409);
+    expect((await canvasesRepository(client).findById(created.id))?.status).toBe("disabled");
+    // An admin CAN delete it (legitimate purge).
+    const asAdmin = await buildApp(client, { id: "admin", isAdmin: true }).request(
+      `/api/canvases/${created.id}`,
+      { method: "DELETE", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(asAdmin.status).toBe(200);
+  });
+
   it("a disabled canvas's reason reaches the OWNER but never a non-owner (M7, §12.0 #3)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

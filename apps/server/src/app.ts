@@ -123,7 +123,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   // Login throttle (§12.3 5/min/IP) — pre-gateway, keyed by the socket-peer IP
   // (never XFF). Defends the credential surface (§12.0 #1). Path-scoped to the
-  // login endpoint, which is the only unauthenticated credential entry point.
+  // login endpoint (oidc-only; a 404 no-op in proxy/dev mode). KNOWN LIMITATION:
+  // behind a shared reverse-proxy/LB the socket peer is the proxy, so all clients
+  // share one bucket — acceptable here since `/auth/login` is an OIDC *redirect*
+  // (no app-side password to brute-force) and proxy mode has no login endpoint at
+  // all; a per-real-client login throttle would belong at the IAP, not here.
   app.use("/auth/login", async (c, next) => {
     if (deps.config.rateLimit.enabled) {
       const ip = c.get("clientIp") ?? "unknown";

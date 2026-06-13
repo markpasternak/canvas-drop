@@ -54,6 +54,8 @@ export interface Canvas {
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
   status: string;
+  /** Admin takedown reason (§6.10.2) — owner/admin-only; null unless disabled. */
+  disabledReason: string | null;
   currentVersionId: string | null;
   createdAt: number;
   updatedAt: number;

@@ -41,22 +41,18 @@ const MAX_KEYS = 100_000;
 export function inProcessRateLimitStore(now: () => number = Date.now): RateLimitStore {
   const buckets = new Map<string, { count: number; resetAt: number }>();
 
-  const evictOneExpired = (ts: number) => {
-    // Cheap bound-keeper: drop the first expired bucket we find; if none are
-    // expired we drop the soonest-resetting one (it's closest to free anyway).
-    let soonest: string | undefined;
-    let soonestAt = Number.POSITIVE_INFINITY;
+  /** Reclaim genuinely-EXPIRED buckets. Returns true if it freed at least one.
+   *  Never touches a live bucket — evicting a soonest-resetting live bucket would
+   *  wipe another user's active counter (cross-user reset; code review). */
+  const reclaimExpired = (ts: number): boolean => {
+    let freed = false;
     for (const [k, b] of buckets) {
       if (b.resetAt <= ts) {
         buckets.delete(k);
-        return;
-      }
-      if (b.resetAt < soonestAt) {
-        soonestAt = b.resetAt;
-        soonest = k;
+        freed = true;
       }
     }
-    if (soonest) buckets.delete(soonest);
+    return freed;
   };
 
   return {
@@ -64,7 +60,12 @@ export function inProcessRateLimitStore(now: () => number = Date.now): RateLimit
       const ts = now();
       let b = buckets.get(key);
       if (!b || b.resetAt <= ts) {
-        if (!b && buckets.size >= MAX_KEYS) evictOneExpired(ts);
+        if (!b && buckets.size >= MAX_KEYS && !reclaimExpired(ts)) {
+          // At the cap with nothing expired: fail OPEN for this request rather
+          // than evict a live bucket. A spray that fills 100k keys is noisy and
+          // attributable on the trusted-org model — never silently wipe a victim.
+          return { allowed: true, remaining: limit - 1, resetAt: ts + windowMs, retryAfterSec: 1 };
+        }
         b = { count: 0, resetAt: ts + windowMs };
         buckets.set(key, b);
       }
@@ -106,7 +107,10 @@ export function classifyRequest(c: Context<AppEnv>, config: Config): Classificat
   // Runtime canvas API: /v1/c/<slug>/...
   const runtimeMatch = path.match(/^\/v1\/c\/([^/]+)(\/|$)/);
   if (runtimeMatch) {
-    const slug = c.get("canvasSlug") ?? runtimeMatch[1];
+    // Key on the PATH slug (what canvasApiRoutes authorizes), NOT the host-derived
+    // `canvasSlug` — in subdomain mode the latter is the host subdomain, so the
+    // per-canvas bucket would be attributed to the wrong canvas (code review).
+    const slug = runtimeMatch[1];
     // AI is the stricter sub-class (auto-applies when the AI primitive lands).
     if (/^\/v1\/c\/[^/]+\/ai(\/|$)/.test(path)) {
       return { cls: "ai", key: `ai:${userId}`, limit: rl.aiPerMin, runtime: true };

@@ -57,22 +57,34 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(active.map((c) => c.id)).toEqual([live.id]);
   });
 
-  it("keyset-paginates on createdAt via the cursor", async () => {
+  it("keyset-paginates on the id cursor, losing NO rows even on createdAt ties", async () => {
     client = await makeTestDb(dialect);
     const canvases = canvasesRepository(client);
     const a = await seedUser(client, "alice");
-    for (let i = 0; i < 3; i++) {
-      await canvases.create({ ownerId: a.id, slug: `p${i}-1111-2222`, apiKeyHash: `h${i}` });
+    const created: string[] = [];
+    // Tight loop → several canvases very likely share a created_at millisecond.
+    // A created_at-only cursor would drop the boundary row; the UUIDv7 id keyset
+    // is exact (id is unique + time-ordered).
+    for (let i = 0; i < 5; i++) {
+      const cv = await canvases.create({
+        ownerId: a.id,
+        slug: `p${i}-1111-2222`,
+        apiKeyHash: `h${i}`,
+      });
+      created.push(cv.id);
     }
     const admin = adminRepository(client);
-    const page1 = await admin.listAllCanvases({ limit: 2 });
-    expect(page1).toHaveLength(2);
-    const cursor = page1[page1.length - 1]?.createdAt ?? 0;
-    const page2 = await admin.listAllCanvases({ limit: 2, cursor });
-    // No overlap; page2 continues strictly older than the page1 cursor.
-    const p1ids = new Set(page1.map((c) => c.id));
-    expect(page2.every((c) => !p1ids.has(c.id))).toBe(true);
-    expect(page2.every((c) => c.createdAt < cursor)).toBe(true);
+    // Walk every page; the union must equal all 5 ids with no dup and no drop.
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await admin.listAllCanvases({ limit: 2, cursor });
+      if (page.length === 0) break;
+      seen.push(...page.map((c) => c.id));
+      cursor = page.at(-1)?.id;
+    }
+    expect(new Set(seen).size).toBe(5); // no duplicates
+    expect(seen.sort()).toEqual([...created].sort()); // no row dropped
   });
 
   it("platformStats: counts by status, user count, file bytes, top canvases", async () => {

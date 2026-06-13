@@ -31,7 +31,7 @@ const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-  cursor: z.coerce.number().int().optional(),
+  cursor: z.string().optional(), // UUIDv7 id keyset cursor
 });
 const disableBody = z.object({ reason: z.string().trim().min(1).max(500) });
 const modelsBody = z.object({ models: z.array(z.string().min(1)).min(1) });
@@ -119,7 +119,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         createdAt: cv.createdAt,
       };
     });
-    return c.json({ canvases, nextCursor: rows.at(-1)?.createdAt ?? null });
+    // Keyset cursor is the last row's id (unique + time-ordered); null = last page.
+    const nextCursor = rows.length === q.data.limit ? (rows.at(-1)?.id ?? null) : null;
+    return c.json({ canvases, nextCursor });
   });
 
   // --- Platform usage overview (§6.10.6): totals + top canvases (AI spend = M9) ---

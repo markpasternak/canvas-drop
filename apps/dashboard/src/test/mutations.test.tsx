@@ -29,6 +29,7 @@ const CANVAS: Canvas = {
   capabilities: { kv: true, files: true, ai: true, realtime: true },
   effective: { identity: false, kv: false, files: false, ai: false, realtime: false },
   status: "active",
+  disabledReason: null,
   currentVersionId: null,
   createdAt: 0,
   updatedAt: 0,

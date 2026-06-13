@@ -284,6 +284,15 @@ export function managementRoutes(deps: ManagementDeps) {
   app.delete("/:id", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    // An OWNER cannot delete a canvas an admin has taken down (§12.0 #5): deleting
+    // then having an admin restore it would launder the takedown into an active
+    // canvas. The admin must `enable` it first, or an admin can delete it directly.
+    if (cv.status === "disabled" && !c.get("user").isAdmin) {
+      return c.json(
+        { code: "DISABLED", message: "this canvas was disabled by an administrator" },
+        409,
+      );
+    }
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     return c.json({ ok: true });

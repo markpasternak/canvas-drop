@@ -266,7 +266,9 @@ export function canvasesRepository(client: DbClient) {
     async restore(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ status: "active", deletedAt: null, updatedAt: Date.now() })
+        // Clear disabledReason too — a deleted canvas that was previously disabled
+        // must not carry a stale takedown note onto the restored (active) row.
+        .set({ status: "active", deletedAt: null, disabledReason: null, updatedAt: Date.now() })
         .where(and(eq(t.id, id), eq(t.status, "deleted")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;

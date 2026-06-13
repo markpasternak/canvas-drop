@@ -42,6 +42,19 @@ describe("inProcessRateLimitStore", () => {
     expect(store.hit("b", 1, 1000).allowed).toBe(true); // independent
     now += 1;
   });
+
+  it("at the key cap with nothing expired, fails OPEN without wiping a live bucket", () => {
+    const now = 1_000_000; // frozen clock — nothing ever expires
+    const store = inProcessRateLimitStore(() => now);
+    store.hit("victim", 2, 60_000); // victim count = 1
+    // Fill past the 100k cap with live buckets.
+    for (let i = 0; i < 100_001; i++) store.hit(`k${i}`, 10, 60_000);
+    // A new key beyond the cap is allowed (fail-open) — never evicts a live bucket.
+    expect(store.hit("new-overflow", 1, 60_000).allowed).toBe(true);
+    // The victim's counter SURVIVED (was not reset): count 2 ok, count 3 blocked.
+    expect(store.hit("victim", 2, 60_000).allowed).toBe(true); // count 2
+    expect(store.hit("victim", 2, 60_000).allowed).toBe(false); // count 3 → blocked
+  });
 });
 
 // --- The middleware + out-of-band throttles, end-to-end through buildApp ---

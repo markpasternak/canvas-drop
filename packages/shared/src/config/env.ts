@@ -57,6 +57,16 @@ const num = (def: number) =>
     .transform((s) => (s === undefined || s === "" ? def : Number(s)))
     .refine((n) => Number.isFinite(n), { message: "must be a number" });
 
+/** Positive integer (>= 1). Used for hot-path enforcement limits (rate limits) so
+ *  a `0`/negative typo fails LOUD at boot instead of silently 429-ing every request
+ *  in that class (§8.1 fail-loud; code review). Use the `enabled` flag to disable. */
+const posInt = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((s) => (s === undefined || s === "" ? def : Number(s)))
+    .refine((n) => Number.isInteger(n) && n >= 1, { message: "must be an integer >= 1" });
+
 const domainOf = (email: string): string => email.slice(email.lastIndexOf("@") + 1).toLowerCase();
 
 const isLocalhost = (host: string): boolean =>
@@ -111,12 +121,12 @@ const rawSchema = z
     // Rate limiting (§12.3, M7). Per-class req/min defaults; admin-tunable rate
     // limits are a follow-up (these are enforcement constants on the hot path).
     CANVAS_DROP_RATELIMIT_ENABLED: bool(true),
-    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: num(60),
-    CANVAS_DROP_RATELIMIT_AI_PER_MIN: num(10),
-    CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: num(10),
-    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: num(60),
-    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: num(5),
-    CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: num(5),
+    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: posInt(60),
+    CANVAS_DROP_RATELIMIT_AI_PER_MIN: posInt(10),
+    CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: posInt(10),
+    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: posInt(60),
+    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: posInt(5),
+    CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: posInt(5),
 
     // Database
     CANVAS_DROP_DB: z.enum(["sqlite", "postgres"]).optional().default("sqlite"),

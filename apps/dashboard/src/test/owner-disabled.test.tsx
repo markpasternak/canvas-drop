@@ -19,8 +19,9 @@ const BASE = {
   galleryListed: false,
   gallerySummary: null,
   galleryTags: null,
+  backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },
-  effective: { identity: true, kv: true, files: true, ai: false, realtime: true },
+  effective: { identity: false, kv: false, files: false, ai: false, realtime: false },
   status: "active",
   disabledReason: null,
   currentVersionId: null,
@@ -46,11 +47,11 @@ function mockFetch(handlers: Record<string, () => Response>) {
   );
 }
 
-function renderUsage() {
+function renderOverview() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/canvases/c1/usage"] }),
+    history: createMemoryHistory({ initialEntries: ["/canvases/c1"] }),
   });
   render(
     <ThemeProvider>
@@ -66,24 +67,25 @@ function renderUsage() {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("usage tab", () => {
-  it("renders real KV-op + file-storage figures when backend is on", async () => {
+describe("owner sees takedown reason (R3)", () => {
+  it("renders the disabledReason on the owner's own disabled canvas", async () => {
     mockFetch({
-      "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: true }),
-      "GET /api/canvases/c1/usage": () =>
-        json({ kvOps: 1280, fileOps: 12, fileCount: 3, fileBytes: 2048 }),
+      "GET /api/canvases/c1": () =>
+        json({ ...BASE, status: "disabled", disabledReason: "Terms of service violation" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    renderUsage();
-    expect(await screen.findByText("1,280")).toBeInTheDocument(); // KV ops
-    expect(await screen.findByText("2.0 KB")).toBeInTheDocument(); // file storage
-    expect(screen.getByText(/3 files/)).toBeInTheDocument();
+    renderOverview();
+    expect(await screen.findByText(/an administrator disabled this canvas/i)).toBeInTheDocument();
+    expect(screen.getByText("Terms of service violation")).toBeInTheDocument();
   });
 
-  it("shows the empty state (pointing at Capabilities) when backend is off", async () => {
+  it("shows no takedown notice on an active canvas", async () => {
     mockFetch({
-      "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: false }),
+      "GET /api/canvases/c1": () => json(BASE),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    renderUsage();
-    expect(await screen.findByText(/No backend usage yet/i)).toBeInTheDocument();
+    renderOverview();
+    await screen.findByText(/status/i);
+    expect(screen.queryByText(/an administrator disabled/i)).not.toBeInTheDocument();
   });
 });

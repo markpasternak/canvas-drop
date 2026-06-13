@@ -169,17 +169,21 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect((await repo.findById(cv.id))?.status).toBe("active");
   });
 
-  it("restore brings a soft-deleted canvas back to active and clears deletedAt (M7)", async () => {
+  it("restore brings a soft-deleted canvas back to active, clearing deletedAt AND any stale disabledReason (M7)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    // Disabled → deleted: a stale takedown reason must NOT survive a restore onto
+    // the active row (would launder a takedown into a live canvas, §12.0 #5).
+    await repo.setDisabled(cv.id, "abuse");
     await repo.setStatus(cv.id, "deleted");
     expect((await repo.findById(cv.id))?.deletedAt).not.toBeNull();
     expect(await repo.restore(cv.id)).toBe(true);
     const back = await repo.findById(cv.id);
     expect(back?.status).toBe("active");
     expect(back?.deletedAt).toBeNull();
+    expect(back?.disabledReason).toBeNull(); // stale reason cleared
     // A non-deleted canvas can't be "restored".
     expect(await repo.restore(cv.id)).toBe(false);
   });

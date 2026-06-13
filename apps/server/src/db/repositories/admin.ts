@@ -10,8 +10,8 @@ export interface ListAllCanvasesQuery {
   status?: AdminCanvasStatus;
   /** Page size (caller clamps to a sane max). */
   limit: number;
-  /** Keyset cursor: the `createdAt` of the last row from the previous page. */
-  cursor?: number;
+  /** Keyset cursor: the `id` of the last row from the previous page (see below). */
+  cursor?: string;
 }
 
 /** Platform overview aggregates (§6.10.6 — AI spend deferred to M9). */
@@ -44,23 +44,23 @@ export function adminRepository(client: DbClient) {
 
   return {
     /**
-     * Cross-owner canvas list, newest-first, keyset-paginated on `createdAt`.
-     * Default excludes soft-deleted (the deleted-restore view passes
-     * `status:"deleted"` explicitly).
+     * Cross-owner canvas list, newest-first, keyset-paginated on the **UUIDv7 id**.
+     * The id is unique AND time-ordered (its first 48 bits are the creation
+     * timestamp), so ordering + the cursor on `id` alone is exact newest-first
+     * with NO `created_at`-tie row loss — a `created_at`-only keyset drops rows
+     * that share the boundary millisecond (code review). Default excludes
+     * soft-deleted (the deleted-restore view passes `status:"deleted"` explicitly).
      */
     async listAllCanvases(q: ListAllCanvasesQuery): Promise<Canvas[]> {
       const filters = [];
       if (q.status) filters.push(eq(canvasesT.status, q.status));
       else filters.push(ne(canvasesT.status, "deleted"));
-      if (q.cursor !== undefined) filters.push(lt(canvasesT.createdAt, q.cursor));
+      if (q.cursor !== undefined) filters.push(lt(canvasesT.id, q.cursor));
       return (await db
         .select()
         .from(canvasesT)
         .where(and(...filters))
-        // UUIDv7 id is the stable tiebreaker — canvases created in the same
-        // millisecond would otherwise order non-deterministically. The id is
-        // time-ordered, so desc(id) keeps "newest-first" within a created_at tie.
-        .orderBy(desc(canvasesT.createdAt), desc(canvasesT.id))
+        .orderBy(desc(canvasesT.id))
         .limit(q.limit)) as Canvas[];
     },
 
