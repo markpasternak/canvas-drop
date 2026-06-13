@@ -105,6 +105,11 @@ export const canvases = pgTable(
     capRealtime: c.bool("cap_realtime").notNull().default(true),
     apiKeyHash: c.text("api_key_hash").notNull(),
     status: c.text("status").notNull().default("active"), // active | disabled | archived | deleted
+    // Admin takedown reason (§6.10.2 / M7). Owner-facing durable state so the owner
+    // can see WHY their canvas was disabled; null unless status='disabled'. Who/when
+    // is NOT duplicated here — it lives in audit_log (action='canvas_disable'). Cleared
+    // on enable/restore.
+    disabledReason: c.text("disabled_reason"),
     // Pointer (not an FK) to the current ready version — avoids a circular FK with
     // versions.canvas_id; nullable until the first deploy lands.
     currentVersionId: c.text("current_version_id"),

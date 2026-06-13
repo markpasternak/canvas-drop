@@ -31,6 +31,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     capRealtime: true,
     apiKeyHash: "h",
     status: "active",
+    disabledReason: null,
     currentVersionId: "v1",
     createdAt: 0,
     updatedAt: 0,
