@@ -14,6 +14,7 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
+import { adminRepository } from "./db/repositories/admin.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
@@ -29,6 +30,7 @@ import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
+import { adminRoutes } from "./routes/admin.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
@@ -177,6 +179,22 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       engine: deps.engine,
       usage: usageEventsRepository(deps.db),
       files: filesRepository(deps.db),
+    }),
+  );
+
+  // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
+  // (server-resolved isAdmin) gates the whole router. Distinct base from /api/canvases.
+  app.route(
+    "/api/admin",
+    adminRoutes({
+      config: deps.config,
+      admin: adminRepository(deps.db),
+      canvases: deps.canvases,
+      versions: deps.versions,
+      users: deps.users,
+      files: filesRepository(deps.db),
+      settings: settingsSvc,
+      audit: deps.audit,
     }),
   );
 

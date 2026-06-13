@@ -1,0 +1,238 @@
+import { type Config, loadConfig } from "@canvas-drop/shared";
+import { Hono } from "hono";
+import { pino } from "pino";
+import { afterEach, describe, expect, it } from "vitest";
+import { adminSettingsService } from "../admin/settings-service.js";
+import { createAuditLog } from "../audit/audit-log.js";
+import type { DbClient } from "../db/factory.js";
+import { adminRepository } from "../db/repositories/admin.js";
+import { auditRepository } from "../db/repositories/audit.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import { filesRepository } from "../db/repositories/files.js";
+import { settingsRepository } from "../db/repositories/settings.js";
+import { usersRepository } from "../db/repositories/users.js";
+import { versionsRepository } from "../db/repositories/versions.js";
+import { makeTestDb } from "../db/testing.js";
+import type { AppEnv } from "../http/types.js";
+import { adminRoutes } from "./admin.js";
+
+const silent = pino({ level: "silent" });
+const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
+
+function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
+  const canvases = canvasesRepository(client);
+  const audit = createAuditLog(auditRepository(client), silent);
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("user", { id: actor.id, isAdmin: actor.isAdmin } as never);
+    c.set("clientIp", "127.0.0.1");
+    await next();
+  });
+  app.route(
+    "/api/admin",
+    adminRoutes({
+      config,
+      admin: adminRepository(client),
+      canvases,
+      versions: versionsRepository(client),
+      users: usersRepository(client),
+      files: filesRepository(client),
+      settings: adminSettingsService({ settings: settingsRepository(client), config }),
+      audit,
+    }),
+  );
+  return { app, audit, canvases };
+}
+
+async function seedUser(client: DbClient, sub: string) {
+  return usersRepository(client).upsert({
+    providerSub: sub,
+    email: `${sub}@example.com`,
+    name: sub,
+    isAdmin: false,
+  });
+}
+
+const post = (body?: unknown) => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body ?? {}),
+});
+const put = (body: unknown) => ({
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+describe("admin routes", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("404s EVERY admin route for a non-admin (no existence leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: owner.id, isAdmin: false });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+    for (const [method, path] of [
+      ["GET", "/api/admin/canvases"],
+      ["GET", "/api/admin/overview"],
+      ["GET", "/api/admin/settings/models"],
+      ["GET", "/api/admin/settings/quotas"],
+    ] as const) {
+      const res = await app.request(path, { method });
+      expect(res.status).toBe(404);
+    }
+    const dis = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
+    expect(dis.status).toBe(404);
+  });
+
+  it("admin disables a canvas with a reason (audited); enable clears it", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "admin",
+      isAdmin: true,
+    });
+    const { app, audit, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+
+    const dis = await app.request(
+      `/api/admin/canvases/${cv.id}/disable`,
+      post({ reason: "policy violation" }),
+    );
+    expect(dis.status).toBe(200);
+    const down = await canvases.findById(cv.id);
+    expect(down?.status).toBe("disabled");
+    expect(down?.disabledReason).toBe("policy violation");
+    await audit.flush();
+    const rows = (await auditRepository(client).recent(50)) as Array<{
+      action: string;
+      meta: { reason?: string } | null;
+    }>;
+    const disableRow = rows.find((r) => r.action === "canvas_disable");
+    expect(disableRow).toBeDefined();
+    expect(disableRow?.meta?.reason).toBe("policy violation");
+
+    const en = await app.request(`/api/admin/canvases/${cv.id}/enable`, post());
+    expect(en.status).toBe(200);
+    const up = await canvases.findById(cv.id);
+    expect(up?.status).toBe("active");
+    expect(up?.disabledReason).toBeNull();
+  });
+
+  it("disable on an archived canvas → 409 not_active", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+    await canvases.archive(cv.id);
+    const res = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("not_active");
+  });
+
+  it("restores a soft-deleted canvas; 409 on a non-deleted one", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+    await canvases.setStatus(cv.id, "deleted");
+    expect((await app.request(`/api/admin/canvases/${cv.id}/restore`, post())).status).toBe(200);
+    expect((await canvases.findById(cv.id))?.status).toBe("active");
+    // already active → 409
+    expect((await app.request(`/api/admin/canvases/${cv.id}/restore`, post())).status).toBe(409);
+  });
+
+  it("lists canvases across owners with status filter + enrichment", async () => {
+    client = await makeTestDb("sqlite");
+    const a = await seedUser(client, "alice");
+    const b = await seedUser(client, "bob");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    await canvases.create({ ownerId: a.id, slug: "aa-1111-2222", apiKeyHash: "h1" });
+    const c2 = await canvases.create({ ownerId: b.id, slug: "bb-1111-2222", apiKeyHash: "h2" });
+    await canvases.setDisabled(c2.id, "spam");
+
+    const all = await app.request("/api/admin/canvases");
+    expect(all.status).toBe(200);
+    const body = (await all.json()) as {
+      canvases: Array<{ owner: { email: string }; disabledReason: string | null }>;
+    };
+    expect(body.canvases.length).toBe(2);
+    const owners = new Set(body.canvases.map((c) => c.owner.email));
+    expect(owners).toEqual(new Set(["alice@example.com", "bob@example.com"]));
+
+    const disabled = (await (await app.request("/api/admin/canvases?status=disabled")).json()) as {
+      canvases: Array<{ disabledReason: string | null }>;
+    };
+    expect(disabled.canvases.length).toBe(1);
+    expect(disabled.canvases[0]?.disabledReason).toBe("spam");
+  });
+
+  it("overview returns totals + top canvases", async () => {
+    client = await makeTestDb("sqlite");
+    const a = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    await canvases.create({ ownerId: a.id, slug: "aa-1111-2222", apiKeyHash: "h1" });
+    const res = await app.request("/api/admin/overview");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      canvasCountByStatus: Record<string, number>;
+      userCount: number;
+      topCanvases: unknown[];
+    };
+    expect(body.canvasCountByStatus.active).toBe(1);
+    expect(body.userCount).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(body.topCanvases)).toBe(true);
+  });
+
+  it("manages the model allowlist + quota defaults (audited); rejects invalid bodies", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+
+    const models1 = (await (await app.request("/api/admin/settings/models")).json()) as {
+      models: string[];
+    };
+    expect(models1.models).toEqual(config.ai.models);
+    const setModels = await app.request(
+      "/api/admin/settings/models",
+      put({ models: ["m1", "m2"] }),
+    );
+    expect(setModels.status).toBe(200);
+    const models2 = (await (await app.request("/api/admin/settings/models")).json()) as {
+      models: string[];
+    };
+    expect(models2.models).toEqual(["m1", "m2"]);
+    expect((await app.request("/api/admin/settings/models", put({ models: [] }))).status).toBe(400);
+
+    const setQuota = await app.request(
+      "/api/admin/settings/quotas",
+      put({ quotas: { "kv.keys.shared": 42 } }),
+    );
+    expect(setQuota.status).toBe(200);
+    const quotaBody = (await (await app.request("/api/admin/settings/quotas")).json()) as {
+      quotas: Array<{ key: string; value: number; override: number | null }>;
+    };
+    const shared = quotaBody.quotas.find((q) => q.key === "kv.keys.shared");
+    expect(shared?.value).toBe(42);
+    expect(shared?.override).toBe(42);
+    // Unknown key rejected.
+    expect(
+      (await app.request("/api/admin/settings/quotas", put({ quotas: { bogus: 1 } }))).status,
+    ).toBe(400);
+  });
+
+  it("rejects a cross-site mutation (same-origin guard)", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const res = await app.request("/api/admin/settings/models", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({ models: ["m1"] }),
+    });
+    expect(res.status).toBe(403);
+  });
+});

@@ -119,6 +119,37 @@ describe("managementRoutes", () => {
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
   });
 
+  it("a disabled canvas's reason reaches the OWNER but never a non-owner (M7, §12.0 #3)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    // An admin takes it down with a reason.
+    await canvasesRepository(client).setDisabled(created.id, "internal HR investigation");
+
+    // Owner sees the reason in their own canvas detail (the "owner sees why" surface).
+    const asOwner = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}`,
+    );
+    expect(asOwner.status).toBe(200);
+    expect((await jsonOf<{ disabledReason: string }>(asOwner)).disabledReason).toBe(
+      "internal HR investigation",
+    );
+
+    // A non-owner 404s — they never receive the projection (or the operator's note).
+    const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}`,
+    );
+    expect(asOther.status).toBe(404);
+    expect(await asOther.text()).not.toContain("HR investigation");
+  });
+
   it("an admin can read another user's canvas", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

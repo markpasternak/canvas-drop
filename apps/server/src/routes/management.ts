@@ -60,7 +60,14 @@ const settingsSchema = z.object({
   galleryTags: z.array(z.string()).optional(),
 });
 
-/** Public canvas view (never leaks `api_key_hash` / `password_hash`). */
+/**
+ * OWNER/ADMIN canvas view (never leaks `api_key_hash` / `password_hash`). Every
+ * caller of this projection is gated by `ownedCanvas` (owner/admin) or
+ * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
+ * sees why"). It is NOT a public/shared projection: any future non-owner-facing
+ * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
+ * and other owner-only fields. Misnamed "public" for historical reasons.
+ */
 function publicCanvas(config: Config, cv: Canvas) {
   return {
     id: cv.id,
@@ -83,6 +90,8 @@ function publicCanvas(config: Config, cv: Canvas) {
     capabilities: storedCapabilities(cv),
     effective: effectiveCapabilities(cv, capabilityGlobals(config)),
     status: cv.status,
+    // Admin takedown reason (§6.10.2, M7). Owner/admin-only — see the doc above.
+    disabledReason: cv.disabledReason,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
     updatedAt: cv.updatedAt,
