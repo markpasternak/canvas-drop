@@ -95,12 +95,16 @@ export interface DeployResult {
   warnings: string[];
 }
 
-/** Per-canvas usage figures (D24, M6) — KV ops + file storage. */
+/** Per-canvas usage figures (D24) — KV ops + file storage (M6), AI + realtime (M9). */
 export interface CanvasUsage {
   kvOps: number;
   fileOps: number;
   fileCount: number;
   fileBytes: number;
+  aiCalls: number;
+  aiTokens: number;
+  aiCostUsd: number;
+  realtimeConnects: number;
 }
 
 /** One file in the draft (no bytes — those load on demand via getDraftFile). */

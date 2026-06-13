@@ -816,17 +816,22 @@ describe("managementRoutes", () => {
 
   // --- Usage stats (U10) ---
 
-  it("GET /:id/usage returns KV op + file storage figures for the owner", async () => {
+  it("GET /:id/usage returns KV op, file storage, AI and realtime figures for the owner", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const created = await createCanvas(app, { backendEnabled: true });
-    // Seed a KV op + a file row directly through the repos.
+    // Seed a KV op + a realtime connect + a file row + an AI call.
     await usageEventsRepository(client).record({
       canvasId: created.id,
       userId: owner.id,
       type: "kv_op",
       meta: { op: "set" },
+    });
+    await usageEventsRepository(client).record({
+      canvasId: created.id,
+      userId: owner.id,
+      type: "rt_connect",
     });
     await filesRepository(client).insert({
       id: "f1",
@@ -837,13 +842,36 @@ describe("managementRoutes", () => {
       storageKey: `files/${created.id}/f1`,
       uploadedBy: owner.id,
     });
+    await aiUsageRepository(client).record({
+      canvasId: created.id,
+      userId: owner.id,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 0.0125,
+    });
     const res = await app.request(`/api/canvases/${created.id}/usage`);
     expect(res.status).toBe(200);
-    expect(await jsonOf<{ kvOps: number; fileCount: number; fileBytes: number }>(res)).toEqual({
+    expect(
+      await jsonOf<{
+        kvOps: number;
+        fileCount: number;
+        fileBytes: number;
+        aiCalls: number;
+        aiTokens: number;
+        aiCostUsd: number;
+        realtimeConnects: number;
+      }>(res),
+    ).toEqual({
       kvOps: 1,
       fileOps: 0,
       fileCount: 1,
       fileBytes: 1234,
+      aiCalls: 1,
+      aiTokens: 150,
+      aiCostUsd: 0.0125,
+      realtimeConnects: 1,
     });
   });
 

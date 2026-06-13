@@ -4,8 +4,15 @@ import { Skeleton } from "../components/Skeleton.js";
 import { formatBytes } from "../lib/format.js";
 import { useCanvas, useUsage } from "../lib/queries.js";
 
-/** Tiles that light up in later milestones (views = C/E, AI/realtime = M9). */
-const COMING_SOON = ["Unique & total viewers", "AI tokens & cost", "Peak realtime connections"];
+/** Tiles that light up in later milestones (views = C/E). */
+const COMING_SOON = ["Unique & total viewers"];
+
+/** Compact USD: extra precision for small AI costs. */
+function formatUsd(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -52,6 +59,16 @@ export default function Usage() {
           label="File storage"
           value={formatBytes(usage.fileBytes)}
           sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+        />
+        <Stat
+          label="AI usage"
+          value={formatUsd(usage.aiCostUsd)}
+          sub={`${usage.aiTokens.toLocaleString()} tokens · ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
+        />
+        <Stat
+          label="Realtime connections"
+          value={usage.realtimeConnects.toLocaleString()}
+          sub="total connects"
         />
       </div>
       <div className="space-y-2">

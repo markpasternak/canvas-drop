@@ -192,22 +192,29 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json(publicCanvas(deps.config, cv));
   });
 
-  // Owner usage stats (D24, plan 007 / M6): KV op count + file storage, derived
-  // from usage_events + files. Owner-or-admin only (ownedCanvas), dashboard-session
-  // gated — NOT the canvas runtime router.
+  // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
+  // realtime connect count (M9), derived from usage_events + files + ai_usage.
+  // Owner-or-admin only (ownedCanvas), dashboard-session gated — NOT the runtime router.
+  // Realtime is ephemeral, so "peak concurrent connections" isn't derivable; we
+  // surface the connect count (rt_connect events) instead.
   app.get("/:id/usage", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const [counts, fileBytes, fileCount] = await Promise.all([
+    const [counts, fileBytes, fileCount, ai] = await Promise.all([
       deps.usage.countByType(cv.id, null),
       deps.files.totalBytes(cv.id),
       deps.files.countFiles(cv.id),
+      deps.aiUsage.canvasTotals(cv.id),
     ]);
     return c.json({
       kvOps: counts.kv_op ?? 0,
       fileOps: counts.file_op ?? 0,
       fileCount,
       fileBytes,
+      aiCalls: ai.calls,
+      aiTokens: ai.inputTokens + ai.outputTokens,
+      aiCostUsd: ai.costUsd,
+      realtimeConnects: counts.rt_connect ?? 0,
     });
   });
 
