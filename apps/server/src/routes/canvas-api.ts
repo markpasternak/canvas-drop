@@ -10,6 +10,7 @@ import type { KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { canvasApiIsolation } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 
 export interface CanvasApiDeps {
@@ -54,9 +55,9 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     return c.json({ id: u.id, email: u.email, name: u.name, avatarUrl: u.avatarUrl });
   });
 
-  // KV primitive (U6).
+  // KV primitive (U6) and Files primitive (U7).
   app.route("/kv", canvasKvRoutes(deps));
-  // Files primitive (U7) mounts its sub-router here.
+  app.route("/files", canvasFilesRoutes(deps));
 
   return app;
 }
