@@ -70,12 +70,20 @@ export default function CreateCanvas() {
     setError(null);
     try {
       const canvas = await api.createCanvas({ title: title || undefined });
-      if (kind === "folder") {
-        await api.deployFolder(canvas.id, folderForm(files));
-      } else {
-        const first = files[0];
-        if (!first) return;
-        await api.deployZip(canvas.id, await first.arrayBuffer());
+      try {
+        if (kind === "folder") {
+          await api.deployFolder(canvas.id, folderForm(files));
+        } else {
+          const first = files[0];
+          if (!first) return;
+          await api.deployZip(canvas.id, await first.arrayBuffer());
+        }
+      } catch (deployErr) {
+        // Deploy failed after the canvas was created — soft-delete the orphan so
+        // the user isn't left with an empty canvas + a forfeited key (mirrors the
+        // server-side /paste cleanup). Then surface the deploy error for retry.
+        await api.deleteCanvas(canvas.id).catch(() => {});
+        throw deployErr;
       }
       setRevealed({ apiKey: canvas.apiKey, id: canvas.id, deployed: true });
     } catch (err) {

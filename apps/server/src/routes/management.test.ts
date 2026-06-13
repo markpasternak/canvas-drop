@@ -54,6 +54,11 @@ async function seedUser(client: DbClient, sub: string, isAdmin = false) {
   });
 }
 
+// SQLite-only by design: these are HTTP route tests (auth, routing, response
+// shaping) which are dialect-independent. The one dialect-sensitive new path —
+// versions.findByIds' empty-array `in ()` case — is dual-dialect tested at the
+// repo level in db/repositories/versions.test.ts. Running this whole suite on
+// pglite would ~double its runtime for no additional SQL coverage.
 describe("managementRoutes", () => {
   let client: DbClient;
   afterEach(async () => {
@@ -443,6 +448,26 @@ describe("managementRoutes", () => {
           method: "POST",
           headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
           body: JSON.stringify({ version: 99 }),
+        })
+      ).status,
+    ).toBe(404);
+    // cross-canvas: a version number that exists on ANOTHER owned canvas must not
+    // resolve here (findReadyByNumber is canvas-scoped — §12.0 invariant #4).
+    const otherCanvas = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>other</h1>" }),
+      }),
+    );
+    // `otherCanvas` now has a ready version 1; a version number only it has must
+    // 404 on a different canvas — findReadyByNumber is canvas-scoped.
+    expect(
+      (
+        await app.request(`/api/canvases/${otherCanvas.id}/rollback`, {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+          body: JSON.stringify({ version: 2 }), // other has only v1
         })
       ).status,
     ).toBe(404);

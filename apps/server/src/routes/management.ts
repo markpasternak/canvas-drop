@@ -57,7 +57,8 @@ function publicCanvas(config: Config, cv: Canvas) {
     spaFallback: cv.spaFallback,
     galleryListed: cv.galleryListed,
     gallerySummary: cv.gallerySummary,
-    galleryTags: cv.galleryTags,
+    // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
+    galleryTags: cv.galleryTags as string[] | null,
     status: cv.status,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
@@ -238,8 +239,12 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { version: body.version },
     });
-    const updated = (await deps.canvases.findById(cv.id)) ?? cv;
-    return c.json({ ...publicCanvas(deps.config, updated), version: body.version });
+    // Reflect the swap from known-good data (target.id) rather than re-reading —
+    // avoids returning a stale snapshot if a refetch transiently fails.
+    return c.json({
+      ...publicCanvas(deps.config, { ...cv, currentVersionId: target.id }),
+      version: body.version,
+    });
   });
 
   // --- Deploy entry points (UI calls these; the engine + result shape is U18/U19) ---

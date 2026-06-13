@@ -33,7 +33,7 @@ export function ConfirmDialog({
   destructive?: boolean;
   loading?: boolean;
   confirmPhrase?: string;
-  confirmPhraseLabel?: ReactNode;
+  confirmPhraseLabel?: string;
 }) {
   const [typed, setTyped] = useState("");
   useEffect(() => {
@@ -48,9 +48,7 @@ export function ConfirmDialog({
         {children && <div className="text-sm text-muted">{children}</div>}
         {confirmPhrase && (
           <Field
-            label={
-              confirmPhraseLabel ? String(confirmPhraseLabel) : `Type ${confirmPhrase} to confirm`
-            }
+            label={confirmPhraseLabel ?? `Type ${confirmPhrase} to confirm`}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             mono

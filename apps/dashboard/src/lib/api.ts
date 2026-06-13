@@ -105,21 +105,30 @@ export class ApiError extends Error {
   }
 }
 
-/** Redirect the whole page to login. Overridable in tests. */
+/** Redirect the whole page to login. Idempotent + overridable in tests. */
+let redirecting = false;
 let onAuthExpired = () => {
+  if (redirecting) return;
+  redirecting = true;
   window.location.assign("/auth/login");
 };
 export function setAuthExpiredHandler(fn: () => void) {
   onAuthExpired = fn;
+  redirecting = false;
 }
 
-function looksUnauthenticated(res: Response): boolean {
-  if (res.status === 401) return true;
-  // A 302 to the OIDC login is followed by fetch and surfaces as an HTML body
-  // and/or a redirected response — neither is our JSON API answering.
-  if (res.redirected) return true;
-  const ct = res.headers.get("content-type") ?? "";
-  return !ct.includes("application/json");
+function isJson(res: Response): boolean {
+  return (res.headers.get("content-type") ?? "").includes("application/json");
+}
+
+/**
+ * The session expired (KTD-8) when: status is 401; the request followed a
+ * redirect (a 302 to the OIDC login); OR a 2xx returned a non-JSON body (a proxy
+ * served its HTML login page with a 200). A non-2xx non-JSON body (e.g. a 5xx
+ * HTML error page) is NOT auth-expiry — it falls through to a normal ApiError.
+ */
+function isAuthExpiry(res: Response): boolean {
+  return res.status === 401 || res.redirected || (res.ok && !isJson(res));
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -154,11 +163,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError("network_error", err instanceof Error ? err.message : "Network error");
   }
 
-  if (looksUnauthenticated(res) && res.status !== 404 && res.status !== 400) {
-    if (res.status === 401 || res.redirected) {
-      onAuthExpired();
-      throw new ApiError("unauthorized", "Session expired", undefined, res.status);
-    }
+  if (isAuthExpiry(res)) {
+    onAuthExpired();
+    throw new ApiError("unauthorized", "Session expired", undefined, res.status);
   }
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;

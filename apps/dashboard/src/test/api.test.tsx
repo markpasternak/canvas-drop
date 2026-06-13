@@ -57,6 +57,40 @@ describe("api error handling", () => {
     expect(onExpired).toHaveBeenCalledOnce();
   });
 
+  it("a 200 HTML body (proxy served its login page) is treated as auth-expiry", async () => {
+    const onExpired = vi.fn();
+    setAuthExpiredHandler(onExpired);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<!doctype html><title>Login</title>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }),
+      ),
+    );
+    await expect(api.me()).rejects.toMatchObject({ code: "unauthorized" });
+    expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("a 5xx HTML error page is NOT auth-expiry (surfaces a normal error)", async () => {
+    const onExpired = vi.fn();
+    setAuthExpiredHandler(onExpired);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<html>boom</html>", {
+            status: 503,
+            headers: { "content-type": "text/html" },
+          }),
+      ),
+    );
+    await expect(api.listCanvases()).rejects.toBeInstanceOf(ApiError);
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
   it("a redirect to an HTML login page is treated as auth-expiry", async () => {
     const onExpired = vi.fn();
     setAuthExpiredHandler(onExpired);

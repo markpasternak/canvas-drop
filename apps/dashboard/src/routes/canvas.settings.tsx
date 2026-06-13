@@ -61,13 +61,17 @@ export default function Settings() {
   const [description, setDescription] = useState("");
   const [gallerySummary, setGallerySummary] = useState("");
   const [galleryTags, setGalleryTags] = useState("");
+  // Seed the local field mirrors once per canvas identity — NOT on every `canvas`
+  // object change. An optimistic toggle rewrites the cached canvas object; keying
+  // on canvas.id keeps in-progress (unblurred) text edits from being clobbered.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
   useEffect(() => {
     if (!canvas) return;
     setTitle(canvas.title);
     setDescription(canvas.description ?? "");
     setGallerySummary(canvas.gallerySummary ?? "");
     setGalleryTags((canvas.galleryTags ?? []).join(", "));
-  }, [canvas]);
+  }, [canvas?.id]);
 
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;

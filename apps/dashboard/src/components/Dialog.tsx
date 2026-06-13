@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 /**
  * Focus-trapped modal. Traps Tab within the panel, closes on Escape + backdrop
@@ -25,6 +25,7 @@ export function Dialog({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const autoId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -63,7 +64,7 @@ export function Dialog({
   }, [open, dismissable, onClose]);
 
   if (!open) return null;
-  const titleId = labelledBy ?? "dialog-title";
+  const titleId = labelledBy ?? autoId;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-dismiss; keyboard users dismiss via Escape (handled in the keydown effect)

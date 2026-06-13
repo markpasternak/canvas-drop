@@ -61,6 +61,18 @@ describe("serveSpa", () => {
     expect(res.headers.get("cache-control")).toBe("no-cache");
   });
 
+  it("404s a missing hashed asset instead of serving the HTML shell (stale-chunk safety)", async () => {
+    const res = await appFor(config).request("/assets/old-chunk-deadbeef.js");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("treats a malformed percent-encoded path as a shell request (no 500)", async () => {
+    const res = await appFor(config).request("/%E0%A4%A");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
   it("does not serve the SPA for a non-dashboard role", async () => {
     const res = await appFor(config, "platform-api").request("/c/x/kv/y");
     expect(res.status).toBe(404);

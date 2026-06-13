@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "@canvas-drop/shared";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { mimeFor } from "../canvas/mime.js";
 import type { AppEnv } from "../http/types.js";
@@ -62,46 +63,57 @@ export function serveSpa(deps: { config: Config }) {
   const distDir = resolveDistDir(deps.config);
   const indexPath = join(distDir, "index.html");
 
+  function indexResponse(c: Context<AppEnv>, body: Uint8Array) {
+    const headers = new Headers(SECURITY_HEADERS);
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    headers.set("Cache-Control", "no-cache");
+    // biome-ignore lint/suspicious/noExplicitAny: BodyInit accepts Uint8Array at runtime
+    return c.body(body as any, 200, Object.fromEntries(headers));
+  }
+
   return createMiddleware<AppEnv>(async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") return next();
 
-    const rel = normalize(decodeURIComponent(new URL(c.req.url).pathname)).replace(
-      /^(\.\.[/\\])+/,
-      "",
-    );
+    // A malformed percent-encoding must not 500 — treat it as a shell request.
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(new URL(c.req.url).pathname);
+    } catch {
+      pathname = "/";
+    }
+    const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
     const candidate = join(distDir, rel);
 
     // Path-traversal guard: the resolved file must stay within distDir.
     const within = candidate === distDir || candidate.startsWith(distDir + sep);
-    const isAsset = within && rel !== "/" && rel !== "" && !rel.endsWith("/");
+    const isFileReq = within && rel !== "/" && !rel.endsWith("/");
+    // Vite emits content-hashed, immutable filenames under /assets/.
+    const isHashedAsset = rel.startsWith("/assets/");
 
-    let body = isAsset ? await read(candidate) : null;
-    let servedIndex = false;
-    if (body === null) {
-      // History fallback → index.html (SPA routing).
-      body = await read(indexPath);
-      servedIndex = true;
+    const fileBody = isFileReq ? await read(candidate) : null;
+    if (fileBody !== null) {
+      const headers = new Headers(SECURITY_HEADERS);
+      headers.set("Content-Type", mimeFor(candidate).contentType);
+      headers.set(
+        "Cache-Control",
+        isHashedAsset ? "public, max-age=31536000, immutable" : "no-cache",
+      );
+      // biome-ignore lint/suspicious/noExplicitAny: BodyInit accepts Uint8Array at runtime
+      return c.body(fileBody as any, 200, Object.fromEntries(headers));
     }
-    if (body === null) {
+
+    // A missing hashed asset must 404, NOT fall back to the HTML shell — a stale
+    // lazy-route chunk requested across a redeploy then fails cleanly (and with
+    // nosniff the browser won't execute HTML as a module) instead of silently
+    // serving index.html with a 200.
+    if (isHashedAsset) return c.json({ error: "not_found" }, 404);
+
+    // History fallback → index.html (SPA routing).
+    const index = await read(indexPath);
+    if (index === null) {
       // The SPA isn't built (dev runs it via Vite; prod must `pnpm build`).
       return c.json({ error: "dashboard_not_built", message: "dashboard dist not found" }, 503);
     }
-
-    const headers = new Headers(SECURITY_HEADERS);
-    if (servedIndex) {
-      headers.set("Content-Type", "text/html; charset=utf-8");
-      headers.set("Cache-Control", "no-cache");
-    } else {
-      headers.set("Content-Type", mimeFor(candidate).contentType);
-      // Vite emits content-hashed filenames under assets/ → safe to cache hard.
-      headers.set(
-        "Cache-Control",
-        rel.startsWith("assets/") || rel.startsWith("/assets/")
-          ? "public, max-age=31536000, immutable"
-          : "no-cache",
-      );
-    }
-    // biome-ignore lint/suspicious/noExplicitAny: BodyInit accepts Uint8Array at runtime
-    return c.body(body as any, 200, Object.fromEntries(headers));
+    return indexResponse(c, index);
   });
 }
