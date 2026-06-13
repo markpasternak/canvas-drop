@@ -16,6 +16,24 @@ export interface Me {
   isAdmin: boolean;
 }
 
+/** The four toggleable backend features (plan 006). Identity is implicit (no flag). */
+export type FeatureCapability = "kv" | "files" | "ai" | "realtime";
+
+/** Raw stored per-feature flags (independent of backend/global state). */
+export type StoredCapabilities = Record<FeatureCapability, boolean>;
+
+/** Effective on/off per capability after the server ANDs backend + flag + globals. */
+export type EffectiveCapabilities = Record<FeatureCapability | "identity", boolean>;
+
+/** Capability patch sent to PATCH /:id/capabilities (all optional). */
+export interface CanvasCapabilitiesPatch {
+  backendEnabled?: boolean;
+  kv?: boolean;
+  files?: boolean;
+  ai?: boolean;
+  realtime?: boolean;
+}
+
 export interface Canvas {
   id: string;
   slug: string;
@@ -29,6 +47,12 @@ export interface Canvas {
   galleryListed: boolean;
   gallerySummary: string | null;
   galleryTags: string[] | null;
+  /** Backend-group master switch (plan 006). */
+  backendEnabled: boolean;
+  /** Raw stored feature flags (what the toggles control). */
+  capabilities: StoredCapabilities;
+  /** Effective state after the server ANDs backend + flag + operator globals. */
+  effective: EffectiveCapabilities;
   status: string;
   currentVersionId: string | null;
   createdAt: number;
@@ -309,6 +333,9 @@ export const api = {
 
   updateSettings: (id: string, patch: CanvasSettings) =>
     request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),
+
+  updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
+    request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),
 
   regenerateSlug: (id: string) =>
     request<Canvas>(`/api/canvases/${id}/regenerate-slug`, { method: "POST" }),

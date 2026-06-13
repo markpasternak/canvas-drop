@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { folderFormFromFiles } from "../components/DeployFiles.js";
-import { api, type Canvas, type CanvasSettings, type DraftView } from "./api.js";
+import {
+  api,
+  type Canvas,
+  type CanvasCapabilitiesPatch,
+  type CanvasSettings,
+  type DraftView,
+} from "./api.js";
 import { keys } from "./queries.js";
 
 /**
@@ -29,6 +35,65 @@ export function useUpdateSettings(id: string) {
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
+        qc.setQueryData(keys.canvas(id), optimistic);
+      }
+      return { prev };
+    },
+    onError: (_err, _patch, ctx) => {
+      if (ctx?.prev) qc.setQueryData(keys.canvas(id), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/**
+ * Capability update (plan 006) — OPTIMISTIC, mirroring useUpdateSettings. Applies
+ * the master/feature flags to the cached `capabilities`/`backendEnabled` and
+ * recomputes `effective` so disabled-feature hints update without a round-trip.
+ * The server is authoritative; onSettled re-syncs (e.g. operator-global gating).
+ */
+export function useUpdateCapabilities(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `capabilities-${id}` },
+    mutationFn: (patch: CanvasCapabilitiesPatch) => api.updateCapabilities(id, patch),
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: keys.canvas(id) });
+      const prev = qc.getQueryData<Canvas>(keys.canvas(id));
+      if (prev) {
+        const backendEnabled = patch.backendEnabled ?? prev.backendEnabled;
+        const capabilities = {
+          kv: patch.kv ?? prev.capabilities.kv,
+          files: patch.files ?? prev.capabilities.files,
+          ai: patch.ai ?? prev.capabilities.ai,
+          realtime: patch.realtime ?? prev.capabilities.realtime,
+        };
+        // Optimistic `effective` reflects only backend && flag — the operator
+        // global gating (ai/realtime) lives server-side and is re-synced by
+        // onSettled. A feature already gated off by the operator stays shown that
+        // way: keep the prior effective when the patch didn't change its inputs.
+        const eff = (feature: keyof typeof capabilities): boolean => {
+          const localOn = backendEnabled && capabilities[feature];
+          const inputsUnchanged =
+            backendEnabled === prev.backendEnabled &&
+            capabilities[feature] === prev.capabilities[feature];
+          return inputsUnchanged ? prev.effective[feature] : localOn;
+        };
+        const optimistic: Canvas = {
+          ...prev,
+          backendEnabled,
+          capabilities,
+          effective: {
+            identity: backendEnabled,
+            kv: eff("kv"),
+            files: eff("files"),
+            ai: eff("ai"),
+            realtime: eff("realtime"),
+          },
+        };
         qc.setQueryData(keys.canvas(id), optimistic);
       }
       return { prev };
