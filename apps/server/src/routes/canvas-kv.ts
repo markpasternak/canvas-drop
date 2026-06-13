@@ -3,13 +3,14 @@ import type { Config } from "@canvas-drop/shared";
 import type { Json } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import type { QuotaResolver } from "../admin/settings-service.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { KvNotNumericError, type KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 
-/** KV limits (§6.4.3–5). */
+/** KV limits (§6.4.3–5). The key-count limits are admin-tunable defaults (M7). */
 export const KV_MAX_VALUE_BYTES = 64 * 1024;
 export const KV_MAX_KEY_BYTES = 512;
 export const KV_MAX_KEYS_SHARED = 10_000;
@@ -19,6 +20,8 @@ export interface CanvasKvDeps {
   config: Config;
   kv: KvRepository;
   usage: UsageEventsRepository;
+  /** Admin-tunable quota resolver (M7). Absent → the hard constants above. */
+  quota?: QuotaResolver;
 }
 
 /**
@@ -38,11 +41,15 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
       .catch(() => {});
   };
 
-  /** Reject a new key that would exceed the per-scope key-count limit (§6.4.5). */
+  /** Reject a new key that would exceed the per-scope key-count limit (§6.4.5).
+   *  The limit is the admin-tunable global default (M7) with the hard constant as
+   *  the fallback when no resolver/override is present. */
   async function overKeyLimit(cId: string, scope: string, key: string): Promise<boolean> {
     const exists = (await deps.kv.get(cId, scope, key)) !== null;
     if (exists) return false; // updates don't count against the limit
-    const limit = scope === "shared" ? KV_MAX_KEYS_SHARED : KV_MAX_KEYS_USER;
+    const fallback = scope === "shared" ? KV_MAX_KEYS_SHARED : KV_MAX_KEYS_USER;
+    const quotaKey = scope === "shared" ? "kv.keys.shared" : "kv.keys.user";
+    const limit = deps.quota ? await deps.quota(quotaKey, fallback) : fallback;
     return (await deps.kv.countKeys(cId, scope)) >= limit;
   }
 

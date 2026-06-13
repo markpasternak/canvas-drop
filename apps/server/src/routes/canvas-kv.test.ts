@@ -213,4 +213,39 @@ describe("canvas KV routes", () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("KEY_LIMIT");
   });
+
+  it("honors an admin-LOWERED kv.keys.shared default (M7 quota resolver)", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    // Admin lowered the shared key limit to 1; the resolver returns it.
+    const quota = async (key: string, fallback: number) =>
+      key === "kv.keys.shared" ? 1 : fallback;
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("user", {
+        id: ownerId,
+        email: "o@x.com",
+        name: "o",
+        avatarUrl: null,
+        isAdmin: false,
+      } as never);
+      await next();
+    });
+    app.route(
+      "/v1/c/:slug",
+      canvasApiRoutes({
+        config,
+        canvases: canvasesRepository(client),
+        kv: kvRepository(client),
+        files: filesService({ files: filesRepository(client), storage: memStorage() }),
+        usage: usageEventsRepository(client),
+        quota,
+      }),
+    );
+    // First shared key is fine; the second exceeds the admin-lowered limit of 1.
+    expect((await app.request("/v1/c/app/kv/first", json(1))).status).toBe(200);
+    const res = await app.request("/v1/c/app/kv/second", json(1));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("KEY_LIMIT");
+  });
 });

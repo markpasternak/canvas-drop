@@ -3,6 +3,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
+import type { QuotaResolver } from "../admin/settings-service.js";
 import { decideCanvasAccess } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
@@ -21,6 +22,8 @@ export interface CanvasApiDeps {
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
+  /** Admin-tunable quota resolver (M7) — threaded to the KV route's key-limit check. */
+  quota?: QuotaResolver;
 }
 
 /**

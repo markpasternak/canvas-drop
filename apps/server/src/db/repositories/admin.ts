@@ -57,7 +57,10 @@ export function adminRepository(client: DbClient) {
         .select()
         .from(canvasesT)
         .where(and(...filters))
-        .orderBy(desc(canvasesT.createdAt))
+        // UUIDv7 id is the stable tiebreaker — canvases created in the same
+        // millisecond would otherwise order non-deterministically. The id is
+        // time-ordered, so desc(id) keeps "newest-first" within a created_at tie.
+        .orderBy(desc(canvasesT.createdAt), desc(canvasesT.id))
         .limit(q.limit)) as Canvas[];
     },
 

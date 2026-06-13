@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
+import { adminSettingsService } from "./admin/settings-service.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import { authRoutes } from "./auth/routes.js";
@@ -17,6 +18,7 @@ import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { settingsRepository } from "./db/repositories/settings.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
@@ -71,6 +73,14 @@ export interface BuildAppDeps {
  */
 export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
+  // `effectiveQuota` is the resolver the KV/files primitives read (settings
+  // override ?? their hard constant); admin reads/writes go through the same svc.
+  const settingsSvc = adminSettingsService({
+    settings: settingsRepository(deps.db),
+    config: deps.config,
+  });
 
   app.use("*", requestLogger(deps.rootLogger));
 
@@ -139,8 +149,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       config: deps.config,
       canvases: deps.canvases,
       kv: kvRepository(deps.db),
-      files: filesService({ files: filesRepository(deps.db), storage: deps.storage }),
+      files: filesService({
+        files: filesRepository(deps.db),
+        storage: deps.storage,
+        quota: settingsSvc.effectiveQuota,
+      }),
       usage: usageEventsRepository(deps.db),
+      quota: settingsSvc.effectiveQuota,
     }),
   );
 
