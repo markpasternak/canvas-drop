@@ -79,6 +79,16 @@ export function versionsRepository(client: DbClient) {
       return (rows[0] as Version | undefined) ?? null;
     },
 
+    /**
+     * Batch-fetch versions by id (list-view `lastDeploy` enrichment — map each
+     * canvas's `currentVersionId` to its summary in one query, no N+1). Guards the
+     * empty-input case: Drizzle's `in ()` errors on some dialects.
+     */
+    async findByIds(ids: string[]): Promise<Version[]> {
+      if (ids.length === 0) return [];
+      return (await db.select().from(t).where(inArray(t.id, ids))) as Version[];
+    },
+
     /** A specific ready version by number (rollback target lookup). */
     async findReadyByNumber(canvasId: string, number: number): Promise<Version | null> {
       const rows = await db

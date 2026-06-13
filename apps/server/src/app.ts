@@ -21,6 +21,7 @@ import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
 import { managementRoutes } from "./routes/management.js";
+import { meRoutes } from "./routes/me.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import type { StorageDriver } from "./storage/driver.js";
 
@@ -112,12 +113,17 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     await next();
   });
 
+  // Current-user identity for the SPA — its own router (NOT under /api/canvases,
+  // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.
+  app.route("/api/me", meRoutes());
+
   // Session-authenticated management API.
   app.route(
     "/api/canvases",
     managementRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      versions: deps.versions,
       audit: deps.audit,
       engine: deps.engine,
     }),

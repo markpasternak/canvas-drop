@@ -14,6 +14,7 @@ import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
+import { meRoutes } from "./me.js";
 
 const silent = pino({ level: "silent" });
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
@@ -39,7 +40,8 @@ function buildApp(
     c.set("clientIp", "127.0.0.1");
     await next();
   });
-  app.route("/api/canvases", managementRoutes({ config, canvases, audit, engine }));
+  app.route("/api/me", meRoutes());
+  app.route("/api/canvases", managementRoutes({ config, canvases, versions, audit, engine }));
   return app;
 }
 
@@ -300,5 +302,160 @@ describe("managementRoutes", () => {
       body: "{}",
     });
     expect(res.status).toBe(403);
+  });
+
+  it("GET /api/me returns exactly the five projected fields (no spread leak)", async () => {
+    client = await makeTestDb("sqlite");
+    // Inject a full user row (incl. fields not in the projection) to prove the
+    // response shape is an explicit allowlist, not a spread.
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("user", {
+        id: "u1",
+        email: "u1@example.com",
+        name: "User One",
+        avatarUrl: null,
+        isAdmin: true,
+        providerSub: "secret-sub",
+        isBlocked: false,
+        createdAt: 123,
+      } as never);
+      await next();
+    });
+    app.route("/api/me", meRoutes());
+    const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));
+    expect(Object.keys(body).sort()).toEqual(["avatarUrl", "email", "id", "isAdmin", "name"]);
+    expect(body.providerSub).toBeUndefined();
+    expect(body.isBlocked).toBeUndefined();
+    expect(body.isAdmin).toBe(true);
+  });
+
+  it("list enriches each canvas with its lastDeploy summary (null until deployed)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    // one never-deployed canvas
+    await app.request("/api/canvases", {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: "{}",
+    });
+    // one deployed via paste
+    await app.request("/api/canvases/paste", {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>x</h1>" }),
+    });
+    const list = await jsonOf<{ canvases: { lastDeploy: { version: number } | null }[] }>(
+      await app.request("/api/canvases"),
+    );
+    const deploys = list.canvases.map((c) => c.lastDeploy);
+    expect(deploys.filter((d) => d === null)).toHaveLength(1);
+    expect(deploys.filter((d) => d?.version === 1)).toHaveLength(1);
+  });
+
+  it("versions: owner sees history with the current marker; a non-owner gets 404", async () => {
+    const { zipSync } = await import("fflate");
+    const { Buffer } = await import("node:buffer");
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const zip = (n: string) =>
+      Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
+    for (const n of ["<h1>1</h1>", "<h1>2</h1>"]) {
+      await app.request(`/api/canvases/${created.id}/deploy/zip`, {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+        body: zip(n),
+      });
+    }
+    const hist = await jsonOf<{ versions: { number: number; current: boolean }[] }>(
+      await app.request(`/api/canvases/${created.id}/versions`),
+    );
+    expect(hist.versions.map((v) => v.number)).toEqual([2, 1]); // newest first
+    expect(hist.versions.find((v) => v.current)?.number).toBe(2);
+
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/versions`,
+    );
+    expect(denied.status).toBe(404);
+  });
+
+  it("rollback: moves the pointer, rejects bad/cross-canvas versions, non-owner, cross-origin", async () => {
+    const { zipSync } = await import("fflate");
+    const { Buffer } = await import("node:buffer");
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const zip = (n: string) =>
+      Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    for (const n of ["<h1>1</h1>", "<h1>2</h1>"]) {
+      await app.request(`/api/canvases/${created.id}/deploy/zip`, {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+        body: zip(n),
+      });
+    }
+    // non-owner first (reject path before happy path)
+    const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/rollback`,
+      {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      },
+    );
+    expect(asOther.status).toBe(404);
+    // cross-origin
+    const xorig = await app.request(`/api/canvases/${created.id}/rollback`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "cross-site", "content-type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(xorig.status).toBe(403);
+    // missing / non-existent version
+    expect(
+      (
+        await app.request(`/api/canvases/${created.id}/rollback`, {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await app.request(`/api/canvases/${created.id}/rollback`, {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+          body: JSON.stringify({ version: 99 }),
+        })
+      ).status,
+    ).toBe(404);
+    // happy path: roll back to v1, pointer moves
+    const ok = await app.request(`/api/canvases/${created.id}/rollback`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(ok.status).toBe(200);
+    const v1 = await versionsRepository(client).findReadyByNumber(created.id, 1);
+    expect((await canvasesRepository(client).findById(created.id))?.currentVersionId).toBe(v1?.id);
   });
 });
