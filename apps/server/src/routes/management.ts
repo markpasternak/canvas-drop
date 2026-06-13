@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { capabilityGlobals } from "../canvas/capability-guard.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
@@ -54,11 +55,6 @@ const settingsSchema = z.object({
   gallerySummary: z.string().max(500).nullable().optional(),
   galleryTags: z.array(z.string()).optional(),
 });
-
-/** Operator global switches the capability helper ANDs against (plan 006). */
-function capabilityGlobals(config: Config) {
-  return { realtimeEnabled: config.realtimeEnabled, aiEnabled: config.ai.apiKey !== undefined };
-}
 
 /** Public canvas view (never leaks `api_key_hash` / `password_hash`). */
 function publicCanvas(config: Config, cv: Canvas) {
