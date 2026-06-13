@@ -1,7 +1,7 @@
 ---
 title: "feat: Canvas capabilities foundation (backend group + per-feature toggles)"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 plan_id: 2026-06-13-006
 depth: standard
