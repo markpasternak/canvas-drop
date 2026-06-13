@@ -1,7 +1,7 @@
 ---
 title: "feat: Canvas backend primitives (M6 — KV, Files, Identity, browser SDK)"
 type: feat
-status: active
+status: completed
 date: 2026-06-13
 plan_id: 2026-06-13-007
 depth: deep
