@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "./api.js";
+import { type AdminCanvasStatus, api } from "./api.js";
 
 export const keys = {
   me: ["me"] as const,
@@ -9,6 +9,10 @@ export const keys = {
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
   usage: (id: string) => ["usage", id] as const,
+  adminCanvases: (status?: AdminCanvasStatus) => ["admin", "canvases", status ?? "all"] as const,
+  adminOverview: ["admin", "overview"] as const,
+  adminModels: ["admin", "models"] as const,
+  adminQuotas: ["admin", "quotas"] as const,
 };
 
 export function useMe() {
@@ -37,4 +41,25 @@ export function useDraft(id: string) {
 
 export function useUsage(id: string) {
   return useQuery({ queryKey: keys.usage(id), queryFn: () => api.getUsage(id) });
+}
+
+// --- Admin (§6.10, M7) ---
+
+export function useAdminCanvases(status?: AdminCanvasStatus) {
+  return useQuery({
+    queryKey: keys.adminCanvases(status),
+    queryFn: () => api.admin.listCanvases(status),
+  });
+}
+
+export function useAdminOverview() {
+  return useQuery({ queryKey: keys.adminOverview, queryFn: api.admin.overview });
+}
+
+export function useAdminModels() {
+  return useQuery({ queryKey: keys.adminModels, queryFn: api.admin.getModels });
+}
+
+export function useAdminQuotas() {
+  return useQuery({ queryKey: keys.adminQuotas, queryFn: api.admin.getQuotas });
 }

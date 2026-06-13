@@ -310,6 +310,39 @@ function jsonBody(body: unknown): RequestInit {
   };
 }
 
+// --- Admin surface (§6.10, M7). Only reachable by an admin user; the server
+//     404s non-admins, and the UI hides the entry behind `me.isAdmin`. ---
+
+export type AdminCanvasStatus = "active" | "disabled" | "archived" | "deleted";
+
+export interface AdminCanvasRow {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  status: string;
+  disabledReason: string | null;
+  owner: { id: string; email: string; name: string } | null;
+  sizeBytes: number;
+  usageOps: number;
+  lastActivityAt: number;
+  createdAt: number;
+}
+
+export interface AdminOverview {
+  canvasCountByStatus: Record<string, number>;
+  userCount: number;
+  totalFileBytes: number;
+  topCanvases: Array<{ canvasId: string; ops: number; slug: string | null; title: string | null }>;
+}
+
+export interface AdminQuota {
+  key: string;
+  value: number;
+  default: number;
+  override: number | null;
+}
+
 export const api = {
   me: () => request<Me>("/api/me"),
 
@@ -415,4 +448,44 @@ export const api = {
 
   restoreToDraft: (id: string, version: number) =>
     request<DraftView>(`/api/canvases/${id}/restore`, jsonBody({ version })),
+
+  // --- Admin (§6.10, M7) ---
+  admin: {
+    listCanvases: (status?: AdminCanvasStatus) =>
+      request<{ canvases: AdminCanvasRow[]; nextCursor: number | null }>(
+        `/api/admin/canvases${status ? `?status=${status}` : ""}`,
+      ).then((r) => r.canvases),
+
+    overview: () => request<AdminOverview>("/api/admin/overview"),
+
+    disableCanvas: (id: string, reason: string) =>
+      request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),
+
+    enableCanvas: (id: string) =>
+      request<{ ok: true }>(`/api/admin/canvases/${id}/enable`, { method: "POST" }),
+
+    // Un-soft-delete (distinct from the draft revert-to-version `restoreToDraft`).
+    restoreCanvas: (id: string) =>
+      request<{ ok: true }>(`/api/admin/canvases/${id}/restore`, { method: "POST" }),
+
+    getModels: () =>
+      request<{ models: string[]; override: string[] | null; default: string[] }>(
+        "/api/admin/settings/models",
+      ),
+
+    setModels: (models: string[]) =>
+      request<{ models: string[] }>("/api/admin/settings/models", {
+        ...jsonBody({ models }),
+        method: "PUT",
+      }),
+
+    getQuotas: () =>
+      request<{ quotas: AdminQuota[] }>("/api/admin/settings/quotas").then((r) => r.quotas),
+
+    setQuotas: (quotas: Record<string, number>) =>
+      request<{ ok: true }>("/api/admin/settings/quotas", {
+        ...jsonBody({ quotas }),
+        method: "PUT",
+      }),
+  },
 };

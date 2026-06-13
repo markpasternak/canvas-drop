@@ -2,6 +2,7 @@ import { Monitor, MoonStars, Plus, Sun } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { BrandMark } from "./components/Brand.js";
 import { cn } from "./lib/cn.js";
+import { useMe } from "./lib/queries.js";
 import { useTheme } from "./lib/theme.js";
 
 function ThemeSwitch() {
@@ -44,6 +45,9 @@ function ThemeSwitch() {
 /** The root shell: a slim top bar (wordmark + create + theme) over the routed
  * content. The wordmark is org-agnostic and re-skinnable. */
 export function AppLayout() {
+  // isAdmin is server-resolved (/api/me). Hiding the link is UX only — the admin
+  // API independently 404s non-admins, so this is not a security boundary.
+  const me = useMe();
   return (
     <div className="min-h-dvh bg-canvas">
       <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78">
@@ -81,6 +85,15 @@ export function AppLayout() {
               >
                 Archived
               </Link>
+              {me.data?.isAdmin && (
+                <Link
+                  to="/admin"
+                  className="rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
+                  activeProps={{ "aria-current": "page" }}
+                >
+                  Admin
+                </Link>
+              )}
             </nav>
           </div>
           <nav className="flex shrink-0 items-center gap-2" aria-label="Primary actions">

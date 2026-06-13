@@ -15,6 +15,8 @@ const VersionsRoute = lazy(() => import("./routes/canvas.versions.js"));
 const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
+const AdminRoute = lazy(() => import("./routes/admin.js"));
+const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
 
 const rootRoute = createRootRoute({ component: AppLayout });
 
@@ -40,6 +42,20 @@ const onboardingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/onboarding",
   component: OnboardingRoute,
+});
+
+// Admin surface (§6.10, M7). Top-level routes (NOT under /c/, /api/, /v1/, /auth/
+// — those are reserved, dashboard-spa-patterns). The server 404s non-admins; the
+// nav entry is hidden for non-admins, but the routes exist for everyone.
+const adminRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin",
+  component: AdminRoute,
+});
+const adminSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/settings",
+  component: AdminSettingsRoute,
 });
 
 const canvasRoute = createRoute({
@@ -86,6 +102,8 @@ export const routeTree = rootRoute.addChildren([
   archivedRoute,
   newRoute,
   onboardingRoute,
+  adminRoute,
+  adminSettingsRoute,
   canvasRoute.addChildren([
     overviewRoute,
     editorRoute,
