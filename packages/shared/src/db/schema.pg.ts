@@ -175,3 +175,28 @@ export const drafts = pgTable(
     uniqueIndex("drafts_canvas_id_uq").on(t.canvasId),
   ],
 );
+
+// Per-op metering substrate (D24, plan 007 / M6). Append-only; one row per
+// primitive op (kv_op | file_op; future: view | deploy | rt_connect). Stats are
+// derived by COUNT over a window; a created_at-keyed prune bounds growth.
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    type: c.text("type").notNull(), // kv_op | file_op | view | deploy | rt_connect
+    meta: c.json("meta"), // op detail, e.g. { op: 'set' }
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    // Stats aggregation + retention prune both filter by canvas + created_at.
+    index("usage_events_canvas_created_idx").on(t.canvasId, t.createdAt),
+  ],
+);
