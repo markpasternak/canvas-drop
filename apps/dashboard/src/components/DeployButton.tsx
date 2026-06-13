@@ -3,7 +3,7 @@ import { ApiError } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { type DeployInput, useDeploy } from "../lib/mutations.js";
 import { Button } from "./Button.js";
-import { DeployProgress, FileDrop } from "./DeployFiles.js";
+import { FileDropOrProgress } from "./DeployFiles.js";
 import { Dialog } from "./Dialog.js";
 import { TextareaField } from "./Field.js";
 import { useToast } from "./Toast.js";
@@ -104,9 +104,7 @@ export function DeployButton({
             </div>
           )}
 
-          {busy && method !== "paste" ? (
-            <DeployProgress pct={progress} />
-          ) : method === "paste" ? (
+          {method === "paste" ? (
             <div className="space-y-3">
               <TextareaField
                 label="HTML"
@@ -132,17 +130,19 @@ export function DeployButton({
               </div>
             </div>
           ) : method === "folder" ? (
-            <FileDrop
+            <FileDropOrProgress
+              busy={busy}
+              pct={progress}
               label="Drag files or a folder here"
               variant="folder"
-              busy={busy}
               onFiles={(files) => run({ kind: "folder", files })}
             />
           ) : (
-            <FileDrop
+            <FileDropOrProgress
+              busy={busy}
+              pct={progress}
               label="Drag a .zip here"
               variant="zip"
-              busy={busy}
               onFiles={(files) => {
                 const file = files[0];
                 if (file) run({ kind: "zip", file });

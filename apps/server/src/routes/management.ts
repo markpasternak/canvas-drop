@@ -87,6 +87,14 @@ export function managementRoutes(deps: ManagementDeps) {
     return cv;
   }
 
+  /** 409 body for deploy/rollback on a non-active (archived/disabled) canvas.
+   *  Publishing to a canvas whose public URL 404s is incoherent — make the caller
+   *  bring it back first. Settings/regenerate/delete stay allowed while archived. */
+  const NOT_ACTIVE = {
+    code: "NOT_ACTIVE",
+    message: "Unarchive this canvas before deploying or changing its live version.",
+  } as const;
+
   // Create → slug + API key (shown once).
   app.post("/", sameOrigin, async (c) => {
     const body = createSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -271,6 +279,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/rollback", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const body = (await c.req.json().catch(() => ({}))) as { version?: number };
     if (typeof body.version !== "number") {
       return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);
@@ -349,6 +358,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/deploy/zip", sameOrigin, deployBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const buf = Buffer.from(await c.req.arrayBuffer());
     if (buf.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
     return deployResponse(c, deps.engine, deps.audit, cv, "zip", fromZip(buf), c.get("user").id);
@@ -357,6 +367,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/deploy/folder", sameOrigin, deployBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     // Each multipart file field's KEY is the file's canvas-relative path.
     const form = await c.req.parseBody({ all: true });
     const entries: DeployEntry[] = [];
@@ -376,6 +387,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/deploy/paste", sameOrigin, deployBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const body = z
       .object({ html: z.string().min(1) })
       .safeParse(await c.req.json().catch(() => ({})));

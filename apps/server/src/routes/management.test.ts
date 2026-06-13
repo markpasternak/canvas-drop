@@ -280,6 +280,40 @@ describe("managementRoutes", () => {
     expect(res.status).toBe(409);
   });
 
+  it("deploy and rollback on an archived canvas → 409 NOT_ACTIVE (unarchive first)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    // A session deploy to a shelved canvas is refused — its public URL 404s, so
+    // publishing to it would be incoherent. (The Bearer path already 401s archived.)
+    const deploy = await app.request(`/api/canvases/${created.id}/deploy/paste`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ html: "<h1>hi</h1>" }),
+    });
+    expect(deploy.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(deploy)).code).toBe("NOT_ACTIVE");
+
+    const rollback = await app.request(`/api/canvases/${created.id}/rollback`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(rollback.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(rollback)).code).toBe("NOT_ACTIVE");
+  });
+
   it("a non-owner cannot archive (404, no existence leak); an admin can", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

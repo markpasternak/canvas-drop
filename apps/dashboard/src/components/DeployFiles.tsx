@@ -120,6 +120,29 @@ export function FileDrop({
   );
 }
 
+/** The upload step's two faces: the drop zone, or — once a deploy is underway —
+ * the progress bar. Both the create flow and the redeploy dialog use this, so
+ * the busy↔idle swap lives in one place. */
+export function FileDropOrProgress({
+  busy,
+  pct,
+  variant,
+  label,
+  onFiles,
+}: {
+  busy: boolean;
+  pct: number | null;
+  variant: "folder" | "zip";
+  label: string;
+  onFiles: (files: File[]) => void;
+}) {
+  return busy ? (
+    <DeployProgress pct={pct} />
+  ) : (
+    <FileDrop label={label} variant={variant} busy={busy} onFiles={onFiles} />
+  );
+}
+
 /** Deploy progress: a real upload bar (0–100% of bytes sent), then an
  * indeterminate "finishing" pulse while the server extracts/publishes. */
 export function DeployProgress({ pct }: { pct: number | null }) {

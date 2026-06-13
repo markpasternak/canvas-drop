@@ -51,4 +51,17 @@ describe("PasswordField", () => {
     expect(screen.getByRole("button", { name: /show password/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /nothing to copy/i })).toBeDisabled();
   });
+
+  it("shows a fallback error toast when clipboard.writeText rejects", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockRejectedValue(new Error("NotAllowedError")) },
+      configurable: true,
+    });
+
+    await user.type(screen.getByLabelText("Password"), "mypassword");
+    await user.click(screen.getByRole("button", { name: /copy password/i }));
+    expect(await screen.findByText(/copy it manually/i)).toBeInTheDocument();
+  });
 });

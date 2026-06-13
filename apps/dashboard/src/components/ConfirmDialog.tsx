@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
-import { Field } from "./Field.js";
 import { HoldButton } from "./HoldButton.js";
 
 /**
@@ -10,10 +8,10 @@ import { HoldButton } from "./HoldButton.js";
  * context slot, and a VERB-labeled action button (never "Confirm"/"OK"). The
  * `destructive` variant styles the action in the danger token, not the accent.
  *
- * Two opt-in friction modes (mutually exclusive): `confirmPhrase` is
- * type-to-confirm (the action stays disabled until the typed value matches);
- * `holdToConfirm` swaps the action for a press-and-hold button (the gesture is
- * the confirmation) — lighter friction for recoverable destructive actions.
+ * One opt-in friction mode: `holdToConfirm` swaps the action for a
+ * press-and-hold button — lighter friction for recoverable destructive actions.
+ * (The old `confirmPhrase` type-to-confirm path was removed — the delete flow
+ * switched to press-and-hold and no production caller uses it.)
  */
 export function ConfirmDialog({
   open,
@@ -24,8 +22,6 @@ export function ConfirmDialog({
   actionLabel,
   destructive = false,
   loading = false,
-  confirmPhrase,
-  confirmPhraseLabel,
   holdToConfirm = false,
 }: {
   open: boolean;
@@ -36,32 +32,12 @@ export function ConfirmDialog({
   actionLabel: string;
   destructive?: boolean;
   loading?: boolean;
-  confirmPhrase?: string;
-  confirmPhraseLabel?: string;
   holdToConfirm?: boolean;
 }) {
-  const [typed, setTyped] = useState("");
-  useEffect(() => {
-    if (!open) setTyped("");
-  }, [open]);
-
-  const phraseSatisfied = !confirmPhrase || typed.trim() === confirmPhrase;
-
   return (
     <Dialog open={open} onClose={onClose} title={title}>
       <div className="space-y-4">
         {children && <div className="text-sm text-muted">{children}</div>}
-        {confirmPhrase && (
-          <Field
-            label={confirmPhraseLabel ?? `Type ${confirmPhrase} to confirm`}
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            mono
-            autoComplete="off"
-            spellCheck={false}
-            data-autofocus
-          />
-        )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={loading}>
             Cancel
@@ -76,8 +52,7 @@ export function ConfirmDialog({
               size="sm"
               onClick={onConfirm}
               loading={loading}
-              disabled={!phraseSatisfied}
-              data-autofocus={confirmPhrase ? undefined : true}
+              data-autofocus
             >
               {actionLabel}
             </Button>

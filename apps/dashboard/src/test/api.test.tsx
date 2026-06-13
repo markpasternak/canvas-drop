@@ -12,15 +12,22 @@ function jsonResponse(body: unknown, status = 200): Response {
 class FakeXHR {
   static status = 200;
   static body = "{}";
+  static contentType = "application/json";
   upload: { onprogress?: (e: ProgressEvent) => void; onload?: () => void } = {};
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  timeout = 0;
   status = 0;
   statusText = "";
   responseText = "";
   withCredentials = false;
   open() {}
   setRequestHeader() {}
+  getResponseHeader(name: string): string | null {
+    if (name === "content-type") return FakeXHR.contentType;
+    return null;
+  }
   send() {
     this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 } as ProgressEvent);
     this.upload.onprogress?.({ lengthComputable: true, loaded: 10, total: 10 } as ProgressEvent);
@@ -33,6 +40,9 @@ class FakeXHR {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  FakeXHR.status = 200;
+  FakeXHR.body = "{}";
+  FakeXHR.contentType = "application/json";
 });
 
 describe("api error handling", () => {
@@ -154,5 +164,29 @@ describe("api error handling", () => {
     );
     await expect(api.me()).rejects.toMatchObject({ code: "unauthorized" });
     expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("XHR upload: status 401 fires auth-expiry handler and rejects with code 'unauthorized'", async () => {
+    const onExpired = vi.fn();
+    setAuthExpiredHandler(onExpired);
+    FakeXHR.status = 401;
+    FakeXHR.body = "";
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
+    await expect(api.deployZip("c1", new ArrayBuffer(4))).rejects.toMatchObject({
+      code: "unauthorized",
+    });
+    expect(onExpired).toHaveBeenCalledOnce();
+  });
+
+  it("XHR upload: onerror rejects with code 'network_error'", async () => {
+    class ErrorXHR extends FakeXHR {
+      override send() {
+        this.onerror?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", ErrorXHR);
+    await expect(api.deployZip("c1", new ArrayBuffer(4))).rejects.toMatchObject({
+      code: "network_error",
+    });
   });
 });

@@ -1,2 +1,1 @@
-ALTER TABLE "canvases" DROP CONSTRAINT "canvases_status_chk";--> statement-breakpoint
-ALTER TABLE "canvases" ADD CONSTRAINT "canvases_status_chk" CHECK ("canvases"."status" in ('active', 'disabled', 'archived', 'deleted'));
+ALTER TABLE "canvases" DROP CONSTRAINT "canvases_status_chk", ADD CONSTRAINT "canvases_status_chk" CHECK ("canvases"."status" in ('active', 'disabled', 'archived', 'deleted'));

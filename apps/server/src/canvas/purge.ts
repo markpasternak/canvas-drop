@@ -79,11 +79,12 @@ export async function purgeDeletedCanvases(
 
       // Collect every object across the canvas's versions, then delete in one
       // batched call (S3 removes up to 1000 per request instead of one network
-      // round-trip per file).
+      // round-trip per file). List all versions concurrently to reduce latency.
       const keys: string[] = [];
-      for (const version of versions) {
-        keys.push(...(await deps.storage.list(versionPrefix(version.id))));
-      }
+      const keyArrays = await Promise.all(
+        versions.map((v) => deps.storage.list(versionPrefix(v.id))),
+      );
+      keys.push(...keyArrays.flat());
       if (!dryRun) {
         await deps.storage.deleteMany(keys);
         await deps.versions.deleteByCanvas(canvas.id);

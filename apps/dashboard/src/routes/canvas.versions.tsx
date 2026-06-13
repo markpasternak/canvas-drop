@@ -10,7 +10,7 @@ import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useRollback } from "../lib/mutations.js";
-import { useVersions } from "../lib/queries.js";
+import { useCanvas, useVersions } from "../lib/queries.js";
 
 /** Versions tab: deploy history (newest first), forward "Deploy new version", and
  * per-version "Make live" (re-point the live version in either direction —
@@ -18,9 +18,12 @@ import { useVersions } from "../lib/queries.js";
 export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: versions, isLoading, isError } = useVersions(id);
+  const { data: canvas } = useCanvas(id);
   const rollback = useRollback(id);
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
+  // Deploy + make-live target the live canvas — disabled while archived/disabled.
+  const isActive = canvas?.status === "active";
 
   if (isLoading) {
     return (
@@ -38,8 +41,12 @@ export default function Versions() {
     return (
       <EmptyState
         title="No versions yet"
-        description="Deploy this canvas to see its history here."
-        action={<DeployButton canvasId={id} />}
+        description={
+          isActive
+            ? "Deploy this canvas to see its history here."
+            : "Unarchive this canvas to deploy and start its history."
+        }
+        action={isActive ? <DeployButton canvasId={id} /> : undefined}
       />
     );
   }
@@ -58,8 +65,10 @@ export default function Versions() {
   return (
     <>
       <p className="mb-4 text-sm text-muted">
-        {versions.length} {versions.length === 1 ? "version" : "versions"} · deploy a new one from
-        the button above.
+        {versions.length} {versions.length === 1 ? "version" : "versions"}
+        {isActive
+          ? " · deploy a new one from the button above."
+          : " · unarchive to deploy or change the live version."}
       </p>
 
       <ul className="space-y-2">
@@ -79,7 +88,7 @@ export default function Versions() {
                 {formatBytes(v.totalBytes)}
               </div>
             </div>
-            {!v.current && v.status === "ready" && (
+            {!v.current && v.status === "ready" && isActive && (
               <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
                 Make live
               </Button>

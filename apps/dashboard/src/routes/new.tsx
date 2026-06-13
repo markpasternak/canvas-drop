@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
 import { CopyButton } from "../components/CopyButton.js";
-import { DeployProgress, FileDrop, folderFormFromFiles } from "../components/DeployFiles.js";
+import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -164,29 +164,25 @@ export default function CreateCanvas() {
           </div>
         )}
 
-        {method === "folder" &&
-          (busy ? (
-            <DeployProgress pct={progress} />
-          ) : (
-            <FileDrop
-              label="Drag files or a folder here"
-              variant="folder"
-              busy={busy}
-              onFiles={(files) => createWithUpload("folder", files)}
-            />
-          ))}
+        {method === "folder" && (
+          <FileDropOrProgress
+            busy={busy}
+            pct={progress}
+            label="Drag files or a folder here"
+            variant="folder"
+            onFiles={(files) => createWithUpload("folder", files)}
+          />
+        )}
 
-        {method === "zip" &&
-          (busy ? (
-            <DeployProgress pct={progress} />
-          ) : (
-            <FileDrop
-              label="Drag a .zip here"
-              variant="zip"
-              busy={busy}
-              onFiles={(files) => createWithUpload("zip", files)}
-            />
-          ))}
+        {method === "zip" && (
+          <FileDropOrProgress
+            busy={busy}
+            pct={progress}
+            label="Drag a .zip here"
+            variant="zip"
+            onFiles={(files) => createWithUpload("zip", files)}
+          />
+        )}
 
         {method === "api" &&
           (apiResult ? (

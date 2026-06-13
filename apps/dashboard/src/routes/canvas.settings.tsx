@@ -1,5 +1,4 @@
 import { useNavigate, useParams } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
@@ -7,11 +6,12 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { PasswordField } from "../components/PasswordField.js";
+import { SettingsNav } from "../components/SettingsNav.js";
+import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
-import { cn } from "../lib/cn.js";
 import {
   useArchiveCanvas,
   useDeleteCanvas,
@@ -20,7 +20,9 @@ import {
   useUnarchiveCanvas,
   useUpdateSettings,
 } from "../lib/mutations.js";
+import { generatePassword } from "../lib/password.js";
 import { useCanvas } from "../lib/queries.js";
+import { useSectionNav } from "../lib/use-section-nav.js";
 
 /** In-page section anchors — drive both the section ids and the floating nav. */
 const SECTIONS = [
@@ -32,166 +34,6 @@ const SECTIONS = [
   { id: "danger", label: "Danger zone" },
 ] as const;
 const SECTION_IDS = SECTIONS.map((s) => s.id);
-
-/** A strong, shareable password from an unambiguous alphabet (no 0/O/1/l/I).
- *  Uses the CSPRNG with rejection sampling so the distribution stays uniform. */
-function generatePassword(length = 20): string {
-  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  const max = Math.floor(256 / alphabet.length) * alphabet.length;
-  const out: string[] = [];
-  while (out.length < length) {
-    const bytes = new Uint8Array(length);
-    crypto.getRandomValues(bytes);
-    for (const b of bytes) {
-      if (out.length >= length) break;
-      if (b < max) out.push(alphabet[b % alphabet.length] as string);
-    }
-  }
-  return out.join("");
-}
-
-/** A titled card grouping related controls. `tone="danger"` tints it for
- *  destructive actions (red border + heading), matching the danger token. */
-function Section({
-  id,
-  title,
-  description,
-  tone = "default",
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-  tone?: "default" | "danger";
-  children: ReactNode;
-}) {
-  return (
-    <section
-      id={id}
-      // Clear the sticky top bar (h-14) when jumped to via the section nav.
-      className={cn(
-        "scroll-mt-20 rounded-xl border bg-surface p-5 sm:p-6",
-        tone === "danger" ? "border-danger/40" : "border-border",
-      )}
-    >
-      <div className="mb-5 space-y-1">
-        <h2 className={cn("text-sm font-semibold", tone === "danger" ? "text-danger" : "text-fg")}>
-          {title}
-        </h2>
-        {description && <p className="text-xs text-muted">{description}</p>}
-      </div>
-      <div className="space-y-4">{children}</div>
-    </section>
-  );
-}
-
-/** A single setting laid out as label/help on the left, control(s) on the
- *  right — generalizing the Toggle row idiom so actions read consistently. */
-function Row({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-sm font-medium text-fg">{title}</p>
-        {description && <div className="text-xs text-muted">{description}</div>}
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">{children}</div>
-    </div>
-  );
-}
-
-/** A hairline divider between rows inside a section. */
-function RowDivider() {
-  return <div className="border-t border-border" />;
-}
-
-/**
- * Drives the floating nav's active state. Active = the last section whose top
- * has scrolled past a line just below the sticky bar — EXCEPT:
- *   - at the page bottom, the last section wins (the lower sections can never
- *     reach the line otherwise, since there's no scroll room beneath them);
- *   - a click selects its target immediately and briefly suppresses the scroll
- *     computation so the smooth-scroll can settle without the highlight flicking.
- * `select` is what the nav links call. `ready` waits for the sections to mount.
- */
-function useSectionNav(ids: readonly string[], ready: boolean) {
-  const [active, setActive] = useState(ids[0] ?? "");
-  const suppressUntil = useRef(0);
-
-  useEffect(() => {
-    if (!ready) return;
-    const compute = () => {
-      if (Date.now() < suppressUntil.current) return;
-      const doc = document.documentElement;
-      const scrollable = doc.scrollHeight > window.innerHeight + 4;
-      // Bottom guard: reaching the end always lands on the final section.
-      if (scrollable && window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
-        setActive(ids[ids.length - 1] ?? "");
-        return;
-      }
-      const line = 96; // just below the sticky top bar (h-14) + a little breathing room
-      let current = ids[0] ?? "";
-      for (const id of ids) {
-        const el = document.getElementById(id);
-        if (el && el.getBoundingClientRect().top <= line) current = id;
-      }
-      setActive(current);
-    };
-    compute();
-    window.addEventListener("scroll", compute, { passive: true });
-    window.addEventListener("resize", compute);
-    return () => {
-      window.removeEventListener("scroll", compute);
-      window.removeEventListener("resize", compute);
-    };
-  }, [ids, ready]);
-
-  const select = (id: string) => {
-    setActive(id);
-    suppressUntil.current = Date.now() + 700;
-  };
-
-  return { active, select };
-}
-
-/** Floating in-page table of contents for the (long) settings page. Sticks
- *  beside the content on wide screens; hidden on narrow ones where the page is
- *  short enough to scroll. Mirrors the detail-tab idiom (accent active border). */
-function SettingsNav({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
-  return (
-    <nav
-      aria-label="Settings sections"
-      className="hidden lg:block lg:sticky lg:top-20 lg:self-start"
-    >
-      <ul className="border-l border-border">
-        {SECTIONS.map((s) => (
-          <li key={s.id}>
-            <a
-              href={`#${s.id}`}
-              onClick={() => onSelect(s.id)}
-              aria-current={active === s.id ? "true" : undefined}
-              className={cn(
-                "-ml-px block border-l-2 py-1.5 pl-3 text-sm transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-                active === s.id
-                  ? "border-accent font-medium text-fg"
-                  : "border-transparent text-muted hover:border-border-strong hover:text-fg",
-              )}
-            >
-              {s.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
 
 /** Settings tab (§6.9.4): all canvas controls. Toggles are optimistic; password,
  * regen, and delete are confirm-and-await. Delete is a press-and-hold confirm. */
@@ -252,7 +94,7 @@ export default function Settings() {
 
   return (
     <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
-      <SettingsNav active={activeSection} onSelect={selectSection} />
+      <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
       <div className="space-y-6">
         <Section id="details" title="Details">
           <Field
@@ -393,8 +235,8 @@ export default function Settings() {
           </div>
           <div className="border-t border-border pt-4">
             <Toggle
-              label="SPA fallback"
-              description="Serve index.html for unknown paths (single-page-app routing)."
+              label="Single-page app mode"
+              description="Serve your home page for any unknown URL, so a JavaScript app's own routing works on reload and deep links. Leave off for multi-page sites — otherwise mistyped or dead links quietly show the home page instead of “not found.”"
               checked={canvas.spaFallback}
               onChange={(spaFallback) => save({ spaFallback })}
             />

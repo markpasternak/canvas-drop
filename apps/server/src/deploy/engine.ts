@@ -137,7 +137,14 @@ export function deployEngine(deps: DeployEngineDeps) {
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
       // swap is the commit — a crash before it leaves the old version live.
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
-      await deps.canvases.setCurrentVersion(canvas.id, version.id);
+      try {
+        await deps.canvases.setCurrentVersion(canvas.id, version.id);
+      } catch (err) {
+        // markReady already ran — clean up the orphaned ready-but-uncurrent version
+        // and its storage objects so nothing is left dangling.
+        await this.cleanupPending(version.id, manifest);
+        throw err;
+      }
 
       // Prune beyond the last 10, asynchronously — never block or fail the deploy.
       // `.catch` guards against an unhandled rejection if prune throws synchronously.
@@ -178,7 +185,11 @@ export function deployEngine(deps: DeployEngineDeps) {
     /** Delete the storage objects written for a failed pending version. */
     async cleanupPending(versionId: string, manifest: Manifest): Promise<void> {
       const keys = Object.keys(manifest).map((path) => versionStorageKey(versionId, path));
-      await deps.storage.deleteMany(keys).catch(() => {});
+      await deps.storage
+        .deleteMany(keys)
+        .catch((err) =>
+          deps.log.warn({ err, versionId }, "cleanupPending storage delete failed (best-effort)"),
+        );
     },
 
     /** Prune ready versions beyond the newest N; log-and-continue on failure. */
@@ -191,7 +202,11 @@ export function deployEngine(deps: DeployEngineDeps) {
         const keys = dropped.flatMap((v) =>
           Object.keys((v.manifest ?? {}) as Manifest).map((path) => versionStorageKey(v.id, path)),
         );
-        await deps.storage.deleteMany(keys).catch(() => {});
+        await deps.storage
+          .deleteMany(keys)
+          .catch((err) =>
+            deps.log.warn({ err, canvasId }, "prune storage delete failed (best-effort)"),
+          );
       } catch (err) {
         deps.log.error({ err, canvasId }, "version prune failed (live version unaffected)");
       }

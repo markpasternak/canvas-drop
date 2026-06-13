@@ -55,7 +55,9 @@ export default function CanvasLayout() {
           ) : (
             <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           )}
-          {canvas && <DeployButton canvasId={id} />}
+          {/* Deploy targets the live canvas — hidden while archived/disabled
+              (the server also 409s these; this just keeps the UI coherent). */}
+          {canvas?.status === "active" && <DeployButton canvasId={id} />}
         </div>
         {canvas && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
