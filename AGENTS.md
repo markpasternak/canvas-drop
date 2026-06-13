@@ -22,6 +22,23 @@ Before starting any unit: **`git pull` first** so you see the other agent's merg
 
 ---
 
+## Autonomous full-scope rounds (Mark's preferred workflow)
+
+The repo owner (Mark) prefers that, once a plan is approved, an agent **executes the entire plan end-to-end in one go and merges the PR without check-ins.** When running this mode, do not pause for input between units or before merging — work from the approved plan straight through to a merged PR. The loop:
+
+1. **Set up** — commit/announce the plan, open the tracking issue, branch (`feat/<plan-slug>`).
+2. **Build every unit** in dependency order, one local commit per unit, each unit's gates green (`typecheck`, `lint`, full dual-dialect `test`) before moving on. The plan groups the whole scope into one branch / one PR (not PR-per-unit) for autonomous rounds.
+3. **Self-review** as you go; fix obvious issues immediately.
+4. **Multi-agent code review** — run `/ce-code-review` on the branch before the PR. **Fix everything real it finds** — P0/P1 and high-value P2 — with regression tests. **Weight findings against the trust model** (`docs/solutions/2026-06-13-auth-invariant-checklist.md` → "Calibrate to the trust model"): §12.0 hard-invariant bugs are P0; right-size hostile-internet findings on non-invariant surfaces.
+5. **Ship** — push, open the PR, wait for the CI matrix to go green (fix any red), then **merge it** (squash, delete branch). The autonomous merge is authorized once: all units done + full suite green on both dialects + code review run and findings fixed + CI green on the PR.
+6. **Close out** — close the issue, capture learnings in `docs/solutions/`, update the active-plan pointers, leave `main` green.
+
+The safety net for the autonomous merge is the CI matrix + the `.githooks/pre-push` gate + the completed code review — not a human gate. Server-side branch protection arrives when the repo goes public / on Pro.
+
+**This is the default for plan-driven rounds on this repo unless Mark says otherwise.** A single round may span many units, a full review, and the merge — all without interruption.
+
+---
+
 ## Parallel work (optional — you may be running solo, or alongside other agents)
 
 You might be the only agent on this repo, or one of several running at once (Codex + Claude, or even two Claudes). The rules below make any of those safe — they cost nothing when you're solo and prevent collisions when you're not. **Don't assume another agent is active; don't assume one isn't.**

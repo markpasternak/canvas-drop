@@ -70,10 +70,41 @@ these are the exact traps, with the fix shape. See also [[dual-dialect-drizzle-s
 - [ ] Test the **rejection** paths first (wrong aud/iss/exp/key, untrusted IP,
       state mismatch) — happy-path green says nothing about the gate.
 
+## Calibrate to the trust model (don't over-engineer)
+
+canvas-drop runs **inside a company**: everyone reaching it has passed org SSO,
+and the email-domain allowlist keeps outsiders out (§12.0). The design principle
+is **trusted colleagues, not hostile public internet**. This is a calibration,
+not a loophole — apply it when planning AND when weighting review findings:
+
+- **The hard invariants still hold absolutely** (the §12.0 list above —
+  no impersonation, no cross-user/cross-canvas theft, no unauthorized access,
+  lifecycle honored instantly). These survive the trust model because they're
+  about colleagues *not being able to become each other*. A real bug here is
+  still P0 (that's why the foundation review's P0/P1s were correctly weighted —
+  they were all gateway/impersonation issues).
+- **Beyond the invariants, stay proportionate and simple.** Light
+  defense-in-depth for *accidents and resource safety* (a colleague's huge/
+  pathological upload OOMing a small VPS; a typo'd config) is good. Elaborate
+  *anti-malicious-insider* hardening (sandboxed extraction, nested-bomb ratio
+  analysis, per-user anomaly detection, per-method permission matrices) is
+  over-engineering against the product's own threat model — don't add it.
+- **For reviewers:** deflate "hostile public internet" findings to match this
+  model. Ask "does this break a §12.0 hard invariant, or is it an accident/
+  resource concern?" — escalate the former, right-size the latter. A finding
+  framed as "a malicious user could…" about a *non-invariant* surface is usually
+  a P3 note here, not a P0.
+
+The worked example: the deploy zip-bomb defense (stream + pre-inflate size cap,
+one file buffered) is justified by **memory safety on a small host**, not by
+"an insider crafts a bomb" — so it's in scope. Sandboxing the extractor would not be.
+
 ## Process lesson
 
 Run `/ce-code-review` (multi-agent) **before** opening a PR on anything
 auth/payment/migration-shaped. Self-review + green tests is necessary but not
 sufficient — the adversarial + security personas construct failure scenarios
 (omit-the-JWT, concurrent-first-login, /0-CIDR) that tests-as-written don't.
-Cost ~10 parallel agents; cheap relative to shipping a P0.
+Cost ~10 parallel agents; cheap relative to shipping a P0. **Weight their
+findings against the trust model above** — not every "an attacker could" is a P0
+in a trusted-org product.
