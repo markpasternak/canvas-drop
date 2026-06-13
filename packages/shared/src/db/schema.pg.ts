@@ -247,3 +247,34 @@ export const files = pgTable(
   },
   (t) => [index("files_canvas_id_idx").on(t.canvasId)],
 );
+
+// AI primitive metering (§6.6.6, plan 009 / M9). One row per proxied AI call:
+// attribution (canvas, user — both server-resolved), provider/model, token
+// counts, and computed USD cost. `cost_usd` is summed over the per-user-daily and
+// per-canvas-monthly windows for quota enforcement; the two indexes serve those
+// windows (and the owner usage tab). This table is the single source of truth for
+// AI tokens/cost/op-count — no parallel usage_events row.
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    provider: c.text("provider").notNull(),
+    model: c.text("model").notNull(),
+    inputTokens: c.int("input_tokens").notNull(),
+    outputTokens: c.int("output_tokens").notNull(),
+    costUsd: c.real("cost_usd").notNull(),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    index("ai_usage_canvas_created_idx").on(t.canvasId, t.createdAt),
+    index("ai_usage_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);
