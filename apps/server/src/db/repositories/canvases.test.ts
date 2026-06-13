@@ -3,6 +3,7 @@ import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { canvasesRepository } from "./canvases.js";
 import { usersRepository } from "./users.js";
+import { versionsRepository } from "./versions.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -115,5 +116,36 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect((await repo.findByApiKeyHash("k"))?.id).toBe(cv.id);
     await repo.setStatus(cv.id, "disabled");
     expect(await repo.findByApiKeyHash("k")).toBeNull();
+  });
+
+  it("setCurrentVersionIfReady swaps to a ready version, refuses a pending/missing one", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "k" });
+    const ready = await versions.createPending({
+      canvasId: cv.id,
+      number: 1,
+      createdBy: ownerId,
+      source: "api",
+    });
+    await versions.markReady(ready.id, { fileCount: 1, totalBytes: 1, manifest: {} });
+    const pending = await versions.createPending({
+      canvasId: cv.id,
+      number: 2,
+      createdBy: ownerId,
+      source: "api",
+    });
+
+    // ready → swap succeeds and the pointer moves
+    expect(await repo.setCurrentVersionIfReady(cv.id, ready.id)).toBe(true);
+    expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
+    // pending (not ready) → refused, pointer unchanged (no dangling pointer)
+    expect(await repo.setCurrentVersionIfReady(cv.id, pending.id)).toBe(false);
+    expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
+    // missing version id (raced-away / pruned) → refused, pointer unchanged
+    expect(await repo.setCurrentVersionIfReady(cv.id, "does-not-exist")).toBe(false);
+    expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
   });
 });

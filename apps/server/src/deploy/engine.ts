@@ -147,14 +147,10 @@ export function deployEngine(deps: DeployEngineDeps) {
     /** Prune ready versions beyond the newest N; log-and-continue on failure. */
     async prune(canvasId: string): Promise<void> {
       try {
-        // Re-read the live pointer so a concurrent rollback's current version is
-        // never pruned out from under it (prune-vs-rollback race).
-        const fresh = await deps.canvases.findById(canvasId);
-        const dropped = await deps.versions.pruneBeyond(
-          canvasId,
-          KEEP_VERSIONS,
-          fresh?.currentVersionId ?? null,
-        );
+        // pruneBeyond re-reads the live pointer atomically inside its DELETE, so a
+        // concurrent rollback's current version is never pruned (prune-vs-rollback
+        // race); no pre-read snapshot needed here.
+        const dropped = await deps.versions.pruneBeyond(canvasId, KEEP_VERSIONS);
         for (const v of dropped) {
           const manifest = (v.manifest ?? {}) as Manifest;
           for (const path of Object.keys(manifest)) {

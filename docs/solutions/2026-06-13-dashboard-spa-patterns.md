@@ -97,13 +97,24 @@ hard-coded bypasses: a `bg-white` thumb or a `warning` tone reusing
   config (node + `CANVAS_DROP_DB` dialect split) is left untouched. CI runs the
   dashboard jsdom suite once in its own job.
 
-## Known follow-up: rollback-vs-prune race (deferred)
+## Rollback-vs-prune race — fixed (two atomic guards)
 
-A rollback to an old version concurrent with a deploy's prune can leave
-`canvases.current_version_id` dangling (the column has no FK; serve.ts then 404s
-the live canvas until the next deploy). **Pre-existing** — the Bearer `/v1`
-rollback has identical `setCurrentVersion` semantics — and cross-cuts the deploy
-engine, where a single cross-dialect transaction was deliberately skipped (see
-[[canvas-hosting-deploy-patterns]] "Atomic-ish commit"). Trust-model-calibrated low
-risk; fix it once for both rollback paths (transactional swap, or re-assert
-`status='ready'` on the target during the pointer swap).
+A rollback to an old version concurrent with a deploy's prune could leave
+`canvases.current_version_id` dangling (no FK; serve.ts then 404s the live canvas
+until the next deploy). Closed on **both** rollback paths with two
+single-statement guards — no cross-dialect transaction (the codebase avoids
+those, see [[canvas-hosting-deploy-patterns]] "Atomic-ish commit"):
+
+1. `versionsRepository.pruneBeyond` re-reads the live pointer **inside** its
+   DELETE (a correlated `notInArray` subquery over an `isNotNull`-filtered
+   `current_version_id`) and returns the rows actually deleted — a version a
+   concurrent rollback just made current is never pruned, even against a stale
+   drop-set snapshot.
+2. `canvasesRepository.setCurrentVersionIfReady` swaps the pointer only if the
+   target is still ready (`UPDATE ... WHERE id=? AND EXISTS(ready version)`),
+   returning whether it succeeded; both rollback handlers return a clean
+   `VERSION_UNAVAILABLE` (409) when the target was pruned mid-race.
+
+Either interleaving is safe: prune-first → rollback fails cleanly; rollback-first
+→ prune skips the now-current version. The deploy path keeps the unconditional
+`setCurrentVersion` (its just-created version is always ready, never racing prune).

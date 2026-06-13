@@ -6,7 +6,7 @@ import {
   sqliteSchema,
   type Version,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, inArray, max } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, max, notInArray } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -26,6 +26,7 @@ export function versionsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
   const t = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
+  const canvasesT = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
 
   return {
     /** Next per-canvas sequence number (1 for a fresh canvas). */
@@ -109,30 +110,43 @@ export function versionsRepository(client: DbClient) {
     },
 
     /**
-     * Ready versions to prune (keep the newest `keep`, never the current one).
-     * Returns the dropped rows so the caller can delete their storage objects,
-     * then deletes the rows.
+     * Prune ready versions beyond the newest `keep`, never the live current one.
+     * Returns the rows actually deleted so the caller cleans up exactly their
+     * storage objects.
+     *
+     * The live current pointer is re-read ATOMICALLY inside the DELETE (a
+     * correlated subquery on `canvases.current_version_id`), NOT from a snapshot —
+     * so a concurrent rollback that just made an old version current never has it
+     * pruned out from under it (prune-vs-rollback race). With the companion
+     * `setCurrentVersionIfReady` guard, every interleaving is safe without a
+     * cross-dialect transaction. `notInArray` over an `isNotNull`-filtered
+     * subquery avoids NULL-poisoning when the canvas has no current version yet.
      */
-    async pruneBeyond(
-      canvasId: string,
-      keep: number,
-      currentVersionId: string | null,
-    ): Promise<Version[]> {
+    async pruneBeyond(canvasId: string, keep: number): Promise<Version[]> {
       const ready = (await db
         .select()
         .from(t)
         .where(and(eq(t.canvasId, canvasId), eq(t.status, "ready")))
         .orderBy(desc(t.number))) as Version[];
-      const drop = ready.slice(keep).filter((v) => v.id !== currentVersionId);
-      if (drop.length > 0) {
-        await db.delete(t).where(
-          inArray(
-            t.id,
-            drop.map((v) => v.id),
+      const candidates = ready.slice(keep);
+      if (candidates.length === 0) return [];
+      const liveCurrent = db
+        .select({ id: canvasesT.currentVersionId })
+        .from(canvasesT)
+        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
+      const deleted = (await db
+        .delete(t)
+        .where(
+          and(
+            inArray(
+              t.id,
+              candidates.map((v) => v.id),
+            ),
+            notInArray(t.id, liveCurrent),
           ),
-        );
-      }
-      return drop;
+        )
+        .returning()) as Version[];
+      return deleted;
     },
   };
 }

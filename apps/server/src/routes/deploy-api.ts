@@ -90,7 +90,14 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     if (!target) {
       return c.json({ code: "INVALID_PATH", message: `no ready version ${body.version}` }, 404);
     }
-    await deps.canvases.setCurrentVersion(auth.id, target.id);
+    // Atomic guarded swap (see management rollback) — a concurrent prune may have
+    // deleted the target between selection and the swap.
+    if (!(await deps.canvases.setCurrentVersionIfReady(auth.id, target.id))) {
+      return c.json(
+        { code: "VERSION_UNAVAILABLE", message: "that version was just removed; retry" },
+        409,
+      );
+    }
     deps.audit.recordAudit({
       action: "rollback",
       actorId: auth.ownerId,

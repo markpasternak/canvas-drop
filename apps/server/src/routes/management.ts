@@ -232,7 +232,18 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!target) {
       return c.json({ code: "INVALID_PATH", message: `no ready version ${body.version}` }, 404);
     }
-    await deps.canvases.setCurrentVersion(cv.id, target.id);
+    // Atomic guarded swap — false means a concurrent prune deleted the target
+    // between selection and the swap; surface a clean retry rather than a
+    // dangling pointer that would 404 the live canvas.
+    if (!(await deps.canvases.setCurrentVersionIfReady(cv.id, target.id))) {
+      return c.json(
+        {
+          code: "VERSION_UNAVAILABLE",
+          message: "that version was just removed; refresh and try another",
+        },
+        409,
+      );
+    }
     deps.audit.recordAudit({
       action: "rollback",
       actorId: c.get("user").id,
