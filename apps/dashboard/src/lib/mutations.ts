@@ -11,6 +11,10 @@ import { keys } from "./queries.js";
 export function useUpdateSettings(id: string) {
   const qc = useQueryClient();
   return useMutation({
+    // Serialize settings mutations for this canvas (TanStack `scope`) so rapid
+    // overlapping toggles can't snapshot each other's optimistic state and roll
+    // back to a stale value — each runs against the prior one's settled cache.
+    scope: { id: `settings-${id}` },
     mutationFn: (patch: CanvasSettings) => api.updateSettings(id, patch),
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: keys.canvas(id) });
