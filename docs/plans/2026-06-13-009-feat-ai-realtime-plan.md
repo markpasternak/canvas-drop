@@ -1,6 +1,6 @@
 # Plan 009 — M9: AI proxy + Realtime primitive (areas H + R)
 
-**Status:** active
+**Status:** completed
 **Milestone:** BUILD_BRIEF §16 M9 (areas **H** = AI primitive §6.6/D12, **R** = Realtime primitive §6.7/D22)
 **Branch:** `feat/m9-ai-realtime` (single branch, autonomous full-scope round)
 **Predecessors (merged):** plan 006 (capability model), plan 007 (M6 primitives runtime seam), plan 008 / PR #18 (editor polish).
