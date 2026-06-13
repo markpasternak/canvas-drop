@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "./api.js";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { api, type GalleryQuery } from "./api.js";
 
 export const keys = {
   me: ["me"] as const,
@@ -9,6 +9,7 @@ export const keys = {
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
   usage: (id: string) => ["usage", id] as const,
+  gallery: (query: GalleryQuery) => ["gallery", query] as const,
 };
 
 export function useMe() {
@@ -37,4 +38,14 @@ export function useDraft(id: string) {
 
 export function useUsage(id: string) {
   return useQuery({ queryKey: keys.usage(id), queryFn: () => api.getUsage(id) });
+}
+
+export function useGallery(query: GalleryQuery) {
+  return useQuery({
+    queryKey: keys.gallery(query),
+    queryFn: () => api.listGallery(query),
+    // Keep the previous page on screen while the next page / search loads so
+    // paging and typing don't flash an empty grid.
+    placeholderData: keepPreviousData,
+  });
 }

@@ -6,28 +6,36 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "node-dist": "./dist/index.js",
       "default": "./src/index.ts"
     },
     "./db": {
       "types": "./src/db/index.ts",
+      "node-dist": "./dist/db/index.js",
       "default": "./src/db/index.ts"
     },
     "./config": {
       "types": "./src/config/env.ts",
+      "node-dist": "./dist/config/env.js",
       "default": "./src/config/env.ts"
     },
     "./capabilities": {
       "types": "./src/capabilities/index.ts",
+      "node-dist": "./dist/capabilities/index.js",
       "default": "./src/capabilities/index.ts"
     }
   },
   "types": "./src/index.ts",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3"
   }
 }

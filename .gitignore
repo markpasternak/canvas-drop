@@ -35,3 +35,12 @@ coverage/
 # Misc
 .cache/
 tmp/
+
+# Deployment details (DigitalOcean) — never commit
+/deploy/
+# Belt-and-suspenders: SSH keys anywhere in the tree
+do
+do.pub
+id_ed25519
+id_ed25519.pub
+*.pem
