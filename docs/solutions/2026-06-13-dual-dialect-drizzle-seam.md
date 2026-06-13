@@ -43,6 +43,23 @@ The **production** drivers (`node-postgres`, real S3) are covered separately by
 CI against the `postgres:16` + MinIO services. pglite proves the SQL; the smoke test
 proves the wire driver.
 
+## Gotcha: adding a column means generating migrations for BOTH dialects
+
+Editing `schema.pg.ts` + `schema.sqlite.ts` is necessary but **not sufficient**. The
+test DBs (`makeTestDb`) apply the **real generated `drizzle/<dialect>` migrations**, not
+the live schema — so a schema-only edit leaves every test that inserts the affected table
+failing with `column ... does not exist` on the pg leg (and sqlite). After a schema edit,
+run both generators:
+
+```
+pnpm drizzle-kit generate --config drizzle.sqlite.config.ts --name <change>
+pnpm drizzle-kit generate --config drizzle.pg.config.ts --name <change>
+```
+
+This writes `drizzle/{sqlite,pg}/0NNN_<change>.sql` + meta snapshots/journals — commit all
+of them. The schema-parity test (`schema.test.ts`) passes on schema edits alone, so it is
+*not* the signal that catches a missing migration; the full suite is. (Seen in plan 006.)
+
 ## Gotcha: migration folder resolution
 
 The migrator's `migrationsFolder` is **cwd-relative**. Tests run from the repo root so
