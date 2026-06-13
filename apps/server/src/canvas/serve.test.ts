@@ -155,6 +155,25 @@ describe("serveCanvas (integration)", () => {
     expect((await on.app.request("/c/s/missing")).status).toBe(200);
   });
 
+  it("404 is JSON for API clients but a friendly HTML page for browsers", async () => {
+    const { app } = await setup({ spaFallback: false });
+
+    // No Accept header (programmatic) → stable JSON, security headers intact.
+    const api = await app.request("/c/s/missing");
+    expect(api.headers.get("Content-Type")).toMatch(/application\/json/);
+    expect(await api.json()).toEqual({ error: "not_found" });
+    expect(api.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+    // Browser (Accept: text/html) → an HTML page, not raw JSON.
+    const browser = await app.request("/c/s/missing", { headers: { Accept: "text/html" } });
+    expect(browser.status).toBe(404);
+    expect(browser.headers.get("Content-Type")).toMatch(/text\/html/);
+    const html = await browser.text();
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("Page not found");
+    expect(browser.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+  });
+
   it("serves a .php file as text/plain with nosniff (never executed)", async () => {
     const { app } = await setup();
     const res = await app.request("/c/s/danger.php");
