@@ -104,6 +104,9 @@ const rawSchema = z
     CANVAS_DROP_ADMIN_EMAILS: csv(),
     CANVAS_DROP_REALTIME: z.enum(["on", "off"]).optional().default("on"),
     CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: bool(false),
+    // Where the built dashboard SPA lives. Defaults (in serveSpa) to a path
+    // resolved from the server module; override for non-standard layouts.
+    CANVAS_DROP_DASHBOARD_DIST: z.string().optional(),
 
     // Database
     CANVAS_DROP_DB: z.enum(["sqlite", "postgres"]).optional().default("sqlite"),
@@ -339,6 +342,7 @@ const rawSchema = z
       adminEmails,
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
       allowMultiUserPathMode: r.CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE,
+      dashboardDist: r.CANVAS_DROP_DASHBOARD_DIST,
 
       db:
         r.CANVAS_DROP_DB === "postgres"

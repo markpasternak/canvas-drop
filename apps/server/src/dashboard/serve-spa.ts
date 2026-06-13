@@ -1,0 +1,107 @@
+import { readFile } from "node:fs/promises";
+import { dirname, join, normalize, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Config } from "@canvas-drop/shared";
+import { createMiddleware } from "hono/factory";
+import { mimeFor } from "../canvas/mime.js";
+import type { AppEnv } from "../http/types.js";
+
+/**
+ * Resolve the built dashboard `dist/`. Default is relative to THIS module (so a
+ * packaged `node apps/server/dist/index.js` run from any cwd finds it), not a
+ * cwd walk-up. `CANVAS_DROP_DASHBOARD_DIST` overrides for non-standard layouts.
+ * Both `apps/server/src/dashboard` and `apps/server/dist/dashboard` sit three
+ * levels under `apps/`, so the same relative path works in dev, tests, and prod.
+ */
+function resolveDistDir(config: Config): string {
+  if (config.dashboardDist) return resolve(config.dashboardDist);
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "../../../dashboard/dist");
+}
+
+/**
+ * Strict Content-Security-Policy + security headers for the dashboard document
+ * (§12.4). The SPA emits external, hashed scripts/styles (Vite) and self-hosted
+ * fonts — so everything is `'self'`. NOTE: this governs the dashboard document,
+ * not canvas documents; in path mode the canvas→management residual is handled by
+ * `Sec-Fetch-Site` + `SameSite` cookies (§12.2), not by this CSP.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; "),
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
+async function read(path: string): Promise<Uint8Array | null> {
+  try {
+    return await readFile(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serve the built dashboard SPA for the `dashboard` role (area E, U3). Mounted at
+ * the post-gateway catch-all (NOT before the gateway), so every asset is served
+ * only to an authenticated org member — login-on-every-request holds for the SPA
+ * shell itself (§12.1.1). Real hashed assets get an immutable cache; the SPA
+ * history fallback serves `index.html` (no-cache) so deploys are instantly live.
+ */
+export function serveSpa(deps: { config: Config }) {
+  const distDir = resolveDistDir(deps.config);
+  const indexPath = join(distDir, "index.html");
+
+  return createMiddleware<AppEnv>(async (c, next) => {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") return next();
+
+    const rel = normalize(decodeURIComponent(new URL(c.req.url).pathname)).replace(
+      /^(\.\.[/\\])+/,
+      "",
+    );
+    const candidate = join(distDir, rel);
+
+    // Path-traversal guard: the resolved file must stay within distDir.
+    const within = candidate === distDir || candidate.startsWith(distDir + sep);
+    const isAsset = within && rel !== "/" && rel !== "" && !rel.endsWith("/");
+
+    let body = isAsset ? await read(candidate) : null;
+    let servedIndex = false;
+    if (body === null) {
+      // History fallback → index.html (SPA routing).
+      body = await read(indexPath);
+      servedIndex = true;
+    }
+    if (body === null) {
+      // The SPA isn't built (dev runs it via Vite; prod must `pnpm build`).
+      return c.json({ error: "dashboard_not_built", message: "dashboard dist not found" }, 503);
+    }
+
+    const headers = new Headers(SECURITY_HEADERS);
+    if (servedIndex) {
+      headers.set("Content-Type", "text/html; charset=utf-8");
+      headers.set("Cache-Control", "no-cache");
+    } else {
+      headers.set("Content-Type", mimeFor(candidate).contentType);
+      // Vite emits content-hashed filenames under assets/ → safe to cache hard.
+      headers.set(
+        "Cache-Control",
+        rel.startsWith("assets/") || rel.startsWith("/assets/")
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+      );
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: BodyInit accepts Uint8Array at runtime
+    return c.body(body as any, 200, Object.fromEntries(headers));
+  });
+}
