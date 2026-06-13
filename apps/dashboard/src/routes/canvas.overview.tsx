@@ -4,6 +4,11 @@ import { Skeleton } from "../components/Skeleton.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
 
+/** Friendly label for a deploy source (folder | zip | paste | api). */
+function sourceLabel(source: string): string {
+  return { folder: "folder upload", zip: "ZIP", paste: "paste", api: "the API" }[source] ?? source;
+}
+
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -56,15 +61,30 @@ export default function Overview() {
             "Private (owner only)"
           )}
           {canvas.hasPassword && <span className="text-muted"> · password-protected</span>}
+          {canvas.galleryListed && <span className="text-muted"> · in gallery</span>}
         </Stat>
         <Stat label="Current deploy">
           {current ? (
             <span title={fullTime(current.createdAt)}>
-              v{current.number} · {relativeTime(current.createdAt)} · {current.fileCount}{" "}
+              v{current.number} · via {sourceLabel(current.source)} ·{" "}
+              {relativeTime(current.createdAt)} · {current.fileCount}{" "}
               {current.fileCount === 1 ? "file" : "files"} · {formatBytes(current.totalBytes)}
             </span>
           ) : (
             <span className="text-muted">Never deployed</span>
+          )}
+        </Stat>
+        <Stat label="Deploys">
+          {versions && versions.length > 0 ? (
+            <Link
+              to="/canvases/$id/versions"
+              params={{ id }}
+              className="text-accent hover:underline"
+            >
+              {versions.length} {versions.length === 1 ? "version" : "versions"}
+            </Link>
+          ) : (
+            <span className="text-muted">None yet</span>
           )}
         </Stat>
         <Stat label="Created">
