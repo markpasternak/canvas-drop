@@ -154,6 +154,44 @@ describe("serveCanvas (integration)", () => {
     expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
   });
 
+  it("404 when the manifest references a hash whose blob is missing from storage", async () => {
+    // Mirror setup() but deliberately DON'T write the blob for index.html.
+    client = await makeTestDb("sqlite");
+    dir = await mkdtemp(join(tmpdir(), "cd-serve-"));
+    storage = new LocalDriver(dir);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const v = await versions.createPending({
+      canvasId: cv.id,
+      number: 1,
+      createdBy: owner.id,
+      source: "folder",
+    });
+    const manifest: Manifest = {
+      "index.html": { size: 3, hash: "missing-hash", mime: "text/html" },
+    };
+    await versions.markReady(v.id, { fileCount: 1, totalBytes: 3, manifest });
+    await canvases.setCurrentVersion(cv.id, v.id);
+    const updated = (await canvases.findById(cv.id)) as Canvas;
+
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("canvas", updated);
+      await next();
+    });
+    app.all("*", serveCanvas({ config, versions, storage }));
+    // The manifest resolves the path, but storage.get returns null → 404 (resilience).
+    expect((await app.request("/c/s/index.html")).status).toBe(404);
+  });
+
   it("404 when the canvas has no current version", async () => {
     client = await makeTestDb("sqlite");
     dir = await mkdtemp(join(tmpdir(), "cd-serve-"));

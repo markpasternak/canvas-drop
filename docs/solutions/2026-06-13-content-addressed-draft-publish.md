@@ -67,3 +67,32 @@ concurrency.
   will redirect to login on every successful load.
 - **CodeMirror is lazy-loaded.** The editor route is its own chunk (~520 kB) so CodeMirror
   only loads when the editor opens — it never weighs on the dashboard's initial bundle.
+
+## Editor gotchas caught in review (post-merge fixes)
+
+- **Draft preview iframe must NOT use `allow-same-origin`.** The preview is served from the
+  dashboard origin, and an admin can preview *another user's* draft. With
+  `sandbox="allow-scripts allow-same-origin"` the framed draft runs scripts same-origin with
+  the dashboard — a hostile draft would ride the admin's session and hit `/api`. Use
+  `sandbox="allow-scripts allow-forms"` (opaque origin); the preview only needs to render
+  static bytes, not call same-origin APIs.
+- **Binary assets must be MIME-gated out of the text editor.** Loading an image/font's bytes
+  into CodeMirror and autosaving re-encodes them as UTF-8 text and corrupts the file. Gate on
+  the manifest's `mime` (`isBinaryMime`): images get an inline `<img>` preview, other binaries
+  a placeholder; both are changed only via **Replace/upload** (raw `PUT` with a `Blob` body),
+  never the text editor. Adding files = "new empty text file" OR drag-drop/picker upload.
+- **The autosave buffer must be bound to its file.** A single shared `bufferRef` + an
+  unconditional flush silently writes the wrong (or empty) content into a file when switching
+  files or publishing. Track `bufferPathRef` (which file the buffer is for), `loadedRef` (clean
+  baseline), and a dirty flag; flush only a genuinely-edited buffer back to *its* path, reset on
+  load, and clear the debounce timer on unmount. Four reviewer personas converged on this.
+- **A missing blob must surface, not blank.** If the canvas predates content-addressing (or a
+  blob is genuinely absent), `getDraftFile` 404s — render an explicit error state, not an empty
+  editor. (Locally: pre-M5 dev data under `storage/versions/` won't resolve; the build is
+  greenfield, so wipe `apps/server/data` to reset.)
+- **Blob GC: list storage before reading the live set.** Reading the version/draft live set
+  *after* `storage.list()` narrows the draft-write-vs-sweep window cheaply — a manifest entry
+  committed before the live read is preserved. The draft-write case (unlike publish) has no
+  idempotent re-write to self-heal, so this ordering matters.
+- **WYSIWYG/visual HTML editing is deferred to its own milestone** — HTML round-tripping +
+  sanitization is a large surface; the live preview pane is the v1 "what you get" loop.

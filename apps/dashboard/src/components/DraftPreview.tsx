@@ -22,12 +22,16 @@ export function DraftPreview({ canvasId, refreshKey, onRefresh }: DraftPreviewPr
           Refresh
         </Button>
       </div>
+      {/* No `allow-same-origin`: the draft runs in an opaque origin, so its scripts
+          can never read the dashboard session/cookies/DOM or call /api with the
+          viewer's credentials. Critical because an admin can preview another user's
+          draft — without this, a hostile draft would execute on the admin's session. */}
       <iframe
         key={refreshKey}
         title="Draft preview"
         src={src}
         className="h-full w-full rounded-md border border-border bg-white"
-        sandbox="allow-scripts allow-forms allow-same-origin"
+        sandbox="allow-scripts allow-forms"
       />
     </div>
   );

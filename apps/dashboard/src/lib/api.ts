@@ -358,6 +358,13 @@ export const api = {
       body: content,
     }),
 
+  /** Replace/upload a draft file with raw bytes (binary-safe — images, fonts, etc.). */
+  uploadDraftFile: (id: string, path: string, body: Blob) =>
+    request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
+      method: "PUT",
+      body,
+    }),
+
   deleteDraftFile: (id: string, path: string) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "DELETE",

@@ -151,6 +151,19 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     await expect(svc.publish(canvas, "actor")).rejects.toMatchObject({ code: "EMPTY_DEPLOY" });
   });
 
+  it("restoring a non-existent version throws INVALID_PATH", async () => {
+    const { svc, canvas } = await setup();
+    await expect(svc.restore(canvas, 999)).rejects.toMatchObject({ code: "INVALID_PATH" });
+  });
+
+  it("getOrCreate returns the existing draft when one already exists (insert-or-get)", async () => {
+    const { svc, drafts, canvas } = await setup();
+    const first = await svc.getOrCreate(canvas);
+    const second = await svc.getOrCreate(canvas);
+    expect(second.id).toBe(first.id);
+    expect((await drafts.getByCanvas(canvas.id))?.id).toBe(first.id);
+  });
+
   it("rejects a traversal path and an oversize file on draft write", async () => {
     const { svc, canvas } = await setup();
     await expect(svc.writeFile(canvas, "../escape.txt", enc("x"))).rejects.toMatchObject({

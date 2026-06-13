@@ -41,6 +41,14 @@ function hashesOf(manifests: Array<Manifest | null | undefined>): Set<string> {
  */
 export async function collectGarbage(deps: BlobGcDeps, canvasId: string): Promise<void> {
   try {
+    const prefix = canvasBlobPrefix(canvasId);
+    // List storage FIRST, then read the live set, so the live read happens after the
+    // candidate set is fixed. A draft write puts its blob, then commits the manifest;
+    // reading the live set after listing means a manifest entry committed before this
+    // read is preserved — narrowing the draft-write-vs-sweep window (which, unlike
+    // publish, has no idempotent re-write to self-heal). The residual window (a commit
+    // landing between this live read and the delete) is accepted at D13 scale.
+    const existing = await deps.storage.list(prefix);
     const versions = await deps.versions.listByCanvas(canvasId);
     const draft = await deps.drafts.getByCanvas(canvasId);
     const live = hashesOf([
@@ -48,13 +56,13 @@ export async function collectGarbage(deps: BlobGcDeps, canvasId: string): Promis
       (draft?.manifest as Manifest | null) ?? null,
     ]);
 
-    const prefix = canvasBlobPrefix(canvasId);
-    const existing = await deps.storage.list(prefix);
     const garbage = existing.filter((key) => !live.has(hashFromBlobKey(canvasId, key)));
     if (garbage.length === 0) return;
 
+    // Log the count BEFORE deleting so a partial deleteMany failure still records what
+    // was identified, not just an opaque "GC failed".
+    deps.log.info({ canvasId, reclaiming: garbage.length, live: live.size }, "blob GC sweep");
     await deps.storage.deleteMany(garbage);
-    deps.log.info({ canvasId, reclaimed: garbage.length, live: live.size }, "blob GC reclaimed");
   } catch (err) {
     deps.log.error({ err, canvasId }, "blob GC failed (live version unaffected)");
   }

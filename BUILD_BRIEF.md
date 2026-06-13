@@ -693,7 +693,7 @@ This sequence was **re-ordered after dashboard core** (2026-06-13) to match wher
 
 **M10 — Deployment + ops hardening + OSS packaging (M, L-finish). [last]** Docker image + compose + vendor-neutral deploy docs; backup/restore drill; load test on a single modest VPS; security review of the five invariants; README/quickstart; 3 starter examples; pilot with 10–15 colleagues. *Result: pilot running behind an IAP; repo is release-shaped.*
 
-Post-v1 (rough order): CLI → agent skill → structured-output AI helper → clone → search → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history → comments → warehouse.
+Post-v1 (rough order): CLI → agent skill → structured-output AI helper → clone → search → **WYSIWYG/visual HTML editing (code↔visual toggle in the editor, own milestone — deferred from M5 to avoid HTML round-trip/sanitization complexity)** → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history → comments → warehouse.
 
 ## 17. Success metrics
 

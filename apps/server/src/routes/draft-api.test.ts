@@ -249,6 +249,52 @@ describe("draftApiRoutes", () => {
     expect(await deep.text()).toBe("<h1>spa shell</h1>");
   });
 
+  it("publishing an archived canvas is rejected with NOT_ACTIVE (409)", async () => {
+    const { appAs, owner, canvas, canvases } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>x</h1>"),
+    });
+    await canvases.setStatus(canvas.id, "archived");
+    const res = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_ACTIVE");
+  });
+
+  it("restoring a non-existent version is rejected (400)", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const res = await appAs(owner.id).request(`/api/canvases/${canvas.id}/restore`, {
+      method: "POST",
+      headers: { ...SO, "content-type": "application/json" },
+      body: JSON.stringify({ version: 999 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("uploading raw bytes round-trips: PUT binary → GET returns the same bytes with its MIME", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    // A tiny PNG header — binary, not valid UTF-8 text.
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+    const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=logo.png`, {
+      method: "PUT",
+      headers: SO,
+      body: png,
+    });
+    expect(put.status).toBe(200);
+    const view = await jsonOf<{ files: { path: string; mime: string }[] }>(put);
+    expect(view.files.find((f) => f.path === "logo.png")?.mime).toMatch(/image\/png/);
+
+    const get = await app.request(`/api/canvases/${canvas.id}/draft/file?path=logo.png`);
+    expect(get.headers.get("Content-Type")).toMatch(/image\/png/);
+    expect(new Uint8Array(await get.arrayBuffer())).toEqual(png);
+  });
+
   it("a path-traversal write is rejected with a stable code (400)", async () => {
     const { appAs, owner, canvas } = await setup();
     const res = await appAs(owner.id).request(

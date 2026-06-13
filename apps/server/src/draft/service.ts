@@ -64,7 +64,16 @@ export function draftService(deps: DraftServiceDeps) {
           baseVersionId = live.id;
         }
       }
-      return deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId });
+      try {
+        return await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId });
+      } catch (err) {
+        // Two concurrent first-touch requests (e.g. GET /draft + an autosave PUT on
+        // first open) both see no draft and both insert; the unique canvas_id index
+        // makes the loser throw. Re-read and return the winner's row (insert-or-get).
+        const raced = await deps.drafts.getByCanvas(canvas.id);
+        if (raced) return raced;
+        throw err;
+      }
     },
 
     /** Read a draft file's bytes, or null if the path isn't in the draft (R13 raw read). */
@@ -154,8 +163,16 @@ export function draftService(deps: DraftServiceDeps) {
         targetId: canvas.id,
         meta: { version: version.number, fileCount },
       });
-      // The draft now mirrors the freshly published version.
-      await deps.drafts.resetToBase(canvas.id, manifest, version.id);
+      // The draft now mirrors the freshly published version. The version is already
+      // live, so a failure here must NOT fail the publish (it would surface a 500 for
+      // an action that actually succeeded, and a retry would double-publish). Best-
+      // effort: log and continue; the worst case is a draft that still shows
+      // unpublished-changes until the next edit/publish.
+      await deps.drafts
+        .resetToBase(canvas.id, manifest, version.id)
+        .catch((err) =>
+          deps.log.warn({ err, canvasId: canvas.id }, "post-publish draft reset failed"),
+        );
 
       // Prune old rows + reclaim unreferenced blobs, async + best-effort.
       service.pruneAndCollect(canvas.id);

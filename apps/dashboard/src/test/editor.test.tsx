@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -142,5 +142,48 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/editing is paused/i)).toBeInTheDocument();
+  });
+
+  it("autosaves an edit to the draft file endpoint (debounced)", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("orig"));
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    await waitFor(
+      () =>
+        expect(
+          calls.some((c) => c.method === "PUT" && c.url.startsWith("/api/canvases/c1/draft/file")),
+        ).toBe(true),
+      { timeout: 2500 },
+    );
+  });
+
+  it("renders a non-editable preview for a binary file instead of the text editor", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ files: [{ path: "logo.png", size: 120, mime: "image/png" }] })),
+    });
+    renderEditor();
+    expect(await screen.findByText("logo.png")).toBeInTheDocument();
+    expect(await screen.findByText(/can.t be edited as text/i)).toBeInTheDocument();
+    // The text editor is never mounted for a binary file.
+    expect(screen.queryByTestId("code-editor")).not.toBeInTheDocument();
+  });
+
+  it("shows an error state when a file's content can't be loaded", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => json({ error: "not_found" }, 404),
+    });
+    renderEditor();
+    expect(await screen.findByText(/couldn.t load this file/i)).toBeInTheDocument();
   });
 });

@@ -100,6 +100,34 @@ export function useSaveDraftFile(id: string) {
   });
 }
 
+/** Replace/upload a single draft file with raw bytes (binary-safe). */
+export function useUploadDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `draft-${id}` },
+    mutationFn: (input: { path: string; file: Blob }) =>
+      api.uploadDraftFile(id, input.path, input.file),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
+/**
+ * Upload many files into the draft (drag-drop / picker add). Sequential by design:
+ * each draft write is a full-manifest overwrite server-side, so parallel uploads
+ * would race and lose entries. Returns the count uploaded; invalidates the draft.
+ */
+export function useUploadDraftFiles(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `draft-${id}` },
+    mutationFn: async (files: Array<{ path: string; file: Blob }>) => {
+      for (const f of files) await api.uploadDraftFile(id, f.path, f.file);
+      return files.length;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.draft(id) }),
+  });
+}
+
 /** Delete a draft file. */
 export function useDeleteDraftFile(id: string) {
   const qc = useQueryClient();
