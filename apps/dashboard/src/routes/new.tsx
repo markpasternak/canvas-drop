@@ -36,7 +36,7 @@ const METHODS = [
     blurb: "Fastest for snippets",
     panelTitle: "Paste HTML and publish",
     panelDescription:
-      "Drop in a single HTML document. canvas-drop creates the canvas and deploys it.",
+      "Drop in a single HTML document. canvas-drop creates the canvas and publishes it.",
     icon: FileHtml,
   },
   {
@@ -257,7 +257,7 @@ export default function CreateCanvas() {
                   placeholder={"<!doctype html>\n<h1>Hello</h1>"}
                 />
                 <Button onClick={createPaste} loading={busy} disabled={!html.trim()}>
-                  Create and deploy
+                  Create and publish
                   <ArrowRight size={16} weight="bold" aria-hidden />
                 </Button>
               </div>

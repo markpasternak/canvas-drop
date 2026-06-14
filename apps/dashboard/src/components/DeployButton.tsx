@@ -17,16 +17,18 @@ const METHODS: { id: Method; label: string }[] = [
 ];
 
 /**
- * "Deploy files" opens a dialog that pushes a new deploy to an EXISTING
- * canvas (paste / folder / ZIP), the forward counterpart to the Versions tab's
- * "Make live". Self-contained: bundles the trigger, dialog, uploader, and the
- * deploy mutation (which invalidates the canvas + version queries on success).
+ * "Publish files" opens a dialog that publishes a new version to an EXISTING
+ * canvas from uploaded files (paste / folder / ZIP), the forward counterpart to
+ * the Versions tab's "Make current". Self-contained: bundles the trigger, dialog,
+ * uploader, and the deploy mutation (which invalidates the canvas + version
+ * queries on success). The "deploy" identifiers are the API/code term; the UI
+ * verb is Publish.
  */
 export function DeployButton({
   canvasId,
   variant = "primary",
   size = "sm",
-  label = "Deploy files",
+  label = "Publish files",
 }: {
   canvasId: string;
   variant?: "primary" | "secondary";
@@ -56,7 +58,7 @@ export function DeployButton({
     if (input.kind !== "paste") setProgress(0);
     try {
       const res = await deploy.mutateAsync(input);
-      toast(`Deployed v${res.version}`);
+      toast(`Published v${res.version}`);
       close();
     } catch (err) {
       setProgress(null);
@@ -73,8 +75,8 @@ export function DeployButton({
         open={open}
         onClose={close}
         dismissable={!busy}
-        title="Deploy a new version"
-        description="Replaces the live canvas for everyone and adds to its version history."
+        title="Publish a new version"
+        description="Publishes a new version to everyone and adds it to the version history."
       >
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-1.5">
@@ -122,7 +124,7 @@ export function DeployButton({
                   disabled={!html.trim()}
                   onClick={() => run({ kind: "paste", html })}
                 >
-                  Deploy
+                  Publish
                 </Button>
               </div>
             </div>

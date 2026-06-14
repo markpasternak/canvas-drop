@@ -61,7 +61,7 @@ export function PublishBar({
     : dirty
       ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
       : stale
-        ? { label: "Draft behind live", tone: "text-warning", icon: WarningCircle }
+        ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
         : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
   const StatusIcon = status.icon;
 
@@ -111,13 +111,13 @@ export function PublishBar({
             disabled={!canPublish}
             title={
               canPublish
-                ? "Publish the draft as a new live version"
+                ? "Publish the draft as a new version"
                 : hasFiles
-                  ? "The live version already matches this draft"
+                  ? "The published version already matches this draft"
                   : "Add a file to the draft before publishing"
             }
           >
-            Publish draft
+            Publish
           </Button>
         </div>
       </div>

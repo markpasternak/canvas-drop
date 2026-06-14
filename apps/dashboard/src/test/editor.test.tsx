@@ -137,7 +137,7 @@ describe("Editor route", () => {
     expect(screen.getByText(/unpublished changes/i)).toBeInTheDocument();
   });
 
-  it("shows a published state and disables Publish draft when the draft is clean", async () => {
+  it("shows a published state and disables Publish when the draft is clean", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
@@ -145,7 +145,7 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/all changes published/i)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Publish draft" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Publish" })).toBeDisabled();
   });
 
   it("enables Page text and shows the live inline preview for a static single-HTML draft", async () => {
@@ -238,7 +238,7 @@ describe("Editor route", () => {
         json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
     });
     renderEditor();
-    const publishBtn = await screen.findByRole("button", { name: "Publish draft" });
+    const publishBtn = await screen.findByRole("button", { name: "Publish" });
     await userEvent.click(publishBtn);
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
