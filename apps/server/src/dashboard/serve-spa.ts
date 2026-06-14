@@ -46,11 +46,19 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Cross-Origin-Opener-Policy": "same-origin",
 };
 
-// Server-owned URL prefixes. An unmatched path under one of these is a real 404
-// (a typo'd or removed endpoint), NOT a dashboard client-side route — so it must
-// never history-fallback to the SPA shell. Without this, `GET /api/typo` would
-// hand an API client `index.html` with a 200 instead of a JSON 404, masking the
-// mistake. Mirrors the hashed-asset "must 404, not fall back to HTML" guard below.
+// Server-owned URL prefixes — keep in sync with the route mounts in app.ts, which
+// is the authoritative list (there's no shared const: a cross-package one would be
+// over-engineering here). An unmatched path under one of these is a real 404 (a
+// typo'd or removed endpoint), NOT a dashboard client-side route, so it must never
+// history-fallback to the SPA shell: `GET /api/typo` should hand an API client a
+// JSON 404, not `index.html` with a 200. Mirrors the hashed-asset guard below.
+//
+// Deliberately a SUPERSET of what reaches here: `/auth` and `/v1/c/*` are already
+// 404'd by their own routers (roles `auth` / `platform-api`) before a request ever
+// hits serveSpa, so those entries are belt-and-suspenders — only `/api`, `/sdk`, and
+// non-canvas `/v1` paths actually fall through to this guard today. If a NEW
+// top-level server prefix is mounted in app.ts, add it here too, or it reintroduces
+// the SPA-shell-for-API bug.
 const RESERVED_API_PREFIXES = ["/api", "/v1", "/sdk", "/auth"];
 
 function isReservedApiPath(rel: string): boolean {
