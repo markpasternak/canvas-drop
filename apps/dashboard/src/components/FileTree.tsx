@@ -100,7 +100,6 @@ export function FileTree({ files, selected, onSelect }: FileTreeProps) {
         <TreeRow
           key={node.path}
           node={node}
-          depth={0}
           selected={selected}
           onSelect={onSelect}
           collapsed={collapsed}
@@ -111,22 +110,33 @@ export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   );
 }
 
+/** Fixed-width chevron column. Folders show the caret; files render an empty slot of
+ * the same width so every row's icon tile lines up in a single column at each level. */
+function Chevron({ state }: { state: "open" | "closed" | "leaf" }) {
+  return (
+    <span
+      aria-hidden
+      className="grid size-3.5 shrink-0 place-items-center text-subtle group-hover:text-fg"
+    >
+      {state === "closed" && <CaretRight size={12} weight="bold" />}
+      {state === "open" && <CaretDown size={12} weight="bold" />}
+    </span>
+  );
+}
+
 function TreeRow({
   node,
-  depth,
   selected,
   onSelect,
   collapsed,
   onToggle,
 }: {
   node: TreeNode;
-  depth: number;
   selected: string | null;
   onSelect: (path: string) => void;
   collapsed: ReadonlySet<string>;
   onToggle: (path: string) => void;
 }) {
-  const pad = { paddingLeft: `${depth * 0.875 + 0.5}rem` };
   if (node.isDir) {
     const isCollapsed = collapsed.has(node.path);
     return (
@@ -135,32 +145,25 @@ function TreeRow({
           type="button"
           onClick={() => onToggle(node.path)}
           aria-expanded={!isCollapsed}
-          style={pad}
           className="group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover"
         >
-          {/* Chevron + a matching icon tile so the folder carries the same visual
-              weight as the file rows (which wrap their icon in a size-7 tile). */}
-          <span className="flex shrink-0 items-center gap-1">
-            {isCollapsed ? (
-              <CaretRight size={12} weight="bold" className="text-subtle" aria-hidden />
-            ) : (
-              <CaretDown size={12} weight="bold" className="text-subtle" aria-hidden />
-            )}
-            <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-raised text-muted group-hover:text-fg">
-              <FolderSimple size={16} weight="duotone" aria-hidden />
-            </span>
+          <Chevron state={isCollapsed ? "closed" : "open"} />
+          {/* Matching icon tile so the folder carries the same weight as file rows. */}
+          <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-raised text-muted group-hover:text-fg">
+            <FolderSimple size={16} weight="duotone" aria-hidden />
           </span>
           <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-fg">
             {node.name}/
           </span>
         </button>
         {!isCollapsed && (
-          <ul className="space-y-1">
+          // Indent + a vertical guide line so it's clear which files live in this folder.
+          // The guide sits under the folder's chevron column (ml ≈ row px + half-chevron).
+          <ul className="mt-1 ml-[0.9375rem] space-y-1 border-l border-border pl-2">
             {node.children.map((child) => (
               <TreeRow
                 key={child.path}
                 node={child}
-                depth={depth + 1}
                 selected={selected}
                 onSelect={onSelect}
                 collapsed={collapsed}
@@ -178,13 +181,14 @@ function TreeRow({
       <button
         type="button"
         onClick={() => onSelect(node.path)}
-        style={pad}
         aria-current={active ? "true" : undefined}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
           active ? "bg-accent-subtle text-accent" : "text-fg hover:bg-surface-hover",
         )}
       >
+        {/* Empty chevron slot keeps file icons aligned with sibling folder icons. */}
+        <Chevron state="leaf" />
         {node.file && <FileKindIcon file={node.file} active={active} />}
         <span className="min-w-0 flex-1">
           <span className="block truncate font-mono text-xs">{node.name}</span>
