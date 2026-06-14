@@ -24,6 +24,13 @@ tree. No file corruption only because the two happened to touch disjoint files.
 routinely *between commits*, so a clean `git status` does not mean the worktree is
 free.
 
+Note git already enforces half of this: a branch can be checked out in only ONE
+worktree at a time, so `git worktree add … feat/polish-bugfix` hard-fails with
+`fatal: 'feat/polish-bugfix' is already used by worktree at …`. That failure is the
+signal — the wrong response is to reuse the existing worktree (what happened here);
+the right response is to pick a new unique name. BOTH the worktree dir and the branch
+must be new and unique every run; neither is ever reused.
+
 **Avoid it:**
 - Name worktree + branch with the per-agent instance number `N`, which is unique:
   `feat/<task>-n<N>`, dir `../canvas-drop-<task>-n<N>`. The suffix alone prevents the
