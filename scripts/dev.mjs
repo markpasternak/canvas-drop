@@ -20,18 +20,32 @@
 //     (e.g. a parallel agent's `CANVAS_DROP_PORT=3003 pnpm dev`) and production's
 //     systemd env both still override. Dev-only; production never runs this.
 import { spawn } from "node:child_process";
+import { unlinkSync, writeFileSync } from "node:fs";
+
+// Record THIS launcher's pid (worktree-root `.dev.pid`, gitignored) so
+// `pnpm dev:stop` can tear the tree down cleanly instead of leaving orphans:
+// SIGTERM to the launcher is forwarded to its pnpm child, which stops vite + tsx.
+const PID_FILE = new URL("../.dev.pid", import.meta.url);
+const cleanup = () => {
+  try {
+    unlinkSync(PID_FILE);
+  } catch {}
+};
 
 const child = spawn("pnpm", ["-r", "--parallel", "dev"], { stdio: "inherit" });
+writeFileSync(PID_FILE, String(process.pid));
 
 const forward = (signal) => child.kill(signal);
 process.on("SIGINT", forward);
 process.on("SIGTERM", forward);
 
 child.on("exit", (code, signal) => {
+  cleanup();
   if (signal) process.kill(process.pid, signal);
   else process.exit(code ?? 0);
 });
 child.on("error", (err) => {
+  cleanup();
   console.error(`dev launcher failed to start pnpm: ${err.message}`);
   process.exit(1);
 });

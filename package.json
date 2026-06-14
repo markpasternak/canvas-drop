@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "dev:stop": "node scripts/dev-stop.mjs",
+    "dev:restart": "node scripts/dev-stop.mjs && node --env-file-if-exists=.env scripts/dev.mjs",
     "build": "pnpm -r build",
     "test": "vitest run && pnpm --filter @canvas-drop/dashboard test",
     "test:watch": "vitest",

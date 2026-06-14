@@ -35,6 +35,7 @@ coverage/
 # Misc
 .cache/
 tmp/
+.dev.pid
 
 # Deployment details (DigitalOcean) — never commit
 /deploy/
