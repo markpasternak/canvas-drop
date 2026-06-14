@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
-import { canvasesRepository } from "./canvases.js";
+import { canvasesRepository, type OwnerListOptions } from "./canvases.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
 
@@ -15,6 +15,19 @@ async function seedOwner(client: DbClient, sub = "owner"): Promise<string> {
     isAdmin: false,
   });
   return u.id;
+}
+
+/** Give a canvas a ready published version (so it counts as "deployed"). */
+async function deploy(
+  client: DbClient,
+  canvasId: string,
+  ownerId: string,
+  number = 1,
+): Promise<void> {
+  const versions = versionsRepository(client);
+  const v = await versions.createPending({ canvasId, number, createdBy: ownerId, source: "api" });
+  await versions.markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: {} });
+  await canvasesRepository(client).setCurrentVersion(canvasId, v.id);
 }
 
 describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
@@ -344,5 +357,154 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     // missing version id (raced-away / pruned) → refused, pointer unchanged
     expect(await repo.setCurrentVersionIfReady(cv.id, "does-not-exist")).toBe(false);
     expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
+  });
+
+  // ── listByOwnerFiltered (plan 005) ───────────────────────────────────────
+
+  it("listByOwnerFiltered returns only the caller's active canvases (owner-scope invariant)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const other = await seedOwner(client, "other");
+    const repo = canvasesRepository(client);
+    const mine = await repo.create({ ownerId: me, slug: "mine", apiKeyHash: "k-mine" });
+    const archived = await repo.create({ ownerId: me, slug: "arch", apiKeyHash: "k-arch" });
+    const deleted = await repo.create({ ownerId: me, slug: "del", apiKeyHash: "k-del" });
+    await repo.create({ ownerId: other, slug: "theirs", apiKeyHash: "k-theirs" });
+    await repo.archive(archived.id);
+    await repo.setStatus(deleted.id, "deleted");
+
+    // Even with all state filters off (the most permissive call), only my one
+    // active canvas comes back — never another owner's, never archived/deleted.
+    const { items, total } = await repo.listByOwnerFiltered({ ownerId: me, limit: 50, offset: 0 });
+    expect(items.map((c) => c.id)).toEqual([mine.id]);
+    expect(total).toBe(1);
+  });
+
+  it("listByOwnerFiltered searches title and slug case-insensitively, escaping LIKE metacharacters", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: me, slug: "weather-app", apiKeyHash: "k1", title: "Weather Dashboard" });
+    await repo.create({ ownerId: me, slug: "budget-tool", apiKeyHash: "k2", title: "Budget" });
+    await repo.create({ ownerId: me, slug: "ab", apiKeyHash: "k3", title: "100% Coverage" });
+
+    // Title match, case-insensitive.
+    expect(
+      (await repo.listByOwnerFiltered({ ownerId: me, q: "WEATHER", limit: 50, offset: 0 })).items
+        .map((c) => c.slug),
+    ).toEqual(["weather-app"]);
+    // Slug match.
+    expect(
+      (await repo.listByOwnerFiltered({ ownerId: me, q: "budget-", limit: 50, offset: 0 })).items
+        .map((c) => c.slug),
+    ).toEqual(["budget-tool"]);
+    // A literal "%" is escaped — matches the "100%" title, not everything.
+    const pct = await repo.listByOwnerFiltered({ ownerId: me, q: "100%", limit: 50, offset: 0 });
+    expect(pct.items.map((c) => c.slug)).toEqual(["ab"]);
+  });
+
+  it("listByOwnerFiltered applies each state filter in isolation", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const plain = await repo.create({ ownerId: me, slug: "plain", apiKeyHash: "k-plain" });
+    const shared = await repo.create({ ownerId: me, slug: "shared", apiKeyHash: "k-shared" });
+    const prot = await repo.create({ ownerId: me, slug: "prot", apiKeyHash: "k-prot" });
+    const listed = await repo.create({ ownerId: me, slug: "listed", apiKeyHash: "k-listed" });
+    const tmpl = await repo.create({ ownerId: me, slug: "tmpl", apiKeyHash: "k-tmpl" });
+    await repo.updateSettings(shared.id, { shared: true });
+    await repo.setPassword(prot.id, "argon2hash");
+    await repo.updateSettings(listed.id, { galleryListed: true });
+    await repo.updateSettings(tmpl.id, { galleryTemplatable: true });
+    // `plain` and one other are deployed; the rest are never-deployed.
+    await deploy(client, plain.id, me);
+
+    const ids = async (opts: Partial<OwnerListOptions>) =>
+      (await repo.listByOwnerFiltered({ ownerId: me, limit: 50, offset: 0, ...opts })).items
+        .map((c) => c.id)
+        .sort();
+
+    expect(await ids({ shared: true })).toEqual([shared.id].sort());
+    expect(await ids({ protected: true })).toEqual([prot.id].sort());
+    expect(await ids({ listed: true })).toEqual([listed.id].sort());
+    expect(await ids({ template: true })).toEqual([tmpl.id].sort());
+    // never-deployed = everything except the one deployed canvas.
+    expect(await ids({ neverDeployed: true })).toEqual(
+      [shared.id, prot.id, listed.id, tmpl.id].sort(),
+    );
+  });
+
+  it("listByOwnerFiltered intersects composed filters", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const both = await repo.create({ ownerId: me, slug: "both", apiKeyHash: "k-both" });
+    const sharedOnly = await repo.create({ ownerId: me, slug: "shared-only", apiKeyHash: "k-so" });
+    const tmplOnly = await repo.create({ ownerId: me, slug: "tmpl-only", apiKeyHash: "k-to" });
+    await repo.updateSettings(both.id, { shared: true, galleryTemplatable: true });
+    await repo.updateSettings(sharedOnly.id, { shared: true });
+    await repo.updateSettings(tmplOnly.id, { galleryTemplatable: true });
+
+    const { items, total } = await repo.listByOwnerFiltered({
+      ownerId: me,
+      shared: true,
+      template: true,
+      limit: 50,
+      offset: 0,
+    });
+    expect(items.map((c) => c.id)).toEqual([both.id]);
+    expect(total).toBe(1);
+  });
+
+  it("listByOwnerFiltered sorts by title (A–Z) and created (newest-first)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const a = await repo.create({ ownerId: me, slug: "a", apiKeyHash: "ka", title: "Banana" });
+    const b = await repo.create({ ownerId: me, slug: "b", apiKeyHash: "kb", title: "apple" });
+    const c = await repo.create({ ownerId: me, slug: "c", apiKeyHash: "kc", title: "Cherry" });
+
+    // Title sort is case-insensitive A–Z: apple, Banana, Cherry.
+    expect(
+      (await repo.listByOwnerFiltered({ ownerId: me, sort: "title", limit: 50, offset: 0 })).items
+        .map((cv) => cv.title),
+    ).toEqual(["apple", "Banana", "Cherry"]);
+    // Created sort is newest-first (uuidv7 id tiebreak makes it deterministic).
+    expect(
+      (await repo.listByOwnerFiltered({ ownerId: me, sort: "created", limit: 50, offset: 0 })).items
+        .map((cv) => cv.id),
+    ).toEqual([c.id, b.id, a.id]);
+  });
+
+  it("listByOwnerFiltered windows with limit/offset while total reflects the full filtered count", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    for (let i = 0; i < 5; i++) {
+      await repo.create({ ownerId: me, slug: `c${i}`, apiKeyHash: `k${i}`, title: `t${i}` });
+    }
+    const page = await repo.listByOwnerFiltered({
+      ownerId: me,
+      sort: "title",
+      limit: 2,
+      offset: 2,
+    });
+    expect(page.items.map((c) => c.title)).toEqual(["t2", "t3"]);
+    expect(page.total).toBe(5); // full count, independent of the window
+  });
+
+  it("listByOwnerFiltered returns an empty page (not an error) when nothing matches", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: me, slug: "only", apiKeyHash: "h" });
+    const res = await repo.listByOwnerFiltered({
+      ownerId: me,
+      q: "no-such-canvas",
+      limit: 50,
+      offset: 0,
+    });
+    expect(res.items).toEqual([]);
+    expect(res.total).toBe(0);
   });
 });

@@ -117,6 +117,35 @@ export interface GalleryFacets {
 }
 
 /**
+ * Your-canvases sort axes (plan 005). `updated` is the default (most-recently
+ * changed first); `created` is newest-first by creation; `title` is
+ * case-insensitive A–Z. An unknown value falls back to `updated` at the route, so
+ * the repo only ever receives one of these three.
+ */
+export type CanvasesSort = "updated" | "created" | "title";
+
+/**
+ * Options for the owner's own filtered/sorted/paginated list (plan 005). Every
+ * filter ANDs onto the owner-scope base (`ownerId = me`, status not deleted/
+ * archived); none may widen past the caller's own active set — the Your-canvases
+ * analogue of the gallery visibility predicate (§12 owner-scope invariant).
+ */
+export interface OwnerListOptions {
+  ownerId: string;
+  q?: string;
+  /** Access/gallery-state filters — each maps to one canvas column. */
+  shared?: boolean;
+  protected?: boolean;
+  listed?: boolean;
+  template?: boolean;
+  /** Deployment-state: no published version yet (`current_version_id IS NULL`). */
+  neverDeployed?: boolean;
+  sort?: CanvasesSort;
+  limit: number;
+  offset: number;
+}
+
+/**
  * Canvases repository (§10). Dual-dialect seam typed `any` (KTD-1); inputs and
  * the {@link Canvas} row shape stay strongly typed.
  */
@@ -201,6 +230,70 @@ export function canvasesRepository(client: DbClient) {
         .from(t)
         .where(and(eq(t.ownerId, ownerId), notInArray(t.status, ["deleted", "archived"])))
         .orderBy(desc(t.createdAt))) as Canvas[];
+    },
+
+    /**
+     * Your-canvases list with server-side filter/search/sort + offset pagination
+     * (plan 005). Mirrors {@link listGallery}'s shape. The owner-scope base
+     * (`ownerId = me`, status not deleted/archived) is the fixed first two filters;
+     * every option ANDs onto it and can only ever shrink the owner's active set —
+     * a missing/malformed option still returns only the caller's canvases (§12).
+     * Two-query count posture (no new index) at single-org scale, like the gallery.
+     */
+    async listByOwnerFiltered(
+      opts: OwnerListOptions,
+    ): Promise<{ items: Canvas[]; total: number }> {
+      const filters = [
+        eq(t.ownerId, opts.ownerId),
+        notInArray(t.status, ["deleted", "archived"]),
+      ];
+
+      const q = opts.q?.trim().toLowerCase();
+      if (q) {
+        // Same portable, metacharacter-escaped LIKE as listGallery — search the
+        // owner-facing identifiers (title + slug) rather than the gallery summary.
+        const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+        filters.push(
+          or(
+            sql`lower(${t.title}) like ${pattern} escape '\\'`,
+            sql`lower(${t.slug}) like ${pattern} escape '\\'`,
+          ),
+        );
+      }
+
+      // Column-based state filters (plan 005 KTD3). `protected` keys off a set
+      // password hash; `neverDeployed` off the absence of a published version.
+      if (opts.shared) filters.push(eq(t.shared, true));
+      if (opts.protected) filters.push(isNotNull(t.passwordHash));
+      if (opts.listed) filters.push(eq(t.galleryListed, true));
+      if (opts.template) filters.push(eq(t.galleryTemplatable, true));
+      if (opts.neverDeployed) filters.push(isNull(t.currentVersionId));
+
+      const where = and(...filters);
+
+      // Default is most-recently-updated; `created` and `title` are alternatives.
+      // Every axis keeps an `id` tiebreak (uuidv7 monotonic) so pages don't shuffle
+      // within an equal sort key — same convention as listGallery.
+      const orderBy =
+        opts.sort === "created"
+          ? [desc(t.createdAt), desc(t.id)]
+          : opts.sort === "title"
+            ? [sql`lower(${t.title}) asc`, desc(t.id)]
+            : [desc(t.updatedAt), desc(t.id)];
+
+      const rows = (await db
+        .select()
+        .from(t)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(opts.limit)
+        .offset(opts.offset)) as Canvas[];
+
+      const totalRows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
+        value: number;
+      }>;
+
+      return { items: rows, total: totalRows[0]?.value ?? 0 };
     },
 
     /** Archive-view list: a user's archived canvases, newest-first. */
