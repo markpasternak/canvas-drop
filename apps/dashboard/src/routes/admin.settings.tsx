@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
-import { Field } from "../components/Field.js";
+import { Field, TextareaField } from "../components/Field.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { type AdminQuota, ApiError } from "../lib/api.js";
@@ -18,7 +18,13 @@ function ModelAllowlistForm({ initial }: { initial: string[] }) {
   const toast = useToast();
   return (
     <>
-      <Field label="Allowed models" value={text} onChange={(e) => setText(e.target.value)} mono />
+      <TextareaField
+        label="Allowed models"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        mono
+      />
       <div className="flex justify-end">
         <Button
           size="sm"

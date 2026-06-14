@@ -117,6 +117,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         // Last activity proxy: updatedAt bumps on deploy/settings/status changes.
         lastActivityAt: cv.updatedAt,
         createdAt: cv.createdAt,
+        // Soft-delete timestamp (purge factors on it); null unless status='deleted'.
+        deletedAt: cv.deletedAt,
       };
     });
     // Keyset cursor is the last row's id (unique + time-ordered); null = last page.
@@ -143,6 +145,11 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       canvasCountByStatus: stats.canvasCountByStatus,
       userCount: stats.userCount,
       totalFileBytes: stats.totalFileBytes,
+      totalOps: stats.totalOps,
+      newCanvases: stats.newCanvases,
+      newUsers: stats.newUsers,
+      recentWindowDays: stats.recentWindowDays,
+      oldestDeletedAt: stats.oldestDeletedAt,
       topCanvases: top,
     });
   });

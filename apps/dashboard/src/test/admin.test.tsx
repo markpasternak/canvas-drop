@@ -66,12 +66,18 @@ const ROW = {
   usageOps: 1280,
   lastActivityAt: Date.now(),
   createdAt: Date.now(),
+  deletedAt: null,
 };
 
 const OVERVIEW = {
-  canvasCountByStatus: { active: 3, disabled: 1 },
+  canvasCountByStatus: { active: 3, disabled: 1, archived: 2, deleted: 4 },
   userCount: 7,
   totalFileBytes: 4096,
+  totalOps: 9001,
+  newCanvases: 5,
+  newUsers: 2,
+  recentWindowDays: 7,
+  oldestDeletedAt: Date.now() - 12 * 86400000,
   topCanvases: [{ canvasId: "c1", ops: 1280, slug: "happy-otter", title: "Happy Otter" }],
 };
 
@@ -114,6 +120,72 @@ describe("admin dashboard", () => {
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // user count
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
+  });
+
+  it("paginates: loads the next keyset page on 'Load more', then hides the button", async () => {
+    const page2 = {
+      ...ROW,
+      id: "c2",
+      slug: "brave-lynx",
+      title: "Brave Lynx",
+      owner: { id: "u2", email: "bob@example.com", name: "Bob" },
+    };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      // First page advertises a cursor; the second (fetched with ?cursor=cur1) ends it.
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
+      "GET /api/admin/canvases?cursor=cur1": () => json({ canvases: [page2], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    // Page 2 not loaded yet.
+    expect(screen.queryByText("Brave Lynx")).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
+    // Both rows present; cursor exhausted → no more "Load more".
+    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("overview failure shows a retry instead of silently vanishing", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json({ error: "boom" }, 500),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    expect(await screen.findByText("Couldn't load the overview")).toBeInTheDocument();
+    // The canvas table below still renders independently.
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+  });
+
+  it("deleted rows show the purge-age hint (days since deletion)", async () => {
+    const deleted = {
+      ...ROW,
+      id: "c9",
+      slug: "old-canvas",
+      title: "Old Canvas",
+      status: "deleted",
+      deletedAt: Date.now() - 5 * 86400000,
+    };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases?status=deleted": () =>
+        json({ canvases: [deleted], nextCursor: null }),
+      "GET /api/admin/canvases": () => json({ canvases: [], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Deleted" }));
+    expect(await screen.findByText(/Deleted 5d ago · awaiting purge/)).toBeInTheDocument();
   });
 
   it("takedown flow: opens the reason dialog, then POSTs disable with the reason", async () => {

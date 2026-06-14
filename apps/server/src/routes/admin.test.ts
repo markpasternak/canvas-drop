@@ -166,10 +166,12 @@ describe("admin routes", () => {
     expect(owners).toEqual(new Set(["alice@example.com", "bob@example.com"]));
 
     const disabled = (await (await app.request("/api/admin/canvases?status=disabled")).json()) as {
-      canvases: Array<{ disabledReason: string | null }>;
+      canvases: Array<{ disabledReason: string | null; deletedAt: number | null }>;
     };
     expect(disabled.canvases.length).toBe(1);
     expect(disabled.canvases[0]?.disabledReason).toBe("spam");
+    // deletedAt is surfaced per row (null unless soft-deleted) for the purge-age hint.
+    expect(disabled.canvases[0]?.deletedAt).toBeNull();
   });
 
   it("overview returns totals + top canvases", async () => {
@@ -182,11 +184,21 @@ describe("admin routes", () => {
     const body = (await res.json()) as {
       canvasCountByStatus: Record<string, number>;
       userCount: number;
+      totalOps: number;
+      newCanvases: number;
+      newUsers: number;
+      recentWindowDays: number;
+      oldestDeletedAt: number | null;
       topCanvases: unknown[];
     };
     expect(body.canvasCountByStatus.active).toBe(1);
     expect(body.userCount).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.topCanvases)).toBe(true);
+    // Expanded overview fields (§6.10.6).
+    expect(body.totalOps).toBe(0);
+    expect(body.newCanvases).toBe(1); // just created → inside the window
+    expect(body.recentWindowDays).toBe(7);
+    expect(body.oldestDeletedAt).toBeNull();
   });
 
   it("manages the model allowlist + quota defaults (audited); rejects invalid bodies", async () => {
