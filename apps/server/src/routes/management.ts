@@ -301,8 +301,9 @@ export function managementRoutes(deps: ManagementDeps) {
     const limit = Math.min(Math.max(data.limit, 1), CANVASES_MAX_LIMIT);
     const offset = Math.max(data.offset, 0);
 
+    const userId = c.get("user").id;
     const { items, total } = await deps.canvases.listByOwnerFiltered({
-      ownerId: c.get("user").id,
+      ownerId: userId,
       q: data.q,
       shared: data.shared,
       protected: data.protected,
@@ -314,8 +315,9 @@ export function managementRoutes(deps: ManagementDeps) {
       limit,
       offset,
     });
+    const summary = await deps.canvases.ownerSummary(userId);
     const canvases = await withLastDeploy(items);
-    return c.json({ canvases, total, limit, offset });
+    return c.json({ canvases, total, limit, offset, summary });
   });
 
   // List the caller's own ARCHIVED canvases — the dedicated Archive view (§6.9.1).

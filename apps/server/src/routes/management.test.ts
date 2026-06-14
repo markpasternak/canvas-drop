@@ -1445,11 +1445,29 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       total: number;
       limit: number;
       offset: number;
+      summary: {
+        active: number;
+        archived: number;
+        shared: number;
+        protected: number;
+        listed: number;
+        templates: number;
+        neverDeployed: number;
+      };
     }>(res);
     expect(body.total).toBe(2);
     expect(body.canvases).toHaveLength(2);
     expect(body.limit).toBe(24);
     expect(body.offset).toBe(0);
+    expect(body.summary).toMatchObject({
+      active: 2,
+      archived: 0,
+      shared: 0,
+      protected: 0,
+      listed: 0,
+      templates: 0,
+      neverDeployed: 2,
+    });
     // withLastDeploy enrichment is preserved (null for never-deployed canvases).
     expect(body.canvases[0]).toHaveProperty("lastDeploy");
   });

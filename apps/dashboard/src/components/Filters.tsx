@@ -78,7 +78,7 @@ export function FilterChip({ active, onClick, children, ...rest }: FilterChipPro
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "h-9 rounded-lg border px-3 text-sm font-medium transition-colors",
+        "inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium transition-colors",
         active
           ? "border-accent/30 bg-accent-subtle text-accent"
           : "border-border text-muted hover:bg-surface-hover hover:text-fg",

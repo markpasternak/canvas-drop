@@ -8,14 +8,18 @@ import { useToast } from "./Toast.js";
 export function CopyButton({
   value,
   label = "Copy",
+  ariaLabel,
   className,
   toastMessage = "Copied to clipboard",
+  onCopyFinished,
   ref,
 }: {
   value: string;
   label?: string;
+  ariaLabel?: string;
   className?: string;
   toastMessage?: string;
+  onCopyFinished?: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {
   const toast = useToast();
@@ -29,6 +33,8 @@ export function CopyButton({
       setTimeout(() => setDone(false), 1500);
     } catch {
       toast("Couldn't copy. Copy it manually.", "error");
+    } finally {
+      onCopyFinished?.();
     }
   }
 
@@ -37,6 +43,7 @@ export function CopyButton({
       ref={ref}
       type="button"
       onClick={copy}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-accent",
         className,

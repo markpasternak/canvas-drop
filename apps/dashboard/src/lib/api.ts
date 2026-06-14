@@ -87,6 +87,16 @@ export interface LastDeploy {
 
 export type CanvasListItem = Canvas & { lastDeploy: LastDeploy | null };
 
+export interface CanvasOwnerSummary {
+  active: number;
+  archived: number;
+  shared: number;
+  protected: number;
+  listed: number;
+  templates: number;
+  neverDeployed: number;
+}
+
 /** What a version serves at the canvas root (computed server-side). `path` is
  *  the entry file; null with reason "ambiguous"/"none" means the root 404s. */
 export interface RootEntry {
@@ -208,6 +218,7 @@ export interface CanvasesPage {
   total: number;
   limit: number;
   offset: number;
+  summary: CanvasOwnerSummary;
 }
 
 /** Your-canvases sort axes (plan 005). `updated` (default) = most-recently-changed. */

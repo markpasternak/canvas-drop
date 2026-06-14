@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
+
+const originalClipboard = navigator.clipboard;
 
 /** A canvas-list row as the API serializes it (only the fields the list view reads;
  *  the fetch JSON is untyped, so we omit capability internals the row never touches). */
@@ -31,6 +33,19 @@ function canvas(over: Record<string, unknown> = {}) {
     updatedAt: 0,
     lastDeploy: { version: 1, createdAt: 0, fileCount: 1, totalBytes: 10 },
     ...over,
+  };
+}
+
+function summaryFor(canvases: Array<ReturnType<typeof canvas>>) {
+  const activeRows = canvases.filter((c) => c.status !== "archived" && c.status !== "deleted");
+  return {
+    active: activeRows.length,
+    archived: canvases.filter((c) => c.status === "archived").length,
+    shared: activeRows.filter((c) => c.shared).length,
+    protected: activeRows.filter((c) => c.hasPassword).length,
+    listed: activeRows.filter((c) => c.galleryListed).length,
+    templates: activeRows.filter((c) => c.galleryTemplatable).length,
+    neverDeployed: activeRows.filter((c) => c.lastDeploy === null).length,
   };
 }
 
@@ -81,6 +96,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         total: matched.length,
         limit,
         offset,
+        summary: summaryFor(all),
       });
     }),
   );
@@ -105,11 +121,28 @@ function renderAt(path: string) {
 }
 
 afterEach(() => {
+  if (originalClipboard === undefined) {
+    Reflect.deleteProperty(navigator, "clipboard");
+  } else {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+  }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("Your canvases — server-side filters (plan 005)", () => {
+  function expectMetric(label: string, value: string) {
+    const metric = screen
+      .getAllByText(label)
+      .find((el) => el.tagName.toLowerCase() === "dt")
+      ?.closest("div");
+    expect(metric).not.toBeNull();
+    expect(within(metric as HTMLElement).getByText(value)).toBeInTheDocument();
+  }
+
   it("filters to shared via the Shared chip", async () => {
     stub([
       canvas({ id: "a", title: "Shared one", shared: true }),
@@ -124,6 +157,30 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(screen.queryByText("Private one")).toBeNull();
   });
 
+  it("shows owner inventory counts on summary metrics and filter chips", async () => {
+    stub([
+      canvas({ id: "a", title: "Shared one", shared: true }),
+      canvas({ id: "b", title: "Protected one", hasPassword: true }),
+      canvas({
+        id: "c",
+        title: "Template draft",
+        galleryListed: true,
+        galleryTemplatable: true,
+        lastDeploy: null,
+      }),
+    ]);
+    renderAt("/");
+
+    await screen.findByText("Shared one");
+    expectMetric("Active", "3");
+    expectMetric("Templates", "1");
+    expectMetric("Never deployed", "1");
+    expect(screen.getByRole("button", { name: "Shared" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Protected" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Templates" })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Never deployed" })).toHaveTextContent("1");
+  });
+
   it("filters to never-deployed from the URL", async () => {
     stub([
       canvas({
@@ -134,13 +191,67 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", title: "Draft only", lastDeploy: null, currentVersionId: null }),
     ]);
     renderAt("/?undeployed=true");
-    expect(await screen.findByText("Draft only")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("link", { name: "View details for Draft only" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Deployed one")).toBeNull();
     // The chip reflects the URL state.
     expect(screen.getByRole("button", { name: "Never deployed" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
+  });
+
+  it("uses a setup action for never-deployed canvases instead of copy/open link actions", async () => {
+    stub([canvas({ id: "draft", title: "Draft only", lastDeploy: null, currentVersionId: null })]);
+    renderAt("/");
+
+    expect(
+      await screen.findByRole("link", { name: "View details for Draft only" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue setup for Draft only" })).toHaveAttribute(
+      "href",
+      "/canvases/draft/editor",
+    );
+    expect(screen.queryByRole("button", { name: "Copy link for Draft only" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open Draft only" })).toBeNull();
+  });
+
+  it("closes the overflow menu after copying a link", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    stub([canvas({ id: "copy", title: "Copyable one" })]);
+    renderAt("/");
+
+    await screen.findByText("Copyable one");
+    const menu = screen.getByRole("button", { name: "More actions for Copyable one" });
+    await userEvent.click(menu);
+    const copy = await screen.findByRole("button", { name: "Copy link for Copyable one" });
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.click(copy);
+
+    await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
+    expect(writeText).toHaveBeenCalledWith("http://x/c/s1");
+  });
+
+  it("closes the overflow menu when clicking outside it", async () => {
+    stub([canvas({ id: "outside", title: "Outside one" })]);
+    renderAt("/");
+
+    await screen.findByText("Outside one");
+    const menu = screen.getByRole("button", { name: "More actions for Outside one" });
+    await userEvent.click(menu);
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Copy link for Outside one" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("heading", { name: "Your canvases" }));
+
+    await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
+    expect(screen.queryByRole("button", { name: "Copy link for Outside one" })).toBeNull();
   });
 
   it("searches by title (debounced into a server request)", async () => {
@@ -194,9 +305,9 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     );
     stub(many);
     renderAt("/?sort=title");
-    expect(await screen.findByText("Showing 1–24 of 25")).toBeInTheDocument();
+    expect(await screen.findAllByText("Showing 1–24 of 25")).toHaveLength(2);
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Showing 25–25 of 25")).toBeInTheDocument();
+    expect(await screen.findAllByText("Showing 25–25 of 25")).toHaveLength(2);
   });
 });

@@ -1,27 +1,52 @@
-import { MagnifyingGlass } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretDown, MagnifyingGlass } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
-import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
+import {
+  CanvasListHeader,
+  CanvasRow,
+  ListSkeleton,
+  rowMenuItemClass,
+  rowPrimaryActionClass,
+} from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
-import { ApiError, CANVASES_PAGE_SIZE, type CanvasListItem } from "../lib/api.js";
+import {
+  ApiError,
+  CANVASES_PAGE_SIZE,
+  type CanvasListItem,
+  type CanvasOwnerSummary,
+} from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { useArchiveCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
 import { useArchivedCanvases, useCanvases } from "../lib/queries.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
 
-const STATE_CHIPS: Array<{ key: keyof CanvasesSearch; label: string }> = [
-  { key: "shared", label: "Shared" },
-  { key: "protected", label: "Protected" },
-  { key: "listed", label: "Listed" },
-  { key: "template", label: "Templates" },
-  { key: "undeployed", label: "Never deployed" },
+const EMPTY_SUMMARY: CanvasOwnerSummary = {
+  active: 0,
+  archived: 0,
+  shared: 0,
+  protected: 0,
+  listed: 0,
+  templates: 0,
+  neverDeployed: 0,
+};
+
+const STATE_CHIPS: Array<{
+  key: keyof CanvasesSearch;
+  label: string;
+  countKey: keyof CanvasOwnerSummary;
+}> = [
+  { key: "shared", label: "Shared", countKey: "shared" },
+  { key: "protected", label: "Protected", countKey: "protected" },
+  { key: "listed", label: "Listed", countKey: "listed" },
+  { key: "template", label: "Templates", countKey: "templates" },
+  { key: "undeployed", label: "Never deployed", countKey: "neverDeployed" },
 ];
 
 const CANVASES_SORT_OPTIONS = [
@@ -30,36 +55,141 @@ const CANVASES_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
 ];
 
-/** Active-list row: the usual copy/open, plus a calm one-click Archive (reversible —
- * the canvas moves to the Archived view, restorable anytime). */
+function canvasTitle(canvas: CanvasListItem) {
+  return canvas.title?.trim() || canvas.slug;
+}
+
+function RowOverflowMenu({
+  label,
+  children,
+}: {
+  label: string;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const close = () => setOpen(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        className="grid size-8 cursor-pointer list-none place-items-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&::-webkit-details-marker]:hidden"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <CaretDown size={14} weight="bold" aria-hidden />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-[calc(100%+0.25rem)] z-20 w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
+        >
+          {children(close)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Active-list row: keep the primary work visible and tuck secondary/destructive
+ * actions into a compact menu. Never-deployed canvases route to setup instead of
+ * pretending there is a useful public link to copy. */
 function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
   const toast = useToast();
   const archive = useArchiveCanvas(canvas.id);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const title = canvasTitle(canvas);
+  const deployed = canvas.lastDeploy !== null;
   return (
     <CanvasRow
       canvas={canvas}
       actions={
         <>
-          <DefaultRowActions canvas={canvas} />
-          <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
-            Duplicate
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            loading={archive.isPending}
-            onClick={async () => {
-              try {
-                await archive.mutateAsync();
-                toast("Canvas archived");
-              } catch (err) {
-                toast(err instanceof ApiError ? err.hint : "Couldn't archive", "error");
-              }
-            }}
-          >
-            Archive
-          </Button>
+          {deployed ? (
+            <a
+              href={canvas.url}
+              target="_blank"
+              rel="noreferrer"
+              className={rowPrimaryActionClass}
+              aria-label={`Open ${title}`}
+            >
+              Open
+              <ArrowSquareOut size={13} weight="bold" aria-hidden />
+            </a>
+          ) : (
+            <Link
+              to="/canvases/$id/editor"
+              params={{ id: canvas.id }}
+              className={rowPrimaryActionClass}
+              aria-label={`Continue setup for ${title}`}
+            >
+              Continue setup
+            </Link>
+          )}
+          <RowOverflowMenu label={`More actions for ${title}`}>
+            {(close) => (
+              <>
+                {deployed && (
+                  <CopyButton
+                    value={canvas.url}
+                    label="Copy link"
+                    ariaLabel={`Copy link for ${title}`}
+                    toastMessage="Link copied"
+                    className={rowMenuItemClass}
+                    onCopyFinished={close}
+                  />
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={rowMenuItemClass}
+                  onClick={() => {
+                    close();
+                    setCloneOpen(true);
+                  }}
+                >
+                  Duplicate
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`${rowMenuItemClass} hover:text-danger`}
+                  loading={archive.isPending}
+                  onClick={async () => {
+                    close();
+                    try {
+                      await archive.mutateAsync();
+                      toast("Canvas archived");
+                    } catch (err) {
+                      toast(err instanceof ApiError ? err.hint : "Couldn't archive", "error");
+                    }
+                  }}
+                >
+                  Archive
+                </Button>
+              </>
+            )}
+          </RowOverflowMenu>
           <CloneDialog
             open={cloneOpen}
             onClose={() => setCloneOpen(false)}
@@ -78,12 +208,12 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
 function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
   const toast = useToast();
   const unarchive = useUnarchiveCanvas(canvas.id);
+  const title = canvasTitle(canvas);
   return (
     <CanvasRow
       canvas={canvas}
       actions={
         <>
-          <CopyButton value={canvas.url} label="Copy link" toastMessage="Link copied" />
           <Button
             size="sm"
             variant="secondary"
@@ -97,8 +227,20 @@ function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
               }
             }}
           >
-            Unarchive
+            Restore
           </Button>
+          <RowOverflowMenu label={`More actions for ${title}`}>
+            {(close) => (
+              <CopyButton
+                value={canvas.url}
+                label="Copy reserved URL"
+                ariaLabel={`Copy reserved URL for ${title}`}
+                toastMessage="Link copied"
+                className={rowMenuItemClass}
+                onCopyFinished={close}
+              />
+            )}
+          </RowOverflowMenu>
         </>
       }
     />
@@ -111,9 +253,11 @@ function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
 function ScopeToggle({
   value,
   onChange,
+  summary,
 }: {
   value: "active" | "archived";
   onChange: (s: "active" | "archived") => void;
+  summary: CanvasOwnerSummary;
 }) {
   return (
     <div
@@ -129,16 +273,50 @@ function ScopeToggle({
           aria-selected={value === s}
           onClick={() => onChange(s)}
           className={cn(
-            "h-8 rounded-md px-3 text-sm font-medium capitalize transition-colors",
+            "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium transition-colors",
             value === s
               ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
               : "text-muted hover:text-fg",
           )}
         >
-          {s}
+          <span className="capitalize">{s}</span>
+          <span className="ml-1.5 text-xs text-subtle">{summary[s]}</span>
         </button>
       ))}
     </div>
+  );
+}
+
+function SummaryStrip({
+  summary,
+  archivedView,
+}: {
+  summary: CanvasOwnerSummary;
+  archivedView: boolean;
+}) {
+  const items = [
+    { label: "Active", value: summary.active, active: !archivedView },
+    { label: "Archived", value: summary.archived, active: archivedView },
+    { label: "Templates", value: summary.templates },
+    { label: "Never deployed", value: summary.neverDeployed },
+    { label: "Protected", value: summary.protected },
+  ];
+  return (
+    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-5">
+      {items.map((item, index) => (
+        <div
+          key={item.label}
+          className={cn(
+            "bg-surface px-3 py-2",
+            index === items.length - 1 && "col-span-2 sm:col-span-1",
+            item.active && "bg-accent-subtle text-accent",
+          )}
+        >
+          <dt className="text-[0.6875rem] font-medium text-subtle">{item.label}</dt>
+          <dd className="mt-0.5 text-lg font-semibold tabular-nums text-fg">{item.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -293,12 +471,23 @@ export default function CanvasList() {
 
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
+  const summary = data?.summary ?? EMPTY_SUMMARY;
+  const activeChipKeys = archivedView
+    ? []
+    : STATE_CHIPS.filter((chip) => search[chip.key] === true).map((chip) => chip.key);
+  const lastActiveChipKey = activeChipKeys.at(-1);
   const from = total === 0 ? 0 : offset + 1;
   // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
   // "Showing 49–49 of 5" before the page snaps back.
   const to = Math.min(offset + items.length, total);
   const hasPrev = page > 1;
   const hasNext = offset + items.length < total;
+  const resultLabel =
+    total === 0
+      ? archivedView
+        ? "No archived canvases"
+        : "No canvases"
+      : `Showing ${from}–${to} of ${total}`;
 
   // The owner has no active canvases at all (not a filtered-empty view) → the
   // onboarding / all-archived pointer, with no filter controls over it. Keyed on
@@ -320,6 +509,8 @@ export default function CanvasList() {
         <EmptyHome />
       ) : (
         <>
+          <SummaryStrip summary={summary} archivedView={archivedView} />
+
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative min-w-[14rem] flex-1">
               <MagnifyingGlass
@@ -336,7 +527,11 @@ export default function CanvasList() {
                 className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
               />
             </div>
-            <ScopeToggle value={archivedView ? "archived" : "active"} onChange={setScope} />
+            <ScopeToggle
+              value={archivedView ? "archived" : "active"}
+              onChange={setScope}
+              summary={summary}
+            />
             <FilterSelect
               label="Sort your canvases"
               options={CANVASES_SORT_OPTIONS}
@@ -348,26 +543,42 @@ export default function CanvasList() {
           {/* Attribute filters apply to the live set only — hidden in the archive. */}
           {!archivedView && (
             <FilterBar>
-              {STATE_CHIPS.map((chip) => (
-                <FilterChip
-                  key={chip.key}
-                  active={search[chip.key] === true}
-                  onClick={() => toggle(chip.key)}
-                >
-                  {chip.label}
-                </FilterChip>
+              {STATE_CHIPS.map((chip, index) => (
+                <Fragment key={chip.key}>
+                  <FilterChip active={search[chip.key] === true} onClick={() => toggle(chip.key)}>
+                    <span>{chip.label}</span>
+                    <span className="ml-2 text-xs tabular-nums text-subtle" aria-hidden>
+                      {summary[chip.countKey]}
+                    </span>
+                  </FilterChip>
+                  {filtering &&
+                    (chip.key === lastActiveChipKey ||
+                      (lastActiveChipKey === undefined && index === STATE_CHIPS.length - 1)) && (
+                      <button
+                        type="button"
+                        onClick={clearFilters}
+                        className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                </Fragment>
               ))}
-              {filtering && (
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-                >
-                  Clear all
-                </button>
-              )}
             </FilterBar>
           )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-subtle">{isLoading ? "Loading canvases..." : resultLabel}</p>
+            {archivedView && filtering && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="h-8 rounded-md px-2 text-xs font-medium text-subtle transition-colors hover:bg-surface-hover hover:text-fg"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
 
           {isLoading && <ListSkeleton />}
 
@@ -406,20 +617,21 @@ export default function CanvasList() {
 
           {items.length > 0 && (
             <>
-              <ul className="space-y-2">
-                {items.map((c) =>
-                  archivedView ? (
-                    <ArchivedRow key={c.id} canvas={c} />
-                  ) : (
-                    <ActiveRow key={c.id} canvas={c} />
-                  ),
-                )}
-              </ul>
+              <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
+                <CanvasListHeader />
+                <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
+                  {items.map((c) =>
+                    archivedView ? (
+                      <ArchivedRow key={c.id} canvas={c} />
+                    ) : (
+                      <ActiveRow key={c.id} canvas={c} />
+                    ),
+                  )}
+                </ul>
+              </div>
 
               <div className="flex items-center justify-between gap-3 pt-1">
-                <p className="text-xs text-subtle">
-                  Showing {from}–{to} of {total}
-                </p>
+                <p className="text-xs text-subtle">{resultLabel}</p>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="secondary"

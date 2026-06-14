@@ -148,6 +148,16 @@ export interface OwnerListOptions {
   offset: number;
 }
 
+export interface OwnerCanvasSummary {
+  active: number;
+  archived: number;
+  shared: number;
+  protected: number;
+  listed: number;
+  templates: number;
+  neverDeployed: number;
+}
+
 /**
  * Canvases repository (§10). Dual-dialect seam typed `any` (KTD-1); inputs and
  * the {@link Canvas} row shape stay strongly typed.
@@ -287,6 +297,39 @@ export function canvasesRepository(client: DbClient) {
       }>;
 
       return { items: rows, total: totalRows[0]?.value ?? 0 };
+    },
+
+    /**
+     * Owner-scoped inventory counts for the Your-canvases dashboard. Counts are
+     * intentionally independent of the current search/filter so they explain the
+     * whole personal inventory and can annotate filter chips honestly.
+     */
+    async ownerSummary(ownerId: string): Promise<OwnerCanvasSummary> {
+      const activeBase = [eq(t.ownerId, ownerId), notInArray(t.status, ["deleted", "archived"])];
+      const countWhere = async (where: SQL | undefined): Promise<number> => {
+        const rows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
+          value: number;
+        }>;
+        return Number(rows[0]?.value ?? 0);
+      };
+
+      const active = await countWhere(and(...activeBase));
+      const archived = await countWhere(and(eq(t.ownerId, ownerId), eq(t.status, "archived")));
+      const shared = await countWhere(and(...activeBase, eq(t.shared, true)));
+      const protectedCount = await countWhere(and(...activeBase, isNotNull(t.passwordHash)));
+      const listed = await countWhere(and(...activeBase, eq(t.galleryListed, true)));
+      const templates = await countWhere(and(...activeBase, eq(t.galleryTemplatable, true)));
+      const neverDeployed = await countWhere(and(...activeBase, isNull(t.currentVersionId)));
+
+      return {
+        active,
+        archived,
+        shared,
+        protected: protectedCount,
+        listed,
+        templates,
+        neverDeployed,
+      };
     },
 
     /** Archive-view list: a user's archived canvases, newest-first. */

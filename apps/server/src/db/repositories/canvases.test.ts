@@ -445,6 +445,40 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     );
   });
 
+  it("ownerSummary counts only the caller's current inventory facets", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const other = await seedOwner(client, "other");
+    const repo = canvasesRepository(client);
+
+    const deployed = await repo.create({ ownerId: me, slug: "deployed", apiKeyHash: "k1" });
+    const shared = await repo.create({ ownerId: me, slug: "shared", apiKeyHash: "k2" });
+    const protectedCanvas = await repo.create({ ownerId: me, slug: "protected", apiKeyHash: "k3" });
+    const listed = await repo.create({ ownerId: me, slug: "listed", apiKeyHash: "k4" });
+    const template = await repo.create({ ownerId: me, slug: "template", apiKeyHash: "k5" });
+    const archived = await repo.create({ ownerId: me, slug: "archived", apiKeyHash: "k6" });
+    const deleted = await repo.create({ ownerId: me, slug: "deleted", apiKeyHash: "k7" });
+    await repo.create({ ownerId: other, slug: "other", apiKeyHash: "ko" });
+
+    await deploy(client, deployed.id, me);
+    await repo.updateSettings(shared.id, { shared: true });
+    await repo.setPassword(protectedCanvas.id, "argon2hash");
+    await repo.updateSettings(listed.id, { galleryListed: true });
+    await repo.updateSettings(template.id, { galleryListed: true, galleryTemplatable: true });
+    await repo.archive(archived.id);
+    await repo.setStatus(deleted.id, "deleted");
+
+    await expect(repo.ownerSummary(me)).resolves.toEqual({
+      active: 5,
+      archived: 1,
+      shared: 1,
+      protected: 1,
+      listed: 2,
+      templates: 1,
+      neverDeployed: 4,
+    });
+  });
+
   it("listByOwnerFiltered intersects composed filters", async () => {
     client = await makeTestDb(dialect);
     const me = await seedOwner(client, "me");

@@ -27,16 +27,52 @@ function canvas(over: Record<string, unknown>) {
   return { ...base, ...over };
 }
 
+function summaryFor(canvases: unknown[]) {
+  const rows = canvases as Array<Record<string, unknown>>;
+  const activeRows = rows.filter((c) => c.status !== "archived" && c.status !== "deleted");
+  return {
+    active: activeRows.length,
+    archived: rows.filter((c) => c.status === "archived").length,
+    shared: activeRows.filter((c) => c.shared).length,
+    protected: activeRows.filter((c) => c.hasPassword).length,
+    listed: activeRows.filter((c) => c.galleryListed).length,
+    templates: activeRows.filter((c) => c.galleryTemplatable).length,
+    neverDeployed: activeRows.filter((c) => c.lastDeploy === null).length,
+  };
+}
+
 function renderListWith(canvases: unknown[]) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify({ canvases, total: canvases.length, limit: 24, offset: 0 }), {
+    vi.fn(async (url: string) => {
+      const path = new URL(url, "http://localhost").pathname;
+      if (path === "/api/me") {
+        return new Response(
+          JSON.stringify({
+            id: "u1",
+            email: "u@example.com",
+            name: "U",
+            avatarUrl: null,
+            isAdmin: false,
+            authMode: "dev",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          canvases,
+          total: canvases.length,
+          limit: 24,
+          offset: 0,
+          summary: summaryFor(canvases),
+        }),
+        {
           status: 200,
           headers: { "content-type": "application/json" },
-        }),
-    ),
+        },
+      );
+    }),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
@@ -55,10 +91,13 @@ function renderListWith(canvases: unknown[]) {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("list row badges", () => {
-  it("shows Shared / Protected pills per state and never the boring 'Active'", async () => {
+  it("splits access state into the Visibility column instead of mixing every state badge", async () => {
     renderListWith([
       canvas({ id: "a", slug: "s-plain", title: "Plain one", shared: false, hasPassword: false }),
       canvas({ id: "b", slug: "s-shared", title: "Shared one", shared: true, hasPassword: false }),
@@ -67,16 +106,17 @@ describe("list row badges", () => {
     ]);
     await screen.findByText("Plain one"); // list rendered
 
-    // Count only the row badges (spans), not the like-named filter chips (buttons,
-    // plan 004) that share label text in the filter bar above the list.
-    const badges = (text: string) =>
-      screen.getAllByText(text).filter((el) => el.closest("button") === null);
-    expect(badges("Shared")).toHaveLength(2); // shared + both
-    expect(badges("Protected")).toHaveLength(2); // locked + both
-    expect(screen.queryByText("Active")).not.toBeInTheDocument(); // active is implicit
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.getByText("Owner only")).toBeInTheDocument();
+    expect(screen.getAllByText("Shared").length).toBeGreaterThan(1);
+    expect(screen.getByText("Public link")).toBeInTheDocument();
+    expect(screen.getAllByText("Protected").length).toBeGreaterThan(1);
+    expect(screen.getByText("Password set")).toBeInTheDocument();
+    expect(screen.getByText("Shared + protected")).toBeInTheDocument();
+    expect(screen.getByText("Password required")).toBeInTheDocument();
   });
 
-  it("badges a never-deployed canvas, but not a deployed one (plan 004)", async () => {
+  it("surfaces draft-only deployment state, but not zeros for deployed canvases", async () => {
     renderListWith([
       canvas({
         id: "shipped",
@@ -87,11 +127,12 @@ describe("list row badges", () => {
       canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base lastDeploy: null
     ]);
     await screen.findByText("Shipped one");
-    // Exclude the like-named "Never deployed" filter chip (a button) — count badges.
-    const badges = screen
-      .getAllByText("Never deployed")
-      .filter((el) => el.closest("button") === null);
-    expect(badges).toHaveLength(1); // only the draft row carries the badge
+    expect(screen.getByText("Published v1")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Draft only").filter((el) => el.closest("button") === null).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("0 B")).toBeNull();
+    expect(screen.queryByText("0 files")).toBeNull();
   });
 
   it("badges a disabled canvas (the one status worth surfacing)", async () => {
@@ -119,9 +160,45 @@ describe("list row badges", () => {
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
+  it("separates gallery listing state from tags", async () => {
+    renderListWith([
+      canvas({
+        id: "listed",
+        slug: "listed",
+        title: "Listed one",
+        galleryListed: true,
+        galleryTags: ["docs"],
+      }),
+      canvas({
+        id: "unlisted",
+        slug: "unlisted",
+        title: "Unlisted one",
+        galleryListed: false,
+        galleryTags: ["internal"],
+      }),
+    ]);
+    await screen.findByText("Listed one");
+
+    expect(screen.getAllByText("Gallery").length).toBeGreaterThan(1);
+    expect(screen.getByText("In gallery")).toBeInTheDocument();
+    expect(screen.getByText("Hidden from gallery")).toBeInTheDocument();
+    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.getByText("internal")).toBeInTheDocument();
+  });
+
+  it("limits the internal details click target to the title link", async () => {
+    renderListWith([canvas({ id: "t", slug: "title-target", title: "Title target" })]);
+
+    const detailsLink = await screen.findByRole("link", { name: "View details for Title target" });
+    expect(detailsLink).toHaveAttribute("href", "/canvases/t");
+    expect(detailsLink).toHaveTextContent("Title target");
+    expect(screen.queryByRole("link", { name: "Open details for Title target" })).toBeNull();
+  });
+
   it("shows no tag pills for an untagged canvas", async () => {
     renderListWith([canvas({ id: "u", slug: "untagged", title: "Untagged one" })]);
     await screen.findByText("Untagged one");
+    expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.queryByText(/^\+\d+$/)).toBeNull();
   });
 });
