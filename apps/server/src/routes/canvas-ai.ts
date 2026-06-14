@@ -99,7 +99,7 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       ? await deps.settings.effectiveModels()
       : deps.config.ai.models;
     if (!allowedModels.includes(model)) {
-      return c.json({ code: "MODEL_NOT_ALLOWED" }, 400);
+      return c.json({ code: "MODEL_NOT_ALLOWED" }, 403);
     }
     // Fail closed on an allowlisted-but-unpriced model: cost would be recorded as
     // $0, so the USD quota windows would never grow and spend would be unbounded
@@ -109,7 +109,7 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
         { model },
         "ai: model is allowlisted but has no pricing entry; rejecting to protect the spend quota",
       );
-      return c.json({ code: "MODEL_NOT_ALLOWED" }, 400);
+      return c.json({ code: "MODEL_NOT_ALLOWED" }, 403);
     }
 
     const canvas = requireCanvas(c);

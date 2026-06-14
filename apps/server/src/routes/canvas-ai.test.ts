@@ -174,14 +174,14 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     expect(spend).toBeCloseTo(0.00011, 8);
   });
 
-  it("rejects a model not in the admin allowlist (400 MODEL_NOT_ALLOWED)", async () => {
+  it("rejects a model not in the admin allowlist (403 MODEL_NOT_ALLOWED)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeCanvas(client);
     const res = await post(buildApi(client, owner.id, fakeProvider({ deltas: ["x"] })), {
       model: "gpt-4o",
       messages: [{ role: "user", content: "hi" }],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("MODEL_NOT_ALLOWED");
   });
 
@@ -199,7 +199,7 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
       model: "made-up-model-v9",
       messages: [{ role: "user", content: "hi" }],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("MODEL_NOT_ALLOWED");
   });
 
