@@ -47,6 +47,10 @@ export interface CanvasCapabilitiesPatch {
   realtime?: boolean;
 }
 
+/** Derived canvas lifecycle (mirrors `PublicationState` in @canvas-drop/shared).
+ *  Precedence disabled > archived > published > draft; computed server-side. */
+export type PublicationState = "draft" | "published" | "archived" | "disabled";
+
 export interface Canvas {
   id: string;
   slug: string;
@@ -71,6 +75,8 @@ export interface Canvas {
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
   status: string;
+  /** Single derived lifecycle the UI renders as the Publication chip (server-computed). */
+  publicationState: PublicationState;
   /** Admin takedown reason (§6.10.2) — owner/admin-only; null unless disabled. */
   disabledReason: string | null;
   currentVersionId: string | null;

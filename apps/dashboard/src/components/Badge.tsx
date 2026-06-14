@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Canvas, PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 
 type Tone = "neutral" | "accent" | "success" | "danger" | "warning";
@@ -24,7 +25,8 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
   );
 }
 
-/** Canvas status → a tone + dot, reused in list + detail. */
+/** Raw admin canvas status → a tone + dot (admin surfaces only — owner-facing
+ *  views use {@link PublicationBadge} for the derived lifecycle). */
 export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { tone: Tone; label: string }> = {
     active: { tone: "success", label: "Active" },
@@ -39,4 +41,34 @@ export function StatusBadge({ status }: { status: string }) {
       {s.label}
     </Badge>
   );
+}
+
+/** Derived canvas lifecycle (Draft/Published/Archived/Disabled) — the Publication
+ *  axis. The single source readers see for "is this live?" across header + list. */
+export function PublicationBadge({ state }: { state: PublicationState }) {
+  const map: Record<PublicationState, { tone: Tone; label: string }> = {
+    draft: { tone: "neutral", label: "Draft" },
+    published: { tone: "success", label: "Published" },
+    archived: { tone: "warning", label: "Archived" },
+    disabled: { tone: "danger", label: "Disabled" },
+  };
+  const s = map[state];
+  return (
+    <Badge tone={s.tone}>
+      <span className="size-1.5 rounded-full bg-current" aria-hidden />
+      {s.label}
+    </Badge>
+  );
+}
+
+/** Visibility axis: who can reach the canvas. */
+export function VisibilityBadge({ shared }: { shared: boolean }) {
+  return <Badge tone={shared ? "accent" : "neutral"}>{shared ? "Shared" : "Private"}</Badge>;
+}
+
+/** Gallery axis: discovery state. Template implies listed; listed implies shared. */
+export function GalleryBadge({ canvas }: { canvas: Pick<Canvas, "galleryListed" | "galleryTemplatable"> }) {
+  if (canvas.galleryTemplatable) return <Badge tone="accent">Template</Badge>;
+  if (canvas.galleryListed) return <Badge tone="neutral">Listed</Badge>;
+  return <Badge tone="neutral">Unlisted</Badge>;
 }
