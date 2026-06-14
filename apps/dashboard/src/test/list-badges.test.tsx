@@ -76,6 +76,24 @@ describe("list row badges", () => {
     expect(screen.queryByText("Active")).not.toBeInTheDocument(); // active is implicit
   });
 
+  it("badges a never-deployed canvas, but not a deployed one (plan 004)", async () => {
+    renderListWith([
+      canvas({
+        id: "shipped",
+        slug: "shipped",
+        title: "Shipped one",
+        lastDeploy: { version: 1, createdAt: 0, fileCount: 1, totalBytes: 10 },
+      }),
+      canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base lastDeploy: null
+    ]);
+    await screen.findByText("Shipped one");
+    // Exclude the like-named "Never deployed" filter chip (a button) — count badges.
+    const badges = screen
+      .getAllByText("Never deployed")
+      .filter((el) => el.closest("button") === null);
+    expect(badges).toHaveLength(1); // only the draft row carries the badge
+  });
+
   it("badges a disabled canvas (the one status worth surfacing)", async () => {
     renderListWith([
       canvas({ id: "x", slug: "down", status: "disabled", shared: false, hasPassword: false }),

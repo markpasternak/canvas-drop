@@ -8,8 +8,10 @@ import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
 
 /** Row indicators. "Active" is the boring default — only badge what's notable:
- * a non-active status (admin takedown, archived), plus the access signals
- * (shared, password). A private, unprotected canvas shows no pills. */
+ * a non-active status (admin takedown, archived), the access signals (shared,
+ * password), the gallery state, and the deployment state. Each badge mirrors a
+ * Your-canvases filter (plan 004) so the list is scannable; a clean, private,
+ * deployed canvas shows no pills. */
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   return (
     <>
@@ -28,6 +30,10 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       ) : canvas.galleryListed ? (
         <Badge tone="neutral">Listed</Badge>
       ) : null}
+      {/* Deployment state (plan 004). Only the notable "never deployed" state gets a
+          pill; a clean, deployed canvas stays quiet. (has-unpublished-changes is
+          deferred — see plan KTD6.) */}
+      {canvas.lastDeploy === null && <Badge tone="warning">Never deployed</Badge>}
     </>
   );
 }
@@ -65,7 +71,9 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
           <span className="truncate font-mono">{canvas.slug}</span>
-          {canvas.lastDeploy ? (
+          {/* Deploy stats when published; the never-deployed state is shown as a
+              badge above (plan 004), so the meta line just omits stats here. */}
+          {canvas.lastDeploy && (
             <>
               <span>v{canvas.lastDeploy.version}</span>
               <span>{relativeTime(canvas.lastDeploy.createdAt)}</span>
@@ -74,8 +82,6 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
                 {canvas.lastDeploy.fileCount} {canvas.lastDeploy.fileCount === 1 ? "file" : "files"}
               </span>
             </>
-          ) : (
-            <span>Never deployed</span>
           )}
         </div>
       </Link>
