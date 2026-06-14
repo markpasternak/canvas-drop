@@ -1,3 +1,4 @@
+import { CaretRight } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
@@ -15,6 +16,7 @@ import { InlineNotice } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
+import { deployCurl } from "../lib/deploy-curl.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import {
   useArchiveCanvas,
@@ -335,6 +337,34 @@ export default function Settings() {
               Regenerate key
             </Button>
           </Row>
+          <RowDivider />
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-fg [&::-webkit-details-marker]:hidden">
+              <CaretRight
+                size={14}
+                weight="bold"
+                aria-hidden
+                className="text-muted transition-transform duration-150 group-open:rotate-90"
+              />
+              Deploy with the API
+            </summary>
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted">
+                  Replace <code className="font-mono text-fg">$CANVAS_DROP_KEY</code> with your
+                  secret key.
+                </p>
+                <CopyButton
+                  value={deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" })}
+                  label="Copy"
+                  toastMessage="Snippet copied"
+                />
+              </div>
+              <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs text-muted">
+                {deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" })}
+              </pre>
+            </div>
+          </details>
         </Section>
 
         <Section

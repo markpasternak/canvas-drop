@@ -18,6 +18,7 @@ import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import { deployCurl } from "../lib/deploy-curl.js";
 
 type Method = "paste" | "folder" | "zip" | "api";
 type MethodConfig = {
@@ -321,9 +322,7 @@ function ApiSnippet({
   result: { id: string; apiKey: string; url: string };
   onDone: () => void;
 }) {
-  const snippet = `curl -X PUT "${new URL(result.url).origin}/v1/canvases/${result.id}/deploy" \\
-  -H "Authorization: Bearer ${result.apiKey}" \\
-  --data-binary @site.zip`;
+  const snippet = deployCurl({ url: result.url, id: result.id, apiKey: result.apiKey });
   return (
     <div className="space-y-5">
       {/* The key is shown once, here. Navigating away forfeits it (regenerate to recover). */}
