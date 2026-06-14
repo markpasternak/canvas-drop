@@ -136,15 +136,23 @@ function TreeRow({
           onClick={() => onToggle(node.path)}
           aria-expanded={!isCollapsed}
           style={pad}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-fg"
+          className="group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover"
         >
-          {isCollapsed ? (
-            <CaretRight size={12} weight="bold" aria-hidden />
-          ) : (
-            <CaretDown size={12} weight="bold" aria-hidden />
-          )}
-          <FolderSimple size={14} weight="duotone" aria-hidden />
-          {node.name}/
+          {/* Chevron + a matching icon tile so the folder carries the same visual
+              weight as the file rows (which wrap their icon in a size-7 tile). */}
+          <span className="flex shrink-0 items-center gap-1">
+            {isCollapsed ? (
+              <CaretRight size={12} weight="bold" className="text-subtle" aria-hidden />
+            ) : (
+              <CaretDown size={12} weight="bold" className="text-subtle" aria-hidden />
+            )}
+            <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-raised text-muted group-hover:text-fg">
+              <FolderSimple size={16} weight="duotone" aria-hidden />
+            </span>
+          </span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-fg">
+            {node.name}/
+          </span>
         </button>
         {!isCollapsed && (
           <ul className="space-y-1">
