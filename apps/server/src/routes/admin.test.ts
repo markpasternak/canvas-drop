@@ -6,6 +6,7 @@ import { adminSettingsService } from "../admin/settings-service.js";
 import { createAuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { adminRepository } from "../db/repositories/admin.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
@@ -37,6 +38,7 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       versions: versionsRepository(client),
       users: usersRepository(client),
       files: filesRepository(client),
+      aiUsage: aiUsageRepository(client),
       settings: adminSettingsService({ settings: settingsRepository(client), config }),
       audit,
     }),
@@ -78,6 +80,7 @@ describe("admin routes", () => {
     for (const [method, path] of [
       ["GET", "/api/admin/canvases"],
       ["GET", "/api/admin/overview"],
+      ["GET", "/api/admin/ai-usage"],
       ["GET", "/api/admin/settings/models"],
       ["GET", "/api/admin/settings/quotas"],
     ] as const) {
@@ -174,11 +177,20 @@ describe("admin routes", () => {
     expect(disabled.canvases[0]?.deletedAt).toBeNull();
   });
 
-  it("overview returns totals + top canvases", async () => {
+  it("overview returns totals + top canvases + AI spend", async () => {
     client = await makeTestDb("sqlite");
     const a = await seedUser(client, "alice");
     const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
-    await canvases.create({ ownerId: a.id, slug: "aa-1111-2222", apiKeyHash: "h1" });
+    const cv = await canvases.create({ ownerId: a.id, slug: "aa-1111-2222", apiKeyHash: "h1" });
+    await aiUsageRepository(client).record({
+      canvasId: cv.id,
+      userId: a.id,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 0.0125,
+    });
     const res = await app.request("/api/admin/overview");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -190,6 +202,9 @@ describe("admin routes", () => {
       recentWindowDays: number;
       oldestDeletedAt: number | null;
       topCanvases: unknown[];
+      aiCostUsd: number;
+      aiTokens: number;
+      aiCalls: number;
     };
     expect(body.canvasCountByStatus.active).toBe(1);
     expect(body.userCount).toBeGreaterThanOrEqual(1);
@@ -199,6 +214,65 @@ describe("admin routes", () => {
     expect(body.newCanvases).toBe(1); // just created → inside the window
     expect(body.recentWindowDays).toBe(7);
     expect(body.oldestDeletedAt).toBeNull();
+    // AI spend (§6.10.6) — no longer the "deferred to M9" stub.
+    expect(body.aiCostUsd).toBeCloseTo(0.0125, 10);
+    expect(body.aiTokens).toBe(150);
+    expect(body.aiCalls).toBe(1);
+  });
+
+  it("overview reports zeroed AI spend when there is no AI usage", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const body = (await (await app.request("/api/admin/overview")).json()) as {
+      aiCostUsd: number;
+      aiTokens: number;
+      aiCalls: number;
+    };
+    expect(body).toMatchObject({ aiCostUsd: 0, aiTokens: 0, aiCalls: 0 });
+  });
+
+  it("ai-usage returns by-user (email) and by-canvas (slug/title) spend, ordered desc", async () => {
+    client = await makeTestDb("sqlite");
+    const alice = await seedUser(client, "alice");
+    const bob = await seedUser(client, "bob");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const ca = await canvases.create({ ownerId: alice.id, slug: "ca-1111-2222", apiKeyHash: "ha" });
+    const cb = await canvases.create({ ownerId: bob.id, slug: "cb-1111-2222", apiKeyHash: "hb" });
+    const ai = aiUsageRepository(client);
+    const rec = (canvasId: string, userId: string, costUsd: number) =>
+      ai.record({
+        canvasId,
+        userId,
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd,
+      });
+    // bob outspends alice; canvas cb outspends ca.
+    await rec(ca.id, alice.id, 1.0);
+    await rec(cb.id, bob.id, 4.0);
+
+    const res = await app.request("/api/admin/ai-usage");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      byUser: Array<{ userId: string; email: string | null; costUsd: number; calls: number }>;
+      byCanvas: Array<{ canvasId: string; slug: string | null; title: string | null; costUsd: number }>;
+    };
+    expect(body.byUser.map((u) => u.email)).toEqual(["bob@example.com", "alice@example.com"]);
+    expect(body.byUser[0].costUsd).toBeCloseTo(4.0, 10);
+    expect(body.byCanvas.map((c2) => c2.slug)).toEqual(["cb-1111-2222", "ca-1111-2222"]);
+    expect(body.byCanvas[0].costUsd).toBeCloseTo(4.0, 10);
+  });
+
+  it("ai-usage returns empty breakdowns (not null) when there is no AI usage", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const body = (await (await app.request("/api/admin/ai-usage")).json()) as {
+      byUser: unknown[];
+      byCanvas: unknown[];
+    };
+    expect(body).toEqual({ byUser: [], byCanvas: [] });
   });
 
   it("manages the model allowlist + quota defaults (audited); rejects invalid bodies", async () => {

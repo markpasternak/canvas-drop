@@ -8,6 +8,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AdminCanvasStatus, AdminRepository } from "../db/repositories/admin.js";
+import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -23,6 +24,7 @@ export interface AdminRoutesDeps {
   versions: VersionsRepository;
   users: UsersRepository;
   files: FilesRepository;
+  aiUsage: AiUsageRepository;
   settings: AdminSettingsService;
   audit: AuditLog;
 }
@@ -131,9 +133,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     return c.json({ canvases, nextCursor });
   });
 
-  // --- Platform usage overview (§6.10.6): totals + top canvases (AI spend = M9) ---
+  // --- Platform usage overview (§6.10.6): totals + top canvases + AI spend ---
   app.get("/overview", async (c) => {
-    const stats = await deps.admin.platformStats(10);
+    const [stats, ai] = await Promise.all([deps.admin.platformStats(10), deps.aiUsage.platformSpend()]);
     // Enrich the top canvases with slug/title (small N — direct lookups).
     const top = await Promise.all(
       stats.topCanvases.map(async (t) => {
@@ -156,7 +158,41 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       recentWindowDays: stats.recentWindowDays,
       oldestDeletedAt: stats.oldestDeletedAt,
       topCanvases: top,
+      aiCostUsd: ai.costUsd,
+      aiTokens: ai.inputTokens + ai.outputTokens,
+      aiCalls: ai.calls,
     });
+  });
+
+  // --- AI usage breakdown (§6.10.7): top spenders by user and by canvas ---
+  app.get("/ai-usage", async (c) => {
+    const [byUserRaw, byCanvasRaw] = await Promise.all([
+      deps.aiUsage.spendByUser(10),
+      deps.aiUsage.spendByCanvas(10),
+    ]);
+    // Enrich ids → email / slug+title. Batch the user lookup (one query), and do
+    // small-N direct canvas lookups (top-10) like the overview's top-canvases.
+    const users = await deps.users.findByIds(byUserRaw.map((r) => r.id));
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
+    const byUser = byUserRaw.map((r) => ({
+      userId: r.id,
+      email: emailById.get(r.id) ?? null,
+      costUsd: r.costUsd,
+      calls: r.calls,
+    }));
+    const byCanvas = await Promise.all(
+      byCanvasRaw.map(async (r) => {
+        const cv = await deps.canvases.findById(r.id);
+        return {
+          canvasId: r.id,
+          slug: cv?.slug ?? null,
+          title: cv?.title ?? null,
+          costUsd: r.costUsd,
+          calls: r.calls,
+        };
+      }),
+    );
+    return c.json({ byUser, byCanvas });
   });
 
   // --- Takedown / restore (§6.10.2, §6.10.5) ---

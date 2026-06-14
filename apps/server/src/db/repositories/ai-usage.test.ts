@@ -118,6 +118,68 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     expect(await repo.userSpendSince("nobody", 0)).toBe(0);
   });
 
+  it("platformSpend sums cost, tokens, and calls across all canvases/users", async () => {
+    client = await makeTestDb(dialect);
+    const a = await seed(client, "a", "ua");
+    const b = await seed(client, "b", "ub");
+    const repo = aiUsageRepository(client);
+    await repo.record(rec(a.canvasId, a.userId, 1.0));
+    await repo.record(rec(b.canvasId, b.userId, 3.0));
+
+    const total = await repo.platformSpend();
+    expect(total.calls).toBe(2);
+    expect(total.inputTokens).toBe(200);
+    expect(total.outputTokens).toBe(100);
+    expect(total.costUsd).toBeCloseTo(4.0, 10);
+  });
+
+  it("platformSpend is zeroed (not null) on an empty table", async () => {
+    client = await makeTestDb(dialect);
+    expect(await aiUsageRepository(client).platformSpend()).toEqual({
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      calls: 0,
+    });
+  });
+
+  it("spendByUser groups by user, orders by spend desc, respects the limit", async () => {
+    client = await makeTestDb(dialect);
+    const a = await seed(client, "a", "ua");
+    const b = await seed(client, "b", "ub");
+    const repo = aiUsageRepository(client);
+    // a spends 1.5 across two calls; b spends 4.0 in one → b ranks first.
+    await repo.record(rec(a.canvasId, a.userId, 0.5));
+    await repo.record(rec(a.canvasId, a.userId, 1.0));
+    await repo.record(rec(b.canvasId, b.userId, 4.0));
+
+    const all = await repo.spendByUser(10);
+    expect(all.map((r) => r.id)).toEqual([b.userId, a.userId]);
+    expect(all[0].costUsd).toBeCloseTo(4.0, 10);
+    expect(all[1].costUsd).toBeCloseTo(1.5, 10);
+    expect(all[1].calls).toBe(2);
+
+    const top1 = await repo.spendByUser(1);
+    expect(top1).toHaveLength(1);
+    expect(top1[0].id).toBe(b.userId);
+  });
+
+  it("spendByCanvas groups by canvas, ordered by spend desc, across multiple users", async () => {
+    client = await makeTestDb(dialect);
+    const a = await seed(client, "a", "ua");
+    const b = await seed(client, "b", "ub");
+    const repo = aiUsageRepository(client);
+    // Two users both spend on canvas a; canvas b gets less → a ranks first.
+    await repo.record(rec(a.canvasId, a.userId, 2.0));
+    await repo.record(rec(a.canvasId, b.userId, 1.0));
+    await repo.record(rec(b.canvasId, b.userId, 0.5));
+
+    const all = await repo.spendByCanvas(10);
+    expect(all.map((r) => r.id)).toEqual([a.canvasId, b.canvasId]);
+    expect(all[0].costUsd).toBeCloseTo(3.0, 10);
+    expect(all[0].calls).toBe(2);
+  });
+
   it("pruneBefore deletes old rows, keeps newer", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

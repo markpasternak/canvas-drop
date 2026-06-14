@@ -39,6 +39,24 @@ export function aiUsageRepository(client: DbClient) {
     return Number(rows[0]?.total ?? 0);
   }
 
+  /** Sum cost + count grouped by a dimension (user or canvas), top spenders first. */
+  async function spendGroupedBy(
+    column: typeof t.userId | typeof t.canvasId,
+    limit: number,
+  ): Promise<Array<{ id: string; costUsd: number; calls: number }>> {
+    const rows = (await db
+      .select({
+        id: column,
+        costUsd: sql<number>`coalesce(sum(${t.costUsd}), 0)`,
+        calls: sql<number>`count(*)`,
+      })
+      .from(t)
+      .groupBy(column)
+      .orderBy(sql`sum(${t.costUsd}) desc`)
+      .limit(limit)) as Array<{ id: string; costUsd: number; calls: number }>;
+    return rows.map((r) => ({ id: r.id, costUsd: Number(r.costUsd), calls: Number(r.calls) }));
+  }
+
   return {
     async record(input: AiUsageInput): Promise<void> {
       await db.insert(t).values({
@@ -89,6 +107,47 @@ export function aiUsageRepository(client: DbClient) {
         costUsd: Number(r?.costUsd ?? 0),
         calls: Number(r?.calls ?? 0),
       };
+    },
+
+    /** Platform-wide AI totals (admin overview §6.10.6) — all canvases, all time. */
+    async platformSpend(): Promise<{
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      calls: number;
+    }> {
+      const rows = (await db
+        .select({
+          costUsd: sql<number>`coalesce(sum(${t.costUsd}), 0)`,
+          inputTokens: sql<number>`coalesce(sum(${t.inputTokens}), 0)`,
+          outputTokens: sql<number>`coalesce(sum(${t.outputTokens}), 0)`,
+          calls: sql<number>`count(*)`,
+        })
+        .from(t)) as Array<{
+        costUsd: number;
+        inputTokens: number;
+        outputTokens: number;
+        calls: number;
+      }>;
+      const r = rows[0];
+      return {
+        costUsd: Number(r?.costUsd ?? 0),
+        inputTokens: Number(r?.inputTokens ?? 0),
+        outputTokens: Number(r?.outputTokens ?? 0),
+        calls: Number(r?.calls ?? 0),
+      };
+    },
+
+    /** Top spenders by user (admin §6.10.7). `id` is the raw user id — the route
+     *  enriches it to an email. Ordered by spend desc, capped at `limit`. */
+    spendByUser(limit: number): Promise<Array<{ id: string; costUsd: number; calls: number }>> {
+      return spendGroupedBy(t.userId, limit);
+    },
+
+    /** Top spenders by canvas (admin §6.10.7). `id` is the raw canvas id — the route
+     *  enriches it to slug/title. Ordered by spend desc, capped at `limit`. */
+    spendByCanvas(limit: number): Promise<Array<{ id: string; costUsd: number; calls: number }>> {
+      return spendGroupedBy(t.canvasId, limit);
     },
 
     /** Retention prune (KTD-7): delete rows older than the cutoff. Returns rows removed. */

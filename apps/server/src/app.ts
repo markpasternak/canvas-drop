@@ -336,6 +336,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       users: deps.users,
       files: filesRepository(deps.db),
+      aiUsage: aiUsageRepository(deps.db),
       settings: settingsSvc,
       audit: deps.audit,
     }),
