@@ -1,10 +1,10 @@
 import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { CanvasListItem } from "../lib/api.js";
+import type { CanvasListItem, PublicationState } from "../lib/api.js";
 import { formatBytes, relativeTime } from "../lib/format.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
-import { Badge, StatusBadge } from "./Badge.js";
+import { Badge, PublicationBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
 
@@ -33,8 +33,11 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   return (
     <>
-      {canvas.status !== "active" && <StatusBadge status={canvas.status} />}
-      {canvas.lastDeploy === null && <Badge tone="warning">Draft only</Badge>}
+      {/* Surface the lifecycle near the title only when it's not the happy
+          Published state — the Publication column carries the full detail. */}
+      {canvas.publicationState !== "published" && (
+        <PublicationBadge state={canvas.publicationState} />
+      )}
       {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
       {canvas.hasPassword && (
         <Badge tone="neutral">
@@ -89,20 +92,27 @@ function galleryState(canvas: CanvasListItem): { primary: string; secondary: str
   return { primary: "Unlisted", secondary: "Hidden from gallery" };
 }
 
-function deployment(canvas: CanvasListItem): { primary: string; secondary: string } {
-  if (!canvas.lastDeploy) {
-    return { primary: "Draft only", secondary: "Never deployed" };
+function publication(canvas: CanvasListItem): { primary: string; secondary: string } {
+  const d = canvas.lastDeploy;
+  if (canvas.publicationState === "published" && d) {
+    const details = [relativeTime(d.createdAt)];
+    if (d.totalBytes > 0 || d.fileCount > 0) {
+      details.push(formatBytes(d.totalBytes));
+      details.push(`${d.fileCount} ${d.fileCount === 1 ? "file" : "files"}`);
+    }
+    return { primary: `Published v${d.version}`, secondary: details.join(" - ") };
   }
-  const details = [relativeTime(canvas.lastDeploy.createdAt)];
-  if (canvas.lastDeploy.totalBytes > 0 || canvas.lastDeploy.fileCount > 0) {
-    details.push(formatBytes(canvas.lastDeploy.totalBytes));
-    details.push(
-      `${canvas.lastDeploy.fileCount} ${canvas.lastDeploy.fileCount === 1 ? "file" : "files"}`,
-    );
-  }
+  // Draft / Archived / Disabled (or the degenerate published-without-version) —
+  // no version is currently served.
+  const labels: Record<PublicationState, string> = {
+    draft: "Draft",
+    published: "Published",
+    archived: "Archived",
+    disabled: "Disabled",
+  };
   return {
-    primary: `Published v${canvas.lastDeploy.version}`,
-    secondary: details.join(" - "),
+    primary: labels[canvas.publicationState],
+    secondary: d ? `Last published v${d.version}` : "Not published",
   };
 }
 
@@ -133,7 +143,7 @@ export function CanvasListHeader() {
       <span>Canvas</span>
       <span>Visibility</span>
       <span>Gallery</span>
-      <span>Deployment</span>
+      <span>Publication</span>
       <span>Tags</span>
       <span className="justify-self-end">Actions</span>
     </div>
@@ -180,7 +190,7 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
   const access = visibility(canvas);
-  const deploy = deployment(canvas);
+  const pub = publication(canvas);
   const gallery = galleryState(canvas);
   const navigate = useNavigate();
   const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
@@ -224,7 +234,7 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
 
         <DataCell label="Visibility" primary={access.primary} secondary={access.secondary} />
         <DataCell label="Gallery" primary={gallery.primary} secondary={gallery.secondary} />
-        <DataCell label="Deployment" primary={deploy.primary} secondary={deploy.secondary} />
+        <DataCell label="Publication" primary={pub.primary} secondary={pub.secondary} />
         <DataCell label="Tags" primary={<RowTags tags={tags} />} />
 
         <div className="flex w-full items-center justify-end gap-1 border-t border-border/70 pt-3 lg:w-auto lg:border-t-0 lg:pt-0">

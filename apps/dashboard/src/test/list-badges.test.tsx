@@ -16,6 +16,7 @@ const base = {
   gallerySummary: null,
   galleryTags: null,
   status: "active",
+  publicationState: "draft",
   disabledReason: null,
   currentVersionId: null,
   createdAt: 0,
@@ -122,24 +123,32 @@ describe("list row badges", () => {
         id: "shipped",
         slug: "shipped",
         title: "Shipped one",
+        publicationState: "published",
         lastDeploy: { version: 1, createdAt: 0, fileCount: 1, totalBytes: 10 },
       }),
-      canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base lastDeploy: null
+      canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base: draft, lastDeploy null
     ]);
     await screen.findByText("Shipped one");
     expect(screen.getByText("Published v1")).toBeInTheDocument();
-    expect(
-      screen.getAllByText("Draft only").filter((el) => el.closest("button") === null).length,
-    ).toBeGreaterThan(0);
+    // The draft row reads "Draft" in the Publication column (and a near-title chip).
+    expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
     expect(screen.queryByText("0 B")).toBeNull();
     expect(screen.queryByText("0 files")).toBeNull();
   });
 
   it("badges a disabled canvas (the one status worth surfacing)", async () => {
     renderListWith([
-      canvas({ id: "x", slug: "down", status: "disabled", shared: false, hasPassword: false }),
+      canvas({
+        id: "x",
+        slug: "down",
+        status: "disabled",
+        publicationState: "disabled",
+        shared: false,
+        hasPassword: false,
+      }),
     ]);
-    expect(await screen.findByText("Disabled")).toBeInTheDocument();
+    // "Disabled" shows in the near-title chip and the Publication column.
+    expect((await screen.findAllByText("Disabled")).length).toBeGreaterThan(0);
   });
 
   it("renders inline tag pills, collapsing beyond the cap into a +N pill (plan 005)", async () => {

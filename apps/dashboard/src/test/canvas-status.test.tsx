@@ -110,10 +110,11 @@ describe("canvas Status tab", () => {
     mockStatus();
     renderStatus();
 
-    expect(await screen.findByText("Canvas is live")).toBeInTheDocument();
+    expect(await screen.findByText("Canvas is published")).toBeInTheDocument();
     // Header three-chip row (Publication · Visibility · Gallery) + the global
     // publish affordance, which on a non-editor tab reads "Publish files" (R7/R12).
-    expect(screen.getByText("Published")).toBeInTheDocument();
+    // "Published" appears in both the header chip and the Publication fact.
+    expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     expect(screen.getByText("Unlisted")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish files" })).toBeInTheDocument();
     // "Shared" appears in both the header Visibility chip and the Access fact.
@@ -140,7 +141,7 @@ describe("canvas Status tab", () => {
       "href",
       "/canvases/c1/editor",
     );
-    expect(screen.getAllByRole("button", { name: "Deploy files" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Publish files" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("Entry file")).not.toBeInTheDocument();
   });
 
@@ -160,10 +161,10 @@ describe("canvas Status tab", () => {
   });
 
   it("handles a canvas with no live deploy yet", async () => {
-    mockStatus({ ...CANVAS, currentVersionId: null, shared: false }, []);
+    mockStatus({ ...CANVAS, currentVersionId: null, shared: false, publicationState: "draft" }, []);
     renderStatus();
 
-    expect(await screen.findByText("No live deploy yet")).toBeInTheDocument();
+    expect(await screen.findByText("Not published yet")).toBeInTheDocument();
     expect(screen.getByText(/The URL has no live page/i)).toBeInTheDocument();
     // "Private" appears in both the header Visibility chip and the Access fact.
     expect(screen.getAllByText("Private").length).toBeGreaterThan(0);
@@ -173,6 +174,7 @@ describe("canvas Status tab", () => {
     mockStatus({
       ...CANVAS,
       status: "disabled",
+      publicationState: "disabled",
       disabledReason: "Terms of service violation",
     });
     renderStatus();
@@ -182,7 +184,7 @@ describe("canvas Status tab", () => {
   });
 
   it("keeps the archived state explicit", async () => {
-    mockStatus({ ...CANVAS, status: "archived" });
+    mockStatus({ ...CANVAS, status: "archived", publicationState: "archived" });
     renderStatus();
 
     expect(await screen.findByText("Canvas archived")).toBeInTheDocument();

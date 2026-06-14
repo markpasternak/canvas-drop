@@ -1,7 +1,7 @@
 import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { StatusBadge } from "../components/Badge.js";
+import { PublicationBadge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -36,8 +36,8 @@ function accessLabel(canvas: Canvas): string {
   return parts.join(", ");
 }
 
-function currentDeployLabel(current?: VersionInfo): string {
-  if (!current) return "Never deployed";
+function currentVersionLabel(current?: VersionInfo): string {
+  if (!current) return "Not published";
   return `v${current.number} via ${sourceLabel(current.source)}, ${relativeTime(current.createdAt)}`;
 }
 
@@ -77,11 +77,11 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
     return (
       <StateCard
         tone="warning"
-        title="No live deploy yet"
+        title="Not published yet"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="Deploy files" />}
+        actions={<RepairActions id={canvas.id} deployLabel="Publish files" />}
       >
-        <p>Publish a draft or deploy files before sharing this canvas. The URL has no live page.</p>
+        <p>Publish this canvas before sharing it. The URL has no live page.</p>
       </StateCard>
     );
   }
@@ -92,7 +92,7 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
         tone="warning"
         title="Root page missing"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="Deploy files" />}
+        actions={<RepairActions id={canvas.id} deployLabel="Publish files" />}
       >
         {entry.reason === "ambiguous" ? (
           <p>
@@ -114,7 +114,7 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
     return (
       <StateCard
         tone="neutral"
-        title="Live, with an inferred home page"
+        title="Published, with an inferred home page"
         icon="info"
         actions={<DraftLink id={canvas.id} label="Open draft" />}
       >
@@ -128,9 +128,9 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
   }
 
   return (
-    <StateCard tone="success" title="Canvas is live" icon="check">
+    <StateCard tone="success" title="Canvas is published" icon="check">
       <p>
-        The root page loads from the current deploy. Review the public URL before sharing widely.
+        The root page loads from the current version. Review the public URL before sharing widely.
       </p>
     </StateCard>
   );
@@ -239,9 +239,9 @@ export default function Overview() {
     <TabContentFrame>
       {live && (
         <InlineNotice tone={rootWorks(current?.entry) ? "success" : "warning"}>
-          Deploy finished.{" "}
+          Published.{" "}
           {rootWorks(current?.entry)
-            ? "Review the live link before sharing."
+            ? "Review the link before sharing."
             : "Fix the root page before sharing."}
         </InlineNotice>
       )}
@@ -250,15 +250,15 @@ export default function Overview() {
 
       <Panel className="p-0 sm:p-0">
         <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <Fact label="Lifecycle">
-            <StatusBadge status={canvas.status} />
+          <Fact label="Publication">
+            <PublicationBadge state={canvas.publicationState} />
           </Fact>
           <Fact label="Access">
             <span className={canvas.shared ? "text-fg" : "text-muted"}>{accessLabel(canvas)}</span>
           </Fact>
-          <Fact label="Current deploy">
+          <Fact label="Current version">
             <span title={current ? fullTime(current.createdAt) : undefined}>
-              {currentDeployLabel(current)}
+              {currentVersionLabel(current)}
             </span>
           </Fact>
           <Fact label="Gallery">
@@ -271,7 +271,7 @@ export default function Overview() {
 
       <Panel className="p-0 sm:p-0">
         <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
-          <Fact label="Live URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
+          <Fact label="Public URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
             <div className="flex min-w-0 items-center gap-2">
               <a
                 href={canvas.url}
@@ -299,14 +299,14 @@ export default function Overview() {
               <span className="text-muted">None</span>
             )}
           </Fact>
-          <Fact label="Deploys">
+          <Fact label="Versions">
             {deployCount > 0 ? (
               <Link
                 to="/canvases/$id/versions"
                 params={{ id }}
                 className="text-accent hover:underline"
               >
-                {deployCount} {deployCount === 1 ? "deploy" : "deploys"}
+                {deployCount} {deployCount === 1 ? "version" : "versions"}
               </Link>
             ) : (
               <span className="text-muted">None yet</span>
