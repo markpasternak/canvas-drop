@@ -32,6 +32,15 @@ export interface CreateCanvasInput {
   description?: string | null;
   /** Backend-group master switch (plan 006). Defaults off; cap_* columns default on. */
   backendEnabled?: boolean;
+  /**
+   * Clone-only seed fields (plan 002). Defaults preserve the normal create path:
+   * no password, version 0, and no lineage. The clone service copies the source's
+   * password hash/version verbatim (the gate grant is per-canvas, so a copied hash
+   * is safe) and records the source canvas for lineage.
+   */
+  passwordHash?: string | null;
+  passwordVersion?: number;
+  clonedFromCanvasId?: string | null;
 }
 
 /**
@@ -103,7 +112,10 @@ export function canvasesRepository(client: DbClient) {
           ownerId: input.ownerId,
           shared: false,
           galleryListed: false,
-          passwordVersion: 0,
+          galleryTemplatable: false,
+          passwordHash: input.passwordHash ?? null,
+          passwordVersion: input.passwordVersion ?? 0,
+          clonedFromCanvasId: input.clonedFromCanvasId ?? null,
           spaFallback: false,
           // Capability defaults: backend off unless requested; cap_* fall back to
           // their column defaults (all on), so an enabled canvas has all features on.
