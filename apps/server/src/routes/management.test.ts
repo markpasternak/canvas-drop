@@ -924,19 +924,31 @@ describe("managementRoutes", () => {
       outputTokens: 50,
       costUsd: 0.0125,
     });
+    // One view (D24) → total + unique = 1, last-viewed set, sparkline populated.
+    const now = Date.now();
+    await usageEventsRepository(client).recordView({
+      canvasId: created.id,
+      userId: owner.id,
+      windowMs: 60_000,
+      now,
+    });
     const res = await app.request(`/api/canvases/${created.id}/usage`);
     expect(res.status).toBe(200);
-    expect(
-      await jsonOf<{
-        kvOps: number;
-        fileCount: number;
-        fileBytes: number;
-        aiCalls: number;
-        aiTokens: number;
-        aiCostUsd: number;
-        realtimeConnects: number;
-      }>(res),
-    ).toEqual({
+    const body = await jsonOf<{
+      totalViews: number;
+      uniqueViewers: number;
+      lastViewedAt: number | null;
+      viewsByDay: Array<{ dayMs: number; count: number }>;
+      kvOps: number;
+      fileOps: number;
+      fileCount: number;
+      fileBytes: number;
+      aiCalls: number;
+      aiTokens: number;
+      aiCostUsd: number;
+      realtimeConnects: number;
+    }>(res);
+    expect(body).toMatchObject({
       kvOps: 1,
       fileOps: 0,
       fileCount: 1,
@@ -945,7 +957,32 @@ describe("managementRoutes", () => {
       aiTokens: 150,
       aiCostUsd: 0.0125,
       realtimeConnects: 1,
+      totalViews: 1,
+      uniqueViewers: 1,
     });
+    expect(body.lastViewedAt).toBe(now);
+    // Dense 30-day series; today's bucket carries the view.
+    expect(body.viewsByDay.length).toBeGreaterThanOrEqual(30);
+    expect(body.viewsByDay.reduce((sum, d) => sum + d.count, 0)).toBe(1);
+  });
+
+  it("GET /:id/usage returns view stats even when the backend is off", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await createCanvas(app, { backendEnabled: false });
+    await usageEventsRepository(client).recordView({
+      canvasId: created.id,
+      userId: owner.id,
+      windowMs: 60_000,
+      now: Date.now(),
+    });
+    const res = await app.request(`/api/canvases/${created.id}/usage`);
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ totalViews: number; uniqueViewers: number; kvOps: number }>(res);
+    expect(body.totalViews).toBe(1);
+    expect(body.uniqueViewers).toBe(1);
+    expect(body.kvOps).toBe(0);
   });
 
   it("GET /:id/usage is 404 for a non-owner", async () => {

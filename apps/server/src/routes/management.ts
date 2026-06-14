@@ -275,13 +275,24 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id/usage", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const [counts, fileBytes, fileCount, ai] = await Promise.all([
+    // View stats (D24) exist for EVERY canvas regardless of backend capability;
+    // primitive op counts only for backend-on canvases. The 30-day sparkline window
+    // sits well inside the 90-day usage_events retention, so the series never truncates.
+    const now = Date.now();
+    const sparklineSince = now - 30 * 24 * 60 * 60 * 1000;
+    const [counts, fileBytes, fileCount, ai, views, viewsByDay] = await Promise.all([
       deps.usage.countByType(cv.id, null),
       deps.files.totalBytes(cv.id),
       deps.files.countFiles(cv.id),
       deps.aiUsage.canvasTotals(cv.id),
+      deps.usage.viewStats(cv.id),
+      deps.usage.viewsByDay(cv.id, sparklineSince, now),
     ]);
     return c.json({
+      totalViews: views.totalViews,
+      uniqueViewers: views.uniqueViewers,
+      lastViewedAt: views.lastViewedAt,
+      viewsByDay,
       kvOps: counts.kv_op ?? 0,
       fileOps: counts.file_op ?? 0,
       fileCount,

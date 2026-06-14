@@ -66,12 +66,26 @@ function renderUsage() {
 
 afterEach(() => vi.restoreAllMocks());
 
+/** A dense 30-day sparkline series whose counts sum to `total`. */
+function viewsByDay(total: number): Array<{ dayMs: number; count: number }> {
+  const DAY = 24 * 60 * 60 * 1000;
+  const start = 1_700_000_000_000;
+  return Array.from({ length: 30 }, (_, i) => ({
+    dayMs: start + i * DAY,
+    count: i === 29 ? total : 0,
+  }));
+}
+
 describe("usage tab", () => {
-  it("renders KV-op, file-storage, AI and realtime figures when backend is on", async () => {
+  it("renders view stats + sparkline and primitive figures when backend is on", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: true }),
       "GET /api/canvases/c1/usage": () =>
         json({
+          totalViews: 42,
+          uniqueViewers: 7,
+          lastViewedAt: 1_700_000_000_000,
+          viewsByDay: viewsByDay(42),
           kvOps: 1280,
           fileOps: 12,
           fileCount: 3,
@@ -83,22 +97,66 @@ describe("usage tab", () => {
         }),
     });
     renderUsage();
-    expect(await screen.findByText("1,280")).toBeInTheDocument(); // KV ops
-    expect(await screen.findByText("2.0 KB")).toBeInTheDocument(); // file storage
-    expect(screen.getByText(/3 files/)).toBeInTheDocument();
+    expect(await screen.findByText("42")).toBeInTheDocument(); // total views
+    expect(screen.getByText(/7 unique/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Views over the last/i })).toBeInTheDocument();
+    expect(screen.getByText("1,280")).toBeInTheDocument(); // KV ops
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // file storage
     expect(screen.getByText("$0.0034")).toBeInTheDocument(); // AI cost (sub-cent precision)
-    expect(screen.getByText(/5,120 tokens/)).toBeInTheDocument();
     expect(screen.getByText("9")).toBeInTheDocument(); // realtime connects
   });
 
-  it("shows the empty state (pointing at Capabilities) when backend is off", async () => {
+  it("shows views (and a backend hint, not primitives) when backend is off", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: false }),
+      "GET /api/canvases/c1/usage": () =>
+        json({
+          totalViews: 3,
+          uniqueViewers: 2,
+          lastViewedAt: 1_700_000_000_000,
+          viewsByDay: viewsByDay(3),
+          kvOps: 0,
+          fileOps: 0,
+          fileCount: 0,
+          fileBytes: 0,
+          aiCalls: 0,
+          aiTokens: 0,
+          aiCostUsd: 0,
+          realtimeConnects: 0,
+        }),
     });
     renderUsage();
-    expect(await screen.findByText(/No backend usage yet/i)).toBeInTheDocument();
-    // Backend off → no primitive usage exists, so the usage query never fires.
+    // Views render regardless of backend (KTD-5); the query DOES fire now.
+    expect(await screen.findByText("3")).toBeInTheDocument(); // total views
+    expect(screen.getByText(/2 unique/)).toBeInTheDocument();
+    expect(screen.getByText(/Turn on/i)).toBeInTheDocument();
+    expect(screen.queryByText("KV operations")).not.toBeInTheDocument();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/usage"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/usage"))).toBe(true);
+  });
+
+  it("shows a no-views empty state (and no sparkline) for a never-viewed canvas", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...BASE, backendEnabled: true }),
+      "GET /api/canvases/c1/usage": () =>
+        json({
+          totalViews: 0,
+          uniqueViewers: 0,
+          lastViewedAt: null,
+          viewsByDay: viewsByDay(0),
+          kvOps: 0,
+          fileOps: 0,
+          fileCount: 0,
+          fileBytes: 0,
+          aiCalls: 0,
+          aiTokens: 0,
+          aiCostUsd: 0,
+          realtimeConnects: 0,
+        }),
+    });
+    renderUsage();
+    expect(await screen.findByText(/No views yet/i)).toBeInTheDocument();
+    expect(screen.getByText("Never")).toBeInTheDocument(); // last viewed
+    expect(screen.queryByRole("img", { name: /Views over the last/i })).not.toBeInTheDocument();
   });
 });

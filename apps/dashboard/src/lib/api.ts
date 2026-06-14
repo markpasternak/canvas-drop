@@ -114,8 +114,19 @@ export interface DeployResult {
   warnings: string[];
 }
 
-/** Per-canvas usage figures (D24) — KV ops + file storage (M6), AI + realtime (M9). */
+/** One UTC-day bucket of the 30-day view sparkline (D24). */
+export interface ViewDay {
+  dayMs: number;
+  count: number;
+}
+
+/** Per-canvas usage figures (D24) — views (all canvases), KV ops + file storage
+ *  (M6), AI + realtime (M9). View fields are present regardless of backend. */
 export interface CanvasUsage {
+  totalViews: number;
+  uniqueViewers: number;
+  lastViewedAt: number | null;
+  viewsByDay: ViewDay[];
   kvOps: number;
   fileOps: number;
   fileCount: number;

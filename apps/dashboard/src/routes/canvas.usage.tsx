@@ -1,13 +1,10 @@
 import { useParams } from "@tanstack/react-router";
 import { TabContentFrame } from "../components/CanvasDetail.js";
-import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { Sparkline } from "../components/Sparkline.js";
 import { MetaGrid, MetaItem, Panel } from "../components/Surface.js";
-import { formatBytes } from "../lib/format.js";
+import { formatBytes, relativeTime } from "../lib/format.js";
 import { useCanvas, useUsage } from "../lib/queries.js";
-
-/** Stats that light up in later milestones (per-visitor views = C/E). */
-const COMING_SOON = ["Unique & total viewers"];
 
 /** Compact USD: extra precision for small AI costs. */
 function formatUsd(usd: number): string {
@@ -26,39 +23,19 @@ function Metric({ value, sub }: { value: string; sub?: string }) {
   );
 }
 
-/** Usage tab (D24): KV ops + file storage (M6), AI tokens/cost + realtime connects
- *  (M9), from usage_events / files / ai_usage. Per-visitor view stats remain "coming
- *  soon". Realtime is ephemeral, so we show connect count, not peak connections. */
+/** Usage tab (D24). Views (total, unique, last-viewed, 30-day sparkline) exist for
+ *  every canvas and render unconditionally. Primitive usage — KV ops + file storage
+ *  (M6), AI tokens/cost + realtime connects (M9) — only exists with a backend, so
+ *  that panel is gated on `backendEnabled`. Realtime is ephemeral, so we show the
+ *  connect count, not peak connections. */
 export default function Usage() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
-  // Only canvases with backend on have primitive usage; skip the query otherwise.
+  // Views apply to all canvases, so the usage query always runs (KTD-5).
+  const { data: usage, isLoading: usageLoading } = useUsage(id);
   const backendOn = canvas?.backendEnabled ?? false;
-  const { data: usage, isLoading: usageLoading } = useUsage(id, backendOn);
 
-  if (canvasLoading || !canvas) {
-    return (
-      <TabContentFrame>
-        <Skeleton className="h-40" />
-      </TabContentFrame>
-    );
-  }
-
-  if (!backendOn) {
-    return (
-      <EmptyState
-        title="No backend usage yet"
-        description={
-          <span className="block">
-            Turn on <strong>Backend</strong> in the Capabilities tab so this canvas can use KV,
-            files, AI, and realtime — usage will appear here once it does.
-          </span>
-        }
-      />
-    );
-  }
-
-  if (usageLoading || !usage) {
+  if (canvasLoading || !canvas || usageLoading || !usage) {
     return (
       <TabContentFrame>
         <Skeleton className="h-40" />
@@ -70,40 +47,55 @@ export default function Usage() {
     <TabContentFrame>
       <Panel>
         <MetaGrid>
-          <MetaItem label="KV operations">
-            <Metric value={usage.kvOps.toLocaleString()} />
-          </MetaItem>
-          <MetaItem label="File storage">
+          <MetaItem label="Total views">
             <Metric
-              value={formatBytes(usage.fileBytes)}
-              sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+              value={usage.totalViews.toLocaleString()}
+              sub={`${usage.uniqueViewers.toLocaleString()} unique`}
             />
           </MetaItem>
-          <MetaItem label="AI usage">
-            <Metric
-              value={formatUsd(usage.aiCostUsd)}
-              sub={`${usage.aiTokens.toLocaleString()} tokens · ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
-            />
-          </MetaItem>
-          <MetaItem label="Realtime connections">
-            <Metric value={usage.realtimeConnects.toLocaleString()} sub="total connects" />
+          <MetaItem label="Last viewed">
+            <Metric value={usage.lastViewedAt ? relativeTime(usage.lastViewedAt) : "Never"} />
           </MetaItem>
         </MetaGrid>
+        <div className="mt-4 space-y-1.5">
+          <p className="text-[0.6875rem] font-medium text-subtle">Last 30 days</p>
+          {usage.totalViews === 0 ? (
+            <p className="text-xs text-muted">No views yet.</p>
+          ) : (
+            <Sparkline data={usage.viewsByDay} className="h-10 w-full text-accent" />
+          )}
+        </div>
       </Panel>
 
-      <div className="space-y-2">
-        <p className="text-[0.6875rem] font-medium text-subtle">Coming soon</p>
-        <div className="flex flex-wrap gap-1.5">
-          {COMING_SOON.map((m) => (
-            <span
-              key={m}
-              className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs text-muted"
-            >
-              {m}
-            </span>
-          ))}
-        </div>
-      </div>
+      {backendOn ? (
+        <Panel>
+          <MetaGrid>
+            <MetaItem label="KV operations">
+              <Metric value={usage.kvOps.toLocaleString()} />
+            </MetaItem>
+            <MetaItem label="File storage">
+              <Metric
+                value={formatBytes(usage.fileBytes)}
+                sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+              />
+            </MetaItem>
+            <MetaItem label="AI usage">
+              <Metric
+                value={formatUsd(usage.aiCostUsd)}
+                sub={`${usage.aiTokens.toLocaleString()} tokens · ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
+              />
+            </MetaItem>
+            <MetaItem label="Realtime connections">
+              <Metric value={usage.realtimeConnects.toLocaleString()} sub="total connects" />
+            </MetaItem>
+          </MetaGrid>
+        </Panel>
+      ) : (
+        <p className="text-sm text-muted">
+          Turn on <strong className="font-medium text-fg">Backend</strong> in the Capabilities tab
+          to use KV, files, AI, and realtime — those usage figures will appear here once it does.
+        </p>
+      )}
     </TabContentFrame>
   );
 }
