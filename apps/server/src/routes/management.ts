@@ -127,6 +127,33 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
   };
 }
 
+const CANVASES_PAGE_SIZE = 24;
+const CANVASES_MAX_LIMIT = 60;
+
+/** Coerce an optional query flag ("1"/"true" → true; absent/anything else → false). */
+const boolFlag = z
+  .string()
+  .optional()
+  .transform((v) => v === "1" || v === "true");
+
+/**
+ * Your-canvases browse query (plan 005). Mirrors the gallery schema: invalid or
+ * absent values clamp to defaults rather than 400ing, so a junk param still
+ * renders the owner's list. `undeployed` is the URL param for the never-deployed
+ * filter (maps to the repo's `neverDeployed`); `sort` falls back to `updated`.
+ */
+const ownerListQuerySchema = z.object({
+  q: z.string().trim().min(1).optional(),
+  shared: boolFlag,
+  protected: boolFlag,
+  listed: boolFlag,
+  template: boolFlag,
+  undeployed: boolFlag,
+  sort: z.enum(["updated", "created", "title"]).catch("updated"),
+  limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
+  offset: z.coerce.number().int().catch(0),
+});
+
 /**
  * Canvas lifecycle management API (§11.3), mounted at `/api/canvases`. Owner (or
  * admin) authenticated via the foundation gateway; same-origin enforced on
@@ -247,10 +274,42 @@ export function managementRoutes(deps: ManagementDeps) {
   }
 
   // List the caller's own ACTIVE canvases (excludes archived + deleted), each
-  // enriched with its last-deploy summary.
+  // enriched with its last-deploy summary. Server-side filter/search/sort +
+  // offset pagination (plan 005), mirroring the gallery: a malformed query falls
+  // back to all-defaults so the list never 400s, and every param ANDs onto the
+  // owner-scope base in the repo — it can only shrink the caller's own set.
   app.get("/", async (c) => {
-    const canvases = await withLastDeploy(await deps.canvases.listByOwner(c.get("user").id));
-    return c.json({ canvases });
+    const parsed = ownerListQuerySchema.safeParse(c.req.query());
+    const data = parsed.success
+      ? parsed.data
+      : {
+          q: undefined,
+          shared: false,
+          protected: false,
+          listed: false,
+          template: false,
+          undeployed: false,
+          sort: "updated" as const,
+          limit: CANVASES_PAGE_SIZE,
+          offset: 0,
+        };
+    const limit = Math.min(Math.max(data.limit, 1), CANVASES_MAX_LIMIT);
+    const offset = Math.max(data.offset, 0);
+
+    const { items, total } = await deps.canvases.listByOwnerFiltered({
+      ownerId: c.get("user").id,
+      q: data.q,
+      shared: data.shared,
+      protected: data.protected,
+      listed: data.listed,
+      template: data.template,
+      neverDeployed: data.undeployed,
+      sort: data.sort,
+      limit,
+      offset,
+    });
+    const canvases = await withLastDeploy(items);
+    return c.json({ canvases, total, limit, offset });
   });
 
   // List the caller's own ARCHIVED canvases — the dedicated Archive view (§6.9.1).

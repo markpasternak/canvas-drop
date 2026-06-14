@@ -19,6 +19,7 @@ import {
   ne,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
@@ -243,7 +244,9 @@ export function canvasesRepository(client: DbClient) {
     async listByOwnerFiltered(
       opts: OwnerListOptions,
     ): Promise<{ items: Canvas[]; total: number }> {
-      const filters = [
+      // Typed to allow `or(...)` (which is SQL | undefined) to be pushed, matching
+      // the gallery's filter-array shape that `and(...)` accepts.
+      const filters: Array<SQL | undefined> = [
         eq(t.ownerId, opts.ownerId),
         notInArray(t.status, ["deleted", "archived"]),
       ];

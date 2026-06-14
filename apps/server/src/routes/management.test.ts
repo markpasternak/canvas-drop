@@ -1421,4 +1421,104 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     );
     expect(res.status).toBe(404);
   });
+
+  // ── GET / server-side filter/search/sort/page (plan 005) ─────────────────
+
+  it("GET / returns the paged shape with defaults and no params", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: owner.id, slug: "one", apiKeyHash: "k1", title: "One" });
+    await repo.create({ ownerId: owner.id, slug: "two", apiKeyHash: "k2", title: "Two" });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases");
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{
+      canvases: Array<{ id: string; lastDeploy: unknown }>;
+      total: number;
+      limit: number;
+      offset: number;
+    }>(res);
+    expect(body.total).toBe(2);
+    expect(body.canvases).toHaveLength(2);
+    expect(body.limit).toBe(24);
+    expect(body.offset).toBe(0);
+    // withLastDeploy enrichment is preserved (null for never-deployed canvases).
+    expect(body.canvases[0]).toHaveProperty("lastDeploy");
+  });
+
+  it("GET /?template=1 returns only matching canvases, still enriched", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const tmpl = await repo.create({ ownerId: owner.id, slug: "tmpl", apiKeyHash: "k1" });
+    await repo.create({ ownerId: owner.id, slug: "plain", apiKeyHash: "k2" });
+    await repo.updateSettings(tmpl.id, { galleryTemplatable: true });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases?template=1",
+    );
+    const body = await jsonOf<{ canvases: Array<{ id: string }>; total: number }>(res);
+    expect(body.total).toBe(1);
+    expect(body.canvases.map((c) => c.id)).toEqual([tmpl.id]);
+    expect(body.canvases[0]).toHaveProperty("lastDeploy");
+  });
+
+  it("GET / honors sort and falls back to the default axis on a junk sort value", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: owner.id, slug: "a", apiKeyHash: "k1", title: "Banana" });
+    await repo.create({ ownerId: owner.id, slug: "b", apiKeyHash: "k2", title: "apple" });
+
+    const sorted = await jsonOf<{ canvases: Array<{ title: string }> }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases?sort=title"),
+    );
+    expect(sorted.canvases.map((c) => c.title)).toEqual(["apple", "Banana"]);
+
+    // A junk sort value must not 400 — it falls back to the default axis.
+    const junk = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases?sort=wat",
+    );
+    expect(junk.status).toBe(200);
+  });
+
+  it("GET / clamps limit/offset and tolerates non-numeric values", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    for (let i = 0; i < 3; i++) {
+      await repo.create({ ownerId: owner.id, slug: `c${i}`, apiKeyHash: `k${i}` });
+    }
+    // limit over the max clamps to 60; negative offset clamps to 0.
+    const over = await jsonOf<{ limit: number; offset: number; total: number }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        "/api/canvases?limit=9999&offset=-5",
+      ),
+    );
+    expect(over.limit).toBe(60);
+    expect(over.offset).toBe(0);
+    expect(over.total).toBe(3);
+    // non-numeric limit falls back to the default page size, not a 400.
+    const junk = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases?limit=abc",
+    );
+    expect(junk.status).toBe(200);
+    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(24);
+  });
+
+  it("GET / never returns another user's canvas, even with permissive params", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: owner.id, slug: "mine", apiKeyHash: "k1" });
+    await repo.create({ ownerId: other.id, slug: "theirs", apiKeyHash: "k2" });
+
+    const body = await jsonOf<{ canvases: Array<{ slug: string }>; total: number }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases"),
+    );
+    expect(body.total).toBe(1);
+    expect(body.canvases.map((c) => c.slug)).toEqual(["mine"]);
+  });
 });
