@@ -245,9 +245,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("index.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add file" }));
     const field = await screen.findByPlaceholderText("e.g. styles/main.css");
-    await userEvent.type(field, "index.html");
+    fireEvent.change(field, { target: { value: "index.html" } });
     expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
     const submit = screen
       .getAllByRole("button", { name: "Add file" })
@@ -273,13 +273,13 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("index.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add file" }));
     const field = await screen.findByPlaceholderText("e.g. styles/main.css");
-    await userEvent.type(field, "styles/main.css");
+    fireEvent.change(field, { target: { value: "styles/main.css" } });
     const submit = screen
       .getAllByRole("button", { name: "Add file" })
       .find((b) => (b as HTMLButtonElement).type === "submit") as HTMLButtonElement;
-    await userEvent.click(submit);
+    fireEvent.click(submit);
     await waitFor(() =>
       expect(
         calls.some(
@@ -309,10 +309,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("a.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
     const field = await screen.findByDisplayValue("a.html");
-    await userEvent.clear(field);
-    await userEvent.type(field, "b.html");
+    fireEvent.change(field, { target: { value: "b.html" } });
     expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
   });

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { S3Client } from "@aws-sdk/client-s3";
 import { loadConfig } from "@canvas-drop/shared";
+import { Client } from "pg";
 import { describe, expect, it } from "vitest";
 import { makeDb } from "../db/factory.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -17,28 +19,73 @@ import { S3Driver } from "../storage/s3.js";
  */
 const PG_URL = process.env.CANVAS_DROP_TEST_DATABASE_URL;
 const S3_ENDPOINT = process.env.CANVAS_DROP_TEST_S3_ENDPOINT;
+const RUN_ID = (process.env.CANVAS_DROP_TEST_RUN_ID ?? randomUUID()).replace(/[^a-zA-Z0-9_]/g, "_");
+
+function quoteIdent(id: string): string {
+  return `"${id.replaceAll('"', '""')}"`;
+}
+
+async function withIsolatedDatabase<T>(
+  baseUrl: string,
+  run: (url: string) => Promise<T>,
+): Promise<T> {
+  const original = new URL(baseUrl);
+  const baseName = basenameFromPath(original.pathname) || "canvasdrop_test";
+  const dbName = `${baseName.slice(0, 36)}_${RUN_ID.slice(0, 24)}`;
+  const admin = new URL(baseUrl);
+  admin.pathname = "/postgres";
+
+  const adminClient = new Client({ connectionString: admin.toString() });
+  await adminClient.connect();
+  try {
+    await adminClient.query(`DROP DATABASE IF EXISTS ${quoteIdent(dbName)} WITH (FORCE)`);
+    await adminClient.query(`CREATE DATABASE ${quoteIdent(dbName)}`);
+  } finally {
+    await adminClient.end();
+  }
+
+  const isolated = new URL(baseUrl);
+  isolated.pathname = `/${dbName}`;
+  try {
+    return await run(isolated.toString());
+  } finally {
+    const cleanupClient = new Client({ connectionString: admin.toString() });
+    await cleanupClient.connect();
+    try {
+      await cleanupClient.query(`DROP DATABASE IF EXISTS ${quoteIdent(dbName)} WITH (FORCE)`);
+    } finally {
+      await cleanupClient.end();
+    }
+  }
+}
+
+function basenameFromPath(pathname: string): string {
+  return pathname.replace(/^\//, "").replace(/[^a-zA-Z0-9_]/g, "_");
+}
 
 describe.skipIf(!PG_URL)("real Postgres (node-postgres driver)", () => {
   it("migrates and round-trips a user against a live server", async () => {
-    const config = loadConfig({
-      CANVAS_DROP_AUTH_MODE: "dev",
-      CANVAS_DROP_DB: "postgres",
-      CANVAS_DROP_DATABASE_URL: PG_URL,
-    });
-    const client = makeDb(config);
-    try {
-      await client.migrate();
-      const repo = usersRepository(client);
-      const u = await repo.upsert({
-        providerSub: "real-pg",
-        email: `u${Date.now()}@example.com`,
-        name: "Real",
-        isAdmin: false,
+    await withIsolatedDatabase(PG_URL as string, async (url) => {
+      const config = loadConfig({
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_DB: "postgres",
+        CANVAS_DROP_DATABASE_URL: url,
       });
-      expect((await repo.findById(u.id))?.id).toBe(u.id);
-    } finally {
-      await client.close();
-    }
+      const client = makeDb(config);
+      try {
+        await client.migrate();
+        const repo = usersRepository(client);
+        const u = await repo.upsert({
+          providerSub: "real-pg",
+          email: `u-${RUN_ID}@example.com`,
+          name: "Real",
+          isAdmin: false,
+        });
+        expect((await repo.findById(u.id))?.id).toBe(u.id);
+      } finally {
+        await client.close();
+      }
+    });
   });
 });
 
@@ -55,11 +102,14 @@ describe.skipIf(!S3_ENDPOINT)("real S3 (MinIO via S3Driver)", () => {
       },
     });
     const driver = new S3Driver(client, bucket);
-    const key = `smoke/${Date.now()}.txt`;
-    await driver.put(key, new TextEncoder().encode("real s3"));
-    const got = await driver.get(key);
-    expect(Buffer.from(got as Uint8Array).toString()).toBe("real s3");
-    await driver.delete(key);
+    const key = `smoke/${RUN_ID}/${randomUUID()}.txt`;
+    try {
+      await driver.put(key, new TextEncoder().encode("real s3"));
+      const got = await driver.get(key);
+      expect(Buffer.from(got as Uint8Array).toString()).toBe("real s3");
+    } finally {
+      await driver.delete(key);
+    }
     expect(await driver.exists(key)).toBe(false);
   });
 });
