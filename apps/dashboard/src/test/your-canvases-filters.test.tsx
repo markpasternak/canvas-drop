@@ -76,7 +76,6 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
           authMode: "dev",
         });
       }
-      if (path.endsWith("/archived")) return json({ canvases: [] });
       // /api/canvases — apply the server-side filter/search the route would.
       const sp = u.searchParams;
       const q = sp.get("q")?.toLowerCase();

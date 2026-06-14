@@ -152,7 +152,6 @@ describe("admin dashboard", () => {
       "GET /api/canvases": () => json({ canvases: [] }),
       "GET /api/canvases?limit=24&offset=0": () =>
         json({ canvases: [], total: 0, limit: 24, offset: 0 }),
-      "GET /api/canvases/archived": () => json({ canvases: [] }),
     });
     renderAt("/");
     await waitFor(() => expect(calls.some((c) => c.path === "/api/me")).toBe(true));

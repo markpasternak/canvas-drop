@@ -291,14 +291,12 @@ export function useDeleteCanvas(id: string) {
   });
 }
 
-/** Invalidate every surface a lifecycle change moves a canvas between: the
- *  canvas detail, the active list, and the archive list. (`keys.canvases` is a
- *  prefix of `keys.archivedCanvases`, but we invalidate both explicitly so the
- *  intent survives any future key reshaping.) */
+/** Invalidate every surface a lifecycle change moves a canvas between: the canvas
+ *  detail and the canvas list (the `keys.canvases` prefix covers every parameterized
+ *  list key, including the `?scope=archived` view). */
 function invalidateLifecycle(qc: ReturnType<typeof useQueryClient>, id: string) {
   qc.invalidateQueries({ queryKey: keys.canvas(id) });
   qc.invalidateQueries({ queryKey: keys.canvases });
-  qc.invalidateQueries({ queryKey: keys.archivedCanvases });
 }
 
 /** Archive — await; takes the canvas offline and moves it to the Archive view. */

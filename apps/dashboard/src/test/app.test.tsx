@@ -73,25 +73,8 @@ describe("dashboard app", () => {
   });
 
   it("points at the Archived view when every canvas is archived (not onboarding)", async () => {
-    const archivedItem = {
-      id: "a1",
-      slug: "old-otter",
-      url: "http://x/c/old-otter",
-      title: "Retired",
-      description: null,
-      shared: false,
-      sharedExpiresAt: null,
-      hasPassword: false,
-      spaFallback: false,
-      galleryListed: false,
-      gallerySummary: null,
-      galleryTags: null,
-      status: "archived",
-      disabledReason: null,
-      currentVersionId: "v1",
-      createdAt: 0,
-      updatedAt: 0,
-    };
+    // The empty-home pointer reads the archived count from the list response summary:
+    // an empty active list whose summary reports one archived canvas.
     const emptySummary = {
       active: 0,
       archived: 1,
@@ -103,19 +86,13 @@ describe("dashboard app", () => {
     };
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url, "http://localhost").pathname;
-        // The empty-home pointer now reads the archived count from the list response
-        // summary (no separate /archived request). Active list is empty; summary
-        // reports one archived canvas.
-        const body = path.endsWith("/archived")
-          ? { canvases: [archivedItem] }
-          : { canvases: [], total: 0, limit: 24, offset: 0, summary: emptySummary };
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0, summary: emptySummary }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
     );
     renderApp("/");
     expect(await screen.findByText(/no active canvases/i)).toBeInTheDocument();

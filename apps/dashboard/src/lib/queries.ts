@@ -15,7 +15,6 @@ export const keys = {
   // Per-filter/page list key (plan 005). Prefixed under `canvases` so the existing
   // invalidations still hit it.
   canvasesList: (query: CanvasesQuery) => ["canvases", "list", query] as const,
-  archivedCanvases: ["canvases", "archived"] as const,
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
@@ -41,10 +40,6 @@ export function useCanvases(query: CanvasesQuery = {}) {
     // paging and typing don't flash an empty list (mirrors useGallery).
     placeholderData: keepPreviousData,
   });
-}
-
-export function useArchivedCanvases() {
-  return useQuery({ queryKey: keys.archivedCanvases, queryFn: api.listArchivedCanvases });
 }
 
 export function useCanvas(id: string) {

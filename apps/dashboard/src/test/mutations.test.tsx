@@ -170,14 +170,14 @@ describe("useArchiveCanvas / useUnarchiveCanvas", () => {
     result.current.mutate();
 
     await waitFor(() => expect(api.archiveCanvas).toHaveBeenCalledWith("c1"));
-    // the canvas detail reflects the new status, and BOTH lists are invalidated so
-    // the canvas visibly moves between the active list and the archive view.
+    // the canvas detail reflects the new status, and the canvas list is invalidated
+    // (the `keys.canvases` prefix covers the active and `?scope=archived` views) so
+    // the canvas visibly moves between them.
     await waitFor(() =>
       expect(qc.getQueryData<Canvas>(keys.canvas("c1"))?.status).toBe("archived"),
     );
     const invalidatedKeys = invalidate.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
     expect(invalidatedKeys).toContain(JSON.stringify(keys.canvases));
-    expect(invalidatedKeys).toContain(JSON.stringify(keys.archivedCanvases));
   });
 
   it("unarchive calls POST /unarchive and restores the active status", async () => {

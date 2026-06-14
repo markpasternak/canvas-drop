@@ -324,14 +324,6 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ canvases, total, limit, offset, summary });
   });
 
-  // List the caller's own ARCHIVED canvases — the dedicated Archive view (§6.9.1).
-  app.get("/archived", async (c) => {
-    const canvases = await withLastDeploy(
-      await deps.canvases.listArchivedByOwner(c.get("user").id),
-    );
-    return c.json({ canvases });
-  });
-
   app.get("/:id", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);

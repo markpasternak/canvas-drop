@@ -623,9 +623,6 @@ export const api = {
     return request<CanvasesPage>(`/api/canvases${qs ? `?${qs}` : ""}`);
   },
 
-  listArchivedCanvases: () =>
-    request<{ canvases: CanvasListItem[] }>("/api/canvases/archived").then((r) => r.canvases),
-
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
 
   getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),

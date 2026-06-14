@@ -349,15 +349,6 @@ export function canvasesRepository(client: DbClient) {
       };
     },
 
-    /** Archive-view list: a user's archived canvases, newest-first. */
-    async listArchivedByOwner(ownerId: string): Promise<Canvas[]> {
-      return (await db
-        .select()
-        .from(t)
-        .where(and(eq(t.ownerId, ownerId), eq(t.status, "archived")))
-        .orderBy(desc(t.createdAt))) as Canvas[];
-    },
-
     async updateSettings(id: string, patch: CanvasSettingsPatch): Promise<Canvas> {
       const set: Record<string, unknown> = { updatedAt: Date.now() };
       if (patch.title !== undefined) set.title = patch.title;

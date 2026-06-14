@@ -307,12 +307,7 @@ describe("managementRoutes", () => {
     const active = await jsonOf<{ canvases: unknown[] }>(await app.request("/api/canvases"));
     expect(active.canvases).toHaveLength(0); // gone from the active view
 
-    const archived = await jsonOf<{ canvases: { id: string }[] }>(
-      await app.request("/api/canvases/archived"),
-    );
-    expect(archived.canvases.map((c) => c.id)).toEqual([created.id]);
-
-    // The Active/Archived toggle reads the SAME list endpoint with `?scope=archived`.
+    // The Active/Archived toggle reads the list endpoint with `?scope=archived`.
     const scoped = await jsonOf<{ canvases: { id: string }[]; total: number }>(
       await app.request("/api/canvases?scope=archived"),
     );
@@ -345,7 +340,7 @@ describe("managementRoutes", () => {
     const active = await jsonOf<{ canvases: { id: string }[] }>(await app.request("/api/canvases"));
     expect(active.canvases.map((c) => c.id)).toEqual([created.id]);
     const archived = await jsonOf<{ canvases: unknown[] }>(
-      await app.request("/api/canvases/archived"),
+      await app.request("/api/canvases?scope=archived"),
     );
     expect(archived.canvases).toHaveLength(0);
   });
