@@ -13,8 +13,8 @@ import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.
 import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
 
-/** Deploys tab: deploy history (newest first), forward "Deploy files", and
- * per-version "Make live" (re-point the live version in either direction).
+/** Versions tab: version history (newest first), forward "Publish files", and
+ * per-version "Make current" (re-point the served version in either direction).
  * Confirm-and-await, not optimistic, since it changes the live canvas for all. */
 export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
@@ -46,13 +46,13 @@ export default function Versions() {
   if (!versions || versions.length === 0) {
     return (
       <TabEmptyState
-        title="No deploys yet"
+        title="No versions yet"
         description={
           isActive
-            ? "Deploy files or publish a draft to start the deploy history."
-            : "Unarchive this canvas to deploy files again."
+            ? "Publish files or publish the draft to start the version history."
+            : "Unarchive this canvas to publish again."
         }
-        action={isActive ? <DeployButton canvasId={id} label="Deploy files" /> : undefined}
+        action={isActive ? <DeployButton canvasId={id} label="Publish files" /> : undefined}
       />
     );
   }
@@ -61,10 +61,10 @@ export default function Versions() {
     if (!target) return;
     try {
       await rollback.mutateAsync(target.number);
-      toast(`Version ${target.number} is now live`);
+      toast(`Version ${target.number} is now current`);
       setTarget(null);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't change the live version", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't change the current version", "error");
     }
   }
 
@@ -82,7 +82,7 @@ export default function Versions() {
       toast(`Version ${version} loaded into the draft`);
       navigate({ to: "/canvases/$id/editor", params: { id } });
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't restore to the draft", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't load into the draft", "error");
     }
   }
 
@@ -90,15 +90,15 @@ export default function Versions() {
     <TabContentFrame>
       <Panel className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-sm font-semibold text-fg">Deploy history</h2>
+          <h2 className="text-sm font-semibold text-fg">Version history</h2>
           <p className="text-xs text-muted">
-            {versions.length} {versions.length === 1 ? "deploy" : "deploys"} kept for this canvas.
+            {versions.length} {versions.length === 1 ? "version" : "versions"} kept for this canvas.
             {isActive
-              ? " Switch the live deploy or push fresh files from here."
-              : " Unarchive to deploy files or change what is live."}
+              ? " Switch the current version or publish fresh files from here."
+              : " Unarchive to publish or change the current version."}
           </p>
         </div>
-        {isActive && <DeployButton canvasId={id} label="Deploy files" variant="secondary" />}
+        {isActive && <DeployButton canvasId={id} label="Publish files" variant="secondary" />}
       </Panel>
 
       <ul className="space-y-2">
@@ -108,7 +108,7 @@ export default function Versions() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
-                  {v.current && <Badge tone="accent">Live</Badge>}
+                  {v.current && <Badge tone="accent">Current</Badge>}
                   <Badge tone="neutral">{sourceLabel(v.source)}</Badge>
                 </div>
                 <div
@@ -130,11 +130,11 @@ export default function Versions() {
                     onClick={() => requestRestore(v.number)}
                     title="Load this version's files into the editable draft"
                   >
-                    Restore to draft
+                    Edit this version
                   </Button>
                   {!v.current && (
                     <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
-                      Make live
+                      Make current
                     </Button>
                   )}
                 </div>
@@ -148,25 +148,25 @@ export default function Versions() {
         open={target !== null}
         onClose={() => setTarget(null)}
         onConfirm={confirmMakeLive}
-        title={`Make version ${target?.number ?? ""} live?`}
-        actionLabel="Make live"
+        title={`Make version ${target?.number ?? ""} current?`}
+        actionLabel="Make current"
         loading={rollback.isPending}
       >
-        This replaces the live version for all visitors immediately. You can switch to any version
-        in the history at any time.
+        This makes this version the current one for all visitors immediately. You can switch to any
+        version in the history at any time.
       </ConfirmDialog>
 
       <ConfirmDialog
         open={restoreTarget !== null}
         onClose={() => setRestoreTarget(null)}
         onConfirm={() => restoreTarget !== null && restoreToDraft(restoreTarget)}
-        title={`Restore version ${restoreTarget ?? ""} into the draft?`}
-        actionLabel="Restore and discard changes"
+        title={`Load version ${restoreTarget ?? ""} into the draft?`}
+        actionLabel="Load and discard changes"
         destructive
         loading={restore.isPending}
       >
-        Your draft has unpublished changes. Restoring loads this version's files into the draft and
-        discards those changes. The live version isn't affected until you publish.
+        Your draft has unpublished changes. Loading this version's files into the draft discards
+        those changes. The published version isn't affected until you publish.
       </ConfirmDialog>
     </TabContentFrame>
   );

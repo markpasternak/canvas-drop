@@ -118,12 +118,12 @@ describe("Versions route — restore to draft", () => {
     });
     renderVersions();
 
-    const restore = await screen.findByRole("button", { name: /restore to draft/i });
+    const restore = await screen.findByRole("button", { name: /edit this version/i });
     await userEvent.click(restore);
 
     // No destructive confirm dialog is shown for a clean draft.
     expect(
-      screen.queryByRole("button", { name: /restore and discard changes/i }),
+      screen.queryByRole("button", { name: /load and discard changes/i }),
     ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/restore"))).toBe(true),
@@ -140,11 +140,11 @@ describe("Versions route — restore to draft", () => {
     });
     const router = renderVersions();
 
-    const restore = await screen.findByRole("button", { name: /restore to draft/i });
+    const restore = await screen.findByRole("button", { name: /edit this version/i });
     await userEvent.click(restore);
 
     // Dirty draft → destructive confirm dialog, no restore call yet.
-    const confirm = await screen.findByRole("button", { name: /restore and discard changes/i });
+    const confirm = await screen.findByRole("button", { name: /load and discard changes/i });
     expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/restore"))).toBe(false);
 
     await userEvent.click(confirm);

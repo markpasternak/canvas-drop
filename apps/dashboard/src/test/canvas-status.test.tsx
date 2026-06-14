@@ -92,11 +92,11 @@ describe("canvas Status tab", () => {
       "href",
       "/canvases/c1",
     );
-    expect(screen.getByRole("link", { name: "Draft" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Editor" })).toHaveAttribute(
       "href",
       "/canvases/c1/editor",
     );
-    expect(screen.getByRole("link", { name: "Deploys" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Versions" })).toHaveAttribute(
       "href",
       "/canvases/c1/versions",
     );

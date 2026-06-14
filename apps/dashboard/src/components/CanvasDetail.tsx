@@ -11,13 +11,13 @@ const TABS = [
   { to: "/canvases/$id", label: "Status", exact: true, path: (id: string) => `/canvases/${id}` },
   {
     to: "/canvases/$id/editor",
-    label: "Draft",
+    label: "Editor",
     exact: false,
     path: (id: string) => `/canvases/${id}/editor`,
   },
   {
     to: "/canvases/$id/versions",
-    label: "Deploys",
+    label: "Versions",
     exact: false,
     path: (id: string) => `/canvases/${id}/versions`,
   },
