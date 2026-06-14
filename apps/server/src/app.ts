@@ -186,12 +186,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   // Public legal pages (`/privacy`, `/terms`) — mounted BEFORE the auth gateway so
   // the Google OAuth consent screen's reviewers can open them while signed out.
-  app.route("/", legalRoutes());
+  app.route("/", legalRoutes(deps.config));
 
   // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
   // the gateway so signed-out agents and OSS browsers can read it on every host.
   // `/llms.txt` here REPLACES the formerly-private one in serve-sdk.ts (U4).
-  app.route("/", docsRoutes());
+  app.route("/", docsRoutes(deps.config));
 
   // Login throttle (§12.3) — pre-gateway, keyed by the resolved real client IP
   // (`clientIp`: the socket peer, or the X-Forwarded-For client when behind a

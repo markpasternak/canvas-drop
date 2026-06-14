@@ -1,3 +1,4 @@
+import type { Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
@@ -28,10 +29,11 @@ const OPERATOR = {
   lastUpdated: "14 June 2026",
 } as const;
 
-export function legalRoutes(): Hono<AppEnv> {
+export function legalRoutes(config: Config): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  app.get("/privacy", () => htmlResponse(renderPrivacyPage()));
-  app.get("/terms", () => htmlResponse(renderTermsPage()));
+  const origin = config.baseUrl;
+  app.get("/privacy", () => htmlResponse(renderPrivacyPage(origin)));
+  app.get("/terms", () => htmlResponse(renderTermsPage(origin)));
   return app;
 }
 
@@ -46,14 +48,48 @@ function htmlResponse(html: string): Response {
   return new Response(html, { status: 200, headers });
 }
 
+/** Open Graph + Twitter card tags. `origin` (config.baseUrl) makes the image/URL
+ *  absolute — social crawlers require that; the card is served publicly at /og.png. */
+function socialMeta(path: string, title: string, description: string, origin: string): string {
+  const base = origin.replace(/\/$/, "");
+  const t = escapeHtml(`${title} · canvas-drop`);
+  const d = escapeHtml(
+    description
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+  const image = escapeHtml(`${base}/og.png`);
+  return `<meta name="description" content="${d}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="canvas-drop">
+<meta property="og:title" content="${t}">
+<meta property="og:description" content="${d}">
+<meta property="og:url" content="${escapeHtml(`${base}${path}`)}">
+<meta property="og:image" content="${image}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${t}">
+<meta name="twitter:description" content="${d}">
+<meta name="twitter:image" content="${image}">`;
+}
+
 /** Shared minimal, light-mode-only page chrome (logo + wordmark, title, body). */
-function renderLegalPage(opts: { title: string; intro: string; body: string }): string {
+function renderLegalPage(opts: {
+  title: string;
+  intro: string;
+  body: string;
+  path: string;
+  origin: string;
+}): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(opts.title)} · canvas-drop</title>
+${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 <style>
   :root {
     --canvas: #f5f5f2;
@@ -151,7 +187,7 @@ function renderLegalPage(opts: { title: string; intro: string; body: string }): 
 
 const CONTACT_LINK = `<a href="mailto:${escapeAttribute(OPERATOR.contactEmail)}">${escapeHtml(OPERATOR.contactEmail)}</a>`;
 
-export function renderPrivacyPage(): string {
+export function renderPrivacyPage(origin = ""): string {
   const body = `
     <h2>Who we are</h2>
     <p>${escapeHtml(OPERATOR.name)} ("canvas-drop", "we", "us") operates this instance and is the data
@@ -208,10 +244,12 @@ export function renderPrivacyPage(): string {
     intro:
       "This policy explains what data canvas-drop collects, why, and how it is handled. We keep this to the minimum needed to run the service.",
     body,
+    path: "/privacy",
+    origin,
   });
 }
 
-export function renderTermsPage(): string {
+export function renderTermsPage(origin = ""): string {
   const body = `
     <h2>Acceptance</h2>
     <p>By accessing or using canvas-drop, you agree to these Terms. If you do not agree, do not use
@@ -265,5 +303,7 @@ export function renderTermsPage(): string {
     intro:
       "These Terms govern your use of this canvas-drop instance. They are intentionally short.",
     body,
+    path: "/terms",
+    origin,
   });
 }

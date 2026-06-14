@@ -146,17 +146,50 @@ function renderPrevNext(currentPath: string): string {
   return `<div class="prevnext">${left}${right}</div>`;
 }
 
-/** Render the full HTML for a doc page, or null if the path is unknown. */
-export function renderDocPage(path: string): string | null {
+/** A trimmed one-line summary for meta description / social card. */
+function summarize(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 160 ? `${flat.slice(0, 157).trimEnd()}…` : flat;
+}
+
+/** Open Graph + Twitter card tags for a doc page. `origin` is the instance's
+ *  public base URL (config.baseUrl) so the image/URL are absolute — social
+ *  crawlers require that. The card image is served publicly at `/og.png`. */
+function socialMeta(path: string, title: string, description: string, origin: string): string {
+  const base = origin.replace(/\/$/, "");
+  const url = `${base}${href(path)}`;
+  const image = `${base}/og.png`;
+  const t = escapeHtml(title);
+  const d = escapeHtml(description);
+  return `<meta name="description" content="${d}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="canvas-drop">
+<meta property="og:title" content="${t}">
+<meta property="og:description" content="${d}">
+<meta property="og:url" content="${escapeHtml(url)}">
+<meta property="og:image" content="${escapeHtml(image)}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${t}">
+<meta name="twitter:description" content="${d}">
+<meta name="twitter:image" content="${escapeHtml(image)}">`;
+}
+
+/** Render the full HTML for a doc page, or null if the path is unknown.
+ *  `origin` (config.baseUrl) makes the social-card URLs absolute. */
+export function renderDocPage(path: string, origin = ""): string | null {
   const page = byPath.get(path);
   if (!page) return null;
   const title = `${escapeHtml(page.title)} · canvas-drop docs`;
+  const description = summarize(page.text) || "Documentation for canvas-drop.";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
+${socialMeta(path, `${page.title} · canvas-drop docs`, description, origin)}
 <style>
 ${DOCS_STYLES}
 </style>

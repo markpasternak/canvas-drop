@@ -1,11 +1,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ERROR_CODES } from "@canvas-drop/sdk";
+import { loadConfig } from "@canvas-drop/shared";
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { DOC_PAGES, LLMS_TXT } from "./generated-content.js";
 import { hasDocPage } from "./render.js";
 import { docsRoutes } from "./routes.js";
+
+const config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
 const allHtml = DOC_PAGES.map((p) => p.html).join("\n");
 const allText = DOC_PAGES.map((p) => `${p.title}\n${p.text}`).join("\n");
@@ -17,7 +20,7 @@ const ENV_TS = fileURLToPath(
 
 describe("docs integrity", () => {
   it("serves /skill.zip containing ONLY allow-listed markdown (no secrets)", async () => {
-    const res = await docsRoutes().request("/skill.zip");
+    const res = await docsRoutes(config).request("/skill.zip");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/zip");
     const entries = Object.keys(unzipSync(new Uint8Array(await res.arrayBuffer())));

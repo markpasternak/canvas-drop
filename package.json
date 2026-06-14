@@ -26,6 +26,7 @@
     "docs:build": "node scripts/build-docs.mjs",
     "docs:watch": "node scripts/build-docs.mjs --watch",
     "docs:screenshots": "node scripts/screenshots.mjs",
+    "og:build": "node scripts/og-card.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",

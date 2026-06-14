@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Config } from "@canvas-drop/shared";
 import { zipSync } from "fflate";
 import { Hono } from "hono";
 import { errorResponse } from "../http/error-pages.js";
@@ -28,6 +29,8 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const ASSETS_DIR = join(REPO_ROOT, "docs/site/assets");
 const ASSET_NAME = /^[a-z0-9][a-z0-9-]*\.webp$/;
 const SKILL_DIR = join(REPO_ROOT, "skill/canvas-drop");
+/** The committed social share card (`pnpm og:build`), served publicly at /og.png. */
+const OG_IMAGE = join(REPO_ROOT, "docs/site/og.png");
 
 /**
  * Build the agent-skill zip in-process from an EXPLICIT allowlist — `SKILL.md`
@@ -74,8 +77,26 @@ function htmlHeaders(): Headers {
   return h;
 }
 
-export function docsRoutes(): Hono<AppEnv> {
+export function docsRoutes(config: Config): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  // Public base URL → absolute og:image / og:url (social crawlers require absolute).
+  const origin = config.baseUrl;
+
+  // Social share card (`pnpm og:build`). Public so crawlers can fetch the image —
+  // the auth-gated SPA can't serve it to an unauthenticated unfurl. A missing file
+  // (deploy didn't ship docs/site/og.png) is a plain 404.
+  app.get("/og.png", async (c) => {
+    try {
+      const bytes = await readFile(OG_IMAGE);
+      const h = new Headers();
+      baseSecurityHeaders(h);
+      h.set("Content-Type", "image/png");
+      h.set("Cache-Control", "public, max-age=86400");
+      return new Response(bytes, { status: 200, headers: h });
+    } catch {
+      return c.notFound();
+    }
+  });
 
   // Served search client (kept ahead of the catch-all doc route).
   app.get("/docs/search.js", () => {
@@ -134,15 +155,15 @@ export function docsRoutes(): Hono<AppEnv> {
   });
 
   // Docs index.
-  app.get("/docs", (c) => docPage(c, ""));
+  app.get("/docs", (c) => docPage(c, "", origin));
   // Any nested doc path (e.g. /docs/sdk/kv). Static routes above take priority.
-  app.get("/docs/:path{.+}", (c) => docPage(c, c.req.param("path")));
+  app.get("/docs/:path{.+}", (c) => docPage(c, c.req.param("path"), origin));
 
   return app;
 }
 
-function docPage(c: import("hono").Context<AppEnv>, path: string): Response {
-  const html = renderDocPage(path);
+function docPage(c: import("hono").Context<AppEnv>, path: string, origin: string): Response {
+  const html = renderDocPage(path, origin);
   if (html === null) {
     return errorResponse(
       c,

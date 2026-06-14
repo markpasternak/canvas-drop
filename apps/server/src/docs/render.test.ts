@@ -19,6 +19,14 @@ describe("docs render", () => {
     expect(html).toContain('class="prevnext"');
   });
 
+  it("emits absolute Open Graph + Twitter share tags from the given origin", () => {
+    const html = renderDocPage("sdk/kv", "https://x.example.test") ?? "";
+    expect(html).toContain('property="og:image" content="https://x.example.test/og.png"');
+    expect(html).toContain('property="og:url" content="https://x.example.test/docs/sdk/kv"');
+    expect(html).toContain('name="twitter:card" content="summary_large_image"');
+    expect(html).toContain("og:image:width");
+  });
+
   it("returns null for an unknown path", () => {
     expect(renderDocPage("nope/nope")).toBeNull();
     expect(hasDocPage("nope/nope")).toBe(false);

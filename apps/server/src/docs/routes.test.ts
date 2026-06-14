@@ -1,10 +1,28 @@
+import { loadConfig } from "@canvas-drop/shared";
 import { describe, expect, it } from "vitest";
 import { DOC_PAGES } from "./generated-content.js";
 import { docsRoutes } from "./routes.js";
 
-const app = () => docsRoutes();
+const config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_BASE_URL: "https://docs.example.test",
+});
+const app = () => docsRoutes(config);
 
 describe("docs routes", () => {
+  it("serves the social card publicly at /og.png and tags pages with absolute OG meta", async () => {
+    const img = await app().request("/og.png");
+    expect(img.status).toBe(200);
+    expect(img.headers.get("content-type")).toBe("image/png");
+    expect(img.headers.get("cache-control")).toContain("max-age");
+
+    const html = await (await app().request("/docs")).text();
+    // Absolute image + url (crawlers require absolute), summary_large_image card.
+    expect(html).toContain('content="https://docs.example.test/og.png"');
+    expect(html).toContain('content="https://docs.example.test/docs"');
+    expect(html).toContain('name="twitter:card" content="summary_large_image"');
+  });
+
   it("GET /docs returns the docs shell", async () => {
     const res = await app().request("/docs");
     expect(res.status).toBe(200);

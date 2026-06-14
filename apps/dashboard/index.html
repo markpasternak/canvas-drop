@@ -12,6 +12,27 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="/site.webmanifest" />
     <title>canvas-drop</title>
+    <!-- Social share tags. The dashboard sits behind the auth gateway, so a crawler
+         can't actually unfurl it today — these are here for completeness and any
+         future public landing. The crawlable surfaces (docs, legal) carry their own
+         absolute-URL og:image served from /og.png. -->
+    <meta
+      name="description"
+      content="Deploy and share small web artifacts — no build step, no secrets in the page. Open-source, self-hostable."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="canvas-drop" />
+    <meta property="og:title" content="canvas-drop" />
+    <meta
+      property="og:description"
+      content="Deploy and share small web artifacts — no build step, no secrets in the page."
+    />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="canvas-drop" />
+    <meta name="twitter:image" content="/og.png" />
   </head>
   <body>
     <div id="root"></div>
