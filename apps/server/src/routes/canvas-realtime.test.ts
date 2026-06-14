@@ -44,13 +44,21 @@ function listen(
   app: Hono<AppEnv>,
   inject: (server: ReturnType<typeof serve>) => void,
 ): Promise<ServerHandle> {
-  return new Promise((resolve) => {
-    const server = serve({ fetch: app.fetch, port: 0 }, (info) => {
+  return new Promise((resolve, reject) => {
+    let server: ReturnType<typeof serve>;
+    const onError = (error: Error) => {
+      server.off("error", onError);
+      reject(error);
+    };
+
+    server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }, (info) => {
+      server.off("error", onError);
       resolve({
         port: info.port,
         close: () => new Promise<void>((r) => server.close(() => r())),
       });
     });
+    server.once("error", onError);
     inject(server);
   });
 }

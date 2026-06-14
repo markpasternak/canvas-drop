@@ -28,6 +28,11 @@ logs/
 .vscode/
 *.swp
 
+# Agent-local state / nested worktrees
+.claude/
+.codex/
+.agents/
+
 # Test / coverage
 coverage/
 .nyc_output/
