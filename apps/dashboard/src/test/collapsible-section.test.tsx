@@ -15,11 +15,12 @@ describe("CollapsibleSection", () => {
     );
     const toggle = screen.getByRole("button", { name: /Section A/i });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("body content")).toBeInTheDocument();
+    expect(screen.getByText("body content")).toBeVisible();
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("body content")).not.toBeInTheDocument();
+    // The region stays in the DOM (so aria-controls always resolves) but is hidden.
+    expect(screen.getByText("body content")).not.toBeVisible();
     expect(localStorage.getItem("test:a")).toBe("0");
   });
 
@@ -33,7 +34,7 @@ describe("CollapsibleSection", () => {
       "aria-expanded",
       "false",
     );
-    expect(screen.queryByText("hidden body")).not.toBeInTheDocument();
+    expect(screen.getByText("hidden body")).not.toBeVisible();
   });
 
   it("reads the persisted state over defaultOpen on mount", () => {

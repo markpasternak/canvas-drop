@@ -58,7 +58,7 @@ describe("dashboard app", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ canvases: [] }), {
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
@@ -96,7 +96,9 @@ describe("dashboard app", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url, "http://localhost").pathname;
-        const body = path.endsWith("/archived") ? { canvases: [archivedItem] } : { canvases: [] };
+        const body = path.endsWith("/archived")
+          ? { canvases: [archivedItem] }
+          : { canvases: [], total: 0, limit: 24, offset: 0 };
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -157,7 +159,7 @@ describe("dashboard app", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ canvases: [] }), {
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
@@ -192,7 +194,7 @@ describe("dashboard app", () => {
         const body =
           path === "/api/me"
             ? { id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin, authMode: "dev" }
-            : { canvases: [] };
+            : { canvases: [], total: 0, limit: 24, offset: 0 };
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -229,7 +231,7 @@ describe("dashboard app", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ canvases: [] }), {
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
@@ -315,7 +317,7 @@ describe("dashboard app", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ canvases: [] }), {
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),

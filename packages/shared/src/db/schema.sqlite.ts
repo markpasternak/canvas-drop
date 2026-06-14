@@ -208,6 +208,15 @@ export const usageEvents = sqliteTable(
   (t) => [
     // Stats aggregation + retention prune both filter by canvas + created_at.
     index("usage_events_canvas_created_idx").on(t.canvasId, t.createdAt),
+    // recordView's per-viewer dedup runs on the serve hot path and filters
+    // (canvas_id, user_id, type, created_at>=since) — this composite makes it a
+    // prefix probe instead of scanning every event for the canvas.
+    index("usage_events_canvas_user_type_created_idx").on(
+      t.canvasId,
+      t.userId,
+      t.type,
+      t.createdAt,
+    ),
   ],
 );
 

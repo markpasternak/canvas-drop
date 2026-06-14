@@ -212,7 +212,9 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
     await expect(clone.clone(published, cloner.id)).rejects.toMatchObject({ code: "not_found" });
 
     // No surviving active orphan canvas, and no leftover clone blobs.
-    expect(await canvases.listByOwner(cloner.id)).toEqual([]);
+    expect(
+      (await canvases.listByOwnerFiltered({ ownerId: cloner.id, limit: 100, offset: 0 })).items,
+    ).toEqual([]);
     const cloneBlobs = (await storage.list("canvases/")).filter(
       (k) => !k.startsWith(canvasBlobPrefix(src.id)),
     );

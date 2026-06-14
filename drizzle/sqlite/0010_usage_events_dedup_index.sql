@@ -1,0 +1,1 @@
+CREATE INDEX `usage_events_canvas_user_type_created_idx` ON `usage_events` (`canvas_id`,`user_id`,`type`,`created_at`);

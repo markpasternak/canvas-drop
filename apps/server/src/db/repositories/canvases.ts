@@ -222,18 +222,6 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Active-view list: a user's canvases newest-first, excluding soft-deleted
-     * AND archived. Archived canvases live in their own view ({@link listArchivedByOwner}).
-     */
-    async listByOwner(ownerId: string): Promise<Canvas[]> {
-      return (await db
-        .select()
-        .from(t)
-        .where(and(eq(t.ownerId, ownerId), notInArray(t.status, ["deleted", "archived"])))
-        .orderBy(desc(t.createdAt))) as Canvas[];
-    },
-
-    /**
      * Your-canvases list with server-side filter/search/sort + offset pagination
      * (plan 005). Mirrors {@link listGallery}'s shape. The owner-scope base
      * (`ownerId = me`, status not deleted/archived) is the fixed first two filters;

@@ -1521,4 +1521,46 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     expect(body.total).toBe(1);
     expect(body.canvases.map((c) => c.slug)).toEqual(["mine"]);
   });
+
+  it("GET /?q= filters by title/slug, and boolFlag params reach the repo", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    await repo.create({
+      ownerId: owner.id,
+      slug: "alpha",
+      apiKeyHash: "k1",
+      title: "Alpha widget",
+    });
+    await repo.create({ ownerId: owner.id, slug: "beta", apiKeyHash: "k2", title: "Beta gadget" });
+
+    // q= is trimmed, plumbed to the repo, and matches title (or slug), case-insensitively.
+    const search = await jsonOf<{ canvases: Array<{ slug: string }>; total: number }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases?q=widget"),
+    );
+    expect(search.total).toBe(1);
+    expect(search.canvases.map((c) => c.slug)).toEqual(["alpha"]);
+
+    // boolFlag coercion reaches the repo: neither canvas is shared → ?shared=1 is empty
+    // (it would be 2 if the flag were dropped on the way to listByOwnerFiltered).
+    const shared = await jsonOf<{ total: number }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases?shared=1"),
+    );
+    expect(shared.total).toBe(0);
+  });
+
+  it("GET / returns an empty page (not a 404) when offset is past the total", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    await canvasesRepository(client).create({ ownerId: owner.id, slug: "only", apiKeyHash: "k1" });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases?offset=50",
+    );
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ canvases: unknown[]; total: number; offset: number }>(res);
+    expect(body.total).toBe(1);
+    expect(body.canvases).toHaveLength(0);
+    expect(body.offset).toBe(50);
+  });
 });

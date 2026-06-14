@@ -379,6 +379,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         versions: deps.versions,
         storage: deps.storage,
         usage: usageEventsRepository(deps.db),
+        log: deps.rootLogger,
       }),
     ),
   );

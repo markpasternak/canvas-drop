@@ -288,6 +288,9 @@ export default function Gallery() {
           options={ownerOptions}
           value={owner ?? ""}
           onValueChange={setOwner}
+          // Until facets resolve the only option is "All owners"; disable so a user
+          // can't open an incomplete list and think there are no other owners.
+          disabled={facets.isLoading && ownerOptions.length <= 1}
         />
         <FilterChip active={templatable} onClick={toggleTemplatable}>
           Templates

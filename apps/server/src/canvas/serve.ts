@@ -7,6 +7,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import { errorResponse } from "../http/error-pages.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
+import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { assetPathFor, resolveAsset } from "./asset-resolver.js";
 import { mimeFor } from "./mime.js";
@@ -24,6 +25,8 @@ export interface ServeDeps {
   versions: VersionsRepository;
   storage: StorageDriver;
   usage: UsageEventsRepository;
+  /** Optional — when present, a swallowed view-metering failure is logged (warn). */
+  log?: Logger;
 }
 
 /**
@@ -99,7 +102,12 @@ function recordView(
       windowMs: VIEW_SESSION_MS,
       now: Date.now(),
     })
-    .catch(() => {});
+    // Best-effort: serving never fails on metering, but a persistent write failure
+    // (e.g. a schema/table problem in a fresh env) must not be invisible — warn so
+    // perpetually-zero view counts have a trail instead of silent swallowing.
+    .catch((err) => {
+      deps.log?.warn({ err, canvasId: canvas.id }, "view metering failed");
+    });
 }
 
 function cacheHeaders(path: string, etag: string): Record<string, string> {

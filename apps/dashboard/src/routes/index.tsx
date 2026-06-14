@@ -109,7 +109,11 @@ export default function CanvasList() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
-  const page = Math.max(1, Math.floor(search.page ?? 1));
+  // This route intentionally has no validateSearch (see router.tsx), so `page` can
+  // arrive as a non-numeric string from a hand-edited/stale URL. Coerce defensively
+  // — a junk `?page=` falls back to 1 rather than letting NaN wedge the pager.
+  const rawPage = Number(search.page ?? 1);
+  const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * CANVASES_PAGE_SIZE;
   const filtering = Boolean(
     q || search.shared || search.protected || search.listed || search.template || search.undeployed,

@@ -261,23 +261,41 @@ describe("serveCanvas (integration)", () => {
       expect((await usage.countByType(canvas.id, null)).view).toBe(1);
     });
 
-    it("a failing metering write never breaks or delays the serve", async () => {
+    it("a failing metering write never breaks or delays the serve, but is logged", async () => {
       const { canvas, owner, versions } = await setup();
       // Replace the usage dep with one whose recordView rejects: serve must still 200.
       const failingUsage: ReturnType<typeof usageEventsRepository> = {
         ...usageEventsRepository(client),
         recordView: () => Promise.reject(new Error("boom")),
       };
+      // Capture warn() so we can assert the swallowed failure leaves a trail.
+      const warned: unknown[] = [];
+      const log = { warn: (obj: unknown) => warned.push(obj) } as unknown as Parameters<
+        typeof serveCanvas
+      >[0]["log"];
       const app = new Hono<AppEnv>();
       app.use("*", async (c, next) => {
         c.set("canvas", canvas);
         c.set("user", owner);
         await next();
       });
-      app.all("*", serveCanvas({ config, versions, storage, usage: failingUsage }));
+      app.all("*", serveCanvas({ config, versions, storage, usage: failingUsage, log }));
       const res = await app.request("/c/s/index.html");
       expect(res.status).toBe(200);
       expect(await res.text()).toContain("home");
+      // Let the fire-and-forget catch run, then assert it warned.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(warned).toHaveLength(1);
+    });
+
+    it("records a view for an SPA-fallback navigation (non-root path → index.html)", async () => {
+      // Plan 005 U1 scenario: a deep-link on a spaFallback canvas resolves to
+      // index.html (an HTML document) and must still count as a view.
+      const { app, canvas, usage } = await setup({ spaFallback: true });
+      const res = await app.request("/c/s/some/client-route");
+      expect(res.status).toBe(200);
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view).toBe(1);
     });
 
     it("records no view when there is no viewer in context", async () => {

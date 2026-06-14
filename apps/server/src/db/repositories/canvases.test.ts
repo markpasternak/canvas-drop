@@ -77,7 +77,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const c = await repo.create({ ownerId, slug: "c", apiKeyHash: "hc" });
     await repo.setStatus(a.id, "deleted");
     await repo.archive(c.id);
-    const list = await repo.listByOwner(ownerId);
+    const list = (await repo.listByOwnerFiltered({ ownerId, limit: 100, offset: 0 })).items;
     expect(list.map((cv) => cv.id)).toEqual([b.id]); // not deleted, not archived
   });
 
@@ -92,7 +92,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(after?.deletedAt).toBeNull(); // archive is not delete
     const archived = await repo.listArchivedByOwner(ownerId);
     expect(archived.map((c) => c.id)).toEqual([cv.id]);
-    expect(await repo.listByOwner(ownerId)).toEqual([]); // gone from the active view
+    expect((await repo.listByOwnerFiltered({ ownerId, limit: 100, offset: 0 })).items).toEqual([]); // gone from the active view
   });
 
   it("does NOT archive a disabled canvas (admin takedown can't be self-rescued, §12.0 #5)", async () => {

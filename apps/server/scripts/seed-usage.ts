@@ -25,6 +25,15 @@ if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
 
 async function main() {
   const config = loadConfig();
+  // Dev-only: this script reaches through the SQLite schema directly (see below),
+  // so refuse to run against any other driver — mirrors seed-canvases.ts.
+  if (config.db.driver !== "sqlite") {
+    process.stderr.write(
+      `This seed uses the SQLite schema directly; current DB driver is "${config.db.driver}". ` +
+        "Point it at the local SQLite dev DB and re-run.\n",
+    );
+    process.exit(1);
+  }
   const db = makeDb(config);
   await runMigrations(db);
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam (sqlite in dev)

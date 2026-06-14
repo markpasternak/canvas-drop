@@ -63,14 +63,16 @@ export function CollapsibleSection({
         />
         <span className="text-sm font-semibold text-fg">{title}</span>
       </button>
-      {open && (
-        <div
-          id={regionId}
-          className={cn(flush ? "border-t border-border" : "px-4 pb-4 sm:px-5 sm:pb-5")}
-        >
-          {children}
-        </div>
-      )}
+      {/* Always render the region (toggle visibility with `hidden`) so the button's
+          aria-controls always references a present element — a collapsed disclosure
+          that points at a missing id is an invalid ARIA contract. */}
+      <div
+        id={regionId}
+        hidden={!open}
+        className={cn(flush ? "border-t border-border" : "px-4 pb-4 sm:px-5 sm:pb-5")}
+      >
+        {children}
+      </div>
     </section>
   );
 }

@@ -71,6 +71,13 @@
       "when": 1781443268228,
       "tag": "0009_clone_template",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781458846873,
+      "tag": "0010_usage_events_dedup_index",
+      "breakpoints": true
     }
   ]
 }
