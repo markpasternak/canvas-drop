@@ -134,8 +134,14 @@ export default function Editor() {
   const usesScripts = draft ? draftUsesScripts(draft.files) : false;
   const htmlCount = htmlFiles.length;
   const rootHtmlFile = htmlFiles.find((f) => f.path.toLowerCase() === ROOT_HTML) ?? null;
-  const onPageHint =
-    htmlCount === 0
+  // On-page (Page text) editing renders the entry HTML in a sandboxed iframe and edits
+  // its visible text inline. For a JS-driven canvas the visible content is mounted by
+  // scripts that can't run in the sandbox, so you'd only ever edit the static shell —
+  // meaningless. Gate it off alongside the same JS signal the preview uses.
+  const onPageAvailable = htmlFile !== null && !usesScripts;
+  const onPageHint = usesScripts
+    ? "Page-text editing isn't available for canvases that render content with JavaScript — edit the source in Code."
+    : htmlCount === 0
       ? "On-page editing needs an HTML page in the draft."
       : `On-page editing works with a single HTML page (this draft has ${htmlCount}).`;
 
@@ -161,13 +167,14 @@ export default function Editor() {
     baseVersionRef.current = draft?.baseVersionId ?? null;
   }, [draft?.baseVersionId]);
 
-  // Fall back to code mode if the draft stops being a single HTML page.
+  // Fall back to code mode if on-page editing stops being available — the draft loses
+  // its single HTML page, or it gains JavaScript (on-page can't render JS; see onPageAvailable).
   useEffect(() => {
-    if (mode === "onpage" && !htmlFile) {
+    if (mode === "onpage" && !onPageAvailable) {
       setMode("code");
       setPane("code");
     }
-  }, [mode, htmlFile]);
+  }, [mode, onPageAvailable]);
 
   // On unmount (tab switch / navigation), persist any edit still inside the autosave
   // debounce window — clearing the timer alone would silently drop it. Write directly
@@ -361,7 +368,7 @@ export default function Editor() {
   }
 
   async function enterOnPage() {
-    if (!htmlFile) return;
+    if (!htmlFile || !onPageAvailable) return;
     await flush(); // persist any pending code edit before switching surfaces
     setSelected(htmlFile.path);
     setMode("onpage");
@@ -687,7 +694,7 @@ export default function Editor() {
           setPane("code");
         }}
         onOnPageMode={() => void enterOnPage()}
-        onPageAvailable={htmlFile !== null}
+        onPageAvailable={onPageAvailable}
         onPageHint={onPageHint}
         previewAvailable
         onPublish={onPublish}

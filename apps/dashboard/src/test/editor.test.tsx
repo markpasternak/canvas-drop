@@ -144,6 +144,41 @@ describe("Editor route", () => {
     expect(await screen.findByRole("button", { name: "Publish draft" })).toBeDisabled();
   });
 
+  it("enables Page text and shows the live inline preview for a static single-HTML draft", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
+    });
+    renderEditor();
+    expect(await screen.findByRole("button", { name: "Page text" })).toBeEnabled();
+    // Static canvas keeps the sandboxed live inline preview frame.
+    expect(document.querySelector('iframe[title="Draft preview"]')).not.toBeNull();
+    expect(screen.queryByTestId("preview-scripts-notice")).toBeNull();
+  });
+
+  it("disables Page text and swaps the preview for the JS notice when the draft ships JS", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({
+            files: [
+              { path: "index.html", size: 10, mime: "text/html" },
+              { path: "app.js", size: 10, mime: "text/javascript" },
+            ],
+          }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
+    });
+    renderEditor();
+    // Page-text editing is meaningless for JS-rendered content — gated off with the hint.
+    expect(await screen.findByRole("button", { name: "Page text" })).toBeDisabled();
+    // Preview swaps to the notice + full-preview CTA; no sandboxed frame.
+    expect(await screen.findByTestId("preview-scripts-notice")).toBeInTheDocument();
+    expect(document.querySelector('iframe[title="Draft preview"]')).toBeNull();
+  });
+
   it("offers to add index.html when the draft has no HTML page", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
