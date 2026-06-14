@@ -33,7 +33,7 @@ The repo owner (Mark) prefers that, once a plan is approved, an agent **executes
 5. **Ship** — push, open the PR, wait for the CI matrix to go green (fix any red), then **merge it** (squash, delete branch). The autonomous merge is authorized once: all units done + full suite green on both dialects + code review run and findings fixed + CI green on the PR.
 6. **Close out** — close the issue, capture learnings in `docs/solutions/`, update the active-plan pointers, leave `main` green.
 
-The safety net for the autonomous merge is the CI matrix + the `.githooks/pre-push` gate + the completed code review — not a human gate. Server-side branch protection arrives when the repo goes public / on Pro.
+The safety net for the autonomous merge is the CI matrix (the explicit, authoritative gate) + the completed code review — not a human gate, and not an implicit local hook. Server-side branch protection arrives when the repo goes public / on Pro.
 
 **This is the default for plan-driven rounds on this repo unless Mark says otherwise.** A single round may span many units, a full review, and the merge — all without interruption.
 
@@ -118,11 +118,11 @@ pnpm build          # compile the server
 
 - **CI must be green on both dialects before merge.** The matrix (`.github/workflows/ci.yml`)
   runs lint, typecheck, test-sqlite, test-postgres (+ real Postgres/MinIO), and build.
-- **Enable the local pre-push gate once per clone:** `git config core.hooksPath .githooks`.
-  It runs lint+typecheck+test before any push to `main` (`--no-verify` to bypass in an
-  emergency). This is the interim stand-in for server-side branch protection, which
-  GitHub gates behind Pro for private repos — real protection arrives when the repo goes
-  public (BUILD_BRIEF OPEN-8) or on Pro.
+  CI is the **explicit, authoritative gate** — there is no local pre-push hook.
+- **Gate yourself explicitly before pushing:** run `pnpm lint && pnpm typecheck && pnpm test`
+  yourself (don't rely on an implicit hook). CI re-runs the full matrix on the PR, in a
+  clean environment, and that green is what authorizes the merge. Server-side branch
+  protection arrives when the repo goes public (BUILD_BRIEF OPEN-8) or on Pro.
 
 ## Read first when working in these areas
 

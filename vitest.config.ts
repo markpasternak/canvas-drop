@@ -13,5 +13,11 @@ export default defineConfig({
     // failing a genuine hang. makeTestDb runs in the test body, so testTimeout covers it.
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // Cap worker threads at half the cores. Two wins: fewer processes spun up on a
+    // local run, and — more importantly — less CPU contention for the in-process
+    // pglite legs, which is the documented cause of the flaky resource timeouts
+    // above (so this reinforces the 20s ceiling rather than fighting it). Override
+    // with `--maxWorkers` on the CLI when a machine has headroom to spare.
+    maxWorkers: "50%",
   },
 });

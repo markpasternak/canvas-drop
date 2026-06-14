@@ -140,6 +140,49 @@ describe("draftApiRoutes", () => {
     expect((await jsonOf<{ files: unknown[] }>(deleted)).files).toEqual([]);
   });
 
+  it("PUT ?mode=create refuses an existing path (PATH_EXISTS) and leaves it intact", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>real</h1>"),
+    });
+    const created = await app.request(
+      `/api/canvases/${canvas.id}/draft/file?path=index.html&mode=create`,
+      { method: "PUT", headers: SO, body: enc("") },
+    );
+    expect(created.status).toBe(400);
+    expect((await jsonOf<{ code: string }>(created)).code).toBe("PATH_EXISTS");
+    // The original file content survives the rejected create.
+    const get = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
+    expect(await get.text()).toBe("<h1>real</h1>");
+  });
+
+  it("POST /rename onto an existing path returns PATH_EXISTS (400); both files survive", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    for (const [path, body] of [
+      ["a.html", "AAA"],
+      ["b.html", "BBB"],
+    ] as const) {
+      await app.request(`/api/canvases/${canvas.id}/draft/file?path=${path}`, {
+        method: "PUT",
+        headers: SO,
+        body: enc(body),
+      });
+    }
+    const renamed = await app.request(`/api/canvases/${canvas.id}/draft/rename`, {
+      method: "POST",
+      headers: { ...SO, "content-type": "application/json" },
+      body: JSON.stringify({ from: "a.html", to: "b.html" }),
+    });
+    expect(renamed.status).toBe(400);
+    expect((await jsonOf<{ code: string }>(renamed)).code).toBe("PATH_EXISTS");
+    const survivor = await app.request(`/api/canvases/${canvas.id}/draft/file?path=b.html`);
+    expect(await survivor.text()).toBe("BBB");
+  });
+
   it("POST /publish freezes the draft into a live version", async () => {
     const { appAs, owner, canvas, canvases } = await setup();
     const app = appAs(owner.id);

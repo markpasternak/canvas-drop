@@ -152,6 +152,32 @@ describe("admin dashboard", () => {
     );
   });
 
+  it("switching the status filter resets paging: a new keyset query, no stale Load more", async () => {
+    const activeRow = { ...ROW, id: "a1", slug: "lone-active", title: "Lone Active" };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      // "All" advertises another page (Load more shows); the Active filter is a single page.
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
+      "GET /api/admin/canvases?status=active": () =>
+        json({ canvases: [activeRow], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    // New query key (status=active) → pages reset to just the active page.
+    expect(await screen.findByText("Lone Active")).toBeInTheDocument();
+    expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument();
+    // The "all" view's cursor must not bleed through: no Load more for the single page.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("overview failure shows a retry instead of silently vanishing", async () => {
     mockFetch({
       "GET /api/me": () =>

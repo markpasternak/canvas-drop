@@ -8,6 +8,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "../components/ErrorState.js";
 import { ToastProvider } from "../components/Toast.js";
@@ -108,6 +109,61 @@ describe("dashboard app", () => {
     renderApp("/");
     expect(await screen.findByText("My Canvas")).toBeInTheDocument();
     expect(screen.getByText("quiet-otter")).toBeInTheDocument();
+  });
+
+  it("mobile menu: the menu button toggles a second copy of the section links", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/");
+    await screen.findByText("Canvasdrop");
+    const user = userEvent.setup();
+
+    // Closed: only the (always-rendered) desktop nav has the Archived link.
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+
+    const toggle = screen.getByRole("button", { name: "Open menu" });
+    await user.click(toggle);
+    // Open: the mobile menu adds a second copy of each section link.
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Close menu" })).toBeInTheDocument();
+
+    // Selecting a link in the menu closes it (back to the single desktop copy).
+    const menuGallery = screen.getAllByRole("link", { name: "Gallery" }).at(-1);
+    if (!menuGallery) throw new Error("expected a menu Gallery link");
+    await user.click(menuGallery);
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+  });
+
+  it("mobile menu: clicking the backdrop closes the menu", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/");
+    await screen.findByText("Canvasdrop");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(2);
+
+    // The backdrop is aria-hidden (out of the a11y tree), so target it by test id.
+    await user.click(screen.getByTestId("menu-backdrop"));
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
   });
 
   it("detail lives under /canvases/:id (NOT /c/:id, which is canvas content in path mode)", async () => {

@@ -34,6 +34,18 @@ export function fullTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString();
 }
 
+/**
+ * Format an epoch as a `datetime-local` input value (`YYYY-MM-DDTHH:mm`) in the
+ * viewer's LOCAL timezone. `<input type="datetime-local">` both displays and
+ * parses in local time, so seeding it from `toISOString()` (UTC) would shift the
+ * shown time by the timezone offset. Build the value from the local components.
+ */
+export function toDatetimeLocal(epochMs: number): string {
+  const d = new Date(epochMs);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** Whole days elapsed since `epochMs` (floored, never negative). For purge-age hints. */
 export function daysSince(epochMs: number, now = Date.now()): number {
   return Math.max(0, Math.floor((now - epochMs) / 86400000));

@@ -188,6 +188,7 @@ const HINTS: Record<string, string> = {
   ZIP_BOMB_REJECTED: "The ZIP's declared size is implausibly large.",
   INVALID_ZIP: "The file isn't a valid ZIP archive.",
   INVALID_PATH: "A path or version was invalid.",
+  PATH_EXISTS: "A file already exists at that path — pick a different name.",
   VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
   NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
@@ -495,6 +496,17 @@ export const api = {
       headers: { "content-type": "application/octet-stream" },
       body: content,
     }),
+
+  /**
+   * Create a NEW empty draft file ("Add a file"). `mode=create` makes the server
+   * refuse an existing path (PATH_EXISTS) instead of overwriting it — so the Add
+   * action can never silently truncate a file that's already there.
+   */
+  createDraftFile: (id: string, path: string) =>
+    request<DraftView>(
+      `/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}&mode=create`,
+      { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: "" },
+    ),
 
   /** Replace/upload a draft file with raw bytes (binary-safe — images, fonts, etc.). */
   uploadDraftFile: (id: string, path: string, body: Blob) =>

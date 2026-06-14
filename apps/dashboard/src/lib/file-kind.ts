@@ -83,6 +83,27 @@ function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1).toLowerCase();
 }
 
+/**
+ * Mirror of the server's `normalizeEntryPath` (deploy/validate.ts), enough to map a
+ * user-typed path to the manifest key the server would store — so the Add/Rename
+ * dialogs can flag a duplicate path inline before issuing a destructive write. The
+ * server stays authoritative (it re-normalizes and rejects PATH_EXISTS); this is
+ * just instant feedback. Returns null for paths the server would reject outright
+ * (empty, directory, `..`, dotfiles, absolute) — callers treat null as "not a
+ * confirmable duplicate" and let the server have the final say.
+ */
+export function normalizeDraftPath(raw: string): string | null {
+  const p = raw
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "");
+  if (p === "" || p.endsWith("/") || p.startsWith("/")) return null;
+  for (const seg of p.split("/")) {
+    if (seg === ".." || seg.startsWith(".")) return null;
+  }
+  return p;
+}
+
 /** Why a file isn't editable — drives the non-editable view's message. */
 export type NonEditableReason = "binary" | "too-large";
 

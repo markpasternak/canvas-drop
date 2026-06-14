@@ -46,6 +46,25 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Cross-Origin-Opener-Policy": "same-origin",
 };
 
+// Server-owned URL prefixes — keep in sync with the route mounts in app.ts, which
+// is the authoritative list (there's no shared const: a cross-package one would be
+// over-engineering here). An unmatched path under one of these is a real 404 (a
+// typo'd or removed endpoint), NOT a dashboard client-side route, so it must never
+// history-fallback to the SPA shell: `GET /api/typo` should hand an API client a
+// JSON 404, not `index.html` with a 200. Mirrors the hashed-asset guard below.
+//
+// Deliberately a SUPERSET of what reaches here: `/auth` and `/v1/c/*` are already
+// 404'd by their own routers (roles `auth` / `platform-api`) before a request ever
+// hits serveSpa, so those entries are belt-and-suspenders — only `/api`, `/sdk`, and
+// non-canvas `/v1` paths actually fall through to this guard today. If a NEW
+// top-level server prefix is mounted in app.ts, add it here too, or it reintroduces
+// the SPA-shell-for-API bug.
+const RESERVED_API_PREFIXES = ["/api", "/v1", "/sdk", "/auth"];
+
+function isReservedApiPath(rel: string): boolean {
+  return RESERVED_API_PREFIXES.some((p) => rel === p || rel.startsWith(`${p}/`));
+}
+
 async function read(path: string, log?: Logger): Promise<Uint8Array | null> {
   try {
     return await readFile(path);
@@ -123,6 +142,22 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
           code: "not_found",
           title: "Asset not found",
           message: "This dashboard asset is no longer available. Refresh the page and try again.",
+        },
+        { error: "not_found" },
+        { "Cache-Control": "no-store" },
+      );
+    }
+
+    // Unmatched server-API path → JSON 404, never the SPA shell (see the
+    // RESERVED_API_PREFIXES note above).
+    if (isReservedApiPath(rel)) {
+      return errorResponse(
+        c,
+        {
+          status: 404,
+          code: "not_found",
+          title: "Not found",
+          message: "There is no endpoint at this address.",
         },
         { error: "not_found" },
         { "Cache-Control": "no-store" },
