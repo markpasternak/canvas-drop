@@ -366,12 +366,30 @@ export interface AdminCanvasRow {
   usageOps: number;
   lastActivityAt: number;
   createdAt: number;
+  /** Soft-delete timestamp; null unless status === "deleted". Drives the purge-age hint. */
+  deletedAt: number | null;
+}
+
+/** One keyset page of the admin all-canvases list. `nextCursor === null` ⇒ last page. */
+export interface AdminCanvasPage {
+  canvases: AdminCanvasRow[];
+  nextCursor: string | null;
 }
 
 export interface AdminOverview {
   canvasCountByStatus: Record<string, number>;
   userCount: number;
   totalFileBytes: number;
+  /** Total recorded primitive ops across the platform (all time). */
+  totalOps: number;
+  /** Canvases created within the last `recentWindowDays` days. */
+  newCanvases: number;
+  /** Users first seen within the last `recentWindowDays` days. */
+  newUsers: number;
+  /** The window (days) the `new*` counts span. */
+  recentWindowDays: number;
+  /** Oldest soft-deleted canvas's `deletedAt` (purge backlog age); null if none pending. */
+  oldestDeletedAt: number | null;
   topCanvases: Array<{ canvasId: string; ops: number; slug: string | null; title: string | null }>;
 }
 
@@ -501,10 +519,14 @@ export const api = {
 
   // --- Admin (§6.10, M7) ---
   admin: {
-    listCanvases: (status?: AdminCanvasStatus) =>
-      request<{ canvases: AdminCanvasRow[]; nextCursor: number | null }>(
-        `/api/admin/canvases${status ? `?status=${status}` : ""}`,
-      ).then((r) => r.canvases),
+    /** One keyset page; pass the previous page's `nextCursor` to fetch the next. */
+    listCanvases: (status?: AdminCanvasStatus, cursor?: string) => {
+      const sp = new URLSearchParams();
+      if (status) sp.set("status", status);
+      if (cursor) sp.set("cursor", cursor);
+      const qs = sp.toString();
+      return request<AdminCanvasPage>(`/api/admin/canvases${qs ? `?${qs}` : ""}`);
+    },
 
     overview: () => request<AdminOverview>("/api/admin/overview"),
 

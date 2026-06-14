@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiryLabel, formatBytes, relativeTime } from "../lib/format.js";
+import { daysSince, expiryLabel, formatBytes, relativeTime } from "../lib/format.js";
 
 describe("formatBytes", () => {
   it("formats across unit boundaries", () => {
@@ -16,6 +16,18 @@ describe("relativeTime", () => {
     expect(relativeTime(now, now)).toBe("just now");
     expect(relativeTime(now - 5 * 60_000, now)).toBe("5m ago");
     expect(relativeTime(now - 3 * 86_400_000, now)).toBe("3d ago");
+  });
+});
+
+describe("daysSince", () => {
+  const now = 1_000_000_000_000;
+  it("floors to whole days and clamps the future to zero", () => {
+    expect(daysSince(now, now)).toBe(0);
+    expect(daysSince(now - 5 * 86_400_000, now)).toBe(5); // exact boundary
+    // 5 days + 23h59m59.999s elapsed → still 5 whole days (floor, not round).
+    expect(daysSince(now - (5 * 86_400_000 + 86_399_999), now)).toBe(5);
+    // Future timestamp (clock skew / stamped-ahead) never goes negative.
+    expect(daysSince(now + 86_400_000, now)).toBe(0);
   });
 });
 

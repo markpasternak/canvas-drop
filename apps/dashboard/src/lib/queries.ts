@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { type AdminCanvasStatus, api, type GalleryQuery } from "./api.js";
 
 export const keys = {
@@ -46,10 +46,17 @@ export function useUsage(id: string) {
 
 // --- Admin (§6.10, M7) ---
 
+/**
+ * The admin all-canvases list, keyset-paginated. Returns every loaded page;
+ * callers flatten `data.pages` and drive "Load more" off `hasNextPage`. The
+ * server caps each page at 50, so a plain query would silently hide the rest.
+ */
 export function useAdminCanvases(status?: AdminCanvasStatus) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: keys.adminCanvases(status),
-    queryFn: () => api.admin.listCanvases(status),
+    queryFn: ({ pageParam }) => api.admin.listCanvases(status, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
