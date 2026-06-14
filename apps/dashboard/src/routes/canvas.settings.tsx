@@ -102,6 +102,11 @@ export default function Settings() {
     }
   };
 
+  // Sharing requires a published canvas (invariant: shared ⟹ published). null = it
+  // can be shared. Leaving Published reverts share, so a Draft canvas is never shared.
+  const shareBlocker =
+    canvas.publicationState === "published" ? null : "Publish this canvas before sharing it.";
+
   // Why this canvas can't be listed in the gallery (null = it can). Order mirrors the
   // server's checks (plan 002): shared → published → unprotected.
   const listBlocker = !canvas.shared
@@ -157,8 +162,14 @@ export default function Settings() {
             label="Shared"
             description="Anyone in your org with the link can open and use this canvas."
             checked={canvas.shared}
+            disabled={shareBlocker !== null}
             onChange={(shared) => save({ shared })}
           />
+          {shareBlocker && (
+            <InlineNotice tone="neutral" className="py-2 text-xs">
+              {shareBlocker}
+            </InlineNotice>
+          )}
           {canvas.shared && (
             <>
               <Field

@@ -441,7 +441,19 @@ export function canvasesRepository(client: DbClient) {
     async archive(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ status: "archived", updatedAt: Date.now() })
+        // Archiving leaves the published state, so it reverts sharing and gallery
+        // listing too (invariant: listed ⟹ shared ⟹ published). Unarchive restores
+        // the canvas at the same URL; the owner re-shares deliberately.
+        .set({
+          status: "archived",
+          shared: false,
+          sharedAt: null,
+          sharedExpiresAt: null,
+          galleryListed: false,
+          galleryTemplatable: false,
+          galleryPublishedAt: null,
+          updatedAt: Date.now(),
+        })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -551,20 +563,25 @@ export function canvasesRepository(client: DbClient) {
 
     /**
      * Unpublish (owner-initiated, reversible): take a published canvas back to the
-     * Draft state. Clears the current-version pointer (the public URL then 404s)
-     * AND clears gallery listing in the same write — a Draft canvas can't sit in
-     * the gallery (mirrors the gallery-clear invariant elsewhere). Guarded to fire
-     * ONLY from an `active` row that currently has a published version, so the
-     * route 409s on a Draft/archived/disabled canvas instead of silently no-opping.
-     * The draft and version history are untouched; re-publishing brings it back.
+     * Draft state. Clears the current-version pointer (the public URL then 404s),
+     * reverts sharing, AND clears gallery listing in the same write — leaving the
+     * published state reverts share (invariant: shared ⟹ published), and a Draft
+     * canvas can't sit in the gallery (listed ⟹ shared). Guarded to fire ONLY from
+     * an `active` row that currently has a published version, so the route 409s on a
+     * Draft/archived/disabled canvas instead of silently no-opping. The draft and
+     * version history are untouched; re-publishing (and re-sharing) brings it back.
      */
     async unpublish(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
         .set({
           currentVersionId: null,
+          shared: false,
+          sharedAt: null,
+          sharedExpiresAt: null,
           galleryListed: false,
           galleryTemplatable: false,
+          galleryPublishedAt: null,
           updatedAt: Date.now(),
         })
         .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))

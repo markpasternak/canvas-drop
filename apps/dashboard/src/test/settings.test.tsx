@@ -158,9 +158,9 @@ describe("settings route — confirm-and-await flows", () => {
     await user.click(within(dialog).getByRole("button", { name: "Unpublish" }));
 
     await vi.waitFor(() =>
-      expect(
-        calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/unpublish"),
-      ).toBe(true),
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/unpublish")).toBe(
+        true,
+      ),
     );
   });
 
@@ -232,10 +232,19 @@ describe("settings route — confirm-and-await flows", () => {
     );
   });
 
+  it("disables the Share toggle until the canvas is published", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) }); // base: publicationState "draft"
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: "Shared" });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/publish this canvas before sharing it/i)).toBeInTheDocument();
+  });
+
   it("warns when a shared canvas's expiry is already in the past", async () => {
     const past = Date.now() - 60 * 60 * 1000; // an hour ago
     mockFetch({
-      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: past }),
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: past }),
     });
     renderSettings();
     expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
@@ -245,7 +254,8 @@ describe("settings route — confirm-and-await flows", () => {
   it("shows no expiry warning when the expiry is still in the future", async () => {
     const future = Date.now() + 24 * 60 * 60 * 1000; // tomorrow
     mockFetch({
-      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: future }),
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: future }),
     });
     renderSettings();
     // The Sharing section renders (shared toggle on); the expired notice does not.
@@ -266,7 +276,8 @@ describe("settings route — confirm-and-await flows", () => {
 
   it("gallery-listing control is enabled once the canvas is shared AND published", async () => {
     mockFetch({
-      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: "v1" }),
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, currentVersionId: "v1" }),
     });
     renderSettings();
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
@@ -286,7 +297,13 @@ describe("settings route — confirm-and-await flows", () => {
   it("gallery-listing is blocked (disabled) for a password-protected canvas", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", hasPassword: true }),
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
     });
     renderSettings();
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
@@ -299,7 +316,13 @@ describe("settings route — confirm-and-await flows", () => {
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
       "PATCH /api/canvases/c1/settings": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", hasPassword: true }),
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
     });
     const user = userEvent.setup();
     renderSettings();

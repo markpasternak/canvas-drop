@@ -388,6 +388,16 @@ export function managementRoutes(deps: ManagementDeps) {
     const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
     const willBeShared = rest.shared === undefined ? cv.shared : rest.shared;
     const isPublished = cv.currentVersionId !== null;
+    // Sharing requires a published canvas (invariant: shared ⟹ published) — you
+    // can't expose a URL that serves no live page. Leaving Published reverts share
+    // (see the unpublish/archive transitions), so this also keeps the at-rest row
+    // from holding shared=true without a current version.
+    if (rest.shared === true && !isPublished) {
+      return c.json(
+        { code: "SHARE_REQUIRES_PUBLISH", message: "Publish this canvas before sharing it." },
+        409,
+      );
+    }
     if (rest.galleryListed === true) {
       if (!willBeShared) {
         return c.json(
@@ -556,7 +566,18 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Archived → offline for everyone; drop live sockets (D-RT-6).
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    return c.json(await canvasView({ ...cv, status: "archived" }));
+    return c.json(
+      await canvasView({
+        ...cv,
+        status: "archived",
+        shared: false,
+        sharedAt: null,
+        sharedExpiresAt: null,
+        galleryListed: false,
+        galleryTemplatable: false,
+        galleryPublishedAt: null,
+      }),
+    );
   });
 
   // Unarchive — restore an archived canvas to active. A 409 on an invalid
@@ -598,8 +619,12 @@ export function managementRoutes(deps: ManagementDeps) {
       await canvasView({
         ...cv,
         currentVersionId: null,
+        shared: false,
+        sharedAt: null,
+        sharedExpiresAt: null,
         galleryListed: false,
         galleryTemplatable: false,
+        galleryPublishedAt: null,
       }),
     );
   });

@@ -115,14 +115,40 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "pub-1", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId);
-    await repo.updateSettings(cv.id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    await repo.updateSettings(cv.id, {
+      shared: true,
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
 
     expect(await repo.unpublish(cv.id)).toBe(true);
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("active"); // still active + editable, just Draft now
     expect(after?.currentVersionId).toBeNull();
+    expect(after?.shared).toBe(false); // leaving Published reverts share
     expect(after?.galleryListed).toBe(false);
     expect(after?.galleryTemplatable).toBe(false);
+  });
+
+  it("archive reverts share + gallery (leaving Published)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "sh-1", apiKeyHash: "h" });
+    await deploy(client, cv.id, ownerId);
+    await repo.updateSettings(cv.id, {
+      shared: true,
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+
+    expect(await repo.archive(cv.id)).toBe(true);
+    const after = await repo.findById(cv.id);
+    expect(after?.status).toBe("archived");
+    expect(after?.shared).toBe(false);
+    expect(after?.galleryListed).toBe(false);
+    expect(after?.galleryTemplatable).toBe(false);
+    expect(after?.currentVersionId).not.toBeNull(); // version pointer kept for unarchive
   });
 
   it("does NOT unpublish a draft / archived / disabled canvas (guarded transition)", async () => {
@@ -155,19 +181,20 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect((await repo.findById(cv.id))?.status).toBe("deleted");
   });
 
-  it("unarchives back to active, preserving settings", async () => {
+  it("unarchives back to active — keeps password + slug, but share/gallery stay reverted", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
+    await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, { shared: true });
     await repo.setPassword(cv.id, "argon2hash");
-    await repo.archive(cv.id);
+    await repo.archive(cv.id); // reverts share (invariant: shared ⟹ published)
     expect(await repo.unarchive(cv.id)).toBe(true);
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("active");
-    expect(after?.shared).toBe(true); // share + password survive the round-trip
-    expect(after?.passwordHash).toBe("argon2hash");
+    expect(after?.shared).toBe(false); // archive reverted share; owner re-shares deliberately
+    expect(after?.passwordHash).toBe("argon2hash"); // password + slug survive the round-trip
     expect(after?.slug).toBe("s");
   });
 

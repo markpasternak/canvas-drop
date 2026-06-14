@@ -244,11 +244,12 @@ describe("managementRoutes", () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
+    // Create published (sharing requires Published — invariant: shared ⟹ published).
     const created = await jsonOf<{ id: string }>(
-      await app.request("/api/canvases", {
+      await app.request("/api/canvases/paste", {
         method: "POST",
         headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
       }),
     );
     const patched = await jsonOf<{ shared: boolean; hasPassword: boolean }>(
@@ -382,10 +383,12 @@ describe("managementRoutes", () => {
     const view = await jsonOf<{
       publicationState: string;
       currentVersionId: string | null;
+      shared: boolean;
       galleryListed: boolean;
     }>(res);
     expect(view.publicationState).toBe("draft");
     expect(view.currentVersionId).toBeNull();
+    expect(view.shared).toBe(false); // leaving Published reverts share
     expect(view.galleryListed).toBe(false);
     // Still in the owner's active list (Draft, not archived).
     const active = await jsonOf<{ canvases: { id: string }[] }>(await app.request("/api/canvases"));
@@ -415,6 +418,42 @@ describe("managementRoutes", () => {
       { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
     );
     expect(asOther.status).toBe(404);
+  });
+
+  it("share requires Published: PATCH shared=true 409s on a Draft, succeeds on a Published canvas", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const patch = (id: string, body: unknown) =>
+      app.request(`/api/canvases/${id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // Draft (never published) → sharing is rejected.
+    const draft = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const denied = await patch(draft.id, { shared: true });
+    expect(denied.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(denied)).code).toBe("SHARE_REQUIRES_PUBLISH");
+
+    // Published → sharing is allowed.
+    const pub = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    const ok = await patch(pub.id, { shared: true });
+    expect(ok.status).toBe(200);
+    expect((await jsonOf<{ shared: boolean }>(ok)).shared).toBe(true);
   });
 
   it("unarchive restores a canvas to the active list", async () => {
