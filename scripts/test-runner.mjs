@@ -23,6 +23,15 @@ const RUN_ID = sanitizeRunId(
   process.env.CANVAS_DROP_TEST_RUN_ID ?? `${Date.now()}-${process.pid}-${randomUUID().slice(0, 8)}`,
 );
 const REGISTRY_FILE = join(REGISTRY_DIR, `${RUN_ID}.json`);
+
+// A unique marker injected into every child's environment so the orphan reaper can
+// verify a still-alive pid is genuinely OUR child before signalling it. A bare
+// command substring ('node ', 'vitest', 'pnpm') is not enough: after the OS recycles
+// a dead child's pid onto an unrelated Node process, that process would match the
+// substring and we could SIGKILL its whole group. The marker survives pid reuse —
+// the recycled process won't carry it — so identity is precise, not heuristic.
+const CHILD_MARKER_VAR = "CANVAS_DROP_TEST_CHILD_MARKER";
+const CHILD_MARKER = `${RUN_ID}-${randomUUID()}`;
 const VALUE_FLAGS = new Set([
   "-t",
   "--config",
@@ -185,8 +194,38 @@ function pidCommand(pid) {
   }
 }
 
+/**
+ * The full environment of a pid, as `KEY=value KEY2=value2 ...` (best-effort).
+ * `ps eww` prints the process environment after the command on macOS/Linux; we use
+ * it to confirm a live pid still carries our injected child marker before signalling
+ * it, which is robust to OS pid reuse (a recycled pid won't carry the marker).
+ */
+function pidEnviron(pid) {
+  if (process.platform === "win32") return "";
+  try {
+    return execFileSync("ps", ["eww", "-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * True only when the live `entry.childPid` is verifiably OUR registered child.
+ * Preferred signal: the unique child marker we injected into its env still appears
+ * in the process environment. When the marker is unavailable (older registry entry,
+ * or `ps eww` blocked/unsupported), fall back to the original command-substring
+ * heuristic so behaviour never regresses — but the marker path is what prevents a
+ * recycled-pid false positive.
+ */
 function looksLikeRegisteredChild(entry) {
-  const cmd = pidCommand(entry.childPid ?? 0);
+  const childPid = entry.childPid ?? 0;
+  if (entry.childMarker) {
+    return pidEnviron(childPid).includes(`${CHILD_MARKER_VAR}=${entry.childMarker}`);
+  }
+  const cmd = pidCommand(childPid);
   if (!cmd) return false;
   return (
     cmd.includes("pnpm") || cmd.includes("vitest") || cmd.includes("node ") || cmd.endsWith("node")
@@ -320,6 +359,12 @@ function localInFlightTests() {
   );
 }
 
+// Bound the wait so a hung/deadlocked test process in this worktree can't block a
+// run forever (e.g. a stuck pglite worker would otherwise pin a CI job until the
+// job-level timeout with no actionable signal). After the ceiling we abort with a
+// diagnostic and a non-zero exit rather than looping indefinitely.
+const MAX_LOCAL_SLOT_WAIT_SEC = 10 * 60;
+
 async function waitForLocalTestSlot() {
   let waited = 0;
   while (true) {
@@ -329,6 +374,13 @@ async function waitForLocalTestSlot() {
       .slice(0, 3)
       .map((row) => `${row.pid} ${row.command.slice(0, 90)}`)
       .join("; ");
+    if (waited >= MAX_LOCAL_SLOT_WAIT_SEC) {
+      console.error(
+        `test-runner: timed out after ${waited}s waiting for a local test slot in this worktree; ` +
+          `the blocking process(es) appear stuck (${sample}). Aborting — kill them and retry.`,
+      );
+      process.exit(1);
+    }
     console.log(`test-runner: waiting for existing test process(es) in this worktree (${sample})`);
     await sleep(5_000);
     waited += 5;
@@ -412,9 +464,12 @@ async function runPhase(phase, sharedEnv) {
   await waitForLocalTestSlot();
   const command = packageCommand();
   const args = ["exec", "vitest", "run", ...phase.args];
-  const env = { ...process.env, ...sharedEnv, ...phase.env };
-  if (phase.name === "root" && sharedEnv.CANVAS_DROP_DB)
-    env.CANVAS_DROP_DB = sharedEnv.CANVAS_DROP_DB;
+  const env = {
+    ...process.env,
+    ...sharedEnv,
+    ...phase.env,
+    [CHILD_MARKER_VAR]: CHILD_MARKER,
+  };
 
   console.log(`test-runner: ${phase.name} -> ${displayCommand(command, args)}`);
   const child = spawn(command, args, {
@@ -439,6 +494,7 @@ async function runPhase(phase, sharedEnv) {
     phase: phase.name,
     childPid: child.pid,
     childCommand: displayCommand(command, args),
+    childMarker: CHILD_MARKER,
   });
 
   const result = await new Promise((resolveRun, rejectRun) => {
@@ -465,7 +521,14 @@ async function runPhase(phase, sharedEnv) {
 }
 
 async function cleanupAndExit(code) {
-  if (cleaned) return;
+  if (cleaned) {
+    // A second signal arrived while the first (async) cleanup is still in flight
+    // — e.g. a double Ctrl-C. Don't wait on the in-progress SIGTERM→sleep→SIGKILL
+    // path: kill the child group synchronously now so the children can't outlive
+    // us, then bail. The first invocation still calls process.exit once it settles.
+    if (currentChild?.pid) signalChildGroup(currentChild.pid, "SIGKILL");
+    return;
+  }
   cleaned = true;
   if (currentChild?.pid) {
     signalChildGroup(currentChild.pid, "SIGTERM");

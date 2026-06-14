@@ -10,7 +10,14 @@
 
 /** Auth mode the instance runs in. `oidc`/`dev` own a revocable session, so the
  * shell offers in-app sign-out; `proxy` mode has the trusted proxy own identity
- * and no app session to revoke (UX only — never an authz signal). */
+ * and no app session to revoke (UX only — never an authz signal).
+ *
+ * This is the browser-side mirror of the wire contract. The source of truth is
+ * `AuthMode` in `@canvas-drop/shared` (derived from the `CANVAS_DROP_AUTH_MODE`
+ * config enum), which `/api/me` serializes. The dashboard does NOT depend on the
+ * shared/config package (it reads `process.env` and pulls in zod + the server
+ * schema — server code must never enter the browser bundle), so this union is
+ * intentionally restated here. Keep the two in lockstep if a mode is ever added. */
 export type AuthMode = "proxy" | "oidc" | "dev";
 
 export interface Me {
@@ -495,12 +502,29 @@ export const api = {
     return res.text();
   },
 
-  /** Write/replace a draft file (raw text body). Returns the refreshed draft view. */
-  putDraftFile: (id: string, path: string, content: string) =>
+  /** Write/replace a draft file (raw text body). Returns the refreshed draft view.
+   * `opts.signal` lets best-effort callers (e.g. the editor's unmount flush) bound the
+   * request so a hung server can't leave the PUT pending indefinitely.
+   * `opts.expectedBaseVersionId` pins the draft fork-point this edit was based on: the
+   * server rejects with 409 DRAFT_CONFLICT if a restore (or any wholesale replace) has
+   * since moved `baseVersionId`, so a stale flush can't clobber the new draft. A `null`
+   * base (draft forked from no live version) is sent as the `none` sentinel. */
+  putDraftFile: (
+    id: string,
+    path: string,
+    content: string,
+    opts?: { signal?: AbortSignal; expectedBaseVersionId?: string | null },
+  ) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "PUT",
-      headers: { "content-type": "application/octet-stream" },
+      headers: {
+        "content-type": "application/octet-stream",
+        ...(opts && "expectedBaseVersionId" in opts
+          ? { "If-Draft-Base": opts.expectedBaseVersionId ?? "none" }
+          : {}),
+      },
       body: content,
+      signal: opts?.signal,
     }),
 
   /**

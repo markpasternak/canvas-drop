@@ -1,16 +1,5 @@
 import { defineConfig } from "vitest/config";
-
-function workerSetting(): number | `${number}%` {
-  const raw = process.env.CANVAS_DROP_TEST_MAX_WORKERS?.trim();
-  if (!raw) return "50%";
-  if (/^[1-9]\d*%$/.test(raw)) return raw as `${number}%`;
-  const n = Number(raw);
-  return Number.isInteger(n) && n >= 1 ? n : "50%";
-}
-
-function safeRunId(raw: string | undefined): string | undefined {
-  return raw?.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 120) || undefined;
-}
+import { safeRunId, workerSetting } from "./scripts/vitest-config-helpers.mjs";
 
 const runId = safeRunId(process.env.CANVAS_DROP_TEST_RUN_ID);
 

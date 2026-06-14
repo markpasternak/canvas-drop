@@ -188,7 +188,7 @@ describe("dashboard app", () => {
         const path = new URL(url, "http://localhost").pathname;
         const body =
           path === "/api/me"
-            ? { id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin }
+            ? { id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin, authMode: "dev" }
             : { canvases: [] };
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -293,6 +293,7 @@ describe("dashboard app", () => {
               name: "Mark",
               avatarUrl: null,
               isAdmin: false,
+              authMode: "dev",
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),

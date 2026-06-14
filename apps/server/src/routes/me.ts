@@ -1,14 +1,17 @@
+import type { AuthMode } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import type { AppEnv } from "../http/types.js";
 
 /** Auth mode the instance runs in (§8.1). The SPA reads this to decide whether to
  * offer in-app sign-out: `oidc`/`dev` own a revocable session (`/auth/logout`),
  * while in `proxy` mode the trusted proxy owns identity and the app has no session
- * to revoke. UX only — never an authz signal. */
-export type MeAuthMode = "proxy" | "oidc" | "dev";
+ * to revoke. UX only — never an authz signal. The union is owned by
+ * `@canvas-drop/shared` (derived from the config enum) — re-exported here for
+ * call sites that already import from this route module. */
+export type MeAuthMode = AuthMode;
 
 export interface MeRoutesDeps {
-  authMode: MeAuthMode;
+  authMode: AuthMode;
 }
 
 /**

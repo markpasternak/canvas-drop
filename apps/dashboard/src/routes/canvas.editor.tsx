@@ -27,7 +27,7 @@ import { type EditorPane, PublishBar } from "../components/PublishBar.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
-import { ApiError, api, type DraftFile } from "../lib/api.js";
+import { ApiError, api, type DraftFile, type DraftView } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import {
   isEditableFile,
@@ -45,7 +45,7 @@ import {
   useUploadDraftFile,
   useUploadDraftFiles,
 } from "../lib/mutations.js";
-import { useCanvas, useDraft } from "../lib/queries.js";
+import { keys, useCanvas, useDraft } from "../lib/queries.js";
 
 const AUTOSAVE_MS = 700;
 
@@ -93,6 +93,9 @@ export default function Editor() {
   const loadedRef = useRef<string>("");
   const dirtyRef = useRef<boolean>(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The draft fork-point the current buffer is based on. Sent as the unmount-flush
+  // precondition (If-Draft-Base) so a stale flush landing after a restore is rejected.
+  const baseVersionRef = useRef<string | null>(null);
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
   const editable = selectedFile ? isEditableFile(selectedFile) : false;
@@ -121,6 +124,11 @@ export default function Editor() {
     }
   }, [draft, selected]);
 
+  // Keep the buffer's fork-point in sync with the draft so the unmount flush can pin it.
+  useEffect(() => {
+    baseVersionRef.current = draft?.baseVersionId ?? null;
+  }, [draft?.baseVersionId]);
+
   // Fall back to code mode if the draft stops being a single HTML page.
   useEffect(() => {
     if (mode === "onpage" && !htmlFile) {
@@ -139,11 +147,30 @@ export default function Editor() {
       if (dirtyRef.current && bufferPathRef.current !== null) {
         const path = bufferPathRef.current;
         const body = bufferRef.current;
+        const expectedBaseVersionId = baseVersionRef.current;
         dirtyRef.current = false;
-        void api.putDraftFile(id, path, body).catch(() => {});
+        // Surface the in-flight edit to other draft consumers (the Versions tab's restore
+        // confirm-gate reads `draft.dirty`) so a restore can't bypass confirmation while
+        // this flush is still settling. Reconciled to server-authoritative dirty on settle.
+        qc.setQueryData<DraftView>(keys.draft(id), (d) => (d ? { ...d, dirty: true } : d));
+        // Bound the best-effort flush and pin its fork-point: a slow/unreachable server on
+        // navigation must not leave the PUT pending, and a flush that lands after a restore
+        // is rejected (409 DRAFT_CONFLICT) instead of clobbering the restored file. Warn
+        // instead of swallowing silently so a dropped exit-save is diagnosable.
+        void api
+          .putDraftFile(id, path, body, {
+            signal: AbortSignal.timeout(5000),
+            expectedBaseVersionId,
+          })
+          .catch((err) => {
+            console.warn(`canvas-drop: failed to flush pending edit to ${path} on exit`, err);
+          })
+          .finally(() => {
+            void qc.invalidateQueries({ queryKey: keys.draft(id) });
+          });
       }
     };
-  }, [id]);
+  }, [id, qc]);
 
   const content = useQuery({
     queryKey: ["draft-file", id, selected],
@@ -254,6 +281,17 @@ export default function Editor() {
 
   async function confirmDelete() {
     if (!deleting) return;
+    // Clear any pending autosave for the file being deleted FIRST. Otherwise an
+    // in-window edit (debounce timer pending, or the unmount-flush) would re-PUT the
+    // buffer and resurrect the file the user just deleted.
+    if (bufferPathRef.current === deleting) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      dirtyRef.current = false;
+      bufferPathRef.current = null;
+    }
     try {
       const next = await del.mutateAsync(deleting);
       if (selected === deleting) setSelected(next.files[0]?.path ?? null);

@@ -41,4 +41,50 @@ describe("FileTree", () => {
     const button = screen.getByText("index.html").closest("button");
     expect(button).toHaveAttribute("aria-current", "true");
   });
+
+  it("collapses a folder on click — children hide and aria-expanded flips to false", async () => {
+    render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={() => {}} />);
+    const folder = screen.getByText("assets/").closest("button");
+    if (!folder) throw new Error("expected the assets/ folder button");
+    // Starts expanded with its child visible.
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("app.css")).toBeInTheDocument();
+
+    await userEvent.click(folder);
+    expect(folder).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
+  });
+
+  it("re-expands a collapsed folder on a second click", async () => {
+    render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={() => {}} />);
+    const folder = screen.getByText("assets/").closest("button");
+    if (!folder) throw new Error("expected the assets/ folder button");
+
+    await userEvent.click(folder); // collapse
+    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
+    await userEvent.click(folder); // re-expand
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("app.css")).toBeInTheDocument();
+  });
+
+  it("collapses nested folders independently", async () => {
+    render(
+      <FileTree
+        files={[f("assets/app.css"), f("assets/img/logo.svg")]}
+        selected={null}
+        onSelect={() => {}}
+      />,
+    );
+    const nested = screen.getByText("img/").closest("button");
+    if (!nested) throw new Error("expected the nested img/ folder button");
+
+    // Collapsing the nested folder hides only its child; the sibling under assets/ stays.
+    await userEvent.click(nested);
+    expect(nested).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("logo.svg")).not.toBeInTheDocument();
+    expect(screen.getByText("app.css")).toBeInTheDocument();
+    // The outer assets/ folder is unaffected and still expanded.
+    const outer = screen.getByText("assets/").closest("button");
+    expect(outer).toHaveAttribute("aria-expanded", "true");
+  });
 });

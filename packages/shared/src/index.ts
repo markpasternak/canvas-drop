@@ -5,4 +5,4 @@
 export const VERSION = "0.0.0";
 
 export * from "./capabilities/index.js";
-export { type Config, ConfigError, loadConfig } from "./config/env.js";
+export { AUTH_MODES, type AuthMode, type Config, ConfigError, loadConfig } from "./config/env.js";

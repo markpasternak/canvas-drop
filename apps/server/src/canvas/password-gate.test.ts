@@ -142,6 +142,14 @@ describe("passwordGate", () => {
     expect(html).not.toContain("#6366f1"); // the old ad-hoc indigo is gone
   });
 
+  it("escapes HTML in the canvas title on the gate page (no injection)", () => {
+    const html = gatePage("<script>alert(1)</script> Canvas", false);
+    // The title is interpolated through escapeHtml — the raw tag must never reach
+    // the rendered page, only its escaped form.
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>alert(1)</script>");
+  });
+
   it("a grant for canvas A does not satisfy canvas B's gate", async () => {
     const grantForA = signGrant(config.sessionSecret, "cvA", 1);
     const cvB = canvas({ id: "cvB", passwordHash: await hashPassword("x") });

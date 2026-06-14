@@ -29,6 +29,18 @@ const TRUTHY = ["1", "true", "on", "yes"];
 const FALSY = ["0", "false", "off", "no"];
 
 /**
+ * The auth modes the instance can run in (§8.1) — the single source of truth for
+ * this value. {@link AuthMode} (the inferred union) is the wire contract `/api/me`
+ * exposes to the SPA so it can decide whether to offer in-app sign-out. Both the
+ * server route and the dashboard client import {@link AuthMode} rather than
+ * re-declaring the union.
+ */
+export const AUTH_MODES = z.enum(["proxy", "oidc", "dev"]);
+
+/** Auth mode the instance runs in (`proxy` | `oidc` | `dev`). */
+export type AuthMode = z.infer<typeof AUTH_MODES>;
+
+/**
  * Strict boolean: only the recognized truthy/falsy tokens are accepted. An
  * unrecognized value fails loud rather than silently coercing to a default —
  * honoring the §8.1 fail-loud contract for operator-flippable flags.
@@ -144,7 +156,7 @@ const rawSchema = z
     CANVAS_DROP_S3_FORCE_PATH_STYLE: bool(true),
 
     // Auth
-    CANVAS_DROP_AUTH_MODE: z.enum(["proxy", "oidc", "dev"]).optional().default("dev"),
+    CANVAS_DROP_AUTH_MODE: AUTH_MODES.optional().default("dev"),
     CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: csv(),
     CANVAS_DROP_AUTH_PROXY_EMAIL_HEADER: z.string().optional().default("X-Auth-Request-Email"),
     CANVAS_DROP_AUTH_PROXY_NAME_HEADER: z
