@@ -273,7 +273,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   // Current-user identity for the SPA — its own router (NOT under /api/canvases,
   // whose /:id route would match `me`). Behind the gateway, before the SPA fallback.
-  app.route("/api/me", meRoutes());
+  app.route("/api/me", meRoutes({ authMode: deps.config.auth.mode }));
 
   // Opt-in gallery browse (M8) — its own router (NOT under /api/canvases, whose
   // /:id would shadow a literal `gallery` segment). Behind the gateway; the §12

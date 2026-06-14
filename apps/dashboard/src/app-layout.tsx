@@ -2,6 +2,7 @@ import { List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useState } from "react";
 import { BrandMark } from "./components/Brand.js";
+import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
 import { useTheme } from "./lib/theme.js";
@@ -142,6 +143,7 @@ export function AppLayout() {
               </span>
             </Link>
             <ThemeSwitch />
+            {me.data && <UserMenu me={me.data} />}
           </nav>
         </div>
 

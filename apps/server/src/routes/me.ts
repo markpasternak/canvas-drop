@@ -1,6 +1,16 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../http/types.js";
 
+/** Auth mode the instance runs in (§8.1). The SPA reads this to decide whether to
+ * offer in-app sign-out: `oidc`/`dev` own a revocable session (`/auth/logout`),
+ * while in `proxy` mode the trusted proxy owns identity and the app has no session
+ * to revoke. UX only — never an authz signal. */
+export type MeAuthMode = "proxy" | "oidc" | "dev";
+
+export interface MeRoutesDeps {
+  authMode: MeAuthMode;
+}
+
 /**
  * Current-user identity for the dashboard SPA (§6.8.1 / §11.3), mounted at
  * `/api/me`. Behind the session gateway, so `c.get("user")` is always the
@@ -9,10 +19,12 @@ import type { AppEnv } from "../http/types.js";
  * Mounted as its OWN router, NOT under `/api/canvases`: that router's `/:id`
  * route would otherwise match `me` as a canvas id and 404.
  *
- * Returns an EXPLICIT five-field projection — never a spread of the user row —
- * so a future internal column can never leak to the browser.
+ * Returns an EXPLICIT field projection — never a spread of the user row — so a
+ * future internal column can never leak to the browser. `authMode` is instance
+ * config (not user data) and is safe to expose: it only tells the client which
+ * shell affordances apply (e.g. whether to show in-app sign-out).
  */
-export function meRoutes() {
+export function meRoutes(deps: MeRoutesDeps) {
   const app = new Hono<AppEnv>();
 
   app.get("/", (c) => {
@@ -23,6 +35,7 @@ export function meRoutes() {
       name: u.name,
       avatarUrl: u.avatarUrl,
       isAdmin: u.isAdmin,
+      authMode: deps.authMode,
     });
   });
 
