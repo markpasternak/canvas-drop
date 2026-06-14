@@ -6,10 +6,11 @@ import { Button } from "../components/Button.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
-import { useGallery } from "../lib/queries.js";
+import { useGallery, useGalleryFacets } from "../lib/queries.js";
 import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
@@ -112,6 +113,9 @@ export default function Gallery() {
 
   const q = search.q?.trim() || undefined;
   const tag = search.tag?.trim() || undefined;
+  const owner = search.owner?.trim() || undefined;
+  const templatable = search.templatable === true;
+  const sort = search.sort ?? "published";
   const page = Math.max(1, Math.floor(search.page ?? 1));
   const offset = (page - 1) * GALLERY_PAGE_SIZE;
 
@@ -147,9 +151,13 @@ export default function Gallery() {
   const { data, isLoading, isError, isPlaceholderData, refetch } = useGallery({
     q,
     tag,
+    owner,
+    templatable,
+    sort,
     limit: GALLERY_PAGE_SIZE,
     offset,
   });
+  const facets = useGalleryFacets();
 
   // A fresh refetch that drops below the current page (e.g. an item was un-listed
   // while on the last page) snaps back to page 1 rather than showing an empty page.
@@ -185,7 +193,47 @@ export default function Gallery() {
   const to = Math.min(offset + items.length, total);
   const hasPrev = page > 1;
   const hasNext = offset + items.length < total;
-  const filtering = Boolean(q || tag);
+  const filtering = Boolean(q || tag || owner || templatable);
+
+  function setOwner(next: string) {
+    navigate({
+      to: "/gallery",
+      search: (prev: GallerySearch) => ({ ...prev, owner: next || undefined, page: 1 }),
+    });
+  }
+  function toggleTemplatable() {
+    navigate({
+      to: "/gallery",
+      search: (prev: GallerySearch) => ({
+        ...prev,
+        templatable: templatable ? undefined : true,
+        page: 1,
+      }),
+    });
+  }
+  function setSort(next: string) {
+    navigate({
+      to: "/gallery",
+      search: (prev: GallerySearch) => ({
+        ...prev,
+        sort: next === "published" ? undefined : (next as GallerySearch["sort"]),
+        page: 1,
+      }),
+    });
+  }
+
+  const ownerOptions = [{ value: "", label: "All owners" }];
+  for (const o of facets.data?.owners ?? []) ownerOptions.push({ value: o.id, label: o.name });
+  // A deep-linked owner with no currently-visible canvas won't be in the facet
+  // list — keep the select controlled by surfacing it as a fallback option.
+  if (owner && !ownerOptions.some((o) => o.value === owner)) {
+    ownerOptions.push({ value: owner, label: "Selected owner" });
+  }
+  const sortOptions = [
+    { value: "published", label: "Newest" },
+    { value: "updated", label: "Recently updated" },
+    { value: "title", label: "Title A–Z" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -210,8 +258,26 @@ export default function Gallery() {
             className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
           />
         </div>
+        <FilterSelect
+          label="Sort canvases"
+          options={sortOptions}
+          value={sort}
+          onValueChange={setSort}
+        />
+      </div>
+
+      <FilterBar>
+        <FilterSelect
+          label="Filter by owner"
+          options={ownerOptions}
+          value={owner ?? ""}
+          onValueChange={setOwner}
+        />
+        <FilterChip active={templatable} onClick={toggleTemplatable}>
+          Templates
+        </FilterChip>
         {tag && (
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-sunken py-1 pr-1 pl-2.5 text-xs font-medium text-muted">
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface-sunken pr-1 pl-2.5 text-xs font-medium text-muted">
             #{tag}
             <button
               type="button"
@@ -223,7 +289,16 @@ export default function Gallery() {
             </button>
           </span>
         )}
-      </div>
+        {filtering && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+          >
+            Clear all
+          </button>
+        )}
+      </FilterBar>
 
       {isLoading && <CardSkeletonGrid />}
 

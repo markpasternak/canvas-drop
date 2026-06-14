@@ -14,6 +14,7 @@ export const keys = {
   adminAiUsage: ["admin", "ai-usage"] as const,
   adminConfig: ["admin", "config"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
+  galleryFacets: ["gallery", "facets"] as const,
 };
 
 export function useMe() {
@@ -82,4 +83,10 @@ export function useGallery(query: GalleryQuery) {
     // paging and typing don't flash an empty grid.
     placeholderData: keepPreviousData,
   });
+}
+
+/** The pickable owner/tag lists for the gallery filter UI (plan 004). Loaded once;
+ *  the lists change rarely relative to a browse session. */
+export function useGalleryFacets() {
+  return useQuery({ queryKey: keys.galleryFacets, queryFn: api.listGalleryFacets });
 }

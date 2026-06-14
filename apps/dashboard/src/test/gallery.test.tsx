@@ -30,11 +30,21 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
   };
 }
 
-/** Stub /api/gallery with a function that receives the parsed query and returns a page. */
-function stubGallery(handler: (params: URLSearchParams) => GalleryPage | Response) {
+type Facets = {
+  owners: Array<{ id: string; name: string; avatarUrl: string | null }>;
+  tags: string[];
+};
+
+/** Stub /api/gallery (browse) and /api/gallery/facets. `handler` receives the parsed
+ *  browse query; `facets` seeds the owner/tag picker lists (plan 004). */
+function stubGallery(
+  handler: (params: URLSearchParams) => GalleryPage | Response,
+  facets: Facets = { owners: [], tags: [] },
+) {
   const calls: URLSearchParams[] = [];
   const fn = vi.fn(async (url: string) => {
     const u = new URL(url, "http://localhost");
+    if (u.pathname === "/api/gallery/facets") return json(facets);
     if (u.pathname !== "/api/gallery") return json({ error: "not_mocked" }, 500);
     calls.push(u.searchParams);
     const out = handler(u.searchParams);
@@ -225,6 +235,85 @@ describe("Gallery view", () => {
 
     await screen.findByRole("link", { name: "Reset to first" });
     expect(calls.some((c) => (c.get("offset") ?? "0") === "0")).toBe(true);
+  });
+
+  it("filters by owner from the facet list (plan 004)", async () => {
+    const calls = stubGallery(
+      (p) => page([item({ title: p.get("owner") ? "Bob's canvas" : "All" })]),
+      { owners: [{ id: "u-bob", name: "bob", avatarUrl: null }], tags: [] },
+    );
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Filter by owner" }),
+      "u-bob",
+    );
+    await waitFor(() => expect(calls.some((c) => c.get("owner") === "u-bob")).toBe(true));
+  });
+
+  it("toggles the templatable filter via the Templates chip (plan 004)", async () => {
+    const calls = stubGallery((p) =>
+      page([item({ title: p.get("templatable") ? "Only templates" : "All" })]),
+    );
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Templates" }));
+    await waitFor(() => expect(calls.some((c) => c.get("templatable") === "1")).toBe(true));
+    // Toggling off drops the param.
+    await userEvent.click(screen.getByRole("button", { name: "Templates" }));
+    await waitFor(() => expect(calls.some((c) => !c.get("templatable"))).toBe(true));
+  });
+
+  it("changes the sort axis via the sort select (plan 004)", async () => {
+    const calls = stubGallery(() => page([item()]));
+    renderGallery();
+    await screen.findByRole("link", { name: "Budget chart" });
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Sort canvases" }), "title");
+    await waitFor(() => expect(calls.some((c) => c.get("sort") === "title")).toBe(true));
+  });
+
+  it("hydrates all filters from the URL (shareable, back-button-able) (plan 004)", async () => {
+    const calls = stubGallery(() => page([item()]), {
+      owners: [{ id: "u-bob", name: "bob", avatarUrl: null }],
+      tags: ["charts"],
+    });
+    renderGallery("/gallery?owner=u-bob&templatable=true&sort=title&tag=charts");
+    await screen.findByRole("link", { name: "Budget chart" });
+
+    // The initial request carries every filter from the URL.
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.get("owner") === "u-bob" &&
+            c.get("templatable") === "1" &&
+            c.get("sort") === "title" &&
+            c.get("tag") === "charts",
+        ),
+      ).toBe(true),
+    );
+    // And the controls reflect that state.
+    expect(screen.getByRole("button", { name: "Templates" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort canvases" })).toHaveValue("title");
+  });
+
+  it("Clear all resets every filter at once (plan 004)", async () => {
+    const calls = stubGallery((p) => page(p.get("owner") || p.get("tag") ? [] : [item()]), {
+      owners: [{ id: "u-bob", name: "bob", avatarUrl: null }],
+      tags: ["charts"],
+    });
+    renderGallery("/gallery?owner=u-bob&templatable=true");
+    expect(await screen.findByText("No canvases match your search")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await screen.findByRole("link", { name: "Budget chart" });
+    expect(calls.some((c) => !c.get("owner") && !c.get("templatable") && !c.get("tag"))).toBe(true);
   });
 
   it("the card copy affordance carries the canvas url", async () => {

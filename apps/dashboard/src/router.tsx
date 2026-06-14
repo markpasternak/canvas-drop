@@ -36,10 +36,15 @@ const archivedRoute = createRoute({
   path: "/archived",
   component: ArchivedRoute,
 });
-/** Gallery browse search params (shared with the gallery view). */
+/** Gallery browse search params (shared with the gallery view). Filters + sort
+ *  (plan 004) live here too so a filtered view is shareable and back-button-able. */
+export type GallerySortParam = "published" | "updated" | "title";
 export interface GallerySearch {
   q?: string;
   tag?: string;
+  owner?: string;
+  templatable?: boolean;
+  sort?: GallerySortParam;
   page?: number;
 }
 const galleryRoute = createRoute({
@@ -48,6 +53,10 @@ const galleryRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): GallerySearch => ({
     q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
     tag: typeof s.tag === "string" && s.tag.length > 0 ? s.tag : undefined,
+    owner: typeof s.owner === "string" && s.owner.length > 0 ? s.owner : undefined,
+    // Only the literal `true` flips it on, so a junk value just means "off".
+    templatable: s.templatable === true || s.templatable === "true" || undefined,
+    sort: s.sort === "updated" || s.sort === "title" || s.sort === "published" ? s.sort : undefined,
     page: typeof s.page === "number" ? s.page : Number(s.page) || undefined,
   }),
   component: GalleryRoute,
