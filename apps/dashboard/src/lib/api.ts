@@ -185,7 +185,8 @@ export interface GalleryItem {
   /** Whether a non-owner may clone this canvas as a template (plan 002). */
   templatable: boolean;
   publishedAt: number | null;
-  owner: { name: string; avatarUrl: string | null };
+  /** `owner.id` is the opaque user uuid (plan 004) — the stable owner-filter key. */
+  owner: { id: string; name: string; avatarUrl: string | null };
 }
 
 /** A page of gallery results. `limit`/`offset` are echoed by the server so the
@@ -197,9 +198,18 @@ export interface GalleryPage {
   offset: number;
 }
 
+/** Gallery sort axes (plan 004). `published` (default) = most-recently-published. */
+export type GallerySort = "published" | "updated" | "title";
+
 export interface GalleryQuery {
   q?: string;
   tag?: string;
+  /** Filter to a single owner by opaque user id (plan 004). */
+  owner?: string;
+  /** Only canvases a non-owner may clone (plan 004). */
+  templatable?: boolean;
+  /** Sort axis; the server defaults to `published` when omitted (plan 004). */
+  sort?: GallerySort;
   limit?: number;
   offset?: number;
 }
@@ -426,6 +436,22 @@ export interface AdminOverview {
   /** Oldest soft-deleted canvas's `deletedAt` (purge backlog age); null if none pending. */
   oldestDeletedAt: number | null;
   topCanvases: Array<{ canvasId: string; ops: number; slug: string | null; title: string | null }>;
+  /** Platform-wide AI spend (§6.10.6) — all canvases, all time. */
+  aiCostUsd: number;
+  aiTokens: number;
+  aiCalls: number;
+}
+
+/** Admin AI-usage breakdown (§6.10.7) — top spenders by user and by canvas. */
+export interface AdminAiUsage {
+  byUser: Array<{ userId: string; email: string | null; costUsd: number; calls: number }>;
+  byCanvas: Array<{
+    canvasId: string;
+    slug: string | null;
+    title: string | null;
+    costUsd: number;
+    calls: number;
+  }>;
 }
 
 /** One row of the admin Configuration view. Secrets never carry a raw `value`. */
@@ -456,6 +482,9 @@ export const api = {
     const sp = new URLSearchParams();
     if (query.q) sp.set("q", query.q);
     if (query.tag) sp.set("tag", query.tag);
+    if (query.owner) sp.set("owner", query.owner);
+    if (query.templatable) sp.set("templatable", "1");
+    if (query.sort && query.sort !== "published") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));
     const qs = sp.toString();
@@ -610,6 +639,8 @@ export const api = {
     },
 
     overview: () => request<AdminOverview>("/api/admin/overview"),
+
+    aiUsage: () => request<AdminAiUsage>("/api/admin/ai-usage"),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),

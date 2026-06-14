@@ -3,15 +3,8 @@ import { TabContentFrame } from "../components/CanvasDetail.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { Sparkline } from "../components/Sparkline.js";
 import { MetaGrid, MetaItem, Panel } from "../components/Surface.js";
-import { formatBytes, relativeTime } from "../lib/format.js";
+import { formatBytes, formatUsd, relativeTime } from "../lib/format.js";
 import { useCanvas, useUsage } from "../lib/queries.js";
-
-/** Compact USD: extra precision for small AI costs. */
-function formatUsd(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
-}
 
 /** A metric value with an optional muted sub-line, matching the overview tab. */
 function Metric({ value, sub }: { value: string; sub?: string }) {

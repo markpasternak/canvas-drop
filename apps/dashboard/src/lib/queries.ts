@@ -11,6 +11,7 @@ export const keys = {
   usage: (id: string) => ["usage", id] as const,
   adminCanvases: (status?: AdminCanvasStatus) => ["admin", "canvases", status ?? "all"] as const,
   adminOverview: ["admin", "overview"] as const,
+  adminAiUsage: ["admin", "ai-usage"] as const,
   adminConfig: ["admin", "config"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
 };
@@ -63,6 +64,10 @@ export function useAdminCanvases(status?: AdminCanvasStatus) {
 
 export function useAdminOverview() {
   return useQuery({ queryKey: keys.adminOverview, queryFn: api.admin.overview });
+}
+
+export function useAdminAiUsage() {
+  return useQuery({ queryKey: keys.adminAiUsage, queryFn: api.admin.aiUsage });
 }
 
 export function useAdminConfig() {

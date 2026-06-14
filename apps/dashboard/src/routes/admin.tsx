@@ -6,8 +6,8 @@ import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 import type { AdminCanvasStatus } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { daysSince, formatBytes } from "../lib/format.js";
-import { useAdminCanvases, useAdminOverview } from "../lib/queries.js";
+import { daysSince, formatBytes, formatUsd } from "../lib/format.js";
+import { useAdminAiUsage, useAdminCanvases, useAdminOverview } from "../lib/queries.js";
 
 /** One cell in the platform stat strip. Cells share a single bordered surface
  *  (gridlines come from the parent's gap), so the block reads as one instrument
@@ -40,6 +40,37 @@ function StatStrip({ children }: { children: ReactNode }) {
   );
 }
 
+/** A ranked AI-spend list (by user or by canvas), §6.10.7. Mirrors the top-canvases
+ *  list style; cost-first since spend is the thing an admin scans for. */
+function SpendPanel({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ key: string; label: string; costUsd: number; calls: number }>;
+}) {
+  return (
+    <Panel className="p-4">
+      <h2 className="mb-2 text-sm font-semibold text-fg">{title}</h2>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted">No AI usage yet.</p>
+      ) : (
+        <ul className="space-y-1 text-sm">
+          {rows.map((r) => (
+            <li key={r.key} className="flex items-baseline justify-between gap-3 text-muted">
+              <span className="truncate">{r.label}</span>
+              <span className="shrink-0 tabular-nums">
+                <span className="font-medium text-fg">{formatUsd(r.costUsd)}</span>
+                <span className="ml-2 text-subtle">{r.calls.toLocaleString()} calls</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
 /** Keep the first row per id (see the call site for why pages can overlap). */
 function dedupeById<T extends { id: string }>(rows: T[]): T[] {
   const seen = new Set<string>();
@@ -64,6 +95,7 @@ export default function AdminDashboard() {
   const [filter, setFilter] = useState<AdminCanvasStatus | "all">("all");
   const status = filter === "all" ? undefined : filter;
   const overview = useAdminOverview();
+  const aiUsage = useAdminAiUsage();
   const canvases = useAdminCanvases(status);
   // Dedupe by id (keep first occurrence). On invalidation React Query refetches
   // every loaded page with its stored keyset cursor; if a concurrent status
@@ -140,6 +172,11 @@ export default function AdminDashboard() {
             label={`New canvases (${ov.recentWindowDays}d)`}
             value={ov.newCanvases.toLocaleString()}
           />
+          <StatCell
+            label="AI spend"
+            value={formatUsd(ov.aiCostUsd)}
+            hint={`${ov.aiCalls.toLocaleString()} calls · ${ov.aiTokens.toLocaleString()} tokens`}
+          />
         </StatStrip>
       )}
 
@@ -155,6 +192,30 @@ export default function AdminDashboard() {
             ))}
           </ul>
         </Panel>
+      )}
+
+      {/* AI usage breakdown (§6.10.7) — top spenders by user and by canvas. */}
+      {aiUsage.data && (aiUsage.data.byUser.length > 0 || aiUsage.data.byCanvas.length > 0) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SpendPanel
+            title="AI spend by user"
+            rows={aiUsage.data.byUser.map((u) => ({
+              key: u.userId,
+              label: u.email ?? u.userId,
+              costUsd: u.costUsd,
+              calls: u.calls,
+            }))}
+          />
+          <SpendPanel
+            title="AI spend by canvas"
+            rows={aiUsage.data.byCanvas.map((c2) => ({
+              key: c2.canvasId,
+              label: c2.title || c2.slug || c2.canvasId,
+              costUsd: c2.costUsd,
+              calls: c2.calls,
+            }))}
+          />
+        </div>
       )}
 
       {/* Status filter */}

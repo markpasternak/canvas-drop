@@ -79,6 +79,16 @@ const OVERVIEW = {
   recentWindowDays: 7,
   oldestDeletedAt: Date.now() - 12 * 86400000,
   topCanvases: [{ canvasId: "c1", ops: 1280, slug: "happy-otter", title: "Happy Otter" }],
+  aiCostUsd: 1.5,
+  aiTokens: 5120,
+  aiCalls: 12,
+};
+
+const AI_USAGE = {
+  byUser: [{ userId: "u1", email: "alice@example.com", costUsd: 4.0, calls: 9 }],
+  byCanvas: [
+    { canvasId: "c1", slug: "happy-otter", title: "Happy Otter", costUsd: 4.0, calls: 9 },
+  ],
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -120,6 +130,23 @@ describe("admin dashboard", () => {
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // user count
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
+  });
+
+  it("renders the AI spend tile and the by-user / by-canvas breakdown (§6.10.7)", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/ai-usage": () => json(AI_USAGE),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    expect(await screen.findByText("AI spend")).toBeInTheDocument(); // overview tile label
+    expect(screen.getByText("$1.50")).toBeInTheDocument(); // platform spend
+    expect(await screen.findByText("AI spend by user")).toBeInTheDocument();
+    expect(screen.getByText("AI spend by canvas")).toBeInTheDocument();
+    // Each breakdown list shows its top spender's cost.
+    expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(2);
   });
 
   it("paginates: loads the next keyset page on 'Load more', then hides the button", async () => {

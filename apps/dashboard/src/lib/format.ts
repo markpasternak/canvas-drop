@@ -11,6 +11,13 @@ export function formatBytes(bytes: number): string {
   return `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
 }
 
+/** Compact USD with extra precision for sub-cent AI costs ($0.0034 vs $1.20). */
+export function formatUsd(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
 /** Relative time ("just now", "3m ago", "2d ago"), with a date fallback. */
 export function relativeTime(epochMs: number, now = Date.now()): string {
   const s = Math.round((now - epochMs) / 1000);
