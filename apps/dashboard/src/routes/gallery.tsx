@@ -21,18 +21,11 @@ function GalleryCard({ item }: { item: GalleryItem }) {
     <li className="group flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
       {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
           screenshot will later render into this same box with no layout change.
-          Clickable to open, but aria-hidden + not tabbable so the title below stays
-          the single announced open affordance (avoids a duplicate link). */}
-      <a
-        href={item.url}
-        target="_blank"
-        rel="noreferrer"
-        aria-hidden
-        tabIndex={-1}
-        className="block aspect-[16/10] w-full overflow-hidden"
-      >
+          Decorative (not a link) so the title below stays the single open
+          affordance — no duplicate link for screen readers. */}
+      <div className="aspect-[16/10] w-full overflow-hidden">
         <GenerativeCover seed={item.id} />
-      </a>
+      </div>
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-2">
           {/* The title IS the open affordance — a direct external link to the live
