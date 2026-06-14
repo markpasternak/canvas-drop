@@ -1,4 +1,4 @@
-import { Link, Outlet, useParams, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useParams } from "@tanstack/react-router";
 import { GalleryBadge, PublicationBadge, VisibilityBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
@@ -16,10 +16,6 @@ export default function CanvasLayout() {
   const { data: canvas, isLoading, isError } = useCanvas(id);
   const unarchive = useUnarchiveCanvas(id);
   const toast = useToast();
-  // One publish affordance per screen: the Editor tab has its own Publish in the
-  // editor bar, so the global header publish is suppressed there (R10/R11).
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const onEditorTab = pathname.startsWith(`/canvases/${id}/editor`);
 
   if (isError) {
     return (
@@ -38,7 +34,9 @@ export default function CanvasLayout() {
   const title = canvas?.title?.trim() || canvas?.slug;
   const actions =
     canvas?.status === "active" ? (
-      onEditorTab ? null : <DeployButton canvasId={id} size="sm" label="Publish files" />
+      // Global "upload a new version" affordance — shown on every tab, distinct
+      // from the Editor tab's own "Publish" (which publishes the draft).
+      <DeployButton canvasId={id} size="sm" label="New version" />
     ) : canvas?.status === "archived" ? (
       <Button
         size="sm"

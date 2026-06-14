@@ -112,11 +112,11 @@ describe("canvas Status tab", () => {
 
     expect(await screen.findByText("Canvas is published")).toBeInTheDocument();
     // Header three-chip row (Publication · Visibility · Gallery) + the global
-    // publish affordance, which on a non-editor tab reads "Publish files" (R7/R12).
+    // "New version" upload affordance (shown on every tab).
     // "Published" appears in both the header chip and the Publication fact.
     expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     expect(screen.getByText("Unlisted")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish files" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New version" })).toBeInTheDocument();
     // "Shared" appears in both the header Visibility chip and the Access fact.
     expect(screen.getAllByText("Shared").length).toBeGreaterThan(0);
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe("canvas Status tab", () => {
       "href",
       "/canvases/c1/editor",
     );
-    expect(screen.getAllByRole("button", { name: "Publish files" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "New version" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("Entry file")).not.toBeInTheDocument();
   });
 

@@ -17,18 +17,18 @@ const METHODS: { id: Method; label: string }[] = [
 ];
 
 /**
- * "Publish files" opens a dialog that publishes a new version to an EXISTING
- * canvas from uploaded files (paste / folder / ZIP), the forward counterpart to
- * the Versions tab's "Make current". Self-contained: bundles the trigger, dialog,
- * uploader, and the deploy mutation (which invalidates the canvas + version
- * queries on success). The "deploy" identifiers are the API/code term; the UI
- * verb is Publish.
+ * "New version" opens a dialog that publishes a new version to an EXISTING canvas
+ * from pasted HTML or uploaded files (paste / folder / ZIP) — distinct from the
+ * editor's "Publish" (which publishes the in-browser draft). Shown on every canvas
+ * tab. Self-contained: bundles the trigger, dialog, uploader, and the deploy
+ * mutation (which invalidates the canvas + version queries on success). The
+ * "deploy" identifiers are the API/code term; the UI verb is Publish.
  */
 export function DeployButton({
   canvasId,
   variant = "primary",
   size = "sm",
-  label = "Publish files",
+  label = "New version",
 }: {
   canvasId: string;
   variant?: "primary" | "secondary";

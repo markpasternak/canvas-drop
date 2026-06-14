@@ -49,10 +49,10 @@ export default function Versions() {
         title="No versions yet"
         description={
           isActive
-            ? "Publish files or publish the draft to start the version history."
+            ? "Publish the draft or add a new version to start the version history."
             : "Unarchive this canvas to publish again."
         }
-        action={isActive ? <DeployButton canvasId={id} label="Publish files" /> : undefined}
+        action={isActive ? <DeployButton canvasId={id} label="New version" /> : undefined}
       />
     );
   }
@@ -94,11 +94,10 @@ export default function Versions() {
           <p className="text-xs text-muted">
             {versions.length} {versions.length === 1 ? "version" : "versions"} kept for this canvas.
             {isActive
-              ? " Switch the current version or publish fresh files from here."
+              ? " Switch the current version, or add a new version with the button above."
               : " Unarchive to publish or change the current version."}
           </p>
         </div>
-        {isActive && <DeployButton canvasId={id} label="Publish files" variant="secondary" />}
       </Panel>
 
       <ul className="space-y-2">

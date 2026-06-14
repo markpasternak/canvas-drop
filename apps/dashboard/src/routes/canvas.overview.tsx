@@ -79,7 +79,7 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
         tone="warning"
         title="Not published yet"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="Publish files" />}
+        actions={<RepairActions id={canvas.id} deployLabel="New version" />}
       >
         <p>Publish this canvas before sharing it. The URL has no live page.</p>
       </StateCard>
@@ -92,7 +92,7 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
         tone="warning"
         title="Root page missing"
         icon="warning"
-        actions={<RepairActions id={canvas.id} deployLabel="Publish files" />}
+        actions={<RepairActions id={canvas.id} deployLabel="New version" />}
       >
         {entry.reason === "ambiguous" ? (
           <p>

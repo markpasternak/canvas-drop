@@ -121,9 +121,11 @@ describe("Editor route", () => {
     expect(await screen.findByText("index.html")).toBeInTheDocument();
     const editor = await screen.findByTestId("code-editor");
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toContain("hi"));
-    // AE3: one publish affordance per screen — the global header "Publish files"
-    // is suppressed on the Editor tab (the editor bar's own Publish wins).
-    expect(screen.queryByRole("button", { name: "Publish files" })).toBeNull();
+    // The Editor tab shows two distinct publish affordances: the editor bar's
+    // "Publish" (publishes the draft) and the global header "New version" (uploads
+    // fresh files as a new version), shown on every tab.
+    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New version" })).toBeInTheDocument();
   });
 
   it("shows the stale notice when a newer version was published under the draft", async () => {
