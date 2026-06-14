@@ -244,6 +244,55 @@ describe("buildApp", () => {
     expect(await res.text()).toContain("Sign in required");
   });
 
+  it("public legal pages are reachable WITHOUT auth in proxy mode (mounted before the gateway)", async () => {
+    client = await makeTestDb("sqlite");
+    // Same proxy config where /api/canvases 401s above — here the unauthenticated
+    // request must succeed, proving /privacy + /terms sit ahead of the gateway so
+    // Google's signed-out consent-screen reviewers can open them.
+    const proxyConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "proxy",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+    });
+    const { proxyStrategy } = await import("./auth/proxy.js");
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    const a = buildApp({
+      config: proxyConfig,
+      db: client,
+      rootLogger: silent,
+      strategy: proxyStrategy(proxyConfig),
+      users: usersRepository(client),
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine: deployEngine({
+        config: proxyConfig,
+        canvases,
+        versions,
+        drafts,
+        storage,
+        log: silent,
+      }),
+      audit: createAuditLog(auditRepository(client), silent),
+      peerIp: () => "8.8.8.8",
+    });
+
+    for (const path of ["/privacy", "/terms"]) {
+      const res = await a.request(path, {
+        headers: { host: "canvases.example.com", accept: "text/html" },
+      });
+      expect(res.status, `${path} should be public`).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+    }
+  });
+
   // Login throttle keys on the RESOLVED client IP, so behind a trusted proxy it is
   // per-user (not one global bucket) — and an untrusted peer cannot evade it via XFF.
   function loginApp(cfg: Config, peer: string) {
