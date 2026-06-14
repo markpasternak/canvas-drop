@@ -1,7 +1,7 @@
 ---
 title: "feat: Usage statistics — canvas views + admin AI spend (API + dashboard)"
 type: feat
-status: active
+status: completed
 date: 2026-06-14
 depth: standard
 area: stats / dashboard / admin
