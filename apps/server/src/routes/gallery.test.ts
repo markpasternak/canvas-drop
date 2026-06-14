@@ -97,11 +97,15 @@ describe("galleryRoutes", () => {
     expect(item).toBeDefined();
     if (!item) return;
     // The item carries EXACTLY the public field set — a future spread or new field
-    // (e.g. apiKeyHash/passwordHash/ownerId/status from the full canvas row, which
-    // listGallery selects into memory) fails this rather than leaking silently.
+    // (e.g. apiKeyHash/passwordHash/status from the full canvas row, which
+    // listGallery selects into memory, or a bare top-level ownerId) fails this
+    // rather than leaking silently. The owner id is exposed only inside `owner`.
     expect(Object.keys(item).sort()).toEqual(ITEM_KEYS);
-    // Owner sub-object is display-only — no email / internal flags / id.
-    expect(Object.keys(item.owner).sort()).toEqual(["avatarUrl", "name"]);
+    // Owner sub-object is display + the opaque owner id (the filter key, plan 004)
+    // — still no email and no internal flags.
+    expect(Object.keys(item.owner).sort()).toEqual(["avatarUrl", "id", "name"]);
+    expect(typeof item.owner.id).toBe("string");
+    expect(JSON.stringify(item)).not.toContain("@example.com");
   });
 
   it("paginates with a stable total and echoes limit/offset", async () => {
@@ -166,6 +170,48 @@ describe("galleryRoutes", () => {
     expect(junk.status).toBe(200);
     expect(junk.body.limit).toBe(24); // default
     expect(junk.body.offset).toBe(0); // clamped
+  });
+
+  it("filters by owner id and by templatable (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const alice = await seedUser(client, "alice");
+    const bob = await seedUser(client, "bob");
+    const aliceTpl = await seedListed(client, alice.id, { galleryTemplatable: true });
+    const alicePlain = await seedListed(client, alice.id, { galleryTemplatable: false });
+    await seedListed(client, bob.id, { galleryTemplatable: true });
+
+    const byOwner = await get(client, `/api/gallery?owner=${alice.id}`);
+    expect(byOwner.body.total).toBe(2);
+    expect(byOwner.body.items.map((i) => i.id).sort()).toEqual([aliceTpl, alicePlain].sort());
+    expect(byOwner.body.items.every((i) => i.owner.id === alice.id)).toBe(true);
+
+    const ownerAndTemplatable = await get(client, `/api/gallery?owner=${alice.id}&templatable=1`);
+    expect(ownerAndTemplatable.body.items.map((i) => i.id)).toEqual([aliceTpl]);
+  });
+
+  it("sorts by title and by updated; an unknown sort falls back to default (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const banana = await seedListed(client, owner.id, { title: "Banana" });
+    const apple = await seedListed(client, owner.id, { title: "apple" });
+
+    const byTitle = await get(client, "/api/gallery?sort=title");
+    expect(byTitle.body.items.map((i) => i.id)).toEqual([apple, banana]);
+
+    // Unknown sort value clamps to the default order (no 400).
+    const junkSort = await get(client, "/api/gallery?sort=sideways");
+    expect(junkSort.status).toBe(200);
+    expect(junkSort.body.items).toHaveLength(2);
+  });
+
+  it("a junk templatable value never errors the browse (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    await seedListed(client, owner.id);
+    // `templatable=false`/`0`/garbage all mean "don't filter" — and never 400.
+    const res = await get(client, "/api/gallery?templatable=banana&q=&offset=-1");
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
   });
 
   it("is GET-only — POST is not routed", async () => {

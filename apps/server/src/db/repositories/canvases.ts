@@ -70,23 +70,50 @@ export interface CanvasSettingsPatch {
 }
 
 /**
- * Options for the opt-in gallery listing (plan 008 / M8). Pagination is
- * offset-based; `now` is supplied by the caller (one timestamp at the route) so
- * the expiry clause is deterministic and testable, mirroring `decideCanvasAccess`.
+ * Gallery sort axes (plan 004). `published` is the default and matches the legacy
+ * fixed order (most-recently-published first). `updated` orders by last change;
+ * `title` is case-insensitive A–Z. An unknown value falls back to `published` at
+ * the route, so the repo only ever receives one of these three.
+ */
+export type GallerySort = "published" | "updated" | "title";
+
+/**
+ * Options for the opt-in gallery listing (plan 008 / M8; filters + sort plan 004).
+ * Pagination is offset-based; `now` is supplied by the caller (one timestamp at the
+ * route) so the expiry clause is deterministic and testable, mirroring
+ * `decideCanvasAccess`. `owner`/`templatable`/`sort` are AND-ed onto the fixed
+ * visibility predicate — they never widen it (§12).
  */
 export interface GalleryListOptions {
   now: number;
   q?: string;
   tag?: string;
+  /** Filter to a single owner by opaque user id (plan 004). */
+  owner?: string;
+  /** When true, return only canvases a non-owner may clone (plan 004). */
+  templatable?: boolean;
+  /** Sort axis; defaults to `published` when omitted (plan 004). */
+  sort?: GallerySort;
   limit: number;
   offset: number;
 }
 
-/** A gallery row: the full canvas plus the owner's display identity (name + avatar). */
+/**
+ * A gallery row: the full canvas plus the owner's display identity. `ownerId` is
+ * the opaque user uuid (plan 004) used as the stable owner-filter key — never the
+ * owner's email or any internal flag.
+ */
 export interface GalleryRow {
   canvas: Canvas;
+  ownerId: string;
   ownerName: string;
   ownerAvatarUrl: string | null;
+}
+
+/** Distinct owners + tags across the currently-visible gallery (plan 004 facets). */
+export interface GalleryFacets {
+  owners: Array<{ id: string; name: string; avatarUrl: string | null }>;
+  tags: string[];
 }
 
 /**
@@ -458,14 +485,39 @@ export function canvasesRepository(client: DbClient) {
         );
       }
 
+      // Filters AND onto the visibility predicate — they never widen it (§12). An
+      // owner/templatable filter can only ever shrink the already-visible set.
+      if (opts.owner) {
+        filters.push(eq(t.ownerId, opts.owner));
+      }
+      if (opts.templatable) {
+        filters.push(eq(t.galleryTemplatable, true));
+      }
+
       const where = and(...filters);
 
+      // Default order is most-recently-published with a stable `id` tiebreak
+      // (uuidv7 monotonic). `updated` and `title` are the plan-004 alternatives;
+      // `title` is case-insensitive A–Z. Every axis keeps the `id` tiebreak so
+      // pages don't shuffle within an equal sort key.
+      const orderBy =
+        opts.sort === "updated"
+          ? [desc(t.updatedAt), desc(t.id)]
+          : opts.sort === "title"
+            ? [sql`lower(${t.title}) asc`, desc(t.id)]
+            : [desc(t.galleryPublishedAt), desc(t.id)];
+
       const rows = (await db
-        .select({ canvas: t, ownerName: usersT.name, ownerAvatarUrl: usersT.avatarUrl })
+        .select({
+          canvas: t,
+          ownerId: usersT.id,
+          ownerName: usersT.name,
+          ownerAvatarUrl: usersT.avatarUrl,
+        })
         .from(t)
         .innerJoin(usersT, eq(t.ownerId, usersT.id))
         .where(where)
-        .orderBy(desc(t.galleryPublishedAt), desc(t.id))
+        .orderBy(...orderBy)
         .limit(opts.limit)
         .offset(opts.offset)) as GalleryRow[];
 

@@ -25,7 +25,7 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
     tags: ["charts"],
     templatable: false,
     publishedAt: 1,
-    owner: { name: "alice", avatarUrl: null },
+    owner: { id: "u-alice", name: "alice", avatarUrl: null },
     ...over,
   };
 }

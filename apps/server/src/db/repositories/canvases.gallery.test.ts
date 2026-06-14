@@ -213,6 +213,128 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(total).toBe(1);
     expect(items.map((i) => i.canvas.id)).toEqual([match]);
   });
+
+  // --- plan 004: owner/templatable filters, sort, owner id ---
+
+  it("exposes the opaque owner id on each row (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    await seedListed(client, owner.id);
+
+    const { items } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
+    expect(items[0]?.ownerId).toBe(owner.id);
+  });
+
+  it("filters by owner id", async () => {
+    client = await makeTestDb(dialect);
+    const alice = await seedUser(client, "alice");
+    const bob = await seedUser(client, "bob");
+    const repo = canvasesRepository(client);
+    const aliceCanvas = await seedListed(client, alice.id);
+    await seedListed(client, bob.id);
+
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      owner: alice.id,
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(1);
+    expect(items.map((i) => i.canvas.id)).toEqual([aliceCanvas]);
+  });
+
+  it("filters by templatable", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const templatable = await seedListed(client, owner.id, { galleryTemplatable: true });
+    await seedListed(client, owner.id, { galleryTemplatable: false });
+
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      templatable: true,
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(1);
+    expect(items.map((i) => i.canvas.id)).toEqual([templatable]);
+  });
+
+  it("owner/templatable filters AND onto the visibility predicate — cannot widen it (§12)", async () => {
+    client = await makeTestDb(dialect);
+    const alice = await seedUser(client, "alice");
+    const repo = canvasesRepository(client);
+
+    // alice has one fully-visible canvas and several that fail a visibility clause.
+    const visible = await seedListed(client, alice.id, { galleryTemplatable: true });
+    // unshared (fails shared=true)
+    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), {
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+    // unlisted (fails gallery_listed)
+    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), {
+      shared: true,
+      galleryTemplatable: true,
+    });
+    // protected (fails password_hash IS NULL)
+    const protectedId = await seedListed(client, alice.id, { galleryTemplatable: true });
+    await repo.setPassword(protectedId, "argon2-hash");
+    // never deployed (fails current_version_id IS NOT NULL)
+    const undeployed = await seedUndeployedCanvas(client, alice.id);
+    await repo.updateSettings(undeployed, {
+      shared: true,
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+
+    // Filtering by alice's owner id AND templatable must still return ONLY the one
+    // visible canvas — no filter combination can surface a non-visible row.
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      owner: alice.id,
+      templatable: true,
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(1);
+    expect(items.map((i) => i.canvas.id)).toEqual([visible]);
+  });
+
+  it("sorts by title case-insensitively (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const banana = await seedListed(client, owner.id, { title: "Banana" });
+    const apple = await seedListed(client, owner.id, { title: "apple" });
+    const cherry = await seedListed(client, owner.id, { title: "Cherry" });
+
+    const { items } = await repo.listGallery({ now: NOW, sort: "title", limit: 24, offset: 0 });
+    // Case-insensitive A–Z: apple, Banana, Cherry — NOT ASCII order (which would
+    // put the lowercase 'apple' last).
+    expect(items.map((i) => i.canvas.id)).toEqual([apple, banana, cherry]);
+  });
+
+  it("sorts by last-updated, distinct from published order (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const first = await seedListed(client, owner.id);
+    const second = await seedListed(client, owner.id);
+    const third = await seedListed(client, owner.id);
+
+    // Re-touch `first` after a real clock gap so its updated_at is strictly newest
+    // while its published order stays oldest — proving `updated` ≠ `published`.
+    await new Promise((r) => setTimeout(r, 5));
+    await repo.updateSettings(first, { gallerySummary: "touched" });
+
+    const published = await repo.listGallery({ now: NOW, sort: "published", limit: 24, offset: 0 });
+    expect(published.items.map((i) => i.canvas.id)).toEqual([third, second, first]);
+
+    const updated = await repo.listGallery({ now: NOW, sort: "updated", limit: 24, offset: 0 });
+    expect(updated.items[0]?.canvas.id).toBe(first);
+  });
 });
 
 describe.each(DIALECTS)("canvasesRepository.findCloneableTemplate [%s]", (dialect) => {

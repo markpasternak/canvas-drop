@@ -22,6 +22,15 @@ const DEFAULT_LIMIT = 24;
 const querySchema = z.object({
   q: z.string().trim().min(1).optional(),
   tag: z.string().trim().min(1).optional(),
+  // Owner filter is an opaque user id (plan 004). Templatable coerces the string
+  // query value to a boolean ("1"/"true" → true). Sort falls back to the default
+  // axis on any unknown value, so a junk `sort` never 400s the browse.
+  owner: z.string().trim().min(1).optional(),
+  templatable: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  sort: z.enum(["published", "updated", "title"]).catch("published"),
   limit: z.coerce.number().int().catch(DEFAULT_LIMIT),
   offset: z.coerce.number().int().catch(0),
 });
@@ -38,7 +47,9 @@ export interface GalleryItemDto {
    *  canvases are always unprotected now, so `hasPassword` is gone from this DTO. */
   templatable: boolean;
   publishedAt: number | null;
-  owner: { name: string; avatarUrl: string | null };
+  /** `owner.id` is the opaque user uuid (plan 004) — the stable owner-filter key.
+   *  Never the owner's email or any internal flag. */
+  owner: { id: string; name: string; avatarUrl: string | null };
 }
 
 export interface GalleryPageDto {
@@ -68,7 +79,7 @@ function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
     tags,
     templatable: cv.galleryTemplatable,
     publishedAt: cv.galleryPublishedAt,
-    owner: { name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
+    owner: { id: row.ownerId, name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
   };
 }
 
@@ -88,7 +99,15 @@ export function galleryRoutes(deps: GalleryDeps) {
     // browse never errors on a malformed query string.
     const data = parsed.success
       ? parsed.data
-      : { q: undefined, tag: undefined, limit: DEFAULT_LIMIT, offset: 0 };
+      : {
+          q: undefined,
+          tag: undefined,
+          owner: undefined,
+          templatable: false,
+          sort: "published" as const,
+          limit: DEFAULT_LIMIT,
+          offset: 0,
+        };
     const limit = Math.min(Math.max(data.limit, 1), MAX_LIMIT);
     const offset = Math.max(data.offset, 0);
 
@@ -96,6 +115,9 @@ export function galleryRoutes(deps: GalleryDeps) {
       now: Date.now(),
       q: data.q,
       tag: data.tag,
+      owner: data.owner,
+      templatable: data.templatable,
+      sort: data.sort,
       limit,
       offset,
     });
