@@ -4,6 +4,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
+import { SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { verifyPassword } from "./password.js";
@@ -109,31 +110,88 @@ export function passwordGate(deps: PasswordGateDeps) {
   });
 }
 
-/** Minimal styled gate page (system pages get the same care, §14.5). */
+/**
+ * The password-gate page. Shares the branded system-page chrome (tokens + logo
+ * header) with the 4xx/5xx error pages so a recipient opening a protected share
+ * link sees the same design language, not a one-off (§14.5). Only the form is
+ * gate-specific.
+ */
 export function gatePage(title: string, error: boolean): string {
   const name = title ? escapeHtml(title) : "This canvas";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex">
 <title>Password required</title>
 <style>
-:root{color-scheme:light dark;--bg:#0a0a0c;--card:#141417;--fg:#f4f4f5;--muted:#a1a1aa;--border:#27272b;--accent:#6366f1;--accent-fg:#fff;--err:#f05252}
-@media (prefers-color-scheme:light){:root{--bg:#fbfbfc;--card:#fff;--fg:#1a1a1e;--muted:#56565f;--border:#e7e7ea;--accent:#4f46e5;--err:#dc2626}}
-body{font:16px/1.5 ui-sans-serif,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--fg)}
-.card{max-width:22rem;width:90%;padding:2rem;border:1px solid var(--border);border-radius:12px;background:var(--card)}
-h1{font-size:1.1rem;margin:0 0 .25rem}p{margin:.25rem 0 1rem;color:var(--muted)}
-input{width:100%;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;margin-bottom:.75rem}
-input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-color:var(--accent)}
-button{width:100%;padding:.6rem;border:0;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-weight:600;cursor:pointer}
-button:hover{filter:brightness(1.08)}
-.err{color:var(--err);font-size:.875rem;margin-bottom:.5rem}
-</style></head><body>
-<form class="card" method="POST">
-<h1>${name} is password-protected</h1>
-<p>Enter the password to continue.</p>
-${error ? '<div class="err">Incorrect password. Try again.</div>' : ""}
-<input type="password" name="password" autofocus autocomplete="current-password" aria-label="Password"/>
-<button type="submit">Unlock</button>
-</form></body></html>`;
+${SYSTEM_PAGE_STYLES}
+  main { width: min(100%, 27rem); }
+  .content { padding: clamp(1.5rem, 4vw, 2rem); }
+  .kicker {
+    margin: 0 0 .6rem;
+    color: var(--subtle);
+    font: 700 .75rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  h1 { margin: 0; color: var(--fg); font-size: 1.2rem; line-height: 1.25; letter-spacing: -.015em; }
+  .lede { margin: .5rem 0 1.25rem; color: var(--muted); font-size: .9rem; }
+  .err {
+    margin: 0 0 .85rem;
+    padding: .6rem .75rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+    border-radius: .6rem;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    font-size: .85rem;
+  }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: .6rem .75rem;
+    margin: 0 0 .85rem;
+    border: 1px solid var(--border-strong);
+    border-radius: .5rem;
+    background: var(--surface-raised);
+    color: var(--fg);
+    font: inherit;
+  }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+  button {
+    width: 100%;
+    min-height: 2.5rem;
+    padding: .6rem;
+    border: 0;
+    border-radius: .5rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font: 650 .9rem/1 inherit;
+    cursor: pointer;
+    transition: transform .1s cubic-bezier(.16, 1, .3, 1), background-color .1s cubic-bezier(.16, 1, .3, 1);
+  }
+  button:hover { background: var(--accent-hover); }
+  button:active { transform: translateY(1px); }
+  button:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <main>
+${SYSTEM_PAGE_BRAND}
+    <section class="content">
+      <p class="kicker">Protected</p>
+      <h1>${name} is password-protected</h1>
+      <p class="lede">Enter the password to continue.</p>
+      ${error ? '<div class="err">Incorrect password. Try again.</div>' : ""}
+      <form method="POST">
+        <input type="password" name="password" autofocus autocomplete="current-password" aria-label="Password" placeholder="Password"/>
+        <button type="submit">Unlock</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>`;
 }
 
 function escapeHtml(s: string): string {

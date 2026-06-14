@@ -72,6 +72,44 @@ describe("dashboard app", () => {
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();
   });
 
+  it("points at the Archived view when every canvas is archived (not onboarding)", async () => {
+    const archivedItem = {
+      id: "a1",
+      slug: "old-otter",
+      url: "http://x/c/old-otter",
+      title: "Retired",
+      description: null,
+      shared: false,
+      sharedExpiresAt: null,
+      hasPassword: false,
+      spaFallback: false,
+      galleryListed: false,
+      gallerySummary: null,
+      galleryTags: null,
+      status: "archived",
+      disabledReason: null,
+      currentVersionId: "v1",
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url, "http://localhost").pathname;
+        const body = path.endsWith("/archived") ? { canvases: [archivedItem] } : { canvases: [] };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    renderApp("/");
+    expect(await screen.findByText(/no active canvases/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view archived/i })).toBeInTheDocument();
+    // The brand-new-user onboarding must NOT appear when archived canvases exist.
+    expect(screen.queryByText(/ship your first canvas/i)).toBeNull();
+  });
+
   it("shows the canvas rows when the list is non-empty", async () => {
     vi.stubGlobal(
       "fetch",
