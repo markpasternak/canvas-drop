@@ -14,7 +14,7 @@ import { InlineNotice } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
-import { toDatetimeLocal } from "../lib/format.js";
+import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import {
   useArchiveCanvas,
   useDeleteCanvas,
@@ -136,6 +136,7 @@ export default function Settings() {
               <Field
                 label="Share expiry"
                 type="datetime-local"
+                min={toDatetimeLocal(Date.now())}
                 hint={canvas.sharedExpiresAt ? "auto-revokes at this time" : "optional"}
                 defaultValue={canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : ""}
                 onBlur={(e) => {
@@ -143,6 +144,12 @@ export default function Settings() {
                   if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });
                 }}
               />
+              {canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= Date.now() && (
+                <InlineNotice tone="warning" className="py-2 text-xs">
+                  This share expired {relativeTime(canvas.sharedExpiresAt)} — non-owners now get a
+                  404. Clear or extend the expiry to share it again.
+                </InlineNotice>
+              )}
               {/* Gallery is only meaningful for shared canvases, so it stays hidden until shared. */}
               <div className="space-y-4 border-t border-border pt-4">
                 <Toggle

@@ -97,5 +97,8 @@ describe("usage tab", () => {
     });
     renderUsage();
     expect(await screen.findByText(/No backend usage yet/i)).toBeInTheDocument();
+    // Backend off → no primitive usage exists, so the usage query never fires.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/usage"))).toBe(false);
   });
 });

@@ -34,7 +34,7 @@ export default function Usage() {
   const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
   // Only canvases with backend on have primitive usage; skip the query otherwise.
   const backendOn = canvas?.backendEnabled ?? false;
-  const { data: usage, isLoading: usageLoading } = useUsage(id);
+  const { data: usage, isLoading: usageLoading } = useUsage(id, backendOn);
 
   if (canvasLoading || !canvas) {
     return (

@@ -175,4 +175,25 @@ describe("settings route — confirm-and-await flows", () => {
       { timeout: HOLD_MS + 1500 },
     );
   });
+
+  it("warns when a shared canvas's expiry is already in the past", async () => {
+    const past = Date.now() - 60 * 60 * 1000; // an hour ago
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: past }),
+    });
+    renderSettings();
+    expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/non-owners now get a 404/i)).toBeInTheDocument();
+  });
+
+  it("shows no expiry warning when the expiry is still in the future", async () => {
+    const future = Date.now() + 24 * 60 * 60 * 1000; // tomorrow
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: future }),
+    });
+    renderSettings();
+    // The Sharing section renders (shared toggle on); the expired notice does not.
+    expect(await screen.findByText(/share expiry/i)).toBeInTheDocument();
+    expect(screen.queryByText(/this share expired/i)).toBeNull();
+  });
 });
