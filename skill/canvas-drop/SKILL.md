@@ -21,18 +21,22 @@ Replace `{base}` below with the instance's base URL (ask the user if unknown).
 ## Golden rules
 
 - **Never put a secret in canvas files.** No API keys, provider keys, or tokens in
-  the HTML/JS you deploy. Identity rides the signed-in session; the canvas API key
-  is used only by the deploy tool, never shipped into the canvas.
+  the HTML/JS you deploy. Identity rides the signed-in session cookie; the per-canvas
+  API key is used only by the deploy tool, never shipped into the canvas.
 - **Static only.** A canvas is plain files — no server build step. AI-generated
   HTML runs unmodified.
 - **Capabilities are off until enabled.** A backend method throws
-  `CapabilityDisabledError` until the canvas owner enables Backend + the feature in
-  the Capabilities tab.
+  `CapabilityDisabledError` (`.code` `CAPABILITY_DISABLED`, 403) until the canvas
+  owner enables the **Backend** master switch plus the feature in the **Backend** tab.
+  Identity (`me()`) has no separate toggle — it is on whenever Backend is on.
 
 ## Deploy a canvas
 
-1. Obtain a per-canvas API key and the canvas id (from the dashboard, or the user).
-2. Zip the site (with `index.html` at the root) and deploy:
+The deploy API publishes a version directly to live (no draft loop). You need the
+canvas `id` and its per-canvas secret key, both from the dashboard create flow (the
+key is shown once at creation; an owner can regenerate it).
+
+Send a ZIP archive (with `index.html` at the root) as the request body:
 
 ```bash
 curl -X PUT "{base}/v1/canvases/{id}/deploy" \
@@ -40,32 +44,99 @@ curl -X PUT "{base}/v1/canvases/{id}/deploy" \
   --data-binary @site.zip
 ```
 
-Other deploy-API operations: `GET {base}/v1/canvases/{id}` (state),
-`GET {base}/v1/canvases/{id}/versions` (history),
-`POST {base}/v1/canvases/{id}/rollback`.
+The key is verified per-canvas. Companion deploy-API operations (same Bearer auth):
+
+- `GET {base}/v1/canvases/{id}` — current state
+- `GET {base}/v1/canvases/{id}/versions` — version history (last 10 kept)
+- `POST {base}/v1/canvases/{id}/rollback` with JSON body `{"version": N}` — sets the
+  live pointer to ready version N (find N via the `/versions` list). Returns 404 if
+  that version is not available.
+
+A deploy-API key only works while the canvas is active; if the canvas is archived or
+disabled, the key is not recognized and the request returns 401 unauthorized. (The 409
+`NOT_ACTIVE` code is dashboard-only; a disabled canvas surfaces as `DISABLED` (403) on
+the runtime API.)
 
 ## Add backend capability (browser SDK)
 
-Add one tag — it defines the global `canvasdrop` and rides the session cookie:
+Add one tag — it defines the global `canvasdrop` (no `cd` alias) and rides the
+session cookie. The bundle and slug/origin are auto-detected from the page location,
+so the same file works in both path and subdomain URL modes:
 
 ```html
 <script src="/sdk/v1.js"></script>
 ```
 
 ```js
-const me = await canvasdrop.me();                 // { id, email, name, avatarUrl }
-await canvasdrop.kv.increment("votes");           // atomic counter
-await canvasdrop.kv.user.set("pref", "dark");     // per-viewer
-const f = await canvasdrop.files.upload(file);    // { id, name, size, url }
-const { text } = await canvasdrop.ai.complete(msgs, { model });
-const ch = canvasdrop.realtime.channel("room");   // publish / subscribe / presence
+// Identity — { id, email, name, avatarUrl }
+const me = await canvasdrop.me();
+
+// KV (shared scope) + kv.user (per-viewer scope) — same five methods on each
+await canvasdrop.kv.set("config", { theme: "dark" });
+const cfg = await canvasdrop.kv.get("config");        // null if absent
+const n = await canvasdrop.kv.increment("votes");     // atomic; returns new number
+const page = await canvasdrop.kv.list({ prefix: "c", limit: 50 });
+await canvasdrop.kv.user.set("pref", "dark");         // scoped to the viewer
+
+// Files — upload returns { id, name, size, url }
+const f = await canvasdrop.files.upload(fileObject);
+const files = await canvasdrop.files.list();
+const src = canvasdrop.files.url(f.id);               // synchronous absolute URL
+
+// AI — model is required; returns { text, usage, cost }
+const { text } = await canvasdrop.ai.chat(
+  [{ role: "user", content: "Summarize this." }],
+  { model: "claude-...", system: "Be terse.", maxTokens: 512 },
+);
+for await (const delta of canvasdrop.ai.stream(messages, { model })) {
+  // delta is a text chunk
+}
+
+// Realtime — one channel object per name
+const ch = canvasdrop.realtime.channel("room");
+ch.subscribe((msg) => { /* { event, data, from } */ });
+ch.publish("move", { x: 1 });
+ch.onJoin((user) => {});                              // also onLeave, onPresence
+const users = await ch.presence();                   // [{ id, name }]
 ```
+
+Notes on signatures (these differ from older docs):
+
+- AI is `chat(messages, options)` / `stream(messages, options)` — there is **no**
+  `complete()`. `AiMessage.role` is `"user"` or `"assistant"` only; the system
+  prompt goes in `options.system`.
+- `realtime.channel().subscribe(handler)` takes the message handler. Listeners are
+  the specific `subscribe` / `onPresence` / `onJoin` / `onLeave` — there is no
+  generic `on(event, handler)`.
+- All SDK requests go to `{apiBase}/v1/c/{slug}/...` with `credentials: "include"`.
 
 ## Errors
 
-Every failure throws a typed error with a stable `.code` and `.status`. Branch on
-`err.code` (e.g. `CAPABILITY_DISABLED`, `QUOTA_EXCEEDED`, `NOT_FOUND`). The full
-table is at `{base}/docs/api/errors`.
+Every failure throws a `CanvasdropError` with a stable `.code` string and `.status`
+number. Branch on `err.code`. Common codes:
+
+| `.code` | status | when |
+|---|---|---|
+| `NOT_AUTHENTICATED` | 401 | viewer not signed in |
+| `CAPABILITY_DISABLED` | 403 | Backend or the feature is off for this canvas |
+| `MODEL_NOT_ALLOWED` | 403 | AI model not in the instance allow-list |
+| `NOT_FOUND` | 404 | key, file, or canvas does not exist |
+| `INVALID_BODY` | 400 | request body failed validation |
+| `VALUE_TOO_LARGE` / `KEY_TOO_LARGE` | 413 | KV value / KV key over limit |
+| `FILE_TOO_LARGE` | 413 | uploaded file over the per-file size limit |
+| `KEY_LIMIT` | 409 | canvas hit its key-count limit |
+| `NOT_NUMERIC` | 409 | `increment` on a non-numeric value |
+| `QUOTA_EXCEEDED` | 429 | spend or rate quota exceeded |
+| `CONNECTION_LIMIT` | 429 | too many concurrent realtime connections |
+| `AI_STREAM_TRUNCATED` / `AI_UPSTREAM_ERROR` | 502 | AI stream ended early / provider error |
+| `REQUEST_FAILED` | 0 | request failed with no specific code |
+
+Typed subclasses with `instanceof` support: `CapabilityDisabledError`,
+`QuotaExceededError`, `NotFoundError`, `NotAuthenticatedError`. Note that any 409 or
+413 response maps to `QuotaExceededError` — so `KEY_LIMIT`, `NOT_NUMERIC` (409), and
+`VALUE_TOO_LARGE` / `KEY_TOO_LARGE` / `FILE_TOO_LARGE` (413) are surfaced as `QuotaExceededError` (with
+the wire `.code` intact). Only codes outside the typed-subclass mapping fall through to
+the base `CanvasdropError` carrying the wire `.code`.
 
 ## More
 

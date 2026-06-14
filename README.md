@@ -21,7 +21,7 @@ People now generate working web interfaces in minutes with AI — but there's no
 
 ## Why it's different
 
-- **Idea → live URL in under 60 seconds.** No cloud, CI/CD, DNS, TLS, secrets, or database to understand. Three deploy paths: drag a folder/ZIP, paste HTML, or `PUT` it from a script.
+- **Idea → live URL in under 60 seconds.** No cloud, CI/CD, DNS, TLS, secrets, or database to understand. Four deploy paths: drag a folder, upload a ZIP, paste HTML, or `PUT` it from a script.
 - **Private by default, inside your org.** Every request is authenticated. Canvases are owner-only until *explicitly* shared; shares are revocable and optionally time-boxed. URLs are unguessable random slugs.
 - **Static-first, backend-optional.** A canvas is just static files — no build step, ever. Backend capability arrives only through five fixed primitives, added to a page with one `<script>` tag and **no secrets in the browser**.
 - **AI agents are first-class authors.** Canvas code runs zero-config, the deploy API ships from day one, and the SDK contract lives on one agent-readable page (`/llms.txt`). An agent can write a canvas and ship it with no human in the loop.
@@ -70,7 +70,7 @@ Every deploy path produces the same thing: an immutable, live version at an ungu
 1. **Drag a folder or ZIP** — drop `index.html` and its assets onto the create flow.
 2. **Paste HTML** — for a single-file artifact (often what an AI just wrote for you).
 3. **Edit in the browser** — a file manager + CodeMirror editor work against a mutable **draft** with autosave; an explicit **Publish** snapshots the draft into an immutable version and swaps the live pointer. One click rolls back to any of the last 10 versions.
-4. **Deploy API** — `PUT` a ZIP/tar with the canvas's secret key. `deploy = live`: this publishes a version directly, no draft loop.
+4. **Deploy API** — `PUT` a ZIP with the canvas's secret key. `deploy = live`: this publishes a version directly, no draft loop.
 
 ```bash
 curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \
@@ -81,6 +81,8 @@ curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \
 The key operates only on its own canvas and **never belongs in canvas files**. `GET /v1/canvases/:id`, `GET …/versions`, and `POST …/rollback` round out the programmatic surface — the future CLI and agent skills are thin clients of exactly this.
 
 Storage is **content-addressed**: blobs are keyed by hash, versions and drafts are manifests over shared blobs, so only changed files are ever written and re-uploads are cheap.
+
+You can also **clone** an existing canvas as a starting point — any active canvas you own, or a gallery-listed template someone else marked as cloneable. The copy starts as an unpublished draft with a fresh slug and key, backend off.
 
 ---
 
@@ -201,8 +203,9 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 - ✅ **Primitives** — KV, files, `me()`, browser SDK with URL-mode auto-detection + `/llms.txt`
 - ✅ **AI + realtime** — streaming Anthropic proxy with quotas; ephemeral pub/sub + presence
 - ✅ **Gallery + admin hardening** — opt-in gallery, admin panel, rate limits, IAP-trust verification
+- ✅ **Beyond v1** — clone-as-template, usage stats, server-side list filters, in-app docs (`/docs`, `/llms.txt`)
 
-Remaining toward 1.0: ops/packaging polish (Docker image + compose, backup/restore drill, single-VPS load test) and a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
+Remaining toward 1.0: ops/packaging — a Docker image + compose file (not in the repo yet), a backup/restore drill, and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
 
 ---
 

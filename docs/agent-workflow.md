@@ -4,11 +4,20 @@ The concrete loop both Claude and Codex follow. `AGENTS.md` is the summary; this
 
 ## Status
 
-The **foundation** (config, abstractions, auth gateway, audit, CI) is **done** — issue #1
-closed, plan `2026-06-13-001-feat-foundation-config-auth-plan.md` complete, merged to `main`.
-Next up: **areas C (canvas hosting) + D (deploy pipeline)** — write the plan with `/ce-plan`,
-open its tracking issue, then resume the loop below. The foundation round's learnings are in
-`docs/solutions/` — read the relevant ones before starting (see AGENTS.md "Read first").
+**v1 is feature-complete: M1–M9 are shipped and merged to `main`** — foundation, hosting +
+deploy, dashboard, canvas-management depth, editor + draft/publish on content-addressed
+storage, the five primitives (KV, files, AI, identity, realtime) + browser SDK, admin +
+hardening, gallery, and the AI proxy + realtime. Several post-v1 features are merged too
+(usage stats, server-side list filters, the documentation system, clone-as-template, the
+primitives showcase). `BUILD_BRIEF.md` §16 and the README Status section are the authoritative
+status; defer to them.
+
+The only open milestone is **M10 — ops/packaging** (Docker image + compose, backup/restore
+drill, single-VPS load test, IAP pilot), which has no code yet. There is also one in-flight
+fix plan (`docs/plans/2026-06-14-001-fix-draft-data-loss-cluster-plan.md`, `status: active`).
+
+Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md
+"Read first"), and pick up a unit from a plan in `docs/plans/`.
 
 ## The loop, step by step
 
@@ -42,9 +51,9 @@ git worktree remove ../canvas-drop-u1
 ## Commits & PRs
 
 - Commit subject references the unit: `U3: pino logging + correlation IDs`
-- PR title: `U3: structured logging (#1)` — the `#1` auto-links the foundation issue.
+- PR title: `U<N>: <what> (#<issue>)` — the `#<issue>` auto-links the plan's tracking issue.
 - PR body: what changed, which test scenarios were implemented, and "Learning captured? yes/no (link)".
-- Tick the unit's checkbox in issue #1 when the PR merges.
+- Tick the unit's checkbox in the plan's tracking issue when the PR merges.
 
 ## When to run `/ce-compound`
 

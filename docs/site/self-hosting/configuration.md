@@ -1,46 +1,158 @@
 # Configuration
 
 canvas-drop is configured entirely by environment variables, validated at boot. A
-single config module is the only reader of the environment; everything else takes
-typed config. Misconfiguration fails loudly at startup rather than at request time.
+single config module is the only reader of `process.env`; everything else takes
+typed config. Misconfiguration fails loudly at startup, not at request time.
 
-This is a tour of the load-bearing settings — see `.env.example` in the repo for
-the full, commented list.
+This page is the env-var reference. The defaults below are the schema defaults
+(authoritative); `.env.example` in the repo mirrors them with inline comments.
+There is no telemetry and no phone-home — nothing is reported anywhere.
+
+## How config gets loaded
+
+- **Local dev:** `pnpm dev` reads a root `.env` file once (`node --env-file-if-exists=.env`). Copy the template and start:
+
+  ```bash
+  cp .env.example .env && pnpm dev
+  ```
+
+  Zero-config defaults give you a logged-in instance on `http://localhost:3000`: **path** URL mode + **sqlite** + **local** storage + **dev** auth.
+
+- **Production:** the `.env` file is *not* read. Set variables in your process environment — a systemd `EnvironmentFile`, container env, or secrets manager.
+
+## The four pluggable interfaces
+
+Each interface is selected by one switch variable. Swapping a driver is a config
+change, never a code change.
+
+| Interface | Switch | Options (default first) | Driver-specific vars |
+|-----------|--------|-------------------------|----------------------|
+| Database | `CANVAS_DROP_DB` | `sqlite` / `postgres` | sqlite: `CANVAS_DROP_SQLITE_PATH`; postgres: `CANVAS_DROP_DATABASE_URL` |
+| Storage | `CANVAS_DROP_STORAGE` | `local` / `s3` | local: `CANVAS_DROP_STORAGE_PATH`; s3: `CANVAS_DROP_S3_*` |
+| URL mode | `CANVAS_DROP_URL_MODE` | `path` / `subdomain` | subdomain requires a non-localhost `CANVAS_DROP_BASE_URL` |
+| Auth | `CANVAS_DROP_AUTH_MODE` | `dev` / `proxy` / `oidc` | proxy: JWT or trusted-header vars; oidc: `CANVAS_DROP_OIDC_*`; dev: `CANVAS_DROP_DEV_USER_*` |
 
 ## Core
 
-| Variable | Purpose |
-|----------|---------|
-| `CANVAS_DROP_BASE_URL` | The instance's public base URL. |
-| `CANVAS_DROP_PORT` | Port to listen on. |
-| `CANVAS_DROP_URL_MODE` | `path` or `subdomain`. |
-| `CANVAS_DROP_SESSION_SECRET` | Secret for session signing (set a strong value in prod). |
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `NODE_ENV` | `development` | `development` \| `production` \| `test`. |
+| `CANVAS_DROP_URL_MODE` | `path` | `path` serves `…/c/{slug}/*`; `subdomain` serves `{slug}.{baseHost}`. |
+| `CANVAS_DROP_BASE_URL` | `http://localhost:3000` | Public base URL. In `subdomain` mode must be non-localhost or boot fails. |
+| `CANVAS_DROP_PORT` | `3000` | Listen port. |
+| `CANVAS_DROP_SESSION_SECRET` | (dev fallback only) | **Required, ≥32 chars, outside dev and always in production.** Signs session cookies (oidc/dev). |
+| `CANVAS_DROP_ADMIN_EMAILS` | (empty) | CSV; lowercased. Grants the admin surface. |
+| `CANVAS_DROP_REALTIME` | `on` | `on` \| `off`. |
+| `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE` | `false` | Must be `true` to boot `path` mode with `proxy`/`oidc` auth (path mode has reduced browser isolation). |
+| `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the dashboard build path; defaults to `apps/dashboard/dist`. |
 
 ## Auth
 
-| Variable | Purpose |
-|----------|---------|
-| `CANVAS_DROP_AUTH_MODE` | `dev`, `proxy`, or `oidc`. |
-| `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` | Restrict sign-in to these domains. |
-| `CANVAS_DROP_ADMIN_EMAILS` | Who gets the admin surface. |
-| `CANVAS_DROP_TRUSTED_PROXY_IPS` | In `proxy` mode, the only peers allowed to assert identity. |
-| `CANVAS_DROP_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | `oidc` provider settings. |
+`CANVAS_DROP_AUTH_MODE` selects how identity is established. Identity always comes
+from the server-side auth strategy, never from anything the client sends.
 
-## Database & storage
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_AUTH_MODE` | `dev` | `dev` \| `proxy` \| `oidc`. `dev` is **rejected when `NODE_ENV=production`**. |
+| `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` | (empty) | CSV, lowercased. **Required (≥1) in `proxy`/`oidc`.** |
 
-| Variable | Purpose |
+### dev mode
+
+Auto-logs-in a fixed local user; zero setup, localhost only.
+
+| Variable | Default |
 |----------|---------|
-| `CANVAS_DROP_DB` | `sqlite` or `postgres`. |
-| `CANVAS_DROP_DATABASE_URL` | Postgres connection string. |
-| `CANVAS_DROP_STORAGE` | `local` or `s3`. |
-| `CANVAS_DROP_S3_*` | S3 endpoint, bucket, region, credentials. |
+| `CANVAS_DROP_DEV_USER_EMAIL` | `dev@example.com` |
+| `CANVAS_DROP_DEV_USER_NAME` | `Dev User` |
+
+### oidc mode
+
+The app owns login via Authorization-Code + PKCE.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_OIDC_ISSUER` | (unset) | **Required.** Provider issuer URL. |
+| `CANVAS_DROP_OIDC_CLIENT_ID` | (unset) | **Required.** |
+| `CANVAS_DROP_OIDC_CLIENT_SECRET` | (unset) | **Required.** |
+
+### proxy mode
+
+Front the app with an identity-aware proxy. Exactly **one** trust path is active —
+they do not compose. Configure **either** the JWT/JWKS path (preferred,
+cryptographic) **or** the trusted-header path. Boot fails if neither is set.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_AUTH_PROXY_EMAIL_HEADER` | `X-Auth-Request-Email` | Identity header (trusted-header path). |
+| `CANVAS_DROP_AUTH_PROXY_NAME_HEADER` | `X-Auth-Request-Preferred-Username` | Display-name header. |
+| `CANVAS_DROP_AUTH_PROXY_JWT_HEADER` | `Cf-Access-Jwt-Assertion` | Header carrying the proxy's signed JWT. |
+| `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` | (unset) | Enables the JWT path. When set, identity headers are never honored. |
+| `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER` | (unset) | **Required when JWKS is set.** |
+| `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE` | (unset) | **Required when JWKS is set.** |
+| `CANVAS_DROP_TRUSTED_PROXY_IPS` | (empty) | CSV of IPv4/CIDR. The only peers whose identity headers are trusted. Gates on the socket peer IP; `/0` is rejected. Also keys the login rate limit in oidc. |
+
+In `proxy` mode you must set either `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` (with
+its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.
+
+## Database
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_DB` | `sqlite` | `sqlite` \| `postgres`. |
+| `CANVAS_DROP_SQLITE_PATH` | `./data/canvasdrop.db` | sqlite file path. |
+| `CANVAS_DROP_DATABASE_URL` | (unset) | **Required when `CANVAS_DROP_DB=postgres`.** |
+
+## Storage
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_STORAGE` | `local` | `local` \| `s3`. |
+| `CANVAS_DROP_STORAGE_PATH` | `./data/storage` | local storage root. |
+| `CANVAS_DROP_S3_ENDPOINT` | (unset) | Custom endpoint for MinIO / R2. |
+| `CANVAS_DROP_S3_BUCKET` | (unset) | **Required when `CANVAS_DROP_STORAGE=s3`.** |
+| `CANVAS_DROP_S3_REGION` | (unset) | **Required when `s3`.** |
+| `CANVAS_DROP_S3_ACCESS_KEY` | (unset) | **Required when `s3`.** |
+| `CANVAS_DROP_S3_SECRET_KEY` | (unset) | **Required when `s3`.** |
+| `CANVAS_DROP_S3_FORCE_PATH_STYLE` | `true` | Keep `true` for MinIO. |
+
+## Rate limiting
+
+In-process counters with a fixed 60-second window; they reset on restart. Each
+limit is an integer ≥ 1 (boot fails on `0` or negative).
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_RATELIMIT_ENABLED` | `true` | Master toggle. |
+| `CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN` | `120` | |
+| `CANVAS_DROP_RATELIMIT_AI_PER_MIN` | `10` | |
+| `CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN` | `10` | Keyed per canvas. |
+| `CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN` | `120` | |
+| `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` | `10` | Keyed on resolved client IP. |
+| `CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN` | `5` | |
 
 ## AI (optional)
 
-| Variable | Purpose |
-|----------|---------|
-| `CANVAS_DROP_AI_API_KEY` | Provider key (server-side only; unset disables AI). |
-| `CANVAS_DROP_AI_USER_DAILY_USD` / `_CANVAS_MONTHLY_USD` | Spend caps. |
+The AI primitive is off until `CANVAS_DROP_AI_API_KEY` is set. The key is
+server-side only and is never exposed to the browser.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_AI_PROVIDER` | `anthropic` | |
+| `CANVAS_DROP_AI_API_KEY` | (unset) | Unset/blank disables AI. |
+| `CANVAS_DROP_AI_BASE_URL` | (unset) | Override the provider base URL. |
+| `CANVAS_DROP_AI_MODELS` | `claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8` | CSV allowlist. |
+| `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. |
+| `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. |
+
+## Logging & error tracking
+
+Structured logs go to stdout via pino — no app-side files, rotation, or shipping.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `LOG_LEVEL` | `info` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace`. |
+| `LOG_FORMAT` | `pretty` in dev, `json` in production | `json` \| `pretty`. |
+| `CANVAS_DROP_SENTRY_DSN` | (unset) | Reserved: the DSN is read into config and shown in the admin Configuration view, but no error-tracking integration consumes it yet — setting it does not enable error reporting. |
 
 > All examples use placeholder values. Never commit real secrets — set them in
 > your deployment environment (systemd, container env, secrets manager).

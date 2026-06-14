@@ -10,7 +10,7 @@ canvas-drop is an open-source (MIT), self-hostable platform where authenticated 
 
 Both agents follow the same compound-engineering loop:
 
-1. **Plan** — work comes from a plan in `docs/plans/`. The foundation (`…-001-…`), canvas hosting + deploy (`…-002-…`, areas C+D), dashboard SPA (`…-003-…`, area E), canvas archiving (`…-004-…`), and the **editor + draft/publish version model on content-addressed storage** (`…-005-…`, M5) plans are **complete**; the next plan is **the primitives (areas F/G/I/J)** — KV, files, `me()`, browser SDK (BUILD_BRIEF §16 M6; realtime moved to M9 with AI). Don't free-style features that aren't in a plan.
+1. **Plan** — work comes from a plan in `docs/plans/`. **v1 is feature-complete: M1–M9 are all shipped and merged to `main`** — foundation (M1), hosting + deploy (M2), dashboard core (M3), canvas-management depth (M4), the editor + draft/publish version model on content-addressed storage (M5), the five primitives + browser SDK (M6: KV, files, `me()`, browser SDK), admin + hardening (M7), gallery (M8), and the AI proxy + realtime (M9). Several post-v1 features (usage stats, server-side list filters, the docs system, clone-as-template, the primitives showcase) are also merged. The only open milestone is **M10 ops/packaging** (BUILD_BRIEF §16: Docker image + compose, backup/restore drill, single-VPS load test, IAP pilot) — plus any in-flight fix plan in `docs/plans/`. Check `BUILD_BRIEF.md §16` and `README.md` Status for current status; don't free-style features that aren't in a plan.
 2. **Issue** — each plan/phase has a GitHub issue with the units as a checklist (foundation = #1, C+D = #4, area E = #6, all closed). Tick a unit's box when its PR merges.
 3. **Branch in your worktree** — never work in the shared checkout. Branch name: `feat/u<N>-<slug>` (e.g. `feat/u7-auth-core`).
 4. **Implement one unit at a time**, with its test scenarios from the plan. Tests are not optional for feature-bearing units.
@@ -109,9 +109,9 @@ pnpm test           # vitest — runs BOTH dialects in-process (sqlite + pglite)
 pnpm test:sqlite    # sqlite leg only (sets CANVAS_DROP_DB)
 pnpm test:pg        # postgres leg only
 pnpm lint           # biome check
-pnpm format         # biome check --write (also sorts imports — plain `format` does not)
+pnpm format         # biome check --write . (fixes + sorts imports); `pnpm lint` (biome check .) only reports
 pnpm typecheck      # tsc --noEmit
-pnpm build          # compile the server
+pnpm build          # build all workspace packages (sdk, dashboard, server) via `pnpm -r build`
 ```
 
 ## Before pushing / merging
