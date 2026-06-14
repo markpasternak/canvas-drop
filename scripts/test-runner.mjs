@@ -315,12 +315,57 @@ function processList() {
   }
 }
 
-function looksLikeTestProcess(command) {
-  return (
-    command.includes("vitest") ||
-    command.includes("scripts/test-runner.mjs") ||
-    command.includes("scripts/test-runner.test.mjs")
-  );
+/**
+ * Identity test for "a genuine vitest run is executing here": a NODE process
+ * running vitest (its CLI/module, or `pnpm exec vitest …`). This is deliberately
+ * NOT a bare substring match. A shell like `zsh -c '… pnpm exec vitest run …'`,
+ * an editor, `grep vitest`, or any command that merely MENTIONS "vitest" or the
+ * worktree path is excluded — matching those is what let two agents sharing one
+ * checkout block each other on the slot wait (a silent-looking ~10-minute "hang").
+ * It also no longer matches a sibling *launcher* (`test-runner.mjs`) that hasn't
+ * spawned its vitest yet: that removes the launcher-vs-launcher deadlock (two
+ * runners each waiting on the other), and the registry-based worker budget still
+ * divides cores across genuinely concurrent runs.
+ */
+export function isVitestProcess(command) {
+  const program = String(command).trim().split(/\s+/, 1)[0] ?? "";
+  const isNode = program === "node" || program.endsWith("/node");
+  return isNode && /(^|[/\s])vitest([/\s.]|$)/.test(command);
+}
+
+let cachedAncestorPids = null;
+/**
+ * This process and all of its ancestors (best-effort, memoized). `localInFlightTests`
+ * excludes these so a run never counts its own launch chain — the shell, a
+ * `timeout`/`pnpm` wrapper, or any grandparent that spawned it — as a competing
+ * in-flight test. Walking the full chain (not just pid/ppid) closes the gap where
+ * an intermediary process makes the launching shell a grandparent that the old
+ * pid/ppid check missed.
+ */
+function ancestorPids() {
+  if (cachedAncestorPids) return cachedAncestorPids;
+  const set = new Set([process.pid]);
+  if (process.platform !== "win32") {
+    let pid = process.pid;
+    for (let depth = 0; depth < 50 && Number.isInteger(pid) && pid > 1; depth++) {
+      let ppid;
+      try {
+        ppid = Number(
+          execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim(),
+        );
+      } catch {
+        break;
+      }
+      if (!Number.isInteger(ppid) || ppid <= 1 || set.has(ppid)) break;
+      set.add(ppid);
+      pid = ppid;
+    }
+  }
+  cachedAncestorPids = set;
+  return set;
 }
 
 function pathIsInThisWorktree(text) {
@@ -350,11 +395,13 @@ function processTouchesWorktree(pid, command) {
 }
 
 function localInFlightTests() {
+  const ancestors = ancestorPids();
   return processList().filter(
     (row) =>
       row.pid !== process.pid &&
       row.pid !== process.ppid &&
-      looksLikeTestProcess(row.command) &&
+      !ancestors.has(row.pid) &&
+      isVitestProcess(row.command) &&
       processTouchesWorktree(row.pid, row.command),
   );
 }
