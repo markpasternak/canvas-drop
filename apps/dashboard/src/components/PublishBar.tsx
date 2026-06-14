@@ -20,6 +20,8 @@ export interface PublishBarProps {
   saving: boolean;
   publishing: boolean;
   canPublish: boolean;
+  /** Whether the draft has any files — distinguishes "nothing to publish" from "matches live". */
+  hasFiles: boolean;
   selectedPath: string | null;
   surface: EditorSurface;
   pane: EditorPane;
@@ -42,6 +44,7 @@ export function PublishBar({
   saving,
   publishing,
   canPublish,
+  hasFiles,
   selectedPath,
   surface,
   pane,
@@ -109,7 +112,9 @@ export function PublishBar({
             title={
               canPublish
                 ? "Publish the draft as a new live version"
-                : "The live version already matches this draft"
+                : hasFiles
+                  ? "The live version already matches this draft"
+                  : "Add a file to the draft before publishing"
             }
           >
             Publish draft

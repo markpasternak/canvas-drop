@@ -11,7 +11,7 @@ import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
-import { useCanvas, useVersions } from "../lib/queries.js";
+import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
 
 /** Versions tab: deploy history (newest first), forward "Deploy new version", and
  * per-version "Make live" (re-point the live version in either direction).
@@ -20,11 +20,14 @@ export default function Versions() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: versions, isLoading, isError } = useVersions(id);
   const { data: canvas } = useCanvas(id);
+  const { data: draft } = useDraft(id);
   const rollback = useRollback(id);
   const restore = useRestoreToDraft(id);
   const navigate = useNavigate();
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
+  // Version awaiting a "this overwrites your unpublished draft" confirmation.
+  const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
   // Deploy + make-live target the live canvas. Disabled while archived/disabled.
   const isActive = canvas?.status === "active";
 
@@ -65,9 +68,17 @@ export default function Versions() {
     }
   }
 
+  // Restore replaces the draft wholesale. If the draft has unpublished changes, confirm
+  // first so those edits aren't silently discarded; otherwise restore straight away.
+  function requestRestore(version: number) {
+    if (draft?.dirty) setRestoreTarget(version);
+    else void restoreToDraft(version);
+  }
+
   async function restoreToDraft(version: number) {
     try {
       await restore.mutateAsync(version);
+      setRestoreTarget(null);
       toast(`Version ${version} loaded into the draft`);
       navigate({ to: "/canvases/$id/editor", params: { id } });
     } catch (err) {
@@ -110,7 +121,7 @@ export default function Versions() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => restoreToDraft(v.number)}
+                    onClick={() => requestRestore(v.number)}
                     title="Load this version's files into the editable draft"
                   >
                     Restore to draft
@@ -137,6 +148,19 @@ export default function Versions() {
       >
         This replaces the live version for all visitors immediately. You can switch to any version
         in the history at any time.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={restoreTarget !== null}
+        onClose={() => setRestoreTarget(null)}
+        onConfirm={() => restoreTarget !== null && restoreToDraft(restoreTarget)}
+        title={`Restore version ${restoreTarget ?? ""} into the draft?`}
+        actionLabel="Restore and discard changes"
+        destructive
+        loading={restore.isPending}
+      >
+        Your draft has unpublished changes. Restoring loads this version's files into the draft and
+        discards those changes. The live version isn't affected until you publish.
       </ConfirmDialog>
     </TabContentFrame>
   );

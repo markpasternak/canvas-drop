@@ -129,11 +129,21 @@ export default function Editor() {
     }
   }, [mode, htmlFile]);
 
+  // On unmount (tab switch / navigation), persist any edit still inside the autosave
+  // debounce window — clearing the timer alone would silently drop it. Write directly
+  // (not via the react-query mutation, whose observer is torn down on unmount) so the
+  // PUT survives the component going away; the draft refetches fresh on remount.
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (dirtyRef.current && bufferPathRef.current !== null) {
+        const path = bufferPathRef.current;
+        const body = bufferRef.current;
+        dirtyRef.current = false;
+        void api.putDraftFile(id, path, body).catch(() => {});
+      }
     };
-  }, []);
+  }, [id]);
 
   const content = useQuery({
     queryKey: ["draft-file", id, selected],
@@ -333,6 +343,7 @@ export default function Editor() {
         path={selected}
         value={content.data ?? ""}
         onChange={onEditorChange}
+        onSave={() => void flush()}
       />
     );
 
@@ -512,6 +523,7 @@ export default function Editor() {
         saving={save.isPending}
         publishing={publish.isPending}
         canPublish={canPublish}
+        hasFiles={draft.files.length > 0}
         selectedPath={selected}
         surface={mode}
         pane={pane}
