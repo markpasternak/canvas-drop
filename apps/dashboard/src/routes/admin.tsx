@@ -81,8 +81,10 @@ export default function AdminDashboard() {
             onClick={() => setFilter(f.id)}
             aria-pressed={filter === f.id}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:text-fg",
-              filter === f.id && "bg-surface-sunken text-fg",
+              "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
+              filter === f.id
+                ? "border-accent/30 bg-accent-subtle text-accent"
+                : "border-transparent text-muted hover:bg-surface-hover hover:text-fg",
             )}
           >
             {f.label}
