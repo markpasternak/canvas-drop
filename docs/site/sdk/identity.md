@@ -1,7 +1,7 @@
 # Identity
 
 `canvasdrop.me()` returns the signed-in viewer. Identity comes from the
-server-side session — the canvas never handles credentials.
+server-side session — the canvas never sees or handles credentials.
 
 ```js
 const me = await canvasdrop.me(); // { id, email, name, avatarUrl }
@@ -11,12 +11,15 @@ const me = await canvasdrop.me(); // { id, email, name, avatarUrl }
 |-------|-------|
 | `id` | Stable per-user id. Use this as a key, not the email. |
 | `email` | The viewer's email. |
-| `name` | Display name (may be empty for some providers). |
+| `name` | Display name. |
 | `avatarUrl` | Avatar URL, or `null` when the provider gives none. |
 
-Identity is effective whenever **Backend** is on for the canvas. If the viewer is
-not signed in, `me()` throws `NotAuthenticatedError` — though in normal use a
-viewer reaching a canvas has already been authenticated by the platform.
+Identity has no separate toggle: `me()` is available exactly when **Backend** is
+on for the canvas. With Backend off, the call throws `CapabilityDisabledError`
+(code `CAPABILITY_DISABLED`). If the viewer is not signed in, it throws
+`NotAuthenticatedError` (code `NOT_AUTHENTICATED`) — though in normal use a viewer
+who reached the canvas has already been authenticated by the platform.
 
 Use `me().id` to scope per-user data — or just use the
-[user KV namespace](/docs/sdk/kv), which scopes automatically.
+[user KV namespace](/docs/sdk/kv) (`canvasdrop.kv.user`), which scopes to the
+viewer automatically.

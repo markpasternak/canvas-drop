@@ -17,9 +17,19 @@ canvas-drop is built by humans and AI coding agents working together. The same r
 5. CI (lint, typecheck, tests on **both** SQLite and Postgres, build) must pass before merge.
 6. Capture anything non-obvious as a learning in `docs/solutions/` (`/ce-compound`) so knowledge compounds.
 
+## Gate yourself before pushing
+
+CI is the authoritative gate — there is no local pre-push hook. Run the full gate yourself first:
+
+```
+pnpm lint && pnpm typecheck && pnpm test
+```
+
+`pnpm test` runs **both** dialects in-process (SQLite + PGlite). CI re-runs the full matrix (lint, typecheck, test-sqlite, test-postgres against real Postgres/MinIO, build) on the PR, and that green is what authorizes the merge.
+
 ## Code standards
 
-- TypeScript end-to-end. Biome for lint + format (`pnpm lint`, `pnpm typecheck`).
+- TypeScript end-to-end. Biome for lint + format (`pnpm lint`, `pnpm format`, `pnpm typecheck`).
 - **Config is the only `process.env` reader** — everything else takes typed config.
 - **Everything behind an interface** — DB, storage, URL mode, auth. Driver choice is config, never code.
 - **Dual-dialect parity is mandatory** — keep SQLite and Postgres schemas in lockstep; CI runs both.

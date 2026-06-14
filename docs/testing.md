@@ -1,5 +1,7 @@
 # Testing
 
+Run `pnpm test` before you push — it runs the full suite on **both** database dialects in one go, then the dashboard suite. CI re-runs the same matrix and that green is what authorizes a merge; the pre-merge gate is `pnpm lint && pnpm typecheck && pnpm test`. There is no local pre-push hook, so gate yourself.
+
 ## Dual-dialect is the point
 
 canvas-drop runs on **SQLite or Postgres** from one schema (BUILD_BRIEF.md §10, Risk #2). The test suite proves both on every run:
@@ -76,11 +78,11 @@ overlapping agent runs from sharing tables or object keys.
 
 | Job | What it proves |
 |-----|----------------|
-| `lint` | Biome + `tsc --noEmit` |
-| `test-sqlite` | root suite on SQLite |
+| `lint` (Lint & typecheck) | `pnpm lint` (Biome) + `pnpm typecheck`, and asserts `apps/server/src/docs/generated-content.ts` is regenerated (`pnpm docs:build` then `git diff --exit-code`) |
+| `test-sqlite` | root suite on SQLite (still runs both dialects in-process via PGlite) |
 | `test-dashboard` | dashboard/jsdom suite |
 | `test-postgres` | root suite on PGlite/Postgres **plus** real `postgres:16` + MinIO smoke tests |
 | `build` | the server compiles (`tsc`) |
 | `dependency-audit` | advisory `pnpm audit` (non-blocking) |
 
-A change that passes on SQLite but breaks Postgres fails `test-postgres`. After this lands, enable branch protection on `main` requiring these checks.
+A change that passes on SQLite but breaks Postgres fails `test-postgres`. CI is the explicit, authoritative gate; server-side branch protection on `main` arrives when the repo goes public or on Pro.

@@ -63,7 +63,7 @@ Allowlist is operator config (`CANVAS_DROP_AI_MODELS`); default updated from pla
 | claude-haiku-4-5 | 1 | 5 |
 | claude-fable-5 | 10 | 50 |
 
-Unknown model → cost 0 + a warn log (tokens still recorded). The allowlist is enforced at the route (out-of-list → `400 {code:"MODEL_NOT_ALLOWED"}`), so unknown-priced models only occur if an operator allowlists something we don't price — degrade gracefully, don't crash.
+Unknown model → cost 0 + a warn log (tokens still recorded). The allowlist is enforced at the route (out-of-list → `403 {code:"MODEL_NOT_ALLOWED"}`), so unknown-priced models only occur if an operator allowlists something we don't price — degrade gracefully, don't crash.
 
 ### D-AI-3 — SSE framing
 `Content-Type: text/event-stream`, one JSON object per `data:` line, `\n\n`-terminated. Event protocol (mirrors the runtime `{code}` envelope style):
@@ -184,7 +184,7 @@ Gate per unit: `cd …/canvas-drop-m9 && pnpm typecheck && pnpm lint && pnpm tes
 
 ### U4 — `POST /v1/c/:slug/ai/chat` SSE route
 - `routes/canvas-ai.ts` mounted `app.route("/ai", canvasAiRoutes(deps))` in `canvas-api.ts`, behind `requireCapability("ai", config)` (→ `CAPABILITY_DISABLED` 403 when backend off, per-canvas `cap_ai` off, or no provider key configured — the global `aiEnabled` already ANDs `config.ai.apiKey` present).
-- Body: `{model, messages, system?, maxTokens?}` (zod-validate; default `maxTokens` modest e.g. 1024, cap to a server max). Model not in `config.ai.models` → `400 {code:"MODEL_NOT_ALLOWED"}`.
+- Body: `{model, messages, system?, maxTokens?}` (zod-validate; default `maxTokens` modest e.g. 1024, cap to a server max). Model not in `config.ai.models` → `403 {code:"MODEL_NOT_ALLOWED"}`.
 - Pre-call quota check (U2) → `429 {code:"QUOTA_EXCEEDED",scope}`.
 - Open SSE; wire `c.req.raw.signal` into `provider.streamChat({signal})`; stream `delta` events from `.textStream`. In a **`finally`** (runs on success, provider error, *and* client abort): read whatever `usage` is available, compute cost, and **record `ai_usage`** so the quota always reflects consumed tokens (adversarial F5 — no under-count on abandon). On clean completion, await the record then emit `done`; on provider/upstream throw mid-stream → emit `error` frame (mapped, no internals) then close; on abort → just record + stop (no frame, client is gone).
 - Inject `ModelProvider` via deps (default = `anthropicProvider(config)`), so tests pass the fake.
