@@ -117,6 +117,8 @@ export function renderErrorPage(input: ErrorPageDetails): string {
     --accent-hover: #1d4ed8;
     --accent-fg: #f8fbff;
     --accent-subtle: #eaf1ff;
+    --logo-frame: #111418;
+    --logo-drop: #2563eb;
     --shadow-color: 240 12% 12%;
     --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.08);
   }
@@ -155,14 +157,9 @@ export function renderErrorPage(input: ErrorPageDetails): string {
     letter-spacing: -.011em;
   }
   .mark {
-    display: grid;
-    place-items: center;
     width: 2rem;
     height: 2rem;
-    border-radius: .65rem;
-    background: var(--fg);
-    color: var(--surface);
-    font: 700 .8rem/1 ui-monospace, "SF Mono", Menlo, monospace;
+    flex: 0 0 auto;
   }
   .content { padding: clamp(1.5rem, 4vw, 2.5rem); }
   .kicker {
@@ -254,6 +251,8 @@ export function renderErrorPage(input: ErrorPageDetails): string {
       --accent-hover: #93c5fd;
       --accent-fg: #07111f;
       --accent-subtle: #0d2a4d;
+      --logo-frame: #f4f4f5;
+      --logo-drop: #60a5fa;
       --shadow-color: 0 0% 0%;
       --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);
     }
@@ -263,7 +262,6 @@ export function renderErrorPage(input: ErrorPageDetails): string {
         linear-gradient(135deg, var(--canvas), var(--surface-sunken));
     }
     main { background: color-mix(in srgb, var(--surface) 96%, transparent); }
-    .mark { background: var(--fg); color: var(--canvas); }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -275,7 +273,14 @@ export function renderErrorPage(input: ErrorPageDetails): string {
 </head>
 <body>
   <main>
-    <div class="brand"><span class="mark">CD</span><span>Canvasdrop</span></div>
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--logo-frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+        <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+        <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
+      </svg>
+      <span>Canvasdrop</span>
+    </div>
     <section class="content" aria-labelledby="error-title">
       <p class="kicker">HTTP ${status}</p>
       <h1 id="error-title">${title}</h1>

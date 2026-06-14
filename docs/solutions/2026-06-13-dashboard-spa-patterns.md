@@ -85,6 +85,33 @@ hard-coded bypasses: a `bg-white` thumb or a `warning` tone reusing
 (`@fontsource-variable/*`, bundled by Vite) — no font CDN, satisfying `font-src
 'self'` + the no-phone-home rule.
 
+## Designed error pages share the brand system
+
+Browser-facing errors are part of the dashboard visual system, not a separate
+server skin. Use the existing Canvasdrop mark and token language everywhere an
+error page is meant for a human:
+
+- Dashboard route errors use `BrandMark` from
+  `apps/dashboard/src/components/Brand.tsx`.
+- Server-rendered error pages inline the same mark paths from
+  `apps/dashboard/public/brand/canvasdrop-mark.svg` inside
+  `apps/server/src/http/error-pages.ts`. Inline the SVG instead of loading the
+  public asset: these pages must still render when the dashboard bundle is
+  missing, a stale `/assets/*` URL is failing, or strict response headers are in
+  force.
+- The server page mirrors the dashboard tokens (`--canvas`, `--surface`,
+  `--fg`, `--muted`, `--accent`, `--logo-frame`, `--logo-drop`) and keeps
+  light/dark behavior token-driven. Do not reintroduce placeholder initials,
+  warning icons as the brand mark, or one-off colors.
+- Negotiation stays product-safe: HTML is only for requests that explicitly
+  prefer `text/html`; API clients, missing/ambiguous `Accept`, and stale module
+  requests keep JSON/non-HTML behavior.
+
+If the brand mark, token contract, or error-page visual direction changes, update
+this section in the same change as the React error state and server renderer.
+This note is the shared design contract for that surface; stale guidance here is
+a bug, not harmless documentation drift.
+
 ## Test infra
 
 - **HTTP route tests stay sqlite-only.** They verify auth/routing/response shaping

@@ -1,4 +1,4 @@
-import { ArrowClockwise, HouseLine, WarningDiamond } from "@phosphor-icons/react";
+import { ArrowClockwise, HouseLine } from "@phosphor-icons/react";
 import {
   type ErrorComponentProps,
   Link,
@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { BrandMark } from "./Brand.js";
 
 function useCurrentPath(): string {
   return useRouterState({ select: (state) => state.location.pathname });
@@ -30,9 +31,7 @@ function ErrorShell({
     <section className="mx-auto grid min-h-[calc(100dvh-8rem)] w-full max-w-5xl place-items-center py-10">
       <div className="w-full overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
         <div className="flex items-center gap-2 border-b border-border bg-surface-raised px-4 py-3 text-sm font-semibold text-fg">
-          <span className="grid size-8 place-items-center rounded-lg bg-surface-sunken text-accent">
-            <WarningDiamond size={18} weight="duotone" aria-hidden />
-          </span>
+          <BrandMark className="size-8" />
           Canvasdrop
         </div>
         <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_20rem] lg:items-end">
