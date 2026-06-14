@@ -675,6 +675,10 @@ export const api = {
   unarchiveCanvas: (id: string) =>
     request<Canvas>(`/api/canvases/${id}/unarchive`, { method: "POST" }),
 
+  /** Unpublish — take a Published canvas back to Draft (offline + de-listed). */
+  unpublishCanvas: (id: string) =>
+    request<Canvas>(`/api/canvases/${id}/unpublish`, { method: "POST" }),
+
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
 

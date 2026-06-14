@@ -392,7 +392,7 @@ describe("managementRoutes", () => {
     expect(active.canvases.map((c) => c.id)).toContain(created.id);
   });
 
-  it("unpublish on a Draft canvas → 409 NOT_PUBLISHED; a non-owner → 404", async () => {
+  it("unpublish on a Draft canvas → 409 CANNOT_UNPUBLISH; a non-owner → 404", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const other = await seedUser(client, "other");
@@ -408,7 +408,7 @@ describe("managementRoutes", () => {
       { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
     );
     expect(onDraft.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(onDraft)).code).toBe("NOT_PUBLISHED");
+    expect((await jsonOf<{ code: string }>(onDraft)).code).toBe("CANNOT_UNPUBLISH");
 
     const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
       `/api/canvases/${created.id}/unpublish`,

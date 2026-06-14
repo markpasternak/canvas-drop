@@ -311,6 +311,20 @@ export function useArchiveCanvas(id: string) {
   });
 }
 
+/** Unpublish — await; takes a Published canvas back to Draft (offline + de-listed).
+ *  Invalidates versions too: the current pointer is cleared. */
+export function useUnpublishCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.unpublishCanvas(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      qc.invalidateQueries({ queryKey: keys.versions(id) });
+      invalidateLifecycle(qc, id);
+    },
+  });
+}
+
 /** Unarchive — await; restores the canvas to active and back into the main list. */
 export function useUnarchiveCanvas(id: string) {
   const qc = useQueryClient();

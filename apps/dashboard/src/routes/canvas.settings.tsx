@@ -22,6 +22,7 @@ import {
   useRegenerateKey,
   useRegenerateSlug,
   useUnarchiveCanvas,
+  useUnpublishCanvas,
   useUpdateSettings,
 } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
@@ -35,7 +36,7 @@ const SECTIONS = [
   { id: "protection", label: "Protection" },
   { id: "url-key", label: "URL & key" },
   { id: "actions", label: "Actions" },
-  { id: "archive", label: "Archive" },
+  { id: "lifecycle", label: "Lifecycle" },
   { id: "danger", label: "Danger zone" },
 ] as const;
 const SECTION_IDS = SECTIONS.map((s) => s.id);
@@ -53,6 +54,7 @@ export default function Settings() {
   const regenKey = useRegenerateKey(id);
   const archive = useArchiveCanvas(id);
   const unarchive = useUnarchiveCanvas(id);
+  const unpublish = useUnpublishCanvas(id);
   const del = useDeleteCanvas(id);
 
   const [password, setPassword] = useState("");
@@ -60,7 +62,7 @@ export default function Settings() {
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [confirm, setConfirm] = useState<
-    null | "slug" | "key" | "archive" | "delete" | "password-unlist"
+    null | "slug" | "key" | "archive" | "unpublish" | "delete" | "password-unlist"
   >(null);
   const urlCopyRef = useRef<HTMLButtonElement>(null);
 
@@ -340,14 +342,24 @@ export default function Settings() {
         </Section>
 
         <Section
-          id="archive"
-          title="Archive"
-          description="Retire a canvas without deleting it. Archiving takes it offline but keeps every file and setting."
+          id="lifecycle"
+          title="Lifecycle"
+          description="Take this canvas offline or retire it. Both keep every file, version, and setting."
         >
+          {canvas.publicationState === "published" && (
+            <Row
+              title="Unpublish canvas"
+              description="Takes it offline and back to Draft — still in your list and editable. Removed from the gallery if listed; re-publish any time."
+            >
+              <Button size="sm" variant="secondary" onClick={() => setConfirm("unpublish")}>
+                Unpublish
+              </Button>
+            </Row>
+          )}
           {canvas.status === "archived" ? (
             <Row
               title="This canvas is archived"
-              description="It's offline and hidden from your main list. Restore it to bring it back live at the same URL."
+              description="It's offline and hidden from your main list. Unarchive it to bring it back at the same URL."
             >
               <Button
                 size="sm"
@@ -449,6 +461,28 @@ export default function Settings() {
         It goes offline immediately
         {canvas.shared ? ", including the link you've shared with others" : ""}, and moves to your
         Archived view. Its files and settings are kept.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirm === "unpublish"}
+        onClose={() => setConfirm(null)}
+        onConfirm={async () => {
+          try {
+            await unpublish.mutateAsync();
+            setConfirm(null);
+            toast("Canvas unpublished");
+          } catch (err) {
+            toast(err instanceof ApiError ? err.hint : "Couldn't unpublish", "error");
+          }
+        }}
+        title="Unpublish this canvas?"
+        actionLabel="Unpublish"
+        loading={unpublish.isPending}
+      >
+        Its public URL goes offline immediately
+        {canvas.shared ? ", including the link you've shared with others" : ""}, and it returns to
+        Draft. It stays in your list and editable
+        {canvas.galleryListed ? ", and is removed from the gallery" : ""}. Re-publish any time.
       </ConfirmDialog>
 
       <ConfirmDialog

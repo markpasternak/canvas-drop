@@ -134,6 +134,36 @@ describe("settings route — confirm-and-await flows", () => {
     );
   });
 
+  it("hides Unpublish for a Draft canvas", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) }); // base: publicationState "draft"
+    renderSettings();
+    // Settings loaded (the Lifecycle section's Archive control is present)...
+    expect(await screen.findByRole("button", { name: "Archive canvas" })).toBeInTheDocument();
+    // ...but a Draft canvas has nothing to unpublish.
+    expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
+  });
+
+  it("unpublish confirms, then POSTs for a Published canvas", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "POST /api/canvases/c1/unpublish": () =>
+        json({ ...published, publicationState: "draft", currentVersionId: null }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: "Unpublish" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Unpublish" }));
+
+    await vi.waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/unpublish"),
+      ).toBe(true),
+    );
+  });
+
   it("regenerate-key reveals the new key once", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

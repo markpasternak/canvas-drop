@@ -583,7 +583,9 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     if (!(await deps.canvases.unpublish(cv.id))) {
-      return c.json({ code: "NOT_PUBLISHED", message: "canvas is not published" }, 409);
+      // Distinct code from the gallery's NOT_PUBLISHED precondition; the message
+      // is self-describing so the dashboard surfaces it directly (no HINTS entry).
+      return c.json({ code: "CANNOT_UNPUBLISH", message: "This canvas isn't published." }, 409);
     }
     deps.audit.recordAudit({
       action: "canvas_unpublish",
