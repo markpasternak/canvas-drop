@@ -32,6 +32,13 @@ export default defineConfig({
       "/api": { target: API_TARGET, changeOrigin: false },
       "/auth": { target: API_TARGET, changeOrigin: false },
       "/v1": { target: API_TARGET, changeOrigin: false },
+      // The public docs surface is server-rendered by Hono (`/docs/*`, `/llms.txt`,
+      // `/skill.zip`), NOT a SPA route. Without these, the dashboard's "Docs" link
+      // falls through to the SPA's catch-all 404 in dev. (Prod is fine — there the
+      // Hono server serves both the built SPA and these paths.)
+      "/docs": { target: API_TARGET, changeOrigin: false },
+      "/llms.txt": { target: API_TARGET, changeOrigin: false },
+      "/skill.zip": { target: API_TARGET, changeOrigin: false },
     },
   },
 });
