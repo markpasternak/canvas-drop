@@ -25,6 +25,7 @@ const CANVAS = {
   capabilities: { kv: true, files: true, ai: true, realtime: true },
   effective: { identity: false, kv: false, files: false, ai: false, realtime: false },
   status: "active",
+  publicationState: "published" as string,
   disabledReason: null as string | null,
   currentVersionId: "v1" as string | null,
   createdAt: 0,
@@ -110,7 +111,13 @@ describe("canvas Status tab", () => {
     renderStatus();
 
     expect(await screen.findByText("Canvas is live")).toBeInTheDocument();
-    expect(screen.getByText("Shared")).toBeInTheDocument();
+    // Header three-chip row (Publication · Visibility · Gallery) + the global
+    // publish affordance, which on a non-editor tab reads "Publish files" (R7/R12).
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(screen.getByText("Unlisted")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish files" })).toBeInTheDocument();
+    // "Shared" appears in both the header Visibility chip and the Access fact.
+    expect(screen.getAllByText("Shared").length).toBeGreaterThan(0);
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
@@ -158,7 +165,8 @@ describe("canvas Status tab", () => {
 
     expect(await screen.findByText("No live deploy yet")).toBeInTheDocument();
     expect(screen.getByText(/The URL has no live page/i)).toBeInTheDocument();
-    expect(screen.getByText("Private")).toBeInTheDocument();
+    // "Private" appears in both the header Visibility chip and the Access fact.
+    expect(screen.getAllByText("Private").length).toBeGreaterThan(0);
   });
 
   it("keeps the disabled state explicit", async () => {

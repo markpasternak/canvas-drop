@@ -1,5 +1,5 @@
-import { Link, Outlet, useParams } from "@tanstack/react-router";
-import { Badge } from "../components/Badge.js";
+import { Link, Outlet, useParams, useRouterState } from "@tanstack/react-router";
+import { GalleryBadge, PublicationBadge, VisibilityBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -16,6 +16,10 @@ export default function CanvasLayout() {
   const { data: canvas, isLoading, isError } = useCanvas(id);
   const unarchive = useUnarchiveCanvas(id);
   const toast = useToast();
+  // One publish affordance per screen: the Editor tab has its own Publish in the
+  // editor bar, so the global header publish is suppressed there (R10/R11).
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const onEditorTab = pathname.startsWith(`/canvases/${id}/editor`);
 
   if (isError) {
     return (
@@ -34,7 +38,7 @@ export default function CanvasLayout() {
   const title = canvas?.title?.trim() || canvas?.slug;
   const actions =
     canvas?.status === "active" ? (
-      <DeployButton canvasId={id} size="sm" label="Deploy files" />
+      onEditorTab ? null : <DeployButton canvasId={id} size="sm" label="Publish files" />
     ) : canvas?.status === "archived" ? (
       <Button
         size="sm"
@@ -73,10 +77,12 @@ export default function CanvasLayout() {
         isLoading={isLoading}
         actions={actions}
         badge={
-          canvas?.galleryTemplatable ? (
-            <Badge tone="accent">Template</Badge>
-          ) : canvas?.galleryListed ? (
-            <Badge tone="neutral">Listed</Badge>
+          canvas ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <PublicationBadge state={canvas.publicationState} />
+              <VisibilityBadge shared={canvas.shared} />
+              <GalleryBadge canvas={canvas} />
+            </span>
           ) : null
         }
       />

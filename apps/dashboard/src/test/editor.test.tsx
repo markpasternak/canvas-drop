@@ -38,6 +38,7 @@ const CANVAS = {
   gallerySummary: null,
   galleryTags: null,
   status: "active",
+  publicationState: "published",
   disabledReason: null,
   currentVersionId: "v1",
   createdAt: 0,
@@ -120,6 +121,9 @@ describe("Editor route", () => {
     expect(await screen.findByText("index.html")).toBeInTheDocument();
     const editor = await screen.findByTestId("code-editor");
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toContain("hi"));
+    // AE3: one publish affordance per screen — the global header "Publish files"
+    // is suppressed on the Editor tab (the editor bar's own Publish wins).
+    expect(screen.queryByRole("button", { name: "Publish files" })).toBeNull();
   });
 
   it("shows the stale notice when a newer version was published under the draft", async () => {

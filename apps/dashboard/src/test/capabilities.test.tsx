@@ -21,6 +21,7 @@ const BASE = {
   gallerySummary: null,
   galleryTags: null,
   status: "active",
+  publicationState: "draft",
   disabledReason: null,
   currentVersionId: null,
   createdAt: 0,
