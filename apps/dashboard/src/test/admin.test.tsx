@@ -74,6 +74,9 @@ const OVERVIEW = {
   userCount: 7,
   totalFileBytes: 4096,
   totalOps: 9001,
+  totalViews: 3120,
+  uniqueViewers: 48,
+  totalDeploys: 27,
   newCanvases: 5,
   newUsers: 2,
   recentWindowDays: 7,
@@ -132,6 +135,39 @@ describe("admin dashboard", () => {
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // user count
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
+    // New engagement/activity cards.
+    expect(screen.getByText("Total views")).toBeInTheDocument();
+    expect(screen.getByText("3,120")).toBeInTheDocument();
+    expect(screen.getByText("Unique viewers")).toBeInTheDocument();
+    expect(screen.getByText("Deploys")).toBeInTheDocument();
+    expect(screen.getByText("27")).toBeInTheDocument(); // deploys
+  });
+
+  it("collapses the platform overview and remembers it", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    const first = renderAt("/admin");
+    const user = userEvent.setup();
+    // Wait for the overview data to render, then collapse it.
+    expect(await screen.findByText("Total views")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Platform overview/i }));
+    expect(screen.queryByText("Total views")).not.toBeInTheDocument();
+    first.unmount();
+
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    // Table renders (render settled), but the overview stayed collapsed via localStorage.
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    expect(screen.queryByText("Total views")).not.toBeInTheDocument();
   });
 
   it("renders the AI spend tile and the by-user / by-canvas breakdown (§6.10.7)", async () => {

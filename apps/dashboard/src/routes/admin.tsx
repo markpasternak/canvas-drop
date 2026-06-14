@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { Button } from "../components/Button.js";
 import { CollapsibleSection } from "../components/CollapsibleSection.js";
@@ -27,16 +27,6 @@ function StatCell({
       <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
       <dd className="mt-1 font-semibold text-2xl text-fg tracking-tight tabular-nums">{value}</dd>
       {hint && <div className="mt-0.5 text-xs text-subtle">{hint}</div>}
-    </div>
-  );
-}
-
-/** Bordered container whose 1px gaps reveal the border-colored backing as clean
- *  gridlines between cells. Works at any column count with no double-border seams. */
-function StatStrip({ children }: { children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-border shadow-[var(--shadow-panel)]">
-      <dl className="grid grid-cols-2 gap-px sm:grid-cols-4">{children}</dl>
     </div>
   );
 }
@@ -119,15 +109,14 @@ export default function AdminDashboard() {
         }
       />
 
-      {/* Platform overview (§6.10.6) — its own loading/error states so it never
-          silently disappears when slow or failing. */}
-      {overview.isLoading && (
-        <div
-          className="overflow-hidden rounded-xl border border-border bg-border shadow-[var(--shadow-panel)]"
-          aria-busy="true"
-        >
-          <div className="grid grid-cols-2 gap-px sm:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, i) => (
+      {/* Platform overview (§6.10.6) — collapsible like the sections below, state
+          remembered in localStorage. Cards run most-interesting-first and cluster by
+          meaning: scale + engagement (row 1), activity + cost (row 2), canvas
+          lifecycle (row 3). */}
+      <CollapsibleSection title="Platform overview" storageKey="admin:section:overview" flush>
+        {overview.isLoading ? (
+          <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4" aria-busy="true">
+            {Array.from({ length: 12 }).map((_, i) => (
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholders
                 key={i}
@@ -135,55 +124,60 @@ export default function AdminDashboard() {
               />
             ))}
           </div>
-        </div>
-      )}
-      {overview.isError && (
-        <EmptyState
-          title="Couldn't load the overview"
-          description="Something went wrong fetching platform stats."
-          action={
-            <Button variant="secondary" size="sm" onClick={() => overview.refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-      {ov && (
-        <StatStrip>
-          <StatCell label="Active canvases" value={byStatus.active ?? 0} />
-          <StatCell label="Disabled" value={byStatus.disabled ?? 0} />
-          <StatCell label="Archived" value={byStatus.archived ?? 0} />
-          <StatCell
-            label="Deleted"
-            value={byStatus.deleted ?? 0}
-            hint={
-              ov.oldestDeletedAt !== null
-                ? `oldest ${daysSince(ov.oldestDeletedAt)}d — awaiting purge`
-                : undefined
-            }
-          />
-          <StatCell
-            label="Users"
-            value={ov.userCount}
-            hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
-          />
-          <StatCell label="File storage" value={formatBytes(ov.totalFileBytes)} />
-          <StatCell label="Primitive ops" value={ov.totalOps.toLocaleString()} />
-          <StatCell
-            label={`New canvases (${ov.recentWindowDays}d)`}
-            value={ov.newCanvases.toLocaleString()}
-          />
-          <StatCell
-            label="AI spend"
-            value={formatUsd(ov.aiCostUsd)}
-            hint={`${ov.aiCalls.toLocaleString()} calls · ${ov.aiTokens.toLocaleString()} tokens`}
-          />
-        </StatStrip>
-      )}
+        ) : overview.isError ? (
+          <div className="p-5">
+            <EmptyState
+              title="Couldn't load the overview"
+              description="Something went wrong fetching platform stats."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => overview.refetch()}>
+                  Try again
+                </Button>
+              }
+            />
+          </div>
+        ) : ov ? (
+          <dl className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+            {/* Row 1 — platform scale + engagement (the headline KPIs). */}
+            <StatCell label="Active canvases" value={byStatus.active ?? 0} />
+            <StatCell
+              label="Users"
+              value={ov.userCount}
+              hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
+            />
+            <StatCell label="Total views" value={ov.totalViews.toLocaleString()} />
+            <StatCell label="Unique viewers" value={ov.uniqueViewers.toLocaleString()} />
+            {/* Row 2 — production activity + what it costs. */}
+            <StatCell label="Deploys" value={ov.totalDeploys.toLocaleString()} />
+            <StatCell label="Primitive ops" value={ov.totalOps.toLocaleString()} />
+            <StatCell
+              label="AI spend"
+              value={formatUsd(ov.aiCostUsd)}
+              hint={`${ov.aiCalls.toLocaleString()} calls · ${ov.aiTokens.toLocaleString()} tokens`}
+            />
+            <StatCell label="File storage" value={formatBytes(ov.totalFileBytes)} />
+            {/* Row 3 — canvas lifecycle (created → disabled → archived → deleted). */}
+            <StatCell
+              label={`New canvases (${ov.recentWindowDays}d)`}
+              value={ov.newCanvases.toLocaleString()}
+            />
+            <StatCell label="Disabled" value={byStatus.disabled ?? 0} />
+            <StatCell label="Archived" value={byStatus.archived ?? 0} />
+            <StatCell
+              label="Deleted"
+              value={byStatus.deleted ?? 0}
+              hint={
+                ov.oldestDeletedAt !== null
+                  ? `oldest ${daysSince(ov.oldestDeletedAt)}d — awaiting purge`
+                  : undefined
+              }
+            />
+          </dl>
+        ) : null}
+      </CollapsibleSection>
 
       {/* Detail sections fold away (state remembered per-section in localStorage) so
-          the governance table below stays reachable. The stat strip above stays
-          pinned — that's the at-a-glance overview. */}
+          the governance table below stays reachable. */}
       {ov && ov.topCanvases.length > 0 && (
         <CollapsibleSection title="Top canvases by usage" storageKey="admin:section:topCanvases">
           <ul className="space-y-1 text-sm">

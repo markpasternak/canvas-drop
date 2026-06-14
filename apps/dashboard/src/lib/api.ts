@@ -433,6 +433,12 @@ export interface AdminOverview {
   totalFileBytes: number;
   /** Total recorded primitive ops across the platform (all time). */
   totalOps: number;
+  /** Total canvas page views across the platform (all time). */
+  totalViews: number;
+  /** Distinct org members who have viewed any canvas. */
+  uniqueViewers: number;
+  /** Total deploys across the platform — one per published version (all time). */
+  totalDeploys: number;
   /** Canvases created within the last `recentWindowDays` days. */
   newCanvases: number;
   /** Users first seen within the last `recentWindowDays` days. */

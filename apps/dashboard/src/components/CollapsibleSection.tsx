@@ -25,11 +25,14 @@ export function CollapsibleSection({
   title,
   storageKey,
   defaultOpen = true,
+  flush = false,
   children,
 }: {
   title: ReactNode;
   storageKey: string;
   defaultOpen?: boolean;
+  /** Drop body padding and add a divider — for edge-to-edge content like a stat grid. */
+  flush?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(() => readStored(storageKey, defaultOpen));
@@ -61,7 +64,10 @@ export function CollapsibleSection({
         <span className="text-sm font-semibold text-fg">{title}</span>
       </button>
       {open && (
-        <div id={regionId} className="px-4 pb-4 sm:px-5 sm:pb-5">
+        <div
+          id={regionId}
+          className={cn(flush ? "border-t border-border" : "px-4 pb-4 sm:px-5 sm:pb-5")}
+        >
           {children}
         </div>
       )}

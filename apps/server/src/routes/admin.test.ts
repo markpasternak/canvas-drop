@@ -11,6 +11,7 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { settingsRepository } from "../db/repositories/settings.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -191,12 +192,28 @@ describe("admin routes", () => {
       outputTokens: 50,
       costUsd: 0.0125,
     });
+    // One view + one deploy (version) so the new engagement/activity cards are exercised.
+    await usageEventsRepository(client).recordView({
+      canvasId: cv.id,
+      userId: a.id,
+      windowMs: 60_000,
+      now: Date.now(),
+    });
+    await versionsRepository(client).createPending({
+      canvasId: cv.id,
+      number: 1,
+      createdBy: a.id,
+      source: "folder",
+    });
     const res = await app.request("/api/admin/overview");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       canvasCountByStatus: Record<string, number>;
       userCount: number;
       totalOps: number;
+      totalViews: number;
+      uniqueViewers: number;
+      totalDeploys: number;
       newCanvases: number;
       newUsers: number;
       recentWindowDays: number;
@@ -210,7 +227,10 @@ describe("admin routes", () => {
     expect(body.userCount).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.topCanvases)).toBe(true);
     // Expanded overview fields (§6.10.6).
-    expect(body.totalOps).toBe(0);
+    expect(body.totalOps).toBe(1); // the view event is a usage_event
+    expect(body.totalViews).toBe(1);
+    expect(body.uniqueViewers).toBe(1);
+    expect(body.totalDeploys).toBe(1); // one version row
     expect(body.newCanvases).toBe(1); // just created → inside the window
     expect(body.recentWindowDays).toBe(7);
     expect(body.oldestDeletedAt).toBeNull();

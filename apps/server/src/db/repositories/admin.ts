@@ -26,6 +26,12 @@ export interface PlatformStats {
   totalFileBytes: number;
   /** Total recorded primitive ops across the platform (KV/file/etc), all time. */
   totalOps: number;
+  /** Total recorded canvas page views across the platform, all time. */
+  totalViews: number;
+  /** Distinct org members who have viewed any canvas (engagement reach). */
+  uniqueViewers: number;
+  /** Total deploys across the platform (one per published version), all time. */
+  totalDeploys: number;
   /** Canvases created in the last {@link RECENT_WINDOW_DAYS} days (growth signal). */
   newCanvases: number;
   /** Users first seen in the last {@link RECENT_WINDOW_DAYS} days (growth signal). */
@@ -55,6 +61,7 @@ export function adminRepository(client: DbClient) {
   const usersT = sqlite ? sqliteSchema.users : pgSchema.users;
   const filesT = sqlite ? sqliteSchema.files : pgSchema.files;
   const usageT = sqlite ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+  const versionsT = sqlite ? sqliteSchema.versions : pgSchema.versions;
 
   return {
     /**
@@ -93,6 +100,8 @@ export function adminRepository(client: DbClient) {
         newUserRows,
         deletedRows,
         topRows,
+        viewRows,
+        deployRows,
       ] = await Promise.all([
         db
           .select({ status: canvasesT.status, count: sql<number>`count(*)` })
@@ -119,6 +128,15 @@ export function adminRepository(client: DbClient) {
           .groupBy(usageT.canvasId)
           .orderBy(desc(sql`count(*)`))
           .limit(topLimit),
+        db
+          .select({
+            total: sql<number>`count(*)`,
+            unique: sql<number>`count(distinct ${usageT.userId})`,
+          })
+          .from(usageT)
+          .where(eq(usageT.type, "view")),
+        // One version row per deploy (a published version is a deploy).
+        db.select({ count: sql<number>`count(*)` }).from(versionsT),
       ]);
       const canvasCountByStatus: Record<string, number> = {};
       for (const r of statusRows as Array<{ status: string; count: number }>) {
@@ -130,6 +148,9 @@ export function adminRepository(client: DbClient) {
         userCount: Number((userRows as Array<{ count: number }>)[0]?.count ?? 0),
         totalFileBytes: Number((byteRows as Array<{ total: number }>)[0]?.total ?? 0),
         totalOps: Number((opsRows as Array<{ count: number }>)[0]?.count ?? 0),
+        totalViews: Number((viewRows as Array<{ total: number }>)[0]?.total ?? 0),
+        uniqueViewers: Number((viewRows as Array<{ unique: number }>)[0]?.unique ?? 0),
+        totalDeploys: Number((deployRows as Array<{ count: number }>)[0]?.count ?? 0),
         newCanvases: Number((newCanvasRows as Array<{ count: number }>)[0]?.count ?? 0),
         newUsers: Number((newUserRows as Array<{ count: number }>)[0]?.count ?? 0),
         recentWindowDays: RECENT_WINDOW_DAYS,
