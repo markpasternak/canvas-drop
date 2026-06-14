@@ -477,3 +477,26 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   return result.data;
 }
+
+/**
+ * The set of config env vars that were explicitly provided (non-empty) in the
+ * environment. The admin Configuration view uses this to attribute each
+ * setting's source — *Environment* (present here) vs *Default* (not). This is the
+ * ONLY other reader of `process.env`, and it lives in the config module by design
+ * (§8.1 — config is the single env reader); callers pass the result in as data.
+ */
+export function presentEnvVars(env: Record<string, string | undefined> = process.env): Set<string> {
+  const present = new Set<string>();
+  for (const [key, value] of Object.entries(env)) {
+    if (value == null || value.trim() === "") continue;
+    if (
+      key.startsWith("CANVAS_DROP_") ||
+      key === "NODE_ENV" ||
+      key === "LOG_LEVEL" ||
+      key === "LOG_FORMAT"
+    ) {
+      present.add(key);
+    }
+  }
+  return present;
+}

@@ -417,11 +417,24 @@ export interface AdminOverview {
   topCanvases: Array<{ canvasId: string; ops: number; slug: string | null; title: string | null }>;
 }
 
-export interface AdminQuota {
+/** One row of the admin Configuration view. Secrets never carry a raw `value`. */
+export interface AdminConfigField {
   key: string;
-  value: number;
-  default: number;
-  override: number | null;
+  env: string;
+  group: string;
+  label: string;
+  help?: string;
+  type: "string" | "number" | "boolean" | "enum" | "csv";
+  enumValues?: string[];
+  secret: boolean;
+  editable: boolean;
+  source: "database" | "environment" | "default";
+  overridden: boolean;
+  /** Non-secret effective value (display string). Absent for secrets. */
+  value?: string;
+  /** Secret-only: configured? + last 4 chars. Never the value. */
+  set?: boolean;
+  last4?: string;
 }
 
 export const api = {
@@ -597,24 +610,19 @@ export const api = {
     restoreCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/restore`, { method: "POST" }),
 
-    getModels: () =>
-      request<{ models: string[]; override: string[] | null; default: string[] }>(
-        "/api/admin/settings/models",
-      ),
+    /** The unified Configuration view: every setting with value/source/secret-mask. */
+    getConfig: () =>
+      request<{ fields: AdminConfigField[] }>("/api/admin/config").then((r) => r.fields),
 
-    setModels: (models: string[]) =>
-      request<{ models: string[] }>("/api/admin/settings/models", {
-        ...jsonBody({ models }),
+    /** Set a DB override for an editable setting (server validates + coerces). */
+    setConfig: (key: string, value: string | number | boolean | string[]) =>
+      request<{ ok: true }>(`/api/admin/config/${encodeURIComponent(key)}`, {
+        ...jsonBody({ value }),
         method: "PUT",
       }),
 
-    getQuotas: () =>
-      request<{ quotas: AdminQuota[] }>("/api/admin/settings/quotas").then((r) => r.quotas),
-
-    setQuotas: (quotas: Record<string, number>) =>
-      request<{ ok: true }>("/api/admin/settings/quotas", {
-        ...jsonBody({ quotas }),
-        method: "PUT",
-      }),
+    /** Clear a setting's DB override (revert to env/default). */
+    clearConfig: (key: string) =>
+      request<{ ok: true }>(`/api/admin/config/${encodeURIComponent(key)}`, { method: "DELETE" }),
   },
 };

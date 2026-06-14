@@ -1,5 +1,4 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import type { Config } from "@canvas-drop/shared";
 import { type ModelMessage, streamText } from "ai";
 
 /**
@@ -49,11 +48,17 @@ export interface ModelProvider {
 /**
  * Default Anthropic-backed provider. Retries 429/5xx with backoff before the
  * first byte streams (§6.6.9, D-AI-5) and forwards the client abort signal.
+ *
+ * The key is passed in (not read from Config) because it is now resolved per
+ * request — the admin can set/rotate it in the DB at runtime (DB overrides env),
+ * so the route builds the provider with the *effective* key for each call. The
+ * key stays server-side and is never serialized into any response or the SDK
+ * bundle (§12.0 no-secrets-in-browser).
  */
-export function anthropicProvider(config: Config): ModelProvider {
+export function anthropicProvider(opts: { apiKey?: string; baseUrl?: string }): ModelProvider {
   const anthropic = createAnthropic({
-    apiKey: config.ai.apiKey,
-    baseURL: config.ai.baseUrl,
+    apiKey: opts.apiKey,
+    baseURL: opts.baseUrl,
   });
   return {
     streamChat({ model, system, messages, maxTokens, signal }) {

@@ -272,25 +272,79 @@ describe("admin dashboard", () => {
     expect(screen.getAllByText("Happy Otter")).toHaveLength(1);
   });
 
-  it("settings page saves the model allowlist", async () => {
+  it("Configuration view edits the model allowlist via the unified config endpoint", async () => {
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
-      "GET /api/admin/settings/models": () =>
-        json({ models: ["claude-fast"], override: null, default: ["claude-fast"] }),
-      "GET /api/admin/settings/quotas": () => json({ quotas: [] }),
-      "PUT /api/admin/settings/models": () => json({ models: ["m1", "m2"] }),
+      "GET /api/admin/config": () =>
+        json({
+          fields: [
+            {
+              key: "ai.models",
+              env: "CANVAS_DROP_AI_MODELS",
+              group: "AI",
+              label: "Model allowlist",
+              type: "csv",
+              secret: false,
+              editable: true,
+              source: "environment",
+              overridden: false,
+              value: "claude-fast",
+            },
+          ],
+        }),
+      "PUT /api/admin/config/ai.models": () => json({ ok: true }),
     });
     renderAt("/admin/settings");
     const user = userEvent.setup();
-    const field = await screen.findByLabelText("Allowed models");
+    const field = await screen.findByLabelText("Model allowlist");
     await user.clear(field);
     await user.type(field, "m1, m2");
-    await user.click(screen.getByRole("button", { name: "Save allowlist" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      const call = calls.find((c) => c.method === "PUT" && c.path === "/api/admin/settings/models");
+      const call = calls.find(
+        (c) => c.method === "PUT" && c.path === "/api/admin/config/ai.models",
+      );
       expect(call).toBeTruthy();
-      expect(JSON.parse(call?.body ?? "{}").models).toEqual(["m1", "m2"]);
+      expect(JSON.parse(call?.body ?? "{}").value).toEqual(["m1", "m2"]);
+    });
+  });
+
+  it("Configuration view sets the AI provider key (write-only secret) via config", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/config": () =>
+        json({
+          fields: [
+            {
+              key: "ai.apiKey",
+              env: "CANVAS_DROP_AI_API_KEY",
+              group: "AI",
+              label: "Provider API key",
+              type: "string",
+              secret: true,
+              editable: true,
+              source: "default",
+              overridden: false,
+              set: false,
+            },
+          ],
+        }),
+      "PUT /api/admin/config/ai.apiKey": () => json({ ok: true }),
+    });
+    renderAt("/admin/settings");
+    const user = userEvent.setup();
+    const field = (await screen.findByLabelText("Provider API key")) as HTMLInputElement;
+    expect(field.type).toBe("password"); // never shown as plain text
+    await user.type(field, "sk-ant-secret-1234");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      const call = calls.find(
+        (c) => c.method === "PUT" && c.path === "/api/admin/config/ai.apiKey",
+      );
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call?.body ?? "{}").value).toBe("sk-ant-secret-1234");
     });
   });
 });

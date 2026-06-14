@@ -1,6 +1,44 @@
 import type { Config } from "@canvas-drop/shared";
 import { z } from "zod";
 import type { SettingsRepository } from "../db/repositories/settings.js";
+import {
+  asDisplayString,
+  CONFIG_FIELD_BY_KEY,
+  CONFIG_FIELDS,
+  type ConfigField,
+  type ConfigGroup,
+} from "./config-fields.js";
+
+/** AI provider-key override store key (write-only secret; DB overrides env). */
+const AI_API_KEY = "config.ai.apiKey";
+/** Realtime master-switch override key (read-only in the registry today). */
+const REALTIME_KEY = "config.realtime.enabled";
+
+const last4 = (s: string) => (s.length <= 4 ? s : s.slice(-4));
+
+/** Source of a setting's effective value, for the admin Configuration view. */
+export type ConfigSource = "database" | "environment" | "default";
+
+/** One row in the admin Configuration view. Secrets carry NO raw value. */
+export interface ConfigFieldView {
+  key: string;
+  env: string;
+  group: ConfigGroup;
+  label: string;
+  help?: string;
+  type: ConfigField["type"];
+  enumValues?: readonly string[];
+  secret: boolean;
+  editable: boolean;
+  source: ConfigSource;
+  /** Whether a DB override is currently set (editable fields). */
+  overridden: boolean;
+  /** Non-secret effective value (display form). Omitted for secrets. */
+  value?: string;
+  /** Secret-only: is a value configured, and its last 4 chars. Never the value. */
+  set?: boolean;
+  last4?: string;
+}
 
 /**
  * Admin-tunable global quota keys (§6.10.4, §12.3). Stored in the `settings`
@@ -45,8 +83,25 @@ const modelsValue = z.array(z.string().min(1)).min(1);
  * invalidation logic) is premature; add it only if instrumentation shows the read
  * matters. Per-canvas/per-user overrides are v1.1 (§6.10.7) — this ships globals.
  */
-export function adminSettingsService(deps: { settings: SettingsRepository; config: Config }) {
+export function adminSettingsService(deps: {
+  settings: SettingsRepository;
+  config: Config;
+  /** Which config env vars were explicitly set — for source attribution (§8.1). */
+  envPresent?: Set<string>;
+}) {
   const { settings, config } = deps;
+  const envPresent = deps.envPresent ?? new Set<string>();
+
+  /** A stored string override (trimmed, non-empty), else undefined. */
+  async function strOverride(key: string): Promise<string | undefined> {
+    const v = await settings.get(key);
+    return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  }
+  /** A stored boolean override, else undefined. */
+  async function boolOverride(key: string): Promise<boolean | undefined> {
+    const v = await settings.get(key);
+    return typeof v === "boolean" ? v : undefined;
+  }
 
   return {
     /**
@@ -95,6 +150,143 @@ export function adminSettingsService(deps: { settings: SettingsRepository; confi
       const parsed = modelsValue.safeParse(models);
       if (!parsed.success) throw new Error("invalid model allowlist: must be a non-empty list");
       await settings.set(MODELS_KEY, parsed.data);
+    },
+
+    // ── AI provider key (write-only secret; DB overrides env) ────────────────
+
+    /**
+     * Effective AI provider key: the admin-set DB value wins, else the env key
+     * (`config.ai.apiKey`, already empty→undefined). Server-side ONLY — never
+     * serialize this anywhere a browser can read it.
+     */
+    async effectiveApiKey(): Promise<string | undefined> {
+      return (await strOverride(AI_API_KEY)) ?? config.ai.apiKey;
+    },
+
+    /** Whether AI is usable (an effective key exists). Drives the capability gate. */
+    async aiEnabled(): Promise<boolean> {
+      return !!(await this.effectiveApiKey());
+    },
+
+    // The provider key is read (write) via describeConfig / setConfigOverride
+    // ("ai.apiKey") like every other setting — there is no bespoke key endpoint.
+
+    // ── Other effective getters the hot-path consumers read ──────────────────
+
+    /**
+     * Effective realtime master switch (DB override ?? env). Read by the
+     * management capability view. (The override is read-only in the registry for
+     * now, so this currently tracks the env value; the resolver is here so the
+     * editable follow-up is a one-line registry flip.)
+     */
+    async effectiveRealtimeEnabled(): Promise<boolean> {
+      return (await boolOverride(REALTIME_KEY)) ?? config.realtimeEnabled;
+    },
+
+    // ── Unified Configuration view (all settings; one resolution rule) ───────
+
+    /** Every setting as a view row: value/source/secret-mask. Grouped by the caller. */
+    async describeConfig(): Promise<ConfigFieldView[]> {
+      return Promise.all(
+        CONFIG_FIELDS.map(async (f): Promise<ConfigFieldView> => {
+          const override =
+            f.editable && f.settingKey ? await settings.get(f.settingKey) : undefined;
+          const overridden = override !== undefined && override !== null;
+          const effective = overridden ? override : f.fromConfig(config);
+          const source: ConfigSource = overridden
+            ? "database"
+            : envPresent.has(f.env)
+              ? "environment"
+              : "default";
+          const base = {
+            key: f.key,
+            env: f.env,
+            group: f.group,
+            label: f.label,
+            help: f.help,
+            type: f.type,
+            enumValues: f.enumValues,
+            secret: f.secret,
+            editable: f.editable,
+            source,
+            overridden,
+          };
+          if (f.secret) {
+            const s = effective == null ? "" : String(effective);
+            // last4 only for EDITABLE secrets (the AI key) — a confirmation aid for
+            // a key you can set here. Read-only env secrets (session secret, DB URL,
+            // OIDC/S3 secrets) expose nothing but "configured" — no fragment leaks.
+            const showLast4 = f.editable && s !== "";
+            return { ...base, set: s !== "", last4: showLast4 ? last4(s) : undefined };
+          }
+          return { ...base, value: asDisplayString(f.type, effective) };
+        }),
+      );
+    },
+
+    /**
+     * Set a DB override for an editable field, validating + coercing the raw input
+     * to the field's type. Empty string / empty list CLEARS the override (reverts to
+     * env/default) rather than storing a dangerous empty value. Throws on an unknown
+     * key, a read-only field, or an invalid value.
+     */
+    async setConfigOverride(key: string, raw: unknown): Promise<void> {
+      const f = CONFIG_FIELD_BY_KEY.get(key);
+      if (!f) throw new Error(`unknown setting: ${key}`);
+      if (!f.editable || !f.settingKey) throw new Error(`setting is read-only: ${key}`);
+      const sk = f.settingKey;
+
+      switch (f.type) {
+        case "number": {
+          // Accept a number or a numeric string; reject arrays/booleans/objects so a
+          // wrong-typed body (e.g. [5] or true) is a 400, not a silently coerced value.
+          if (typeof raw !== "number" && typeof raw !== "string") {
+            throw new Error(`${key} must be a number`);
+          }
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n <= 0) throw new Error(`${key} must be a number > 0`);
+          await settings.set(sk, n);
+          return;
+        }
+        // boolean/enum: forward-compat scaffolding. No editable field is boolean or
+        // enum today (realtime/rate-limit/auth-mode are read-only), so these branches
+        // are unreached until the editable set grows; kept so that's a one-line flip.
+        case "boolean": {
+          const b = typeof raw === "boolean" ? raw : raw === "true";
+          await settings.set(sk, b);
+          return;
+        }
+        case "csv": {
+          const list = (
+            Array.isArray(raw) ? (raw as unknown[]).map(String) : String(raw).split(",")
+          )
+            .map((s) => s.trim())
+            .filter((s) => s !== "");
+          if (list.length === 0) {
+            await settings.delete(sk); // empty → clear rather than store an empty list
+            return;
+          }
+          await settings.set(sk, list);
+          return;
+        }
+        default: {
+          // string / enum / secret string
+          const s = String(raw).trim();
+          if (f.enumValues && s !== "" && !f.enumValues.includes(s)) {
+            throw new Error(`${key} must be one of: ${f.enumValues.join(", ")}`);
+          }
+          if (s === "") await settings.delete(sk);
+          else await settings.set(sk, s);
+          return;
+        }
+      }
+    },
+
+    /** Clear a DB override so the field reverts to its env/default value. */
+    async clearConfigOverride(key: string): Promise<void> {
+      const f = CONFIG_FIELD_BY_KEY.get(key);
+      if (!f || !f.editable || !f.settingKey) throw new Error(`cannot clear: ${key}`);
+      await settings.delete(f.settingKey);
     },
   };
 }

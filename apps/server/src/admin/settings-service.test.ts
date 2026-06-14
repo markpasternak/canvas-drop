@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Json } from "@canvas-drop/shared/db";
 import { describe, expect, it } from "vitest";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -14,6 +14,9 @@ function fakeSettings(): SettingsRepository {
     },
     async set(key, value) {
       store.set(key, value);
+    },
+    async delete(key) {
+      store.delete(key);
     },
   };
 }
@@ -61,5 +64,148 @@ describe("adminSettingsService", () => {
     await settings.set("quota.kv.keys.user", "garbage" as unknown as Json);
     const s = adminSettingsService({ settings, config });
     expect(await s.effectiveQuota("kv.keys.user", 1_000)).toBe(1_000);
+  });
+});
+
+// Realistic config so describeConfig's per-field accessors don't hit undefined.
+const ENV = {
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_AI_API_KEY: "sk-ant-env-key-WXYZ",
+};
+const fullConfig = loadConfig(ENV);
+const envPresent = new Set(Object.keys(ENV));
+
+function configSvc(extraEnv: Set<string> = envPresent) {
+  return adminSettingsService({
+    settings: fakeSettings(),
+    config: fullConfig,
+    envPresent: extraEnv,
+  });
+}
+
+// The provider key is written/read via setConfigOverride/describeConfig ("ai.apiKey")
+// like every other setting — there is no bespoke key API.
+const aiKeyRow = async (s: ReturnType<typeof configSvc>) =>
+  (await s.describeConfig()).find((r) => r.key === "ai.apiKey");
+
+describe("adminSettingsService — AI provider key (write-only secret)", () => {
+  it("effectiveApiKey/aiEnabled fall back to the env key, then a DB override wins", async () => {
+    const s = configSvc();
+    expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
+    expect(await s.aiEnabled()).toBe(true);
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    expect(await s.effectiveApiKey()).toBe("sk-ant-db-override-1234"); // DB overrides env
+    await s.clearConfigOverride("ai.apiKey");
+    expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ"); // back to env
+  });
+
+  it("the config view reports source + last4 but NEVER the raw key", async () => {
+    const s = configSvc();
+    const env = await aiKeyRow(s);
+    expect(env).toMatchObject({ set: true, source: "environment", last4: "WXYZ" });
+    expect(env).not.toHaveProperty("value");
+    expect(JSON.stringify(env)).not.toContain("sk-ant-env-key-WXYZ");
+
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    const db = await aiKeyRow(s);
+    expect(db).toMatchObject({ set: true, source: "database", last4: "1234" });
+    expect(JSON.stringify(db)).not.toContain("sk-ant-db-override-1234");
+  });
+
+  it("with no env key and no DB key, AI is disabled until the admin sets one", async () => {
+    const noKey = adminSettingsService({
+      settings: fakeSettings(),
+      config: loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" }),
+      envPresent: new Set(["CANVAS_DROP_AUTH_MODE"]),
+    });
+    expect(await noKey.aiEnabled()).toBe(false);
+    expect((await aiKeyRow(noKey))?.set).toBe(false);
+    await noKey.setConfigOverride("ai.apiKey", "sk-ant-fresh-0000");
+    expect(await noKey.aiEnabled()).toBe(true);
+  });
+
+  it("empty/whitespace input clears the key override (reverts to env)", async () => {
+    const s = configSvc();
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    await s.setConfigOverride("ai.apiKey", "   ");
+    expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
+  });
+
+  it("a READ-ONLY secret exposes only `set` — never last4 (no fragment leak)", async () => {
+    // Session secret is secret + read-only → set:true, but NO last4.
+    const s = configSvc();
+    const sessionSecret = (await s.describeConfig()).find((r) => r.key === "core.sessionSecret");
+    expect(sessionSecret).toMatchObject({ secret: true, editable: false, set: true });
+    expect(sessionSecret?.last4).toBeUndefined();
+    expect(sessionSecret).not.toHaveProperty("value");
+  });
+});
+
+describe("adminSettingsService — unified Configuration view", () => {
+  it("describeConfig masks secrets (set + last4, no raw value) and labels the source", async () => {
+    const s = configSvc();
+    const rows = await s.describeConfig();
+    const key = rows.find((r) => r.key === "ai.apiKey");
+    expect(key).toMatchObject({ secret: true, editable: true, set: true, source: "environment" });
+    expect(key?.last4).toBe("WXYZ");
+    expect(key).not.toHaveProperty("value"); // raw value never serialized
+    expect(JSON.stringify(rows)).not.toContain("sk-ant-env-key-WXYZ");
+  });
+
+  it("describeConfig shows non-secret values and flips source to database on override", async () => {
+    const s = configSvc();
+    let rows = await s.describeConfig();
+    const models = rows.find((r) => r.key === "ai.models");
+    // CANVAS_DROP_AI_MODELS isn't in our ENV set → the value comes from the default.
+    expect(models).toMatchObject({ secret: false, editable: true, source: "default" });
+    expect(models?.value).toContain("claude");
+
+    await s.setConfigOverride("ai.models", ["claude-opus-4-8"]);
+    rows = await s.describeConfig();
+    const after = rows.find((r) => r.key === "ai.models");
+    expect(after).toMatchObject({ source: "database", overridden: true, value: "claude-opus-4-8" });
+  });
+
+  it("a value not present in env shows source=default", async () => {
+    // ai.models is NOT in our ENV set → default.
+    const s = adminSettingsService({
+      settings: fakeSettings(),
+      config: fullConfig,
+      envPresent: new Set(["CANVAS_DROP_AUTH_MODE"]),
+    });
+    const models = (await s.describeConfig()).find((r) => r.key === "ai.models");
+    expect(models?.source).toBe("default");
+  });
+});
+
+describe("adminSettingsService — setConfigOverride validation", () => {
+  it("coerces + validates an editable number; rejects non-positive", async () => {
+    const s = configSvc();
+    await s.setConfigOverride("quota.ai.user.daily.usd", 25);
+    expect(await s.effectiveQuota("ai.user.daily.usd", 5)).toBe(25);
+    await expect(s.setConfigOverride("quota.ai.user.daily.usd", 0)).rejects.toThrow();
+    await expect(s.setConfigOverride("quota.ai.user.daily.usd", -3)).rejects.toThrow();
+  });
+
+  it("rejects a read-only field and an unknown key", async () => {
+    const s = configSvc();
+    await expect(s.setConfigOverride("auth.mode", "oidc")).rejects.toThrow(/read-only/);
+    await expect(s.setConfigOverride("access.adminEmails", "a@x.com")).rejects.toThrow(/read-only/);
+    await expect(s.setConfigOverride("does.not.exist", "x")).rejects.toThrow(/unknown/);
+  });
+
+  it("empty csv / empty secret clears the override rather than storing nothing", async () => {
+    const s = configSvc();
+    await s.setConfigOverride("ai.models", ["a", "b"]);
+    await s.setConfigOverride("ai.models", "   ,  "); // all-empty → clear
+    const models = (await s.describeConfig()).find((r) => r.key === "ai.models");
+    expect(models?.overridden).toBe(false);
+  });
+
+  it("clearConfigOverride reverts an editable field to env/default", async () => {
+    const s = configSvc();
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    await s.clearConfigOverride("ai.apiKey");
+    expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
   });
 });

@@ -60,6 +60,51 @@ function buildApi(client: DbClient, userId: string, provider: ModelProvider, con
   return app;
 }
 
+/** Build the API with a `settings` stub so the DB-effective config path runs
+ *  (effective key/models/quota), mirroring production wiring. */
+function buildApiWithSettings(
+  client: DbClient,
+  userId: string,
+  provider: ModelProvider,
+  settings: {
+    effectiveModels: () => Promise<string[]>;
+    effectiveApiKey: () => Promise<string | undefined>;
+    aiEnabled: () => Promise<boolean>;
+    effectiveQuota: (key: string, fallback: number) => Promise<number>;
+  },
+  config = aiConfig,
+) {
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("user", {
+      id: userId,
+      email: "owner@example.com",
+      name: "Owner",
+      avatarUrl: null,
+      isAdmin: false,
+    } as never);
+    await next();
+  });
+  app.route(
+    "/v1/c/:slug",
+    canvasApiRoutes({
+      config,
+      canvases: canvasesRepository(client),
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      kv: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      files: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      usage: {} as any,
+      aiUsage: aiUsageRepository(client),
+      aiProvider: provider,
+      // biome-ignore lint/suspicious/noExplicitAny: narrow settings stub for this suite
+      settings: settings as any,
+    }),
+  );
+  return app;
+}
+
 /** Parse an SSE body into the list of decoded `data:` JSON objects. */
 function parseSSE(body: string): Array<Record<string, unknown>> {
   return body
@@ -208,6 +253,59 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     const body = (await res.json()) as { code: string; scope: string };
     expect(body.code).toBe("QUOTA_EXCEEDED");
     expect(body.scope).toBe("user_daily");
+  });
+
+  it("enforces the admin-overridden (DB) AI USD daily quota, not the env config value", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await makeCanvas(client);
+    // Spend $1 — under the env cap ($5) but at the admin-lowered override ($1).
+    await aiUsageRepository(client).record({
+      canvasId: cv.id,
+      userId: owner.id,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 1,
+    });
+    const settings = {
+      effectiveModels: async () => ["claude-haiku-4-5"],
+      effectiveApiKey: async () => "test-key",
+      aiEnabled: async () => true,
+      // Admin lowered the per-user daily cap to $1; everything else uses the fallback.
+      effectiveQuota: async (key: string, fallback: number) =>
+        key === "ai.user.daily.usd" ? 1 : fallback,
+    };
+    const res = await post(
+      buildApiWithSettings(client, owner.id, fakeProvider({ deltas: ["x"] }), settings),
+      { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] },
+    );
+    // The env cap ($5) would allow this; the DB override ($1) blocks it.
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { scope: string }).scope).toBe("user_daily");
+  });
+
+  it("a DB-set key flips the capability gate from 403 to allowed with NO env key (no restart)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeCanvas(client);
+    const settings = {
+      effectiveModels: async () => ["claude-haiku-4-5"],
+      effectiveApiKey: async () => "db-set-key",
+      aiEnabled: async () => true, // admin set the key in the DB; env has none
+      effectiveQuota: async (_key: string, fallback: number) => fallback,
+    };
+    const res = await post(
+      // noKeyConfig: env has NO provider key — only the DB key (via settings) enables AI.
+      buildApiWithSettings(
+        client,
+        owner.id,
+        fakeProvider({ deltas: ["ok"] }),
+        settings,
+        noKeyConfig,
+      ),
+      { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] },
+    );
+    expect(res.status).toBe(200); // gate passed on the DB-effective key, not config
   });
 
   it("403 CAPABILITY_DISABLED when backend is off", async () => {

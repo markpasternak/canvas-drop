@@ -11,8 +11,7 @@ export const keys = {
   usage: (id: string) => ["usage", id] as const,
   adminCanvases: (status?: AdminCanvasStatus) => ["admin", "canvases", status ?? "all"] as const,
   adminOverview: ["admin", "overview"] as const,
-  adminModels: ["admin", "models"] as const,
-  adminQuotas: ["admin", "quotas"] as const,
+  adminConfig: ["admin", "config"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
 };
 
@@ -66,12 +65,8 @@ export function useAdminOverview() {
   return useQuery({ queryKey: keys.adminOverview, queryFn: api.admin.overview });
 }
 
-export function useAdminModels() {
-  return useQuery({ queryKey: keys.adminModels, queryFn: api.admin.getModels });
-}
-
-export function useAdminQuotas() {
-  return useQuery({ queryKey: keys.adminQuotas, queryFn: api.admin.getQuotas });
+export function useAdminConfig() {
+  return useQuery({ queryKey: keys.adminConfig, queryFn: api.admin.getConfig });
 }
 
 export function useGallery(query: GalleryQuery) {

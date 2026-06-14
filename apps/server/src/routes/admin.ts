@@ -38,6 +38,11 @@ const modelsBody = z.object({ models: z.array(z.string().min(1)).min(1) });
 const quotasBody = z.object({
   quotas: z.record(z.string(), z.number().finite().positive()),
 });
+// A config override value: string | number | boolean | string[] (per the field's
+// type — the settings service validates/coerces against the registry).
+const configBody = z.object({
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+});
 
 /** The hard fallback for each admin-tunable quota key (KV/files constants; AI from config). */
 function quotaFallback(config: Config, key: QuotaKey): number {
@@ -256,6 +261,47 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       action: "admin_settings_update",
       actorId: c.get("user").id,
       meta: { keys: keys.map((k) => `quota.${k}`) },
+    });
+    return c.json({ ok: true });
+  });
+
+  // --- Unified Configuration view (§6.10, this round) ---
+  // Every setting with its effective value / source / secret-mask. Secrets carry
+  // NO raw value, only configured + last-4. A safe subset is editable (DB override).
+
+  app.get("/config", async (c) => {
+    return c.json({ fields: await deps.settings.describeConfig() });
+  });
+
+  app.put("/config/:key", sameOrigin, async (c) => {
+    const key = c.req.param("key");
+    const body = configBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      await deps.settings.setConfigOverride(key, body.data.value);
+    } catch (err) {
+      return c.json({ error: "invalid_value", message: (err as Error).message }, 400);
+    }
+    // NEVER log the value — a setting may be a secret (e.g. the AI provider key).
+    deps.audit.recordAudit({
+      action: "admin_settings_update",
+      actorId: c.get("user").id,
+      meta: { keys: [`config.${key}`] },
+    });
+    return c.json({ ok: true });
+  });
+
+  app.delete("/config/:key", sameOrigin, async (c) => {
+    const key = c.req.param("key");
+    try {
+      await deps.settings.clearConfigOverride(key);
+    } catch (err) {
+      return c.json({ error: "invalid_key", message: (err as Error).message }, 400);
+    }
+    deps.audit.recordAudit({
+      action: "admin_settings_update",
+      actorId: c.get("user").id,
+      meta: { keys: [`config.${key}`, "cleared"] },
     });
     return c.json({ ok: true });
   });

@@ -357,18 +357,18 @@ export function useAdminRestoreCanvas() {
   });
 }
 
-export function useAdminSetModels() {
+/** Set or clear (value === null) a DB override for an editable config setting. */
+export function useAdminSetConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (models: string[]) => api.admin.setModels(models),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminModels }),
-  });
-}
-
-export function useAdminSetQuotas() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (quotas: Record<string, number>) => api.admin.setQuotas(quotas),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminQuotas }),
+    mutationFn: ({
+      key,
+      value,
+    }: {
+      key: string;
+      value: string | number | boolean | string[] | null;
+    }) => (value === null ? api.admin.clearConfig(key) : api.admin.setConfig(key, value)),
+    // The effective AI key/models also feed the capabilities view; refresh broadly.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
   });
 }

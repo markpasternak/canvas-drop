@@ -25,6 +25,11 @@ export function settingsRepository(client: DbClient) {
         await db.insert(t).values({ key, value });
       }
     },
+
+    /** Remove a stored override so the value falls back to env/default. */
+    async delete(key: string): Promise<void> {
+      await db.delete(t).where(eq(t.key, key));
+    },
   };
 }
 
