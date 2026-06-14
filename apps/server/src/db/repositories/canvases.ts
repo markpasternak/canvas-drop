@@ -550,6 +550,29 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
+     * Unpublish (owner-initiated, reversible): take a published canvas back to the
+     * Draft state. Clears the current-version pointer (the public URL then 404s)
+     * AND clears gallery listing in the same write — a Draft canvas can't sit in
+     * the gallery (mirrors the gallery-clear invariant elsewhere). Guarded to fire
+     * ONLY from an `active` row that currently has a published version, so the
+     * route 409s on a Draft/archived/disabled canvas instead of silently no-opping.
+     * The draft and version history are untouched; re-publishing brings it back.
+     */
+    async unpublish(id: string): Promise<boolean> {
+      const rows = (await db
+        .update(t)
+        .set({
+          currentVersionId: null,
+          galleryListed: false,
+          galleryTemplatable: false,
+          updatedAt: Date.now(),
+        })
+        .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
      * Soft-deleted canvases eligible for a purge sweep. `cutoffMs === null`
      * returns every deleted canvas; a number returns only those soft-deleted at
      * or before the cutoff (the retention window). Oldest deletions first.

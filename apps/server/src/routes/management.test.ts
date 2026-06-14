@@ -353,6 +353,70 @@ describe("managementRoutes", () => {
     expect(scoped.total).toBe(1);
   });
 
+  it("unpublish takes a published canvas to Draft and clears its gallery listing", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    // Create + publish via paste, then share and list it in the gallery.
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    const patch = (body: unknown) =>
+      app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    await patch({ shared: true });
+    await patch({ galleryListed: true });
+
+    const res = await app.request(`/api/canvases/${created.id}/unpublish`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    const view = await jsonOf<{
+      publicationState: string;
+      currentVersionId: string | null;
+      galleryListed: boolean;
+    }>(res);
+    expect(view.publicationState).toBe("draft");
+    expect(view.currentVersionId).toBeNull();
+    expect(view.galleryListed).toBe(false);
+    // Still in the owner's active list (Draft, not archived).
+    const active = await jsonOf<{ canvases: { id: string }[] }>(await app.request("/api/canvases"));
+    expect(active.canvases.map((c) => c.id)).toContain(created.id);
+  });
+
+  it("unpublish on a Draft canvas → 409 NOT_PUBLISHED; a non-owner → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const onDraft = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/unpublish`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(onDraft.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(onDraft)).code).toBe("NOT_PUBLISHED");
+
+    const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/unpublish`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(asOther.status).toBe(404);
+  });
+
   it("unarchive restores a canvas to the active list", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

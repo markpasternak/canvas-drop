@@ -109,6 +109,42 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect((await repo.findById(cv.id))?.status).toBe("disabled");
   });
 
+  it("unpublishes a published canvas → clears the version pointer AND gallery listing", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "pub-1", apiKeyHash: "h" });
+    await deploy(client, cv.id, ownerId);
+    await repo.updateSettings(cv.id, { shared: true, galleryListed: true, galleryTemplatable: true });
+
+    expect(await repo.unpublish(cv.id)).toBe(true);
+    const after = await repo.findById(cv.id);
+    expect(after?.status).toBe("active"); // still active + editable, just Draft now
+    expect(after?.currentVersionId).toBeNull();
+    expect(after?.galleryListed).toBe(false);
+    expect(after?.galleryTemplatable).toBe(false);
+  });
+
+  it("does NOT unpublish a draft / archived / disabled canvas (guarded transition)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    // Draft (active, never published) → no current version → false.
+    const draft = await repo.create({ ownerId, slug: "d-1", apiKeyHash: "h" });
+    expect(await repo.unpublish(draft.id)).toBe(false);
+    // Archived published → false (unarchive first).
+    const arch = await repo.create({ ownerId, slug: "a-1", apiKeyHash: "h2" });
+    await deploy(client, arch.id, ownerId);
+    await repo.archive(arch.id);
+    expect(await repo.unpublish(arch.id)).toBe(false);
+    expect((await repo.findById(arch.id))?.currentVersionId).not.toBeNull(); // untouched
+    // Disabled published → false.
+    const dis = await repo.create({ ownerId, slug: "x-1", apiKeyHash: "h3" });
+    await deploy(client, dis.id, ownerId);
+    await repo.setDisabled(dis.id, "policy");
+    expect(await repo.unpublish(dis.id)).toBe(false);
+  });
+
   it("does not archive a deleted canvas (no tombstone resurrection)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);

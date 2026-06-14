@@ -575,6 +575,33 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json(await canvasView({ ...cv, status: "active" }));
   });
 
+  // Unpublish — take a published canvas back to Draft (its public URL 404s) while
+  // keeping it in the owner's active list and fully editable. Clears the gallery
+  // listing (a Draft can't be in the gallery). A 409 when the canvas isn't
+  // currently published (Draft/archived/disabled) rather than silently no-opping.
+  app.post("/:id/unpublish", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (!(await deps.canvases.unpublish(cv.id))) {
+      return c.json({ code: "NOT_PUBLISHED", message: "canvas is not published" }, 409);
+    }
+    deps.audit.recordAudit({
+      action: "canvas_unpublish",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+    });
+    // Offline for everyone now → drop live sockets (D-RT-6).
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    return c.json(
+      await canvasView({
+        ...cv,
+        currentVersionId: null,
+        galleryListed: false,
+        galleryTemplatable: false,
+      }),
+    );
+  });
+
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
   // endpoint — owner/admin only, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
