@@ -160,3 +160,23 @@ export function singleHtmlFile<T extends Pick<DraftFile, "mime">>(files: T[]): T
   const html = files.filter(isHtmlFile);
   return html.length === 1 ? (html[0] ?? null) : null;
 }
+
+const SCRIPT_EXTENSIONS = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx"];
+
+/**
+ * True when the draft ships JavaScript. The inline draft preview (DraftPreview)
+ * runs in a sandboxed, opaque `null` origin, so ES modules are CORS-blocked and the
+ * SDK's signed-in API calls can't send the session cookie — JS-driven canvases
+ * don't run there (only static HTML/CSS/images render). We use this to swap the
+ * inline frame for an "Open full preview" affordance (the new tab is top-level,
+ * same-origin, and runs everything). Keyed on MIME first (matching {@link isHtmlFile}),
+ * with an extension fallback for types the server maps loosely (e.g. `.mjs`).
+ */
+export function draftUsesScripts(files: Pick<DraftFile, "path" | "mime">[]): boolean {
+  return files.some((f) => {
+    const mime = f.mime.toLowerCase();
+    if (mime.includes("javascript") || mime.includes("ecmascript")) return true;
+    const path = f.path.toLowerCase();
+    return SCRIPT_EXTENSIONS.some((ext) => path.endsWith(ext));
+  });
+}

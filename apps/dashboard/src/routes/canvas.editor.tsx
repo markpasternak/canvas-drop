@@ -31,6 +31,7 @@ import { useToast } from "../components/Toast.js";
 import { ApiError, api, type DraftFile, type DraftView } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import {
+  draftUsesScripts,
   isEditableFile,
   isHtmlFile,
   nonEditableReason,
@@ -127,6 +128,10 @@ export default function Editor() {
   // On-page editing is only offered for a single static HTML page (see singleHtmlFile).
   const htmlFiles = draft ? draft.files.filter(isHtmlFile) : [];
   const htmlFile = draft ? singleHtmlFile(draft.files) : null;
+  // JS-driven drafts can't run in the sandboxed inline preview (opaque origin → ES
+  // modules CORS-blocked, SDK calls unauthenticated), so the preview pane swaps to a
+  // "Open full preview" notice; static canvases keep the live inline frame.
+  const usesScripts = draft ? draftUsesScripts(draft.files) : false;
   const htmlCount = htmlFiles.length;
   const rootHtmlFile = htmlFiles.find((f) => f.path.toLowerCase() === ROOT_HTML) ?? null;
   const onPageHint =
@@ -640,6 +645,7 @@ export default function Editor() {
           fullscreen={false}
           onToggleFullscreen={() => setPreviewFullscreen(true)}
           onHide={() => setPreviewVisible(false)}
+          usesScripts={usesScripts}
         />
       </section>
     ) : null;
