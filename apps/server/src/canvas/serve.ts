@@ -3,6 +3,7 @@ import type { Canvas, Manifest, ManifestEntry } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { errorResponse } from "../http/error-pages.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -88,14 +89,22 @@ type NotFoundReason = "unpublished" | "no-home" | "missing";
  * content at the path; access-denial 404s come from canvasAccess (no leak).
  */
 function notFound(c: Context<AppEnv>, reason: NotFoundReason = "missing") {
-  const wantsHtml = c.req.header("accept")?.includes("text/html") ?? false;
-  const headers = new Headers({
-    "Content-Type": wantsHtml ? "text/html; charset=utf-8" : "application/json",
-    "Cache-Control": "no-store",
-  });
-  securityHeaders(headers);
-  const body = wantsHtml ? notFoundPage(reason) : JSON.stringify({ error: "not_found" });
-  return c.body(body, 404, Object.fromEntries(headers));
+  const copy = NOT_FOUND_COPY[reason];
+  return errorResponse(
+    c,
+    {
+      status: 404,
+      code: "not_found",
+      title: copy.title,
+      message: copy.body,
+      hint: copy.hint,
+    },
+    { error: "not_found" },
+    {
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "frame-ancestors 'none'",
+    },
+  );
 }
 
 const NOT_FOUND_COPY: Record<NotFoundReason, { title: string; body: string; hint?: string }> = {
@@ -113,42 +122,3 @@ const NOT_FOUND_COPY: Record<NotFoundReason, { title: string; body: string; hint
     body: "There’s no page at this address.",
   },
 };
-
-/** A tiny, dependency-free, org-agnostic 404 page (light + dark). Copy is static
- *  — no canvas data is interpolated, so there's nothing to escape or leak. */
-function notFoundPage(reason: NotFoundReason): string {
-  const { title, body, hint } = NOT_FOUND_COPY[reason];
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 2rem;
-    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: #fbfbfc; color: #1a1a1e; }
-  main { max-width: 26rem; text-align: center; }
-  .code { margin: 0; font: 600 .75rem ui-monospace, monospace; letter-spacing: .08em; color: #8a8a93; }
-  h1 { margin: .5rem 0; font-size: 1.375rem; letter-spacing: -.01em; }
-  p.msg { margin: 0; color: #56565f; }
-  .hint { margin-top: 1.25rem; padding: .5rem .75rem; display: inline-block; border-radius: .5rem;
-    font: .8125rem ui-monospace, monospace; color: #56565f; background: rgba(0,0,0,.04); }
-  @media (prefers-color-scheme: dark) {
-    body { background: #0a0a0c; color: #f4f4f5; }
-    p.msg, .code, .hint { color: #a1a1aa; } .hint { background: rgba(255,255,255,.06); }
-  }
-</style>
-</head>
-<body>
-  <main>
-    <p class="code">404</p>
-    <h1>${title}</h1>
-    <p class="msg">${body}</p>
-    ${hint ? `<p class="hint">${hint}</p>` : ""}
-  </main>
-</body>
-</html>`;
-}

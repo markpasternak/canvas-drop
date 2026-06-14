@@ -67,6 +67,15 @@ describe("serveSpa", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
   });
 
+  it("keeps stale asset requests JSON for ambiguous Accept headers", async () => {
+    const res = await appFor(config).request("/assets/old-chunk-deadbeef.js", {
+      headers: { Accept: "*/*" },
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
   it("treats a malformed percent-encoded path as a shell request (no 500)", async () => {
     const res = await appFor(config).request("/%E0%A4%A");
     expect(res.status).toBe(200);
@@ -92,6 +101,24 @@ describe("serveSpa", () => {
     });
     const res = await appFor(missing).request("/");
     expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual({
+      error: "dashboard_not_built",
+      message: "dashboard dist not found",
+    });
+  });
+
+  it("returns a designed 503 page for browser requests when the SPA isn't built", async () => {
+    const missing = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DASHBOARD_DIST: join(dist, "does-not-exist"),
+    });
+    const res = await appFor(missing).request("/", { headers: { Accept: "text/html" } });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Dashboard not built");
+    expect(html).toContain("pnpm build");
   });
 
   it("logs a warning (not just a silent 503) when the SPA isn't built", async () => {

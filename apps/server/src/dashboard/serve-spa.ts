@@ -5,6 +5,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { mimeFor } from "../canvas/mime.js";
+import { errorResponse } from "../http/error-pages.js";
 import type { AppEnv } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 
@@ -114,7 +115,19 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
     // lazy-route chunk requested across a redeploy then fails cleanly (and with
     // nosniff the browser won't execute HTML as a module) instead of silently
     // serving index.html with a 200.
-    if (isHashedAsset) return c.json({ error: "not_found" }, 404);
+    if (isHashedAsset) {
+      return errorResponse(
+        c,
+        {
+          status: 404,
+          code: "not_found",
+          title: "Asset not found",
+          message: "This dashboard asset is no longer available. Refresh the page and try again.",
+        },
+        { error: "not_found" },
+        { "Cache-Control": "no-store" },
+      );
+    }
 
     // History fallback → index.html (SPA routing).
     const index = await read(indexPath, log);
@@ -124,7 +137,18 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
         { distDir, indexPath },
         "serveSpa: dashboard index.html not found — is the SPA built? (pnpm build)",
       );
-      return c.json({ error: "dashboard_not_built", message: "dashboard dist not found" }, 503);
+      return errorResponse(
+        c,
+        {
+          status: 503,
+          code: "dashboard_not_built",
+          title: "Dashboard not built",
+          message: "dashboard dist not found",
+          hint: "Run pnpm build before starting the production server.",
+        },
+        { error: "dashboard_not_built", message: "dashboard dist not found" },
+        { "Cache-Control": "no-store" },
+      );
     }
     return indexResponse(c, index);
   });

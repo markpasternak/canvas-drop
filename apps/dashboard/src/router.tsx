@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
+import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
 
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
@@ -19,7 +20,11 @@ const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
 const AdminRoute = lazy(() => import("./routes/admin.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
 
-const rootRoute = createRootRoute({ component: AppLayout });
+const rootRoute = createRootRoute({
+  component: AppLayout,
+  errorComponent: DashboardRouteErrorState,
+  notFoundComponent: DashboardNotFoundState,
+});
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -132,7 +137,12 @@ export const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: "intent" });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  defaultErrorComponent: DashboardRouteErrorState,
+  defaultNotFoundComponent: DashboardNotFoundState,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {
