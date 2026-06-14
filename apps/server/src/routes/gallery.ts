@@ -59,6 +59,13 @@ export interface GalleryPageDto {
   offset: number;
 }
 
+/** The pickable owner/tag lists for the gallery filter UI (plan 004). Owners carry
+ *  display identity + the opaque filter id only — never email/internal flags. */
+export interface GalleryFacetsDto {
+  owners: Array<{ id: string; name: string; avatarUrl: string | null }>;
+  tags: string[];
+}
+
 /** Display-only projection of a gallery row — explicit field list, never a spread
  *  of the canvas/user row, so api_key_hash / password_hash / owner email / internal
  *  flags can never leak (§12.0 #1). */
@@ -128,6 +135,20 @@ export function galleryRoutes(deps: GalleryDeps) {
       limit,
       offset,
     });
+  });
+
+  // Pickable owner/tag lists for the filter UI (plan 004). Same session gateway,
+  // same visibility predicate as the browse — facets can only reference owners/tags
+  // whose canvas is currently visible. Owners are projected by the repo to
+  // {id,name,avatarUrl} only; re-state the explicit shape here so a future repo
+  // change can't silently widen what the route returns (§12).
+  app.get("/facets", async (c) => {
+    const { owners, tags } = await deps.canvases.listGalleryFacets(Date.now());
+    const dto: GalleryFacetsDto = {
+      owners: owners.map((o) => ({ id: o.id, name: o.name, avatarUrl: o.avatarUrl })),
+      tags,
+    };
+    return c.json(dto);
   });
 
   return app;

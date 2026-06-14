@@ -214,6 +214,28 @@ describe("galleryRoutes", () => {
     expect(res.body.items).toHaveLength(1);
   });
 
+  it("exposes owner/tag facets with no PII leak (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const alice = await seedUser(client, "alice");
+    const bob = await seedUser(client, "bob");
+    await seedListed(client, alice.id, { galleryTags: ["charts"] });
+    await seedListed(client, bob.id, { galleryTags: ["games", "charts"] });
+
+    const res = await buildApp(client).request("/api/gallery/facets");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      owners: Array<{ id: string; name: string; avatarUrl: string | null }>;
+      tags: string[];
+    };
+    expect(body.owners.map((o) => o.name).sort()).toEqual(["alice", "bob"]);
+    expect(body.tags).toEqual(["charts", "games"]);
+    // Owner facet objects are display + opaque id only — no email/internal flags.
+    for (const o of body.owners) {
+      expect(Object.keys(o).sort()).toEqual(["avatarUrl", "id", "name"]);
+    }
+    expect(JSON.stringify(body)).not.toContain("@example.com");
+  });
+
   it("is GET-only — POST is not routed", async () => {
     client = await makeTestDb("sqlite");
     const res = await buildApp(client).request("/api/gallery", { method: "POST" });

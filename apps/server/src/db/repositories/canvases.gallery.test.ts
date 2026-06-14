@@ -337,6 +337,54 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
   });
 });
 
+describe.each(DIALECTS)("canvasesRepository.listGalleryFacets [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const NOW = 1_000_000;
+
+  it("returns distinct owners (only those with a visible canvas), id+name+avatar only", async () => {
+    client = await makeTestDb(dialect);
+    const alice = await seedUser(client, "alice");
+    const bob = await seedUser(client, "bob");
+    const carol = await seedUser(client, "carol");
+    const repo = canvasesRepository(client);
+
+    await seedListed(client, alice.id);
+    await seedListed(client, alice.id); // alice appears once despite two canvases
+    await seedListed(client, bob.id);
+    // carol has only a non-visible canvas (unlisted) → absent from facets.
+    await repo.updateSettings(await seedPublishedCanvas(client, carol.id), { shared: true });
+
+    const { owners } = await repo.listGalleryFacets(NOW);
+    expect(owners.map((o) => o.name)).toEqual(["alice", "bob"]);
+    expect(owners.map((o) => o.id).sort()).toEqual([alice.id, bob.id].sort());
+    // Exactly the public owner shape — no email / internal flags.
+    for (const o of owners) {
+      expect(Object.keys(o).sort()).toEqual(["avatarUrl", "id", "name"]);
+    }
+  });
+
+  it("returns the deduped tag set across visible canvases only", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+
+    await seedListed(client, owner.id, { galleryTags: ["charts", "finance"] });
+    await seedListed(client, owner.id, { galleryTags: ["charts", "games"] });
+    // A non-visible (unlisted) canvas's tag must NOT leak into the facets.
+    await repo.updateSettings(await seedPublishedCanvas(client, owner.id), {
+      shared: true,
+      galleryTags: ["secret"],
+    });
+
+    const { tags } = await repo.listGalleryFacets(NOW);
+    expect(tags).toEqual(["charts", "finance", "games"]);
+  });
+});
+
 describe.each(DIALECTS)("canvasesRepository.findCloneableTemplate [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {

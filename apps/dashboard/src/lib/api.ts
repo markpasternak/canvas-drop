@@ -214,6 +214,12 @@ export interface GalleryQuery {
   offset?: number;
 }
 
+/** Pickable owner/tag lists for the gallery filter UI (plan 004). */
+export interface GalleryFacets {
+  owners: Array<{ id: string; name: string; avatarUrl: string | null }>;
+  tags: string[];
+}
+
 /** Gallery page size: the client's `limit` AND the page→offset divisor. One
  *  constant so the page math can never desync from the requested page size. */
 export const GALLERY_PAGE_SIZE = 24;
@@ -490,6 +496,9 @@ export const api = {
     const qs = sp.toString();
     return request<GalleryPage>(`/api/gallery${qs ? `?${qs}` : ""}`);
   },
+
+  /** Pickable owner/tag lists for the gallery filter UI (plan 004). */
+  listGalleryFacets: () => request<GalleryFacets>("/api/gallery/facets"),
 
   listCanvases: () =>
     request<{ canvases: CanvasListItem[] }>("/api/canvases").then((r) => r.canvases),

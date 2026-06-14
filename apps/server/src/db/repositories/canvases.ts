@@ -529,6 +529,40 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
+     * Distinct owners + tags across the currently-visible gallery (plan 004), so
+     * the filter UI can offer pickable lists. Reuses the SAME visibility predicate
+     * as {@link listGallery} so a facet can never reference an owner/tag whose only
+     * canvas is non-visible. Owners are projected to display identity + opaque id
+     * ONLY — never email/internal flags (§12). Tags are flattened + deduped in JS
+     * rather than via dialect-divergent JSON unnesting; at gallery scale (dozens of
+     * rows) that is simplest and keeps the query dual-dialect-trivial.
+     */
+    async listGalleryFacets(now: number): Promise<GalleryFacets> {
+      const where = and(...galleryVisibilityFilters(now));
+
+      const owners = (await db
+        .selectDistinct({ id: usersT.id, name: usersT.name, avatarUrl: usersT.avatarUrl })
+        .from(t)
+        .innerJoin(usersT, eq(t.ownerId, usersT.id))
+        .where(where)
+        .orderBy(usersT.name)) as GalleryFacets["owners"];
+
+      const tagRows = (await db.select({ tags: t.galleryTags }).from(t).where(where)) as Array<{
+        tags: unknown;
+      }>;
+      const tagSet = new Set<string>();
+      for (const row of tagRows) {
+        if (Array.isArray(row.tags)) {
+          for (const tag of row.tags) {
+            if (typeof tag === "string") tagSet.add(tag);
+          }
+        }
+      }
+
+      return { owners, tags: [...tagSet].sort() };
+    },
+
+    /**
      * Clone-eligibility for a NON-owner (plan 002 R2): the canvas must satisfy the
      * exact gallery-visibility predicate AND be marked templatable. Returns the row
      * when cloneable, else null — the route 404s opaquely for null so a non-eligible
