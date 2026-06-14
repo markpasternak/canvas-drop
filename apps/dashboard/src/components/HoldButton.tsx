@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn.js";
 
 /** Default press-and-hold duration before the action fires. */
-export const HOLD_MS = 1200;
+export const HOLD_MS = 1000;
 
 /**
  * A destructive action that requires a deliberate press-and-hold instead of a
@@ -89,14 +89,18 @@ export function HoldButton({
       className={cn(
         "relative inline-flex h-8 items-center justify-center gap-2 overflow-hidden rounded-md px-3",
         "select-none whitespace-nowrap text-[0.8125rem] font-medium text-danger-fg",
-        "bg-danger hover:bg-danger-hover transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+        // No hover color-shift: it would mask the fill while you mouse-hold.
+        "bg-danger",
         "disabled:pointer-events-none disabled:opacity-50",
+        holding && "[&>.label]:scale-[0.97]",
         className,
       )}
     >
+      {/* The progress fill. `danger-fg`-tinted so it reads in both themes (a light
+          sweep on light mode, a dark sweep on dark) while the label stays legible. */}
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 origin-left bg-danger-hover/35"
+        className="pointer-events-none absolute inset-y-0 left-0 w-full origin-left bg-danger-fg/35"
         style={{
           transform: holding ? "scaleX(1)" : "scaleX(0)",
           transition: `transform ${holding ? holdMs : 150}ms linear`,
@@ -105,7 +109,9 @@ export function HoldButton({
       {loading && (
         <span className="relative size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
       )}
-      <span className="relative">{children}</span>
+      <span className="label relative inline-flex items-center gap-2 transition-transform duration-150">
+        {children}
+      </span>
     </button>
   );
 }
