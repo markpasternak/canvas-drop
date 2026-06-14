@@ -150,42 +150,51 @@ export default function Settings() {
                   404. Clear or extend the expiry to share it again.
                 </InlineNotice>
               )}
-              {/* Gallery is only meaningful for shared canvases, so it stays hidden until shared. */}
-              <div className="space-y-4 border-t border-border pt-4">
-                <Toggle
-                  label="List in the gallery"
-                  description="Show this canvas in the opt-in gallery with a title, summary, and tags."
-                  checked={canvas.galleryListed}
-                  onChange={(galleryListed) => save({ galleryListed })}
-                />
-                {canvas.galleryListed && (
-                  <>
-                    <Field
-                      label="Gallery summary"
-                      value={gallerySummary}
-                      onChange={(e) => setGallerySummary(e.target.value)}
-                      onBlur={() => save({ gallerySummary: gallerySummary || null })}
-                      maxLength={500}
-                    />
-                    <Field
-                      label="Tags"
-                      hint="comma-separated"
-                      value={galleryTags}
-                      onChange={(e) => setGalleryTags(e.target.value)}
-                      onBlur={() =>
-                        save({
-                          galleryTags: galleryTags
-                            .split(",")
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </>
-                )}
-              </div>
             </>
           )}
+
+          {/* Gallery listing. A gallery canvas must be openable by org members, so it
+              requires sharing (D4). The control is always shown for discoverability,
+              but disabled with a hint until the canvas is shared. */}
+          <div className="space-y-4 border-t border-border pt-4">
+            <Toggle
+              label="List in the gallery"
+              description="Show this canvas in the opt-in gallery with a title, summary, and tags."
+              checked={canvas.shared && canvas.galleryListed}
+              disabled={!canvas.shared}
+              onChange={(galleryListed) => save({ galleryListed })}
+            />
+            {!canvas.shared && (
+              <InlineNotice tone="neutral" className="py-2 text-xs">
+                Turn on <strong>Shared</strong> above to list this canvas in the gallery.
+              </InlineNotice>
+            )}
+            {canvas.shared && canvas.galleryListed && (
+              <>
+                <Field
+                  label="Gallery summary"
+                  value={gallerySummary}
+                  onChange={(e) => setGallerySummary(e.target.value)}
+                  onBlur={() => save({ gallerySummary: gallerySummary || null })}
+                  maxLength={500}
+                />
+                <Field
+                  label="Tags"
+                  hint="comma-separated"
+                  value={galleryTags}
+                  onChange={(e) => setGalleryTags(e.target.value)}
+                  onBlur={() =>
+                    save({
+                      galleryTags: galleryTags
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </>
+            )}
+          </div>
         </Section>
 
         <Section id="protection" title="Protection">

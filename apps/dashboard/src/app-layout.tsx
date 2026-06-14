@@ -17,8 +17,10 @@ const SECTION_LINKS: ReadonlyArray<{
 }> = [
   { to: "/", label: "Canvases", exact: true },
   { to: "/archived", label: "Archived" },
-  { to: "/admin", label: "Admin", adminOnly: true },
   { to: "/gallery", label: "Gallery" },
+  // Admin sits last — to the right of the member-facing sections, visible only to
+  // admins (and the admin API independently 404s non-admins).
+  { to: "/admin", label: "Admin", adminOnly: true },
 ];
 
 function ThemeSwitch() {

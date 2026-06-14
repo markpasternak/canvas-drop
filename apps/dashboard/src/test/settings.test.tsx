@@ -196,4 +196,22 @@ describe("settings route — confirm-and-await flows", () => {
     expect(await screen.findByText(/share expiry/i)).toBeInTheDocument();
     expect(screen.queryByText(/this share expired/i)).toBeNull();
   });
+
+  it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: false }) });
+    renderSettings();
+    // The control is visible (not hidden) even on a private canvas...
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    // ...with a hint explaining the prerequisite.
+    expect(screen.getByText(/turn on/i)).toBeInTheDocument();
+    expect(screen.getByText(/to list this canvas in the gallery/i)).toBeInTheDocument();
+  });
+
+  it("gallery-listing control is enabled once the canvas is shared", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true }) });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeEnabled();
+  });
 });

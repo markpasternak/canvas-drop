@@ -7,7 +7,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "../components/ErrorState.js";
@@ -178,6 +178,47 @@ describe("dashboard app", () => {
     if (!menuGallery) throw new Error("expected a menu Gallery link");
     await user.click(menuGallery);
     expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+  });
+
+  /** Path-aware stub: lets a test set what /api/me reports for isAdmin. */
+  function stubFetch(isAdmin: boolean) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url, "http://localhost").pathname;
+        const body =
+          path === "/api/me"
+            ? { id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin }
+            : { canvases: [] };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+  }
+
+  it("Admin is visible to admins and sits last — to the right of Gallery", async () => {
+    stubFetch(true);
+    renderApp("/");
+    // Wait for the admin-gated link to appear after /api/me resolves.
+    await screen.findByRole("link", { name: "Admin" });
+    // The (always-rendered) desktop section nav is the first "Sections" landmark.
+    const [desktopNav] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!desktopNav) throw new Error("expected the desktop Sections nav");
+    const order = within(desktopNav)
+      .getAllByRole("link")
+      .map((a) => a.textContent);
+    expect(order).toEqual(["Canvases", "Archived", "Gallery", "Admin"]);
+  });
+
+  it("Admin is hidden from non-admins (UX layer of the admin-only boundary)", async () => {
+    stubFetch(false);
+    renderApp("/");
+    await screen.findByRole("link", { name: "Gallery" });
+    const [desktopNav] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!desktopNav) throw new Error("expected the desktop Sections nav");
+    expect(within(desktopNav).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
   it("mobile menu: clicking the backdrop closes the menu", async () => {
