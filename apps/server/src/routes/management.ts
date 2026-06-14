@@ -167,7 +167,10 @@ export function managementRoutes(deps: ManagementDeps) {
   // An owner may clone any ACTIVE canvas they own; a non-owner only a gallery-listed
   // + templatable one. Eligibility is re-derived server-side from the row (never the
   // client); a non-eligible source 404s opaquely so its existence isn't revealed
-  // (§12.2). Returns the new canvas + its one-time API key, like create.
+  // (§12.2). The clone gets its OWN fresh deploy key (the source's is never copied),
+  // but unlike create we do NOT return the plaintext here — a clone's key is revealed
+  // on demand via Settings → Regenerate key, so an unused secret never transits the
+  // wire (plan 002 decision).
   app.post("/:id/clone", sameOrigin, async (c) => {
     const id = c.req.param("id");
     const user = c.get("user");
@@ -180,14 +183,14 @@ export function managementRoutes(deps: ManagementDeps) {
         : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
-    const { canvas, apiKey } = await deps.clone.clone(source, user.id);
+    const { canvas } = await deps.clone.clone(source, user.id);
     deps.audit.recordAudit({
       action: "canvas_clone",
       actorId: user.id,
       targetId: canvas.id,
       meta: { from: source.id },
     });
-    return c.json({ ...publicCanvas(deps.config, canvas), apiKey }, 201);
+    return c.json(publicCanvas(deps.config, canvas), 201);
   });
 
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched

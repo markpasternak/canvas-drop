@@ -1093,11 +1093,12 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     const body = await jsonOf<{
       id: string;
       title: string;
-      apiKey: string;
+      apiKey?: string;
       galleryListed: boolean;
     }>(res);
     expect(body.id).not.toBe(src.id);
-    expect(body.apiKey).toMatch(/^cd_/);
+    // The clone's key is NOT returned (revealed via Settings → Regenerate key instead).
+    expect(body.apiKey).toBeUndefined();
     expect(body.galleryListed).toBe(false);
     const clone = await canvasesRepository(client).findById(body.id);
     expect(clone?.ownerId).toBe(owner.id);

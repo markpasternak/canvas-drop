@@ -447,10 +447,11 @@ export const api = {
   createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
 
-  /** Clone a canvas into a new one owned by the caller (plan 002). Returns the new
-   *  canvas + its one-time API key, like create. */
+  /** Clone a canvas into a new one owned by the caller (plan 002). The clone gets its
+   *  own fresh deploy key, revealed on demand via Settings → Regenerate key — so it is
+   *  NOT returned here (no unused secret over the wire). */
   cloneCanvas: (id: string) =>
-    request<Canvas & { apiKey: string }>(`/api/canvases/${id}/clone`, { method: "POST" }),
+    request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
   pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(
