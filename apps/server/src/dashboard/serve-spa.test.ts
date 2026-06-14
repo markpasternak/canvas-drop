@@ -61,6 +61,22 @@ describe("serveSpa", () => {
     expect(res.headers.get("cache-control")).toBe("no-cache");
   });
 
+  it("404s (JSON) unmatched server-API paths instead of history-falling back to the shell", async () => {
+    for (const path of ["/api/nope", "/api", "/v1/c/x/kv/y", "/sdk/missing.js", "/auth/whoops"]) {
+      const res = await appFor(config).request(path);
+      expect(res.status, path).toBe(404);
+      expect(res.headers.get("content-type"), path).toContain("application/json");
+      expect(await res.json(), path).toEqual({ error: "not_found" });
+    }
+  });
+
+  it("still history-falls back for a client route that merely starts like an API word", async () => {
+    // `/apidocs` is a dashboard route, not the `/api` prefix — must serve the shell.
+    const res = await appFor(config).request("/apidocs");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
   it("404s a missing hashed asset instead of serving the HTML shell (stale-chunk safety)", async () => {
     const res = await appFor(config).request("/assets/old-chunk-deadbeef.js");
     expect(res.status).toBe(404);

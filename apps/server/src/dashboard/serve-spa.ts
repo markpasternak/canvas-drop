@@ -46,6 +46,17 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Cross-Origin-Opener-Policy": "same-origin",
 };
 
+// Server-owned URL prefixes. An unmatched path under one of these is a real 404
+// (a typo'd or removed endpoint), NOT a dashboard client-side route — so it must
+// never history-fallback to the SPA shell. Without this, `GET /api/typo` would
+// hand an API client `index.html` with a 200 instead of a JSON 404, masking the
+// mistake. Mirrors the hashed-asset "must 404, not fall back to HTML" guard below.
+const RESERVED_API_PREFIXES = ["/api", "/v1", "/sdk", "/auth"];
+
+function isReservedApiPath(rel: string): boolean {
+  return RESERVED_API_PREFIXES.some((p) => rel === p || rel.startsWith(`${p}/`));
+}
+
 async function read(path: string, log?: Logger): Promise<Uint8Array | null> {
   try {
     return await readFile(path);
@@ -123,6 +134,22 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
           code: "not_found",
           title: "Asset not found",
           message: "This dashboard asset is no longer available. Refresh the page and try again.",
+        },
+        { error: "not_found" },
+        { "Cache-Control": "no-store" },
+      );
+    }
+
+    // Unmatched server-API path → JSON 404, never the SPA shell (see the
+    // RESERVED_API_PREFIXES note above).
+    if (isReservedApiPath(rel)) {
+      return errorResponse(
+        c,
+        {
+          status: 404,
+          code: "not_found",
+          title: "Not found",
+          message: "There is no endpoint at this address.",
         },
         { error: "not_found" },
         { "Cache-Control": "no-store" },
