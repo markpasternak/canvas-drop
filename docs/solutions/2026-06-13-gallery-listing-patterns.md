@@ -35,8 +35,16 @@ status='active' AND shared AND gallery_listed
   Without this clause the gallery renders dead links. A multi-agent review caught
   this; it's the canonical "gallery shows a canvas it shouldn't" case. Test the
   never-deployed exclusion explicitly.
-- A password-gated canvas **is** listed (the gallery hands out links; the gate
-  enforces on open). `hasPassword` is surfaced; no password material leaves the DB.
+- ~~A password-gated canvas **is** listed (the gallery hands out links; the gate
+  enforces on open).~~ **REVERSED by plan 002 (2026-06-14).** A password-protected
+  canvas is now **never** listable: the predicate gained `password_hash IS NULL`
+  (alongside `current_version_id IS NOT NULL`), the settings route rejects listing a
+  protected canvas and auto-unlists when a password is set, and listing also requires
+  a published version. The predicate lives in **one shared builder**
+  (`galleryVisibilityFilters`) reused by `listGallery` AND the clone-eligibility check
+  (`findCloneableTemplate`) so "in the gallery" and "cloneable by a non-owner" can't
+  drift. The gallery DTO dropped `hasPassword` (always false now) for `templatable`.
+  See [[2026-06-14-clone-as-template]].
 
 ## Owner metadata: explicit projection, never a row spread (the me.ts rule, second surface)
 
