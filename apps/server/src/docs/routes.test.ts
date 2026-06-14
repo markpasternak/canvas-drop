@@ -10,7 +10,7 @@ describe("docs routes", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-    expect(html).toContain("Canvasdrop");
+    expect(html).toContain("canvas-drop");
     expect(html).toContain('class="toc"'); // left nav present
   });
 

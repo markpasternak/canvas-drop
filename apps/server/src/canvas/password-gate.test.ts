@@ -137,7 +137,7 @@ describe("passwordGate", () => {
     const html = gatePage("My Canvas", false);
     // Same brand header and design tokens as the 4xx/5xx error pages — the gate
     // must not regress to a one-off look (§14.5).
-    expect(html).toContain("Canvasdrop");
+    expect(html).toContain("canvas-drop");
     expect(html).toContain('viewBox="0 0 48 48"'); // the logo mark
     expect(html).toContain("--accent: #2563eb"); // canonical brand accent, not the old indigo
     expect(html).toContain("My Canvas is password-protected");

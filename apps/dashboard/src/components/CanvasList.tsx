@@ -7,11 +7,23 @@ import { Badge, StatusBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
 
-/** Row indicators. "Active" is the boring default — only badge what's notable:
- * a non-active status (admin takedown, archived), the access signals (shared,
- * password), the gallery state, and the deployment state. Each badge mirrors a
- * Your-canvases filter (plan 004) so the list is scannable; a clean, private,
- * deployed canvas shows no pills. */
+/** Up to this many tag pills render inline on a row; the rest collapse into a
+ *  `+N` pill so a heavily-tagged canvas can't blow out the row (plan 005). */
+const MAX_ROW_TAGS = 3;
+
+/** The canvas's gallery tags as a clean string[] — `galleryTags` is a JSON column,
+ *  so project defensively (mirrors the gallery's own defensive read). */
+function canvasTags(canvas: CanvasListItem): string[] {
+  return Array.isArray(canvas.galleryTags)
+    ? canvas.galleryTags.filter((t): t is string => typeof t === "string")
+    : [];
+}
+
+/** Row indicators (the primary tier). "Active" is the boring default — only badge
+ * what's notable: a non-active status (admin takedown, archived), the access
+ * signals (shared, password), the gallery state, and the deployment state. Each
+ * badge mirrors a Your-canvases filter (plan 004/005) so the list is scannable; a
+ * clean, private, deployed canvas shows no pills. */
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   return (
     <>
@@ -38,6 +50,31 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   );
 }
 
+/** Inline tag pills (the secondary tier, plan 005) — visually quieter than the
+ * state badges (sunken chips, no tone) so they read as metadata, not status. Caps
+ * at {@link MAX_ROW_TAGS} with a `+N` overflow pill so a dense row stays tidy. */
+function RowTags({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+  const shown = tags.slice(0, MAX_ROW_TAGS);
+  const extra = tags.length - shown.length;
+  const chip =
+    "rounded border border-border bg-surface-sunken px-1.5 py-0.5 text-[0.6875rem] font-medium";
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {shown.map((tag) => (
+        <span key={tag} className={`${chip} text-muted`}>
+          {tag}
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className={`${chip} text-subtle`} aria-label={`${extra} more tags`}>
+          +{extra}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** The default trailing actions for a row in the active list: copy + open. */
 export function DefaultRowActions({ canvas }: { canvas: CanvasListItem }) {
   return (
@@ -60,6 +97,7 @@ export function DefaultRowActions({ canvas }: { canvas: CanvasListItem }) {
  * copy/open, the archive view shows restore/delete. */
 export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions?: ReactNode }) {
   const title = canvas.title?.trim() || canvas.slug;
+  const tags = canvasTags(canvas);
   return (
     <li className="group flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised">
       <Link to="/canvases/$id" params={{ id: canvas.id }} className="min-w-0 flex-1">
@@ -83,6 +121,8 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
               </span>
             </>
           )}
+          {/* Tags as a quiet secondary tier (plan 005) — capped with a +N overflow. */}
+          <RowTags tags={tags} />
         </div>
       </Link>
       <div className="flex shrink-0 items-center gap-1">

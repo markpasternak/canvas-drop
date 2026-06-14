@@ -5,7 +5,7 @@ describe("legal pages — rendered content", () => {
   it("privacy page states the operator, contact, and the data actually collected", () => {
     const html = renderPrivacyPage();
     expect(html).toContain("Privacy Policy");
-    expect(html).toContain("Canvasdrop (canvas-drop.com)");
+    expect(html).toContain("canvas-drop (canvas-drop.com)");
     expect(html).toContain("mark.pasternak@gmail.com");
     // Grounded in what the codebase handles (identity, session cookie, content, logs).
     expect(html).toContain("name, email address, and profile-picture URL");

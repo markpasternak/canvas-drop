@@ -100,4 +100,28 @@ describe("list row badges", () => {
     ]);
     expect(await screen.findByText("Disabled")).toBeInTheDocument();
   });
+
+  it("renders inline tag pills, collapsing beyond the cap into a +N pill (plan 005)", async () => {
+    renderListWith([
+      canvas({
+        id: "tagged",
+        slug: "tagged",
+        title: "Tagged one",
+        galleryTags: ["alpha", "beta", "gamma", "delta", "epsilon"],
+      }),
+    ]);
+    await screen.findByText("Tagged one");
+    // First MAX_ROW_TAGS (3) render as pills; the remaining two collapse to +2.
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(screen.queryByText("delta")).toBeNull();
+    expect(screen.getByText("+2")).toBeInTheDocument();
+  });
+
+  it("shows no tag pills for an untagged canvas", async () => {
+    renderListWith([canvas({ id: "u", slug: "untagged", title: "Untagged one" })]);
+    await screen.findByText("Untagged one");
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+  });
 });

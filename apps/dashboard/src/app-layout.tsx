@@ -120,12 +120,12 @@ export function AppLayout() {
             </button>
             <Link
               to="/"
-              aria-label="Canvasdrop home"
+              aria-label="canvas-drop home"
               className="group flex min-w-0 items-center gap-2.5 text-fg"
             >
               <BrandMark className="size-8" />
               <span className="truncate text-[0.9375rem] font-semibold tracking-tight">
-                Canvasdrop
+                canvas-drop
               </span>
             </Link>
             {/* Primary section nav: the first secondary navigation in the shell.

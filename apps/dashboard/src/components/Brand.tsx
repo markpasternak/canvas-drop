@@ -8,7 +8,7 @@ interface BrandMarkProps extends Omit<SVGProps<SVGSVGElement>, "title"> {
 
 export function BrandMark({
   className,
-  title = "Canvasdrop mark",
+  title = "canvas-drop mark",
   decorative = true,
   ...props
 }: BrandMarkProps) {

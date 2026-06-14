@@ -32,7 +32,7 @@ function ErrorShell({
       <div className="w-full overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
         <div className="flex items-center gap-2 border-b border-border bg-surface-raised px-4 py-3 text-sm font-semibold text-fg">
           <BrandMark className="size-8" />
-          Canvasdrop
+          canvas-drop
         </div>
         <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_20rem] lg:items-end">
           <div className="min-w-0">

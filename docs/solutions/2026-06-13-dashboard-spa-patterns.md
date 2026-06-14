@@ -88,7 +88,7 @@ hard-coded bypasses: a `bg-white` thumb or a `warning` tone reusing
 ## Designed error pages share the brand system
 
 Browser-facing errors are part of the dashboard visual system, not a separate
-server skin. Use the existing Canvasdrop mark and token language everywhere an
+server skin. Use the existing canvas-drop mark and token language everywhere an
 error page is meant for a human:
 
 - Dashboard route errors use `BrandMark` from

@@ -6,7 +6,7 @@ describe("docs render", () => {
   it("renders the index page with the brand and search box", () => {
     const html = renderDocPage("");
     expect(html).not.toBeNull();
-    expect(html).toContain("Canvasdrop");
+    expect(html).toContain("canvas-drop");
     expect(html).toContain('id="docs-search"');
     expect(html).toContain('src="/docs/search.js"');
     // A way back to the dashboard from the public docs site.

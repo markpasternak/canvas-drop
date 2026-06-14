@@ -14,14 +14,14 @@ import type { AppEnv } from "./types.js";
  * an org session and would bounce Google's crawler to a login redirect.
  *
  * The pages are deliberately minimal, light-mode-only static HTML with light
- * Canvasdrop branding — no SPA bundle, no client JS. Content is hardcoded for
+ * canvas-drop branding — no SPA bundle, no client JS. Content is hardcoded for
  * the canvas-drop.com instance (operator, contact, jurisdiction) and describes
  * only the data this codebase actually handles.
  */
 
 /** Operator-specific facts baked into the canvas-drop.com legal pages. */
 const OPERATOR = {
-  name: "Canvasdrop (canvas-drop.com)",
+  name: "canvas-drop (canvas-drop.com)",
   contactEmail: "mark.pasternak@gmail.com",
   jurisdiction: "Sweden",
   /** Human-readable "last updated" stamp shown at the top of each document. */
@@ -53,7 +53,7 @@ function renderLegalPage(opts: { title: string; intro: string; body: string }): 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(opts.title)} · Canvasdrop</title>
+<title>${escapeHtml(opts.title)} · canvas-drop</title>
 <style>
   :root {
     --canvas: #f5f5f2;
@@ -134,7 +134,7 @@ function renderLegalPage(opts: { title: string; intro: string; body: string }): 
         <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
         <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
       </svg>
-      <span>Canvasdrop</span>
+      <span>canvas-drop</span>
     </a>
     <h1>${escapeHtml(opts.title)}</h1>
     <p class="updated">Last updated ${escapeHtml(OPERATOR.lastUpdated)}</p>
@@ -154,8 +154,8 @@ const CONTACT_LINK = `<a href="mailto:${escapeAttribute(OPERATOR.contactEmail)}"
 export function renderPrivacyPage(): string {
   const body = `
     <h2>Who we are</h2>
-    <p>${escapeHtml(OPERATOR.name)} ("Canvasdrop", "we", "us") operates this instance and is the data
-    controller for the information described below. Canvasdrop is open-source software (MIT);
+    <p>${escapeHtml(OPERATOR.name)} ("canvas-drop", "we", "us") operates this instance and is the data
+    controller for the information described below. canvas-drop is open-source software (MIT);
     this policy covers the instance hosted at canvas-drop.com.</p>
 
     <h2>What we collect</h2>
@@ -206,7 +206,7 @@ export function renderPrivacyPage(): string {
   return renderLegalPage({
     title: "Privacy Policy",
     intro:
-      "This policy explains what data Canvasdrop collects, why, and how it is handled. We keep this to the minimum needed to run the service.",
+      "This policy explains what data canvas-drop collects, why, and how it is handled. We keep this to the minimum needed to run the service.",
     body,
   });
 }
@@ -214,11 +214,11 @@ export function renderPrivacyPage(): string {
 export function renderTermsPage(): string {
   const body = `
     <h2>Acceptance</h2>
-    <p>By accessing or using Canvasdrop, you agree to these Terms. If you do not agree, do not use
+    <p>By accessing or using canvas-drop, you agree to these Terms. If you do not agree, do not use
     the service.</p>
 
     <h2>The service</h2>
-    <p>Canvasdrop lets authenticated members deploy and share small static web artifacts
+    <p>canvas-drop lets authenticated members deploy and share small static web artifacts
     ("canvases"). It is open-source software (MIT); this instance is operated by
     ${escapeHtml(OPERATOR.name)}.</p>
 
@@ -262,7 +262,8 @@ export function renderTermsPage(): string {
 
   return renderLegalPage({
     title: "Terms of Service",
-    intro: "These Terms govern your use of this Canvasdrop instance. They are intentionally short.",
+    intro:
+      "These Terms govern your use of this canvas-drop instance. They are intentionally short.",
     body,
   });
 }

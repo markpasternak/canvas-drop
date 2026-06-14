@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { CopyButton } from "../components/CopyButton.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 
-const AGENT_SNIPPET = `# Deploy to Canvasdrop
+const AGENT_SNIPPET = `# Deploy to canvas-drop
 # 1. Create a canvas in the dashboard ("Use the API") to get its ID + secret key.
 # 2. Build static files (HTML/CSS/JS, no build step needed).
 # 3. Deploy the folder as a zip with the canvas's secret key:

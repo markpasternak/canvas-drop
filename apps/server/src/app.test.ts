@@ -109,7 +109,7 @@ describe("buildApp", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("vary")).toContain("Accept");
     const html = await res.text();
-    expect(html).toContain("Canvasdrop");
+    expect(html).toContain("canvas-drop");
     expect(html).toContain("Page not found");
     expect(html).toContain("/api/canvases/missing");
   });

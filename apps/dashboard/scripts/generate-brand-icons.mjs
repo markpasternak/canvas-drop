@@ -38,4 +38,4 @@ await Promise.all([
   tileIcon(512, path.join(publicDir, "brand/canvasdrop-mark-512.png")),
 ]);
 
-console.log("Generated Canvasdrop brand icons.");
+console.log("Generated canvas-drop brand icons.");

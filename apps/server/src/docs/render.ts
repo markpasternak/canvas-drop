@@ -150,7 +150,7 @@ function renderPrevNext(currentPath: string): string {
 export function renderDocPage(path: string): string | null {
   const page = byPath.get(path);
   if (!page) return null;
-  const title = `${escapeHtml(page.title)} · Canvasdrop docs`;
+  const title = `${escapeHtml(page.title)} · canvas-drop docs`;
   return `<!doctype html>
 <html lang="en">
 <head>

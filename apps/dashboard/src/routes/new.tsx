@@ -36,7 +36,7 @@ const METHODS = [
     blurb: "Fastest for snippets",
     panelTitle: "Paste HTML and publish",
     panelDescription:
-      "Drop in a single HTML document. Canvasdrop creates the canvas and deploys it.",
+      "Drop in a single HTML document. canvas-drop creates the canvas and deploys it.",
     icon: FileHtml,
   },
   {
@@ -161,7 +161,7 @@ export default function CreateCanvas() {
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Create a canvas"
-        description="Choose a source. Canvasdrop handles the URL, secret key, and first publish."
+        description="Choose a source. canvas-drop handles the URL, secret key, and first publish."
       />
 
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
