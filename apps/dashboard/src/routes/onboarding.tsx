@@ -5,11 +5,11 @@ import { CopyButton } from "../components/CopyButton.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 
 const AGENT_SNIPPET = `# Deploy to Canvasdrop
-# 1. Create a canvas in the dashboard ("Use the API") to get its URL + key.
+# 1. Create a canvas in the dashboard ("Use the API") to get its ID + secret key.
 # 2. Build static files (HTML/CSS/JS, no build step needed).
 # 3. Deploy the folder as a zip with the canvas's secret key:
 
-curl -X PUT "<your-canvas-url>/../v1/canvases/<canvas-id>/deploy" \\
+curl -X PUT "<app-url>/v1/canvases/<canvas-id>/deploy" \\
   -H "Authorization: Bearer <cd_secret_key>" \\
   --data-binary @site.zip
 
@@ -59,16 +59,17 @@ export default function Onboarding() {
     <div className="max-w-5xl space-y-8">
       <PageHeader
         title="Ship your first canvas"
-        description="A canvas is a small web artifact on its own URL. Start from a snippet, local files, or an API deploy."
+        description={
+          <>
+            A canvas is a small web artifact on its own URL. Start from a snippet, local files, or
+            an API deploy &mdash; or read the{" "}
+            <a href="/docs/quickstart" className="font-medium text-accent hover:underline">
+              Quickstart guide ↗
+            </a>
+            .
+          </>
+        }
       />
-
-      <p className="-mt-4 text-sm text-muted">
-        New here? Read the{" "}
-        <a href="/docs/quickstart" className="font-medium text-accent hover:underline">
-          Quickstart guide ↗
-        </a>
-        .
-      </p>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <PathCard
