@@ -19,6 +19,9 @@
     "test:dashboard": "node scripts/test-runner.mjs dashboard",
     "test:file": "node scripts/test-runner.mjs file",
     "purge": "pnpm --filter @canvas-drop/server run purge",
+    "docs:build": "node scripts/build-docs.mjs",
+    "docs:watch": "node scripts/build-docs.mjs --watch",
+    "docs:screenshots": "node scripts/screenshots.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",
@@ -27,6 +30,9 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "drizzle-kit": "^0.31.10",
+    "highlight.js": "^11.10.0",
+    "marked": "^14.1.3",
+    "sanitize-html": "^2.13.1",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
   }

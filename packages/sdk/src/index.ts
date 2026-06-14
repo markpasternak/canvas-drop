@@ -9,6 +9,42 @@
 export const SDK_VERSION = "1";
 
 // ---------------------------------------------------------------------------
+// Canonical machine-readable error codes (§11.5). This is the single source of
+// truth the docs error table and its drift guard read — the `*Error` classes
+// below cover only a subset, while several wire codes (KEY_LIMIT, VALUE_TOO_LARGE,
+// AI_*, CONNECTION_LIMIT) are returned by the runtime API without a dedicated
+// class. Keep this in lockstep with the server's emitted codes.
+// ---------------------------------------------------------------------------
+
+export const ERROR_CODES = {
+  NOT_AUTHENTICATED: { status: 401, summary: "The viewer is not signed in." },
+  PASSWORD_REQUIRED: { status: 401, summary: "The canvas is password-protected." },
+  CAPABILITY_DISABLED: {
+    status: 403,
+    summary: "Backend or the specific feature is off for this canvas.",
+  },
+  CROSS_CANVAS_FORBIDDEN: {
+    status: 403,
+    summary: "A request targeted another canvas's resources.",
+  },
+  MODEL_NOT_ALLOWED: { status: 403, summary: "The requested AI model is not in the allow-list." },
+  DISABLED: { status: 403, summary: "The canvas has been disabled by an administrator." },
+  NOT_FOUND: { status: 404, summary: "The key, file, or canvas does not exist." },
+  INVALID_BODY: { status: 400, summary: "The request body failed validation." },
+  KEY_TOO_LARGE: { status: 413, summary: "The KV key exceeds the size limit." },
+  VALUE_TOO_LARGE: { status: 413, summary: "The KV value or file exceeds the size limit." },
+  KEY_LIMIT: { status: 409, summary: "The canvas hit its key-count limit." },
+  NOT_NUMERIC: { status: 409, summary: "increment was called on a non-numeric value." },
+  QUOTA_EXCEEDED: { status: 429, summary: "A spend or rate quota was exceeded." },
+  CONNECTION_LIMIT: { status: 429, summary: "Too many concurrent realtime connections." },
+  AI_STREAM_TRUNCATED: { status: 502, summary: "An AI stream ended before completion." },
+  AI_UPSTREAM_ERROR: { status: 502, summary: "The AI provider returned an error." },
+  REQUEST_FAILED: { status: 0, summary: "A request failed without a more specific code." },
+} as const;
+
+export type ErrorCode = keyof typeof ERROR_CODES;
+
+// ---------------------------------------------------------------------------
 // Typed errors (§6.7). The 403 CAPABILITY_DISABLED maps to CapabilityDisabledError.
 // ---------------------------------------------------------------------------
 
