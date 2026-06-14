@@ -142,16 +142,15 @@ describe("galleryRoutes", () => {
     expect(both.body.items).toHaveLength(0);
   });
 
-  it("lists a password-gated canvas with hasPassword and no password material", async () => {
+  it("excludes a password-protected canvas (plan 002: protected canvases are not listable)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await seedListed(client, owner.id);
     await canvasesRepository(client).setPassword(id, "argon2-hash");
 
     const { body } = await get(client, "/api/gallery");
-    const item = body.items.find((i) => i.id === id);
-    expect(item?.hasPassword).toBe(true);
-    expect(JSON.stringify(item)).not.toContain("argon2-hash");
+    expect(body.items.find((i) => i.id === id)).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("argon2-hash");
   });
 
   it("clamps junk pagination params instead of erroring", async () => {

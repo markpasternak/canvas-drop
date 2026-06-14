@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
+import { cloneService } from "../canvas/clone-service.js";
 import { verifyPassword } from "../canvas/password.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -15,6 +16,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import type { DeployEntry } from "../deploy/ingest.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
@@ -40,6 +42,7 @@ function buildApp(
   const drafts = draftsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
   const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+  const clone = cloneService({ canvases, versions, drafts, storage });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
@@ -54,6 +57,7 @@ function buildApp(
       config,
       canvases,
       versions,
+      clone,
       audit,
       engine,
       usage: usageEventsRepository(client),
@@ -1032,5 +1036,162 @@ describe("management realtime revoke hooks (D-RT-6)", () => {
     hub.calls.length = 0;
     expect((await mutate(app, "DELETE", `/api/canvases/${cv.id}`)).status).toBe(200);
     expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+  });
+});
+
+const enc = (s: string) => new TextEncoder().encode(s);
+async function* folder(files: Record<string, string>): AsyncGenerator<DeployEntry> {
+  for (const [path, body] of Object.entries(files)) yield { path, bytes: enc(body) };
+}
+const sameOriginPost = {
+  method: "POST",
+  headers: { "Sec-Fetch-Site": "same-origin" as const },
+};
+
+describe("managementRoutes — clone (plan 002 U4)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** Publish a canvas owned by `ownerId` into `storage`, applying optional gallery settings. */
+  async function seedCanvas(
+    storage: ReturnType<typeof memStorage>,
+    ownerId: string,
+    opts: {
+      slug: string;
+      apiKeyHash: string;
+      publish?: boolean;
+      settings?: Parameters<ReturnType<typeof canvasesRepository>["updateSettings"]>[1];
+    },
+  ) {
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    const cv = await canvases.create({ ownerId, slug: opts.slug, apiKeyHash: opts.apiKeyHash });
+    if (opts.publish !== false) {
+      await engine.deploy(cv, "folder", folder({ "index.html": "<h1>hi</h1>" }), ownerId);
+    }
+    if (opts.settings) await canvases.updateSettings(cv.id, opts.settings);
+    return (await canvases.findById(cv.id)) as NonNullable<
+      Awaited<ReturnType<typeof canvases.findById>>
+    >;
+  }
+
+  it("owner clones their own active canvas → 201, new owned canvas, unpublished draft", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const src = await seedCanvas(storage, owner.id, { slug: "src", apiKeyHash: "k1" });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{
+      id: string;
+      title: string;
+      apiKey: string;
+      galleryListed: boolean;
+    }>(res);
+    expect(body.id).not.toBe(src.id);
+    expect(body.apiKey).toMatch(/^cd_/);
+    expect(body.galleryListed).toBe(false);
+    const clone = await canvasesRepository(client).findById(body.id);
+    expect(clone?.ownerId).toBe(owner.id);
+    expect(clone?.currentVersionId).toBeNull(); // clone-to-draft
+    expect(clone?.clonedFromCanvasId).toBe(src.id);
+  });
+
+  it("owner cannot clone their own ARCHIVED canvas → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const src = await seedCanvas(storage, owner.id, { slug: "src", apiKeyHash: "k1" });
+    await canvasesRepository(client).archive(src.id);
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("non-owner clones a listed + templatable + published canvas → 201", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const src = await seedCanvas(storage, owner.id, {
+      slug: "tmpl",
+      apiKeyHash: "k1",
+      settings: { shared: true, galleryListed: true, galleryTemplatable: true },
+    });
+
+    const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(res);
+    expect((await canvasesRepository(client).findById(body.id))?.ownerId).toBe(other.id);
+  });
+
+  it("non-owner cannot clone a listed-but-NOT-templatable canvas → 404 (opaque)", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const src = await seedCanvas(storage, owner.id, {
+      slug: "tmpl",
+      apiKeyHash: "k1",
+      settings: { shared: true, galleryListed: true }, // not templatable
+    });
+
+    const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("non-owner cannot clone a templatable canvas that is NOT shared → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    // listed + templatable but shared=false → fails the §12 predicate.
+    const src = await seedCanvas(storage, owner.id, {
+      slug: "tmpl",
+      apiKeyHash: "k1",
+      settings: { galleryListed: true, galleryTemplatable: true },
+    });
+
+    const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("non-owner cannot clone a templatable canvas that was never published → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const src = await seedCanvas(storage, owner.id, {
+      slug: "tmpl",
+      apiKeyHash: "k1",
+      publish: false,
+      settings: { shared: true, galleryListed: true, galleryTemplatable: true },
+    });
+
+    const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(404);
   });
 });

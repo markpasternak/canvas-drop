@@ -82,19 +82,19 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(items.map((i) => i.canvas.id).sort()).toEqual([future, noExpiry].sort());
   });
 
-  it("includes a password-gated canvas (the gallery lists links, the gate enforces on open)", async () => {
+  it("EXCLUDES a password-protected canvas (plan 002: protected canvases are not listable)", async () => {
+    // Reverses the M8 decision — a password gate now makes a canvas invisible in
+    // the gallery (the `password_hash IS NULL` predicate clause), so a protected
+    // canvas is never handed out as a gallery link.
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
     const id = await seedListed(client, owner.id);
     await repo.setPassword(id, "argon2-hash");
 
-    const { items } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
-    expect(items).toHaveLength(1);
-    const [item] = items;
-    if (!item) throw new Error("expected a gallery item");
-    expect(item.canvas.id).toBe(id);
-    expect(item.canvas.passwordHash).toBe("argon2-hash");
+    const { items, total } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
+    expect(items).toHaveLength(0);
+    expect(total).toBe(0);
   });
 
   it("surfaces the correct owner identity across owners (cross-owner join)", async () => {

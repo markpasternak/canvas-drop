@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { capabilityGlobals } from "../canvas/capability-guard.js";
+import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
@@ -28,6 +29,7 @@ export interface ManagementDeps {
   config: Config;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  clone: CloneService;
   audit: AuditLog;
   engine: DeployEngine;
   usage: UsageEventsRepository;
@@ -155,6 +157,33 @@ export function managementRoutes(deps: ManagementDeps) {
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // apiKey is returned ONCE and never again.
     return c.json({ ...publicCanvas(deps.config, cv), apiKey }, 201);
+  });
+
+  // Clone → a new canvas owned by the caller, seeded from an existing one (plan 002).
+  // An owner may clone any ACTIVE canvas they own; a non-owner only a gallery-listed
+  // + templatable one. Eligibility is re-derived server-side from the row (never the
+  // client); a non-eligible source 404s opaquely so its existence isn't revealed
+  // (§12.2). Returns the new canvas + its one-time API key, like create.
+  app.post("/:id/clone", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    const source = await deps.canvases.findById(id);
+    if (!source || source.status === "deleted") return c.json({ error: "not_found" }, 404);
+
+    const eligible =
+      source.ownerId === user.id
+        ? source.status === "active"
+        : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+    if (!eligible) return c.json({ error: "not_found" }, 404);
+
+    const { canvas, apiKey } = await deps.clone.clone(source, user.id);
+    deps.audit.recordAudit({
+      action: "canvas_clone",
+      actorId: user.id,
+      targetId: canvas.id,
+      meta: { from: source.id },
+    });
+    return c.json({ ...publicCanvas(deps.config, canvas), apiKey }, 201);
   });
 
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched
