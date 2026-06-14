@@ -384,19 +384,26 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     client = await makeTestDb(dialect);
     const me = await seedOwner(client, "me");
     const repo = canvasesRepository(client);
-    await repo.create({ ownerId: me, slug: "weather-app", apiKeyHash: "k1", title: "Weather Dashboard" });
+    await repo.create({
+      ownerId: me,
+      slug: "weather-app",
+      apiKeyHash: "k1",
+      title: "Weather Dashboard",
+    });
     await repo.create({ ownerId: me, slug: "budget-tool", apiKeyHash: "k2", title: "Budget" });
     await repo.create({ ownerId: me, slug: "ab", apiKeyHash: "k3", title: "100% Coverage" });
 
     // Title match, case-insensitive.
     expect(
-      (await repo.listByOwnerFiltered({ ownerId: me, q: "WEATHER", limit: 50, offset: 0 })).items
-        .map((c) => c.slug),
+      (
+        await repo.listByOwnerFiltered({ ownerId: me, q: "WEATHER", limit: 50, offset: 0 })
+      ).items.map((c) => c.slug),
     ).toEqual(["weather-app"]);
     // Slug match.
     expect(
-      (await repo.listByOwnerFiltered({ ownerId: me, q: "budget-", limit: 50, offset: 0 })).items
-        .map((c) => c.slug),
+      (
+        await repo.listByOwnerFiltered({ ownerId: me, q: "budget-", limit: 50, offset: 0 })
+      ).items.map((c) => c.slug),
     ).toEqual(["budget-tool"]);
     // A literal "%" is escaped — matches the "100%" title, not everything.
     const pct = await repo.listByOwnerFiltered({ ownerId: me, q: "100%", limit: 50, offset: 0 });
@@ -466,13 +473,15 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
 
     // Title sort is case-insensitive A–Z: apple, Banana, Cherry.
     expect(
-      (await repo.listByOwnerFiltered({ ownerId: me, sort: "title", limit: 50, offset: 0 })).items
-        .map((cv) => cv.title),
+      (
+        await repo.listByOwnerFiltered({ ownerId: me, sort: "title", limit: 50, offset: 0 })
+      ).items.map((cv) => cv.title),
     ).toEqual(["apple", "Banana", "Cherry"]);
     // Created sort is newest-first (uuidv7 id tiebreak makes it deterministic).
     expect(
-      (await repo.listByOwnerFiltered({ ownerId: me, sort: "created", limit: 50, offset: 0 })).items
-        .map((cv) => cv.id),
+      (
+        await repo.listByOwnerFiltered({ ownerId: me, sort: "created", limit: 50, offset: 0 })
+      ).items.map((cv) => cv.id),
     ).toEqual([c.id, b.id, a.id]);
   });
 

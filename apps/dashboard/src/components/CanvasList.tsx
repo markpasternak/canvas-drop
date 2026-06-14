@@ -67,7 +67,7 @@ function RowTags({ tags }: { tags: string[] }) {
         </span>
       ))}
       {extra > 0 && (
-        <span className={`${chip} text-subtle`} aria-label={`${extra} more tags`}>
+        <span className={`${chip} text-subtle`} title={`${extra} more tags`}>
           +{extra}
         </span>
       )}

@@ -241,9 +241,7 @@ export function canvasesRepository(client: DbClient) {
      * a missing/malformed option still returns only the caller's canvases (§12).
      * Two-query count posture (no new index) at single-org scale, like the gallery.
      */
-    async listByOwnerFiltered(
-      opts: OwnerListOptions,
-    ): Promise<{ items: Canvas[]; total: number }> {
+    async listByOwnerFiltered(opts: OwnerListOptions): Promise<{ items: Canvas[]; total: number }> {
       // Typed to allow `or(...)` (which is SQL | undefined) to be pushed, matching
       // the gallery's filter-array shape that `and(...)` accepts.
       const filters: Array<SQL | undefined> = [

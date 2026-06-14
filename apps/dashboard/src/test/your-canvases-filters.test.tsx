@@ -52,7 +52,14 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
           headers: { "content-type": "application/json" },
         });
       if (path === "/api/me") {
-        return json({ id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin: false, authMode: "dev" });
+        return json({
+          id: "u1",
+          email: "u@x",
+          name: "U",
+          avatarUrl: null,
+          isAdmin: false,
+          authMode: "dev",
+        });
       }
       if (path.endsWith("/archived")) return json({ canvases: [] });
       // /api/canvases — apply the server-side filter/search the route would.

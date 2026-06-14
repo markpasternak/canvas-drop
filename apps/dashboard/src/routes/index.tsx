@@ -112,12 +112,7 @@ export default function CanvasList() {
   const page = Math.max(1, Math.floor(search.page ?? 1));
   const offset = (page - 1) * CANVASES_PAGE_SIZE;
   const filtering = Boolean(
-    q ||
-      search.shared ||
-      search.protected ||
-      search.listed ||
-      search.template ||
-      search.undeployed,
+    q || search.shared || search.protected || search.listed || search.template || search.undeployed,
   );
 
   // Local mirror of the search box, debounced into the `q` route param. Seeded on
