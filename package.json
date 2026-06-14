@@ -20,6 +20,8 @@
     "test:file": "node scripts/test-runner.mjs file",
     "purge": "pnpm --filter @canvas-drop/server run purge",
     "seed:showcase": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-showcase.ts",
+    "reset:data": "pnpm --filter @canvas-drop/server exec tsx scripts/reset-data.ts",
+    "seed:canvases": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-canvases.ts",
     "docs:build": "node scripts/build-docs.mjs",
     "docs:watch": "node scripts/build-docs.mjs --watch",
     "docs:screenshots": "node scripts/screenshots.mjs",
