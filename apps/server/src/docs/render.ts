@@ -30,6 +30,12 @@ const DOCS_STYLES = `${SYSTEM_PAGE_STYLES}
     background: var(--surface-raised);
   }
   .topbar .brand { padding: 0; border: 0; background: none; }
+  .topbar .to-app {
+    margin-left: auto; font-size: .875rem; font-weight: 500; color: var(--fg);
+    text-decoration: none; padding: .35rem .7rem;
+    border: 1px solid var(--border); border-radius: .5rem; background: var(--surface);
+  }
+  .topbar .to-app:hover { background: var(--surface-sunken); }
   .nav-burger {
     display: none; cursor: pointer; user-select: none;
     font-size: 1.25rem; line-height: 1; padding: .25rem .5rem;
@@ -156,6 +162,7 @@ ${DOCS_STYLES}
   <header class="topbar">
     <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation">☰</label>
     <a href="/docs" style="text-decoration:none;color:inherit">${SYSTEM_PAGE_BRAND_INLINE}</a>
+    <a href="/" class="to-app">Open app →</a>
   </header>
   <div class="layout">
     <aside class="sidebar">

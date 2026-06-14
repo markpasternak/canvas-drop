@@ -9,6 +9,8 @@ describe("docs render", () => {
     expect(html).toContain("Canvasdrop");
     expect(html).toContain('id="docs-search"');
     expect(html).toContain('src="/docs/search.js"');
+    // A way back to the dashboard from the public docs site.
+    expect(html).toContain('href="/" class="to-app"');
   });
 
   it("marks the current page with aria-current and renders prev/next", () => {
