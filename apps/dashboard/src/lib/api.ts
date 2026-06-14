@@ -501,10 +501,19 @@ export const api = {
 
   // --- Admin (§6.10, M7) ---
   admin: {
-    listCanvases: (status?: AdminCanvasStatus) =>
-      request<{ canvases: AdminCanvasRow[]; nextCursor: number | null }>(
-        `/api/admin/canvases${status ? `?status=${status}` : ""}`,
-      ).then((r) => r.canvases),
+    /** One keyset page of the platform canvas list. `cursor` is the previous
+     *  page's `nextCursor` (the last row's id); omit it for the first page. The
+     *  full `{ canvases, nextCursor }` is returned so the caller can page — the
+     *  governance view must not silently truncate at the server's default limit. */
+    listCanvases: (status?: AdminCanvasStatus, cursor?: string) => {
+      const sp = new URLSearchParams();
+      if (status) sp.set("status", status);
+      if (cursor) sp.set("cursor", cursor);
+      const qs = sp.toString();
+      return request<{ canvases: AdminCanvasRow[]; nextCursor: string | null }>(
+        `/api/admin/canvases${qs ? `?${qs}` : ""}`,
+      );
+    },
 
     overview: () => request<AdminOverview>("/api/admin/overview"),
 

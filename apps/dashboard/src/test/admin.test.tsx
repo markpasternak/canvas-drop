@@ -116,6 +116,34 @@ describe("admin dashboard", () => {
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
   });
 
+  it("pages the canvas list: Load more fetches the next keyset page with the cursor", async () => {
+    const PAGE2 = { ...ROW, id: "c2", slug: "brave-newt", title: "Brave Newt" };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      // First page reports more rows (nextCursor = last id); the cursored second
+      // page closes it out (nextCursor null).
+      "GET /api/admin/canvases": (init) => {
+        // path-keyed handlers are matched first, so a bare key with no query
+        // string serves the first page; the cursored page hits the path key below.
+        void init;
+        return json({ canvases: [ROW], nextCursor: "c1" });
+      },
+      "GET /api/admin/canvases?cursor=c1": () => json({ canvases: [PAGE2], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Brave Newt")).toBeInTheDocument();
+    // First page still on screen (appended, not replaced); the cursor was sent.
+    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/api/admin/canvases?cursor=c1")).toBe(true);
+    // No further pages → the button is gone.
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
   it("takedown flow: opens the reason dialog, then POSTs disable with the reason", async () => {
     mockFetch({
       "GET /api/me": () =>

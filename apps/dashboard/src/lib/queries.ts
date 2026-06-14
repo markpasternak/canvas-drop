@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { type AdminCanvasStatus, api, type GalleryQuery } from "./api.js";
 
 export const keys = {
@@ -46,10 +46,18 @@ export function useUsage(id: string) {
 
 // --- Admin (§6.10, M7) ---
 
+/**
+ * Keyset-paginated platform canvas list. The server caps a page at its default
+ * limit and returns a `nextCursor` (the last row's id, null on the last page);
+ * "Load more" fetches the next page so the governance view never silently
+ * truncates. Pages are flattened by the caller.
+ */
 export function useAdminCanvases(status?: AdminCanvasStatus) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: keys.adminCanvases(status),
-    queryFn: () => api.admin.listCanvases(status),
+    queryFn: ({ pageParam }) => api.admin.listCanvases(status, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
 

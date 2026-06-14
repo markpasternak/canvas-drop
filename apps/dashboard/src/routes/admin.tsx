@@ -33,6 +33,8 @@ export default function AdminDashboard() {
   const status = filter === "all" ? undefined : filter;
   const overview = useAdminOverview();
   const canvases = useAdminCanvases(status);
+  // Flatten the keyset pages into one list for the table.
+  const rows = canvases.data?.pages.flatMap((p) => p.canvases) ?? [];
 
   return (
     <div className="space-y-6">
@@ -100,10 +102,26 @@ export default function AdminDashboard() {
           }
         />
       )}
-      {canvases.data && canvases.data.length === 0 && (
+      {canvases.data && rows.length === 0 && (
         <EmptyState title="No canvases" description="Nothing matches this filter." />
       )}
-      {canvases.data && canvases.data.length > 0 && <AdminCanvasTable canvases={canvases.data} />}
+      {rows.length > 0 && (
+        <>
+          <AdminCanvasTable canvases={rows} />
+          {canvases.hasNextPage && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={canvases.isFetchingNextPage}
+                onClick={() => canvases.fetchNextPage()}
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
