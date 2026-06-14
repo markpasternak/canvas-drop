@@ -202,4 +202,24 @@ describe("canvasAccess — disabled-canvas rendering", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("CANVAS CONTENT");
   });
+
+  // §12.2 / D23: every 404 denial reason must collapse to an OPAQUE body at the
+  // HTTP layer. A non-owner must not tell an archived / owner-only / expired-share
+  // canvas apart from one that never existed — the decision keeps distinct reasons
+  // internally (for 403 routing / audit), but the wire never sees them on a 404.
+  it("404 denials are opaque — archived/owner-only/expired all return { error: not_found }", async () => {
+    const denied: Canvas[] = [
+      canvas({ status: "archived" }), // archived → 404
+      canvas({ status: "active", shared: false }), // owner-only → 404 to `other`
+      canvas({ status: "active", shared: true, sharedExpiresAt: NOW - 1 }), // expired → 404
+    ];
+    for (const cv of denied) {
+      const res = await appFor(cv, other).request("/", { headers: { accept: "application/json" } });
+      expect(res.status).toBe(404);
+      // The internal reason (archived/owner_only/share_expired) never reaches the
+      // client — not in the JSON, and (since the branded error page derives its
+      // copy from this body's `error`) not on the browser HTML page either.
+      expect(await res.json()).toEqual({ error: "not_found" });
+    }
+  });
 });
