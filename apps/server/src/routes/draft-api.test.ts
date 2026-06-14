@@ -366,6 +366,78 @@ describe("draftApiRoutes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(png);
   });
 
+  it("If-Draft-Base precondition: matching base writes, no header upserts unconditionally", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+
+    // Fresh canvas has no live version → baseVersionId is null, sent as the `none` sentinel.
+    const matched = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: { ...SO, "If-Draft-Base": "none" },
+      body: enc("<h1>hello</h1>"),
+    });
+    expect(matched.status).toBe(200);
+
+    // No precondition header at all → upsert applies as before (autosave/upload back-compat).
+    const noHeader = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>again</h1>"),
+    });
+    expect(noHeader.status).toBe(200);
+    expect((await jsonOf<{ dirty: boolean }>(noHeader)).dirty).toBe(true);
+  });
+
+  it("a stale If-Draft-Base after a restore is rejected (409) and the restored file survives", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    const draftBase = async () =>
+      (
+        await jsonOf<{ baseVersionId: string | null }>(
+          await app.request(`/api/canvases/${canvas.id}/draft`),
+        )
+      ).baseVersionId;
+
+    // Publish v1 then v2 (each rebases the draft's baseVersionId to the new version).
+    for (const body of ["<h1>v1</h1>", "<h1>v2</h1>"]) {
+      await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+        method: "PUT",
+        headers: SO,
+        body: enc(body),
+      });
+      await app.request(`/api/canvases/${canvas.id}/publish`, { method: "POST", headers: SO });
+    }
+    const staleBase = await draftBase(); // the editor's fork-point before restore (v2)
+
+    // Restore v1 — wholesale replace; baseVersionId moves to v1.
+    await app.request(`/api/canvases/${canvas.id}/restore`, {
+      method: "POST",
+      headers: { ...SO, "content-type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+
+    // A stale unmount-flush pinned to the pre-restore base is refused — no clobber.
+    const stale = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: { ...SO, "If-Draft-Base": staleBase ?? "none" },
+      body: enc("<h1>stale</h1>"),
+    });
+    expect(stale.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(stale)).code).toBe("DRAFT_CONFLICT");
+    const intact = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
+    expect(await intact.text()).toBe("<h1>v1</h1>"); // restored content untouched
+
+    // A write pinned to the CURRENT (post-restore) base still applies — sequential saves work.
+    const after = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: { ...SO, "If-Draft-Base": (await draftBase()) ?? "none" },
+      body: enc("<h1>edited-after-restore</h1>"),
+    });
+    expect(after.status).toBe(200);
+    const final = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
+    expect(await final.text()).toBe("<h1>edited-after-restore</h1>");
+  });
+
   it("a path-traversal write is rejected with a stable code (400)", async () => {
     const { appAs, owner, canvas } = await setup();
     const res = await appAs(owner.id).request(

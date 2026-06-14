@@ -1,5 +1,6 @@
 import {
   CaretDown,
+  CaretRight,
   File,
   FileArchive,
   FileCode,
@@ -18,7 +19,7 @@ import {
   FolderSimple,
   type Icon,
 } from "@phosphor-icons/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { DraftFile } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { fileLabel, isImage } from "../lib/file-kind.js";
@@ -71,9 +72,19 @@ export interface FileTreeProps {
   onSelect: (path: string) => void;
 }
 
-/** Draft file tree (R16). Read affordance only; add/rename/delete live in the toolbar. */
+/** Draft file tree (R16). Read affordance only; add/rename/delete live in the toolbar.
+ * Folders start expanded; clicking one collapses its subtree (state is per-path). */
 export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
+  // Collapsed folder paths. Empty = everything expanded (the prior behaviour).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
   if (files.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-surface-sunken px-3 py-8 text-center">
@@ -86,7 +97,15 @@ export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   return (
     <ul className="space-y-1 text-sm" aria-label="Draft files">
       {tree.children.map((node) => (
-        <TreeRow key={node.path} node={node} depth={0} selected={selected} onSelect={onSelect} />
+        <TreeRow
+          key={node.path}
+          node={node}
+          depth={0}
+          selected={selected}
+          onSelect={onSelect}
+          collapsed={collapsed}
+          onToggle={toggle}
+        />
       ))}
     </ul>
   );
@@ -97,35 +116,51 @@ function TreeRow({
   depth,
   selected,
   onSelect,
+  collapsed,
+  onToggle,
 }: {
   node: TreeNode;
   depth: number;
   selected: string | null;
   onSelect: (path: string) => void;
+  collapsed: ReadonlySet<string>;
+  onToggle: (path: string) => void;
 }) {
   const pad = { paddingLeft: `${depth * 0.875 + 0.5}rem` };
   if (node.isDir) {
+    const isCollapsed = collapsed.has(node.path);
     return (
       <li>
-        <div
-          className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-subtle"
+        <button
+          type="button"
+          onClick={() => onToggle(node.path)}
+          aria-expanded={!isCollapsed}
           style={pad}
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-fg"
         >
-          <CaretDown size={12} weight="bold" aria-hidden />
+          {isCollapsed ? (
+            <CaretRight size={12} weight="bold" aria-hidden />
+          ) : (
+            <CaretDown size={12} weight="bold" aria-hidden />
+          )}
           <FolderSimple size={14} weight="duotone" aria-hidden />
           {node.name}/
-        </div>
-        <ul className="space-y-1">
-          {node.children.map((child) => (
-            <TreeRow
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              selected={selected}
-              onSelect={onSelect}
-            />
-          ))}
-        </ul>
+        </button>
+        {!isCollapsed && (
+          <ul className="space-y-1">
+            {node.children.map((child) => (
+              <TreeRow
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                selected={selected}
+                onSelect={onSelect}
+                collapsed={collapsed}
+                onToggle={onToggle}
+              />
+            ))}
+          </ul>
+        )}
       </li>
     );
   }

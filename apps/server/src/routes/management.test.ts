@@ -47,7 +47,7 @@ function buildApp(
     c.set("clientIp", "127.0.0.1");
     await next();
   });
-  app.route("/api/me", meRoutes());
+  app.route("/api/me", meRoutes({ authMode: "dev" }));
   app.route(
     "/api/canvases",
     managementRoutes({
@@ -569,7 +569,7 @@ describe("managementRoutes", () => {
     expect(res.status).toBe(403);
   });
 
-  it("GET /api/me returns exactly the five projected fields (no spread leak)", async () => {
+  it("GET /api/me returns exactly the projected fields (no spread leak)", async () => {
     client = await makeTestDb("sqlite");
     // Inject a full user row (incl. fields not in the projection) to prove the
     // response shape is an explicit allowlist, not a spread.
@@ -587,12 +587,21 @@ describe("managementRoutes", () => {
       } as never);
       await next();
     });
-    app.route("/api/me", meRoutes());
+    app.route("/api/me", meRoutes({ authMode: "oidc" }));
     const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));
-    expect(Object.keys(body).sort()).toEqual(["avatarUrl", "email", "id", "isAdmin", "name"]);
+    expect(Object.keys(body).sort()).toEqual([
+      "authMode",
+      "avatarUrl",
+      "email",
+      "id",
+      "isAdmin",
+      "name",
+    ]);
     expect(body.providerSub).toBeUndefined();
     expect(body.isBlocked).toBeUndefined();
     expect(body.isAdmin).toBe(true);
+    // authMode is instance config, not a spread of the user row.
+    expect(body.authMode).toBe("oidc");
   });
 
   it("list enriches each canvas with its lastDeploy summary (null until deployed)", async () => {

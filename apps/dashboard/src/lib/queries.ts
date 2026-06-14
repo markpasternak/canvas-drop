@@ -40,8 +40,10 @@ export function useDraft(id: string) {
   return useQuery({ queryKey: keys.draft(id), queryFn: () => api.getDraft(id) });
 }
 
-export function useUsage(id: string) {
-  return useQuery({ queryKey: keys.usage(id), queryFn: () => api.getUsage(id) });
+// `enabled` lets callers skip the request for canvases with no backend — there's
+// no primitive usage to show, so the Usage tab renders an empty state instead.
+export function useUsage(id: string, enabled = true) {
+  return useQuery({ queryKey: keys.usage(id), queryFn: () => api.getUsage(id), enabled });
 }
 
 // --- Admin (§6.10, M7) ---

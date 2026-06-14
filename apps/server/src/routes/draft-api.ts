@@ -128,6 +128,24 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
+    // Optimistic-concurrency (opt-in): a best-effort writer — the editor's unmount flush —
+    // pins the draft fork-point it edited against via `If-Draft-Base`. If a restore (or any
+    // wholesale replace) has since moved `baseVersionId`, reject so a stale single-file write
+    // can't clobber the new draft. `null` base is encoded as the `none` sentinel client-side.
+    // Header absent = no precondition (normal autosave/upload/create are unaffected).
+    const expectedBase = c.req.header("If-Draft-Base");
+    if (expectedBase !== undefined) {
+      const current = await deps.drafts.getOrCreate(cv);
+      if ((current.baseVersionId ?? "none") !== expectedBase) {
+        return c.json(
+          {
+            code: "DRAFT_CONFLICT",
+            message: "The draft changed since this edit; not overwriting.",
+          },
+          409,
+        );
+      }
+    }
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     // `?mode=create` = "Add a file": refuse to overwrite an existing path (R11) so a
     // create can never silently truncate the file already there. A plain PUT (autosave,

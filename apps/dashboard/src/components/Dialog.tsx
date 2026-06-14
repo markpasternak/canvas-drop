@@ -26,6 +26,14 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const autoId = useId();
+  // Read latest onClose/dismissable from refs so they stay OUT of the effect deps.
+  // Otherwise a fresh onClose arrow on every parent render tears down and re-runs the
+  // focus-trap + body-overflow effect each render — which, with a live CodeMirror
+  // editor underneath, snowballs into a focus/measure loop that freezes the tab.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const dismissableRef = useRef(dismissable);
+  dismissableRef.current = dismissable;
 
   useEffect(() => {
     if (!open) return;
@@ -34,8 +42,8 @@ export function Dialog({
     panel?.querySelector<HTMLElement>("[data-autofocus]")?.focus() ?? panel?.focus();
 
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && dismissable) {
-        onClose();
+      if (e.key === "Escape" && dismissableRef.current) {
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !panel) return;
@@ -61,7 +69,7 @@ export function Dialog({
       document.body.style.overflow = prevOverflow;
       restoreRef.current?.focus?.();
     };
-  }, [open, dismissable, onClose]);
+  }, [open]);
 
   if (!open) return null;
   const titleId = labelledBy ?? autoId;

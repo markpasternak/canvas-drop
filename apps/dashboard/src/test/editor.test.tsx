@@ -4,6 +4,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
+import type { DraftView } from "../lib/api.js";
+import { keys } from "../lib/queries.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
 
@@ -50,12 +52,22 @@ function json(body: unknown, status = 200): Response {
 }
 
 function mockFetch(handlers: Record<string, (init?: RequestInit) => Response>) {
-  const calls: { method: string; url: string; body?: string }[] = [];
+  const calls: {
+    method: string;
+    url: string;
+    body?: string;
+    headers?: Record<string, string>;
+  }[] = [];
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
     const u = new URL(url, "http://localhost");
     const key = `${method} ${u.pathname}`;
-    calls.push({ method, url: u.pathname + u.search, body: init?.body as string | undefined });
+    calls.push({
+      method,
+      url: u.pathname + u.search,
+      body: init?.body as string | undefined,
+      headers: init?.headers as Record<string, string> | undefined,
+    });
     const handler = handlers[key];
     if (handler) return handler(init);
     return json({ error: "not_mocked" }, 500);
@@ -70,16 +82,19 @@ function renderEditor() {
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/canvases/c1/editor"] }),
   });
-  render(
-    <ThemeProvider>
-      <QueryClientProvider client={qc}>
-        <ToastProvider>
-          {/* biome-ignore lint/suspicious/noExplicitAny: test router instance */}
-          <RouterProvider router={router as any} />
-        </ToastProvider>
-      </QueryClientProvider>
-    </ThemeProvider>,
-  );
+  return {
+    qc,
+    ...render(
+      <ThemeProvider>
+        <QueryClientProvider client={qc}>
+          <ToastProvider>
+            {/* biome-ignore lint/suspicious/noExplicitAny: test router instance */}
+            <RouterProvider router={router as any} />
+          </ToastProvider>
+        </QueryClientProvider>
+      </ThemeProvider>,
+    ),
+  };
 }
 
 const draftView = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -176,6 +191,51 @@ describe("Editor route", () => {
     );
   });
 
+  it("flushes a pending autosave on unmount, so leaving the tab mid-edit isn't lost", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+    });
+    const { unmount } = renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("orig"));
+    // Edit, then leave before the 700ms debounce would fire — no PUT yet.
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    unmount();
+    // The unmount flush must have dispatched the save with the edited content,
+    // pinned to the draft's fork-point so a flush landing after a restore is rejected.
+    await waitFor(() => {
+      const put = calls.find(
+        (c) => c.method === "PUT" && c.url.startsWith("/api/canvases/c1/draft/file"),
+      );
+      expect(put?.body).toContain("edited");
+      expect(put?.headers?.["If-Draft-Base"]).toBe("v1");
+    });
+  });
+
+  it("marks the draft dirty on unmount so an in-window edit can't bypass the restore confirm", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+    });
+    const { unmount, qc } = renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("orig"));
+    // The draft cache starts clean (the restore fast-path would skip confirmation).
+    expect(qc.getQueryData<DraftView>(keys.draft("c1"))?.dirty).toBe(false);
+    // Edit inside the debounce window, then leave the tab.
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    unmount();
+    // Synchronously after unmount the shared draft cache is flagged dirty, so the
+    // Versions tab's `draft.dirty` confirm-gate fires before discarding this edit.
+    expect(qc.getQueryData<DraftView>(keys.draft("c1"))?.dirty).toBe(true);
+  });
+
   it("renders an image preview (with Download) instead of the text editor", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
@@ -245,9 +305,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("index.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add file" }));
     const field = await screen.findByPlaceholderText("e.g. styles/main.css");
-    await userEvent.type(field, "index.html");
+    fireEvent.change(field, { target: { value: "index.html" } });
     expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
     const submit = screen
       .getAllByRole("button", { name: "Add file" })
@@ -273,13 +333,13 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("index.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add file" }));
     const field = await screen.findByPlaceholderText("e.g. styles/main.css");
-    await userEvent.type(field, "styles/main.css");
+    fireEvent.change(field, { target: { value: "styles/main.css" } });
     const submit = screen
       .getAllByRole("button", { name: "Add file" })
       .find((b) => (b as HTMLButtonElement).type === "submit") as HTMLButtonElement;
-    await userEvent.click(submit);
+    fireEvent.click(submit);
     await waitFor(() =>
       expect(
         calls.some(
@@ -309,10 +369,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     await screen.findByText("a.html");
-    await userEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
     const field = await screen.findByDisplayValue("a.html");
-    await userEvent.clear(field);
-    await userEvent.type(field, "b.html");
+    fireEvent.change(field, { target: { value: "b.html" } });
     expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
   });

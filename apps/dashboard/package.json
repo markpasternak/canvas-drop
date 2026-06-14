@@ -9,7 +9,7 @@
     "brand:icons": "node scripts/generate-brand-icons.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "node ../../scripts/test-runner.mjs dashboard"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
