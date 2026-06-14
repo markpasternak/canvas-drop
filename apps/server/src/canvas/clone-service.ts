@@ -14,6 +14,15 @@ export interface CloneServiceDeps {
   storage: StorageDriver;
 }
 
+/**
+ * How many blob copies to run concurrently when cloning. Each S3 `CopyObject` is a
+ * server-side copy (no bytes transit this process) but still a network round-trip,
+ * so copying in parallel hides per-blob latency. Matches the deploy engine's
+ * `PUT_CONCURRENCY` (same storage backend, same rationale); capped so a many-file
+ * clone can't exhaust the S3 client's socket pool or trip request-rate limits.
+ */
+const COPY_CONCURRENCY = 8;
+
 export interface CloneResult {
   canvas: Canvas;
 }
@@ -79,10 +88,20 @@ export function cloneService(deps: CloneServiceDeps) {
       //    rethrow so the route still surfaces the failure.
       try {
         // Copy the DISTINCT blobs into the clone's namespace (dedup by hash — two
-        // paths sharing one hash copy that blob once).
-        const hashes = new Set(Object.values(manifest).map((entry) => entry.hash));
-        for (const hash of hashes) {
-          await deps.storage.copy(blobKey(source.id, hash), blobKey(canvas.id, hash));
+        // paths sharing one hash copy that blob once), in bounded-concurrency
+        // batches so remote (S3) clones don't pay per-blob round-trip latency
+        // serially. Each batch waits for ALL copies to SETTLE before surfacing a
+        // failure (allSettled, not all) — mirroring the deploy engine — so no copy
+        // can still be in flight when the rollback below lists+deletes the prefix.
+        const hashes = [...new Set(Object.values(manifest).map((entry) => entry.hash))];
+        for (let i = 0; i < hashes.length; i += COPY_CONCURRENCY) {
+          const results = await Promise.allSettled(
+            hashes
+              .slice(i, i + COPY_CONCURRENCY)
+              .map((hash) => deps.storage.copy(blobKey(source.id, hash), blobKey(canvas.id, hash))),
+          );
+          const failed = results.find((r) => r.status === "rejected");
+          if (failed) throw (failed as PromiseRejectedResult).reason;
         }
         // Seed the draft AFTER all blobs land, so a mid-copy failure never leaves a
         // draft referencing a blob that isn't there.

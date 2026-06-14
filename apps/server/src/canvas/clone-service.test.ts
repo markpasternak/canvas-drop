@@ -183,6 +183,21 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
     expect((await storage.list(canvasBlobPrefix(canvas.id))).length).toBeGreaterThan(0);
   });
 
+  it("copies every blob when the file count exceeds the parallel-copy batch size", async () => {
+    const { storage, canvases, drafts, engine, clone, owner, cloner, reload } = await setup();
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
+    // 20 distinct files > COPY_CONCURRENCY (16) → the batching loop runs >1 iteration.
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 20; i++) files[`f${i}.html`] = `<h1>${i}</h1>`;
+    await engine.deploy(src, "folder", folder(files), owner.id);
+
+    const { canvas } = await clone.clone(await reload(src.id), cloner.id);
+    expect(Object.keys((await drafts.getByCanvas(canvas.id))?.manifest as Manifest)).toHaveLength(
+      20,
+    );
+    expect((await storage.list(canvasBlobPrefix(canvas.id))).length).toBe(20);
+  });
+
   it("rolls back the orphan canvas when a blob copy fails mid-clone", async () => {
     const { storage, canvases, engine, clone, owner, cloner, reload } = await setup();
     const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
