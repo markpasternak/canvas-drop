@@ -83,7 +83,7 @@ export function errorResponse(
   });
 }
 
-export function renderErrorPage(input: ErrorPageDetails): string {
+function renderErrorPage(input: ErrorPageDetails): string {
   const details = normalizeDetails(input);
   const title = escapeHtml(details.title);
   const message = escapeHtml(details.message);
@@ -297,7 +297,7 @@ export function renderErrorPage(input: ErrorPageDetails): string {
 </html>`;
 }
 
-export function detailsFromBody(
+function detailsFromBody(
   c: Context<AppEnv>,
   status: number,
   statusText: string,

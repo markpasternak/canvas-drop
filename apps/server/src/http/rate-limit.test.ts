@@ -183,7 +183,7 @@ describe("rate limiting (middleware + out-of-band)", () => {
     }
   });
 
-  it("login is throttled per-IP, pre-gateway (5/min default; 2 here)", async () => {
+  it("login is throttled per-IP, pre-gateway (10/min default; 2 here)", async () => {
     client = await makeTestDb("sqlite");
     // oidc-less dev mode has no /auth/login handler, but the throttle runs first;
     // before the limit it falls through (404), past it returns 429.
