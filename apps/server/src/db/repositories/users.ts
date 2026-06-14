@@ -1,5 +1,5 @@
 import { pgSchema, sqliteSchema, type User } from "@canvas-drop/shared/db";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -115,12 +115,17 @@ export function usersRepository(client: DbClient) {
       await db.update(t).set({ isAdmin }).where(eq(t.id, id));
     },
 
-    /** Count of admins — backs the route's last-admin demotion guard. */
+    /**
+     * Count of *functioning* admins — backs the last-admin demote/block guards.
+     * Blocked admins are excluded: the gateway rejects them per request, so a
+     * blocked admin can't administer anything and must not pad the guard count
+     * (otherwise demoting/blocking the last usable admin could lock the org out).
+     */
     async countAdmins(): Promise<number> {
       const rows = (await db
         .select({ count: sql<number>`count(*)` })
         .from(t)
-        .where(eq(t.isAdmin, true))) as Array<{ count: number }>;
+        .where(and(eq(t.isAdmin, true), eq(t.isBlocked, false)))) as Array<{ count: number }>;
       return Number(rows[0]?.count ?? 0);
     },
   };

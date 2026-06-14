@@ -58,6 +58,11 @@ export function daysSince(epochMs: number, now = Date.now()): number {
   return Math.max(0, Math.floor((now - epochMs) / 86400000));
 }
 
+/** Friendly label for a deploy source (folder | zip | paste | api). */
+export function sourceLabel(source: string): string {
+  return { folder: "folder upload", zip: "ZIP", paste: "paste", api: "the API" }[source] ?? source;
+}
+
 /** Countdown to a future expiry, or "expired". */
 export function expiryLabel(epochMs: number, now = Date.now()): string {
   const s = Math.round((epochMs - now) / 1000);

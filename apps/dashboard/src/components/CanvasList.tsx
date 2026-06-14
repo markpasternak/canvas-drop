@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
 import { formatBytes, relativeTime } from "../lib/format.js";
+import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { Badge, StatusBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
@@ -11,17 +12,9 @@ const MAX_ROW_TAGS = 3;
 const DESKTOP_GRID =
   "lg:grid-cols-[minmax(0,1.7fr)_minmax(0,0.85fr)_minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.1fr)_10rem]";
 
-export const rowPrimaryActionClass =
-  "inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-surface-raised px-3 " +
-  "text-[0.8125rem] font-medium text-fg border border-border-strong transition-all duration-100 " +
-  "[transition-timing-function:var(--ease-out)] hover:bg-surface-hover active:translate-y-px";
-
-export const rowMenuItemClass =
-  "flex h-8 w-full items-center justify-start rounded-md px-2 text-left text-xs font-medium " +
-  "text-muted transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
-  "hover:bg-surface-hover hover:text-fg";
-
-function canvasTitle(canvas: CanvasListItem): string {
+/** Display title: the trimmed title, or the slug as a stable fallback. Shared so
+ * the Your-canvases route renders identical titles to the list rows. */
+export function canvasTitle(canvas: CanvasListItem): string {
   return canvas.title?.trim() || canvas.slug;
 }
 
@@ -193,6 +186,11 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
   const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
+    // Keyboard access to the canvas is the focusable title <Link> below (and the
+    // inner Open/copy/menu controls). The whole-row click is a mouse convenience;
+    // the <li> stays non-interactive (no role/tabIndex) because biome's a11y rules
+    // disallow an interactive role on <li> and a tab stop here would only duplicate
+    // the title link. onKeyDown is retained to satisfy useKeyWithClickEvents.
     <li
       className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-3 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised"
       onClick={(event) => {

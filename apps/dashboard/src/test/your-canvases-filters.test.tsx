@@ -80,7 +80,15 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
       // /api/canvases — apply the server-side filter/search the route would.
       const sp = u.searchParams;
       const q = sp.get("q")?.toLowerCase();
+      const archivedScope = sp.get("scope") === "archived";
       const matched = all.filter((c) => {
+        // Scope is the lifecycle slice: archived view shows only archived; the
+        // default active view excludes archived/deleted (mirrors the server).
+        if (archivedScope) {
+          if (c.status !== "archived") return false;
+        } else if (c.status === "archived" || c.status === "deleted") {
+          return false;
+        }
         if (sp.get("shared") === "1" && !c.shared) return false;
         if (sp.get("protected") === "1" && !c.hasPassword) return false;
         if (sp.get("listed") === "1" && !c.galleryListed) return false;
@@ -296,6 +304,26 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     // Zero owned canvases with no active filter → the onboarding/empty path.
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.queryByText("No canvases match these filters")).toBeNull();
+  });
+
+  it("toggles to the Archived scope: requests scope=archived and renders the Restore action", async () => {
+    stub([
+      canvas({ id: "act", slug: "act", title: "Active one", status: "active" }),
+      canvas({ id: "arc", slug: "arc", title: "Archived one", status: "archived" }),
+    ]);
+    renderAt("/");
+    await screen.findByText("Active one");
+    // The archived canvas is not in the default (active) scope.
+    expect(screen.queryByText("Archived one")).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: /archived/i }));
+
+    // Archived scope: the archived row appears, the active one drops out, and the
+    // row exposes Restore (not Open) — the ArchivedRow branch.
+    expect(await screen.findByText("Archived one")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Active one")).toBeNull());
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Archived one" })).toBeNull();
   });
 
   it("paginates: shows the page window and a working Next control", async () => {

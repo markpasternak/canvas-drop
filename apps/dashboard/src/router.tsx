@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/
 import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
+import type { AdminCanvasSort, AdminCanvasStatus } from "./lib/api.js";
 
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
@@ -104,6 +105,19 @@ const onboardingRoute = createRoute({
   path: "/onboarding",
   component: OnboardingRoute,
 });
+
+/** Admin canvas-list search params (plan 006), URL-driven so a filtered/drill-down
+ *  view is shareable and back-button-able. Read loosely (no validateSearch on the
+ *  route) and coerced in the view, mirroring the Your-canvases list. Lives here with
+ *  the other route search types so views don't import it across sibling route files. */
+export interface AdminCanvasesSearch {
+  status?: AdminCanvasStatus;
+  q?: string;
+  sort?: AdminCanvasSort;
+  /** Drill-down: restrict to a single owner by user id ("see what they have"). */
+  owner?: string;
+  page?: number;
+}
 
 // Admin surface (§6.10, M7). Top-level routes (NOT under /c/, /api/, /v1/, /auth/
 // — those are reserved, dashboard-spa-patterns). The server 404s non-admins; the

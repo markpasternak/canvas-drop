@@ -137,7 +137,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
       "GET /api/canvases": () => json({ canvases: [] }),
     });
@@ -164,7 +164,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
     });
     renderAt("/admin");
     expect(await screen.findByText("Total views")).toBeInTheDocument();
@@ -255,7 +255,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     const first = renderAt("/admin");
@@ -271,7 +271,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
@@ -415,7 +415,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
       "POST /api/admin/canvases/c1/disable": () => json({ ok: true }),
     });
@@ -437,7 +437,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin/canvases");

@@ -10,13 +10,8 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { expiryLabel, formatBytes, fullTime, relativeTime } from "../lib/format.js";
+import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
-
-/** Friendly label for a deploy source (folder | zip | paste | api). */
-function sourceLabel(source: string): string {
-  return { folder: "folder upload", zip: "ZIP", paste: "paste", api: "the API" }[source] ?? source;
-}
 
 function rootWorks(entry?: RootEntry): boolean {
   return entry?.reason === "index" || entry?.reason === "single";

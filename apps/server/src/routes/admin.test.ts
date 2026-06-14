@@ -91,8 +91,11 @@ describe("admin routes", () => {
     }
     const dis = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
     expect(dis.status).toBe(404);
-    const blk = await app.request(`/api/admin/users/${owner.id}/block`, post());
-    expect(blk.status).toBe(404);
+    // Every user-mutation route is gated too — not just /block (no existence leak).
+    for (const action of ["block", "unblock", "promote", "demote"] as const) {
+      const res = await app.request(`/api/admin/users/${owner.id}/${action}`, post());
+      expect(res.status).toBe(404);
+    }
   });
 
   it("admin disables a canvas with a reason (audited); enable clears it", async () => {
@@ -410,11 +413,30 @@ describe("admin routes", () => {
     expect((await usersRepository(client).findById(bob.id))?.isAdmin).toBe(true); // unchanged
   });
 
-  it("block/promote on a missing user → 404", async () => {
+  it("block/unblock/promote/demote on a missing user → 404", async () => {
     client = await makeTestDb("sqlite");
     const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
-    expect((await app.request("/api/admin/users/nope/block", post())).status).toBe(404);
-    expect((await app.request("/api/admin/users/nope/promote", post())).status).toBe(404);
+    for (const action of ["block", "unblock", "promote", "demote"] as const) {
+      expect((await app.request(`/api/admin/users/nope/${action}`, post())).status).toBe(404);
+    }
+  });
+
+  it("cannot block the last functioning admin (409 last_admin)", async () => {
+    client = await makeTestDb("sqlite");
+    // bob is the only DB admin; the actor is admin-by-context but not a counted DB
+    // admin. Blocking bob would leave zero usable admins (the gateway rejects blocked
+    // users), so it must be refused — the same invariant as demote.
+    const bob = await usersRepository(client).upsert({
+      providerSub: "bob",
+      email: "bob@example.com",
+      name: "bob",
+      isAdmin: true,
+    });
+    const { app } = buildAdminApp(client, { id: "ghost-admin", isAdmin: true });
+    const res = await app.request(`/api/admin/users/${bob.id}/block`, post());
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("last_admin");
+    expect((await usersRepository(client).findById(bob.id))?.isBlocked).toBe(false); // unchanged
   });
 
   it("manages the model allowlist + quota defaults (audited); rejects invalid bodies", async () => {

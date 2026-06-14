@@ -302,20 +302,24 @@ export function managementRoutes(deps: ManagementDeps) {
     const offset = Math.max(data.offset, 0);
 
     const userId = c.get("user").id;
-    const { items, total } = await deps.canvases.listByOwnerFiltered({
-      ownerId: userId,
-      q: data.q,
-      shared: data.shared,
-      protected: data.protected,
-      listed: data.listed,
-      template: data.template,
-      neverDeployed: data.undeployed,
-      archived: data.scope === "archived",
-      sort: data.sort,
-      limit,
-      offset,
-    });
-    const summary = await deps.canvases.ownerSummary(userId);
+    // The filtered page and the (filter-independent) inventory summary have no data
+    // dependency — run them concurrently rather than serially.
+    const [{ items, total }, summary] = await Promise.all([
+      deps.canvases.listByOwnerFiltered({
+        ownerId: userId,
+        q: data.q,
+        shared: data.shared,
+        protected: data.protected,
+        listed: data.listed,
+        template: data.template,
+        neverDeployed: data.undeployed,
+        archived: data.scope === "archived",
+        sort: data.sort,
+        limit,
+        offset,
+      }),
+      deps.canvases.ownerSummary(userId),
+    ]);
     const canvases = await withLastDeploy(items);
     return c.json({ canvases, total, limit, offset, summary });
   });

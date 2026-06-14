@@ -5,9 +5,8 @@ import { Button } from "../components/Button.js";
 import {
   CanvasListHeader,
   CanvasRow,
+  canvasTitle,
   ListSkeleton,
-  rowMenuItemClass,
-  rowPrimaryActionClass,
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
@@ -23,7 +22,9 @@ import {
 } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { useArchiveCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
-import { useArchivedCanvases, useCanvases } from "../lib/queries.js";
+import { useCanvases } from "../lib/queries.js";
+import { rowMenuItemClass, rowPrimaryActionClass } from "../lib/row-styles.js";
+import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
 
@@ -54,10 +55,6 @@ const CANVASES_SORT_OPTIONS = [
   { value: "created", label: "Newest" },
   { value: "title", label: "Title A–Z" },
 ];
-
-function canvasTitle(canvas: CanvasListItem) {
-  return canvas.title?.trim() || canvas.slug;
-}
 
 function RowOverflowMenu({
   label,
@@ -323,18 +320,14 @@ function SummaryStrip({
 /** Shown when the owner has NO active canvases at all (not merely a filtered-empty
  * view). A brand-new user gets the onboarding first-run page; a user whose canvases
  * are ALL archived gets a pointer to the Archived view instead (showing "get
- * started" would wrongly imply they have nothing). The archived query only fires
- * here — on the empty path — so it costs nothing for users who have active canvases. */
-function EmptyHome() {
-  const { data: archived } = useArchivedCanvases();
-  // Wait for the archived count before choosing, so we don't flash the full
-  // onboarding page and then swap it for the archived pointer.
-  if (archived === undefined) return <ListSkeleton />;
-  if (archived.length > 0) {
+ * started" would wrongly imply they have nothing). The archived count comes from the
+ * list response's inventory summary — already loaded here — so no extra request fires. */
+function EmptyHome({ archivedCount }: { archivedCount: number }) {
+  if (archivedCount > 0) {
     return (
       <EmptyState
         title="No active canvases"
-        description={`All your canvases are archived (${archived.length}). Restore one to bring it back live, or create a new canvas.`}
+        description={`All your canvases are archived (${archivedCount}). Restore one to bring it back live, or create a new canvas.`}
         action={
           <Link to="/" search={{ scope: "archived" }}>
             <Button variant="secondary" size="sm">
@@ -378,27 +371,8 @@ export default function CanvasList() {
           search.undeployed,
       );
 
-  // Local mirror of the search box, debounced into the `q` route param. Seeded on
-  // `q` so a shared URL or back-nav populates the field.
-  const [text, setText] = useState(q ?? "");
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
-
-  // Typing debounces (300ms) into the URL → refetch; clearing the field applies
-  // immediately so the list doesn't stay filtered after the box is emptied.
-  useEffect(() => {
-    const value = text.trim() || undefined;
-    if (value === q) return; // already in sync — no navigation
-    if (value === undefined) {
-      navigate({ to: "/", search: (prev) => ({ ...prev, q: undefined, page: 1 }) });
-      return;
-    }
-    const id = setTimeout(() => {
-      navigate({ to: "/", search: (prev) => ({ ...prev, q: value, page: 1 }) });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [text, q, navigate]);
+  // Search box ⇆ URL `q`, debounced (shared with the admin canvases/users lists).
+  const [text, setText] = useDebouncedUrlSearch(q, "/");
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useCanvases({
     q,
@@ -506,7 +480,7 @@ export default function CanvasList() {
       />
 
       {pristineEmpty ? (
-        <EmptyHome />
+        <EmptyHome archivedCount={summary.archived} />
       ) : (
         <>
           <SummaryStrip summary={summary} archivedView={archivedView} />

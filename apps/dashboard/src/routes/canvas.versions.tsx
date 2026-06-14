@@ -9,13 +9,9 @@ import { Skeleton } from "../components/Skeleton.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
-import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
+import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
-
-function sourceLabel(source: string): string {
-  return { folder: "folder upload", zip: "ZIP", paste: "paste", api: "the API" }[source] ?? source;
-}
 
 /** Deploys tab: deploy history (newest first), forward "Deploy files", and
  * per-version "Make live" (re-point the live version in either direction).

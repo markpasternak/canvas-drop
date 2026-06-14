@@ -13,6 +13,7 @@ import {
   eq,
   exists,
   gt,
+  inArray,
   isNotNull,
   isNull,
   lte,
@@ -233,6 +234,15 @@ export function canvasesRepository(client: DbClient) {
       return (rows[0] as Canvas | undefined) ?? null;
     },
 
+    /** Batched lookup (any status) for enriching admin top-N lists — no N+1. */
+    async findByIds(ids: readonly string[]): Promise<Canvas[]> {
+      if (ids.length === 0) return [];
+      return (await db
+        .select()
+        .from(t)
+        .where(inArray(t.id, [...ids]))) as Canvas[];
+    },
+
     /**
      * Your-canvases list with server-side filter/search/sort + offset pagination
      * (plan 005). Mirrors {@link listGallery}'s shape. The owner-scope base
@@ -305,30 +315,37 @@ export function canvasesRepository(client: DbClient) {
      * whole personal inventory and can annotate filter chips honestly.
      */
     async ownerSummary(ownerId: string): Promise<OwnerCanvasSummary> {
-      const activeBase = [eq(t.ownerId, ownerId), notInArray(t.status, ["deleted", "archived"])];
-      const countWhere = async (where: SQL | undefined): Promise<number> => {
-        const rows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
-          value: number;
-        }>;
-        return Number(rows[0]?.value ?? 0);
-      };
-
-      const active = await countWhere(and(...activeBase));
-      const archived = await countWhere(and(eq(t.ownerId, ownerId), eq(t.status, "archived")));
-      const shared = await countWhere(and(...activeBase, eq(t.shared, true)));
-      const protectedCount = await countWhere(and(...activeBase, isNotNull(t.passwordHash)));
-      const listed = await countWhere(and(...activeBase, eq(t.galleryListed, true)));
-      const templates = await countWhere(and(...activeBase, eq(t.galleryTemplatable, true)));
-      const neverDeployed = await countWhere(and(...activeBase, isNull(t.currentVersionId)));
+      // Single pass: conditional aggregation over the owner's rows instead of seven
+      // serial COUNT round-trips. Each bucket is `sum(case when <cond> then 1 else 0
+      // end)`; the conditions are drizzle SQL objects so they render correctly on
+      // both dialects (the same predicates the filtered list uses). `active` excludes
+      // deleted/archived; the rest AND onto that, except `archived` which is its own
+      // status slice. Counts stay independent of the current search/filter.
+      const isActive = notInArray(t.status, ["deleted", "archived"]);
+      const sumCase = (cond: SQL | undefined) =>
+        sql<number>`sum(case when ${cond} then 1 else 0 end)`;
+      const rows = (await db
+        .select({
+          active: sumCase(isActive),
+          archived: sumCase(eq(t.status, "archived")),
+          shared: sumCase(and(isActive, eq(t.shared, true))),
+          protected: sumCase(and(isActive, isNotNull(t.passwordHash))),
+          listed: sumCase(and(isActive, eq(t.galleryListed, true))),
+          templates: sumCase(and(isActive, eq(t.galleryTemplatable, true))),
+          neverDeployed: sumCase(and(isActive, isNull(t.currentVersionId))),
+        })
+        .from(t)
+        .where(eq(t.ownerId, ownerId))) as Array<Record<keyof OwnerCanvasSummary, number | null>>;
+      const r = rows[0];
 
       return {
-        active,
-        archived,
-        shared,
-        protected: protectedCount,
-        listed,
-        templates,
-        neverDeployed,
+        active: Number(r?.active ?? 0),
+        archived: Number(r?.archived ?? 0),
+        shared: Number(r?.shared ?? 0),
+        protected: Number(r?.protected ?? 0),
+        listed: Number(r?.listed ?? 0),
+        templates: Number(r?.templates ?? 0),
+        neverDeployed: Number(r?.neverDeployed ?? 0),
       };
     },
 

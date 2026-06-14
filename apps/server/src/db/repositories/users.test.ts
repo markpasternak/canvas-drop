@@ -129,6 +129,18 @@ describe.each(DIALECTS)("usersRepository [%s]", (dialect) => {
     expect(await repo.countAdmins()).toBe(2);
   });
 
+  it("countAdmins excludes blocked admins (they can't administer anything)", async () => {
+    client = await makeTestDb(dialect);
+    const repo = usersRepository(client);
+    const a = await repo.upsert({ providerSub: "a", email: "a@x.com", name: "A", isAdmin: true });
+    await repo.upsert({ providerSub: "b", email: "b@x.com", name: "B", isAdmin: true });
+    expect(await repo.countAdmins()).toBe(2);
+    // Blocking an admin removes them from the functioning-admin count — the guard
+    // must not treat a blocked admin as a usable one (else the org could be locked out).
+    await repo.setBlocked(a.id, true);
+    expect(await repo.countAdmins()).toBe(1);
+  });
+
   it("setBlocked persists and a login never resurrects a blocked user", async () => {
     client = await makeTestDb(dialect);
     const repo = usersRepository(client);

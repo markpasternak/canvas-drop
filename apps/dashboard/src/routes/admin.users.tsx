@@ -1,6 +1,6 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
 import { Button } from "../components/Button.js";
@@ -8,6 +8,7 @@ import { EmptyState } from "../components/EmptyState.js";
 import { FilterSelect } from "../components/Filters.js";
 import { ADMIN_PAGE_SIZE, type AdminUserSort } from "../lib/api.js";
 import { useAdminUsers, useMe } from "../lib/queries.js";
+import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 
 /** Admin users-list search params (plan 006), URL-driven like the canvas list. */
 interface AdminUsersSearch {
@@ -46,22 +47,7 @@ export default function AdminUsers() {
     offset,
   });
 
-  const [text, setText] = useState(q ?? "");
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
-  useEffect(() => {
-    const value = text.trim() || undefined;
-    if (value === q) return;
-    if (value === undefined) {
-      navigate({ to: "/admin/users", search: (prev) => ({ ...prev, q: undefined, page: 1 }) });
-      return;
-    }
-    const id = setTimeout(() => {
-      navigate({ to: "/admin/users", search: (prev) => ({ ...prev, q: value, page: 1 }) });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [text, q, navigate]);
+  const [text, setText] = useDebouncedUrlSearch(q, "/admin/users");
 
   useEffect(() => {
     if (!isPlaceholderData && data && data.total > 0 && offset >= data.total) {

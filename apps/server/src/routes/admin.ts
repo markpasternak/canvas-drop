@@ -157,20 +157,21 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       deps.admin.platformStats(10),
       deps.aiUsage.platformSpend(),
     ]);
-    // Enrich the top canvases with slug/title (small N — direct lookups).
-    const top = await Promise.all(
-      stats.topCanvases.map(async (t) => {
-        // A single failed lookup must not 500 the whole overview — fall back to null
-        // slug/title (already handled below) for that row.
-        const cv = await deps.canvases.findById(t.canvasId).catch(() => null);
-        return {
-          canvasId: t.canvasId,
-          ops: t.ops,
-          slug: cv?.slug ?? null,
-          title: cv?.title ?? null,
-        };
-      }),
-    );
+    // Enrich the top canvases with slug/title via one batched lookup (no N+1). A
+    // missing canvas simply isn't in the map → null slug/title for that row.
+    const topCanvases = await deps.canvases
+      .findByIds(stats.topCanvases.map((t) => t.canvasId))
+      .catch(() => []);
+    const topById = new Map(topCanvases.map((cv) => [cv.id, cv]));
+    const top = stats.topCanvases.map((t) => {
+      const cv = topById.get(t.canvasId);
+      return {
+        canvasId: t.canvasId,
+        ops: t.ops,
+        slug: cv?.slug ?? null,
+        title: cv?.title ?? null,
+      };
+    });
     return c.json({
       canvasCountByStatus: stats.canvasCountByStatus,
       userCount: stats.userCount,
@@ -196,18 +197,17 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   //     (a cost/abuse object fact), never which member made which call (plan 006). ---
   app.get("/ai-usage", async (c) => {
     const byCanvasRaw = await deps.aiUsage.spendByCanvas(10);
-    // Small-N direct canvas lookups (top-10), resilient like /overview: one bad
-    // lookup falls back to null, not a 500. Then batch the owner lookup (one query).
-    const canvases = await Promise.all(
-      byCanvasRaw.map((r) => deps.canvases.findById(r.id).catch(() => null)),
-    );
-    const ownerIds = [
-      ...new Set(canvases.filter((cv): cv is Canvas => cv !== null).map((cv) => cv.ownerId)),
-    ];
+    // Batched canvas + owner lookups (top-10), resilient like /overview: a missing
+    // canvas falls back to null slug/title/owner, never a 500.
+    const canvasRows = await deps.canvases
+      .findByIds(byCanvasRaw.map((r) => r.id))
+      .catch((): Canvas[] => []);
+    const canvasById = new Map(canvasRows.map((cv) => [cv.id, cv]));
+    const ownerIds = [...new Set(canvasRows.map((cv) => cv.ownerId))];
     const owners = await deps.users.findByIds(ownerIds);
     const emailById = new Map(owners.map((u) => [u.id, u.email]));
-    const byCanvas = byCanvasRaw.map((r, i) => {
-      const cv = canvases[i];
+    const byCanvas = byCanvasRaw.map((r) => {
+      const cv = canvasById.get(r.id);
       return {
         canvasId: r.id,
         slug: cv?.slug ?? null,
@@ -297,7 +297,15 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const actor = c.get("user");
     // Self-protection: you can never block yourself out of the platform.
     if (id === actor.id) return c.json({ error: "cannot_block_self" }, 400);
-    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    const target = await deps.users.findById(id);
+    if (!target) return c.json({ error: "not_found" }, 404);
+    // Last-admin protection: blocking a functioning admin removes them from the
+    // org just like a demote (the gateway rejects blocked users). Don't let it
+    // strip the org of its final usable administrator. countAdmins() counts only
+    // non-blocked admins, so it includes this still-active target.
+    if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
+      return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
+    }
     await deps.users.setBlocked(id, true);
     deps.audit.recordAudit({
       action: "user_block",
@@ -341,9 +349,10 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (id === actor.id) return c.json({ error: "cannot_demote_self" }, 400);
     const target = await deps.users.findById(id);
     if (!target) return c.json({ error: "not_found" }, 404);
-    // Self-protection #2: never demote the last remaining admin — a single click
-    // must not leave the org with no administrator.
-    if (target.isAdmin && (await deps.users.countAdmins()) <= 1) {
+    // Self-protection #2: never demote the last functioning admin — a single click
+    // must not leave the org with no usable administrator. A blocked target isn't
+    // counted by countAdmins(), so demoting them can't drop the functioning count.
+    if (target.isAdmin && !target.isBlocked && (await deps.users.countAdmins()) <= 1) {
       return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
     }
     await deps.users.setAdmin(id, false);

@@ -1,6 +1,6 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Button } from "../components/Button.js";
@@ -8,18 +8,8 @@ import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { ADMIN_PAGE_SIZE, type AdminCanvasSort, type AdminCanvasStatus } from "../lib/api.js";
 import { useAdminCanvases } from "../lib/queries.js";
-
-/** Admin canvas-list search params (plan 006), URL-driven so a filtered/drill-down
- *  view is shareable and back-button-able. Read loosely (no validateSearch on the
- *  route — see router.tsx) and coerced here, mirroring the Your-canvases list. */
-export interface AdminCanvasesSearch {
-  status?: AdminCanvasStatus;
-  q?: string;
-  sort?: AdminCanvasSort;
-  /** Drill-down: restrict to a single owner by user id ("see what they have"). */
-  owner?: string;
-  page?: number;
-}
+import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
+import type { AdminCanvasesSearch } from "../router.js";
 
 const STATUS_CHIPS: Array<{ value: AdminCanvasStatus | undefined; label: string }> = [
   { value: undefined, label: "All" },
@@ -61,24 +51,8 @@ export default function AdminCanvases() {
     offset,
   });
 
-  // Local mirror of the search box, debounced into the `q` route param (mirrors the
-  // member list). Seeded on `q` so a shared URL / back-nav repopulates the field.
-  const [text, setText] = useState(q ?? "");
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
-  useEffect(() => {
-    const value = text.trim() || undefined;
-    if (value === q) return;
-    if (value === undefined) {
-      navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, q: undefined, page: 1 }) });
-      return;
-    }
-    const id = setTimeout(() => {
-      navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, q: value, page: 1 }) });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [text, q, navigate]);
+  // Search box ⇆ URL `q`, debounced (shared with the member + users lists).
+  const [text, setText] = useDebouncedUrlSearch(q, "/admin/canvases");
 
   // Snap back to page 1 if a refetch lands past the last page (e.g. a takedown
   // shrank the set while paging). Gated on !isPlaceholderData so a stale total

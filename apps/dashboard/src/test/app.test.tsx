@@ -92,13 +92,25 @@ describe("dashboard app", () => {
       createdAt: 0,
       updatedAt: 0,
     };
+    const emptySummary = {
+      active: 0,
+      archived: 1,
+      shared: 0,
+      protected: 0,
+      listed: 0,
+      templates: 0,
+      neverDeployed: 0,
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url, "http://localhost").pathname;
+        // The empty-home pointer now reads the archived count from the list response
+        // summary (no separate /archived request). Active list is empty; summary
+        // reports one archived canvas.
         const body = path.endsWith("/archived")
           ? { canvases: [archivedItem] }
-          : { canvases: [], total: 0, limit: 24, offset: 0 };
+          : { canvases: [], total: 0, limit: 24, offset: 0, summary: emptySummary };
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "content-type": "application/json" },

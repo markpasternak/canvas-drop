@@ -7,22 +7,36 @@ import { CollapsibleSection } from "../components/CollapsibleSection.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { daysSince, formatBytes, formatUsd } from "../lib/format.js";
 import { useAdminAiUsage, useAdminOverview } from "../lib/queries.js";
-import type { AdminCanvasesSearch } from "./admin.canvases.js";
+import type { AdminCanvasesSearch } from "../router.js";
 
-/** One cell in the platform stat strip. Cells share a single bordered surface
- *  (gridlines come from the parent's gap), so the block reads as one instrument
- *  panel — not a grid of identical SaaS hero-metric cards. */
-function StatCell({
+/**
+ * A labelled metric. `strip` (default) is a bordered instrument-panel cell — cells
+ * share one surface (gridlines come from the parent's gap), so the block reads as a
+ * single panel, not a grid of SaaS hero-metric cards. `compact` is the borderless
+ * inline variant. `emphasis` bumps the strip value size for the headline figures.
+ */
+function Metric({
   label,
   value,
   hint,
+  variant = "strip",
   emphasis = false,
 }: {
   label: string;
   value: string | number;
   hint?: string;
+  variant?: "strip" | "compact";
   emphasis?: boolean;
 }) {
+  if (variant === "compact") {
+    return (
+      <div className="min-w-0">
+        <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
+        <dd className="mt-1 text-sm font-semibold text-fg tabular-nums">{value}</dd>
+        {hint && <div className="mt-0.5 truncate text-xs text-subtle">{hint}</div>}
+      </div>
+    );
+  }
   return (
     <div className="min-h-[5.5rem] bg-surface px-4 py-3.5">
       <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
@@ -36,24 +50,6 @@ function StatCell({
         {value}
       </dd>
       {hint && <div className="mt-1 text-xs text-subtle">{hint}</div>}
-    </div>
-  );
-}
-
-function CompactMetric({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | number;
-  hint?: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
-      <dd className="mt-1 text-sm font-semibold text-fg tabular-nums">{value}</dd>
-      {hint && <div className="mt-0.5 truncate text-xs text-subtle">{hint}</div>}
     </div>
   );
 }
@@ -153,15 +149,15 @@ function AdminOverview() {
           <div className="bg-surface">
             <dl className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
               {/* Headline KPIs: the first thing an admin should scan. */}
-              <StatCell label="Active canvases" value={byStatus.active ?? 0} emphasis />
-              <StatCell
+              <Metric label="Active canvases" value={byStatus.active ?? 0} emphasis />
+              <Metric
                 label="Users"
                 value={ov.userCount}
                 hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
                 emphasis
               />
-              <StatCell label="Total views" value={ov.totalViews.toLocaleString()} emphasis />
-              <StatCell
+              <Metric label="Total views" value={ov.totalViews.toLocaleString()} emphasis />
+              <Metric
                 label="AI spend"
                 value={formatUsd(ov.aiCostUsd)}
                 hint={`${ov.aiCalls.toLocaleString()} calls`}
@@ -170,17 +166,31 @@ function AdminOverview() {
             </dl>
 
             <dl className="grid gap-x-8 gap-y-4 border-border border-t px-4 py-3.5 sm:grid-cols-4 lg:grid-cols-8">
-              <CompactMetric label="Unique viewers" value={ov.uniqueViewers.toLocaleString()} />
-              <CompactMetric label="Deploys" value={ov.totalDeploys.toLocaleString()} />
-              <CompactMetric label="Primitive ops" value={ov.totalOps.toLocaleString()} />
-              <CompactMetric label="File storage" value={formatBytes(ov.totalFileBytes)} />
-              <CompactMetric
+              <Metric
+                variant="compact"
+                label="Unique viewers"
+                value={ov.uniqueViewers.toLocaleString()}
+              />
+              <Metric variant="compact" label="Deploys" value={ov.totalDeploys.toLocaleString()} />
+              <Metric
+                variant="compact"
+                label="Primitive ops"
+                value={ov.totalOps.toLocaleString()}
+              />
+              <Metric
+                variant="compact"
+                label="File storage"
+                value={formatBytes(ov.totalFileBytes)}
+              />
+              <Metric
+                variant="compact"
                 label={`New (${ov.recentWindowDays}d)`}
                 value={ov.newCanvases.toLocaleString()}
               />
-              <CompactMetric label="Disabled" value={byStatus.disabled ?? 0} />
-              <CompactMetric label="Archived" value={byStatus.archived ?? 0} />
-              <CompactMetric
+              <Metric variant="compact" label="Disabled" value={byStatus.disabled ?? 0} />
+              <Metric variant="compact" label="Archived" value={byStatus.archived ?? 0} />
+              <Metric
+                variant="compact"
                 label="Deleted"
                 value={byStatus.deleted ?? 0}
                 hint={
