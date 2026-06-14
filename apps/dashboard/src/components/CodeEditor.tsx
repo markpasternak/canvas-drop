@@ -111,6 +111,8 @@ export interface CodeEditorProps {
   value: string;
   readOnly?: boolean;
   onChange: (next: string) => void;
+  /** ⌘S / Ctrl+S — flush the autosave immediately instead of the browser save dialog. */
+  onSave?: () => void;
 }
 
 /**
@@ -119,10 +121,12 @@ export interface CodeEditorProps {
  * and re-keys this component per file, so we don't reconcile external value changes
  * into a live view — that avoids cursor-jump on autosave round-trips).
  */
-export function CodeEditor({ path, value, readOnly = false, onChange }: CodeEditorProps) {
+export function CodeEditor({ path, value, readOnly = false, onChange, onSave }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
 
   // Re-create the view only when the open file or readOnly changes — `value` is an
   // initial doc seed, not a live binding (the parent re-keys per file), so it's
@@ -133,6 +137,18 @@ export function CodeEditor({ path, value, readOnly = false, onChange }: CodeEdit
     const state = EditorState.create({
       doc: value,
       extensions: [
+        // ⌘S / Ctrl+S flushes the draft (returning true preempts the browser's "Save
+        // page" dialog). Sits before baseExtensions so it wins over the default keymap.
+        keymap.of([
+          {
+            key: "Mod-s",
+            preventDefault: true,
+            run: () => {
+              onSaveRef.current?.();
+              return true;
+            },
+          },
+        ]),
         ...baseExtensions,
         ...languageFor(path),
         EditorState.readOnly.of(readOnly),

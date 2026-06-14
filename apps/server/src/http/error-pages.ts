@@ -83,26 +83,13 @@ export function errorResponse(
   });
 }
 
-function renderErrorPage(input: ErrorPageDetails): string {
-  const details = normalizeDetails(input);
-  const title = escapeHtml(details.title);
-  const message = escapeHtml(details.message);
-  const code = escapeHtml(details.code);
-  const status = escapeHtml(String(details.status));
-  const path = details.requestPath ? escapeHtml(details.requestPath) : "";
-  const hint = details.hint ? escapeHtml(details.hint) : "";
-  const actionHref = escapeAttribute(details.actionHref ?? "/");
-  const actionLabel = escapeHtml(details.actionLabel ?? "Open dashboard");
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${status} ${title}</title>
-<style>
-  :root {
+/**
+ * Shared visual chrome for self-contained system pages (the branded 4xx/5xx
+ * error pages AND the canvas password gate, §14.5). Both pages emit this token
+ * block + brand header so they render in ONE design language and cannot drift
+ * apart. Page-specific layout (error meta grid, gate form) is layered after.
+ */
+export const SYSTEM_PAGE_STYLES = `  :root {
     color-scheme: light dark;
     --canvas: #f5f5f2;
     --surface: #fbfbf8;
@@ -161,6 +148,70 @@ function renderErrorPage(input: ErrorPageDetails): string {
     height: 2rem;
     flex: 0 0 auto;
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --canvas: #0b0b0d;
+      --surface: #141416;
+      --surface-raised: #1c1c20;
+      --surface-sunken: #09090b;
+      --fg: #f4f4f5;
+      --muted: #a1a1aa;
+      --subtle: #6e6e78;
+      --border: #27272b;
+      --border-strong: #3a3a40;
+      --accent: #60a5fa;
+      --accent-hover: #93c5fd;
+      --accent-fg: #07111f;
+      --accent-subtle: #0d2a4d;
+      --logo-frame: #f4f4f5;
+      --logo-drop: #60a5fa;
+      --shadow-color: 0 0% 0%;
+      --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);
+    }
+    body {
+      background:
+        radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-subtle), transparent 35%), transparent 30rem),
+        linear-gradient(135deg, var(--canvas), var(--surface-sunken));
+    }
+    main { background: color-mix(in srgb, var(--surface) 96%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      transition-duration: .01ms !important;
+    }
+  }`;
+
+/** The Canvasdrop logo + wordmark header, shared by every system page. */
+export const SYSTEM_PAGE_BRAND = `    <div class="brand">
+      <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--logo-frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+        <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
+        <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
+      </svg>
+      <span>Canvasdrop</span>
+    </div>`;
+
+function renderErrorPage(input: ErrorPageDetails): string {
+  const details = normalizeDetails(input);
+  const title = escapeHtml(details.title);
+  const message = escapeHtml(details.message);
+  const code = escapeHtml(details.code);
+  const status = escapeHtml(String(details.status));
+  const path = details.requestPath ? escapeHtml(details.requestPath) : "";
+  const hint = details.hint ? escapeHtml(details.hint) : "";
+  const actionHref = escapeAttribute(details.actionHref ?? "/");
+  const actionLabel = escapeHtml(details.actionLabel ?? "Open dashboard");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${status} ${title}</title>
+<style>
+${SYSTEM_PAGE_STYLES}
   .content { padding: clamp(1.5rem, 4vw, 2.5rem); }
   .kicker {
     margin: 0 0 .75rem;
@@ -236,51 +287,11 @@ function renderErrorPage(input: ErrorPageDetails): string {
   a:hover { background: var(--accent-hover); }
   a:active { transform: translateY(1px); }
   a:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --canvas: #0b0b0d;
-      --surface: #141416;
-      --surface-raised: #1c1c20;
-      --surface-sunken: #09090b;
-      --fg: #f4f4f5;
-      --muted: #a1a1aa;
-      --subtle: #6e6e78;
-      --border: #27272b;
-      --border-strong: #3a3a40;
-      --accent: #60a5fa;
-      --accent-hover: #93c5fd;
-      --accent-fg: #07111f;
-      --accent-subtle: #0d2a4d;
-      --logo-frame: #f4f4f5;
-      --logo-drop: #60a5fa;
-      --shadow-color: 0 0% 0%;
-      --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);
-    }
-    body {
-      background:
-        radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-subtle), transparent 35%), transparent 30rem),
-        linear-gradient(135deg, var(--canvas), var(--surface-sunken));
-    }
-    main { background: color-mix(in srgb, var(--surface) 96%, transparent); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: .01ms !important;
-      transition-duration: .01ms !important;
-    }
-  }
 </style>
 </head>
 <body>
   <main>
-    <div class="brand">
-      <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--logo-frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
-      </svg>
-      <span>Canvasdrop</span>
-    </div>
+${SYSTEM_PAGE_BRAND}
     <section class="content" aria-labelledby="error-title">
       <p class="kicker">HTTP ${status}</p>
       <h1 id="error-title">${title}</h1>

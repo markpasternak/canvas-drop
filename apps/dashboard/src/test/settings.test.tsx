@@ -175,4 +175,43 @@ describe("settings route — confirm-and-await flows", () => {
       { timeout: HOLD_MS + 1500 },
     );
   });
+
+  it("warns when a shared canvas's expiry is already in the past", async () => {
+    const past = Date.now() - 60 * 60 * 1000; // an hour ago
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: past }),
+    });
+    renderSettings();
+    expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/non-owners now get a 404/i)).toBeInTheDocument();
+  });
+
+  it("shows no expiry warning when the expiry is still in the future", async () => {
+    const future = Date.now() + 24 * 60 * 60 * 1000; // tomorrow
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, sharedExpiresAt: future }),
+    });
+    renderSettings();
+    // The Sharing section renders (shared toggle on); the expired notice does not.
+    expect(await screen.findByText(/share expiry/i)).toBeInTheDocument();
+    expect(screen.queryByText(/this share expired/i)).toBeNull();
+  });
+
+  it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: false }) });
+    renderSettings();
+    // The control is visible (not hidden) even on a private canvas...
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    // ...with a hint explaining the prerequisite.
+    expect(screen.getByText(/turn on/i)).toBeInTheDocument();
+    expect(screen.getByText(/to list this canvas in the gallery/i)).toBeInTheDocument();
+  });
+
+  it("gallery-listing control is enabled once the canvas is shared", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true }) });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeEnabled();
+  });
 });

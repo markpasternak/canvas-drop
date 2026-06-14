@@ -10,7 +10,7 @@ import { makeTestDb } from "../db/testing.js";
 import { inProcessRateLimitStore } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { hashPassword } from "./password.js";
-import { GATE_COOKIE, passwordGate, signGrant, verifyGrant } from "./password-gate.js";
+import { GATE_COOKIE, gatePage, passwordGate, signGrant, verifyGrant } from "./password-gate.js";
 
 const silent = pino({ level: "silent" });
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
@@ -129,6 +129,17 @@ describe("passwordGate", () => {
     const res = await buildApp(cv, await mkAudit()).request("/c/s/index.html");
     expect(res.status).toBe(401);
     expect(await res.text()).toContain("password-protected");
+  });
+
+  it("gate page wears the shared branded system-page chrome (logo + tokens)", () => {
+    const html = gatePage("My Canvas", false);
+    // Same brand header and design tokens as the 4xx/5xx error pages — the gate
+    // must not regress to a one-off look (§14.5).
+    expect(html).toContain("Canvasdrop");
+    expect(html).toContain('viewBox="0 0 48 48"'); // the logo mark
+    expect(html).toContain("--accent: #2563eb"); // canonical brand accent, not the old indigo
+    expect(html).toContain("My Canvas is password-protected");
+    expect(html).not.toContain("#6366f1"); // the old ad-hoc indigo is gone
   });
 
   it("a grant for canvas A does not satisfy canvas B's gate", async () => {

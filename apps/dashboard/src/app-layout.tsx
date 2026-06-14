@@ -2,6 +2,7 @@ import { List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
+import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
 import { useTheme } from "./lib/theme.js";
@@ -17,8 +18,10 @@ const SECTION_LINKS: ReadonlyArray<{
 }> = [
   { to: "/", label: "Canvases", exact: true },
   { to: "/archived", label: "Archived" },
-  { to: "/admin", label: "Admin", adminOnly: true },
   { to: "/gallery", label: "Gallery" },
+  // Admin sits last — to the right of the member-facing sections, visible only to
+  // admins (and the admin API independently 404s non-admins).
+  { to: "/admin", label: "Admin", adminOnly: true },
 ];
 
 function ThemeSwitch() {
@@ -151,6 +154,7 @@ export function AppLayout() {
               </span>
             </Link>
             <ThemeSwitch />
+            {me.data && <UserMenu me={me.data} />}
           </nav>
         </div>
 
