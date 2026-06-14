@@ -5,7 +5,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { generateApiKey, hashApiKey } from "./api-key.js";
 import { generateUniqueSlug } from "./slug.js";
-import { blobKey } from "./storage-keys.js";
+import { blobKey, canvasBlobPrefix } from "./storage-keys.js";
 
 export interface CloneServiceDeps {
   canvases: CanvasesRepository;
@@ -16,8 +16,6 @@ export interface CloneServiceDeps {
 
 export interface CloneResult {
   canvas: Canvas;
-  /** The new canvas's API key — returned ONCE (mirrors create). */
-  apiKey: string;
 }
 
 /**
@@ -55,16 +53,18 @@ export function cloneService(deps: CloneServiceDeps) {
         if (draft) manifest = draft.manifest as Manifest;
       }
 
-      // 2. Create the new canvas. backendEnabled is intentionally NOT carried —
-      //    a clone starts static-first (create defaults it off + cap_* on).
-      const apiKey = generateApiKey();
+      // 2. Create the new canvas. The fresh deploy key is generated + hashed here
+      //    (apiKeyHash is NOT NULL) but the plaintext is intentionally discarded —
+      //    a clone's key is revealed on demand via Settings → Regenerate key, so it
+      //    never transits the wire (plan 002). backendEnabled is NOT carried — a
+      //    clone starts static-first (create defaults it off + cap_* on).
       const slug = await generateUniqueSlug(
         async (s) => (await deps.canvases.findBySlug(s)) !== null,
       );
       const canvas = await deps.canvases.create({
         ownerId,
         slug,
-        apiKeyHash: hashApiKey(apiKey),
+        apiKeyHash: hashApiKey(generateApiKey()),
         title: source.title ? `Copy of ${source.title}` : "Copy of Untitled canvas",
         description: source.description,
         passwordHash: source.passwordHash,
@@ -72,18 +72,30 @@ export function cloneService(deps: CloneServiceDeps) {
         clonedFromCanvasId: source.id,
       });
 
-      // 3. Copy the DISTINCT blobs into the clone's namespace (dedup by hash —
-      //    two paths sharing one hash copy that blob once).
-      const hashes = new Set(Object.values(manifest).map((entry) => entry.hash));
-      for (const hash of hashes) {
-        await deps.storage.copy(blobKey(source.id, hash), blobKey(canvas.id, hash));
+      // 3-4. Copy blobs, then seed the draft — but if anything fails after the
+      //    canvas row exists, roll it back so a half-cloned, draftless canvas never
+      //    survives (opening such a canvas would mint an empty draft and silently
+      //    lose the cloned content). Soft-delete + best-effort blob cleanup, then
+      //    rethrow so the route still surfaces the failure.
+      try {
+        // Copy the DISTINCT blobs into the clone's namespace (dedup by hash — two
+        // paths sharing one hash copy that blob once).
+        const hashes = new Set(Object.values(manifest).map((entry) => entry.hash));
+        for (const hash of hashes) {
+          await deps.storage.copy(blobKey(source.id, hash), blobKey(canvas.id, hash));
+        }
+        // Seed the draft AFTER all blobs land, so a mid-copy failure never leaves a
+        // draft referencing a blob that isn't there.
+        await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: null });
+      } catch (err) {
+        await deps.canvases.setStatus(canvas.id, "deleted").catch(() => {});
+        await deps.storage
+          .deleteMany(await deps.storage.list(canvasBlobPrefix(canvas.id)))
+          .catch(() => {});
+        throw err;
       }
 
-      // 4. Seed the draft AFTER all blobs land, so a mid-copy failure never leaves
-      //    a draft referencing a blob that isn't there.
-      await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: null });
-
-      return { canvas, apiKey };
+      return { canvas };
     },
   };
 }

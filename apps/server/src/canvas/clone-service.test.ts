@@ -87,14 +87,13 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
       published.currentVersionId as string,
     );
 
-    const { canvas, apiKey } = await clone.clone(published, cloner.id);
+    const { canvas } = await clone.clone(published, cloner.id);
 
-    // New, owned, distinct identity.
+    // New, owned, distinct identity with its own fresh (un-returned) deploy key.
     expect(canvas.id).not.toBe(src.id);
     expect(canvas.slug).not.toBe(src.slug);
     expect(canvas.ownerId).toBe(cloner.id);
     expect(canvas.apiKeyHash).not.toBe(src.apiKeyHash);
-    expect(apiKey).toMatch(/.+/);
     expect(canvas.title).toBe("Copy of My Site");
 
     // Clone-to-draft: unpublished, no history.
@@ -182,6 +181,52 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
     expect((await storage.list(canvasBlobPrefix(src.id))).length).toBe(0);
     // The clone's blobs remain.
     expect((await storage.list(canvasBlobPrefix(canvas.id))).length).toBeGreaterThan(0);
+  });
+
+  it("rolls back the orphan canvas when a blob copy fails mid-clone", async () => {
+    const { storage, canvases, engine, clone, owner, cloner, reload } = await setup();
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
+    await engine.deploy(src, "folder", folder({ "a.html": "AAA", "b.html": "BBB" }), owner.id);
+    const published = await reload(src.id);
+    const manifest = await versionsRepositoryManifest(client, published.currentVersionId as string);
+    // Remove one source blob so the clone's copy loop throws not_found mid-way.
+    const victimHash = Object.values(manifest)[0]?.hash as string;
+    await storage.deleteMany([blobKey(src.id, victimHash)]);
+
+    await expect(clone.clone(published, cloner.id)).rejects.toBeTruthy();
+
+    // No surviving active orphan canvas, and no leftover clone blobs.
+    expect(await canvases.listByOwner(cloner.id)).toEqual([]);
+    const cloneBlobs = (await storage.list("canvases/")).filter(
+      (k) => !k.startsWith(canvasBlobPrefix(src.id)),
+    );
+    expect(cloneBlobs).toEqual([]);
+  });
+
+  it("clones a never-published, never-edited canvas into an empty draft", async () => {
+    const { storage, canvases, drafts, clone, owner, cloner } = await setup();
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
+
+    const { canvas } = await clone.clone(await reloadCanvas(canvases, src.id), cloner.id);
+    expect(canvas.ownerId).toBe(cloner.id);
+    expect((await drafts.getByCanvas(canvas.id))?.manifest).toEqual({});
+    expect((await storage.list(canvasBlobPrefix(canvas.id))).length).toBe(0);
+  });
+
+  it("titles an untitled source's clone 'Copy of Untitled canvas' and carries the description", async () => {
+    const { canvases, engine, clone, owner, cloner, reload } = await setup();
+    // create() defaults title to "" and we set a description.
+    const src = await canvases.create({
+      ownerId: owner.id,
+      slug: "src",
+      apiKeyHash: "k",
+      description: "the original blurb",
+    });
+    await engine.deploy(src, "folder", folder({ "index.html": "x" }), owner.id);
+
+    const { canvas } = await clone.clone(await reload(src.id), cloner.id);
+    expect(canvas.title).toBe("Copy of Untitled canvas");
+    expect(canvas.description).toBe("the original blurb");
   });
 });
 

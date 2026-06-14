@@ -19,7 +19,9 @@ export function memStorage(failOnPut?: number): StorageDriver {
       if (bytes === undefined) {
         throw new StorageError(`source key does not exist: ${srcKey}`, "not_found");
       }
-      store.set(dstKey, bytes);
+      // Store an independent copy, matching local (copyFile) and S3 (CopyObject)
+      // semantics — never alias the source buffer under the destination key.
+      store.set(dstKey, bytes.slice());
     },
     async get(key) {
       return store.get(key) ?? null;

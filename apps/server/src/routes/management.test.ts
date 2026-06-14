@@ -1292,3 +1292,68 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     expect(body.galleryTemplatable).toBe(false);
   });
 });
+
+describe("managementRoutes — clone + listability edge cases (plan 002 review)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function publish(storage: ReturnType<typeof memStorage>, ownerId: string, slug: string) {
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    const cv = await canvases.create({ ownerId, slug, apiKeyHash: `k-${slug}` });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>x</h1>" }), ownerId);
+    return cv.id;
+  }
+
+  function patch(app: ReturnType<typeof buildApp>, id: string, body: unknown) {
+    return app.request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("rejects listing a published-but-UNSHARED canvas (NOT_SHARED)", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const id = await publish(storage, owner.id, "src");
+
+    const res = await patch(app, id, { galleryListed: true }); // no shared:true
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_SHARED");
+  });
+
+  it("un-sharing a listed+templatable canvas clears listing and templatable", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const id = await publish(storage, owner.id, "src");
+    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+
+    const res = await patch(app, id, { shared: false });
+    const body = await jsonOf<{ galleryListed: boolean; galleryTemplatable: boolean }>(res);
+    expect(body.galleryListed).toBe(false);
+    expect(body.galleryTemplatable).toBe(false);
+  });
+
+  it("owner cannot clone their own DISABLED canvas → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const id = await publish(storage, owner.id, "src");
+    await canvasesRepository(client).setDisabled(id, "abuse");
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }, storage).request(
+      `/api/canvases/${id}/clone`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(res.status).toBe(404);
+  });
+});

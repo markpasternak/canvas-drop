@@ -66,6 +66,22 @@ describe("S3Driver (in-memory fake)", () => {
   storageContract(() => new S3Driver(fakeS3Client(), "test-bucket"));
 });
 
+describe("S3Driver copy error mapping", () => {
+  it("maps a NoSuchCopySource error to a typed StorageError not_found", async () => {
+    const client: S3Client = {
+      send: async (cmd: { constructor: { name: string } }) => {
+        if (cmd.constructor.name === "CopyObjectCommand") {
+          throw Object.assign(new Error("NoSuchCopySource"), { name: "NoSuchCopySource" });
+        }
+        return {};
+      },
+    } as unknown as S3Client;
+    const driver = new S3Driver(client, "test-bucket");
+    await expect(driver.copy("missing", "dst")).rejects.toBeInstanceOf(StorageError);
+    await expect(driver.copy("missing", "dst")).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
 describe("S3Driver deleteMany error handling", () => {
   it("rejects with StorageError when S3 returns per-key Errors in the response", async () => {
     const errorClient: S3Client = {

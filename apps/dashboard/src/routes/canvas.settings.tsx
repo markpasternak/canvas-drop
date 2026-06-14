@@ -86,6 +86,17 @@ export default function Settings() {
 
   const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
 
+  // The gallery toggles are pre-blocked when not listable, but a server rejection
+  // (e.g. the canvas was unpublished in another tab) would otherwise roll back
+  // silently — surface it. Other settings stay optimistic/fire-and-forget.
+  const saveGallery = async (patch: Parameters<typeof update.mutate>[0]) => {
+    try {
+      await update.mutateAsync(patch);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update the gallery setting", "error");
+    }
+  };
+
   // Why this canvas can't be listed in the gallery (null = it can). Order mirrors the
   // server's checks (plan 002): shared → published → unprotected.
   const listBlocker = !canvas.shared
@@ -175,7 +186,7 @@ export default function Settings() {
               description="Show this canvas in the opt-in gallery with a title, summary, and tags."
               checked={canvas.galleryListed}
               disabled={listBlocker !== null}
-              onChange={(galleryListed) => save({ galleryListed })}
+              onChange={(galleryListed) => void saveGallery({ galleryListed })}
             />
             {listBlocker && (
               <InlineNotice tone="neutral" className="py-2 text-xs">
@@ -209,7 +220,7 @@ export default function Settings() {
                   label="Allow others to use as a template"
                   description="Let colleagues clone this canvas as a starting point for their own. They get an editable copy; your canvas is untouched."
                   checked={canvas.galleryTemplatable}
-                  onChange={(galleryTemplatable) => save({ galleryTemplatable })}
+                  onChange={(galleryTemplatable) => void saveGallery({ galleryTemplatable })}
                 />
               </>
             )}

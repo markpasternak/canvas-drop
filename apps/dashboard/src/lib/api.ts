@@ -211,6 +211,10 @@ const HINTS: Record<string, string> = {
   VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
   NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
+  NOT_SHARED: "Share this canvas before listing it in the gallery.",
+  NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
+  PASSWORD_PROTECTED: "Remove the password before listing this canvas in the gallery.",
+  NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
 };
@@ -450,8 +454,7 @@ export const api = {
   /** Clone a canvas into a new one owned by the caller (plan 002). The clone gets its
    *  own fresh deploy key, revealed on demand via Settings → Regenerate key — so it is
    *  NOT returned here (no unused secret over the wire). */
-  cloneCanvas: (id: string) =>
-    request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
+  cloneCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
   pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(

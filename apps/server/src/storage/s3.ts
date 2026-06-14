@@ -118,9 +118,18 @@ export class S3Driver implements StorageDriver {
   }
 }
 
-/** S3 "not found" surfaces as NoSuchKey (GET) or NotFound / 404 (HEAD). */
+/**
+ * S3 "not found" surfaces as NoSuchKey (GET), NotFound / 404 (HEAD), or
+ * NoSuchCopySource (CopyObject with a missing source — some S3 implementations
+ * use this name instead of NoSuchKey).
+ */
 function isMissing(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
-  return e.name === "NoSuchKey" || e.name === "NotFound" || e.$metadata?.httpStatusCode === 404;
+  return (
+    e.name === "NoSuchKey" ||
+    e.name === "NotFound" ||
+    e.name === "NoSuchCopySource" ||
+    e.$metadata?.httpStatusCode === 404
+  );
 }

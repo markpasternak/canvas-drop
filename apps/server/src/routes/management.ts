@@ -272,11 +272,21 @@ export function managementRoutes(deps: ManagementDeps) {
     const { password, ...rest } = p;
 
     // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
-    // published AND will be unprotected after this patch; a password set always
-    // un-lists. "Templatable" can only be on when the canvas ends up listed.
+    // shared AND published AND will be unprotected after this patch; a password set
+    // (or un-share) always un-lists. "Templatable" can only be on when the canvas
+    // ends up listed. These mirror the galleryVisibilityFilters read predicate, so
+    // the at-rest row can't reach a listed-but-invisible state (templatable ⊆ listed
+    // ⊆ shared/published/unprotected).
     const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
+    const willBeShared = rest.shared === undefined ? cv.shared : rest.shared;
     const isPublished = cv.currentVersionId !== null;
     if (rest.galleryListed === true) {
+      if (!willBeShared) {
+        return c.json(
+          { code: "NOT_SHARED", message: "Share this canvas before listing it in the gallery." },
+          409,
+        );
+      }
       if (!isPublished) {
         return c.json(
           {
@@ -296,9 +306,12 @@ export function managementRoutes(deps: ManagementDeps) {
         );
       }
     }
-    // Setting a password forces the canvas un-listed, so it can never end up listed.
+    // Setting a password OR un-sharing forces the canvas un-listed, so it can never
+    // end up listed-but-invisible.
     const finalListed =
-      typeof password === "string" ? false : (rest.galleryListed ?? cv.galleryListed);
+      typeof password === "string" || !willBeShared
+        ? false
+        : (rest.galleryListed ?? cv.galleryListed);
     if (rest.galleryTemplatable === true && !finalListed) {
       return c.json(
         {
@@ -309,9 +322,15 @@ export function managementRoutes(deps: ManagementDeps) {
       );
     }
 
-    // Build the persisted patch. A newly-set password un-lists + clears gallery
-    // metadata (R10) — the server enforces this regardless of what the client sent.
+    // Build the persisted patch. A newly-set password OR an un-share un-lists +
+    // clears gallery metadata (R10/R11) — the server enforces this regardless of
+    // what the client sent. (updateSettings also clears templatable whenever
+    // galleryListed is set false, keeping templatable ⊆ listed.)
     const patch: CanvasSettingsPatch = { ...rest };
+    if (rest.shared === false) {
+      patch.galleryListed = false;
+      patch.galleryTemplatable = false;
+    }
     if (typeof password === "string") {
       patch.galleryListed = false;
       patch.galleryTemplatable = false;

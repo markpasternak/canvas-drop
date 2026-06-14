@@ -240,19 +240,32 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/remove the password before listing/i)).toBeInTheDocument();
   });
 
-  it("shows the template toggle once listed, and warns before a password unlists", async () => {
-    mockFetch({
+  it("shows the template toggle once listed, and warns before a password unlists — confirming fires the PATCH", async () => {
+    const calls = mockFetch({
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", hasPassword: true }),
     });
+    const user = userEvent.setup();
     renderSettings();
     // Template toggle is offered for a listed canvas.
     expect(
       await screen.findByRole("switch", { name: /allow others to use as a template/i }),
     ).toBeInTheDocument();
     // Setting a password on a listed canvas warns first (doesn't fire immediately).
-    await userEvent.type(screen.getByLabelText("Password"), "hunter2");
-    await userEvent.click(screen.getByRole("button", { name: /set password/i }));
+    await user.type(screen.getByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: /set password/i }));
     expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();
+    // No PATCH yet — the warning gates the write.
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    // Confirming fires the password PATCH.
+    await user.click(screen.getByRole("button", { name: /add password & remove from gallery/i }));
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain("hunter2");
+    });
   });
 });
