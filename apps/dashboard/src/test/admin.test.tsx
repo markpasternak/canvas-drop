@@ -66,12 +66,18 @@ const ROW = {
   usageOps: 1280,
   lastActivityAt: Date.now(),
   createdAt: Date.now(),
+  deletedAt: null,
 };
 
 const OVERVIEW = {
-  canvasCountByStatus: { active: 3, disabled: 1 },
+  canvasCountByStatus: { active: 3, disabled: 1, archived: 2, deleted: 4 },
   userCount: 7,
   totalFileBytes: 4096,
+  totalOps: 9001,
+  newCanvases: 5,
+  newUsers: 2,
+  recentWindowDays: 7,
+  oldestDeletedAt: Date.now() - 12 * 86400000,
   topCanvases: [{ canvasId: "c1", ops: 1280, slug: "happy-otter", title: "Happy Otter" }],
 };
 
@@ -116,44 +122,46 @@ describe("admin dashboard", () => {
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
   });
 
-  it("pages the canvas list: Load more fetches the next keyset page with the cursor", async () => {
-    const PAGE2 = { ...ROW, id: "c2", slug: "brave-newt", title: "Brave Newt" };
+  it("paginates: loads the next keyset page on 'Load more', then hides the button", async () => {
+    const page2 = {
+      ...ROW,
+      id: "c2",
+      slug: "brave-lynx",
+      title: "Brave Lynx",
+      owner: { id: "u2", email: "bob@example.com", name: "Bob" },
+    };
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      // First page reports more rows (nextCursor = last id); the cursored second
-      // page closes it out (nextCursor null).
-      "GET /api/admin/canvases": (init) => {
-        // path-keyed handlers are matched first, so a bare key with no query
-        // string serves the first page; the cursored page hits the path key below.
-        void init;
-        return json({ canvases: [ROW], nextCursor: "c1" });
-      },
-      "GET /api/admin/canvases?cursor=c1": () => json({ canvases: [PAGE2], nextCursor: null }),
+      // First page advertises a cursor; the second (fetched with ?cursor=cur1) ends it.
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
+      "GET /api/admin/canvases?cursor=cur1": () => json({ canvases: [page2], nextCursor: null }),
     });
     renderAt("/admin");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    // Page 2 not loaded yet.
+    expect(screen.queryByText("Brave Lynx")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Load more" }));
-    expect(await screen.findByText("Brave Newt")).toBeInTheDocument();
-    // First page still on screen (appended, not replaced); the cursor was sent.
+    expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
+    // Both rows present; cursor exhausted → no more "Load more".
     expect(screen.getByText("Happy Otter")).toBeInTheDocument();
-    expect(calls.some((c) => c.path === "/api/admin/canvases?cursor=c1")).toBe(true);
-    // No further pages → the button is gone.
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
+    );
   });
 
   it("switching the status filter resets paging: a new keyset query, no stale Load more", async () => {
-    const ACTIVE_ROW = { ...ROW, id: "a1", slug: "lone-active", title: "Lone Active" };
+    const activeRow = { ...ROW, id: "a1", slug: "lone-active", title: "Lone Active" };
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      // "All" has more pages (Load more shows); the Active filter is a single page.
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "c1" }),
+      // "All" advertises another page (Load more shows); the Active filter is a single page.
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
       "GET /api/admin/canvases?status=active": () =>
-        json({ canvases: [ACTIVE_ROW], nextCursor: null }),
+        json({ canvases: [activeRow], nextCursor: null }),
     });
     renderAt("/admin");
     const user = userEvent.setup();
@@ -165,7 +173,45 @@ describe("admin dashboard", () => {
     expect(await screen.findByText("Lone Active")).toBeInTheDocument();
     expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument();
     // The "all" view's cursor must not bleed through: no Load more for the single page.
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("overview failure shows a retry instead of silently vanishing", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json({ error: "boom" }, 500),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    expect(await screen.findByText("Couldn't load the overview")).toBeInTheDocument();
+    // The canvas table below still renders independently.
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+  });
+
+  it("deleted rows show the purge-age hint (days since deletion)", async () => {
+    const deleted = {
+      ...ROW,
+      id: "c9",
+      slug: "old-canvas",
+      title: "Old Canvas",
+      status: "deleted",
+      deletedAt: Date.now() - 5 * 86400000,
+    };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases?status=deleted": () =>
+        json({ canvases: [deleted], nextCursor: null }),
+      "GET /api/admin/canvases": () => json({ canvases: [], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Deleted" }));
+    expect(await screen.findByText(/Deleted 5d ago · awaiting purge/)).toBeInTheDocument();
   });
 
   it("takedown flow: opens the reason dialog, then POSTs disable with the reason", async () => {
@@ -187,6 +233,43 @@ describe("admin dashboard", () => {
       expect(call).toBeTruthy();
       expect(JSON.parse(call?.body ?? "{}").reason).toBe("abusive");
     });
+  });
+
+  it("caps the takedown reason at 500 chars with a live counter", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Disable" }));
+    const reason = (await screen.findByLabelText("Reason")) as HTMLTextAreaElement;
+    await user.click(reason);
+    await user.paste("x".repeat(600));
+    // onChange slices to the server's 500 cap; the counter reflects the capped length.
+    expect(reason.value.length).toBe(500);
+    expect(screen.getByText("500/500")).toBeInTheDocument();
+  });
+
+  it("dedupes rows that overlap across keyset pages (no duplicate React keys)", async () => {
+    // page 2 (stale cursor after a concurrent shift) repeats ROW from page 1.
+    const other = { ...ROW, id: "c2", slug: "brave-lynx", title: "Brave Lynx" };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
+      "GET /api/admin/canvases?cursor=cur1": () =>
+        json({ canvases: [ROW, other], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
+    // ROW ("Happy Otter") was returned by both pages but must render exactly once.
+    expect(screen.getAllByText("Happy Otter")).toHaveLength(1);
   });
 
   it("settings page saves the model allowlist", async () => {

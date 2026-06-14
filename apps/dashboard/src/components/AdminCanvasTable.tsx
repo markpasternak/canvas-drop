@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AdminCanvasRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
-import { formatBytes, relativeTime } from "../lib/format.js";
+import { daysSince, formatBytes, relativeTime } from "../lib/format.js";
 import {
   useAdminDisableCanvas,
   useAdminEnableCanvas,
@@ -10,8 +10,11 @@ import {
 import { StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
-import { Field } from "./Field.js";
+import { TextareaField } from "./Field.js";
 import { useToast } from "./Toast.js";
+
+/** Server cap on the takedown reason (routes/admin.ts disableBody.max). */
+const REASON_MAX = 500;
 
 /** Reason-capturing takedown dialog (§6.10.2 — the reason the owner later sees). */
 function TakedownDialog({
@@ -33,11 +36,14 @@ function TakedownDialog({
           The public URL will show a “disabled” page. The owner sees the reason below in their
           dashboard.
         </p>
-        <Field
+        <TextareaField
           label="Reason"
           placeholder="Why is this being taken down?"
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={(e) => setReason(e.target.value.slice(0, REASON_MAX))}
+          maxLength={REASON_MAX}
+          rows={3}
+          hint={`${reason.length}/${REASON_MAX}`}
         />
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={disable.isPending}>
@@ -151,6 +157,14 @@ export function AdminCanvasTable({ canvases }: { canvases: AdminCanvasRow[] }) {
                 <div className="font-mono text-xs text-muted">{c.slug}</div>
                 {c.disabledReason && (
                   <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>
+                )}
+                {c.status === "deleted" && c.deletedAt !== null && (
+                  <div
+                    className="mt-0.5 text-xs text-subtle"
+                    title={`Deleted ${relativeTime(c.deletedAt)}`}
+                  >
+                    Deleted {daysSince(c.deletedAt)}d ago · awaiting purge
+                  </div>
                 )}
               </td>
               <td className="px-3 py-2 text-muted">{c.owner?.email ?? "—"}</td>

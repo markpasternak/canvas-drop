@@ -46,6 +46,11 @@ export function toDatetimeLocal(epochMs: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** Whole days elapsed since `epochMs` (floored, never negative). For purge-age hints. */
+export function daysSince(epochMs: number, now = Date.now()): number {
+  return Math.max(0, Math.floor((now - epochMs) / 86400000));
+}
+
 /** Countdown to a future expiry, or "expired". */
 export function expiryLabel(epochMs: number, now = Date.now()): string {
   const s = Math.round((epochMs - now) / 1000);

@@ -125,6 +125,36 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(stats.userCount).toBe(2);
     expect(stats.totalFileBytes).toBe(1500);
     expect(stats.topCanvases[0]).toEqual({ canvasId: c1.id, ops: 2 });
+    // Expanded stats: total ops across the platform; growth counts; no purge backlog yet.
+    expect(stats.totalOps).toBe(3);
+    expect(stats.newCanvases).toBe(2); // both just created → inside the window
+    expect(stats.newUsers).toBe(2);
+    expect(stats.recentWindowDays).toBe(7);
+    expect(stats.oldestDeletedAt).toBeNull(); // c2 is disabled, not deleted
+  });
+
+  it("platformStats: recent-window counts respect the cutoff; oldestDeletedAt tracks purge backlog", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const a = await seedUser(client, "alice");
+    const fresh = await canvases.create({ ownerId: a.id, slug: "new-1111-2222", apiKeyHash: "h1" });
+    const gone = await canvases.create({ ownerId: a.id, slug: "del-1111-2222", apiKeyHash: "h2" });
+    await canvases.setStatus(gone.id, "deleted");
+
+    const admin = adminRepository(client);
+    // Anchor "now" far in the future so the just-created rows fall OUTSIDE the 7-day window.
+    const farFuture = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    const stats = await admin.platformStats(5, farFuture);
+    expect(stats.newCanvases).toBe(0);
+    expect(stats.newUsers).toBe(0);
+    // A soft-deleted canvas exists → oldestDeletedAt is its deletedAt stamp (a number).
+    expect(typeof stats.oldestDeletedAt).toBe("number");
+    expect(stats.oldestDeletedAt).toBeLessThanOrEqual(Date.now());
+
+    // With "now" at creation time, both rows are inside the window.
+    const nowStats = await admin.platformStats(5, Date.now());
+    expect(nowStats.newCanvases).toBe(2);
+    expect(fresh.id).toBeTruthy();
   });
 
   it("platformStats on an EMPTY platform returns numeric zeros (no null/NaN sum)", async () => {

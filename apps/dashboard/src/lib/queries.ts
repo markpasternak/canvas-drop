@@ -47,17 +47,16 @@ export function useUsage(id: string) {
 // --- Admin (§6.10, M7) ---
 
 /**
- * Keyset-paginated platform canvas list. The server caps a page at its default
- * limit and returns a `nextCursor` (the last row's id, null on the last page);
- * "Load more" fetches the next page so the governance view never silently
- * truncates. Pages are flattened by the caller.
+ * The admin all-canvases list, keyset-paginated. Returns every loaded page;
+ * callers flatten `data.pages` and drive "Load more" off `hasNextPage`. The
+ * server caps each page at 50, so a plain query would silently hide the rest.
  */
 export function useAdminCanvases(status?: AdminCanvasStatus) {
   return useInfiniteQuery({
     queryKey: keys.adminCanvases(status),
     queryFn: ({ pageParam }) => api.admin.listCanvases(status, pageParam),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
