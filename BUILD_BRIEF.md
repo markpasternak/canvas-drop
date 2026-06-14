@@ -579,7 +579,7 @@ Canvas CRUD, settings (incl. shared toggle, **share revoke**, **share expiry**, 
 `PUT /v1/canvases/:id/deploy` · `GET /v1/canvases/:id` · `GET /v1/canvases/:id/versions` · `POST /v1/canvases/:id/rollback`. A key operates only on its own canvas. Future CLI and agent skills are thin clients of exactly this.
 
 ### 11.5 Agent enablement (v1, cheap and high-leverage)
-- `{base}/docs` — single-page human docs; `{base}/llms.txt` — same content agent-optimized.
+- `{base}/docs/*` — multi-page human docs (server-rendered, with an API reference and search); `{base}/llms.txt` — same content agent-optimized. Both public (before the auth gateway). *(Built multi-page rather than single-page — owner decision 2026-06-14; see docs/plans/2026-06-14-002-…-documentation-system-plan.md.)*
 - Dashboard "Build with AI" snippet: copy-paste prompt block containing the SDK contract + deploy API + this canvas's URL and mode.
 - Stable machine-readable error codes throughout.
 

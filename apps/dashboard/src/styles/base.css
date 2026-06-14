@@ -35,9 +35,10 @@
   h3,
   h4 {
     font-weight: 600;
-    letter-spacing: -0.011em;
-    line-height: 1.2;
+    letter-spacing: -0.014em;
+    line-height: 1.18;
     margin: 0;
+    text-wrap: balance;
   }
 
   /* Machine text (slugs, URLs, keys, versions) reads as identifiers. */
@@ -47,6 +48,13 @@
   .font-mono {
     font-family: var(--font-mono);
     font-feature-settings: "zero", "ss01";
+  }
+
+  /* Data — stats, sizes, counts, versions — gets tabular figures so columns
+     and changing values stay vertically aligned (DESIGN.md: numerals). */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "zero";
   }
 
   a {

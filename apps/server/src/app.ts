@@ -28,11 +28,13 @@ import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
+import { docsRoutes } from "./docs/routes.js";
 import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import { resolveClientIp } from "./http/client-ip.js";
 import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
+import { legalRoutes } from "./http/legal-pages.js";
 import {
   inProcessRateLimitStore,
   type RateLimitStore,
@@ -177,6 +179,15 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     const health = await checkHealth(deps.db);
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
+
+  // Public legal pages (`/privacy`, `/terms`) — mounted BEFORE the auth gateway so
+  // the Google OAuth consent screen's reviewers can open them while signed out.
+  app.route("/", legalRoutes());
+
+  // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
+  // the gateway so signed-out agents and OSS browsers can read it on every host.
+  // `/llms.txt` here REPLACES the formerly-private one in serve-sdk.ts (U4).
+  app.route("/", docsRoutes());
 
   // Login throttle (§12.3) — pre-gateway, keyed by the resolved real client IP
   // (`clientIp`: the socket peer, or the X-Forwarded-For client when behind a

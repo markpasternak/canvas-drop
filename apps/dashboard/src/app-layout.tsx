@@ -1,4 +1,4 @@
-import { List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
+import { BookOpen, List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
@@ -153,6 +153,17 @@ export function AppLayout() {
                 Create <span className="hidden sm:inline">canvas</span>
               </span>
             </Link>
+            {/* Docs are server-rendered at /docs (outside the SPA), so this is a
+                plain anchor, NOT a TanStack <Link>. Icon-only on the narrowest bar. */}
+            <a
+              href="/docs"
+              aria-label="Documentation"
+              title="Documentation"
+              className="hidden h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg sm:inline-flex"
+            >
+              <BookOpen size={16} weight="regular" aria-hidden />
+              <span className="hidden lg:inline">Docs</span>
+            </a>
             <ThemeSwitch />
             {me.data && <UserMenu me={me.data} />}
           </nav>
@@ -175,6 +186,9 @@ export function AppLayout() {
               aria-label="Sections"
             >
               {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
+              <a href="/docs" onClick={() => setMenuOpen(false)} className={linkClass}>
+                Docs
+              </a>
             </nav>
           </>
         )}
