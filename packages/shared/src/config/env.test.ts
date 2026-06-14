@@ -20,21 +20,21 @@ describe("loadConfig", () => {
   it("defaults the rate-limit config to the §12.3 values, enabled", () => {
     const config = loadConfig({});
     expect(config.rateLimit.enabled).toBe(true);
-    expect(config.rateLimit.canvasApiPerMin).toBe(60);
+    expect(config.rateLimit.canvasApiPerMin).toBe(120);
     expect(config.rateLimit.aiPerMin).toBe(10);
     expect(config.rateLimit.deployPerMin).toBe(10);
-    expect(config.rateLimit.managementPerMin).toBe(60);
-    expect(config.rateLimit.loginPerMin).toBe(5);
+    expect(config.rateLimit.managementPerMin).toBe(120);
+    expect(config.rateLimit.loginPerMin).toBe(10);
     expect(config.rateLimit.passwordGatePerMin).toBe(5);
   });
 
   it("honors rate-limit overrides and the master disable flag", () => {
     const config = loadConfig({
       CANVAS_DROP_RATELIMIT_ENABLED: "false",
-      CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: "120",
+      CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: "200",
     });
     expect(config.rateLimit.enabled).toBe(false);
-    expect(config.rateLimit.canvasApiPerMin).toBe(120);
+    expect(config.rateLimit.canvasApiPerMin).toBe(200);
   });
 
   it("rejects a zero/negative rate-limit value at boot (fail loud, not a bricked class)", () => {

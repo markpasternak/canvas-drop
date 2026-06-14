@@ -121,11 +121,11 @@ const rawSchema = z
     // Rate limiting (§12.3, M7). Per-class req/min defaults; admin-tunable rate
     // limits are a follow-up (these are enforcement constants on the hot path).
     CANVAS_DROP_RATELIMIT_ENABLED: bool(true),
-    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: posInt(60),
+    CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: posInt(120),
     CANVAS_DROP_RATELIMIT_AI_PER_MIN: posInt(10),
     CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN: posInt(10),
-    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: posInt(60),
-    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: posInt(5),
+    CANVAS_DROP_RATELIMIT_MANAGEMENT_PER_MIN: posInt(120),
+    CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: posInt(10),
     CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: posInt(5),
 
     // Database

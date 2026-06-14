@@ -30,6 +30,8 @@ import type { DeployEngine } from "./deploy/engine.js";
 import { draftService } from "./draft/service.js";
 import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
+import { resolveClientIp } from "./http/client-ip.js";
+import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
 import {
   inProcessRateLimitStore,
   type RateLimitStore,
@@ -66,8 +68,8 @@ export interface BuildAppDeps {
   audit: AuditLog;
   sessionSvc?: SessionService;
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
-  /** Override the peer-IP extractor (tests inject a fixed IP). */
-  clientIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
+  /** Override the socket-peer-IP extractor (tests inject a fixed peer). */
+  peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
@@ -125,13 +127,47 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // the handlers so `c.json` inherits them; self-Response surfaces (canvas serve,
   // SPA, file serving, disabled page) call `baseSecurityHeaders` directly.
   app.use("*", securityHeadersMiddleware());
+  app.use("*", errorPageMiddleware());
 
-  // Resolve the client IP for trusted-proxy checks (§12.5). MUST be the real TCP
-  // socket peer — NOT X-Forwarded-For / X-Real-IP (client-settable).
-  const extractIp = deps.clientIp ?? ((c) => getConnInfo(c).remote.address);
+  app.onError((err, c) => {
+    deps.rootLogger.error({ err }, "request failed");
+    return errorResponse(
+      c,
+      {
+        status: 500,
+        code: "internal_server_error",
+        title: "Internal server error",
+        message: "The server hit an unexpected problem. Please try again.",
+      },
+      { error: "internal_server_error" },
+    );
+  });
+
+  app.notFound((c) =>
+    errorResponse(
+      c,
+      {
+        status: 404,
+        code: "not_found",
+        title: "Page not found",
+        message: "There is no page at this address.",
+      },
+      { error: "not_found" },
+    ),
+  );
+
+  // Resolve two IPs (§12.5): `peerIp` is the real TCP socket peer — the immediate
+  // hop — used for the trusted-proxy identity gate, NEVER from a header. `clientIp`
+  // is the real end-client, taken from X-Forwarded-For ONLY when the peer is a
+  // configured trusted proxy (else it equals the peer). clientIp keys login
+  // throttling + audit logs; peerIp gates trust. See http/client-ip.ts.
+  const extractPeerIp = deps.peerIp ?? ((c) => getConnInfo(c).remote.address);
+  const trustedProxyIps = deps.config.auth.proxy.trustedProxyIps;
   app.use("*", async (c, next) => {
-    const ip = extractIp(c);
-    if (ip) c.set("clientIp", ip);
+    const peer = extractPeerIp(c);
+    if (peer) c.set("peerIp", peer);
+    const client = resolveClientIp(peer, c.req.header("x-forwarded-for"), trustedProxyIps);
+    if (client) c.set("clientIp", client);
     await next();
   });
 
@@ -141,13 +177,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
 
-  // Login throttle (§12.3 5/min/IP) — pre-gateway, keyed by the socket-peer IP
-  // (never XFF). Defends the credential surface (§12.0 #1). Path-scoped to the
-  // login endpoint (oidc-only; a 404 no-op in proxy/dev mode). KNOWN LIMITATION:
-  // behind a shared reverse-proxy/LB the socket peer is the proxy, so all clients
-  // share one bucket — acceptable here since `/auth/login` is an OIDC *redirect*
-  // (no app-side password to brute-force) and proxy mode has no login endpoint at
-  // all; a per-real-client login throttle would belong at the IAP, not here.
+  // Login throttle (§12.3) — pre-gateway, keyed by the resolved real client IP
+  // (`clientIp`: the socket peer, or the X-Forwarded-For client when behind a
+  // configured trusted proxy — so it is per-user even behind Caddy, not one global
+  // bucket). Defends the credential surface (§12.0 #1). Path-scoped to the login
+  // endpoint (oidc-only; a 404 no-op in proxy/dev mode — proxy mode delegates
+  // login to the IAP). Set CANVAS_DROP_TRUSTED_PROXY_IPS to your proxy's egress
+  // for per-user bucketing; without it the peer (the proxy) is the bucket.
   app.use("/auth/login", async (c, next) => {
     if (deps.config.rateLimit.enabled) {
       const ip = c.get("clientIp") ?? "unknown";

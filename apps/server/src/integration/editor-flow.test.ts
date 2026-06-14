@@ -53,7 +53,7 @@ describe("editor flows (e2e)", () => {
       engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
       audit: createAuditLog(auditRepository(client), silent),
       sessionSvc: sessionService(config, sessionsRepository(client)),
-      clientIp: () => "127.0.0.1",
+      peerIp: () => "127.0.0.1",
     });
   }
 

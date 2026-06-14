@@ -9,7 +9,12 @@ import type { Logger } from "../log/logger.js";
 export interface AppVariables {
   log: Logger;
   correlationId: string;
-  /** Real socket peer IP (set by the conninfo middleware) — used for trusted-proxy checks (U8). */
+  /** Real TCP socket peer IP (set by the conninfo middleware) — the immediate hop.
+   *  Used for the trusted-proxy identity gate (§12.5); NEVER derived from a header. */
+  peerIp?: string;
+  /** Resolved real end-client IP — equals `peerIp`, except behind a configured
+   *  trusted proxy where it is taken from X-Forwarded-For (see http/client-ip.ts).
+   *  Used for login rate-limiting and audit logging — never for auth decisions. */
   clientIp?: string;
   /** The authenticated user — guaranteed set by the auth gateway on protected routes. */
   user: User;

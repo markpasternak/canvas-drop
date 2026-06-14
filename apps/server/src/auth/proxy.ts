@@ -65,11 +65,13 @@ export function proxyStrategy(config: Config, jwks?: JWTVerifyGetKey): AuthStrat
         }
       }
 
-      // (b) trusted-hop header path (only when no JWKS is configured).
+      // (b) trusted-hop header path (only when no JWKS is configured). Gate on the
+      // socket PEER (the immediate hop), never the resolved client IP — the latter
+      // is X-Forwarded-For-derived and therefore client-influenced (§12.5).
       if (p.trustedProxyIps.length > 0) {
         const email = c.req.header(p.emailHeader);
         if (email) {
-          const ip = c.get("clientIp");
+          const ip = c.get("peerIp");
           if (ip && ipAllowed(ip, p.trustedProxyIps)) {
             const name = c.req.header(p.nameHeader) ?? undefined;
             return { sub: `proxy:${email.toLowerCase()}`, email, name };
