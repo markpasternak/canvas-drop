@@ -1,5 +1,6 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
+import * as client from "openid-client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
@@ -50,6 +51,45 @@ function buildApp(client: DbClient) {
   );
   return app;
 }
+
+describe("oidc login — authorization request", () => {
+  // A real openid-client Configuration built from static metadata — login()
+  // does no network of its own, so buildAuthorizationUrl runs offline here.
+  function loginApp(): Hono<AppEnv> {
+    const cfg = new client.Configuration(
+      {
+        issuer: "https://idp.example.com",
+        authorization_endpoint: "https://idp.example.com/authorize",
+        token_endpoint: "https://idp.example.com/token",
+        code_challenge_methods_supported: ["S256"],
+      },
+      "client",
+      "secret",
+    );
+    const oidc = makeOidc({
+      config,
+      // biome-ignore lint/suspicious/noExplicitAny: repos unused by login()
+      users: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: session svc unused by login()
+      sessionSvc: {} as any,
+      getConfig: () => Promise.resolve(cfg),
+    });
+    const app = new Hono<AppEnv>();
+    app.get("/auth/login", (c) => oidc.login(c));
+    return app;
+  }
+
+  it("forces re-prompt with prompt=login so logout is not silently undone by IdP SSO", async () => {
+    const res = await loginApp().request("/auth/login");
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location") as string);
+    expect(loc.searchParams.get("prompt")).toBe("login");
+    // sanity: the rest of the PKCE/state request is still well-formed
+    expect(loc.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(loc.searchParams.get("scope")).toBe("openid email profile");
+    expect(loc.searchParams.get("state")).toBeTruthy();
+  });
+});
 
 describe("oidc callback — pre-exchange guards", () => {
   let client: DbClient;

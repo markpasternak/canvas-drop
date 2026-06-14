@@ -57,6 +57,14 @@ export function makeOidc(deps: OidcDeps) {
         code_challenge: challenge,
         code_challenge_method: "S256",
         state,
+        // Force the IdP to re-prompt rather than silently re-authenticating via
+        // its own SSO session. Our /auth/logout only revokes the local app
+        // session — without this, clicking "sign out" then "sign in" bounces the
+        // user straight back in with no prompt, which reads as a broken logout.
+        // This keeps logout a local concern (we never end the IdP session) while
+        // making re-login a deliberate act. Sessions are sliding-14-day, so the
+        // extra prompt is rare.
+        prompt: "login",
       });
       setCookie(c, OIDC_TX_COOKIE, JSON.stringify({ state, verifier }), {
         httpOnly: true,
