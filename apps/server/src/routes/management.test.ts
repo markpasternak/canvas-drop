@@ -128,6 +128,44 @@ describe("managementRoutes", () => {
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
   });
 
+  it("GET /:id derives publicationState across draft/published/archived/disabled (R6)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+    const repo = canvasesRepository(client);
+    const stateOf = async (id: string) =>
+      (await jsonOf<{ publicationState: string }>(await app().request(`/api/canvases/${id}`)))
+        .publicationState;
+
+    // Fresh canvas, never published → draft.
+    const draft = await jsonOf<{ id: string }>(
+      await app().request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    expect(await stateOf(draft.id)).toBe("draft");
+
+    // Created-and-published via paste → published.
+    const published = await jsonOf<{ id: string }>(
+      await app().request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    expect(await stateOf(published.id)).toBe("published");
+
+    // Archive outranks published.
+    await repo.archive(published.id);
+    expect(await stateOf(published.id)).toBe("archived");
+
+    // Disable outranks everything (admin takedown of the still-draft canvas).
+    await repo.setDisabled(draft.id, "abuse");
+    expect(await stateOf(draft.id)).toBe("disabled");
+  });
+
   it("an OWNER cannot delete a disabled canvas (no takedown laundering via delete→restore, §12.0 #5)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

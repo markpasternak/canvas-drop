@@ -1,5 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
+import { publicationState } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAdmin } from "../admin/authz.js";
@@ -134,6 +135,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         url: canvasUrl(deps.config, cv.slug),
         title: cv.title,
         status: cv.status,
+        publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
         disabledReason: cv.disabledReason,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         // Size = deployed version bytes + uploaded file bytes (§6.10.1).

@@ -176,12 +176,18 @@ describe("admin routes", () => {
     expect(owners).toEqual(new Set(["alice@example.com", "bob@example.com"]));
 
     const disabled = (await (await app.request("/api/admin/canvases?status=disabled")).json()) as {
-      canvases: Array<{ disabledReason: string | null; deletedAt: number | null }>;
+      canvases: Array<{
+        disabledReason: string | null;
+        deletedAt: number | null;
+        publicationState: string;
+      }>;
     };
     expect(disabled.canvases.length).toBe(1);
     expect(disabled.canvases[0]?.disabledReason).toBe("spam");
     // deletedAt is surfaced per row (null unless soft-deleted) for the purge-age hint.
     expect(disabled.canvases[0]?.deletedAt).toBeNull();
+    // Derived publication state rides each admin row (disabled outranks draft/published).
+    expect(disabled.canvases[0]?.publicationState).toBe("disabled");
   });
 
   it("overview returns totals + top canvases + AI spend", async () => {

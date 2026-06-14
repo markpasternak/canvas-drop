@@ -5,7 +5,8 @@ import {
   effectiveCapabilities,
   storedCapabilities,
 } from "@canvas-drop/shared";
-import type { Canvas, Manifest } from "@canvas-drop/shared/db";
+import type { Canvas, CanvasStatus, Manifest } from "@canvas-drop/shared/db";
+import { publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -119,6 +120,9 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
     // admin's DB override of the AI key / realtime switch is reflected here too.
     effective: effectiveCapabilities(cv, globals),
     status: cv.status,
+    // Single derived lifecycle (Draft/Published/Archived/Disabled) the dashboard
+    // renders as the Publication chip — one authoritative value, never stored.
+    publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
     // Admin takedown reason (§6.10.2, M7). Owner/admin-only — see the doc above.
     disabledReason: cv.disabledReason,
     currentVersionId: cv.currentVersionId,
