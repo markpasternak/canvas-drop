@@ -1,9 +1,14 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { type AdminCanvasStatus, api, type GalleryQuery } from "./api.js";
+import { type AdminCanvasStatus, api, type CanvasesQuery, type GalleryQuery } from "./api.js";
 
 export const keys = {
   me: ["me"] as const,
+  // Base key for the owner's canvases — mutations invalidate this prefix, which
+  // (by React Query's prefix match) also invalidates every parameterized list key.
   canvases: ["canvases"] as const,
+  // Per-filter/page list key (plan 005). Prefixed under `canvases` so the existing
+  // invalidations still hit it.
+  canvasesList: (query: CanvasesQuery) => ["canvases", "list", query] as const,
   archivedCanvases: ["canvases", "archived"] as const,
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
@@ -21,8 +26,14 @@ export function useMe() {
   return useQuery({ queryKey: keys.me, queryFn: api.me });
 }
 
-export function useCanvases() {
-  return useQuery({ queryKey: keys.canvases, queryFn: api.listCanvases });
+export function useCanvases(query: CanvasesQuery = {}) {
+  return useQuery({
+    queryKey: keys.canvasesList(query),
+    queryFn: () => api.listCanvases(query),
+    // Keep the previous page/filter result on screen while the next loads, so
+    // paging and typing don't flash an empty list (mirrors useGallery).
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useArchivedCanvases() {

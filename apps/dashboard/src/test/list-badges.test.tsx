@@ -32,7 +32,7 @@ function renderListWith(canvases: unknown[]) {
     "fetch",
     vi.fn(
       async () =>
-        new Response(JSON.stringify({ canvases }), {
+        new Response(JSON.stringify({ canvases, total: canvases.length, limit: 24, offset: 0 }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),

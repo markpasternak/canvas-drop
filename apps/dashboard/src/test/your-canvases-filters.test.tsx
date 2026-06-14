@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -34,20 +34,46 @@ function canvas(over: Record<string, unknown> = {}) {
   };
 }
 
-function stub(canvases: Array<ReturnType<typeof canvas>>) {
+/**
+ * Fake server (plan 005): `/api/canvases` now filters/searches/sorts/paginates
+ * server-side, so the stub applies the same predicates from the query params and
+ * returns the `{ canvases, total, limit, offset }` page shape. The view's job is to
+ * send the right params and render the response — that's what these tests exercise.
+ */
+function stub(all: Array<ReturnType<typeof canvas>>) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const path = new URL(url, "http://localhost").pathname;
-      const body =
-        path === "/api/me"
-          ? { id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin: false, authMode: "dev" }
-          : path.endsWith("/archived")
-            ? { canvases: [] }
-            : { canvases };
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
+      const u = new URL(url, "http://localhost");
+      const path = u.pathname;
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      if (path === "/api/me") {
+        return json({ id: "u1", email: "u@x", name: "U", avatarUrl: null, isAdmin: false, authMode: "dev" });
+      }
+      if (path.endsWith("/archived")) return json({ canvases: [] });
+      // /api/canvases — apply the server-side filter/search the route would.
+      const sp = u.searchParams;
+      const q = sp.get("q")?.toLowerCase();
+      const matched = all.filter((c) => {
+        if (sp.get("shared") === "1" && !c.shared) return false;
+        if (sp.get("protected") === "1" && !c.hasPassword) return false;
+        if (sp.get("listed") === "1" && !c.galleryListed) return false;
+        if (sp.get("template") === "1" && !c.galleryTemplatable) return false;
+        if (sp.get("undeployed") === "1" && c.lastDeploy !== null) return false;
+        if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+      const limit = Number(sp.get("limit") ?? 24);
+      const offset = Number(sp.get("offset") ?? 0);
+      return json({
+        canvases: matched.slice(offset, offset + limit),
+        total: matched.length,
+        limit,
+        offset,
       });
     }),
   );
@@ -76,7 +102,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Your canvases — client-side filters (plan 004)", () => {
+describe("Your canvases — server-side filters (plan 005)", () => {
   it("filters to shared via the Shared chip", async () => {
     stub([
       canvas({ id: "a", title: "Shared one", shared: true }),
@@ -110,7 +136,7 @@ describe("Your canvases — client-side filters (plan 004)", () => {
     );
   });
 
-  it("searches by title", async () => {
+  it("searches by title (debounced into a server request)", async () => {
     stub([
       canvas({ id: "a", title: "Quarterly revenue" }),
       canvas({ id: "b", title: "Team poll" }),
@@ -119,8 +145,10 @@ describe("Your canvases — client-side filters (plan 004)", () => {
     await screen.findByText("Quarterly revenue");
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search your canvases" }), "poll");
-    expect(await screen.findByText("Team poll")).toBeInTheDocument();
-    expect(screen.queryByText("Quarterly revenue")).toBeNull();
+    // "Team poll" is in both states, so wait on the non-match disappearing — that's
+    // the signal the debounced server refetch landed.
+    await waitFor(() => expect(screen.queryByText("Quarterly revenue")).toBeNull());
+    expect(screen.getByText("Team poll")).toBeInTheDocument();
   });
 
   it("composes filters and shows the filtered-empty state with Clear filters", async () => {
@@ -128,7 +156,7 @@ describe("Your canvases — client-side filters (plan 004)", () => {
       canvas({ id: "a", title: "Shared template", shared: true, galleryTemplatable: true }),
       canvas({ id: "b", title: "Plain shared", shared: true, galleryTemplatable: false }),
     ]);
-    // shared AND template → only the first; then narrow further to never-deployed → none.
+    // shared AND template → only the first; narrowing further to never-deployed → none.
     renderAt("/?shared=true&template=true&undeployed=true");
     expect(await screen.findByText("No canvases match these filters")).toBeInTheDocument();
 
@@ -144,11 +172,24 @@ describe("Your canvases — client-side filters (plan 004)", () => {
     expect(screen.queryByRole("button", { name: /unpublished/i })).toBeNull();
   });
 
-  it("keeps onboarding for a truly empty list (filters never trigger it)", async () => {
+  it("shows onboarding for a truly empty list (no active filters)", async () => {
     stub([]);
-    renderAt("/?shared=true");
-    // Zero owned canvases → the onboarding/empty path, not the filtered-empty state.
+    renderAt("/");
+    // Zero owned canvases with no active filter → the onboarding/empty path.
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.queryByText("No canvases match these filters")).toBeNull();
+  });
+
+  it("paginates: shows the page window and a working Next control", async () => {
+    // 25 canvases → page size 24 → page 1 shows 24, Next reveals the 25th.
+    const many = Array.from({ length: 25 }, (_, i) =>
+      canvas({ id: `c${i}`, slug: `s${i}`, title: `Canvas ${String(i).padStart(2, "0")}` }),
+    );
+    stub(many);
+    renderAt("/?sort=title");
+    expect(await screen.findByText("Showing 1–24 of 25")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Showing 25–25 of 25")).toBeInTheDocument();
   });
 });

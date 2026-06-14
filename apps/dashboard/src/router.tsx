@@ -41,10 +41,16 @@ export interface CanvasesSearch {
   listed?: boolean;
   template?: boolean;
   undeployed?: boolean;
+  /** 1-based page for server-side pagination (plan 005). */
+  page?: number;
 }
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
+  // No validateSearch by design: the index route reads its params loosely (the
+  // default search parser already coerces `?page=2`→2, `?shared=true`→true), and
+  // adding a typed schema here would widen the router-wide search union (e.g. the
+  // `created` sort axis) and break the other routes' typed navigate reducers.
   component: IndexRoute,
 });
 const archivedRoute = createRoute({

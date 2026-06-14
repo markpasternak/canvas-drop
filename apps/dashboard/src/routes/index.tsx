@@ -1,6 +1,6 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
@@ -8,32 +8,11 @@ import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
-import { ApiError, type CanvasListItem } from "../lib/api.js";
+import { ApiError, CANVASES_PAGE_SIZE, type CanvasListItem } from "../lib/api.js";
 import { useArchiveCanvas } from "../lib/mutations.js";
 import { useArchivedCanvases, useCanvases } from "../lib/queries.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
-
-/** Client-side filter + sort over the already-loaded owned list (plan 004). All
- *  filter inputs are present on `CanvasListItem`, so no server call is added. */
-function filterAndSort(list: CanvasListItem[], s: CanvasesSearch): CanvasListItem[] {
-  const q = s.q?.trim().toLowerCase();
-  const out = list.filter((c) => {
-    if (s.shared && !c.shared) return false;
-    if (s.protected && !c.hasPassword) return false;
-    if (s.listed && !c.galleryListed) return false;
-    if (s.template && !c.galleryTemplatable) return false;
-    if (s.undeployed && c.lastDeploy !== null) return false;
-    if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
-    return true;
-  });
-  const sort = s.sort ?? "updated";
-  return out.sort((a, b) => {
-    if (sort === "title") return (a.title || a.slug).localeCompare(b.title || b.slug);
-    if (sort === "created") return b.createdAt - a.createdAt;
-    return b.updatedAt - a.updatedAt; // "updated" — the default
-  });
-}
 
 const STATE_CHIPS: Array<{ key: keyof CanvasesSearch; label: string }> = [
   { key: "shared", label: "Shared" },
@@ -92,11 +71,11 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
   );
 }
 
-/** Shown when the active list is empty. A brand-new user gets the onboarding
- * first-run page; a user whose canvases are ALL archived gets a pointer to the
- * Archived view instead (showing "get started" would wrongly imply they have
- * nothing). The archived query only fires here — on the empty path — so it costs
- * nothing for users who have active canvases. */
+/** Shown when the owner has NO active canvases at all (not merely a filtered-empty
+ * view). A brand-new user gets the onboarding first-run page; a user whose canvases
+ * are ALL archived gets a pointer to the Archived view instead (showing "get
+ * started" would wrongly imply they have nothing). The archived query only fires
+ * here — on the empty path — so it costs nothing for users who have active canvases. */
 function EmptyHome() {
   const { data: archived } = useArchivedCanvases();
   // Wait for the archived count before choosing, so we don't flash the full
@@ -120,17 +99,20 @@ function EmptyHome() {
   return <Onboarding />;
 }
 
-/** My-canvases-first (§6.9.1). Zero canvases → onboarding, or a pointer to the
- * Archived view when every canvas is archived (see EmptyHome).
- * Archived canvases live in their own view (/archived) and are excluded here. */
+/** My-canvases-first (§6.9.1). Server-side filter/search/sort + offset pagination
+ * (plan 005), all URL-driven so a filtered view is shareable and back-button-able.
+ * Zero active canvases → onboarding, or a pointer to the Archived view when every
+ * canvas is archived (see EmptyHome). Archived canvases live in their own view. */
 export default function CanvasList() {
-  const { data, isLoading, isError, refetch } = useCanvases();
   const search = useSearch({ strict: false }) as CanvasesSearch;
   const navigate = useNavigate();
 
+  const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
+  const page = Math.max(1, Math.floor(search.page ?? 1));
+  const offset = (page - 1) * CANVASES_PAGE_SIZE;
   const filtering = Boolean(
-    search.q ||
+    q ||
       search.shared ||
       search.protected ||
       search.listed ||
@@ -138,22 +120,55 @@ export default function CanvasList() {
       search.undeployed,
   );
 
-  // Local mirror of the search box (seeded so a shared URL / back-nav populates the
-  // field). Resync when the param changes externally, e.g. back-button or clear-all.
-  const [text, setText] = useState(search.q ?? "");
+  // Local mirror of the search box, debounced into the `q` route param. Seeded on
+  // `q` so a shared URL or back-nav populates the field.
+  const [text, setText] = useState(q ?? "");
   useEffect(() => {
-    setText(search.q ?? "");
-  }, [search.q]);
+    setText(q ?? "");
+  }, [q]);
 
-  const filtered = useMemo(() => (data ? filterAndSort(data, search) : []), [data, search]);
+  // Typing debounces (300ms) into the URL → refetch; clearing the field applies
+  // immediately so the list doesn't stay filtered after the box is emptied.
+  useEffect(() => {
+    const value = text.trim() || undefined;
+    if (value === q) return; // already in sync — no navigation
+    if (value === undefined) {
+      navigate({ to: "/", search: (prev) => ({ ...prev, q: undefined, page: 1 }) });
+      return;
+    }
+    const id = setTimeout(() => {
+      navigate({ to: "/", search: (prev) => ({ ...prev, q: value, page: 1 }) });
+    }, 300);
+    return () => clearTimeout(id);
+  }, [text, q, navigate]);
+
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useCanvases({
+    q,
+    shared: search.shared,
+    protected: search.protected,
+    listed: search.listed,
+    template: search.template,
+    undeployed: search.undeployed,
+    sort,
+    limit: CANVASES_PAGE_SIZE,
+    offset,
+  });
+
+  // A refetch that drops below the current page (e.g. a canvas was archived while
+  // on the last page) snaps back to page 1 rather than showing an empty page.
+  // Gated on !isPlaceholderData so a stale keepPreviousData total can't trigger a
+  // spurious reset mid-navigation.
+  useEffect(() => {
+    if (!isPlaceholderData && data && data.total > 0 && offset >= data.total) {
+      navigate({ to: "/", search: (prev) => ({ ...prev, page: 1 }) });
+    }
+  }, [data, isPlaceholderData, offset, navigate]);
 
   function toggle(key: keyof CanvasesSearch) {
-    // Read current state from the coerced `search` (not the loosely-typed updater
-    // arg) so toggling is type-safe on the un-validated index route.
     const nextOn = !search[key];
     navigate({
       to: "/",
-      search: (prev) => ({ ...prev, [key]: nextOn ? true : undefined }),
+      search: (prev) => ({ ...prev, [key]: nextOn ? true : undefined, page: 1 }),
     });
   }
   function setSort(next: string) {
@@ -162,20 +177,32 @@ export default function CanvasList() {
       search: (prev) => ({
         ...prev,
         sort: next === "updated" ? undefined : (next as CanvasesSearch["sort"]),
+        page: 1,
       }),
     });
-  }
-  function setQ(next: string) {
-    setText(next);
-    const value = next.trim() || undefined;
-    // Client-side filter, so apply immediately; `replace` keeps per-keystroke URL
-    // writes from stacking the browser history.
-    navigate({ to: "/", search: (prev) => ({ ...prev, q: value }), replace: true });
   }
   function clearFilters() {
     setText("");
     navigate({ to: "/", search: {} });
   }
+  function goToPage(next: number) {
+    navigate({ to: "/", search: (prev) => ({ ...prev, page: next }) });
+  }
+
+  const total = data?.total ?? 0;
+  const items = data?.canvases ?? [];
+  const from = total === 0 ? 0 : offset + 1;
+  // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
+  // "Showing 49–49 of 5" before the page snaps back.
+  const to = Math.min(offset + items.length, total);
+  const hasPrev = page > 1;
+  const hasNext = offset + items.length < total;
+
+  // The owner has no active canvases at all (not a filtered-empty view) → the
+  // onboarding / all-archived pointer, with no filter controls over it. Keyed on
+  // an empty result with no active filter (and a zero total), so a populated page
+  // always shows its rows.
+  const pristineEmpty = Boolean(data) && items.length === 0 && total === 0 && !filtering;
 
   return (
     <div className="space-y-6">
@@ -186,25 +213,9 @@ export default function CanvasList() {
         description="Manage drafts, published versions, sharing, and settings from one place."
       />
 
-      {isLoading && <ListSkeleton />}
-
-      {isError && (
-        <EmptyState
-          title="Couldn't load your canvases"
-          description="Something went wrong fetching the list."
-          action={
-            <Button variant="secondary" size="sm" onClick={() => refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-
-      {/* Onboarding / all-archived pointer only when the owner truly has no canvases
-          — never when a filter merely emptied the view. */}
-      {data && data.length === 0 && <EmptyHome />}
-
-      {data && data.length > 0 && (
+      {pristineEmpty ? (
+        <EmptyHome />
+      ) : (
         <>
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative min-w-[14rem] flex-1">
@@ -216,7 +227,7 @@ export default function CanvasList() {
               <input
                 type="search"
                 value={text}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => setText(e.target.value)}
                 placeholder="Search your canvases"
                 aria-label="Search your canvases"
                 className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
@@ -251,13 +262,21 @@ export default function CanvasList() {
             )}
           </FilterBar>
 
-          {filtered.length > 0 ? (
-            <ul className="space-y-2">
-              {filtered.map((c) => (
-                <ActiveRow key={c.id} canvas={c} />
-              ))}
-            </ul>
-          ) : (
+          {isLoading && <ListSkeleton />}
+
+          {isError && (
+            <EmptyState
+              title="Couldn't load your canvases"
+              description="Something went wrong fetching the list."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                  Try again
+                </Button>
+              }
+            />
+          )}
+
+          {data && items.length === 0 && filtering && (
             <EmptyState
               title="No canvases match these filters"
               description="Try removing a filter, or clear them all to see everything."
@@ -267,6 +286,40 @@ export default function CanvasList() {
                 </Button>
               }
             />
+          )}
+
+          {items.length > 0 && (
+            <>
+              <ul className="space-y-2">
+                {items.map((c) => (
+                  <ActiveRow key={c.id} canvas={c} />
+                ))}
+              </ul>
+
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <p className="text-xs text-subtle">
+                  Showing {from}–{to} of {total}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!hasPrev}
+                    onClick={() => goToPage(page - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!hasNext}
+                    onClick={() => goToPage(page + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </>
       )}

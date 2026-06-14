@@ -201,6 +201,32 @@ export interface GalleryPage {
 /** Gallery sort axes (plan 004). `published` (default) = most-recently-published. */
 export type GallerySort = "published" | "updated" | "title";
 
+/** A page of Your-canvases results (plan 005). `total`/`limit`/`offset` are echoed
+ *  by the server so the view derives "showing X–Y of N" from authoritative values. */
+export interface CanvasesPage {
+  canvases: CanvasListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Your-canvases sort axes (plan 005). `updated` (default) = most-recently-changed. */
+export type CanvasesSort = "updated" | "created" | "title";
+
+/** Your-canvases browse query (plan 005). State flags map 1:1 to the row pills. */
+export interface CanvasesQuery {
+  q?: string;
+  shared?: boolean;
+  protected?: boolean;
+  listed?: boolean;
+  template?: boolean;
+  /** Never-deployed (no published version) — the URL param is `undeployed`. */
+  undeployed?: boolean;
+  sort?: CanvasesSort;
+  limit?: number;
+  offset?: number;
+}
+
 export interface GalleryQuery {
   q?: string;
   tag?: string;
@@ -223,6 +249,9 @@ export interface GalleryFacets {
 /** Gallery page size: the client's `limit` AND the page→offset divisor. One
  *  constant so the page math can never desync from the requested page size. */
 export const GALLERY_PAGE_SIZE = 24;
+
+/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor. */
+export const CANVASES_PAGE_SIZE = 24;
 
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {
@@ -506,8 +535,22 @@ export const api = {
   /** Pickable owner/tag lists for the gallery filter UI (plan 004). */
   listGalleryFacets: () => request<GalleryFacets>("/api/gallery/facets"),
 
-  listCanvases: () =>
-    request<{ canvases: CanvasListItem[] }>("/api/canvases").then((r) => r.canvases),
+  /** Your canvases (plan 005): server-side filter/search/sort + offset paging.
+   *  Empty/default params are omitted so a clean view has a bare URL. */
+  listCanvases: (query: CanvasesQuery = {}) => {
+    const sp = new URLSearchParams();
+    if (query.q) sp.set("q", query.q);
+    if (query.shared) sp.set("shared", "1");
+    if (query.protected) sp.set("protected", "1");
+    if (query.listed) sp.set("listed", "1");
+    if (query.template) sp.set("template", "1");
+    if (query.undeployed) sp.set("undeployed", "1");
+    if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
+    if (query.limit !== undefined) sp.set("limit", String(query.limit));
+    if (query.offset !== undefined) sp.set("offset", String(query.offset));
+    const qs = sp.toString();
+    return request<CanvasesPage>(`/api/canvases${qs ? `?${qs}` : ""}`);
+  },
 
   listArchivedCanvases: () =>
     request<{ canvases: CanvasListItem[] }>("/api/canvases/archived").then((r) => r.canvases),

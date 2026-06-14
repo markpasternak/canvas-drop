@@ -66,7 +66,7 @@ describe("dashboard app", () => {
     );
     renderApp("/");
     // shell chrome
-    expect(await screen.findByText("Canvasdrop")).toBeInTheDocument();
+    expect(await screen.findByText("canvas-drop")).toBeInTheDocument();
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();
@@ -139,6 +139,9 @@ describe("dashboard app", () => {
                   lastDeploy: { version: 1, createdAt: Date.now(), fileCount: 1, totalBytes: 10 },
                 },
               ],
+              total: 1,
+              limit: 24,
+              offset: 0,
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
@@ -161,7 +164,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("Canvasdrop");
+    await screen.findByText("canvas-drop");
     const user = userEvent.setup();
 
     // Closed: only the (always-rendered) desktop nav has the Archived link.
@@ -233,7 +236,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("Canvasdrop");
+    await screen.findByText("canvas-drop");
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
@@ -319,7 +322,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("Canvasdrop");
+    await screen.findByText("canvas-drop");
     const docs = screen.getByRole("link", { name: "Documentation" });
     // A plain anchor (server-served), not a client route.
     expect(docs.tagName).toBe("A");
