@@ -84,8 +84,18 @@ export function draftService(deps: DraftServiceDeps) {
       return deps.storage.get(blobKey(canvas.id, entry.hash));
     },
 
-    /** Write/replace a draft file: hash → blob → manifest. No version (R11/AE1). */
-    async writeFile(canvas: Canvas, rawPath: string, bytes: Uint8Array): Promise<Draft> {
+    /**
+     * Write/replace a draft file: hash → blob → manifest. No version (R11/AE1).
+     * `mustNotExist` makes it a *create* (used by "Add a file"): if the path is
+     * already in the draft it throws PATH_EXISTS instead of silently truncating the
+     * existing file's content to the new (often empty) bytes.
+     */
+    async writeFile(
+      canvas: Canvas,
+      rawPath: string,
+      bytes: Uint8Array,
+      opts: { mustNotExist?: boolean } = {},
+    ): Promise<Draft> {
       const path = normalizeEntryPath(rawPath);
       if (path === null) {
         throw new DeployError("INVALID_PATH", `not a writable file path: ${rawPath}`, rawPath);
@@ -95,6 +105,9 @@ export function draftService(deps: DraftServiceDeps) {
         throw new DeployError("FILE_TOO_LARGE", `${path} exceeds 25 MB`, path);
       }
       const draft = await service.getOrCreate(canvas);
+      if (opts.mustNotExist && (draft.manifest as Manifest)[path]) {
+        throw new DeployError("PATH_EXISTS", `a file already exists at ${path}`, path);
+      }
       const next: Manifest = { ...(draft.manifest as Manifest) };
       const hash = sha256(bytes);
       next[path] = { size, hash, mime: mimeFor(path).contentType };
@@ -133,6 +146,12 @@ export function draftService(deps: DraftServiceDeps) {
       const next: Manifest = { ...(draft.manifest as Manifest) };
       const entry = next[from];
       if (!entry) throw new DeployError("INVALID_PATH", `no such draft file: ${from}`, from);
+      if (to === from) return draft; // no-op rename (after normalization) — nothing to do
+      // Renaming onto a different existing file would silently destroy that file —
+      // refuse it (the editor surfaces PATH_EXISTS as inline validation).
+      if (next[to]) {
+        throw new DeployError("PATH_EXISTS", `a file already exists at ${to}`, to);
+      }
       delete next[from];
       next[to] = entry;
       return deps.drafts.setManifest(canvas.id, next);

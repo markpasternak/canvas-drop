@@ -29,8 +29,15 @@ import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, api, type DraftFile } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { isEditableFile, isHtmlFile, nonEditableReason, singleHtmlFile } from "../lib/file-kind.js";
 import {
+  isEditableFile,
+  isHtmlFile,
+  nonEditableReason,
+  normalizeDraftPath,
+  singleHtmlFile,
+} from "../lib/file-kind.js";
+import {
+  useCreateDraftFile,
   useDeleteDraftFile,
   usePublishDraft,
   useRenameDraftFile,
@@ -69,6 +76,7 @@ export default function Editor() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const save = useSaveDraftFile(id);
+  const create = useCreateDraftFile(id);
   const upload = useUploadDraftFile(id);
   const uploadMany = useUploadDraftFiles(id);
   const del = useDeleteDraftFile(id);
@@ -96,6 +104,16 @@ export default function Editor() {
     htmlCount === 0
       ? "On-page editing needs an HTML page in the draft."
       : `On-page editing works with a single HTML page (this draft has ${htmlCount}).`;
+
+  // Inline duplicate-path detection for the Add / Rename dialogs. A create or a
+  // rename onto an existing path would silently destroy that file server-side, so we
+  // flag it and disable the action; the server is still authoritative (PATH_EXISTS).
+  const existingPaths = new Set(draft?.files.map((f) => f.path) ?? []);
+  const addCandidate = normalizeDraftPath(newPath);
+  const addDuplicate = addCandidate !== null && existingPaths.has(addCandidate);
+  const renameCandidate = normalizeDraftPath(renameTo);
+  const renameDuplicate =
+    renameCandidate !== null && renameCandidate !== renaming && existingPaths.has(renameCandidate);
 
   useEffect(() => {
     if (selected === null && draft && draft.files.length > 0) {
@@ -197,12 +215,12 @@ export default function Editor() {
 
   async function addFile() {
     const path = newPath.trim();
-    if (!path) return;
+    if (!path || addDuplicate) return;
     try {
-      await save.mutateAsync({ path, content: "" });
+      await create.mutateAsync(path);
       setAddOpen(false);
       setNewPath("");
-      setSelected(path);
+      setSelected(normalizeDraftPath(path) ?? path);
       setRefreshKey((k) => k + 1);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add the file", "error");
@@ -213,9 +231,10 @@ export default function Editor() {
     if (!renaming) return;
     const to = renameTo.trim();
     if (!to || to === renaming) return setRenaming(null);
+    if (renameDuplicate) return;
     try {
       await rename.mutateAsync({ from: renaming, to });
-      if (selected === renaming) setSelected(to);
+      if (selected === renaming) setSelected(normalizeDraftPath(to) ?? to);
       setRenaming(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -553,14 +572,25 @@ export default function Editor() {
             onChange={(e) => setNewPath(e.target.value)}
             data-autofocus
           />
-          <p className="text-xs text-subtle">
-            Creates an empty text file. To add an image or other asset, use Upload.
-          </p>
+          {addDuplicate ? (
+            <p className="text-xs text-danger">
+              A file already exists at that path — pick a different name.
+            </p>
+          ) : (
+            <p className="text-xs text-subtle">
+              Creates an empty text file. To add an image or other asset, use Upload.
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setAddOpen(false)}>
               Cancel
             </Button>
-            <Button size="sm" type="submit" loading={save.isPending} disabled={!newPath.trim()}>
+            <Button
+              size="sm"
+              type="submit"
+              loading={create.isPending}
+              disabled={!newPath.trim() || addDuplicate}
+            >
               Add file
             </Button>
           </div>
@@ -583,11 +613,21 @@ export default function Editor() {
             onChange={(e) => setRenameTo(e.target.value)}
             data-autofocus
           />
+          {renameDuplicate && (
+            <p className="text-xs text-danger">
+              A file already exists at that path — pick a different name.
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="sm" onClick={() => setRenaming(null)}>
               Cancel
             </Button>
-            <Button size="sm" type="submit" loading={rename.isPending}>
+            <Button
+              size="sm"
+              type="submit"
+              loading={rename.isPending}
+              disabled={renameDuplicate || !renameTo.trim()}
+            >
               Rename
             </Button>
           </div>

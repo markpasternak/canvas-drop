@@ -68,6 +68,21 @@ export function AppLayout() {
   const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
   const linkClass =
     "rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]";
+  // One renderer for both navs so a future Link-prop change can't be applied to
+  // only one copy. `onSelect` is the sole difference (the mobile menu closes on
+  // tap); the desktop bar passes none.
+  const renderLink = (l: (typeof SECTION_LINKS)[number], onSelect?: () => void) => (
+    <Link
+      key={l.to}
+      to={l.to}
+      activeOptions={l.exact ? { exact: true } : undefined}
+      onClick={onSelect}
+      className={linkClass}
+      activeProps={{ "aria-current": "page" }}
+    >
+      {l.label}
+    </Link>
+  );
 
   return (
     <div className="min-h-dvh bg-canvas">
@@ -106,17 +121,7 @@ export function AppLayout() {
               className="hidden items-center gap-1 rounded-lg border border-border bg-surface-sunken p-1 text-[0.8125rem] md:flex"
               aria-label="Sections"
             >
-              {links.map((l) => (
-                <Link
-                  key={l.to}
-                  to={l.to}
-                  activeOptions={l.exact ? { exact: true } : undefined}
-                  className={linkClass}
-                  activeProps={{ "aria-current": "page" }}
-                >
-                  {l.label}
-                </Link>
-              ))}
+              {links.map((l) => renderLink(l))}
             </nav>
           </div>
           <nav className="flex shrink-0 items-center gap-2" aria-label="Primary actions">
@@ -146,6 +151,7 @@ export function AppLayout() {
               type="button"
               aria-hidden
               tabIndex={-1}
+              data-testid="menu-backdrop"
               className="fixed inset-0 top-16 z-20 cursor-default bg-transparent md:hidden"
               onClick={() => setMenuOpen(false)}
             />
@@ -153,18 +159,7 @@ export function AppLayout() {
               className="relative z-30 flex flex-col gap-1 border-border border-t bg-surface px-5 py-3 text-sm md:hidden"
               aria-label="Sections"
             >
-              {links.map((l) => (
-                <Link
-                  key={l.to}
-                  to={l.to}
-                  activeOptions={l.exact ? { exact: true } : undefined}
-                  onClick={() => setMenuOpen(false)}
-                  className={linkClass}
-                  activeProps={{ "aria-current": "page" }}
-                >
-                  {l.label}
-                </Link>
-              ))}
+              {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
             </nav>
           </>
         )}

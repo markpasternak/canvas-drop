@@ -129,8 +129,12 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
     const bytes = new Uint8Array(await c.req.arrayBuffer());
+    // `?mode=create` = "Add a file": refuse to overwrite an existing path (R11) so a
+    // create can never silently truncate the file already there. A plain PUT (autosave,
+    // replace, upload) stays an upsert.
+    const mustNotExist = c.req.query("mode") === "create";
     try {
-      const draft = await deps.drafts.writeFile(cv, path, bytes);
+      const draft = await deps.drafts.writeFile(cv, path, bytes, { mustNotExist });
       return viewOf(c, cv, draft);
     } catch (err) {
       return deployErr(c, err);

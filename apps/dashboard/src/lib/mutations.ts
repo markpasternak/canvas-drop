@@ -163,6 +163,20 @@ export function useSaveDraftFile(id: string) {
   });
 }
 
+/**
+ * Create a new empty draft file ("Add a file"). Distinct from useSaveDraftFile: it
+ * uses the create-only endpoint, so adding a path that already exists fails with
+ * PATH_EXISTS rather than truncating the existing file.
+ */
+export function useCreateDraftFile(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    scope: { id: `draft-${id}` },
+    mutationFn: (path: string) => api.createDraftFile(id, path),
+    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+  });
+}
+
 /** Replace/upload a single draft file with raw bytes (binary-safe). */
 export function useUploadDraftFile(id: string) {
   const qc = useQueryClient();

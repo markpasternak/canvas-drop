@@ -45,4 +45,14 @@ describe("toDatetimeLocal", () => {
     process.env.TZ = "UTC";
     expect(toDatetimeLocal(Date.UTC(2026, 0, 3, 4, 5))).toBe("2026-01-03T04:05");
   });
+
+  it("round-trips with the settings onBlur parse (new Date(value).getTime())", () => {
+    // The share-expiry field seeds with toDatetimeLocal and saves with
+    // `new Date(e.target.value).getTime()` — both must agree on local time, so a
+    // reseed→save with no edit recovers the original epoch (to minute precision).
+    process.env.TZ = "America/New_York";
+    const epoch = Date.UTC(2026, 5, 14, 19, 0); // 15:00 local, zero seconds
+    const roundTripped = new Date(toDatetimeLocal(epoch)).getTime();
+    expect(roundTripped).toBe(epoch);
+  });
 });

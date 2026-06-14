@@ -237,6 +237,86 @@ describe("Editor route", () => {
     expect(onPage.title).toMatch(/single HTML page \(this draft has 2\)/i);
   });
 
+  it("Add a file refuses an existing path inline and never issues a write", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+    });
+    renderEditor();
+    await screen.findByText("index.html");
+    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    const field = await screen.findByPlaceholderText("e.g. styles/main.css");
+    await userEvent.type(field, "index.html");
+    expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
+    const submit = screen
+      .getAllByRole("button", { name: "Add file" })
+      .find((b) => (b as HTMLButtonElement).type === "submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("Add a file creates a fresh path via the create-only endpoint (mode=create)", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json(
+          draftView({
+            files: [
+              { path: "index.html", size: 10, mime: "text/html" },
+              { path: "styles/main.css", size: 0, mime: "text/css" },
+            ],
+          }),
+        ),
+    });
+    renderEditor();
+    await screen.findByText("index.html");
+    await userEvent.click(await screen.findByRole("button", { name: "Add file" }));
+    const field = await screen.findByPlaceholderText("e.g. styles/main.css");
+    await userEvent.type(field, "styles/main.css");
+    const submit = screen
+      .getAllByRole("button", { name: "Add file" })
+      .find((b) => (b as HTMLButtonElement).type === "submit") as HTMLButtonElement;
+    await userEvent.click(submit);
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "PUT" &&
+            c.url.includes("/api/canvases/c1/draft/file") &&
+            c.url.includes("mode=create") &&
+            c.url.includes("styles%2Fmain.css"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("Rename refuses renaming onto an existing path inline", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(
+          draftView({
+            files: [
+              { path: "a.html", size: 10, mime: "text/html" },
+              { path: "b.html", size: 10, mime: "text/html" },
+            ],
+          }),
+        ),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+    });
+    renderEditor();
+    await screen.findByText("a.html");
+    await userEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    const field = await screen.findByDisplayValue("a.html");
+    await userEvent.clear(field);
+    await userEvent.type(field, "b.html");
+    expect(await screen.findByText(/already exists at that path/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
+  });
+
   it("shows an error state when a file's content can't be loaded", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

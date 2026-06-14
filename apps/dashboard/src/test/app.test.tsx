@@ -142,6 +142,30 @@ describe("dashboard app", () => {
     expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
   });
 
+  it("mobile menu: clicking the backdrop closes the menu", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/");
+    await screen.findByText("Canvasdrop");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(2);
+
+    // The backdrop is aria-hidden (out of the a11y tree), so target it by test id.
+    await user.click(screen.getByTestId("menu-backdrop"));
+    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+  });
+
   it("detail lives under /canvases/:id (NOT /c/:id, which is canvas content in path mode)", async () => {
     const canvas = {
       id: "c1",

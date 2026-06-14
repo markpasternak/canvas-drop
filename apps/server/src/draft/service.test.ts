@@ -173,4 +173,58 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
       svc.writeFile(canvas, "big.bin", new Uint8Array(26 * 1024 * 1024)),
     ).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
   });
+
+  it("a create (mustNotExist) refuses an existing path instead of truncating it", async () => {
+    const { svc, canvas, reload } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("<h1>real content</h1>"));
+
+    // "Add a file" at an existing path must fail, not overwrite the file with "".
+    await expect(
+      svc.writeFile(await reload(), "index.html", enc(""), { mustNotExist: true }),
+    ).rejects.toMatchObject({ code: "PATH_EXISTS" });
+
+    // The original content is untouched.
+    const bytes = await svc.readFile(await reload(), "index.html");
+    expect(new TextDecoder().decode(bytes ?? new Uint8Array())).toBe("<h1>real content</h1>");
+
+    // The same path normalizes, so a "./index.html" create is rejected too.
+    await expect(
+      svc.writeFile(await reload(), "./index.html", enc(""), { mustNotExist: true }),
+    ).rejects.toMatchObject({ code: "PATH_EXISTS" });
+
+    // A plain write (no mustNotExist) is still an upsert.
+    await svc.writeFile(await reload(), "index.html", enc("<h1>edited</h1>"));
+    const edited = await svc.readFile(await reload(), "index.html");
+    expect(new TextDecoder().decode(edited ?? new Uint8Array())).toBe("<h1>edited</h1>");
+  });
+
+  it("rename onto a different existing file is refused (PATH_EXISTS); both files survive", async () => {
+    const { svc, canvas, reload } = await setup();
+    await svc.writeFile(canvas, "a.html", enc("AAA"));
+    await svc.writeFile(await reload(), "b.html", enc("BBB"));
+
+    await expect(svc.renameFile(await reload(), "a.html", "b.html")).rejects.toMatchObject({
+      code: "PATH_EXISTS",
+    });
+
+    // Neither the source nor the destination was destroyed.
+    expect(
+      new TextDecoder().decode((await svc.readFile(await reload(), "a.html")) ?? new Uint8Array()),
+    ).toBe("AAA");
+    expect(
+      new TextDecoder().decode((await svc.readFile(await reload(), "b.html")) ?? new Uint8Array()),
+    ).toBe("BBB");
+  });
+
+  it("rename to a free path moves the file; rename to itself is a no-op", async () => {
+    const { svc, canvas, reload } = await setup();
+    await svc.writeFile(canvas, "old.html", enc("X"));
+
+    const moved = await svc.renameFile(await reload(), "old.html", "new.html");
+    expect(Object.keys(moved.manifest as object)).toEqual(["new.html"]);
+
+    // Renaming a path to itself (after normalization) changes nothing and doesn't throw.
+    const same = await svc.renameFile(await reload(), "new.html", "./new.html");
+    expect(Object.keys(same.manifest as object)).toEqual(["new.html"]);
+  });
 });
