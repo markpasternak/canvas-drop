@@ -1,20 +1,46 @@
-import { MagnifyingGlass } from "@phosphor-icons/react";
+import { CaretRight } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
+import { useEffect } from "react";
+import { AdminHeader } from "../components/AdminHeader.js";
 import { Button } from "../components/Button.js";
 import { CollapsibleSection } from "../components/CollapsibleSection.js";
 import { EmptyState } from "../components/EmptyState.js";
-import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
-import { PageHeader, Panel } from "../components/Surface.js";
-import { ADMIN_PAGE_SIZE, type AdminCanvasSort, type AdminCanvasStatus } from "../lib/api.js";
 import { daysSince, formatBytes, formatUsd } from "../lib/format.js";
-import { useAdminAiUsage, useAdminCanvases, useAdminOverview } from "../lib/queries.js";
+import { useAdminAiUsage, useAdminOverview } from "../lib/queries.js";
+import type { AdminCanvasesSearch } from "./admin.canvases.js";
 
 /** One cell in the platform stat strip. Cells share a single bordered surface
  *  (gridlines come from the parent's gap), so the block reads as one instrument
  *  panel — not a grid of identical SaaS hero-metric cards. */
 function StatCell({
+  label,
+  value,
+  hint,
+  emphasis = false,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="min-h-[5.5rem] bg-surface px-4 py-3.5">
+      <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
+      <dd
+        className={
+          emphasis
+            ? "mt-1 font-semibold text-[1.75rem] leading-none text-fg tracking-tight tabular-nums"
+            : "mt-1 font-semibold text-xl leading-none text-fg tracking-tight tabular-nums"
+        }
+      >
+        {value}
+      </dd>
+      {hint && <div className="mt-1 text-xs text-subtle">{hint}</div>}
+    </div>
+  );
+}
+
+function CompactMetric({
   label,
   value,
   hint,
@@ -24,10 +50,10 @@ function StatCell({
   hint?: string;
 }) {
   return (
-    <div className="bg-surface p-4">
+    <div className="min-w-0">
       <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
-      <dd className="mt-1 font-semibold text-2xl text-fg tracking-tight tabular-nums">{value}</dd>
-      {hint && <div className="mt-0.5 text-xs text-subtle">{hint}</div>}
+      <dd className="mt-1 text-sm font-semibold text-fg tabular-nums">{value}</dd>
+      {hint && <div className="mt-0.5 truncate text-xs text-subtle">{hint}</div>}
     </div>
   );
 }
@@ -42,165 +68,59 @@ function SpendPanel({
   rows: Array<{ key: string; label: string; sub?: string | null; costUsd: number; calls: number }>;
 }) {
   return (
-    <Panel className="p-4">
-      <h2 className="mb-2 text-sm font-semibold text-fg">{title}</h2>
+    <div className="rounded-lg border border-border bg-surface-sunken/40">
+      <h2 className="border-border border-b px-4 py-3 text-sm font-semibold text-fg">{title}</h2>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted">No AI usage yet.</p>
+        <p className="px-4 py-3 text-sm text-muted">No AI usage yet.</p>
       ) : (
-        <ul className="space-y-1 text-sm">
+        <ul className="divide-y divide-border text-sm">
           {rows.map((r) => (
-            <li key={r.key} className="flex items-baseline justify-between gap-3 text-muted">
-              <span className="min-w-0 truncate">
-                {r.label}
-                {r.sub && <span className="ml-2 text-subtle">{r.sub}</span>}
-              </span>
-              <span className="shrink-0 tabular-nums">
-                <span className="font-medium text-fg">{formatUsd(r.costUsd)}</span>
-                <span className="ml-2 text-subtle">{r.calls.toLocaleString()} calls</span>
-              </span>
+            <li key={r.key}>
+              <Link
+                to="/canvases/$id"
+                params={{ id: r.key }}
+                className="flex items-center justify-between gap-3 px-4 py-2.5 text-muted transition-colors hover:bg-surface-hover"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-fg">{r.label}</span>
+                  {r.sub && <span className="block truncate text-xs text-subtle">{r.sub}</span>}
+                </span>
+                <span className="shrink-0 text-right tabular-nums">
+                  <span className="block font-medium text-fg">{formatUsd(r.costUsd)}</span>
+                  <span className="text-xs text-subtle">{r.calls.toLocaleString()} calls</span>
+                </span>
+              </Link>
             </li>
           ))}
         </ul>
       )}
-    </Panel>
+    </div>
   );
 }
 
-/** Admin canvas-list search params (plan 006), URL-driven so a filtered/drill-down
- *  view is shareable and back-button-able. Read loosely (no validateSearch on the
- *  route — see router.tsx) and coerced here, mirroring the Your-canvases list. */
-interface AdminSearch {
-  status?: AdminCanvasStatus;
-  q?: string;
-  sort?: AdminCanvasSort;
-  /** Drill-down: restrict to a single owner by user id ("see what they have"). */
-  owner?: string;
-  page?: number;
+const CANVAS_SEARCH_KEYS: Array<keyof AdminCanvasesSearch> = [
+  "owner",
+  "status",
+  "q",
+  "sort",
+  "page",
+];
+
+function hasCanvasSearch(search: AdminCanvasesSearch): boolean {
+  return CANVAS_SEARCH_KEYS.some((key) => search[key] !== undefined);
 }
 
-const STATUS_CHIPS: Array<{ value: AdminCanvasStatus | undefined; label: string }> = [
-  { value: undefined, label: "All" },
-  { value: "active", label: "Active" },
-  { value: "disabled", label: "Disabled" },
-  { value: "archived", label: "Archived" },
-  { value: "deleted", label: "Deleted" },
-];
-
-const ADMIN_SORT_OPTIONS = [
-  { value: "recent", label: "Recent activity" },
-  { value: "created", label: "Newest" },
-  { value: "title", label: "Title A–Z" },
-];
-
-/** Admin dashboard (§6.10) — platform overview + the all-canvases governance
- *  table. Admin-only: the server 404s non-admins and the nav entry is hidden.
- *  Privacy posture (plan 006): admin governs OBJECTS (canvases, owners, platform),
- *  never AUDIENCE behavior — AI spend is by canvas/owner, there are no per-user
- *  view breakdowns, and audit/users surfaces stay object-scoped. */
-export default function AdminDashboard() {
-  const search = useSearch({ strict: false }) as AdminSearch;
-  const navigate = useNavigate();
-
-  const status = search.status;
-  const owner = search.owner;
-  const q = search.q?.trim() || undefined;
-  const sort = search.sort ?? "recent";
-  // No validateSearch on this route, so coerce `page` defensively — a junk
-  // `?page=` falls back to 1 rather than letting NaN wedge the pager.
-  const rawPage = Number(search.page ?? 1);
-  const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
-  const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q || status || owner);
-
+function AdminOverview() {
   const overview = useAdminOverview();
   const aiUsage = useAdminAiUsage();
-  const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
-    status,
-    q,
-    owner,
-    sort,
-    limit: ADMIN_PAGE_SIZE,
-    offset,
-  });
-
-  // Local mirror of the search box, debounced into the `q` route param (mirrors the
-  // member list). Seeded on `q` so a shared URL / back-nav repopulates the field.
-  const [text, setText] = useState(q ?? "");
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
-  useEffect(() => {
-    const value = text.trim() || undefined;
-    if (value === q) return;
-    if (value === undefined) {
-      navigate({ to: "/admin", search: (prev) => ({ ...prev, q: undefined, page: 1 }) });
-      return;
-    }
-    const id = setTimeout(() => {
-      navigate({ to: "/admin", search: (prev) => ({ ...prev, q: value, page: 1 }) });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [text, q, navigate]);
-
-  // Snap back to page 1 if a refetch lands past the last page (e.g. a takedown
-  // shrank the set while paging). Gated on !isPlaceholderData so a stale total
-  // can't trigger a spurious reset mid-navigation.
-  useEffect(() => {
-    if (!isPlaceholderData && data && data.total > 0 && offset >= data.total) {
-      navigate({ to: "/admin", search: (prev) => ({ ...prev, page: 1 }) });
-    }
-  }, [data, isPlaceholderData, offset, navigate]);
-
-  function setStatus(next: AdminCanvasStatus | undefined) {
-    navigate({ to: "/admin", search: (prev) => ({ ...prev, status: next, page: 1 }) });
-  }
-  function setSort(next: string) {
-    navigate({
-      to: "/admin",
-      search: (prev) => ({
-        ...prev,
-        sort: next === "recent" ? undefined : (next as AdminCanvasSort),
-        page: 1,
-      }),
-    });
-  }
-  function clearFilters() {
-    setText("");
-    navigate({ to: "/admin", search: {} });
-  }
-  function clearOwner() {
-    navigate({ to: "/admin", search: (prev) => ({ ...prev, owner: undefined, page: 1 }) });
-  }
-  function goToPage(next: number) {
-    navigate({ to: "/admin", search: (prev) => ({ ...prev, page: next }) });
-  }
-
   const ov = overview.data;
   const byStatus = ov?.canvasCountByStatus ?? {};
-  const rows = data?.canvases ?? [];
-  const total = data?.total ?? 0;
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + rows.length, total);
-  const hasPrev = page > 1;
-  const hasNext = offset + rows.length < total;
-  // Owner drill-down label, derived from the rows (all share one owner).
-  const ownerLabel = owner ? (rows[0]?.owner?.email ?? "this owner") : null;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Admin"
-        description="Platform-wide visibility and governance. Take down, restore, and set defaults."
-        actions={
-          <div className="flex items-center gap-4">
-            <Link to="/admin/users" className="text-sm font-medium text-accent">
-              Users
-            </Link>
-            <Link to="/admin/settings" className="text-sm font-medium text-accent">
-              Settings & defaults
-            </Link>
-          </div>
-        }
+      <AdminHeader
+        title="Overview"
+        description="Platform-wide visibility and governance health at a glance."
       />
 
       {/* Platform overview (§6.10.6) — collapsible, state remembered in localStorage.
@@ -230,63 +150,91 @@ export default function AdminDashboard() {
             />
           </div>
         ) : ov ? (
-          <dl className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-            {/* Row 1 — platform scale + engagement (the headline KPIs). */}
-            <StatCell label="Active canvases" value={byStatus.active ?? 0} />
-            <StatCell
-              label="Users"
-              value={ov.userCount}
-              hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
-            />
-            <StatCell label="Total views" value={ov.totalViews.toLocaleString()} />
-            <StatCell label="Unique viewers" value={ov.uniqueViewers.toLocaleString()} />
-            {/* Row 2 — production activity + what it costs. */}
-            <StatCell label="Deploys" value={ov.totalDeploys.toLocaleString()} />
-            <StatCell label="Primitive ops" value={ov.totalOps.toLocaleString()} />
-            <StatCell
-              label="AI spend"
-              value={formatUsd(ov.aiCostUsd)}
-              hint={`${ov.aiCalls.toLocaleString()} calls · ${ov.aiTokens.toLocaleString()} tokens`}
-            />
-            <StatCell label="File storage" value={formatBytes(ov.totalFileBytes)} />
-            {/* Row 3 — canvas lifecycle (created → disabled → archived → deleted). */}
-            <StatCell
-              label={`New canvases (${ov.recentWindowDays}d)`}
-              value={ov.newCanvases.toLocaleString()}
-            />
-            <StatCell label="Disabled" value={byStatus.disabled ?? 0} />
-            <StatCell label="Archived" value={byStatus.archived ?? 0} />
-            <StatCell
-              label="Deleted"
-              value={byStatus.deleted ?? 0}
-              hint={
-                ov.oldestDeletedAt !== null
-                  ? `oldest ${daysSince(ov.oldestDeletedAt)}d — awaiting purge`
-                  : undefined
-              }
-            />
-          </dl>
+          <div className="bg-surface">
+            <dl className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+              {/* Headline KPIs: the first thing an admin should scan. */}
+              <StatCell label="Active canvases" value={byStatus.active ?? 0} emphasis />
+              <StatCell
+                label="Users"
+                value={ov.userCount}
+                hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
+                emphasis
+              />
+              <StatCell label="Total views" value={ov.totalViews.toLocaleString()} emphasis />
+              <StatCell
+                label="AI spend"
+                value={formatUsd(ov.aiCostUsd)}
+                hint={`${ov.aiCalls.toLocaleString()} calls`}
+                emphasis
+              />
+            </dl>
+
+            <dl className="grid gap-x-8 gap-y-4 border-border border-t px-4 py-3.5 sm:grid-cols-4 lg:grid-cols-8">
+              <CompactMetric label="Unique viewers" value={ov.uniqueViewers.toLocaleString()} />
+              <CompactMetric label="Deploys" value={ov.totalDeploys.toLocaleString()} />
+              <CompactMetric label="Primitive ops" value={ov.totalOps.toLocaleString()} />
+              <CompactMetric label="File storage" value={formatBytes(ov.totalFileBytes)} />
+              <CompactMetric
+                label={`New (${ov.recentWindowDays}d)`}
+                value={ov.newCanvases.toLocaleString()}
+              />
+              <CompactMetric label="Disabled" value={byStatus.disabled ?? 0} />
+              <CompactMetric label="Archived" value={byStatus.archived ?? 0} />
+              <CompactMetric
+                label="Deleted"
+                value={byStatus.deleted ?? 0}
+                hint={
+                  ov.oldestDeletedAt !== null
+                    ? `oldest ${daysSince(ov.oldestDeletedAt)}d`
+                    : undefined
+                }
+              />
+            </dl>
+          </div>
         ) : null}
       </CollapsibleSection>
 
       {/* Top canvases by usage — an aggregate object fact (most-active canvases by
-          recorded ops), contract-safe. Folds away so the governance table stays close. */}
+          recorded ops), contract-safe. Clickable so admins can inspect the canvas. */}
       {ov && ov.topCanvases.length > 0 && (
         <CollapsibleSection title="Top canvases by usage" storageKey="admin:section:topCanvases">
-          <ul className="space-y-1 text-sm">
-            {ov.topCanvases.slice(0, 5).map((t) => (
-              <li key={t.canvasId} className="flex justify-between text-muted">
-                <span className="font-mono">{t.slug ?? t.canvasId}</span>
-                <span className="tabular-nums">{t.ops.toLocaleString()} ops</span>
-              </li>
-            ))}
-          </ul>
+          <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-sunken/40 text-sm">
+            {ov.topCanvases.slice(0, 5).map((t, index) => {
+              const title = t.title || t.slug || t.canvasId;
+              const meta = t.title && t.slug ? t.slug : t.canvasId;
+              return (
+                <li key={t.canvasId}>
+                  <Link
+                    to="/canvases/$id"
+                    params={{ id: t.canvasId }}
+                    className="group grid grid-cols-[2rem_1fr_auto_1rem] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
+                  >
+                    <span className="text-right text-xs text-subtle tabular-nums">{index + 1}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-fg transition-colors group-hover:text-accent">
+                        {title}
+                      </span>
+                      <span className="block truncate text-xs text-subtle">{meta}</span>
+                    </span>
+                    <span className="shrink-0 text-sm text-muted tabular-nums">
+                      {t.ops.toLocaleString()} ops
+                    </span>
+                    <CaretRight
+                      size={14}
+                      weight="bold"
+                      aria-hidden
+                      className="text-subtle transition-colors group-hover:text-accent"
+                    />
+                  </Link>
+                </li>
+              );
+            })}
+          </ol>
         </CollapsibleSection>
       )}
 
       {/* AI usage breakdown (§6.10.7) — top-spending canvases and their owners.
-          Re-attributed to canvas/owner only (plan 006): no per-user spend. Folded
-          by default so the governance table stays close on first load. */}
+          Re-attributed to canvas/owner only (plan 006): no per-user spend. */}
       {aiUsage.data && aiUsage.data.byCanvas.length > 0 && (
         <CollapsibleSection title="AI usage" storageKey="admin:section:aiUsage" defaultOpen={false}>
           <SpendPanel
@@ -311,127 +259,27 @@ export default function AdminDashboard() {
           description="Governance actions (takedowns, restores, blocks, settings changes) are already recorded. A browsable trail will land here; it will show who changed what, never who viewed what."
         />
       </CollapsibleSection>
-
-      {/* Owner drill-down banner — set when arriving from the user table. */}
-      {owner && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm">
-          <span className="text-muted">
-            Showing canvases owned by <span className="font-medium text-fg">{ownerLabel}</span>
-          </span>
-          <button
-            type="button"
-            onClick={clearOwner}
-            className="font-medium text-subtle transition-colors hover:text-fg"
-          >
-            Clear owner filter
-          </button>
-        </div>
-      )}
-
-      {/* Search + sort (member-parity: same primitives as Your canvases). */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[14rem] flex-1">
-          <MagnifyingGlass
-            size={16}
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Search by title, slug, or owner email"
-            aria-label="Search all canvases"
-            className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-          />
-        </div>
-        <FilterSelect
-          label="Sort canvases"
-          options={ADMIN_SORT_OPTIONS}
-          value={sort}
-          onValueChange={setSort}
-        />
-      </div>
-
-      {/* Status facets (single-select chips). */}
-      <FilterBar>
-        {STATUS_CHIPS.map((chip) => (
-          <FilterChip
-            key={chip.label}
-            active={status === chip.value}
-            onClick={() => setStatus(chip.value)}
-          >
-            {chip.label}
-          </FilterChip>
-        ))}
-        {filtering && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-          >
-            Clear all
-          </button>
-        )}
-      </FilterBar>
-
-      {isLoading && <p className="text-sm text-muted">Loading canvases…</p>}
-      {isError && (
-        <EmptyState
-          title="Couldn't load canvases"
-          description="Something went wrong fetching the platform canvas list."
-          action={
-            <Button variant="secondary" size="sm" onClick={() => refetch()}>
-              Try again
-            </Button>
-          }
-        />
-      )}
-      {data && rows.length === 0 && (
-        <EmptyState
-          title={filtering ? "No canvases match these filters" : "No canvases"}
-          description={
-            filtering
-              ? "Try removing a filter, or clear them all to see everything."
-              : "There are no canvases on the platform yet."
-          }
-          action={
-            filtering ? (
-              <Button variant="secondary" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            ) : undefined
-          }
-        />
-      )}
-      {rows.length > 0 && (
-        <div className="space-y-3">
-          <AdminCanvasTable canvases={rows} />
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <p className="text-xs text-subtle">
-              Showing {from}–{to} of {total}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!hasPrev}
-                onClick={() => goToPage(page - 1)}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!hasNext}
-                onClick={() => goToPage(page + 1)}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
+}
+
+/** Admin overview (§6.10). Old filtered `/admin?...` links are redirected to the
+ *  dedicated canvas governance tab so shared links and back-button state survive
+ *  the IA split. */
+export default function AdminDashboard() {
+  const search = useSearch({ strict: false }) as AdminCanvasesSearch;
+  const navigate = useNavigate();
+  const redirectToCanvases = hasCanvasSearch(search);
+
+  useEffect(() => {
+    if (!redirectToCanvases) return;
+    navigate({
+      to: "/admin/canvases",
+      search: () => search,
+      replace: true,
+    });
+  }, [navigate, redirectToCanvases, search]);
+
+  if (redirectToCanvases) return null;
+  return <AdminOverview />;
 }

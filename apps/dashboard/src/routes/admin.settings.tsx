@@ -1,8 +1,8 @@
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
-import { PageHeader, Panel } from "../components/Surface.js";
+import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { type AdminConfigField, ApiError } from "../lib/api.js";
 import { useAdminSetConfig } from "../lib/mutations.js";
@@ -198,14 +198,9 @@ function Configuration() {
 export default function AdminSettings() {
   return (
     <div className="space-y-6">
-      <PageHeader
+      <AdminHeader
         title="Configuration"
-        description="Every platform setting in one place. Database overrides environment overrides default. The editable subset (AI key, models, quotas) can be set here without a restart."
-        actions={
-          <Link to="/admin" className="text-sm font-medium text-accent">
-            Back to admin
-          </Link>
-        }
+        description="Database overrides environment; editable AI and quota defaults can change without restart."
       />
       <Configuration />
     </div>

@@ -14,21 +14,10 @@ function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefin
   const block = useAdminBlockUser();
   const promote = useAdminPromoteUser();
   const toast = useToast();
-  const navigate = useNavigate();
   const isSelf = user.id === meId;
 
   return (
     <div className="flex items-center justify-end gap-2">
-      {/* Drill-down: "see what they have" — the admin canvas list scoped to this
-          owner. Programmatic navigate (function-updater form) sidesteps Link's
-          search typing on the un-validated /admin route. */}
-      <button
-        type="button"
-        onClick={() => navigate({ to: "/admin", search: () => ({ owner: user.id, page: 1 }) })}
-        className="rounded-md px-2 py-1 text-sm font-medium text-accent hover:underline"
-      >
-        Canvases
-      </button>
       <Button
         size="sm"
         variant="secondary"
@@ -79,6 +68,12 @@ export function AdminUserTable({
   users: AdminUserRow[];
   meId: string | undefined;
 }) {
+  const navigate = useNavigate();
+
+  function viewCanvases(user: AdminUserRow) {
+    navigate({ to: "/admin/canvases", search: () => ({ owner: user.id, page: 1 }) });
+  }
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-left text-sm">
@@ -102,8 +97,18 @@ export function AdminUserTable({
                 </div>
                 <div className="text-xs text-muted">{u.email}</div>
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-muted">
-                {u.canvasCount.toLocaleString()}
+              <td className="px-3 py-2 text-right text-muted">
+                <div className="flex items-center justify-end gap-2">
+                  <span className="tabular-nums">{u.canvasCount.toLocaleString()}</span>
+                  <button
+                    type="button"
+                    onClick={() => viewCanvases(u)}
+                    className="rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent-subtle hover:underline"
+                    aria-label={`View canvases owned by ${u.email}`}
+                  >
+                    View
+                  </button>
+                </div>
               </td>
               <td className="px-3 py-2">
                 {u.isAdmin ? (

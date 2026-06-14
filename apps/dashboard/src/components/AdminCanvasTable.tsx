@@ -134,7 +134,13 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
 }
 
 /** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity. */
-export function AdminCanvasTable({ canvases }: { canvases: AdminCanvasRow[] }) {
+export function AdminCanvasTable({
+  canvases,
+  onOwnerClick,
+}: {
+  canvases: AdminCanvasRow[];
+  onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-left text-sm">
@@ -167,7 +173,21 @@ export function AdminCanvasTable({ canvases }: { canvases: AdminCanvasRow[] }) {
                   </div>
                 )}
               </td>
-              <td className="px-3 py-2 text-muted">{c.owner?.email ?? "—"}</td>
+              <td className="px-3 py-2 text-muted">
+                {c.owner && onOwnerClick ? (
+                  <button
+                    type="button"
+                    onClick={() => onOwnerClick?.(c.owner as NonNullable<AdminCanvasRow["owner"]>)}
+                    className="rounded-md px-1 py-0.5 text-left text-accent transition-colors hover:bg-accent-subtle hover:underline"
+                  >
+                    {c.owner.email}
+                  </button>
+                ) : c.owner ? (
+                  c.owner.email
+                ) : (
+                  "—"
+                )}
+              </td>
               <td className="px-3 py-2">
                 <StatusBadge status={c.status} />
               </td>

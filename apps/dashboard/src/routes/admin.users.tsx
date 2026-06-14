@@ -1,11 +1,11 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterSelect } from "../components/Filters.js";
-import { PageHeader } from "../components/Surface.js";
 import { ADMIN_PAGE_SIZE, type AdminUserSort } from "../lib/api.js";
 import { useAdminUsers, useMe } from "../lib/queries.js";
 
@@ -92,14 +92,9 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <AdminHeader
         title="Users"
         description="Members, their owned canvases, and governance — block access or grant admin."
-        actions={
-          <Link to="/admin" className="text-sm font-medium text-accent">
-            ← Back to admin
-          </Link>
-        }
       />
 
       <div className="flex flex-wrap items-center gap-3">

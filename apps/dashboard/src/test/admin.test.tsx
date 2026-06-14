@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -100,6 +100,26 @@ const AI_USAGE = {
   ],
 };
 
+const USER_ROW = {
+  id: "u1",
+  email: "alice@example.com",
+  name: "Alice",
+  avatarUrl: null,
+  isAdmin: false,
+  isBlocked: false,
+  createdAt: Date.now(),
+  lastSeenAt: Date.now(),
+  canvasCount: 1,
+};
+
+const ADMIN_ME = {
+  id: "admin",
+  email: "admin@example.com",
+  name: "Admin",
+  avatarUrl: null,
+  isAdmin: true,
+};
+
 /** A canvas page in the offset-pagination shape (plan 006). */
 function canvasPage(rows: unknown[], total = rows.length): Response {
   return json({ canvases: rows, total, limit: 50, offset: 0 });
@@ -130,32 +150,104 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: false }),
       "GET /api/canvases": () => json({ canvases: [] }),
+      "GET /api/canvases?limit=24&offset=0": () =>
+        json({ canvases: [], total: 0, limit: 24, offset: 0 }),
+      "GET /api/canvases/archived": () => json({ canvases: [] }),
     });
     renderAt("/");
-    // The list page settles; the Admin link must never appear.
-    await screen.findByRole("link", { name: "Archived" });
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/me")).toBe(true));
     expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
   });
 
-  it("renders overview stats + the all-canvases table", async () => {
+  it("renders overview stats and the admin workspace tabs", async () => {
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
       "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
-      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
-    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    expect(await screen.findByText("Total views")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // user count
-    expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
     // New engagement/activity cards.
-    expect(screen.getByText("Total views")).toBeInTheDocument();
     expect(screen.getByText("3,120")).toBeInTheDocument();
     expect(screen.getByText("Unique viewers")).toBeInTheDocument();
     expect(screen.getByText("Deploys")).toBeInTheDocument();
     expect(screen.getByText("27")).toBeInTheDocument(); // deploys
+    expect(screen.getByRole("link", { name: /Happy Otter/ })).toHaveAttribute(
+      "href",
+      "/canvases/c1",
+    );
+    const adminNav = screen.getByRole("navigation", { name: "Admin sections" });
+    expect(within(adminNav).getByRole("link", { name: "Overview" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(adminNav).getByRole("link", { name: "Canvases" })).toBeInTheDocument();
+    expect(within(adminNav).getByRole("link", { name: "Users" })).toBeInTheDocument();
+    expect(within(adminNav).getByRole("link", { name: "Configuration" })).toBeInTheDocument();
+  });
+
+  it("renders the all-canvases table on the Canvases tab", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    renderAt("/admin/canvases");
+    expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
+  });
+
+  it("redirects old filtered /admin links to the Canvases tab with filters preserved", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases?owner=u1&limit=50&offset=0": () => canvasPage([ROW]),
+    });
+    renderAt("/admin?owner=u1&page=1");
+    expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
+    expect(await screen.findByText(/Showing canvases owned by/)).toBeInTheDocument();
+    expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
+    expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
+      true,
+    );
+  });
+
+  it("links a user's canvas count to that user's filtered Canvases tab", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/users": () => json({ users: [USER_ROW], total: 1, limit: 50, offset: 0 }),
+      "GET /api/admin/canvases?owner=u1&limit=50&offset=0": () => canvasPage([ROW]),
+    });
+    renderAt("/admin/users");
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "View canvases owned by alice@example.com" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
+    expect(await screen.findByText(/Showing canvases owned by/)).toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
+      true,
+    );
+  });
+
+  it("filters the Canvases table by owner when an owner email is clicked", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases?owner=u1&limit=50&offset=0": () => canvasPage([ROW]),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "alice@example.com" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText(/Showing canvases owned by/)).toBeInTheDocument();
   });
 
   it("collapses the platform overview and remembers it", async () => {
@@ -183,8 +275,8 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
-    // Table renders (render settled), but the overview stayed collapsed via localStorage.
-    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    // The overview content stayed collapsed via localStorage.
+    await screen.findByRole("button", { name: /Platform overview/i });
     expect(await screen.findByText("Total views")).not.toBeVisible();
   });
 
@@ -207,8 +299,7 @@ describe("admin dashboard", () => {
     await user.click(await screen.findByRole("button", { name: /AI usage/i }));
     expect(await screen.findByText("AI spend by canvas")).toBeVisible();
     expect(screen.getByText("$4.00")).toBeInTheDocument();
-    // Spend is attributed to the canvas's owner (object fact). The owner email also
-    // appears in the canvas table's Owner column, so allow >= 1 occurrence.
+    // Spend is attributed to the canvas's owner (object fact).
     expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
   });
 
@@ -253,7 +344,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases?limit=50&offset=50": () => canvasPage([page2], 60),
       "GET /api/admin/canvases": () => canvasPage([ROW], 60),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
     expect(screen.getByText("Showing 1–1 of 60")).toBeInTheDocument();
@@ -275,7 +366,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases?status=active&limit=50&offset=0": () => canvasPage([activeRow]),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
 
@@ -294,8 +385,7 @@ describe("admin dashboard", () => {
     });
     renderAt("/admin");
     expect(await screen.findByText("Couldn't load the overview")).toBeInTheDocument();
-    // The canvas table below still renders independently.
-    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("deleted rows show the purge-age hint (days since deletion)", async () => {
@@ -314,7 +404,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([deleted]),
       "GET /api/admin/canvases": () => canvasPage([]),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Deleted" }));
     expect(await screen.findByText(/Deleted 5d ago · awaiting purge/)).toBeInTheDocument();
@@ -329,7 +419,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases": () => canvasPage([ROW]),
       "POST /api/admin/canvases/c1/disable": () => json({ ok: true }),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Disable" }));
     const reason = await screen.findByLabelText("Reason");
@@ -350,7 +440,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Disable" }));
     const reason = (await screen.findByLabelText("Reason")) as HTMLTextAreaElement;
@@ -370,7 +460,7 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases?q=weather&limit=50&offset=0": () => canvasPage([match]),
       "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
-    renderAt("/admin");
+    renderAt("/admin/canvases");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: /search all canvases/i }), "weather");
@@ -417,6 +507,12 @@ describe("admin dashboard", () => {
     });
     renderAt("/admin/settings");
     const user = userEvent.setup();
+    const adminNav = await screen.findByRole("navigation", { name: "Admin sections" });
+    expect(within(adminNav).getByRole("link", { name: "Configuration" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByRole("link", { name: /back to admin/i })).not.toBeInTheDocument();
     const field = await screen.findByLabelText("Model allowlist");
     await user.clear(field);
     await user.type(field, "m1, m2");
