@@ -1,6 +1,6 @@
 ---
 title: "feat: Canvas vocabulary & state model"
-status: active
+status: completed
 date: 2026-06-14
 type: feat
 depth: deep
