@@ -84,14 +84,11 @@ export function errorResponse(
 }
 
 /**
- * Shared visual chrome for self-contained system pages (the branded 4xx/5xx
- * error pages AND the canvas password gate, §14.5). Both pages emit this token
- * block + brand header so they render in ONE design language and cannot drift
- * apart. Page-specific layout (error meta grid, gate form) is layered after.
+ * The light + dark token palettes, factored out so callers that support a manual
+ * theme override (the docs site, via a `data-theme` attribute matching the
+ * dashboard) can re-assert either palette without duplicating the values.
  */
-export const SYSTEM_PAGE_STYLES = `  :root {
-    color-scheme: light dark;
-    --canvas: #f5f5f2;
+export const LIGHT_TOKENS = `    --canvas: #f5f5f2;
     --surface: #fbfbf8;
     --surface-raised: #fefefb;
     --surface-sunken: #ededeb;
@@ -107,7 +104,35 @@ export const SYSTEM_PAGE_STYLES = `  :root {
     --logo-frame: #111418;
     --logo-drop: #2563eb;
     --shadow-color: 240 12% 12%;
-    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.08);
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.08);`;
+
+export const DARK_TOKENS = `    --canvas: #0b0b0d;
+    --surface: #141416;
+    --surface-raised: #1c1c20;
+    --surface-sunken: #09090b;
+    --fg: #f4f4f5;
+    --muted: #a1a1aa;
+    --subtle: #6e6e78;
+    --border: #27272b;
+    --border-strong: #3a3a40;
+    --accent: #60a5fa;
+    --accent-hover: #93c5fd;
+    --accent-fg: #07111f;
+    --accent-subtle: #0d2a4d;
+    --logo-frame: #f4f4f5;
+    --logo-drop: #60a5fa;
+    --shadow-color: 0 0% 0%;
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);`;
+
+/**
+ * Shared visual chrome for self-contained system pages (the branded 4xx/5xx
+ * error pages AND the canvas password gate, §14.5). Both pages emit this token
+ * block + brand header so they render in ONE design language and cannot drift
+ * apart. Page-specific layout (error meta grid, gate form) is layered after.
+ */
+export const SYSTEM_PAGE_STYLES = `  :root {
+    color-scheme: light dark;
+${LIGHT_TOKENS}
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -150,23 +175,7 @@ export const SYSTEM_PAGE_STYLES = `  :root {
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --canvas: #0b0b0d;
-      --surface: #141416;
-      --surface-raised: #1c1c20;
-      --surface-sunken: #09090b;
-      --fg: #f4f4f5;
-      --muted: #a1a1aa;
-      --subtle: #6e6e78;
-      --border: #27272b;
-      --border-strong: #3a3a40;
-      --accent: #60a5fa;
-      --accent-hover: #93c5fd;
-      --accent-fg: #07111f;
-      --accent-subtle: #0d2a4d;
-      --logo-frame: #f4f4f5;
-      --logo-drop: #60a5fa;
-      --shadow-color: 0 0% 0%;
-      --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);
+${DARK_TOKENS}
     }
     body {
       background:

@@ -13,6 +13,21 @@ describe("docs render", () => {
     expect(html).toContain('href="/" class="to-app"');
   });
 
+  it("renders the theme switch and loads the theme client before paint", () => {
+    const html = renderDocPage("") ?? "";
+    // The segmented switch with all three choices, matching the dashboard.
+    expect(html).toContain("data-theme-switch");
+    expect(html).toContain('data-theme-choice="system"');
+    expect(html).toContain('data-theme-choice="light"');
+    expect(html).toContain('data-theme-choice="dark"');
+    // Loaded from <head> (before the body) so the stored theme applies pre-paint.
+    const headEnd = html.indexOf("</head>");
+    expect(headEnd).toBeGreaterThan(-1);
+    expect(html.slice(0, headEnd)).toContain('src="/docs/theme.js"');
+    // The manual override honors the same data-theme attribute as the app.
+    expect(html).toContain('[data-theme="dark"]');
+  });
+
   it("marks the current page with aria-current and renders prev/next", () => {
     const html = renderDocPage("sdk/kv") ?? "";
     expect(html).toContain('href="/docs/sdk/kv" aria-current="page"');

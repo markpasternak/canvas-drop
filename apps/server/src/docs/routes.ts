@@ -11,13 +11,15 @@ import type { AppEnv } from "../http/types.js";
 import { LLMS_TXT, SEARCH_INDEX } from "./generated-content.js";
 import { renderDocPage } from "./render.js";
 import { SEARCH_CLIENT_JS } from "./search.client.js";
+import { THEME_CLIENT_JS } from "./theme.client.js";
 
 /**
  * Public docs router — mounted at "/" BEFORE the auth gateway (see app.ts), so
  * `/docs/*` and `/llms.txt` are served to signed-out agents and OSS browsers on
  * every host. All responses are static, author-controlled content (no identity),
  * so the §12 invariants are unaffected. The docs CSP is `script-src 'self';
- * frame-ancestors 'none'` because the only script is the served `/docs/search.js`.
+ * frame-ancestors 'none'` because the only scripts are the served, same-origin
+ * `/docs/search.js` and `/docs/theme.js`.
  */
 
 // Resolve repo-relative content dirs from THIS module (apps/server/src|dist/docs),
@@ -105,6 +107,16 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
     h.set("Content-Type", "application/javascript; charset=utf-8");
     h.set("Cache-Control", "public, max-age=3600");
     return new Response(SEARCH_CLIENT_JS, { status: 200, headers: h });
+  });
+
+  // Served theme client — loaded from <head> so the persisted theme applies
+  // before first paint. Shares the dashboard's data-theme + canvas-drop-theme key.
+  app.get("/docs/theme.js", () => {
+    const h = new Headers();
+    baseSecurityHeaders(h);
+    h.set("Content-Type", "application/javascript; charset=utf-8");
+    h.set("Cache-Control", "public, max-age=3600");
+    return new Response(THEME_CLIENT_JS, { status: 200, headers: h });
   });
 
   app.get("/docs/search-index.json", () => {

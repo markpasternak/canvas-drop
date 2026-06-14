@@ -80,6 +80,16 @@ describe("docs routes", () => {
     expect(js).toContain("Search unavailable.");
   });
 
+  it("serves the theme client as application/javascript", async () => {
+    const res = await app().request("/docs/theme.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("javascript");
+    const js = await res.text();
+    // Shares the dashboard's mechanism: same localStorage key + data-theme attribute.
+    expect(js).toContain("canvas-drop-theme");
+    expect(js).toContain("data-theme");
+  });
+
   it("serves a search index with one entry per page", async () => {
     const res = await app().request("/docs/search-index.json");
     expect(res.status).toBe(200);
