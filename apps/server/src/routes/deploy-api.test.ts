@@ -95,6 +95,30 @@ describe("deployApiRoutes (Bearer key)", () => {
     expect(res.status).toBe(401);
   });
 
+  it("GET /:id returns the derived publicationState (draft → published after a deploy)", async () => {
+    const { app, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    const draftRes = await app.request(`/v1/canvases/${a.id}`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(draftRes.status).toBe(200);
+    expect(((await draftRes.json()) as { publicationState: string }).publicationState).toBe(
+      "draft",
+    );
+
+    await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: zip(),
+    });
+    const pubRes = await app.request(`/v1/canvases/${a.id}`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(((await pubRes.json()) as { publicationState: string }).publicationState).toBe(
+      "published",
+    );
+  });
+
   it("rollback to an existing-but-pending version → 404 (only ready versions are targets)", async () => {
     const { app, versions, mkCanvas, ownerId } = await setup();
     const a = await mkCanvas();

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
+import { publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AuditLog } from "../audit/audit-log.js";
@@ -79,6 +80,10 @@ export function deployApiRoutes(deps: DeployApiDeps) {
       url: canvasUrl(deps.config, auth.slug),
       title: auth.title,
       status: auth.status,
+      publicationState: publicationState(
+        auth.status as CanvasStatus,
+        auth.currentVersionId !== null,
+      ),
       currentVersionId: auth.currentVersionId,
     });
   });

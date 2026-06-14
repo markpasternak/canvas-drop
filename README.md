@@ -63,14 +63,14 @@ curl http://localhost:3000/healthz      # → {"status":"ok","db":"ok","version"
 
 ---
 
-## Deploying a canvas
+## Publishing a canvas
 
-Every deploy path produces the same thing: an immutable, live version at an unguessable URL. The first three are in the dashboard; the fourth is for scripts and agents.
+Every publish produces the same thing: an immutable version served at an unguessable URL. The first three are in the dashboard; the fourth is for scripts and agents.
 
 1. **Drag a folder or ZIP** — drop `index.html` and its assets onto the create flow.
 2. **Paste HTML** — for a single-file artifact (often what an AI just wrote for you).
-3. **Edit in the browser** — a file manager + CodeMirror editor work against a mutable **draft** with autosave; an explicit **Publish** snapshots the draft into an immutable version and swaps the live pointer. One click rolls back to any of the last 10 versions.
-4. **Deploy API** — `PUT` a ZIP with the canvas's secret key. `deploy = live`: this publishes a version directly, no draft loop.
+3. **Edit in the browser** — a file manager + CodeMirror editor work against a mutable **draft** with autosave; an explicit **Publish** snapshots the draft into an immutable version and makes it the current one. One click switches the current version to any of the last 10.
+4. **Deploy API** — `PUT` a ZIP with the canvas's secret key. `deploy = live`: this publishes a version directly, no draft loop. ("Deploy" is the API/CLI term for publishing from files.)
 
 ```bash
 curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \

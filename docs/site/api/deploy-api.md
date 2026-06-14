@@ -64,7 +64,11 @@ GET {base}/v1/canvases/{id}
 Authorization: Bearer cd_...
 ```
 
-Returns `{ id, slug, url, title, status, currentVersionId }`.
+Returns `{ id, slug, url, title, status, publicationState, currentVersionId }`.
+`publicationState` is the derived lifecycle — one of `draft`, `published`,
+`archived`, or `disabled` (precedence `disabled > archived > published > draft`) —
+so an agent can confirm a canvas is live without interpreting `status` +
+`currentVersionId` itself.
 
 ## List versions
 

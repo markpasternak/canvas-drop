@@ -21,7 +21,7 @@ that communicates better as a working artifact than as a screenshot or a slide.
 
 ## How it fits together
 
-- **Deploy** a canvas four ways: paste a single `index.html`, drag a folder of
+- **Publish** a canvas four ways: paste a single `index.html`, drag a folder of
   files, upload a `.zip`, or call the [deploy API](/docs/api/deploy-api) with a
   per-canvas key (agents can ship without a human in the loop). You can also edit
   in the browser and **Publish** from the draft.
@@ -31,7 +31,7 @@ that communicates better as a working artifact than as a screenshot or a slide.
   (off by default), then toggles `kv`, `files`, `ai`, and `realtime`
   independently; `me()` is on whenever backend is on.
 - **Version & roll back.** Every publish is an immutable version (last 10 kept);
-  one-click rollback swaps the live pointer.
+  one-click **Make current** switches the served version.
 - **Share** the URL. Access follows your instance's sign-in. Share a canvas
   publicly, set an expiry, or lock it with a per-canvas password; opt into the
   gallery to let colleagues browse it.

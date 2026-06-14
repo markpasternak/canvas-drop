@@ -10,9 +10,9 @@
     "section": "Authoring canvases",
     "pages": [
       {
-        "path": "authoring/create-and-deploy",
-        "file": "authoring/create-and-deploy.md",
-        "title": "Create & deploy"
+        "path": "authoring/create-and-publish",
+        "file": "authoring/create-and-publish.md",
+        "title": "Create & publish"
       },
       {
         "path": "authoring/capabilities",

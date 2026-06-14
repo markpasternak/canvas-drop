@@ -1,6 +1,6 @@
 # Quickstart
 
-Stand up a local instance, then deploy your first canvas.
+Stand up a local instance, then publish your first canvas.
 
 ## Run an instance locally
 
@@ -31,9 +31,9 @@ and S3, all of which are config swaps, not code changes.
 
 ## Create a canvas
 
-From the dashboard, click **New**. Four deploy paths:
+From the dashboard, click **New**. Four ways to publish:
 
-- **Paste HTML** — a single `index.html`, created and deployed in one step.
+- **Paste HTML** — a single `index.html`, created and published in one step.
 - **Files / folder** — drag files or a folder; relative paths are kept at the
   canvas root.
 - **ZIP** — upload an archive; it's extracted server-side.
@@ -77,10 +77,11 @@ whenever Backend is on. See the [SDK overview](/docs/sdk/overview).
 
 ## Publish & share
 
-Open the canvas, edit in the **Draft** tab, then **Publish** to snapshot an
-immutable version and point the live URL at it. Roll back from the **Deploys**
-tab. Who can open a canvas follows your instance's sign-in — canvases are
-private to your org by default.
+Open the canvas, edit in the **Editor** tab, then **Publish** to snapshot an
+immutable version and point the canvas URL at it. Switch the current version from
+the **Versions** tab. Who can open a canvas follows your instance's sign-in —
+canvases are private to your org by default, and sharing is available once a
+canvas is published.
 
 ## Deploying as an agent
 
