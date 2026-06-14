@@ -164,13 +164,28 @@ export function deployEngine(deps: DeployEngineDeps) {
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
       await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
-      // A direct publish (deploy API / folder / ZIP / paste) supersedes any held
-      // in-browser draft: keep the draft but flag it stale so the editor shows the
-      // "a newer version was published" notice (M5 R15/F3/AE5). No-op when there's
-      // no draft. Best-effort — never fail the deploy over the stale flag.
-      await deps.drafts
-        .markStale(canvas.id)
-        .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "markStale failed"));
+      // Reconcile the in-browser draft with this direct publish (deploy API / folder
+      // / ZIP / paste). If there are real held edits (a non-empty draft), preserve
+      // them and just flag the draft stale so the editor shows the "a newer version
+      // was published" notice (M5 R15/F3/AE5). But if there's no draft — or the draft
+      // is empty, so there is nothing to lose — seed/sync it to the just-published
+      // version (manifest + base = this version, stale cleared), exactly as the
+      // editor's own Publish leaves things. That way an API/agent publish leaves the
+      // editor reflecting production instead of an empty, perpetually-"behind" draft.
+      // Best-effort — never fail the deploy over draft bookkeeping.
+      try {
+        const draft = await deps.drafts.getByCanvas(canvas.id);
+        const draftEmpty = !draft || Object.keys(draft.manifest as Manifest).length === 0;
+        if (!draftEmpty) {
+          await deps.drafts.markStale(canvas.id);
+        } else if (draft) {
+          await deps.drafts.resetToBase(canvas.id, manifest, version.id);
+        } else {
+          await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: version.id });
+        }
+      } catch (err) {
+        deps.log.warn({ err, canvasId: canvas.id }, "post-deploy draft sync failed");
+      }
 
       // Prune old version rows + reclaim unreferenced blobs, asynchronously —
       // never block or fail the deploy. `.catch` guards against an unhandled

@@ -146,6 +146,33 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     expect((draft?.manifest as Record<string, unknown>)["index.html"]).toBeDefined(); // draft intact
   });
 
+  it("a direct deploy with no draft seeds an in-sync draft (matches production)", async () => {
+    const { engine, drafts, canvas, owner, reload } = await setup();
+    await engine.deploy(canvas, "api", folder({ "index.html": "<h1>via api</h1>" }), owner.id);
+
+    const live = await reload();
+    const draft = await drafts.getByCanvas(canvas.id);
+    expect(draft).not.toBeNull();
+    expect(Object.keys(draft?.manifest as object)).toEqual(["index.html"]);
+    // In step with the just-published version: not stale, base = the live version.
+    expect(draft?.stale).toBe(false);
+    expect(draft?.baseVersionId).toBe(live.currentVersionId);
+  });
+
+  it("a direct deploy under an empty existing draft syncs it (no stale, not behind)", async () => {
+    const { svc, engine, drafts, canvas, owner, reload } = await setup();
+    // An empty draft exists first (e.g. the editor was opened before any deploy).
+    const before = await svc.getOrCreate(canvas);
+    expect(before.manifest).toEqual({});
+    await engine.deploy(canvas, "api", folder({ "index.html": "<h1>via api</h1>" }), owner.id);
+
+    const live = await reload();
+    const draft = await drafts.getByCanvas(canvas.id);
+    expect(Object.keys(draft?.manifest as object)).toEqual(["index.html"]);
+    expect(draft?.stale).toBe(false);
+    expect(draft?.baseVersionId).toBe(live.currentVersionId);
+  });
+
   it("publishing an empty draft is rejected (EMPTY_DEPLOY)", async () => {
     const { svc, canvas } = await setup();
     await expect(svc.publish(canvas, "actor")).rejects.toMatchObject({ code: "EMPTY_DEPLOY" });
