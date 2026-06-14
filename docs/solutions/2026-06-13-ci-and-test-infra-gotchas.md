@@ -86,6 +86,29 @@ Gotchas that make the reuse correct:
 - SQLite stays fresh-per-call: in-memory boot is already free, so no reason to add
   shared-state risk there.
 
+## Supervise Vitest runs under parallel agents
+
+Reusing one PGlite per worker makes worker count a real resource knob. Multiple
+agents running direct `vitest run` commands at once can overclaim CPU, and abandoned
+launchers can leave Vitest process groups alive. The root test scripts now go
+through `scripts/test-runner.mjs`, which registers each run, shares workers across
+active runs, forwards interrupts to the owned process group, and reaps only stale
+registered groups on the next supervised startup. Run-scoped Vite caches are
+removed when the runner exits, so the isolation does not become a new pile-up.
+For single-file iteration use `pnpm test:file -- <test-file>`; it runs one fork,
+uses verbose reporting, and emits a heartbeat if the file is still running. Reserve
+full `pnpm test` for gates.
+
+Avoid `pnpm test | tail` for long runs you need to watch: the pipe can buffer away
+the useful progress until EOF, which makes a healthy run look stalled. Let the
+supervised command stream in the foreground, or redirect to a log file and inspect
+that file. If dashboard/router tests all time out together, first run a cheap pure
+test (`apps/dashboard/src/test/format.test.tsx`). A fast pass means the machine is
+fine and the shared provider/setup path is suspect; a slow run means contention.
+When adding browser APIs, stub/guard them in `apps/dashboard/src/test/setup.ts`
+(`matchMedia`, `ResizeObserver`, `IntersectionObserver`) so jsdom crashes do not
+look like route timeouts.
+
 ## Branch protection on a private repo needs Pro
 
 GitHub gates both classic branch protection AND rulesets behind Pro for **private**

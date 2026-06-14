@@ -67,3 +67,33 @@ untouched) is in flight; until it lands on `main`, exporting is the reliable pat
 
 (Aside: `/healthz` is the real health check. A `503` from `/health` in dev is just
 the SPA history fallback with no built `dist/` — not a bug.)
+
+## Test runs need ownership, not command-pattern cleanup
+
+Another parallel-agent failure came from abandoned test process trees. A shell can
+die, be SIGKILLed, or pipe a long `pnpm test | tail` run while its Vitest workers
+keep running. With several agents, this degrades badly: each "dead" run leaves
+PGlite/Vitest work behind, and the next agent sees a saturated machine rather than
+a clean failure.
+
+**Avoid it:**
+- Use the supervised root scripts (`pnpm test`, `pnpm test:pg`,
+  `pnpm test:sqlite`, `pnpm test:dashboard`) for gates. They register a run under
+  the system temp dir, forward termination to the owned process group, and reap only
+  stale registered groups from launchers that are gone. Their run-scoped Vite
+  caches are removed on runner exit and during stale-run cleanup. They also wait if
+  another Vitest/test-runner process is already touching the same worktree.
+- For iteration, prefer `pnpm test:file -- <test-file>` in the foreground. It uses
+  one fork, no file parallelism, verbose output, and heartbeat logs for a
+  long-running file, so it doesn't spin up a worker army or go silent during a
+  stuck assertion loop.
+- Do not pipe long runs through `tail`; pipe buffering can hide progress until EOF
+  and bait a duplicate launch. Redirect to a log file if you need a durable trace.
+- Never clean up with broad `pkill -f vitest` / `pkill -f pnpm` commands. If a run
+  is not in your registry entry or your terminal session, assume it may belong to
+  another agent.
+- If you must inspect leftovers manually, scope by worktree: find candidate PIDs,
+  verify with `lsof -p <pid>` that they touch this checkout, then terminate only
+  those owned processes and verify the worktree is process-free.
+- Override worker count deliberately with `CANVAS_DROP_TEST_MAX_WORKERS` only when
+  you know you are the only heavy runner on the machine.
