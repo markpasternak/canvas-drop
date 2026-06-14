@@ -18,33 +18,35 @@ function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
   const [cloneOpen, setCloneOpen] = useState(false);
   return (
-    <li className="group flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
+    <li className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
       {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
           screenshot will later render into this same box with no layout change.
           Decorative (not a link) so the title below stays the single open
           affordance — no duplicate link for screen readers. */}
-      <div className="aspect-[16/10] w-full overflow-hidden">
+      <div className="aspect-[16/9] w-full overflow-hidden">
         <GenerativeCover seed={item.id} />
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-2.5 p-3.5">
         <div className="flex items-start justify-between gap-2">
           {/* The title IS the open affordance — a direct external link to the live
-            canvas. One primary target, no duplicate "Open" action. */}
+            canvas. Its ::after stretches over the whole card so clicking anywhere
+            (except the raised tag/action controls below) opens the canvas, while
+            screen readers still get one labelled link. */}
           <a
             href={item.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate text-sm font-semibold text-fg hover:text-accent"
+            className="min-w-0 truncate text-sm font-semibold text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
           >
             {item.title || "Untitled canvas"}
           </a>
           {item.templatable && <Badge tone="accent">Template</Badge>}
         </div>
 
-        {item.summary && <p className="line-clamp-3 text-sm text-muted">{item.summary}</p>}
+        {item.summary && <p className="line-clamp-2 text-sm text-muted">{item.summary}</p>}
 
         {item.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="relative z-10 flex flex-wrap gap-1.5">
             {item.tags.map((tag) => (
               <button
                 key={tag}
@@ -78,7 +80,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
             )}
             <span className="truncate text-xs text-subtle">{item.owner.name}</span>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* Raised above the title's stretched ::after so these stay clickable
+              while the rest of the card opens the canvas. */}
+          <div className="relative z-10 flex shrink-0 items-center gap-1">
             {item.templatable && (
               <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
                 Make a copy
@@ -102,14 +106,14 @@ function GalleryCard({ item }: { item: GalleryItem }) {
 
 function CardSkeletonGrid() {
   return (
-    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: 6 }, (_, i) => i).map((i) => (
+    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {Array.from({ length: 8 }, (_, i) => i).map((i) => (
         <li
           key={i}
           className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface"
         >
-          <Skeleton className="aspect-[16/10] w-full rounded-none" />
-          <div className="flex flex-col gap-3 p-4">
+          <Skeleton className="aspect-[16/9] w-full rounded-none" />
+          <div className="flex flex-col gap-2.5 p-3.5">
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-3 w-full" />
             <Skeleton className="h-3 w-4/5" />
@@ -360,7 +364,7 @@ export default function Gallery() {
 
       {items.length > 0 && (
         <>
-          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((item) => (
               <GalleryCard key={item.id} item={item} />
             ))}
