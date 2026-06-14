@@ -6,13 +6,7 @@ export interface SparklinePoint {
   count: number;
 }
 
-export function Sparkline({
-  data,
-  className,
-}: {
-  data: SparklinePoint[];
-  className?: string;
-}) {
+export function Sparkline({ data, className }: { data: SparklinePoint[]; className?: string }) {
   const width = 240;
   const height = 40;
   const pad = 2;

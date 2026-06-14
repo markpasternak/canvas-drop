@@ -135,7 +135,10 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   // --- Platform usage overview (§6.10.6): totals + top canvases + AI spend ---
   app.get("/overview", async (c) => {
-    const [stats, ai] = await Promise.all([deps.admin.platformStats(10), deps.aiUsage.platformSpend()]);
+    const [stats, ai] = await Promise.all([
+      deps.admin.platformStats(10),
+      deps.aiUsage.platformSpend(),
+    ]);
     // Enrich the top canvases with slug/title (small N — direct lookups).
     const top = await Promise.all(
       stats.topCanvases.map(async (t) => {

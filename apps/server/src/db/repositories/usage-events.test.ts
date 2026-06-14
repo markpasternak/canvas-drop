@@ -94,9 +94,7 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
       false,
     );
     // Return after the window → a new view.
-    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 90_000 })).toBe(
-      true,
-    );
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 90_000 })).toBe(true);
     expect((await repo.countByType(canvasId, null)).view).toBe(2);
   });
 

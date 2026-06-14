@@ -86,9 +86,7 @@ const OVERVIEW = {
 
 const AI_USAGE = {
   byUser: [{ userId: "u1", email: "alice@example.com", costUsd: 4.0, calls: 9 }],
-  byCanvas: [
-    { canvasId: "c1", slug: "happy-otter", title: "Happy Otter", costUsd: 4.0, calls: 9 },
-  ],
+  byCanvas: [{ canvasId: "c1", slug: "happy-otter", title: "Happy Otter", costUsd: 4.0, calls: 9 }],
 };
 
 afterEach(() => vi.restoreAllMocks());

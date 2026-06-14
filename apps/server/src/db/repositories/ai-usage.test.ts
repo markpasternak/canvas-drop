@@ -155,13 +155,13 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
 
     const all = await repo.spendByUser(10);
     expect(all.map((r) => r.id)).toEqual([b.userId, a.userId]);
-    expect(all[0].costUsd).toBeCloseTo(4.0, 10);
-    expect(all[1].costUsd).toBeCloseTo(1.5, 10);
-    expect(all[1].calls).toBe(2);
+    expect(all[0]?.costUsd).toBeCloseTo(4.0, 10);
+    expect(all[1]?.costUsd).toBeCloseTo(1.5, 10);
+    expect(all[1]?.calls).toBe(2);
 
     const top1 = await repo.spendByUser(1);
     expect(top1).toHaveLength(1);
-    expect(top1[0].id).toBe(b.userId);
+    expect(top1[0]?.id).toBe(b.userId);
   });
 
   it("spendByCanvas groups by canvas, ordered by spend desc, across multiple users", async () => {
@@ -176,8 +176,8 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
 
     const all = await repo.spendByCanvas(10);
     expect(all.map((r) => r.id)).toEqual([a.canvasId, b.canvasId]);
-    expect(all[0].costUsd).toBeCloseTo(3.0, 10);
-    expect(all[0].calls).toBe(2);
+    expect(all[0]?.costUsd).toBeCloseTo(3.0, 10);
+    expect(all[0]?.calls).toBe(2);
   });
 
   it("pruneBefore deletes old rows, keeps newer", async () => {

@@ -257,12 +257,17 @@ describe("admin routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       byUser: Array<{ userId: string; email: string | null; costUsd: number; calls: number }>;
-      byCanvas: Array<{ canvasId: string; slug: string | null; title: string | null; costUsd: number }>;
+      byCanvas: Array<{
+        canvasId: string;
+        slug: string | null;
+        title: string | null;
+        costUsd: number;
+      }>;
     };
     expect(body.byUser.map((u) => u.email)).toEqual(["bob@example.com", "alice@example.com"]);
-    expect(body.byUser[0].costUsd).toBeCloseTo(4.0, 10);
+    expect(body.byUser[0]?.costUsd).toBeCloseTo(4.0, 10);
     expect(body.byCanvas.map((c2) => c2.slug)).toEqual(["cb-1111-2222", "ca-1111-2222"]);
-    expect(body.byCanvas[0].costUsd).toBeCloseTo(4.0, 10);
+    expect(body.byCanvas[0]?.costUsd).toBeCloseTo(4.0, 10);
   });
 
   it("ai-usage returns empty breakdowns (not null) when there is no AI usage", async () => {
