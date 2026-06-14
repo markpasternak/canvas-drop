@@ -67,7 +67,11 @@ export function VisibilityBadge({ shared }: { shared: boolean }) {
 }
 
 /** Gallery axis: discovery state. Template implies listed; listed implies shared. */
-export function GalleryBadge({ canvas }: { canvas: Pick<Canvas, "galleryListed" | "galleryTemplatable"> }) {
+export function GalleryBadge({
+  canvas,
+}: {
+  canvas: Pick<Canvas, "galleryListed" | "galleryTemplatable">;
+}) {
   if (canvas.galleryTemplatable) return <Badge tone="accent">Template</Badge>;
   if (canvas.galleryListed) return <Badge tone="neutral">Listed</Badge>;
   return <Badge tone="neutral">Unlisted</Badge>;
