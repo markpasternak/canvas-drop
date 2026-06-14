@@ -46,6 +46,8 @@ describe("serveSpa", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     // Allows IdP avatars (e.g. Google) over https while blocking http:/other schemes.
     expect(csp).toContain("img-src 'self' data: https:");
+    // CodeMirror injects its theme as runtime inline styles — required for the editor.
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 

@@ -33,7 +33,12 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": [
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self'",
+    // `'unsafe-inline'` for styles only: the CodeMirror 6 editor (R17) injects its
+    // base + theme CSS as a runtime <style> element and inline style= attributes
+    // (via style-mod). A nonce can't reach those from a statically-served index.html,
+    // so without this the editor renders unstyled (collapsed lines, overlapping
+    // gutter). Scripts stay strict (`script-src 'self'`) — inline CSS can't execute.
+    "style-src 'self' 'unsafe-inline'",
     // `https:` so a user's IdP avatar (e.g. Google lh3.googleusercontent.com) can
     // load — provider-agnostic, images only, no http:/other schemes. The avatar
     // <img> sends no Referer (page Referrer-Policy + img referrerPolicy="no-referrer").
