@@ -11,12 +11,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
-import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { CanvasesRepository, CanvasSettingsPatch } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -32,6 +33,7 @@ export interface ManagementDeps {
   config: Config;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
+  clone: CloneService;
   audit: AuditLog;
   engine: DeployEngine;
   usage: UsageEventsRepository;
@@ -77,6 +79,7 @@ const settingsSchema = z.object({
   password: z.string().min(1).nullable().optional(), // set, or null to clear
   spaFallback: z.boolean().optional(),
   galleryListed: z.boolean().optional(),
+  galleryTemplatable: z.boolean().optional(),
   gallerySummary: z.string().max(500).nullable().optional(),
   galleryTags: z.array(z.string()).optional(),
 });
@@ -101,9 +104,12 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
     galleryListed: cv.galleryListed,
+    galleryTemplatable: cv.galleryTemplatable,
     gallerySummary: cv.gallerySummary,
     // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
     galleryTags: cv.galleryTags as string[] | null,
+    // Lineage (plan 002): the canvas this one was cloned from, for "Cloned from …".
+    clonedFromCanvasId: cv.clonedFromCanvasId,
     // Capability model (plan 006): the master switch, the raw stored feature flags,
     // and the effective state after ANDing operator globals (so the dashboard can
     // explain a feature that's off because the operator disabled it).
@@ -185,6 +191,36 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ ...(await canvasView(cv)), apiKey }, 201);
   });
 
+  // Clone → a new canvas owned by the caller, seeded from an existing one (plan 002).
+  // An owner may clone any ACTIVE canvas they own; a non-owner only a gallery-listed
+  // + templatable one. Eligibility is re-derived server-side from the row (never the
+  // client); a non-eligible source 404s opaquely so its existence isn't revealed
+  // (§12.2). The clone gets its OWN fresh deploy key (the source's is never copied),
+  // but unlike create we do NOT return the plaintext here — a clone's key is revealed
+  // on demand via Settings → Regenerate key, so an unused secret never transits the
+  // wire (plan 002 decision).
+  app.post("/:id/clone", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    const source = await deps.canvases.findById(id);
+    if (!source || source.status === "deleted") return c.json({ error: "not_found" }, 404);
+
+    const eligible =
+      source.ownerId === user.id
+        ? source.status === "active"
+        : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+    if (!eligible) return c.json({ error: "not_found" }, 404);
+
+    const { canvas } = await deps.clone.clone(source, user.id);
+    deps.audit.recordAudit({
+      action: "canvas_clone",
+      actorId: user.id,
+      targetId: canvas.id,
+      meta: { from: source.id },
+    });
+    return c.json(await canvasView(canvas), 201);
+  });
+
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched
    *  version lookup (no N+1). Shared by the active list and the archived list. */
   async function withLastDeploy(list: Canvas[]) {
@@ -263,11 +299,81 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const p = body.data;
+    const { password, ...rest } = p;
+
+    // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
+    // shared AND published AND will be unprotected after this patch; a password set
+    // (or un-share) always un-lists. "Templatable" can only be on when the canvas
+    // ends up listed. These mirror the galleryVisibilityFilters read predicate, so
+    // the at-rest row can't reach a listed-but-invisible state (templatable ⊆ listed
+    // ⊆ shared/published/unprotected).
+    const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
+    const willBeShared = rest.shared === undefined ? cv.shared : rest.shared;
+    const isPublished = cv.currentVersionId !== null;
+    if (rest.galleryListed === true) {
+      if (!willBeShared) {
+        return c.json(
+          { code: "NOT_SHARED", message: "Share this canvas before listing it in the gallery." },
+          409,
+        );
+      }
+      if (!isPublished) {
+        return c.json(
+          {
+            code: "NOT_PUBLISHED",
+            message: "Publish this canvas before listing it in the gallery.",
+          },
+          409,
+        );
+      }
+      if (willBeProtected) {
+        return c.json(
+          {
+            code: "PASSWORD_PROTECTED",
+            message: "Remove the password before listing this canvas in the gallery.",
+          },
+          409,
+        );
+      }
+    }
+    // Setting a password OR un-sharing forces the canvas un-listed, so it can never
+    // end up listed-but-invisible.
+    const finalListed =
+      typeof password === "string" || !willBeShared
+        ? false
+        : (rest.galleryListed ?? cv.galleryListed);
+    if (rest.galleryTemplatable === true && !finalListed) {
+      return c.json(
+        {
+          code: "NOT_LISTED",
+          message: "List this canvas in the gallery before allowing templates.",
+        },
+        409,
+      );
+    }
+
+    // Build the persisted patch — the server enforces the listability invariant
+    // regardless of what the client sent. (updateSettings also clears templatable
+    // whenever galleryListed is set false, keeping templatable ⊆ listed.)
+    const patch: CanvasSettingsPatch = { ...rest };
+    // Un-share un-lists, but KEEPS the gallery summary/tags so re-sharing later
+    // restores them without the owner re-typing (R11).
+    if (rest.shared === false) {
+      patch.galleryListed = false;
+      patch.galleryTemplatable = false;
+    }
+    // A newly-set password un-lists AND clears the gallery metadata — a password is a
+    // deliberate "make private" signal, not a temporary toggle (R10).
+    if (typeof password === "string") {
+      patch.galleryListed = false;
+      patch.galleryTemplatable = false;
+      patch.gallerySummary = null;
+      patch.galleryTags = null;
+    }
 
     let updated = cv;
-    const { password, ...rest } = p;
-    if (Object.keys(rest).length > 0) {
-      updated = await deps.canvases.updateSettings(cv.id, rest);
+    if (Object.keys(patch).length > 0) {
+      updated = await deps.canvases.updateSettings(cv.id, patch);
     }
     if (password !== undefined) {
       const hash = password === null ? null : await hashPassword(password);

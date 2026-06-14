@@ -50,6 +50,22 @@ export function useUpdateSettings(id: string) {
 }
 
 /**
+ * Clone a canvas into a new one owned by the caller (plan 002). The source id is
+ * the mutation variable (an own-canvas id or a gallery item's id), so one hook
+ * serves every clone affordance. On success the caller navigates to the new
+ * canvas's editor; we invalidate the canvases list so it shows up there too.
+ */
+export function useCloneCanvas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => api.cloneCanvas(sourceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/**
  * Capability update (plan 006) — OPTIMISTIC, mirroring useUpdateSettings. Applies
  * the master/feature flags to the cached `capabilities`/`backendEnabled` and
  * recomputes `effective` so disabled-feature hints update without a round-trip.

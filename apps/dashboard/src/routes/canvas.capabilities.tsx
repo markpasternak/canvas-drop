@@ -80,7 +80,15 @@ export default function Capabilities() {
                     Disabled by your administrator for this instance.
                   </span>
                 ) : (
-                  f.description
+                  <>
+                    {f.description}{" "}
+                    <a
+                      href={`/docs/sdk/${f.key}`}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      Docs ↗
+                    </a>
+                  </>
                 )
               }
               checked={storedOn}

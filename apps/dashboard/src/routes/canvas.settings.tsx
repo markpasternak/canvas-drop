@@ -56,7 +56,9 @@ export default function Settings() {
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<null | "slug" | "key" | "archive" | "delete">(null);
+  const [confirm, setConfirm] = useState<
+    null | "slug" | "key" | "archive" | "delete" | "password-unlist"
+  >(null);
   const urlCopyRef = useRef<HTMLButtonElement>(null);
 
   // Local mirrors for text fields (saved on blur).
@@ -83,6 +85,27 @@ export default function Settings() {
   }
 
   const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+
+  // The gallery toggles are pre-blocked when not listable, but a server rejection
+  // (e.g. the canvas was unpublished in another tab) would otherwise roll back
+  // silently — surface it. Other settings stay optimistic/fire-and-forget.
+  const saveGallery = async (patch: Parameters<typeof update.mutate>[0]) => {
+    try {
+      await update.mutateAsync(patch);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update the gallery setting", "error");
+    }
+  };
+
+  // Why this canvas can't be listed in the gallery (null = it can). Order mirrors the
+  // server's checks (plan 002): shared → published → unprotected.
+  const listBlocker = !canvas.shared
+    ? "Turn on Shared above to list this canvas in the gallery."
+    : canvas.currentVersionId === null
+      ? "Publish this canvas before listing it in the gallery."
+      : canvas.hasPassword
+        ? "Remove the password before listing this canvas in the gallery."
+        : null;
 
   async function setOrClearPassword(next: string | null) {
     try {
@@ -153,23 +176,24 @@ export default function Settings() {
             </>
           )}
 
-          {/* Gallery listing. A gallery canvas must be openable by org members, so it
-              requires sharing (D4). The control is always shown for discoverability,
-              but disabled with a hint until the canvas is shared. */}
+          {/* Gallery listing. A listed canvas must be openable by org members without
+              a password, and must actually exist at its URL — so listing requires
+              shared + published + no password (plan 002). The control is always shown
+              for discoverability, but disabled with the specific blocking reason. */}
           <div className="space-y-4 border-t border-border pt-4">
             <Toggle
               label="List in the gallery"
               description="Show this canvas in the opt-in gallery with a title, summary, and tags."
-              checked={canvas.shared && canvas.galleryListed}
-              disabled={!canvas.shared}
-              onChange={(galleryListed) => save({ galleryListed })}
+              checked={canvas.galleryListed}
+              disabled={listBlocker !== null}
+              onChange={(galleryListed) => void saveGallery({ galleryListed })}
             />
-            {!canvas.shared && (
+            {listBlocker && (
               <InlineNotice tone="neutral" className="py-2 text-xs">
-                Turn on <strong>Shared</strong> above to list this canvas in the gallery.
+                {listBlocker}
               </InlineNotice>
             )}
-            {canvas.shared && canvas.galleryListed && (
+            {canvas.galleryListed && (
               <>
                 <Field
                   label="Gallery summary"
@@ -191,6 +215,12 @@ export default function Settings() {
                         .filter(Boolean),
                     })
                   }
+                />
+                <Toggle
+                  label="Allow others to use as a template"
+                  description="Let colleagues clone this canvas as a starting point for their own. They get an editable copy; your canvas is untouched."
+                  checked={canvas.galleryTemplatable}
+                  onChange={(galleryTemplatable) => void saveGallery({ galleryTemplatable })}
                 />
               </>
             )}
@@ -237,7 +267,14 @@ export default function Settings() {
                 variant="secondary"
                 disabled={!password}
                 loading={update.isPending}
-                onClick={() => setOrClearPassword(password)}
+                onClick={() =>
+                  // Adding a password to a listed canvas removes it from the gallery —
+                  // warn first (plan 002 R10). Changing an existing password (already
+                  // unlisted) or an unlisted canvas needs no warning.
+                  canvas.galleryListed
+                    ? setConfirm("password-unlist")
+                    : setOrClearPassword(password)
+                }
               >
                 {canvas.hasPassword ? "Change password" : "Set password"}
               </Button>
@@ -416,6 +453,22 @@ export default function Settings() {
       >
         This takes the canvas offline immediately and removes it from your list. It's recoverable
         for 30 days, then purged permanently.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirm === "password-unlist"}
+        onClose={() => setConfirm(null)}
+        onConfirm={async () => {
+          setConfirm(null);
+          await setOrClearPassword(password);
+        }}
+        title="Add a password and unlist?"
+        actionLabel="Add password & remove from gallery"
+        loading={update.isPending}
+      >
+        Gallery canvases must be openable without a password. Adding one will remove this canvas
+        from the gallery (and turn off its template setting). You can re-list it after clearing the
+        password.
       </ConfirmDialog>
 
       {revealedKey && <ApiKeyReveal apiKey={revealedKey} onClose={() => setRevealedKey(null)} />}

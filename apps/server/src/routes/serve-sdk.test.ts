@@ -17,13 +17,9 @@ describe("serveSdkRoutes", () => {
     expect(await res.text()).toMatch(/pnpm build/);
   });
 
-  it("serves the agent reference at /llms.txt", async () => {
+  it("no longer serves /llms.txt here — it moved to the public docs band (U4)", async () => {
     const app = serveSdkRoutes({ loadBundle: () => "x" });
     const res = await app.request("/llms.txt");
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/plain");
-    const body = await res.text();
-    expect(body).toContain("canvasdrop.kv");
-    expect(body).toContain("/sdk/v1.js");
+    expect(res.status).toBe(404);
   });
 });

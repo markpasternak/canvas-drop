@@ -32,6 +32,15 @@ export interface CreateCanvasInput {
   description?: string | null;
   /** Backend-group master switch (plan 006). Defaults off; cap_* columns default on. */
   backendEnabled?: boolean;
+  /**
+   * Clone-only seed fields (plan 002). Defaults preserve the normal create path:
+   * no password, version 0, and no lineage. The clone service copies the source's
+   * password hash/version verbatim (the gate grant is per-canvas, so a copied hash
+   * is safe) and records the source canvas for lineage.
+   */
+  passwordHash?: string | null;
+  passwordVersion?: number;
+  clonedFromCanvasId?: string | null;
 }
 
 /**
@@ -55,6 +64,7 @@ export interface CanvasSettingsPatch {
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
   galleryListed?: boolean;
+  galleryTemplatable?: boolean;
   gallerySummary?: string | null;
   galleryTags?: Json;
 }
@@ -90,6 +100,24 @@ export function canvasesRepository(client: DbClient) {
   const versionsT = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
   const usersT = client.dialect === "sqlite" ? sqliteSchema.users : pgSchema.users;
 
+  /**
+   * The §12 gallery-visibility predicate, shared by {@link listGallery} and the
+   * clone-eligibility check ({@link findCloneableTemplate}) so "is this in the
+   * gallery" and "may a non-owner clone this" can never drift apart (plan 002
+   * KTD4). A canvas is visible only when it is active, shared, listed, unexpired,
+   * published, AND unprotected — the `password_hash IS NULL` clause makes a
+   * protected canvas invisible even if a stale row still has it listed (plan 002
+   * R10, reversing the M8 "protected canvases are listed" decision).
+   */
+  const galleryVisibilityFilters = (now: number) => [
+    eq(t.status, "active"),
+    eq(t.shared, true),
+    eq(t.galleryListed, true),
+    or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
+    isNotNull(t.currentVersionId),
+    isNull(t.passwordHash),
+  ];
+
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
       const now = Date.now();
@@ -103,7 +131,10 @@ export function canvasesRepository(client: DbClient) {
           ownerId: input.ownerId,
           shared: false,
           galleryListed: false,
-          passwordVersion: 0,
+          galleryTemplatable: false,
+          passwordHash: input.passwordHash ?? null,
+          passwordVersion: input.passwordVersion ?? 0,
+          clonedFromCanvasId: input.clonedFromCanvasId ?? null,
           spaFallback: false,
           // Capability defaults: backend off unless requested; cap_* fall back to
           // their column defaults (all on), so an enabled canvas has all features on.
@@ -164,6 +195,10 @@ export function canvasesRepository(client: DbClient) {
         set.galleryListed = patch.galleryListed;
         set.galleryPublishedAt = patch.galleryListed ? Date.now() : null;
       }
+      if (patch.galleryTemplatable !== undefined) set.galleryTemplatable = patch.galleryTemplatable;
+      // Invariant (KTD6): templatable ⊆ listed. Un-listing in this same patch always
+      // clears templatable, overriding any templatable=true in the same call.
+      if (patch.galleryListed === false) set.galleryTemplatable = false;
       if (patch.gallerySummary !== undefined) set.gallerySummary = patch.gallerySummary;
       if (patch.galleryTags !== undefined) set.galleryTags = patch.galleryTags;
       if (patch.shared !== undefined) {
@@ -398,13 +433,7 @@ export function canvasesRepository(client: DbClient) {
      * under the same predicate for "showing X of N" pagination.
      */
     async listGallery(opts: GalleryListOptions): Promise<{ items: GalleryRow[]; total: number }> {
-      const filters = [
-        eq(t.status, "active"),
-        eq(t.shared, true),
-        eq(t.galleryListed, true),
-        or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, opts.now)),
-        isNotNull(t.currentVersionId),
-      ];
+      const filters = galleryVisibilityFilters(opts.now);
 
       const q = opts.q?.trim().toLowerCase();
       if (q) {
@@ -445,6 +474,21 @@ export function canvasesRepository(client: DbClient) {
       }>;
 
       return { items: rows, total: totalRows[0]?.value ?? 0 };
+    },
+
+    /**
+     * Clone-eligibility for a NON-owner (plan 002 R2): the canvas must satisfy the
+     * exact gallery-visibility predicate AND be marked templatable. Returns the row
+     * when cloneable, else null — the route 404s opaquely for null so a non-eligible
+     * canvas's existence isn't revealed. Owners use their own path (no gate).
+     */
+    async findCloneableTemplate(id: string, now: number): Promise<Canvas | null> {
+      const rows = await db
+        .select()
+        .from(t)
+        .where(and(eq(t.id, id), eq(t.galleryTemplatable, true), ...galleryVisibilityFilters(now)))
+        .limit(1);
+      return (rows[0] as Canvas | undefined) ?? null;
     },
   };
 }

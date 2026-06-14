@@ -23,7 +23,7 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
     title: "Budget chart",
     summary: "A handy budget chart",
     tags: ["charts"],
-    hasPassword: false,
+    templatable: false,
     publishedAt: 1,
     owner: { name: "alice", avatarUrl: null },
     ...over,
@@ -85,10 +85,19 @@ describe("Gallery view", () => {
     expect(screen.getByText("charts")).toBeInTheDocument();
   });
 
-  it("shows the password badge with an accessible label", async () => {
-    stubGallery(() => page([item({ hasPassword: true })]));
+  it("shows a Template badge and a 'Make a copy' action only for templatable items", async () => {
+    stubGallery(() => page([item({ id: "t1", templatable: true })]));
     renderGallery();
-    expect(await screen.findByLabelText("Password required to open")).toBeInTheDocument();
+    expect(await screen.findByText("Template")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Make a copy" })).toBeInTheDocument();
+  });
+
+  it("hides the clone action for non-templatable items", async () => {
+    stubGallery(() => page([item({ id: "n1", templatable: false })]));
+    renderGallery();
+    await screen.findByText("Budget chart");
+    expect(screen.queryByText("Template")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Make a copy" })).not.toBeInTheDocument();
   });
 
   it("shows the no-canvases-yet empty state (no filters) with a link back", async () => {

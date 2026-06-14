@@ -27,6 +27,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Docs compile to a committed module (apps/server/src/docs/generated-content.ts).
+      # Re-run the build and fail if it drifts from what's checked in.
+      - run: pnpm docs:build
+      - name: Assert generated docs are up to date
+        run: git diff --exit-code -- apps/server/src/docs/generated-content.ts
       - run: pnpm lint
       - run: pnpm typecheck
 

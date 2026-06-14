@@ -58,8 +58,12 @@ export interface Canvas {
   hasPassword: boolean;
   spaFallback: boolean;
   galleryListed: boolean;
+  /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
+  galleryTemplatable: boolean;
   gallerySummary: string | null;
   galleryTags: string[] | null;
+  /** Lineage: the canvas this one was cloned from, or null (plan 002). */
+  clonedFromCanvasId: string | null;
   /** Backend-group master switch (plan 006). */
   backendEnabled: boolean;
   /** Raw stored feature flags (what the toggles control). */
@@ -154,6 +158,7 @@ export interface CanvasSettings {
   password?: string | null;
   spaFallback?: boolean;
   galleryListed?: boolean;
+  galleryTemplatable?: boolean;
   gallerySummary?: string | null;
   galleryTags?: string[];
 }
@@ -166,7 +171,8 @@ export interface GalleryItem {
   title: string;
   summary: string | null;
   tags: string[];
-  hasPassword: boolean;
+  /** Whether a non-owner may clone this canvas as a template (plan 002). */
+  templatable: boolean;
   publishedAt: number | null;
   owner: { name: string; avatarUrl: string | null };
 }
@@ -205,6 +211,10 @@ const HINTS: Record<string, string> = {
   VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
   NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
+  NOT_SHARED: "Share this canvas before listing it in the gallery.",
+  NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
+  PASSWORD_PROTECTED: "Remove the password before listing this canvas in the gallery.",
+  NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
 };
@@ -453,6 +463,11 @@ export const api = {
 
   createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
+
+  /** Clone a canvas into a new one owned by the caller (plan 002). The clone gets its
+   *  own fresh deploy key, revealed on demand via Settings → Regenerate key — so it is
+   *  NOT returned here (no unused secret over the wire). */
+  cloneCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
   pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(

@@ -1,6 +1,6 @@
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { cn } from "../lib/cn.js";
 import { CopyButton } from "./CopyButton.js";
 import { EmptyState } from "./EmptyState.js";
@@ -47,14 +47,28 @@ export function CanvasDetailChrome({
   url,
   isLoading,
   actions,
+  badge,
 }: {
   id: string;
   title?: ReactNode;
   url?: string;
   isLoading?: boolean;
   actions?: ReactNode;
+  /** Optional status pill rendered next to the title (e.g. gallery/template state). */
+  badge?: ReactNode;
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  // Keep the current section visible in the horizontally-scrolling tab row. On a
+  // phone the six tabs overflow; without this the active tab (e.g. "Usage") can
+  // sit half-clipped off the right edge. `nearest` avoids any vertical page jump.
+  const activeTabRef = useRef<HTMLAnchorElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the intended trigger — the effect re-scrolls the (changed) active tab into view on each route change, it doesn't read pathname's value.
+  useEffect(() => {
+    // Optional-chain the method: jsdom (tests) doesn't implement scrollIntoView,
+    // and it's a pure progressive enhancement, so a no-op there is correct.
+    activeTabRef.current?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [pathname]);
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
@@ -63,7 +77,10 @@ export function CanvasDetailChrome({
           {isLoading ? (
             <Skeleton className="h-6 w-48" />
           ) : (
-            <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+              {badge && <span className="shrink-0">{badge}</span>}
+            </div>
           )}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -101,6 +118,7 @@ export function CanvasDetailChrome({
             return (
               <Link
                 key={tab.label}
+                ref={isActive ? activeTabRef : undefined}
                 to={tab.to}
                 params={{ id }}
                 aria-current={isActive ? "page" : undefined}

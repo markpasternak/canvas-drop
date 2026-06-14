@@ -1,0 +1,68 @@
+[
+  {
+    "section": "Getting started",
+    "pages": [
+      { "path": "", "file": "index.md", "title": "Overview" },
+      { "path": "quickstart", "file": "quickstart.md", "title": "Quickstart" }
+    ]
+  },
+  {
+    "section": "Authoring canvases",
+    "pages": [
+      {
+        "path": "authoring/create-and-deploy",
+        "file": "authoring/create-and-deploy.md",
+        "title": "Create & deploy"
+      },
+      {
+        "path": "authoring/capabilities",
+        "file": "authoring/capabilities.md",
+        "title": "Capabilities"
+      },
+      { "path": "authoring/editor", "file": "authoring/editor.md", "title": "The editor" }
+    ]
+  },
+  {
+    "section": "Browser SDK",
+    "pages": [
+      { "path": "sdk/overview", "file": "sdk/overview.md", "title": "Overview" },
+      { "path": "sdk/kv", "file": "sdk/kv.md", "title": "Key–value storage" },
+      { "path": "sdk/files", "file": "sdk/files.md", "title": "File storage" },
+      { "path": "sdk/identity", "file": "sdk/identity.md", "title": "Identity" },
+      { "path": "sdk/ai", "file": "sdk/ai.md", "title": "AI" },
+      { "path": "sdk/realtime", "file": "sdk/realtime.md", "title": "Realtime" }
+    ]
+  },
+  {
+    "section": "API reference",
+    "pages": [
+      { "path": "api/deploy-api", "file": "api/deploy-api.md", "title": "Deploy API" },
+      { "path": "api/runtime-api", "file": "api/runtime-api.md", "title": "Runtime API" },
+      { "path": "api/errors", "file": "api/errors.md", "title": "Error codes" }
+    ]
+  },
+  {
+    "section": "Self-hosting",
+    "pages": [
+      { "path": "self-hosting/install", "file": "self-hosting/install.md", "title": "Install" },
+      {
+        "path": "self-hosting/configuration",
+        "file": "self-hosting/configuration.md",
+        "title": "Configuration"
+      },
+      {
+        "path": "self-hosting/security-model",
+        "file": "self-hosting/security-model.md",
+        "title": "Security model"
+      },
+      { "path": "self-hosting/deploy", "file": "self-hosting/deploy.md", "title": "Deploy" }
+    ]
+  },
+  {
+    "section": "For agents",
+    "pages": [
+      { "path": "agents/llms", "file": "agents/llms.md", "title": "llms.txt" },
+      { "path": "agents/skill", "file": "agents/skill.md", "title": "Agent skill" }
+    ]
+  }
+]

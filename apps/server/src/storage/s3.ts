@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -33,6 +34,22 @@ export class S3Driver implements StorageDriver {
         ContentType: opts?.contentType,
       }),
     );
+  }
+
+  async copy(srcKey: string, dstKey: string): Promise<void> {
+    // CopySource is `bucket/key`; URL-encode each key segment (preserving the
+    // path separators) so any non-ASCII/special chars in a key round-trip.
+    const copySource = `${this.bucket}/${srcKey.split("/").map(encodeURIComponent).join("/")}`;
+    try {
+      await this.client.send(
+        new CopyObjectCommand({ Bucket: this.bucket, Key: dstKey, CopySource: copySource }),
+      );
+    } catch (err) {
+      if (isMissing(err)) {
+        throw new StorageError(`source key does not exist: ${srcKey}`, "not_found");
+      }
+      throw err;
+    }
   }
 
   async get(key: string): Promise<Uint8Array | null> {
@@ -101,9 +118,18 @@ export class S3Driver implements StorageDriver {
   }
 }
 
-/** S3 "not found" surfaces as NoSuchKey (GET) or NotFound / 404 (HEAD). */
+/**
+ * S3 "not found" surfaces as NoSuchKey (GET), NotFound / 404 (HEAD), or
+ * NoSuchCopySource (CopyObject with a missing source — some S3 implementations
+ * use this name instead of NoSuchKey).
+ */
 function isMissing(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
-  return e.name === "NoSuchKey" || e.name === "NotFound" || e.$metadata?.httpStatusCode === 404;
+  return (
+    e.name === "NoSuchKey" ||
+    e.name === "NotFound" ||
+    e.name === "NoSuchCopySource" ||
+    e.$metadata?.httpStatusCode === 404
+  );
 }

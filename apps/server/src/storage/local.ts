@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { access, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { type PutOptions, type StorageDriver, StorageError } from "./driver.js";
 
@@ -27,6 +27,20 @@ export class LocalDriver implements StorageDriver {
     const target = this.pathFor(key);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, bytes);
+  }
+
+  async copy(srcKey: string, dstKey: string): Promise<void> {
+    const src = this.pathFor(srcKey);
+    const dst = this.pathFor(dstKey);
+    await mkdir(dirname(dst), { recursive: true });
+    try {
+      await copyFile(src, dst);
+    } catch (err) {
+      if (isNotFound(err)) {
+        throw new StorageError(`source key does not exist: ${srcKey}`, "not_found");
+      }
+      throw err;
+    }
   }
 
   async get(key: string): Promise<Uint8Array | null> {
