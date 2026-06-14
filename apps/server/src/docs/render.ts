@@ -31,11 +31,15 @@ const DOCS_STYLES = `${SYSTEM_PAGE_STYLES}
   }
   .topbar .brand { padding: 0; border: 0; background: none; }
   .topbar .to-app {
-    margin-left: auto; font-size: .875rem; font-weight: 500; color: var(--fg);
-    text-decoration: none; padding: .35rem .7rem;
-    border: 1px solid var(--border); border-radius: .5rem; background: var(--surface);
+    margin-left: auto; display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .8125rem; font-weight: 600; line-height: 1;
+    color: var(--accent-fg); background: var(--accent);
+    text-decoration: none; padding: .45rem .8rem; border-radius: .5rem;
+    transition: background .15s ease;
   }
-  .topbar .to-app:hover { background: var(--surface-sunken); }
+  .topbar .to-app:hover { background: var(--accent-hover); }
+  .topbar .to-app .arrow { transition: transform .15s ease; }
+  .topbar .to-app:hover .arrow { transform: translateX(2px); }
   .nav-burger {
     display: none; cursor: pointer; user-select: none;
     font-size: 1.25rem; line-height: 1; padding: .25rem .5rem;
@@ -162,7 +166,7 @@ ${DOCS_STYLES}
   <header class="topbar">
     <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation">☰</label>
     <a href="/docs" style="text-decoration:none;color:inherit">${SYSTEM_PAGE_BRAND_INLINE}</a>
-    <a href="/" class="to-app">Open app →</a>
+    <a href="/" class="to-app">Open app <span class="arrow" aria-hidden="true">→</span></a>
   </header>
   <div class="layout">
     <aside class="sidebar">
