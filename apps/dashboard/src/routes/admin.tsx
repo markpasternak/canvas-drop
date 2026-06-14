@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { Button } from "../components/Button.js";
+import { CollapsibleSection } from "../components/CollapsibleSection.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 import type { AdminCanvasStatus } from "../lib/api.js";
@@ -180,9 +181,11 @@ export default function AdminDashboard() {
         </StatStrip>
       )}
 
+      {/* Detail sections fold away (state remembered per-section in localStorage) so
+          the governance table below stays reachable. The stat strip above stays
+          pinned — that's the at-a-glance overview. */}
       {ov && ov.topCanvases.length > 0 && (
-        <Panel className="p-4">
-          <h2 className="mb-2 text-sm font-semibold text-fg">Top canvases by usage</h2>
+        <CollapsibleSection title="Top canvases by usage" storageKey="admin:section:topCanvases">
           <ul className="space-y-1 text-sm">
             {ov.topCanvases.slice(0, 5).map((t) => (
               <li key={t.canvasId} className="flex justify-between text-muted">
@@ -191,31 +194,34 @@ export default function AdminDashboard() {
               </li>
             ))}
           </ul>
-        </Panel>
+        </CollapsibleSection>
       )}
 
-      {/* AI usage breakdown (§6.10.7) — top spenders by user and by canvas. */}
+      {/* AI usage breakdown (§6.10.7) — top spenders by user and by canvas. Folded
+          by default: it's a deep-dive, so the table stays close on first load. */}
       {aiUsage.data && (aiUsage.data.byUser.length > 0 || aiUsage.data.byCanvas.length > 0) && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <SpendPanel
-            title="AI spend by user"
-            rows={aiUsage.data.byUser.map((u) => ({
-              key: u.userId,
-              label: u.email ?? u.userId,
-              costUsd: u.costUsd,
-              calls: u.calls,
-            }))}
-          />
-          <SpendPanel
-            title="AI spend by canvas"
-            rows={aiUsage.data.byCanvas.map((c2) => ({
-              key: c2.canvasId,
-              label: c2.title || c2.slug || c2.canvasId,
-              costUsd: c2.costUsd,
-              calls: c2.calls,
-            }))}
-          />
-        </div>
+        <CollapsibleSection title="AI usage" storageKey="admin:section:aiUsage" defaultOpen={false}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SpendPanel
+              title="AI spend by user"
+              rows={aiUsage.data.byUser.map((u) => ({
+                key: u.userId,
+                label: u.email ?? u.userId,
+                costUsd: u.costUsd,
+                calls: u.calls,
+              }))}
+            />
+            <SpendPanel
+              title="AI spend by canvas"
+              rows={aiUsage.data.byCanvas.map((c2) => ({
+                key: c2.canvasId,
+                label: c2.title || c2.slug || c2.canvasId,
+                costUsd: c2.costUsd,
+                calls: c2.calls,
+              }))}
+            />
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* Status filter */}

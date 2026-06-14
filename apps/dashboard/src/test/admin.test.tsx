@@ -42,7 +42,7 @@ function renderAt(path: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  render(
+  return render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -89,7 +89,11 @@ const AI_USAGE = {
   byCanvas: [{ canvasId: "c1", slug: "happy-otter", title: "Happy Otter", costUsd: 4.0, calls: 9 }],
 };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  // CollapsibleSection persists open/closed state — reset so tests don't leak it.
+  localStorage.clear();
+});
 
 describe("admin dashboard", () => {
   it("shows the Admin nav link only when me.isAdmin", async () => {
@@ -139,12 +143,42 @@ describe("admin dashboard", () => {
       "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
     });
     renderAt("/admin");
-    expect(await screen.findByText("AI spend")).toBeInTheDocument(); // overview tile label
+    const user = userEvent.setup();
+    // The AI spend tile lives in the always-visible stat strip.
+    expect(await screen.findByText("AI spend")).toBeInTheDocument();
     expect(screen.getByText("$1.50")).toBeInTheDocument(); // platform spend
+    // The by-user/by-canvas breakdown sits in a section collapsed by default.
+    expect(screen.queryByText("AI spend by user")).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /AI usage/i }));
     expect(await screen.findByText("AI spend by user")).toBeInTheDocument();
     expect(screen.getByText("AI spend by canvas")).toBeInTheDocument();
     // Each breakdown list shows its top spender's cost.
     expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("remembers a collapsed section across remounts via localStorage", async () => {
+    const handlers = {
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/ai-usage": () => json(AI_USAGE),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    };
+    mockFetch(handlers);
+    const first = renderAt("/admin");
+    const user = userEvent.setup();
+    // "Top canvases by usage" is open by default; collapse it.
+    const toggle = await screen.findByRole("button", { name: /Top canvases by usage/i });
+    expect(screen.getByText("1,280 ops")).toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.queryByText("1,280 ops")).not.toBeInTheDocument();
+    first.unmount();
+
+    // Remount: the collapsed state was persisted, so the list stays hidden.
+    mockFetch(handlers);
+    renderAt("/admin");
+    await screen.findByRole("button", { name: /Top canvases by usage/i });
+    expect(screen.queryByText("1,280 ops")).not.toBeInTheDocument();
   });
 
   it("paginates: loads the next keyset page on 'Load more', then hides the button", async () => {
