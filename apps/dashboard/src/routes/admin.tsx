@@ -27,6 +27,16 @@ function StatCard({
   );
 }
 
+/** Keep the first row per id (see the call site for why pages can overlap). */
+function dedupeById<T extends { id: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
+}
+
 const FILTERS: Array<{ id: AdminCanvasStatus | "all"; label: string }> = [
   { id: "all", label: "All" },
   { id: "active", label: "Active" },
@@ -42,7 +52,11 @@ export default function AdminDashboard() {
   const status = filter === "all" ? undefined : filter;
   const overview = useAdminOverview();
   const canvases = useAdminCanvases(status);
-  const rows = canvases.data?.pages.flatMap((p) => p.canvases) ?? [];
+  // Dedupe by id (keep first occurrence). On invalidation React Query refetches
+  // every loaded page with its stored keyset cursor; if a concurrent status
+  // change shifted the dataset, a boundary row can land in two pages at once —
+  // deduping keeps React from ever seeing a duplicate key.
+  const rows = dedupeById(canvases.data?.pages.flatMap((p) => p.canvases) ?? []);
 
   const ov = overview.data;
   const byStatus = ov?.canvasCountByStatus ?? {};

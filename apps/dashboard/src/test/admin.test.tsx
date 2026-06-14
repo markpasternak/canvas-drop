@@ -209,6 +209,43 @@ describe("admin dashboard", () => {
     });
   });
 
+  it("caps the takedown reason at 500 chars with a live counter", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Disable" }));
+    const reason = (await screen.findByLabelText("Reason")) as HTMLTextAreaElement;
+    await user.click(reason);
+    await user.paste("x".repeat(600));
+    // onChange slices to the server's 500 cap; the counter reflects the capped length.
+    expect(reason.value.length).toBe(500);
+    expect(screen.getByText("500/500")).toBeInTheDocument();
+  });
+
+  it("dedupes rows that overlap across keyset pages (no duplicate React keys)", async () => {
+    // page 2 (stale cursor after a concurrent shift) repeats ROW from page 1.
+    const other = { ...ROW, id: "c2", slug: "brave-lynx", title: "Brave Lynx" };
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
+      "GET /api/admin/canvases?cursor=cur1": () =>
+        json({ canvases: [ROW, other], nextCursor: null }),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
+    // ROW ("Happy Otter") was returned by both pages but must render exactly once.
+    expect(screen.getAllByText("Happy Otter")).toHaveLength(1);
+  });
+
   it("settings page saves the model allowlist", async () => {
     mockFetch({
       "GET /api/me": () =>
