@@ -6,14 +6,18 @@ import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { Skeleton } from "../components/Skeleton.js";
-import { InlineNotice, Panel } from "../components/Surface.js";
+import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
 
-/** Versions tab: deploy history (newest first), forward "Deploy new version", and
+function sourceLabel(source: string): string {
+  return { folder: "folder upload", zip: "ZIP", paste: "paste", api: "the API" }[source] ?? source;
+}
+
+/** Deploys tab: deploy history (newest first), forward "Deploy files", and
  * per-version "Make live" (re-point the live version in either direction).
  * Confirm-and-await, not optimistic, since it changes the live canvas for all. */
 export default function Versions() {
@@ -46,13 +50,13 @@ export default function Versions() {
   if (!versions || versions.length === 0) {
     return (
       <TabEmptyState
-        title="No versions yet"
+        title="No deploys yet"
         description={
           isActive
-            ? "Deploy this canvas to see its history here."
-            : "Unarchive this canvas to deploy and start its history."
+            ? "Deploy files or publish a draft to start the deploy history."
+            : "Unarchive this canvas to deploy files again."
         }
-        action={isActive ? <DeployButton canvasId={id} /> : undefined}
+        action={isActive ? <DeployButton canvasId={id} label="Deploy files" /> : undefined}
       />
     );
   }
@@ -88,12 +92,18 @@ export default function Versions() {
 
   return (
     <TabContentFrame>
-      <InlineNotice tone={isActive ? "neutral" : "warning"}>
-        {versions.length} {versions.length === 1 ? "version" : "versions"}
-        {isActive
-          ? ". Deploy a new one from the button above."
-          : ". Unarchive to deploy or change the live version."}
-      </InlineNotice>
+      <Panel className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+        <div className="min-w-0 space-y-1">
+          <h2 className="text-sm font-semibold text-fg">Deploy history</h2>
+          <p className="text-xs text-muted">
+            {versions.length} {versions.length === 1 ? "deploy" : "deploys"} kept for this canvas.
+            {isActive
+              ? " Switch the live deploy or push fresh files from here."
+              : " Unarchive to deploy files or change what is live."}
+          </p>
+        </div>
+        {isActive && <DeployButton canvasId={id} label="Deploy files" variant="secondary" />}
+      </Panel>
 
       <ul className="space-y-2">
         {versions.map((v) => (
@@ -103,7 +113,7 @@ export default function Versions() {
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
                   {v.current && <Badge tone="accent">Live</Badge>}
-                  <Badge tone="neutral">{v.source}</Badge>
+                  <Badge tone="neutral">{sourceLabel(v.source)}</Badge>
                 </div>
                 <div
                   className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-subtle"

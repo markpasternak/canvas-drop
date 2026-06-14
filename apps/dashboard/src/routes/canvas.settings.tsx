@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { Field, TextareaField } from "../components/Field.js";
@@ -33,6 +34,7 @@ const SECTIONS = [
   { id: "sharing", label: "Sharing" },
   { id: "protection", label: "Protection" },
   { id: "url-key", label: "URL & key" },
+  { id: "actions", label: "Actions" },
   { id: "archive", label: "Archive" },
   { id: "danger", label: "Danger zone" },
 ] as const;
@@ -56,6 +58,7 @@ export default function Settings() {
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [confirm, setConfirm] = useState<
     null | "slug" | "key" | "archive" | "delete" | "password-unlist"
   >(null);
@@ -322,6 +325,21 @@ export default function Settings() {
         </Section>
 
         <Section
+          id="actions"
+          title="Actions"
+          description="Branch the work into a separate canvas without changing this one."
+        >
+          <Row
+            title="Duplicate canvas"
+            description="Creates a new canvas from the current published files and opens its draft."
+          >
+            <Button size="sm" variant="secondary" onClick={() => setCloneOpen(true)}>
+              Duplicate canvas
+            </Button>
+          </Row>
+        </Section>
+
+        <Section
           id="archive"
           title="Archive"
           description="Retire a canvas without deleting it. Archiving takes it offline but keeps every file and setting."
@@ -470,6 +488,16 @@ export default function Settings() {
         from the gallery (and turn off its template setting). You can re-list it after clearing the
         password.
       </ConfirmDialog>
+
+      <CloneDialog
+        open={cloneOpen}
+        onClose={() => setCloneOpen(false)}
+        sourceId={canvas.id}
+        sourceTitle={canvas.title}
+        keepsPassword={canvas.hasPassword}
+        title="Duplicate canvas"
+        actionLabel="Duplicate canvas"
+      />
 
       {revealedKey && <ApiKeyReveal apiKey={revealedKey} onClose={() => setRevealedKey(null)} />}
     </TabContentFrame>

@@ -73,7 +73,7 @@ export default function CreateCanvas() {
   const [method, setMethod] = useState<Method>(initial);
   const [title, setTitle] = useState("");
   // Backend-group master switch chosen at create time (plan 006). Off by default;
-  // changeable later in the canvas Capabilities tab.
+  // changeable later in the canvas Backend tab.
   const [backendEnabled, setBackendEnabled] = useState(false);
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,7 +167,7 @@ export default function CreateCanvas() {
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
 
       {/* Capability toggle from the canvas-capabilities foundation (origin/main, #14):
-          start static or backend-enabled; changeable later in the Capabilities tab. */}
+          start static or backend-enabled; changeable later in the Backend tab. */}
       <Panel className="p-5">
         <Toggle
           label="Enable backend"

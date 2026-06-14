@@ -144,6 +144,52 @@ describe("Editor route", () => {
     expect(await screen.findByRole("button", { name: "Publish draft" })).toBeDisabled();
   });
 
+  it("offers to add index.html when the draft has no HTML page", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ files: [{ path: "styles.css", size: 10, mime: "text/css" }] })),
+      "GET /api/canvases/c1/draft/file": () => new Response("body {}", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json(draftView()),
+    });
+    renderEditor();
+
+    expect(await screen.findByText("No HTML page in this draft")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add index.html" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "PUT" &&
+            c.url === "/api/canvases/c1/draft/file?path=index.html&mode=create",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("offers to rename a single inferred HTML page to index.html", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () =>
+        json(draftView({ files: [{ path: "page.html", size: 10, mime: "text/html" }] })),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
+      "POST /api/canvases/c1/draft/rename": () => json(draftView()),
+    });
+    renderEditor();
+
+    expect(await screen.findByText("Home page is inferred")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Rename to index.html" }));
+
+    await waitFor(() => {
+      const rename = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/draft/rename",
+      );
+      expect(rename?.body).toContain('"from":"page.html"');
+      expect(rename?.body).toContain('"to":"index.html"');
+    });
+  });
+
   it("publishes the draft via the publish endpoint", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

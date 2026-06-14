@@ -8,16 +8,16 @@ import { IconLink } from "./IconButton.js";
 import { Skeleton } from "./Skeleton.js";
 
 const TABS = [
-  { to: "/canvases/$id", label: "Overview", exact: true, path: (id: string) => `/canvases/${id}` },
+  { to: "/canvases/$id", label: "Status", exact: true, path: (id: string) => `/canvases/${id}` },
   {
     to: "/canvases/$id/editor",
-    label: "Edit",
+    label: "Draft",
     exact: false,
     path: (id: string) => `/canvases/${id}/editor`,
   },
   {
     to: "/canvases/$id/versions",
-    label: "Versions",
+    label: "Deploys",
     exact: false,
     path: (id: string) => `/canvases/${id}/versions`,
   },
@@ -29,7 +29,7 @@ const TABS = [
   },
   {
     to: "/canvases/$id/capabilities",
-    label: "Capabilities",
+    label: "Backend",
     exact: false,
     path: (id: string) => `/canvases/${id}/capabilities`,
   },

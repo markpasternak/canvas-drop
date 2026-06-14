@@ -15,8 +15,8 @@ import { useCanvas } from "../lib/queries.js";
 const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: string }[] = [
   {
     key: "kv",
-    label: "Key–value storage",
-    description: "Per-canvas and per-user key–value store for durable state.",
+    label: "Key-value storage",
+    description: "Per-canvas and per-user durable state.",
   },
   {
     key: "files",
@@ -57,11 +57,18 @@ export default function Capabilities() {
       <Section
         id="backend"
         title="Backend"
-        description="Give this canvas backend capability so its code can store data, serve files, call AI, and sync in realtime. You can change this any time."
+        description="Give this canvas server-side primitives. You can change these any time."
       >
+        <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs leading-relaxed text-muted">
+          Canvas code can use enabled primitives without browser secrets. Read the{" "}
+          <a href="/docs" className="font-medium text-accent hover:underline">
+            SDK docs
+          </a>{" "}
+          for the client API.
+        </div>
         <Toggle
           label="Enable backend"
-          description="Off by default — a canvas is static until you turn this on."
+          description="Off by default. A canvas is static until you turn this on."
           checked={backendOn}
           onChange={(next) => update.mutate({ backendEnabled: next })}
         />
@@ -80,15 +87,7 @@ export default function Capabilities() {
                     Disabled by your administrator for this instance.
                   </span>
                 ) : (
-                  <>
-                    {f.description}{" "}
-                    <a
-                      href={`/docs/sdk/${f.key}`}
-                      className="font-medium text-accent hover:underline"
-                    >
-                      Docs ↗
-                    </a>
-                  </>
+                  f.description
                 )
               }
               checked={storedOn}
