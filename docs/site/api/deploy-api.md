@@ -95,6 +95,21 @@ Points the canvas back at version `5`. Returns `{ url, version }`.
 - `404 INVALID_PATH` — no ready version with that number.
 - `409 VERSION_UNAVAILABLE` — the target version was pruned out from under the request.
 
+## Unpublish
+
+```
+POST {base}/v1/canvases/{id}/unpublish
+Authorization: Bearer cd_...
+```
+
+Takes a published canvas back to **Draft**: the public URL goes offline (404) and
+the canvas leaves the gallery, while its draft and version history are kept.
+Returns `{ url, publicationState: "draft", currentVersionId: null }`. Re-publish
+later with `PUT .../deploy` or by rolling back to a kept version.
+
+- `409 CANNOT_UNPUBLISH` — the canvas isn't currently published (already a draft,
+  archived, or disabled).
+
 ## Errors
 
 Validation failures return a stable `code` so agents can repair from the body:

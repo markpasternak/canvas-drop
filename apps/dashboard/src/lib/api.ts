@@ -47,9 +47,12 @@ export interface CanvasCapabilitiesPatch {
   realtime?: boolean;
 }
 
-/** Derived canvas lifecycle (mirrors `PublicationState` in @canvas-drop/shared).
- *  Precedence disabled > archived > published > draft; computed server-side. */
-export type PublicationState = "draft" | "published" | "archived" | "disabled";
+/** Derived canvas lifecycle. Local mirror of `PublicationState` in
+ *  `packages/shared/src/db/publication-state.ts` (the dashboard mirrors wire
+ *  types locally to stay decoupled from the server package) — keep the two unions
+ *  in lockstep. Precedence disabled > archived > published > draft; `deleted` is
+ *  its own state (only the admin purge view surfaces it); computed server-side. */
+export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
 
 export interface Canvas {
   id: string;

@@ -109,6 +109,7 @@ function publication(canvas: CanvasListItem): { primary: string; secondary: stri
     published: "Published",
     archived: "Archived",
     disabled: "Disabled",
+    deleted: "Deleted",
   };
   return {
     primary: labels[canvas.publicationState],

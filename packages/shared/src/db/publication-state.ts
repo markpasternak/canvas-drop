@@ -6,21 +6,23 @@ import type { CanvasStatus } from "./types.js";
  * so there is one place this precedence lives and every projection (owner
  * detail, owner list, admin list) stays in lockstep.
  *
- * Precedence: disabled > archived > published > draft.
- */
-export type PublicationState = "draft" | "published" | "archived" | "disabled";
-
-/**
- * Compute the derived {@link PublicationState}.
+ * Precedence: disabled > archived > published > draft. `deleted` is its own
+ * value (not folded into `archived`) — owner surfaces filter deleted rows out,
+ * but the admin purge view legitimately lists them, so the helper must label a
+ * deleted row honestly rather than mask it as archived.
  *
- * `deleted` canvases are filtered out before any projection runs, so they are
- * never surfaced; they map to `archived` here only to keep the function total.
+ * NOTE: the dashboard mirrors this exact union in `apps/dashboard/src/lib/api.ts`
+ * — keep the two in lockstep when adding a state.
  */
+export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
+
+/** Compute the derived {@link PublicationState}. Total over {@link CanvasStatus}. */
 export function publicationState(
   status: CanvasStatus,
   hasCurrentVersion: boolean,
 ): PublicationState {
+  if (status === "deleted") return "deleted";
   if (status === "disabled") return "disabled";
-  if (status === "archived" || status === "deleted") return "archived";
+  if (status === "archived") return "archived";
   return hasCurrentVersion ? "published" : "draft";
 }

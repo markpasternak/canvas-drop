@@ -18,7 +18,11 @@ import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
-import type { CanvasesRepository, CanvasSettingsPatch } from "../db/repositories/canvases.js";
+import {
+  type CanvasesRepository,
+  type CanvasSettingsPatch,
+  CLEARED_PUBLICATION_FIELDS,
+} from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -387,7 +391,11 @@ export function managementRoutes(deps: ManagementDeps) {
     // ⊆ shared/published/unprotected).
     const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
     const willBeShared = rest.shared === undefined ? cv.shared : rest.shared;
-    const isPublished = cv.currentVersionId !== null;
+    // "Published" for the share/gallery preconditions means the full lifecycle
+    // state, not just "has a version": an archived canvas keeps its currentVersionId,
+    // so guarding on currentVersionId alone would let an admin re-share an archived
+    // canvas (publicationState=archived). Require active + a current version.
+    const isPublished = cv.status === "active" && cv.currentVersionId !== null;
     // Sharing requires a published canvas (invariant: shared ⟹ published) — you
     // can't expose a URL that serves no live page. Leaving Published reverts share
     // (see the unpublish/archive transitions), so this also keeps the at-rest row
@@ -566,18 +574,7 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Archived → offline for everyone; drop live sockets (D-RT-6).
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    return c.json(
-      await canvasView({
-        ...cv,
-        status: "archived",
-        shared: false,
-        sharedAt: null,
-        sharedExpiresAt: null,
-        galleryListed: false,
-        galleryTemplatable: false,
-        galleryPublishedAt: null,
-      }),
-    );
+    return c.json(await canvasView({ ...cv, status: "archived", ...CLEARED_PUBLICATION_FIELDS }));
   });
 
   // Unarchive — restore an archived canvas to active. A 409 on an invalid
@@ -616,16 +613,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Offline for everyone now → drop live sockets (D-RT-6).
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
     return c.json(
-      await canvasView({
-        ...cv,
-        currentVersionId: null,
-        shared: false,
-        sharedAt: null,
-        sharedExpiresAt: null,
-        galleryListed: false,
-        galleryTemplatable: false,
-        galleryPublishedAt: null,
-      }),
+      await canvasView({ ...cv, currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS }),
     );
   });
 

@@ -26,6 +26,22 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
+/**
+ * The share + gallery columns cleared whenever a canvas leaves the Published
+ * state (unpublish, archive) — invariant: listed ⟹ shared ⟹ published. The repo
+ * writes spread this into their `.set()`; the management routes spread it into the
+ * returned view (which is built from the pre-mutation row), so the DB write and
+ * the optimistic response can never clear different fields. One source of truth.
+ */
+export const CLEARED_PUBLICATION_FIELDS = {
+  shared: false,
+  sharedAt: null,
+  sharedExpiresAt: null,
+  galleryListed: false,
+  galleryTemplatable: false,
+  galleryPublishedAt: null,
+} as const;
+
 export interface CreateCanvasInput {
   ownerId: string;
   slug: string;
@@ -444,16 +460,7 @@ export function canvasesRepository(client: DbClient) {
         // Archiving leaves the published state, so it reverts sharing and gallery
         // listing too (invariant: listed ⟹ shared ⟹ published). Unarchive restores
         // the canvas at the same URL; the owner re-shares deliberately.
-        .set({
-          status: "archived",
-          shared: false,
-          sharedAt: null,
-          sharedExpiresAt: null,
-          galleryListed: false,
-          galleryTemplatable: false,
-          galleryPublishedAt: null,
-          updatedAt: Date.now(),
-        })
+        .set({ status: "archived", ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -574,16 +581,7 @@ export function canvasesRepository(client: DbClient) {
     async unpublish(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({
-          currentVersionId: null,
-          shared: false,
-          sharedAt: null,
-          sharedExpiresAt: null,
-          galleryListed: false,
-          galleryTemplatable: false,
-          galleryPublishedAt: null,
-          updatedAt: Date.now(),
-        })
+        .set({ currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;

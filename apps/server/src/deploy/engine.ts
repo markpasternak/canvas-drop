@@ -175,7 +175,11 @@ export function deployEngine(deps: DeployEngineDeps) {
       // Best-effort — never fail the deploy over draft bookkeeping.
       try {
         const draft = await deps.drafts.getByCanvas(canvas.id);
-        const draftEmpty = !draft || Object.keys(draft.manifest as Manifest).length === 0;
+        // `manifest` is a nullable JSON column at the type level; guard before
+        // Object.keys so a null manifest is treated as empty rather than throwing
+        // into the catch (which would silently skip the sync after a clean deploy).
+        const draftManifest = (draft?.manifest as Manifest | null) ?? {};
+        const draftEmpty = !draft || Object.keys(draftManifest).length === 0;
         if (!draftEmpty) {
           await deps.drafts.markStale(canvas.id);
         } else if (draft) {

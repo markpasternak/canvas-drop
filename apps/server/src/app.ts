@@ -225,6 +225,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       engine: deps.engine,
       audit: deps.audit,
       rateLimitStore: rlStore,
+      hub: deps.hub,
     }),
   );
 

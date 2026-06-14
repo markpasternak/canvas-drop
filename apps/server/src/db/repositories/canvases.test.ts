@@ -130,6 +130,21 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(after?.galleryTemplatable).toBe(false);
   });
 
+  it("re-publishing after unpublish does NOT auto-restore sharing (owner re-shares deliberately)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "re-1", apiKeyHash: "h" });
+    await deploy(client, cv.id, ownerId, 1);
+    await repo.updateSettings(cv.id, { shared: true });
+    await repo.unpublish(cv.id);
+    // Re-publish by pointing at a fresh ready version (what a new deploy does).
+    await deploy(client, cv.id, ownerId, 2);
+    const after = await repo.findById(cv.id);
+    expect(after?.currentVersionId).not.toBeNull(); // published again
+    expect(after?.shared).toBe(false); // sharing was NOT silently restored
+  });
+
   it("archive reverts share + gallery (leaving Published)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);

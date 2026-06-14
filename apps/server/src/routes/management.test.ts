@@ -456,6 +456,137 @@ describe("managementRoutes", () => {
     expect((await jsonOf<{ shared: boolean }>(ok)).shared).toBe(true);
   });
 
+  it("unpublish requires same-origin (cross-site → 403)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    const res = await app.request(`/api/canvases/${created.id}/unpublish`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("archive clears shared + gallery in the returned view (leaving Published)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    const patch = (body: unknown) =>
+      app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    await patch({ shared: true });
+    await patch({ galleryListed: true });
+    const res = await app.request(`/api/canvases/${created.id}/archive`, {
+      method: "POST",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(res.status).toBe(200);
+    const view = await jsonOf<{
+      shared: boolean;
+      galleryListed: boolean;
+      galleryTemplatable: boolean;
+    }>(res);
+    expect(view.shared).toBe(false);
+    expect(view.galleryListed).toBe(false);
+    expect(view.galleryTemplatable).toBe(false);
+  });
+
+  it("unpublish 409s on an archived canvas, and on a disabled canvas without laundering the takedown", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const mk = async () =>
+      (
+        await jsonOf<{ id: string }>(
+          await app.request("/api/canvases/paste", {
+            method: "POST",
+            headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+            body: JSON.stringify({ html: "<h1>hi</h1>" }),
+          }),
+        )
+      ).id;
+    const unpublish = (id: string) =>
+      app.request(`/api/canvases/${id}/unpublish`, {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+      });
+
+    const archived = await mk();
+    await repo.archive(archived);
+    expect((await unpublish(archived)).status).toBe(409);
+
+    const disabled = await mk();
+    await repo.setDisabled(disabled, "policy");
+    const res = await unpublish(disabled);
+    expect(res.status).toBe(409);
+    // Takedown is not laundered: the canvas stays disabled with its version intact.
+    const after = await repo.findById(disabled);
+    expect(after?.status).toBe("disabled");
+    expect(after?.currentVersionId).not.toBeNull();
+  });
+
+  it("an admin can unpublish another owner's published canvas", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const admin = await seedUser(client, "admin", true);
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    const res = await buildApp(client, { id: admin.id, isAdmin: true }).request(
+      `/api/canvases/${created.id}/unpublish`,
+      { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ publicationState: string }>(res)).publicationState).toBe("draft");
+  });
+
+  it("share guard: an admin cannot re-share an ARCHIVED canvas (published means active + current version)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const admin = await seedUser(client, "admin", true);
+    const repo = canvasesRepository(client);
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    await repo.archive(created.id); // archived keeps currentVersionId
+    const res = await buildApp(client, { id: admin.id, isAdmin: true }).request(
+      `/api/canvases/${created.id}/settings`,
+      {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ shared: true }),
+      },
+    );
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("SHARE_REQUIRES_PUBLISH");
+  });
+
   it("unarchive restores a canvas to the active list", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

@@ -13,6 +13,7 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface DeployApiDeps {
@@ -25,6 +26,9 @@ export interface DeployApiDeps {
    *  this pre-gateway mount, so the deploy class (§12.3 10/min/canvas) is applied
    *  here, keyed by canvasId resolved after the Bearer key is verified. */
   rateLimitStore?: RateLimitStore;
+  /** Realtime hub for drop-sockets on unpublish (D-RT-6). Optional — omitted in
+   *  unit tests and when realtime is disabled. */
+  hub?: RealtimeHub;
 }
 
 /**
@@ -85,6 +89,28 @@ export function deployApiRoutes(deps: DeployApiDeps) {
         auth.currentVersionId !== null,
       ),
       currentVersionId: auth.currentVersionId,
+    });
+  });
+
+  // Unpublish (agent-native parity with the dashboard Unpublish). Takes a published
+  // canvas back to Draft: clears the current-version pointer + share/gallery, drops
+  // live sockets. 409 CANNOT_UNPUBLISH when the canvas isn't currently published.
+  app.post("/:id/unpublish", async (c) => {
+    const auth = await authCanvas(c);
+    if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+    if (!(await deps.canvases.unpublish(auth.id))) {
+      return c.json({ code: "CANNOT_UNPUBLISH", message: "This canvas isn't published." }, 409);
+    }
+    deps.audit.recordAudit({
+      action: "canvas_unpublish",
+      actorId: auth.ownerId,
+      targetId: auth.id,
+    });
+    if (deps.hub) await deps.hub.revalidateCanvas(auth.id).catch(() => {});
+    return c.json({
+      url: canvasUrl(deps.config, auth.slug),
+      publicationState: "draft" as const,
+      currentVersionId: null,
     });
   });
 

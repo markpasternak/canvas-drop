@@ -51,6 +51,7 @@ export function PublicationBadge({ state }: { state: PublicationState }) {
     published: { tone: "success", label: "Published" },
     archived: { tone: "warning", label: "Archived" },
     disabled: { tone: "danger", label: "Disabled" },
+    deleted: { tone: "neutral", label: "Deleted" },
   };
   const s = map[state];
   return (

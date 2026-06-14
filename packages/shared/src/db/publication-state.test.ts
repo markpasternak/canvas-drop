@@ -20,8 +20,8 @@ describe("publicationState", () => {
     expect(publicationState("active", false)).toBe("draft");
   });
 
-  it("treats deleted as archived defensively (never surfaced)", () => {
-    expect(publicationState("deleted", true)).toBe("archived");
-    expect(publicationState("deleted", false)).toBe("archived");
+  it("labels deleted as its own state (admin purge view surfaces it; never masked as archived)", () => {
+    expect(publicationState("deleted", true)).toBe("deleted");
+    expect(publicationState("deleted", false)).toBe("deleted");
   });
 });
