@@ -1,4 +1,4 @@
-import { escapeHtml, SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
+import { escapeHtml, SYSTEM_PAGE_BRAND_INLINE, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
 import { DOC_NAV, DOC_PAGES, type DocPage } from "./generated-content.js";
 
 /**
@@ -155,7 +155,7 @@ ${DOCS_STYLES}
   <input type="checkbox" id="nav-toggle" class="nav-toggle">
   <header class="topbar">
     <label for="nav-toggle" class="nav-burger" aria-label="Toggle navigation">☰</label>
-    <a href="/docs" style="text-decoration:none;color:inherit">${SYSTEM_PAGE_BRAND.replace('<div class="brand">', '<span class="brand">').replace("</div>", "</span>")}</a>
+    <a href="/docs" style="text-decoration:none;color:inherit">${SYSTEM_PAGE_BRAND_INLINE}</a>
   </header>
   <div class="layout">
     <aside class="sidebar">

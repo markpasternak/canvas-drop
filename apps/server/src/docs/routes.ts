@@ -35,22 +35,33 @@ const SKILL_DIR = join(REPO_ROOT, "skill/canvas-drop");
  * secret file can never be served. Memoized at first request. Uses fflate
  * (already a server dependency) — no build artifact, no committed binary.
  */
-let skillZipCache: Uint8Array | null | undefined;
+let skillZipCache: Uint8Array | null = null;
 
 export function buildSkillZip(): Uint8Array | null {
-  if (skillZipCache !== undefined) return skillZipCache;
+  // Memoize only the SUCCESS path: a transient FS error must not pin /skill.zip
+  // to 404 for the process lifetime (a later request can retry).
+  if (skillZipCache) return skillZipCache;
+
+  let skillMd: Uint8Array;
   try {
-    const files: Record<string, Uint8Array> = {
-      "canvas-drop/SKILL.md": readFileSync(join(SKILL_DIR, "SKILL.md")),
-    };
+    skillMd = readFileSync(join(SKILL_DIR, "SKILL.md"));
+  } catch {
+    return null; // SKILL.md is required; without it there is no skill to serve.
+  }
+
+  const files: Record<string, Uint8Array> = { "canvas-drop/SKILL.md": skillMd };
+  // Examples are best-effort: a missing examples/ dir still yields a valid zip
+  // with SKILL.md alone. Allowlist: only markdown files (never a recursive glob).
+  try {
     for (const name of readdirSync(join(SKILL_DIR, "examples"))) {
-      if (!name.endsWith(".md")) continue; // allowlist: only markdown examples
+      if (!name.endsWith(".md")) continue;
       files[`canvas-drop/examples/${name}`] = readFileSync(join(SKILL_DIR, "examples", name));
     }
-    skillZipCache = zipSync(files);
   } catch {
-    skillZipCache = null;
+    // no examples/ dir — serve SKILL.md only
   }
+
+  skillZipCache = zipSync(files);
   return skillZipCache;
 }
 

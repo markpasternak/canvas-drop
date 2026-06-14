@@ -192,6 +192,14 @@ export const SYSTEM_PAGE_BRAND = `    <div class="brand">
       <span>Canvasdrop</span>
     </div>`;
 
+/** The brand mark in an inline (`<span>`) wrapper, for contexts that nest it
+ * inside an anchor (the docs topbar). Computed once here so callers never do
+ * string surgery on `SYSTEM_PAGE_BRAND`'s markup. */
+export const SYSTEM_PAGE_BRAND_INLINE = SYSTEM_PAGE_BRAND.replace(
+  '<div class="brand">',
+  '<span class="brand">',
+).replace("</div>", "</span>");
+
 function renderErrorPage(input: ErrorPageDetails): string {
   const details = normalizeDetails(input);
   const title = escapeHtml(details.title);

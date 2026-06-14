@@ -11,7 +11,7 @@ This table is the canonical set; it is kept in lockstep with the SDK's exported
 | Code | Status | Meaning |
 |------|--------|---------|
 | `NOT_AUTHENTICATED` | 401 | The viewer is not signed in. |
-| `PASSWORD_REQUIRED` | 401 | The canvas is password-protected. |
+| `PASSWORD_REQUIRED` | 403 | The canvas is password-protected. |
 | `CAPABILITY_DISABLED` | 403 | Backend or the specific feature is off for this canvas. |
 | `CROSS_CANVAS_FORBIDDEN` | 403 | A request targeted another canvas's resources. |
 | `MODEL_NOT_ALLOWED` | 403 | The requested AI model is not in the allow-list. |

@@ -18,7 +18,7 @@ export const SDK_VERSION = "1";
 
 export const ERROR_CODES = {
   NOT_AUTHENTICATED: { status: 401, summary: "The viewer is not signed in." },
-  PASSWORD_REQUIRED: { status: 401, summary: "The canvas is password-protected." },
+  PASSWORD_REQUIRED: { status: 403, summary: "The canvas is password-protected." },
   CAPABILITY_DISABLED: {
     status: 403,
     summary: "Backend or the specific feature is off for this canvas.",

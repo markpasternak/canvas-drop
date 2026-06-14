@@ -31,6 +31,19 @@ describe("build-docs renderMarkdown", () => {
     expect(html).not.toContain("onerror");
   });
 
+  it("strips javascript: and data: URL schemes from links and images", () => {
+    const { html } = renderMarkdown("# T\n\n[click](javascript:alert(1)) ![x](data:text/html,bad)");
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("data:text/html");
+  });
+
+  it("de-duplicates anchor ids when a page repeats a heading", () => {
+    const { html, headings } = renderMarkdown("# T\n\n## Limits\n\nx\n\n## Limits\n\ny");
+    expect(html).toContain('<h2 id="limits">');
+    expect(html).toContain('<h2 id="limits-2">');
+    expect(headings.map((h) => h.id)).toEqual(["limits", "limits-2"]);
+  });
+
   it("rewrites asset-relative image links to /docs/assets/*", () => {
     const { html } = renderMarkdown("# T\n\n![shot](assets/dash.webp)");
     expect(html).toContain('src="/docs/assets/dash.webp"');

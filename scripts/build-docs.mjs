@@ -95,12 +95,16 @@ function stripTags(html) {
 /** Render one markdown string; returns { title, html, headings, text }. */
 export function renderMarkdown(md) {
   const headings = [];
+  const seenIds = new Map(); // de-dupe within a page so anchors stay unique
   const marked = new Marked();
   marked.use({
     renderer: {
       heading({ tokens, depth }) {
         const inner = this.parser.parseInline(tokens);
-        const id = slugify(inner);
+        const base = slugify(inner) || `section-${seenIds.size + 1}`;
+        const n = seenIds.get(base) ?? 0;
+        seenIds.set(base, n + 1);
+        const id = n === 0 ? base : `${base}-${n + 1}`;
         if (depth >= 2 && depth <= 3) headings.push({ id, text: stripTags(inner), level: depth });
         return `<h${depth} id="${id}">${inner}</h${depth}>\n`;
       },
