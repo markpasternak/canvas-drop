@@ -70,10 +70,8 @@ function EditableRow({ field }: { field: AdminConfigField }) {
   async function clear() {
     try {
       await setConfig.mutateAsync({ key: field.key, value: null });
-      setDraft(field.secret ? "" : "");
-      toast(
-        `${field.label} reset to ${field.source === "database" ? "environment/default" : "default"}`,
-      );
+      setDraft(""); // Clear only renders for an overridden field; revert to env/default.
+      toast(`${field.label} reset to environment/default`);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't clear", "error");
     }

@@ -14,7 +14,7 @@ import type { AppEnv } from "../http/types.js";
 /** The slice of the settings service the AI route reads (DB-effective config). */
 export type AiSettings = Pick<
   AdminSettingsService,
-  "effectiveModels" | "effectiveApiKey" | "aiEnabled"
+  "effectiveModels" | "effectiveApiKey" | "aiEnabled" | "effectiveQuota"
 >;
 
 /** AI output limits (§6.6). Default modest; hard cap so one call can't run away. */
@@ -67,6 +67,13 @@ const chatSchema = z.object({
  * the SDK maps status→typed error before reading the stream.
  */
 export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
+  // Wiring guard: a route with neither a ready provider nor a factory would pass
+  // the capability gate (when a key is set) and then 403 with a misleading
+  // CAPABILITY_DISABLED. Fail loud at mount instead. (Tests pass `provider`;
+  // production passes `makeProvider`.)
+  if (!deps.provider && !deps.makeProvider) {
+    throw new Error("canvasAiRoutes: supply `provider` (tests) or `makeProvider` (production)");
+  }
   const app = new Hono<AppEnv>();
   const settings = deps.settings;
   // The AI capability is gated on the EFFECTIVE provider key (DB override ?? env),
@@ -114,10 +121,15 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       deps.aiUsage.userSpendSince(user.id, dayStartUtc(now)),
       deps.aiUsage.canvasSpendSince(canvas.id, monthStartUtc(now)),
     ]);
-    const quota = checkQuota(userSpend, canvasSpend, {
-      userDailyUsd: deps.config.ai.userDailyUsd,
-      canvasMonthlyUsd: deps.config.ai.canvasMonthlyUsd,
-    });
+    // USD caps are admin-tunable defaults (DB override ?? env), resolved per call so
+    // an admin lowering the spend cap to halt runaway cost takes effect immediately.
+    const [userDailyUsd, canvasMonthlyUsd] = settings
+      ? await Promise.all([
+          settings.effectiveQuota("ai.user.daily.usd", deps.config.ai.userDailyUsd),
+          settings.effectiveQuota("ai.canvas.monthly.usd", deps.config.ai.canvasMonthlyUsd),
+        ])
+      : [deps.config.ai.userDailyUsd, deps.config.ai.canvasMonthlyUsd];
+    const quota = checkQuota(userSpend, canvasSpend, { userDailyUsd, canvasMonthlyUsd });
     if (!quota.ok) return c.json({ code: "QUOTA_EXCEEDED", scope: quota.scope }, 429);
 
     // Build the provider with the EFFECTIVE key (DB override ?? env), resolved now.

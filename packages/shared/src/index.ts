@@ -11,5 +11,5 @@ export {
   type Config,
   ConfigError,
   loadConfig,
-  setEnvVars,
+  presentEnvVars,
 } from "./config/env.js";

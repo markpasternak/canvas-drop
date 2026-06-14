@@ -72,7 +72,7 @@ export interface BuildAppDeps {
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
-  /** Env vars explicitly set (from `setEnvVars()` at boot) — admin config source labels. */
+  /** Env vars explicitly set (from `presentEnvVars()` at boot) — admin config source labels. */
   envPresent?: Set<string>;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
   aiProvider?: ModelProvider;

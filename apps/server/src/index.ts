@@ -1,4 +1,4 @@
-import { ConfigError, loadConfig, setEnvVars } from "@canvas-drop/shared";
+import { ConfigError, loadConfig, presentEnvVars } from "@canvas-drop/shared";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { buildApp } from "./app.js";
@@ -74,7 +74,7 @@ async function main() {
   let injectWebSocket: ((server: ReturnType<typeof serve>) => void) | undefined;
   const app = buildApp({
     config,
-    envPresent: setEnvVars(),
+    envPresent: presentEnvVars(),
     db,
     rootLogger,
     strategy,

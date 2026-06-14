@@ -341,22 +341,6 @@ export function useAdminRestoreCanvas() {
   });
 }
 
-export function useAdminSetModels() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (models: string[]) => api.admin.setModels(models),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminModels }),
-  });
-}
-
-export function useAdminSetQuotas() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (quotas: Record<string, number>) => api.admin.setQuotas(quotas),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminQuotas }),
-  });
-}
-
 /** Set or clear (value === null) a DB override for an editable config setting. */
 export function useAdminSetConfig() {
   const qc = useQueryClient();

@@ -168,29 +168,8 @@ export function adminSettingsService(deps: {
       return !!(await this.effectiveApiKey());
     },
 
-    /** Status for the admin view — NEVER the key itself, only configured/source/last4. */
-    async getApiKeyStatus(): Promise<{
-      configured: boolean;
-      source: ConfigSource;
-      last4?: string;
-    }> {
-      const dbKey = await strOverride(AI_API_KEY);
-      if (dbKey) return { configured: true, source: "database", last4: last4(dbKey) };
-      if (config.ai.apiKey) {
-        return { configured: true, source: "environment", last4: last4(config.ai.apiKey) };
-      }
-      return { configured: false, source: "default" };
-    },
-
-    /** Persist the admin-set provider key (trimmed). Empty input clears the override. */
-    async setApiKey(key: string): Promise<void> {
-      const trimmed = key.trim();
-      if (trimmed === "") await settings.delete(AI_API_KEY);
-      else await settings.set(AI_API_KEY, trimmed);
-    },
-    async clearApiKey(): Promise<void> {
-      await settings.delete(AI_API_KEY);
-    },
+    // The provider key is read (write) via describeConfig / setConfigOverride
+    // ("ai.apiKey") like every other setting — there is no bespoke key endpoint.
 
     // ── Other effective getters the hot-path consumers read ──────────────────
 
@@ -234,7 +213,11 @@ export function adminSettingsService(deps: {
           };
           if (f.secret) {
             const s = effective == null ? "" : String(effective);
-            return { ...base, set: s !== "", last4: s ? last4(s) : undefined };
+            // last4 only for EDITABLE secrets (the AI key) — a confirmation aid for
+            // a key you can set here. Read-only env secrets (session secret, DB URL,
+            // OIDC/S3 secrets) expose nothing but "configured" — no fragment leaks.
+            const showLast4 = f.editable && s !== "";
+            return { ...base, set: s !== "", last4: showLast4 ? last4(s) : undefined };
           }
           return { ...base, value: asDisplayString(f.type, effective) };
         }),
@@ -255,11 +238,19 @@ export function adminSettingsService(deps: {
 
       switch (f.type) {
         case "number": {
-          const n = typeof raw === "number" ? raw : Number(raw);
+          // Accept a number or a numeric string; reject arrays/booleans/objects so a
+          // wrong-typed body (e.g. [5] or true) is a 400, not a silently coerced value.
+          if (typeof raw !== "number" && typeof raw !== "string") {
+            throw new Error(`${key} must be a number`);
+          }
+          const n = Number(raw);
           if (!Number.isFinite(n) || n <= 0) throw new Error(`${key} must be a number > 0`);
           await settings.set(sk, n);
           return;
         }
+        // boolean/enum: forward-compat scaffolding. No editable field is boolean or
+        // enum today (realtime/rate-limit/auth-mode are read-only), so these branches
+        // are unreached until the editable set grows; kept so that's a one-line flip.
         case "boolean": {
           const b = typeof raw === "boolean" ? raw : raw === "true";
           await settings.set(sk, b);

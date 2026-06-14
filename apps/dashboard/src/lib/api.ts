@@ -407,13 +407,6 @@ export interface AdminOverview {
   topCanvases: Array<{ canvasId: string; ops: number; slug: string | null; title: string | null }>;
 }
 
-export interface AdminQuota {
-  key: string;
-  value: number;
-  default: number;
-  override: number | null;
-}
-
 /** One row of the admin Configuration view. Secrets never carry a raw `value`. */
 export interface AdminConfigField {
   key: string;
@@ -601,26 +594,6 @@ export const api = {
     // Un-soft-delete (distinct from the draft revert-to-version `restoreToDraft`).
     restoreCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/restore`, { method: "POST" }),
-
-    getModels: () =>
-      request<{ models: string[]; override: string[] | null; default: string[] }>(
-        "/api/admin/settings/models",
-      ),
-
-    setModels: (models: string[]) =>
-      request<{ models: string[] }>("/api/admin/settings/models", {
-        ...jsonBody({ models }),
-        method: "PUT",
-      }),
-
-    getQuotas: () =>
-      request<{ quotas: AdminQuota[] }>("/api/admin/settings/quotas").then((r) => r.quotas),
-
-    setQuotas: (quotas: Record<string, number>) =>
-      request<{ ok: true }>("/api/admin/settings/quotas", {
-        ...jsonBody({ quotas }),
-        method: "PUT",
-      }),
 
     /** The unified Configuration view: every setting with value/source/secret-mask. */
     getConfig: () =>

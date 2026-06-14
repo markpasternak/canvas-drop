@@ -30,12 +30,6 @@ export function settingsRepository(client: DbClient) {
     async delete(key: string): Promise<void> {
       await db.delete(t).where(eq(t.key, key));
     },
-
-    /** All stored override keys (config view: which settings have a DB override). */
-    async keys(): Promise<string[]> {
-      const rows = await db.select({ key: t.key }).from(t);
-      return rows.map((r: { key: string }) => r.key);
-    },
   };
 }
 

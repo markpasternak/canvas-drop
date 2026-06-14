@@ -18,9 +18,6 @@ function fakeSettings(): SettingsRepository {
     async delete(key) {
       store.delete(key);
     },
-    async keys() {
-      return [...store.keys()];
-    },
   };
 }
 
@@ -86,28 +83,33 @@ function configSvc(extraEnv: Set<string> = envPresent) {
   });
 }
 
+// The provider key is written/read via setConfigOverride/describeConfig ("ai.apiKey")
+// like every other setting — there is no bespoke key API.
+const aiKeyRow = async (s: ReturnType<typeof configSvc>) =>
+  (await s.describeConfig()).find((r) => r.key === "ai.apiKey");
+
 describe("adminSettingsService — AI provider key (write-only secret)", () => {
   it("effectiveApiKey/aiEnabled fall back to the env key, then a DB override wins", async () => {
     const s = configSvc();
     expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
     expect(await s.aiEnabled()).toBe(true);
-    await s.setApiKey("sk-ant-db-override-1234");
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
     expect(await s.effectiveApiKey()).toBe("sk-ant-db-override-1234"); // DB overrides env
-    await s.clearApiKey();
+    await s.clearConfigOverride("ai.apiKey");
     expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ"); // back to env
   });
 
-  it("getApiKeyStatus reports source + last4 but NEVER the raw key", async () => {
+  it("the config view reports source + last4 but NEVER the raw key", async () => {
     const s = configSvc();
-    const envStatus = await s.getApiKeyStatus();
-    expect(envStatus).toEqual({ configured: true, source: "environment", last4: "WXYZ" });
-    // No field anywhere equals the full key.
-    expect(JSON.stringify(envStatus)).not.toContain("sk-ant-env-key-WXYZ");
+    const env = await aiKeyRow(s);
+    expect(env).toMatchObject({ set: true, source: "environment", last4: "WXYZ" });
+    expect(env).not.toHaveProperty("value");
+    expect(JSON.stringify(env)).not.toContain("sk-ant-env-key-WXYZ");
 
-    await s.setApiKey("sk-ant-db-override-1234");
-    const dbStatus = await s.getApiKeyStatus();
-    expect(dbStatus).toEqual({ configured: true, source: "database", last4: "1234" });
-    expect(JSON.stringify(dbStatus)).not.toContain("sk-ant-db-override-1234");
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    const db = await aiKeyRow(s);
+    expect(db).toMatchObject({ set: true, source: "database", last4: "1234" });
+    expect(JSON.stringify(db)).not.toContain("sk-ant-db-override-1234");
   });
 
   it("with no env key and no DB key, AI is disabled until the admin sets one", async () => {
@@ -117,16 +119,25 @@ describe("adminSettingsService — AI provider key (write-only secret)", () => {
       envPresent: new Set(["CANVAS_DROP_AUTH_MODE"]),
     });
     expect(await noKey.aiEnabled()).toBe(false);
-    expect(await noKey.getApiKeyStatus()).toEqual({ configured: false, source: "default" });
-    await noKey.setApiKey("sk-ant-fresh-0000");
+    expect((await aiKeyRow(noKey))?.set).toBe(false);
+    await noKey.setConfigOverride("ai.apiKey", "sk-ant-fresh-0000");
     expect(await noKey.aiEnabled()).toBe(true);
   });
 
-  it("setApiKey with empty/whitespace input clears the override (reverts to env)", async () => {
+  it("empty/whitespace input clears the key override (reverts to env)", async () => {
     const s = configSvc();
-    await s.setApiKey("sk-ant-db-override-1234");
-    await s.setApiKey("   ");
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
+    await s.setConfigOverride("ai.apiKey", "   ");
     expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
+  });
+
+  it("a READ-ONLY secret exposes only `set` — never last4 (no fragment leak)", async () => {
+    // Session secret is secret + read-only → set:true, but NO last4.
+    const s = configSvc();
+    const sessionSecret = (await s.describeConfig()).find((r) => r.key === "core.sessionSecret");
+    expect(sessionSecret).toMatchObject({ secret: true, editable: false, set: true });
+    expect(sessionSecret?.last4).toBeUndefined();
+    expect(sessionSecret).not.toHaveProperty("value");
   });
 });
 
@@ -193,7 +204,7 @@ describe("adminSettingsService — setConfigOverride validation", () => {
 
   it("clearConfigOverride reverts an editable field to env/default", async () => {
     const s = configSvc();
-    await s.setApiKey("sk-ant-db-override-1234");
+    await s.setConfigOverride("ai.apiKey", "sk-ant-db-override-1234");
     await s.clearConfigOverride("ai.apiKey");
     expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
   });

@@ -252,7 +252,13 @@ describe("admin routes", () => {
     client = await makeTestDb("sqlite");
     const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
     const body = (await (await app.request("/api/admin/config")).json()) as {
-      fields: Array<{ key: string; secret: boolean; editable: boolean; value?: string; set?: boolean }>;
+      fields: Array<{
+        key: string;
+        secret: boolean;
+        editable: boolean;
+        value?: string;
+        set?: boolean;
+      }>;
     };
     const key = body.fields.find((f) => f.key === "ai.apiKey");
     expect(key?.secret).toBe(true);
@@ -284,7 +290,9 @@ describe("admin routes", () => {
     expect((await fieldFor("ai.models"))?.overridden).toBe(false);
 
     // A read-only field cannot be overridden via the API.
-    expect((await app.request("/api/admin/config/auth.mode", put({ value: "oidc" }))).status).toBe(400);
+    expect((await app.request("/api/admin/config/auth.mode", put({ value: "oidc" }))).status).toBe(
+      400,
+    );
     // An invalid value (non-positive quota) is rejected.
     expect(
       (await app.request("/api/admin/config/quota.ai.user.daily.usd", put({ value: 0 }))).status,

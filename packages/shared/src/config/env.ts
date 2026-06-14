@@ -485,7 +485,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
  * ONLY other reader of `process.env`, and it lives in the config module by design
  * (§8.1 — config is the single env reader); callers pass the result in as data.
  */
-export function setEnvVars(env: Record<string, string | undefined> = process.env): Set<string> {
+export function presentEnvVars(env: Record<string, string | undefined> = process.env): Set<string> {
   const present = new Set<string>();
   for (const [key, value] of Object.entries(env)) {
     if (value == null || value.trim() === "") continue;
