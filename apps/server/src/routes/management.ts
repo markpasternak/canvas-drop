@@ -322,15 +322,18 @@ export function managementRoutes(deps: ManagementDeps) {
       );
     }
 
-    // Build the persisted patch. A newly-set password OR an un-share un-lists +
-    // clears gallery metadata (R10/R11) — the server enforces this regardless of
-    // what the client sent. (updateSettings also clears templatable whenever
-    // galleryListed is set false, keeping templatable ⊆ listed.)
+    // Build the persisted patch — the server enforces the listability invariant
+    // regardless of what the client sent. (updateSettings also clears templatable
+    // whenever galleryListed is set false, keeping templatable ⊆ listed.)
     const patch: CanvasSettingsPatch = { ...rest };
+    // Un-share un-lists, but KEEPS the gallery summary/tags so re-sharing later
+    // restores them without the owner re-typing (R11).
     if (rest.shared === false) {
       patch.galleryListed = false;
       patch.galleryTemplatable = false;
     }
+    // A newly-set password un-lists AND clears the gallery metadata — a password is a
+    // deliberate "make private" signal, not a temporary toggle (R10).
     if (typeof password === "string") {
       patch.galleryListed = false;
       patch.galleryTemplatable = false;

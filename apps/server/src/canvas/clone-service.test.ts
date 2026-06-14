@@ -186,7 +186,7 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
   it("copies every blob when the file count exceeds the parallel-copy batch size", async () => {
     const { storage, canvases, drafts, engine, clone, owner, cloner, reload } = await setup();
     const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
-    // 20 distinct files > COPY_CONCURRENCY (16) → the batching loop runs >1 iteration.
+    // 20 distinct files > COPY_CONCURRENCY (8) → the batching loop runs several iterations.
     const files: Record<string, string> = {};
     for (let i = 0; i < 20; i++) files[`f${i}.html`] = `<h1>${i}</h1>`;
     await engine.deploy(src, "folder", folder(files), owner.id);
@@ -208,7 +208,8 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
     const victimHash = Object.values(manifest)[0]?.hash as string;
     await storage.deleteMany([blobKey(src.id, victimHash)]);
 
-    await expect(clone.clone(published, cloner.id)).rejects.toBeTruthy();
+    // Rejects with the ORIGINAL typed copy error (not a rollback/list error).
+    await expect(clone.clone(published, cloner.id)).rejects.toMatchObject({ code: "not_found" });
 
     // No surviving active orphan canvas, and no leftover clone blobs.
     expect(await canvases.listByOwner(cloner.id)).toEqual([]);

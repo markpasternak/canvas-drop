@@ -5,7 +5,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { generateApiKey, hashApiKey } from "./api-key.js";
 import { generateUniqueSlug } from "./slug.js";
-import { blobKey, canvasBlobPrefix } from "./storage-keys.js";
+import { blobKey } from "./storage-keys.js";
 
 export interface CloneServiceDeps {
   canvases: CanvasesRepository;
@@ -81,19 +81,21 @@ export function cloneService(deps: CloneServiceDeps) {
         clonedFromCanvasId: source.id,
       });
 
+      // The DISTINCT blobs to copy (dedup by hash — two paths sharing one hash copy
+      // that blob once). Declared outside the try so the rollback can delete exactly
+      // these destination keys.
+      const hashes = [...new Set(Object.values(manifest).map((entry) => entry.hash))];
+
       // 3-4. Copy blobs, then seed the draft — but if anything fails after the
       //    canvas row exists, roll it back so a half-cloned, draftless canvas never
       //    survives (opening such a canvas would mint an empty draft and silently
       //    lose the cloned content). Soft-delete + best-effort blob cleanup, then
-      //    rethrow so the route still surfaces the failure.
+      //    rethrow so the route still surfaces the original failure.
       try {
-        // Copy the DISTINCT blobs into the clone's namespace (dedup by hash — two
-        // paths sharing one hash copy that blob once), in bounded-concurrency
-        // batches so remote (S3) clones don't pay per-blob round-trip latency
-        // serially. Each batch waits for ALL copies to SETTLE before surfacing a
-        // failure (allSettled, not all) — mirroring the deploy engine — so no copy
-        // can still be in flight when the rollback below lists+deletes the prefix.
-        const hashes = [...new Set(Object.values(manifest).map((entry) => entry.hash))];
+        // Copy in bounded-concurrency batches so remote (S3) clones don't pay
+        // per-blob round-trip latency serially. Each batch waits for ALL copies to
+        // SETTLE before surfacing a failure (allSettled, not all) — mirroring the
+        // deploy engine — so no copy is still in flight when the rollback runs.
         for (let i = 0; i < hashes.length; i += COPY_CONCURRENCY) {
           const results = await Promise.allSettled(
             hashes
@@ -107,9 +109,15 @@ export function cloneService(deps: CloneServiceDeps) {
         // draft referencing a blob that isn't there.
         await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: null });
       } catch (err) {
+        // Best-effort rollback. Delete exactly the destination keys we attempted
+        // (deleteMany ignores missing ones) rather than list()-ing the prefix — that
+        // avoids both a list() throw masking the original error AND any list-after-
+        // write consistency gap. Both cleanup steps are guarded so the ORIGINAL error
+        // always rethrows; a leaked blob under the now-soft-deleted canvas is reclaimed
+        // by the purge sweep.
         await deps.canvases.setStatus(canvas.id, "deleted").catch(() => {});
         await deps.storage
-          .deleteMany(await deps.storage.list(canvasBlobPrefix(canvas.id)))
+          .deleteMany(hashes.map((hash) => blobKey(canvas.id, hash)))
           .catch(() => {});
         throw err;
       }

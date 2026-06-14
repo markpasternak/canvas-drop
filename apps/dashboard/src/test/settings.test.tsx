@@ -268,4 +268,23 @@ describe("settings route — confirm-and-await flows", () => {
       expect(patch?.body).toContain("hunter2");
     });
   });
+
+  it("surfaces a gallery-toggle server rejection as an error toast (not a silent rollback)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ code: "NOT_PUBLISHED", message: "Publish this canvas before listing it." }, 409),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    // Toggling the template switch hits saveGallery → the 409 must toast its hint.
+    await user.click(
+      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
+    );
+    expect(
+      await screen.findByText(/publish this canvas before listing it in the gallery/i),
+    ).toBeInTheDocument();
+  });
 });

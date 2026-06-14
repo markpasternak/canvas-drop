@@ -1329,18 +1329,46 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_SHARED");
   });
 
-  it("un-sharing a listed+templatable canvas clears listing and templatable", async () => {
+  it("un-sharing a listed+templatable canvas clears listing/templatable but KEEPS summary+tags", async () => {
     client = await makeTestDb("sqlite");
     const storage = memStorage();
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false }, storage);
     const id = await publish(storage, owner.id, "src");
-    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    await patch(app, id, {
+      shared: true,
+      galleryListed: true,
+      galleryTemplatable: true,
+      gallerySummary: "a handy starter",
+      galleryTags: ["starter"],
+    });
 
     const res = await patch(app, id, { shared: false });
-    const body = await jsonOf<{ galleryListed: boolean; galleryTemplatable: boolean }>(res);
+    const body = await jsonOf<{
+      galleryListed: boolean;
+      galleryTemplatable: boolean;
+      gallerySummary: string | null;
+      galleryTags: string[] | null;
+    }>(res);
     expect(body.galleryListed).toBe(false);
     expect(body.galleryTemplatable).toBe(false);
+    // Metadata is retained so re-sharing restores it without re-typing.
+    expect(body.gallerySummary).toBe("a handy starter");
+    expect(body.galleryTags).toEqual(["starter"]);
+  });
+
+  it("rejects {shared:false, galleryListed:true} in one PATCH (NOT_SHARED)", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const id = await publish(storage, owner.id, "src");
+    await patch(app, id, { shared: true }); // currently shared
+
+    // Atomically un-share AND request listing → the willBeShared check rejects it.
+    const res = await patch(app, id, { shared: false, galleryListed: true });
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_SHARED");
   });
 
   it("owner cannot clone their own DISABLED canvas → 404", async () => {
