@@ -17,7 +17,7 @@ const base =
   "disabled:opacity-50 disabled:pointer-events-none select-none";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg shadow-[var(--shadow-panel)] hover:bg-accent-hover",
+  primary: "bg-accent text-accent-fg shadow-[var(--shadow-xs)] hover:bg-accent-hover",
   secondary: "bg-surface-raised text-fg border border-border-strong hover:bg-surface-hover",
   ghost: "text-muted hover:text-fg hover:bg-surface-hover",
   danger: "bg-danger text-danger-fg hover:bg-danger-hover",

@@ -23,7 +23,9 @@ export function PageHeader({
     >
       <div className="min-w-0 space-y-1">
         {eyebrow && <div className="text-xs font-medium text-subtle">{eyebrow}</div>}
-        <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+        <h1 className="truncate text-[1.5rem] font-semibold leading-tight tracking-[-0.02em] text-fg">
+          {title}
+        </h1>
         {description && <p className="max-w-2xl text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -136,7 +138,7 @@ export function MetaItem({ label, children }: { label: ReactNode; children: Reac
   return (
     <div className="min-w-0 space-y-1">
       <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
-      <dd className="min-w-0 text-sm text-fg">{children}</dd>
+      <dd className="min-w-0 text-sm text-fg tabular-nums">{children}</dd>
     </div>
   );
 }

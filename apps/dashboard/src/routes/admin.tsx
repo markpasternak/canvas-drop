@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -9,7 +9,10 @@ import { cn } from "../lib/cn.js";
 import { daysSince, formatBytes } from "../lib/format.js";
 import { useAdminCanvases, useAdminOverview } from "../lib/queries.js";
 
-function StatCard({
+/** One cell in the platform stat strip. Cells share a single bordered surface
+ *  (gridlines come from the parent's gap), so the block reads as one instrument
+ *  panel — not a grid of identical SaaS hero-metric cards. */
+function StatCell({
   label,
   value,
   hint,
@@ -19,10 +22,20 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="text-xs text-muted">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums text-fg">{value}</div>
+    <div className="bg-surface p-4">
+      <dt className="text-[0.6875rem] font-medium text-subtle">{label}</dt>
+      <dd className="mt-1 font-semibold text-2xl text-fg tracking-tight tabular-nums">{value}</dd>
       {hint && <div className="mt-0.5 text-xs text-subtle">{hint}</div>}
+    </div>
+  );
+}
+
+/** Bordered container whose 1px gaps reveal the border-colored backing as clean
+ *  gridlines between cells. Works at any column count with no double-border seams. */
+function StatStrip({ children }: { children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-border shadow-[var(--shadow-panel)]">
+      <dl className="grid grid-cols-2 gap-px sm:grid-cols-4">{children}</dl>
     </div>
   );
 }
@@ -76,14 +89,19 @@ export default function AdminDashboard() {
       {/* Platform overview (§6.10.6) — its own loading/error states so it never
           silently disappears when slow or failing. */}
       {overview.isLoading && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-busy="true">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholders
-              key={i}
-              className="h-[78px] animate-pulse rounded-lg border border-border bg-surface-sunken"
-            />
-          ))}
+        <div
+          className="overflow-hidden rounded-xl border border-border bg-border shadow-[var(--shadow-panel)]"
+          aria-busy="true"
+        >
+          <div className="grid grid-cols-2 gap-px sm:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholders
+                key={i}
+                className="h-[78px] animate-pulse bg-surface-sunken"
+              />
+            ))}
+          </div>
         </div>
       )}
       {overview.isError && (
@@ -98,11 +116,11 @@ export default function AdminDashboard() {
         />
       )}
       {ov && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Active canvases" value={byStatus.active ?? 0} />
-          <StatCard label="Disabled" value={byStatus.disabled ?? 0} />
-          <StatCard label="Archived" value={byStatus.archived ?? 0} />
-          <StatCard
+        <StatStrip>
+          <StatCell label="Active canvases" value={byStatus.active ?? 0} />
+          <StatCell label="Disabled" value={byStatus.disabled ?? 0} />
+          <StatCell label="Archived" value={byStatus.archived ?? 0} />
+          <StatCell
             label="Deleted"
             value={byStatus.deleted ?? 0}
             hint={
@@ -111,18 +129,18 @@ export default function AdminDashboard() {
                 : undefined
             }
           />
-          <StatCard
+          <StatCell
             label="Users"
             value={ov.userCount}
             hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
           />
-          <StatCard label="File storage" value={formatBytes(ov.totalFileBytes)} />
-          <StatCard label="Primitive ops" value={ov.totalOps.toLocaleString()} />
-          <StatCard
+          <StatCell label="File storage" value={formatBytes(ov.totalFileBytes)} />
+          <StatCell label="Primitive ops" value={ov.totalOps.toLocaleString()} />
+          <StatCell
             label={`New canvases (${ov.recentWindowDays}d)`}
             value={ov.newCanvases.toLocaleString()}
           />
-        </div>
+        </StatStrip>
       )}
 
       {ov && ov.topCanvases.length > 0 && (

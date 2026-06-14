@@ -96,10 +96,10 @@ export function HoldButton({
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-0 bg-danger-hover/35"
+        className="pointer-events-none absolute inset-0 origin-left bg-danger-hover/35"
         style={{
-          width: holding ? "100%" : "0%",
-          transition: `width ${holding ? holdMs : 150}ms linear`,
+          transform: holding ? "scaleX(1)" : "scaleX(0)",
+          transition: `transform ${holding ? holdMs : 150}ms linear`,
         }}
       />
       {loading && (

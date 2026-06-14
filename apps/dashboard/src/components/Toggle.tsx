@@ -39,7 +39,7 @@ export function Toggle({
       >
         <span
           className={cn(
-            "inline-block size-4 rounded-full bg-accent-fg shadow-[var(--shadow-panel)] transition-transform duration-100 [transition-timing-function:var(--ease-out)]",
+            "inline-block size-4 rounded-full bg-accent-fg shadow-[var(--shadow-xs)] transition-transform duration-100 [transition-timing-function:var(--ease-out)]",
             checked ? "translate-x-5" : "translate-x-1",
           )}
         />

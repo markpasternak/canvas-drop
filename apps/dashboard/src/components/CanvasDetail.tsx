@@ -1,6 +1,6 @@
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { cn } from "../lib/cn.js";
 import { CopyButton } from "./CopyButton.js";
 import { EmptyState } from "./EmptyState.js";
@@ -56,6 +56,17 @@ export function CanvasDetailChrome({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
+  // Keep the current section visible in the horizontally-scrolling tab row. On a
+  // phone the six tabs overflow; without this the active tab (e.g. "Usage") can
+  // sit half-clipped off the right edge. `nearest` avoids any vertical page jump.
+  const activeTabRef = useRef<HTMLAnchorElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the intended trigger — the effect re-scrolls the (changed) active tab into view on each route change, it doesn't read pathname's value.
+  useEffect(() => {
+    // Optional-chain the method: jsdom (tests) doesn't implement scrollIntoView,
+    // and it's a pure progressive enhancement, so a no-op there is correct.
+    activeTabRef.current?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [pathname]);
+
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
       <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -101,6 +112,7 @@ export function CanvasDetailChrome({
             return (
               <Link
                 key={tab.label}
+                ref={isActive ? activeTabRef : undefined}
                 to={tab.to}
                 params={{ id }}
                 aria-current={isActive ? "page" : undefined}
