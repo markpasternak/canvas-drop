@@ -285,7 +285,7 @@ export function adminSettingsService(deps: {
     /** Clear a DB override so the field reverts to its env/default value. */
     async clearConfigOverride(key: string): Promise<void> {
       const f = CONFIG_FIELD_BY_KEY.get(key);
-      if (!f || !f.editable || !f.settingKey) throw new Error(`cannot clear: ${key}`);
+      if (!f?.editable || !f.settingKey) throw new Error(`cannot clear: ${key}`);
       await settings.delete(f.settingKey);
     },
   };
