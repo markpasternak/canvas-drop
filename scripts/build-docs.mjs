@@ -1,0 +1,218 @@
+// Compile the hand-authored docs in docs/site/ into the committed server module
+// apps/server/src/docs/generated-content.ts. Markdown → highlighted + sanitized
+// HTML, an ordered nav, a search index, and the /llms.txt body — one artifact the
+// server imports with no runtime markdown dependency. Run via `pnpm docs:build`
+// (or `--watch`). The generated file is committed; CI re-runs this and asserts no
+// diff (drift guard). See docs/plans/2026-06-14-002-feat-documentation-system-plan.md.
+
+import { readFileSync, watch, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import hljs from "highlight.js";
+import { Marked } from "marked";
+import sanitizeHtml from "sanitize-html";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SITE_DIR = join(root, "docs/site");
+const OUT_FILE = join(root, "apps/server/src/docs/generated-content.ts");
+
+// Pages whose plain text is inlined into /llms.txt (ordered, curated subset).
+const LLMS_PAGES = [
+  "",
+  "quickstart",
+  "authoring/capabilities",
+  "sdk/overview",
+  "api/deploy-api",
+  "api/runtime-api",
+  "api/errors",
+];
+
+const SANITIZE_OPTS = {
+  allowedTags: [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "p",
+    "a",
+    "ul",
+    "ol",
+    "li",
+    "strong",
+    "em",
+    "code",
+    "pre",
+    "span",
+    "blockquote",
+    "hr",
+    "br",
+    "img",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+  ],
+  allowedAttributes: {
+    a: ["href"],
+    img: ["src", "alt"],
+    span: ["class"],
+    code: ["class"],
+    pre: ["class"],
+    h1: ["id"],
+    h2: ["id"],
+    h3: ["id"],
+    h4: ["id"],
+    th: ["align"],
+    td: ["align"],
+  },
+  // Drop anything not allow-listed (scripts, iframes, on* handlers) silently.
+  disallowedTagsMode: "discard",
+};
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]*>/g, "")
+    .trim()
+    .replace(/[^\w]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function stripTags(html) {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Render one markdown string; returns { title, html, headings, text }. */
+export function renderMarkdown(md) {
+  const headings = [];
+  const seenIds = new Map(); // de-dupe within a page so anchors stay unique
+  const marked = new Marked();
+  marked.use({
+    renderer: {
+      heading({ tokens, depth }) {
+        const inner = this.parser.parseInline(tokens);
+        const base = slugify(inner) || `section-${seenIds.size + 1}`;
+        const n = seenIds.get(base) ?? 0;
+        seenIds.set(base, n + 1);
+        const id = n === 0 ? base : `${base}-${n + 1}`;
+        if (depth >= 2 && depth <= 3) headings.push({ id, text: stripTags(inner), level: depth });
+        return `<h${depth} id="${id}">${inner}</h${depth}>\n`;
+      },
+      code({ text, lang }) {
+        const language = lang && hljs.getLanguage(lang) ? lang : null;
+        const out = language
+          ? hljs.highlight(text, { language }).value
+          : hljs.highlightAuto(text).value;
+        return `<pre><code class="hljs${language ? ` language-${language}` : ""}">${out}</code></pre>\n`;
+      },
+      image({ href, title, text }) {
+        const src = href.startsWith("assets/") ? `/docs/${href}` : href;
+        const t = title ? ` title="${title}"` : "";
+        return `<img src="${src}" alt="${text ?? ""}"${t}>`;
+      },
+    },
+  });
+
+  const rawHtml = marked.parse(md);
+  const html = sanitizeHtml(rawHtml, SANITIZE_OPTS);
+  const titleMatch = md.match(/^#\s+(.+)$/m);
+  const title = titleMatch ? titleMatch[1].trim() : "Untitled";
+  return { title, html, headings, text: stripTags(html) };
+}
+
+export function build() {
+  const nav = JSON.parse(readFileSync(join(SITE_DIR, "_nav.json"), "utf8"));
+  const pages = [];
+  const navOut = [];
+
+  for (const group of nav) {
+    const navPages = [];
+    for (const entry of group.pages) {
+      const md = readFileSync(join(SITE_DIR, entry.file), "utf8");
+      const { title, html, headings, text } = renderMarkdown(md);
+      pages.push({
+        path: entry.path,
+        section: group.section,
+        title: entry.title || title,
+        html,
+        headings,
+        text,
+      });
+      navPages.push({ path: entry.path, title: entry.title || title });
+    }
+    navOut.push({ section: group.section, pages: navPages });
+  }
+
+  const searchIndex = pages.map((p) => ({
+    path: p.path,
+    title: p.title,
+    headings: p.headings.map((h) => h.text),
+    text: p.text.slice(0, 2000),
+  }));
+
+  const byPath = new Map(pages.map((p) => [p.path, p]));
+  const llms = [
+    "# canvas-drop — llms.txt",
+    "",
+    "Agent-readable reference for deploying and extending canvases. See {base}/docs for the full docs.",
+    "",
+  ];
+  for (const path of LLMS_PAGES) {
+    const p = byPath.get(path);
+    if (!p) continue;
+    llms.push(`## ${p.title}`, "", p.text, "");
+  }
+  const llmsText = llms.join("\n");
+
+  const banner =
+    "// AUTO-GENERATED by scripts/build-docs.mjs from docs/site/. Do not edit by hand.\n" +
+    "// Run `pnpm docs:build` to regenerate. CI asserts this file has no uncommitted drift.\n";
+
+  const out =
+    `${banner}\n` +
+    "export interface DocHeading { id: string; text: string; level: number; }\n" +
+    "export interface DocPage { path: string; section: string; title: string; html: string; headings: DocHeading[]; text: string; }\n" +
+    "export interface NavSection { section: string; pages: { path: string; title: string }[]; }\n" +
+    "export interface SearchEntry { path: string; title: string; headings: string[]; text: string; }\n\n" +
+    `export const DOC_PAGES: DocPage[] = ${JSON.stringify(pages, null, 2)};\n\n` +
+    `export const DOC_NAV: NavSection[] = ${JSON.stringify(navOut, null, 2)};\n\n` +
+    `export const SEARCH_INDEX: SearchEntry[] = ${JSON.stringify(searchIndex, null, 2)};\n\n` +
+    `export const LLMS_TXT = ${JSON.stringify(llmsText)};\n`;
+
+  writeFileSync(OUT_FILE, out);
+  return pages.length;
+}
+
+function run() {
+  const n = build();
+  console.log(`docs:build — ${n} pages → apps/server/src/docs/generated-content.ts`);
+}
+
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+
+if (isMain) run();
+
+if (isMain && process.argv.includes("--watch")) {
+  console.log("docs:build — watching docs/site/ for changes…");
+  let timer = null;
+  watch(SITE_DIR, { recursive: true }, () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      try {
+        run();
+      } catch (err) {
+        console.error("docs:build failed:", err.message);
+      }
+    }, 100);
+  });
+}

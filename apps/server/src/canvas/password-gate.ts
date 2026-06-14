@@ -4,7 +4,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
-import { SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
+import { escapeHtml, SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { verifyPassword } from "./password.js";
@@ -192,13 +192,6 @@ ${SYSTEM_PAGE_BRAND}
   </main>
 </body>
 </html>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(
-    /[&<>"']/g,
-    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string,
-  );
 }
 
 export { GATE_COOKIE, signGrant, verifyGrant };

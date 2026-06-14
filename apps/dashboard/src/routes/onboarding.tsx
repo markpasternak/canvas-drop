@@ -62,6 +62,14 @@ export default function Onboarding() {
         description="A canvas is a small web artifact on its own URL. Start from a snippet, local files, or an API deploy."
       />
 
+      <p className="-mt-4 text-sm text-muted">
+        New here? Read the{" "}
+        <a href="/docs/quickstart" className="font-medium text-accent hover:underline">
+          Quickstart guide ↗
+        </a>
+        .
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <PathCard
           icon={<FileHtml size={18} weight="duotone" aria-hidden />}

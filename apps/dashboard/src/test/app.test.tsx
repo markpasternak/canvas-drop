@@ -307,6 +307,49 @@ describe("dashboard app", () => {
     expect(screen.getByText("/missing-dashboard-route")).toBeInTheDocument();
   });
 
+  it("the top bar exposes Docs as a real anchor to the server-served /docs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/");
+    await screen.findByText("Canvasdrop");
+    const docs = screen.getByRole("link", { name: "Documentation" });
+    // A plain anchor (server-served), not a client route.
+    expect(docs.tagName).toBe("A");
+    expect(docs.getAttribute("href")).toBe("/docs");
+  });
+
+  it("the SPA defines no /docs route — /docs falls through to the dashboard 404", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: "u1",
+              email: "u@x",
+              name: "U",
+              avatarUrl: null,
+              isAdmin: false,
+              authMode: "dev",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    renderApp("/docs");
+    // No client route owns /docs, so the SPA shows its 404 — the real /docs is
+    // served by the server before the SPA ever loads.
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+  });
+
   it("shows the designed dashboard error state for route render failures", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
