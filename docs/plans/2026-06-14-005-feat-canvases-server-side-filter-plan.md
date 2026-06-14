@@ -1,7 +1,7 @@
 ---
 date: 2026-06-14
 type: feat
-status: active
+status: completed
 origin: docs/brainstorms/2026-06-14-list-filters-and-gallery-cards-requirements.md
 supersedes: docs/plans/2026-06-14-004-feat-list-filters-and-gallery-cards-plan.md (KTD1, for Your-canvases only)
 title: "feat: Server-side filter/search for Your canvases + richer row pills"
