@@ -26,6 +26,22 @@ const rootRoute = createRootRoute({
   notFoundComponent: DashboardNotFoundState,
 });
 
+/** Your-canvases filter/search/sort params (plan 004). Filtering is client-side
+ *  over the already-loaded owned list. The state lives in the URL so a filtered view
+ *  is shareable and back-button-able. The index route is left UN-validated on
+ *  purpose: typing a fourth search route tips TanStack's un-anchored `navigate`
+ *  inference into whole-router union mode (which breaks the gallery's updaters), so
+ *  the view reads `useSearch` loosely and coerces these params itself. */
+export type CanvasesSortParam = "updated" | "created" | "title";
+export interface CanvasesSearch {
+  q?: string;
+  sort?: CanvasesSortParam;
+  shared?: boolean;
+  protected?: boolean;
+  listed?: boolean;
+  template?: boolean;
+  undeployed?: boolean;
+}
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",

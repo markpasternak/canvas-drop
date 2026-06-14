@@ -67,8 +67,12 @@ describe("list row badges", () => {
     ]);
     await screen.findByText("Plain one"); // list rendered
 
-    expect(screen.getAllByText("Shared")).toHaveLength(2); // shared + both
-    expect(screen.getAllByText("Protected")).toHaveLength(2); // locked + both
+    // Count only the row badges (spans), not the like-named filter chips (buttons,
+    // plan 004) that share label text in the filter bar above the list.
+    const badges = (text: string) =>
+      screen.getAllByText(text).filter((el) => el.closest("button") === null);
+    expect(badges("Shared")).toHaveLength(2); // shared + both
+    expect(badges("Protected")).toHaveLength(2); // locked + both
     expect(screen.queryByText("Active")).not.toBeInTheDocument(); // active is implicit
   });
 

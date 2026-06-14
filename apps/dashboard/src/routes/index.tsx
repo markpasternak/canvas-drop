@@ -1,15 +1,53 @@
-import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { MagnifyingGlass } from "@phosphor-icons/react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type CanvasListItem } from "../lib/api.js";
 import { useArchiveCanvas } from "../lib/mutations.js";
 import { useArchivedCanvases, useCanvases } from "../lib/queries.js";
+import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
+
+/** Client-side filter + sort over the already-loaded owned list (plan 004). All
+ *  filter inputs are present on `CanvasListItem`, so no server call is added. */
+function filterAndSort(list: CanvasListItem[], s: CanvasesSearch): CanvasListItem[] {
+  const q = s.q?.trim().toLowerCase();
+  const out = list.filter((c) => {
+    if (s.shared && !c.shared) return false;
+    if (s.protected && !c.hasPassword) return false;
+    if (s.listed && !c.galleryListed) return false;
+    if (s.template && !c.galleryTemplatable) return false;
+    if (s.undeployed && c.lastDeploy !== null) return false;
+    if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const sort = s.sort ?? "updated";
+  return out.sort((a, b) => {
+    if (sort === "title") return (a.title || a.slug).localeCompare(b.title || b.slug);
+    if (sort === "created") return b.createdAt - a.createdAt;
+    return b.updatedAt - a.updatedAt; // "updated" — the default
+  });
+}
+
+const STATE_CHIPS: Array<{ key: keyof CanvasesSearch; label: string }> = [
+  { key: "shared", label: "Shared" },
+  { key: "protected", label: "Protected" },
+  { key: "listed", label: "Listed" },
+  { key: "template", label: "Templates" },
+  { key: "undeployed", label: "Never deployed" },
+];
+
+const CANVASES_SORT_OPTIONS = [
+  { value: "updated", label: "Recently updated" },
+  { value: "created", label: "Newest" },
+  { value: "title", label: "Title A–Z" },
+];
 
 /** Active-list row: the usual copy/open, plus a calm one-click Archive (reversible —
  * the canvas moves to the Archived view, restorable anytime). */
@@ -87,6 +125,57 @@ function EmptyHome() {
  * Archived canvases live in their own view (/archived) and are excluded here. */
 export default function CanvasList() {
   const { data, isLoading, isError, refetch } = useCanvases();
+  const search = useSearch({ strict: false }) as CanvasesSearch;
+  const navigate = useNavigate();
+
+  const sort = search.sort ?? "updated";
+  const filtering = Boolean(
+    search.q ||
+      search.shared ||
+      search.protected ||
+      search.listed ||
+      search.template ||
+      search.undeployed,
+  );
+
+  // Local mirror of the search box (seeded so a shared URL / back-nav populates the
+  // field). Resync when the param changes externally, e.g. back-button or clear-all.
+  const [text, setText] = useState(search.q ?? "");
+  useEffect(() => {
+    setText(search.q ?? "");
+  }, [search.q]);
+
+  const filtered = useMemo(() => (data ? filterAndSort(data, search) : []), [data, search]);
+
+  function toggle(key: keyof CanvasesSearch) {
+    // Read current state from the coerced `search` (not the loosely-typed updater
+    // arg) so toggling is type-safe on the un-validated index route.
+    const nextOn = !search[key];
+    navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, [key]: nextOn ? true : undefined }),
+    });
+  }
+  function setSort(next: string) {
+    navigate({
+      to: "/",
+      search: (prev) => ({
+        ...prev,
+        sort: next === "updated" ? undefined : (next as CanvasesSearch["sort"]),
+      }),
+    });
+  }
+  function setQ(next: string) {
+    setText(next);
+    const value = next.trim() || undefined;
+    // Client-side filter, so apply immediately; `replace` keeps per-keystroke URL
+    // writes from stacking the browser history.
+    navigate({ to: "/", search: (prev) => ({ ...prev, q: value }), replace: true });
+  }
+  function clearFilters() {
+    setText("");
+    navigate({ to: "/", search: {} });
+  }
 
   return (
     <div className="space-y-6">
@@ -111,14 +200,75 @@ export default function CanvasList() {
         />
       )}
 
+      {/* Onboarding / all-archived pointer only when the owner truly has no canvases
+          — never when a filter merely emptied the view. */}
       {data && data.length === 0 && <EmptyHome />}
 
       {data && data.length > 0 && (
-        <ul className="space-y-2">
-          {data.map((c) => (
-            <ActiveRow key={c.id} canvas={c} />
-          ))}
-        </ul>
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[14rem] flex-1">
+              <MagnifyingGlass
+                size={16}
+                className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
+                aria-hidden
+              />
+              <input
+                type="search"
+                value={text}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search your canvases"
+                aria-label="Search your canvases"
+                className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
+              />
+            </div>
+            <FilterSelect
+              label="Sort your canvases"
+              options={CANVASES_SORT_OPTIONS}
+              value={sort}
+              onValueChange={setSort}
+            />
+          </div>
+
+          <FilterBar>
+            {STATE_CHIPS.map((chip) => (
+              <FilterChip
+                key={chip.key}
+                active={search[chip.key] === true}
+                onClick={() => toggle(chip.key)}
+              >
+                {chip.label}
+              </FilterChip>
+            ))}
+            {filtering && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+              >
+                Clear all
+              </button>
+            )}
+          </FilterBar>
+
+          {filtered.length > 0 ? (
+            <ul className="space-y-2">
+              {filtered.map((c) => (
+                <ActiveRow key={c.id} canvas={c} />
+              ))}
+            </ul>
+          ) : (
+            <EmptyState
+              title="No canvases match these filters"
+              description="Try removing a filter, or clear them all to see everything."
+              action={
+                <Button variant="secondary" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              }
+            />
+          )}
+        </>
       )}
     </div>
   );
