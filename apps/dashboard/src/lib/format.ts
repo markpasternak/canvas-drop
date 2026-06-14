@@ -34,6 +34,18 @@ export function fullTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString();
 }
 
+/**
+ * Format an epoch as a `datetime-local` input value (`YYYY-MM-DDTHH:mm`) in the
+ * viewer's LOCAL timezone. `<input type="datetime-local">` both displays and
+ * parses in local time, so seeding it from `toISOString()` (UTC) would shift the
+ * shown time by the timezone offset. Build the value from the local components.
+ */
+export function toDatetimeLocal(epochMs: number): string {
+  const d = new Date(epochMs);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** Countdown to a future expiry, or "expired". */
 export function expiryLabel(epochMs: number, now = Date.now()): string {
   const s = Math.round((epochMs - now) / 1000);

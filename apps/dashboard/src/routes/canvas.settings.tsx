@@ -14,6 +14,7 @@ import { InlineNotice } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError } from "../lib/api.js";
+import { toDatetimeLocal } from "../lib/format.js";
 import {
   useArchiveCanvas,
   useDeleteCanvas,
@@ -136,11 +137,7 @@ export default function Settings() {
                 label="Share expiry"
                 type="datetime-local"
                 hint={canvas.sharedExpiresAt ? "auto-revokes at this time" : "optional"}
-                defaultValue={
-                  canvas.sharedExpiresAt
-                    ? new Date(canvas.sharedExpiresAt).toISOString().slice(0, 16)
-                    : ""
-                }
+                defaultValue={canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : ""}
                 onBlur={(e) => {
                   const v = e.target.value ? new Date(e.target.value).getTime() : null;
                   if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });

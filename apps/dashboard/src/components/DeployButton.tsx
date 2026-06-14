@@ -109,7 +109,7 @@ export function DeployButton({
                 rows={9}
                 value={html}
                 onChange={(e) => setHtml(e.target.value)}
-                placeholder="<!doctype html>\n<h1>Hello</h1>"
+                placeholder={"<!doctype html>\n<h1>Hello</h1>"}
                 data-autofocus
               />
               <div className="flex justify-end gap-2">

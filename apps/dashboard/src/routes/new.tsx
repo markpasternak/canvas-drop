@@ -254,7 +254,7 @@ export default function CreateCanvas() {
                   rows={9}
                   value={html}
                   onChange={(e) => setHtml(e.target.value)}
-                  placeholder="<!doctype html>\n<h1>Hello</h1>"
+                  placeholder={"<!doctype html>\n<h1>Hello</h1>"}
                 />
                 <Button onClick={createPaste} loading={busy} disabled={!html.trim()}>
                   Create and deploy

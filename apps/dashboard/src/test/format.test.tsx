@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { expiryLabel, formatBytes, relativeTime } from "../lib/format.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { expiryLabel, formatBytes, relativeTime, toDatetimeLocal } from "../lib/format.js";
 
 describe("formatBytes", () => {
   it("formats across unit boundaries", () => {
@@ -25,5 +25,24 @@ describe("expiryLabel", () => {
     expect(expiryLabel(now - 1000, now)).toBe("expired");
     expect(expiryLabel(now + 2 * 86_400_000, now)).toBe("expires in 2d");
     expect(expiryLabel(now + 3 * 3_600_000, now)).toBe("expires in 3h");
+  });
+});
+
+describe("toDatetimeLocal", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
+  it("formats in LOCAL time, not UTC (datetime-local seeding bug)", () => {
+    process.env.TZ = "America/New_York"; // UTC-4 in June (DST)
+    // 2026-06-14T19:00:00Z is 15:00 local — the input must show 15:00, not 19:00.
+    const epoch = Date.UTC(2026, 5, 14, 19, 0);
+    expect(toDatetimeLocal(epoch)).toBe("2026-06-14T15:00");
+  });
+
+  it("zero-pads month, day, hour, and minute", () => {
+    process.env.TZ = "UTC";
+    expect(toDatetimeLocal(Date.UTC(2026, 0, 3, 4, 5))).toBe("2026-01-03T04:05");
   });
 });
