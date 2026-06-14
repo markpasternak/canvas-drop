@@ -75,7 +75,7 @@ function lowLimitConfig(overrides: Record<string, string> = {}): Config {
   });
 }
 
-function app(client: DbClient, config: Config, clientIp = () => "127.0.0.1") {
+function app(client: DbClient, config: Config, peerIp = () => "127.0.0.1") {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
@@ -93,7 +93,7 @@ function app(client: DbClient, config: Config, clientIp = () => "127.0.0.1") {
     engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
     audit: createAuditLog(auditRepository(client), silent),
     sessionSvc: sessionService(config, sessionsRepository(client)),
-    clientIp,
+    peerIp,
   });
 }
 
@@ -146,6 +146,22 @@ describe("rate limiting (middleware + out-of-band)", () => {
     expect(((await res.json()) as { error: string }).error).toBe("rate_limited");
   });
 
+  it("browser management breach → designed 429 HTML with rate-limit headers", async () => {
+    client = await makeTestDb("sqlite");
+    const a = app(client, lowLimitConfig());
+    expect((await a.request("/api/canvases", { headers: host })).status).toBe(200);
+    expect((await a.request("/api/canvases", { headers: host })).status).toBe(200);
+    const res = await a.request("/api/canvases", {
+      headers: { ...host, accept: "text/html" },
+    });
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("retry-after")).toBeTruthy();
+    expect(res.headers.get("x-ratelimit-limit")).toBe("2");
+    expect(await res.text()).toContain("Too many requests");
+  });
+
   it("static content + healthz are NOT throttled (not API classes)", async () => {
     client = await makeTestDb("sqlite");
     const a = app(client, lowLimitConfig());
@@ -167,7 +183,7 @@ describe("rate limiting (middleware + out-of-band)", () => {
     }
   });
 
-  it("login is throttled per-IP, pre-gateway (5/min default; 2 here)", async () => {
+  it("login is throttled per-IP, pre-gateway (10/min default; 2 here)", async () => {
     client = await makeTestDb("sqlite");
     // oidc-less dev mode has no /auth/login handler, but the throttle runs first;
     // before the limit it falls through (404), past it returns 429.

@@ -1,7 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DashboardNotFoundState, DashboardRouteErrorState } from "../components/ErrorState.js";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -12,6 +20,20 @@ function renderApp(initialPath: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
+  render(
+    <ThemeProvider>
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          {/* biome-ignore lint/suspicious/noExplicitAny: test router instance */}
+          <RouterProvider router={router as any} />
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>,
+  );
+}
+
+function renderTestRouter(router: unknown) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
@@ -122,5 +144,62 @@ describe("dashboard app", () => {
     // the detail shell renders (breadcrumb + title), proving the route resolves
     expect(await screen.findByText("Your canvases")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Team poll" })).toBeInTheDocument();
+  });
+
+  it("shows the designed dashboard 404 for unknown SPA routes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: "u1",
+              email: "mark@example.com",
+              name: "Mark",
+              avatarUrl: null,
+              isAdmin: false,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    renderApp("/missing-dashboard-route");
+
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+    expect(screen.getByText("not_found")).toBeInTheDocument();
+    expect(screen.getByText("/missing-dashboard-route")).toBeInTheDocument();
+  });
+
+  it("shows the designed dashboard error state for route render failures", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const rootRoute = createRootRoute({
+      component: Outlet,
+      errorComponent: DashboardRouteErrorState,
+      notFoundComponent: DashboardNotFoundState,
+    });
+    const boomRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/boom",
+      component: () => {
+        throw new Error("render exploded");
+      },
+    });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([boomRoute]),
+      history: createMemoryHistory({ initialEntries: ["/boom"] }),
+      defaultErrorComponent: DashboardRouteErrorState,
+      defaultNotFoundComponent: DashboardNotFoundState,
+    });
+
+    renderTestRouter(router);
+
+    expect(
+      await screen.findByRole("heading", { name: "Dashboard view failed" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("route_error")).toBeInTheDocument();
+    expect(screen.getByText("render exploded")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

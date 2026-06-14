@@ -45,7 +45,7 @@ function app(client: DbClient, config: Config = devConfig) {
     engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
     audit: createAuditLog(auditRepository(client), silent),
     sessionSvc: sessionService(config, sessionsRepository(client)),
-    clientIp: () => "127.0.0.1",
+    peerIp: () => "127.0.0.1",
   });
 }
 
@@ -97,6 +97,21 @@ describe("buildApp", () => {
     const platform = await a.request("/v1/c/abc/kv/x", { headers: { host: "localhost:3000" } });
     expect(platform.status).toBe(404);
     expect((await jsonOf<{ code: string }>(platform)).code).toBe("NOT_FOUND");
+  });
+
+  it("direct browser visits to API errors get the designed HTML page", async () => {
+    client = await makeTestDb("sqlite");
+    const res = await app(client).request("/api/canvases/missing", {
+      headers: { host: "localhost:3000", accept: "text/html" },
+    });
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("vary")).toContain("Accept");
+    const html = await res.text();
+    expect(html).toContain("Canvasdrop");
+    expect(html).toContain("Page not found");
+    expect(html).toContain("/api/canvases/missing");
   });
 
   it("end-to-end: create → deploy ZIP → the canvas is live at its URL", async () => {
@@ -177,9 +192,108 @@ describe("buildApp", () => {
         log: silent,
       }),
       audit: createAuditLog(auditRepository(client), silent),
-      clientIp: () => "8.8.8.8",
+      peerIp: () => "8.8.8.8",
     });
     const res = await a.request("/api/canvases", { headers: { host: "canvases.example.com" } });
     expect(res.status).toBe(401);
+  });
+
+  it("browser unauthenticated requests in proxy mode get an HTML 401 page", async () => {
+    client = await makeTestDb("sqlite");
+    const proxyConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "proxy",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+    });
+    const { proxyStrategy } = await import("./auth/proxy.js");
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    const a = buildApp({
+      config: proxyConfig,
+      db: client,
+      rootLogger: silent,
+      strategy: proxyStrategy(proxyConfig),
+      users: usersRepository(client),
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine: deployEngine({
+        config: proxyConfig,
+        canvases,
+        versions,
+        drafts,
+        storage,
+        log: silent,
+      }),
+      audit: createAuditLog(auditRepository(client), silent),
+      peerIp: () => "8.8.8.8",
+    });
+
+    const res = await a.request("/api/canvases", {
+      headers: { host: "canvases.example.com", accept: "text/html" },
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(await res.text()).toContain("Sign in required");
+  });
+
+  // Login throttle keys on the RESOLVED client IP, so behind a trusted proxy it is
+  // per-user (not one global bucket) — and an untrusted peer cannot evade it via XFF.
+  function loginApp(cfg: Config, peer: string) {
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    return buildApp({
+      config: cfg,
+      db: client,
+      rootLogger: silent,
+      strategy: devStrategy(cfg),
+      users: usersRepository(client),
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine: deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent }),
+      audit: createAuditLog(auditRepository(client), silent),
+      sessionSvc: sessionService(cfg, sessionsRepository(client)),
+      peerIp: () => peer,
+    });
+  }
+  const loginCfg = (perMin: string) =>
+    loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DEV_USER_EMAIL: "mark@example.com",
+      CANVAS_DROP_ADMIN_EMAILS: "mark@example.com",
+      CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+      CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: perMin,
+    });
+
+  it("login throttle buckets per real client IP behind a trusted proxy", async () => {
+    client = await makeTestDb("sqlite");
+    const a = loginApp(loginCfg("1"), "10.0.0.1"); // peer is a trusted proxy hop
+    const hit = (xff: string) => a.request("/auth/login", { headers: { "x-forwarded-for": xff } });
+    // Same client twice → second is throttled (429). (Passing the throttle yields a
+    // 404 here: dev mode mounts no /auth/login route — what matters is "not 429".)
+    expect((await hit("1.1.1.1")).status).not.toBe(429);
+    expect((await hit("1.1.1.1")).status).toBe(429);
+    // A different real client behind the same proxy gets its OWN bucket.
+    expect((await hit("2.2.2.2")).status).not.toBe(429);
+  });
+
+  it("login throttle ignores X-Forwarded-For from an untrusted peer (no evasion)", async () => {
+    client = await makeTestDb("sqlite");
+    const a = loginApp(loginCfg("1"), "8.8.8.8"); // untrusted peer → XFF is not trusted
+    const hit = (xff: string) => a.request("/auth/login", { headers: { "x-forwarded-for": xff } });
+    // Differing XFF does not create separate buckets — both share the peer's bucket.
+    expect((await hit("1.1.1.1")).status).not.toBe(429);
+    expect((await hit("2.2.2.2")).status).toBe(429);
   });
 });

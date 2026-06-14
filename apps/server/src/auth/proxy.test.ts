@@ -22,7 +22,7 @@ const EMAIL_HEADER = config.auth.proxy.emailHeader;
 /** Minimal Context stub exposing only what the strategy reads. */
 function ctx(opts: {
   headers?: Record<string, string>;
-  clientIp?: string;
+  peerIp?: string;
   warnings?: string[];
 }): Context<AppEnv> {
   const headers = new Headers(opts.headers ?? {});
@@ -31,7 +31,7 @@ function ctx(opts: {
     : undefined;
   return {
     req: { header: (n: string) => headers.get(n) ?? undefined },
-    get: (k: string) => (k === "clientIp" ? opts.clientIp : k === "log" ? log : undefined),
+    get: (k: string) => (k === "peerIp" ? opts.peerIp : k === "log" ? log : undefined),
   } as unknown as Context<AppEnv>;
 }
 
@@ -104,7 +104,7 @@ describe("proxyStrategy — JWT path", () => {
     // omits the JWT but supplies a trusted-hop identity header must be anonymous —
     // otherwise an attacker could downgrade to the weaker header path.
     const id = await proxyStrategy(config, jwks).resolveIdentity(
-      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, clientIp: "10.1.2.3" }),
+      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, peerIp: "10.1.2.3" }),
     );
     expect(id).toBeNull();
   });
@@ -153,7 +153,7 @@ const headerOnlyConfig: Config = loadConfig({
 describe("proxyStrategy — trusted-header path (§12.5, no JWKS)", () => {
   it("accepts an identity header from a trusted hop", async () => {
     const id = await proxyStrategy(headerOnlyConfig).resolveIdentity(
-      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, clientIp: "10.1.2.3" }),
+      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, peerIp: "10.1.2.3" }),
     );
     expect(id).toEqual({
       sub: "proxy:grace@example.com",
@@ -164,7 +164,7 @@ describe("proxyStrategy — trusted-header path (§12.5, no JWKS)", () => {
 
   it("ignores the same header from an untrusted source (anti-impersonation)", async () => {
     const id = await proxyStrategy(headerOnlyConfig).resolveIdentity(
-      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, clientIp: "8.8.8.8" }),
+      ctx({ headers: { [EMAIL_HEADER]: "grace@example.com" }, peerIp: "8.8.8.8" }),
     );
     expect(id).toBeNull();
   });
@@ -176,13 +176,13 @@ describe("proxyStrategy — trusted-header path (§12.5, no JWKS)", () => {
     expect(id).toBeNull();
   });
 
-  it("gates on the SOCKET peer (c.get clientIp), never X-Forwarded-For (§12.5)", async () => {
+  it("gates on the SOCKET peer (c.get peerIp), never X-Forwarded-For (§12.5)", async () => {
     // A spoofable X-Forwarded-For claiming a trusted hop must NOT grant trust —
     // the gate reads only the real socket peer from context, which is untrusted here.
     const id = await proxyStrategy(headerOnlyConfig).resolveIdentity(
       ctx({
         headers: { [EMAIL_HEADER]: "grace@example.com", "x-forwarded-for": "10.1.2.3" },
-        clientIp: "8.8.8.8", // untrusted socket peer
+        peerIp: "8.8.8.8", // untrusted socket peer
       }),
     );
     expect(id).toBeNull();
