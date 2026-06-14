@@ -45,7 +45,7 @@ import {
   useUploadDraftFile,
   useUploadDraftFiles,
 } from "../lib/mutations.js";
-import { useCanvas, useDraft } from "../lib/queries.js";
+import { keys, useCanvas, useDraft } from "../lib/queries.js";
 
 const AUTOSAVE_MS = 700;
 
@@ -93,6 +93,9 @@ export default function Editor() {
   const loadedRef = useRef<string>("");
   const dirtyRef = useRef<boolean>(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest flush, kept in a ref so the unmount cleanup (empty-deps) can call the
+  // current closure rather than a stale first-render one.
+  const flushRef = useRef<() => void>(() => {});
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
   const editable = selectedFile ? isEditableFile(selectedFile) : false;
@@ -129,9 +132,13 @@ export default function Editor() {
     }
   }, [mode, htmlFile]);
 
+  // On unmount (leaving the Edit tab, route change, etc.) dispatch any pending
+  // autosave so edits made within the debounce window aren't silently dropped.
+  // flush() clears the timer itself; we fire-and-forget since unmount can't await
+  // (the underlying mutation request still goes out).
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      flushRef.current();
     };
   }, []);
 
@@ -166,6 +173,24 @@ export default function Editor() {
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
     }
+  };
+  // Exit flush (unmount): dispatch any pending autosave with a raw request that
+  // doesn't depend on the component still being mounted — the react-query mutation
+  // can't reliably run after the provider tears down. Cache is updated best-effort
+  // so a quick navigation back reflects the save; otherwise the draft refetches.
+  flushRef.current = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (!dirtyRef.current || bufferPathRef.current === null) return;
+    const path = bufferPathRef.current;
+    const body = bufferRef.current;
+    dirtyRef.current = false;
+    void api
+      .putDraftFile(id, path, body)
+      .then((draft) => qc.setQueryData(keys.draft(id), draft))
+      .catch(() => {});
   };
 
   const onEditorChange = (next: string) => {

@@ -91,7 +91,9 @@ export function CanvasDetailChrome({
       </div>
 
       <div className="overflow-x-auto border-t border-border px-3">
-        <div className="flex w-max min-w-full gap-1" role="tablist">
+        {/* Section links (not ARIA tabs): they navigate routes and mark the current
+            one with aria-current, the correct pattern for nav-style links. */}
+        <nav className="flex w-max min-w-full gap-1" aria-label="Canvas sections">
           {TABS.map((tab) => {
             const tabPath = tab.path(id);
             const isActive = tab.exact ? pathname === tabPath : pathname.startsWith(tabPath);
@@ -114,7 +116,7 @@ export function CanvasDetailChrome({
               </Link>
             );
           })}
-        </div>
+        </nav>
       </div>
     </section>
   );

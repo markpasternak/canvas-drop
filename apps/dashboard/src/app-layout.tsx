@@ -1,6 +1,6 @@
 import { List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
 import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
@@ -65,6 +65,17 @@ export function AppLayout() {
   // API independently 404s non-admins, so this is not a security boundary.
   const me = useMe();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The mobile menu is `md:hidden`; if the viewport grows past `md` while it's
+  // open, reset the state so it doesn't reappear on a later shrink back to mobile.
+  useEffect(() => {
+    const mq = window.matchMedia?.("(min-width: 768px)");
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setMenuOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
   const linkClass =
     "rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]";

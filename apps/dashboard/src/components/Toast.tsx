@@ -8,14 +8,21 @@ const ToastContext = createContext<ToastFn | null>(null);
 
 let nextId = 1;
 
+/** Most simultaneous toasts to keep on screen (newest win). */
+const MAX_TOASTS = 3;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const push = useCallback<ToastFn>((message, tone = "default") => {
     const id = nextId++;
-    setToasts((t) => [...t, { id, message, tone }]);
+    // Cap the stack so a burst of failures can't pile up off-screen.
+    setToasts((t) => [...t, { id, message, tone }].slice(-MAX_TOASTS));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
   }, []);
+
+  // Errors interrupt the screen reader (assertive); confirmations wait their turn.
+  const hasError = toasts.some((t) => t.tone === "error");
 
   return (
     <ToastContext.Provider value={push}>
@@ -23,8 +30,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {/* Live region so confirmations are announced to screen readers. */}
       <div
         className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2"
-        role="status"
-        aria-live="polite"
+        role={hasError ? "alert" : "status"}
+        aria-live={hasError ? "assertive" : "polite"}
       >
         {toasts.map((t) => (
           <div

@@ -70,7 +70,7 @@ function renderEditor() {
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/canvases/c1/editor"] }),
   });
-  render(
+  return render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -174,6 +174,29 @@ describe("Editor route", () => {
         ).toBe(true),
       { timeout: 2500 },
     );
+  });
+
+  it("flushes a pending autosave on unmount, so leaving the tab mid-edit isn't lost", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>orig</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+    });
+    const { unmount } = renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("orig"));
+    // Edit, then leave before the 700ms debounce would fire — no PUT yet.
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    unmount();
+    // The unmount flush must have dispatched the save with the edited content.
+    await waitFor(() => {
+      const put = calls.find(
+        (c) => c.method === "PUT" && c.url.startsWith("/api/canvases/c1/draft/file"),
+      );
+      expect(put?.body).toContain("edited");
+    });
   });
 
   it("renders an image preview (with Download) instead of the text editor", async () => {
