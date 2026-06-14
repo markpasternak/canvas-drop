@@ -373,7 +373,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.use(
     "*",
     onlyCanvas(
-      serveCanvas({ config: deps.config, versions: deps.versions, storage: deps.storage }),
+      serveCanvas({
+        config: deps.config,
+        versions: deps.versions,
+        storage: deps.storage,
+        usage: usageEventsRepository(deps.db),
+      }),
     ),
   );
 

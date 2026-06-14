@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { Canvas, Manifest, ManifestEntry } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { errorResponse } from "../http/error-pages.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
@@ -14,10 +15,15 @@ import { blobKey } from "./storage-keys.js";
 /** Filenames that look content-hashed (e.g. app.a1b2c3d4.js) get immutable caching. */
 const CONTENT_HASH_RE = /\.[0-9a-f]{8,}\.[a-z0-9]+$/i;
 
+/** A "view" is one HTML-document load per viewer per this sliding window (D24).
+ *  A refresh/return inside the window doesn't re-count; idle past it = a new view. */
+const VIEW_SESSION_MS = 30 * 60 * 1000;
+
 export interface ServeDeps {
   config: Config;
   versions: VersionsRepository;
   storage: StorageDriver;
+  usage: UsageEventsRepository;
 }
 
 /**
@@ -43,6 +49,14 @@ export function serveCanvas(deps: ServeDeps) {
 
     const entry = manifest[resolved.path] as ManifestEntry;
     const etag = `"${entry.hash}"`;
+    const { contentType } = mimeFor(resolved.path);
+
+    // Record a view on the initial HTML-document load of a session (D24, §6.9.6).
+    // HTML docs only (sub-assets like js/css/img never count); deduped per viewer
+    // within VIEW_SESSION_MS; fired off the response path so serving never waits on
+    // or fails from metering. Runs before the 304 branch so a returning viewer's
+    // revalidation counts (or doesn't) by the same session rule as a full load.
+    recordView(c, deps, canvas, contentType);
 
     // Conditional GET → 304 (revalidation is cheap; the ETag is the content hash).
     if (c.req.header("if-none-match") === etag) {
@@ -54,13 +68,38 @@ export function serveCanvas(deps: ServeDeps) {
     const bytes = await deps.storage.get(blobKey(canvas.id, entry.hash));
     if (!bytes) return notFound(c, "missing");
 
-    const { contentType } = mimeFor(resolved.path);
     const headers = new Headers(cacheHeaders(resolved.path, etag));
     headers.set("Content-Type", contentType);
     securityHeaders(headers);
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view.
     return new Response(new Uint8Array(bytes), { status: 200, headers });
   });
+}
+
+/**
+ * Fire-and-forget view metering for an HTML-document serve. No-ops for sub-assets
+ * (only `text/html` counts as a page view) and when no viewer is in context. The
+ * repo dedupes per viewer within the session window; we never await it, and any
+ * failure is swallowed so metering can never delay or break serving (mirrors the
+ * audit-log / usage-event best-effort contract).
+ */
+function recordView(
+  c: Context<AppEnv>,
+  deps: ServeDeps,
+  canvas: Canvas,
+  contentType: string,
+): void {
+  if (!contentType.startsWith("text/html")) return;
+  const user = c.get("user");
+  if (!user) return;
+  void deps.usage
+    .recordView({
+      canvasId: canvas.id,
+      userId: user.id,
+      windowMs: VIEW_SESSION_MS,
+      now: Date.now(),
+    })
+    .catch(() => {});
 }
 
 function cacheHeaders(path: string, etag: string): Record<string, string> {

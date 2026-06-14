@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -69,14 +70,16 @@ describe("serveCanvas (integration)", () => {
     await versions.markReady(v.id, { fileCount: 4, totalBytes: 0, manifest });
     await canvases.setCurrentVersion(cv.id, v.id);
     const updated = (await canvases.findById(cv.id)) as Canvas;
+    const usage = usageEventsRepository(client);
 
     const app = new Hono<AppEnv>();
     app.use("*", async (c, next) => {
       c.set("canvas", updated);
+      c.set("user", owner);
       await next();
     });
-    app.all("*", serveCanvas({ config, versions, storage }));
-    return { app, canvas: updated };
+    app.all("*", serveCanvas({ config, versions, storage, usage }));
+    return { app, canvas: updated, owner, usage, versions };
   }
 
   it("serves files with the right MIME and body", async () => {
@@ -188,7 +191,7 @@ describe("serveCanvas (integration)", () => {
       c.set("canvas", updated);
       await next();
     });
-    app.all("*", serveCanvas({ config, versions, storage }));
+    app.all("*", serveCanvas({ config, versions, storage, usage: usageEventsRepository(client) }));
     // The manifest resolves the path, but storage.get returns null → 404 (resilience).
     expect((await app.request("/c/s/index.html")).status).toBe(404);
   });
@@ -204,7 +207,91 @@ describe("serveCanvas (integration)", () => {
       c.set("canvas", cv);
       await next();
     });
-    app.all("*", serveCanvas({ config, versions, storage }));
+    app.all("*", serveCanvas({ config, versions, storage, usage: usageEventsRepository(client) }));
     expect((await app.request("/c/s/index.html")).status).toBe(404);
+  });
+
+  describe("view recording (D24, §6.9.6)", () => {
+    it("records exactly one view for an HTML-document load, attributed to the viewer", async () => {
+      const { app, canvas, usage } = await setup();
+      const res = await app.request("/c/s/index.html");
+      expect(res.status).toBe(200);
+      // Fire-and-forget: let the background record settle before asserting.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(await usage.countByType(canvas.id, null)).toEqual({ view: 1 });
+    });
+
+    it("records a view when serving index.html at the canvas root", async () => {
+      const { app, canvas, usage } = await setup();
+      await app.request("/c/s/");
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view).toBe(1);
+    });
+
+    it("records NO view for sub-asset (js/css/hashed) requests", async () => {
+      const { app, canvas, usage } = await setup();
+      await app.request("/c/s/app.js");
+      await app.request("/c/s/assets/app.abcdef12.js");
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view ?? 0).toBe(0);
+    });
+
+    it("dedupes repeat loads within the session window (one view, not three)", async () => {
+      const { app, canvas, usage } = await setup();
+      await app.request("/c/s/index.html");
+      await new Promise((r) => setTimeout(r, 20));
+      await app.request("/c/s/index.html");
+      await app.request("/c/s/index.html");
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view).toBe(1);
+    });
+
+    it("still records a view on a 304 revalidation that starts a session", async () => {
+      const { app, canvas, usage } = await setup();
+      const first = await app.request("/c/s/index.html");
+      const etag = first.headers.get("ETag") as string;
+      await new Promise((r) => setTimeout(r, 20));
+      // Clear the view so the 304 is the session's first load, then revalidate.
+      await usage.pruneBefore(Date.now() + 1);
+      const second = await app.request("/c/s/index.html", {
+        headers: { "If-None-Match": etag },
+      });
+      expect(second.status).toBe(304);
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view).toBe(1);
+    });
+
+    it("a failing metering write never breaks or delays the serve", async () => {
+      const { canvas, owner, versions } = await setup();
+      // Replace the usage dep with one whose recordView rejects: serve must still 200.
+      const failingUsage: ReturnType<typeof usageEventsRepository> = {
+        ...usageEventsRepository(client),
+        recordView: () => Promise.reject(new Error("boom")),
+      };
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("canvas", canvas);
+        c.set("user", owner);
+        await next();
+      });
+      app.all("*", serveCanvas({ config, versions, storage, usage: failingUsage }));
+      const res = await app.request("/c/s/index.html");
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("home");
+    });
+
+    it("records no view when there is no viewer in context", async () => {
+      const { canvas, usage, versions } = await setup();
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("canvas", canvas);
+        // no c.set("user", ...) — anonymous serve path
+        await next();
+      });
+      app.all("*", serveCanvas({ config, versions, storage, usage }));
+      await app.request("/c/s/index.html");
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await usage.countByType(canvas.id, null)).view ?? 0).toBe(0);
+    });
   });
 });

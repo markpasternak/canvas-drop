@@ -55,6 +55,108 @@ export function usageEventsRepository(client: DbClient) {
       return out;
     },
 
+    /**
+     * Record a "view" for (canvas, viewer) unless one already exists within the
+     * session window. D24 defines a view as "the initial load during a session",
+     * not every request: a refresh or return inside `windowMs` does not re-count,
+     * and `windowMs` of inactivity starts a new view (30-min sliding window). The
+     * caller serves the HTML document first and fires this off the response path,
+     * so a rare concurrent double-load may over-count by one — acceptable on the
+     * trusted-org, best-effort metering model. Returns true when a row was inserted.
+     */
+    async recordView(input: {
+      canvasId: string;
+      userId: string;
+      windowMs: number;
+      now: number;
+    }): Promise<boolean> {
+      const since = input.now - input.windowMs;
+      const existing = (await db
+        .select({ id: t.id })
+        .from(t)
+        .where(
+          and(
+            eq(t.canvasId, input.canvasId),
+            eq(t.userId, input.userId),
+            eq(t.type, "view"),
+            gte(t.createdAt, since),
+          ),
+        )
+        .limit(1)) as Array<{ id: string }>;
+      if (existing.length > 0) return false;
+      await db.insert(t).values({
+        id: uuidv7(),
+        canvasId: input.canvasId,
+        userId: input.userId,
+        type: "view",
+        meta: null,
+        createdAt: input.now,
+      });
+      return true;
+    },
+
+    /**
+     * Owner view summary (D24): total views, unique viewers, last-viewed.
+     * `count(*)`, `count(distinct …)`, and `max(…)` are all dialect-safe; counts
+     * are coerced through `Number()` (pg returns them as strings) and `lastViewedAt`
+     * is null when the canvas has no views.
+     */
+    async viewStats(
+      canvasId: string,
+    ): Promise<{ totalViews: number; uniqueViewers: number; lastViewedAt: number | null }> {
+      const rows = (await db
+        .select({
+          totalViews: sql<number>`count(*)`,
+          uniqueViewers: sql<number>`count(distinct ${t.userId})`,
+          lastViewedAt: sql<number | null>`max(${t.createdAt})`,
+        })
+        .from(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.type, "view")))) as Array<{
+        totalViews: number;
+        uniqueViewers: number;
+        lastViewedAt: number | null;
+      }>;
+      const r = rows[0];
+      const last = r?.lastViewedAt;
+      return {
+        totalViews: Number(r?.totalViews ?? 0),
+        uniqueViewers: Number(r?.uniqueViewers ?? 0),
+        lastViewedAt: last === null || last === undefined ? null : Number(last),
+      };
+    },
+
+    /**
+     * Dense per-UTC-day `view` counts over the window `[sinceMs, now]` for the
+     * 30-day sparkline (D24). Bucketing is done in JS — not dialect-specific date
+     * SQL — so the query stays dialect-neutral (the seam doc flags `date()` /
+     * `date_trunc()` divergence). Returns one entry per day incl. zero-view days,
+     * oldest first, so the sparkline x-axis is uniform.
+     */
+    async viewsByDay(
+      canvasId: string,
+      sinceMs: number,
+      now: number,
+    ): Promise<Array<{ dayMs: number; count: number }>> {
+      const rows = (await db
+        .select({ createdAt: t.createdAt })
+        .from(t)
+        .where(
+          and(eq(t.canvasId, canvasId), eq(t.type, "view"), gte(t.createdAt, sinceMs)),
+        )) as Array<{ createdAt: number }>;
+
+      const DAY = 24 * 60 * 60 * 1000;
+      // Build the dense series of UTC day-start buckets from `sinceMs`'s day to `now`'s.
+      const startDay = Math.floor(sinceMs / DAY) * DAY;
+      const endDay = Math.floor(now / DAY) * DAY;
+      const counts = new Map<number, number>();
+      for (let d = startDay; d <= endDay; d += DAY) counts.set(d, 0);
+      for (const row of rows) {
+        const day = Math.floor(Number(row.createdAt) / DAY) * DAY;
+        if (counts.has(day)) counts.set(day, (counts.get(day) ?? 0) + 1);
+      }
+      return [...counts.entries()].map(([dayMs, count]) => ({ dayMs, count }));
+    },
+
     /** Retention prune (KTD-7): delete rows older than the cutoff. Returns rows removed. */
     async pruneBefore(cutoffMs: number): Promise<number> {
       const rows = (await db

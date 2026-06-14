@@ -80,4 +80,102 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
       repo.record({ canvasId: "nope", userId: "nope", type: "kv_op" }),
     ).rejects.toBeDefined();
   });
+
+  it("recordView dedupes within the session window and re-records after it", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const repo = usageEventsRepository(client);
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    // First load → inserts.
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 })).toBe(true);
+    // Refresh inside the window → no new row.
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 30_000 })).toBe(
+      false,
+    );
+    // Return after the window → a new view.
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 90_000 })).toBe(
+      true,
+    );
+    expect((await repo.countByType(canvasId, null)).view).toBe(2);
+  });
+
+  it("viewStats returns total, unique viewers, and last-viewed; excludes non-view types", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const viewerB = await usersRepository(client).upsert({
+      providerSub: "b",
+      email: "b@example.com",
+      name: "B",
+      isAdmin: false,
+    });
+    const repo = usageEventsRepository(client);
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    // A views twice across two sessions, B views once → 3 views / 2 unique.
+    await repo.recordView({ canvasId, userId, windowMs: win, now: t0 });
+    await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 2 * win });
+    await repo.recordView({ canvasId, userId: viewerB.id, windowMs: win, now: t0 + win });
+    // Noise that must not count as a view.
+    await repo.record({ canvasId, userId, type: "kv_op" });
+
+    const stats = await repo.viewStats(canvasId);
+    expect(stats.totalViews).toBe(3);
+    expect(stats.uniqueViewers).toBe(2);
+    expect(stats.lastViewedAt).toBe(t0 + 2 * win);
+  });
+
+  it("viewStats reports zeros and null last-viewed for a canvas with no views", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId } = await seed(client);
+    const stats = await usageEventsRepository(client).viewStats(canvasId);
+    expect(stats).toEqual({ totalViews: 0, uniqueViewers: 0, lastViewedAt: null });
+  });
+
+  it("viewsByDay returns a dense UTC-day series with correct per-day counts", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const viewerB = await usersRepository(client).upsert({
+      providerSub: "b",
+      email: "b@example.com",
+      name: "B",
+      isAdmin: false,
+    });
+    const repo = usageEventsRepository(client);
+    const DAY = 24 * 60 * 60 * 1000;
+    const day0 = 1_700_000_000_000 - (1_700_000_000_000 % DAY); // a UTC midnight
+    const win = 60_000;
+    // day0: two viewers; day2: one viewer; day1: none.
+    await repo.recordView({ canvasId, userId, windowMs: win, now: day0 + 1_000 });
+    await repo.recordView({ canvasId, userId: viewerB.id, windowMs: win, now: day0 + 2_000 });
+    await repo.recordView({ canvasId, userId, windowMs: win, now: day0 + 2 * DAY + 1_000 });
+
+    const series = await repo.viewsByDay(canvasId, day0, day0 + 2 * DAY + 5_000);
+    expect(series).toEqual([
+      { dayMs: day0, count: 2 },
+      { dayMs: day0 + DAY, count: 0 },
+      { dayMs: day0 + 2 * DAY, count: 1 },
+    ]);
+  });
+
+  it("viewsByDay places events on either side of a UTC midnight in different buckets", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const viewerB = await usersRepository(client).upsert({
+      providerSub: "b",
+      email: "b@example.com",
+      name: "B",
+      isAdmin: false,
+    });
+    const repo = usageEventsRepository(client);
+    const DAY = 24 * 60 * 60 * 1000;
+    const midnight = 1_700_000_000_000 - (1_700_000_000_000 % DAY) + DAY;
+    await repo.recordView({ canvasId, userId, windowMs: 60_000, now: midnight - 1 });
+    await repo.recordView({ canvasId, userId: viewerB.id, windowMs: 60_000, now: midnight + 1 });
+    const series = await repo.viewsByDay(canvasId, midnight - DAY, midnight + 1);
+    expect(series).toEqual([
+      { dayMs: midnight - DAY, count: 1 },
+      { dayMs: midnight, count: 1 },
+    ]);
+  });
 });
