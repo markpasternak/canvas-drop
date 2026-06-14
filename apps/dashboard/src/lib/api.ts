@@ -58,8 +58,12 @@ export interface Canvas {
   hasPassword: boolean;
   spaFallback: boolean;
   galleryListed: boolean;
+  /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
+  galleryTemplatable: boolean;
   gallerySummary: string | null;
   galleryTags: string[] | null;
+  /** Lineage: the canvas this one was cloned from, or null (plan 002). */
+  clonedFromCanvasId: string | null;
   /** Backend-group master switch (plan 006). */
   backendEnabled: boolean;
   /** Raw stored feature flags (what the toggles control). */
@@ -154,6 +158,7 @@ export interface CanvasSettings {
   password?: string | null;
   spaFallback?: boolean;
   galleryListed?: boolean;
+  galleryTemplatable?: boolean;
   gallerySummary?: string | null;
   galleryTags?: string[];
 }
@@ -166,7 +171,8 @@ export interface GalleryItem {
   title: string;
   summary: string | null;
   tags: string[];
-  hasPassword: boolean;
+  /** Whether a non-owner may clone this canvas as a template (plan 002). */
+  templatable: boolean;
   publishedAt: number | null;
   owner: { name: string; avatarUrl: string | null };
 }
@@ -440,6 +446,11 @@ export const api = {
 
   createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
+
+  /** Clone a canvas into a new one owned by the caller (plan 002). Returns the new
+   *  canvas + its one-time API key, like create. */
+  cloneCanvas: (id: string) =>
+    request<Canvas & { apiKey: string }>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
   pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(

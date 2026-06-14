@@ -1,8 +1,9 @@
-import { LockSimple, MagnifyingGlass, X } from "@phosphor-icons/react";
+import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -13,6 +14,7 @@ import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
+  const [cloneOpen, setCloneOpen] = useState(false);
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)]">
       <div className="flex items-start justify-between gap-2">
@@ -26,18 +28,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
         >
           {item.title || "Untitled canvas"}
         </a>
-        {item.hasPassword && (
-          <Badge tone="neutral">
-            <LockSimple size={12} weight="bold" aria-hidden />
-            <span
-              role="img"
-              aria-label="Password required to open"
-              title="Password required to open"
-            >
-              Protected
-            </span>
-          </Badge>
-        )}
+        {item.templatable && <Badge tone="accent">Template</Badge>}
       </div>
 
       {item.summary && <p className="line-clamp-3 text-sm text-muted">{item.summary}</p>}
@@ -76,8 +67,23 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           )}
           <span className="truncate text-xs text-subtle">{item.owner.name}</span>
         </div>
-        <CopyButton value={item.url} label="Copy link" toastMessage="Link copied" />
+        <div className="flex shrink-0 items-center gap-1">
+          {item.templatable && (
+            <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
+              Make a copy
+            </Button>
+          )}
+          <CopyButton value={item.url} label="Copy link" toastMessage="Link copied" />
+        </div>
       </div>
+      {item.templatable && (
+        <CloneDialog
+          open={cloneOpen}
+          onClose={() => setCloneOpen(false)}
+          sourceId={item.id}
+          sourceTitle={item.title}
+        />
+      )}
     </li>
   );
 }

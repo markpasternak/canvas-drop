@@ -19,8 +19,10 @@ const CANVAS = {
   hasPassword: false,
   spaFallback: false,
   galleryListed: false,
+  galleryTemplatable: false,
   gallerySummary: null,
   galleryTags: null,
+  clonedFromCanvasId: null,
   status: "active",
   disabledReason: null,
   currentVersionId: null,
@@ -208,10 +210,49 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/to list this canvas in the gallery/i)).toBeInTheDocument();
   });
 
-  it("gallery-listing control is enabled once the canvas is shared", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true }) });
+  it("gallery-listing control is enabled once the canvas is shared AND published", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: "v1" }),
+    });
     renderSettings();
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
     expect(toggle).toBeEnabled();
+  });
+
+  it("gallery-listing is blocked (disabled) for a shared-but-unpublished canvas", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: null }),
+    });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/publish this canvas before listing/i)).toBeInTheDocument();
+  });
+
+  it("gallery-listing is blocked (disabled) for a password-protected canvas", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", hasPassword: true }),
+    });
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/remove the password before listing/i)).toBeInTheDocument();
+  });
+
+  it("shows the template toggle once listed, and warns before a password unlists", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+    });
+    renderSettings();
+    // Template toggle is offered for a listed canvas.
+    expect(
+      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
+    ).toBeInTheDocument();
+    // Setting a password on a listed canvas warns first (doesn't fire immediately).
+    await userEvent.type(screen.getByLabelText("Password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: /set password/i }));
+    expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();
   });
 });

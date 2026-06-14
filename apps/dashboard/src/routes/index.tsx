@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
+import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
@@ -14,12 +16,16 @@ import Onboarding from "./onboarding.js";
 function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
   const toast = useToast();
   const archive = useArchiveCanvas(canvas.id);
+  const [cloneOpen, setCloneOpen] = useState(false);
   return (
     <CanvasRow
       canvas={canvas}
       actions={
         <>
           <DefaultRowActions canvas={canvas} />
+          <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
+            Duplicate
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -35,6 +41,13 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
           >
             Archive
           </Button>
+          <CloneDialog
+            open={cloneOpen}
+            onClose={() => setCloneOpen(false)}
+            sourceId={canvas.id}
+            sourceTitle={canvas.title}
+            keepsPassword={canvas.hasPassword}
+          />
         </>
       }
     />

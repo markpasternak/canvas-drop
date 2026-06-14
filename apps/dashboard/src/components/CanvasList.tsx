@@ -21,6 +21,13 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
           Protected
         </Badge>
       )}
+      {/* Gallery state (plan 002). Template implies listed, so show the stronger
+          one. Blockers/reasons live on the canvas Overview + Settings, not here. */}
+      {canvas.galleryTemplatable ? (
+        <Badge tone="accent">Template</Badge>
+      ) : canvas.galleryListed ? (
+        <Badge tone="neutral">Listed</Badge>
+      ) : null}
     </>
   );
 }

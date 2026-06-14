@@ -47,12 +47,15 @@ export function CanvasDetailChrome({
   url,
   isLoading,
   actions,
+  badge,
 }: {
   id: string;
   title?: ReactNode;
   url?: string;
   isLoading?: boolean;
   actions?: ReactNode;
+  /** Optional status pill rendered next to the title (e.g. gallery/template state). */
+  badge?: ReactNode;
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
@@ -63,7 +66,10 @@ export function CanvasDetailChrome({
           {isLoading ? (
             <Skeleton className="h-6 w-48" />
           ) : (
-            <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+              {badge && <span className="shrink-0">{badge}</span>}
+            </div>
           )}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
