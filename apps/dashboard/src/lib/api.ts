@@ -8,12 +8,18 @@
  *   2. Stable error codes → a typed ApiError carrying a human/agent `hint`.
  */
 
+/** Auth mode the instance runs in. `oidc`/`dev` own a revocable session, so the
+ * shell offers in-app sign-out; `proxy` mode has the trusted proxy own identity
+ * and no app session to revoke (UX only — never an authz signal). */
+export type AuthMode = "proxy" | "oidc" | "dev";
+
 export interface Me {
   id: string;
   email: string;
   name: string;
   avatarUrl: string | null;
   isAdmin: boolean;
+  authMode: AuthMode;
 }
 
 /** The four toggleable backend features (plan 006). Identity is implicit (no flag). */
