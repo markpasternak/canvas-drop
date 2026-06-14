@@ -1,4 +1,4 @@
-import { Code, FileHtml, FolderOpen } from "@phosphor-icons/react";
+import { ArrowRight, ArrowSquareOut, Code, FileHtml, FolderOpen } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CopyButton } from "../components/CopyButton.js";
@@ -35,7 +35,7 @@ function PathCard({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-40 flex-col items-start gap-3 rounded-xl border border-border bg-surface p-5 text-left shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-accent hover:bg-surface-raised"
+      className="group flex min-h-32 flex-col items-start gap-2.5 rounded-lg border border-transparent p-4 text-left transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:border-border hover:bg-surface-hover active:translate-y-px"
     >
       <span className="grid size-9 place-items-center rounded-lg border border-border bg-surface-sunken text-subtle group-hover:text-accent">
         {icon}
@@ -43,7 +43,15 @@ function PathCard({
       <span className="text-xs font-medium text-subtle">{label}</span>
       <span className="text-sm font-semibold text-fg">{title}</span>
       <span className="text-sm text-muted">{body}</span>
-      <span className="mt-auto text-[0.8125rem] font-medium text-accent">{cta}</span>
+      <span className="mt-auto inline-flex items-center gap-1.5 text-[0.8125rem] font-medium text-accent">
+        {cta}
+        <ArrowRight
+          size={14}
+          weight="bold"
+          aria-hidden
+          className="transition-transform duration-100 [transition-timing-function:var(--ease-out)] group-hover:translate-x-0.5"
+        />
+      </span>
     </button>
   );
 }
@@ -56,57 +64,66 @@ export default function Onboarding() {
   const go = (method: string) => navigate({ to: "/new", search: { method } });
 
   return (
-    <div className="max-w-5xl space-y-8">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Ship your first canvas"
         description={
           <>
             A canvas is a small web artifact on its own URL. Start from a snippet, local files, or
             an API deploy &mdash; or read the{" "}
-            <a href="/docs/quickstart" className="font-medium text-accent hover:underline">
-              Quickstart guide ↗
+            <a
+              href="/docs/quickstart"
+              className="inline-flex items-center gap-1 font-medium text-accent hover:underline"
+            >
+              Quickstart guide
+              <ArrowSquareOut size={13} weight="bold" aria-hidden />
             </a>
             .
           </>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <PathCard
-          icon={<FileHtml size={18} weight="duotone" aria-hidden />}
-          label="Fastest path"
-          title="Paste HTML"
-          body="Paste a snippet and get a live URL in seconds."
-          cta="Paste"
-          onClick={() => go("paste")}
-        />
-        <PathCard
-          icon={<FolderOpen size={18} weight="duotone" aria-hidden />}
-          label="Static files"
-          title="Files, folder, or ZIP"
-          body="Drag in files or a whole folder, exactly as they are."
-          cta="Upload"
-          onClick={() => go("folder")}
-        />
-        <PathCard
-          icon={<Code size={18} weight="duotone" aria-hidden />}
-          label="Programmatic"
-          title="Use the API"
-          body="Get a key and deploy programmatically or with an AI agent."
-          cta="Get a key"
-          onClick={() => go("api")}
-        />
-      </div>
+      <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <section
+          className="grid gap-1.5 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-panel)] sm:grid-cols-3 lg:grid-cols-1"
+          aria-label="Creation paths"
+        >
+          <PathCard
+            icon={<FileHtml size={18} weight="duotone" aria-hidden />}
+            label="Fastest path"
+            title="Paste HTML"
+            body="Paste a snippet and get a live URL in seconds."
+            cta="Paste"
+            onClick={() => go("paste")}
+          />
+          <PathCard
+            icon={<FolderOpen size={18} weight="duotone" aria-hidden />}
+            label="Static files"
+            title="Files, folder, or ZIP"
+            body="Drag in files or a whole folder, exactly as they are."
+            cta="Upload"
+            onClick={() => go("folder")}
+          />
+          <PathCard
+            icon={<Code size={18} weight="duotone" aria-hidden />}
+            label="Programmatic"
+            title="Use the API"
+            body="Get a key and deploy programmatically or with an AI agent."
+            cta="Get a key"
+            onClick={() => go("api")}
+          />
+        </section>
 
-      <Panel className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Build with an AI agent</h2>
-          <CopyButton value={AGENT_SNIPPET} label="Copy snippet" toastMessage="Snippet copied" />
-        </div>
-        <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-muted">
-          {AGENT_SNIPPET}
-        </pre>
-      </Panel>
+        <Panel className="min-w-0 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">Build with an AI agent</h2>
+            <CopyButton value={AGENT_SNIPPET} label="Copy snippet" toastMessage="Snippet copied" />
+          </div>
+          <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-muted">
+            {AGENT_SNIPPET}
+          </pre>
+        </Panel>
+      </div>
     </div>
   );
 }
