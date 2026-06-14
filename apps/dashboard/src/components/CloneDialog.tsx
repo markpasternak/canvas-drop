@@ -20,12 +20,16 @@ export function CloneDialog({
   sourceId,
   sourceTitle,
   keepsPassword = false,
+  title = "Make a copy",
+  actionLabel = "Make a copy",
 }: {
   open: boolean;
   onClose: () => void;
   sourceId: string;
   sourceTitle: string;
   keepsPassword?: boolean;
+  title?: string;
+  actionLabel?: string;
 }) {
   const clone = useCloneCanvas();
   const navigate = useNavigate();
@@ -47,8 +51,8 @@ export function CloneDialog({
       open={open}
       onClose={onClose}
       onConfirm={confirm}
-      title="Make a copy"
-      actionLabel="Make a copy"
+      title={title}
+      actionLabel={actionLabel}
       loading={clone.isPending}
     >
       This creates a <strong>new canvas you own</strong>, named “Copy of{" "}

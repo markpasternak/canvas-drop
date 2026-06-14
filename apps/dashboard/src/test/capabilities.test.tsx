@@ -92,6 +92,7 @@ describe("capabilities tab", () => {
       "aria-checked",
       "false",
     );
+    expect(screen.getByRole("link", { name: "SDK docs" })).toHaveAttribute("href", "/docs");
     expect(screen.getByRole("switch", { name: /value storage/i })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "AI" })).toBeDisabled();
     expect(screen.getByText("Off")).toBeInTheDocument();

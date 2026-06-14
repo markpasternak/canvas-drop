@@ -150,6 +150,29 @@ describe("settings route — confirm-and-await flows", () => {
     expect(screen.getByText(/save your canvas key/i)).toBeInTheDocument();
   });
 
+  it("duplicates the canvas from Settings", async () => {
+    const clone = { ...CANVAS, id: "c2", slug: "copy-quiet-otter", title: "Copy of My Canvas" };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "POST /api/canvases/c1/clone": () => json(clone, 201),
+      "GET /api/canvases/c2": () => json(clone),
+      "GET /api/canvases/c2/draft": () =>
+        json({ files: [], stale: false, baseVersionId: null, updatedAt: 0, dirty: false }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: "Duplicate canvas" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Duplicate canvas" }));
+
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/clone")).toBe(
+        true,
+      ),
+    );
+  });
+
   it("delete confirms with a press-and-hold, then DELETEs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

@@ -69,13 +69,13 @@ export default function Usage() {
             <MetaItem label="File storage">
               <Metric
                 value={formatBytes(usage.fileBytes)}
-                sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"} · ${usage.fileOps.toLocaleString()} ops`}
+                sub={`${usage.fileCount} file${usage.fileCount === 1 ? "" : "s"}, ${usage.fileOps.toLocaleString()} ops`}
               />
             </MetaItem>
             <MetaItem label="AI usage">
               <Metric
                 value={formatUsd(usage.aiCostUsd)}
-                sub={`${usage.aiTokens.toLocaleString()} tokens · ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
+                sub={`${usage.aiTokens.toLocaleString()} tokens, ${usage.aiCalls.toLocaleString()} call${usage.aiCalls === 1 ? "" : "s"}`}
               />
             </MetaItem>
             <MetaItem label="Realtime connections">
@@ -85,8 +85,8 @@ export default function Usage() {
         </Panel>
       ) : (
         <p className="text-sm text-muted">
-          Turn on <strong className="font-medium text-fg">Backend</strong> in the Capabilities tab
-          to use KV, files, AI, and realtime — those usage figures will appear here once it does.
+          Turn on <strong className="font-medium text-fg">Backend</strong> to use KV, files, AI, and
+          realtime. Those usage figures will appear here once it does.
         </p>
       )}
     </TabContentFrame>

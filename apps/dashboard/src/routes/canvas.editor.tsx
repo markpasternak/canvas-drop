@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "../components/Button.js";
@@ -48,10 +49,33 @@ import {
 import { keys, useCanvas, useDraft } from "../lib/queries.js";
 
 const AUTOSAVE_MS = 700;
+const ROOT_HTML = "index.html";
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const rawUrl = (id: string, path: string) =>
   `/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`;
+
+function DraftRepairNotice({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-warning/30 bg-warning-subtle/40 px-4 py-3 text-warning shadow-[var(--shadow-panel)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-0.5">
+          <h2 className="text-sm font-semibold text-fg">{title}</h2>
+          <p className="max-w-3xl text-xs leading-relaxed text-muted">{description}</p>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+    </section>
+  );
+}
 
 /**
  * In-browser editor (M5): file tree + CodeMirror over the draft, autosave, the
@@ -101,8 +125,10 @@ export default function Editor() {
   const editable = selectedFile ? isEditableFile(selectedFile) : false;
 
   // On-page editing is only offered for a single static HTML page (see singleHtmlFile).
+  const htmlFiles = draft ? draft.files.filter(isHtmlFile) : [];
   const htmlFile = draft ? singleHtmlFile(draft.files) : null;
-  const htmlCount = draft ? draft.files.filter(isHtmlFile).length : 0;
+  const htmlCount = htmlFiles.length;
+  const rootHtmlFile = htmlFiles.find((f) => f.path.toLowerCase() === ROOT_HTML) ?? null;
   const onPageHint =
     htmlCount === 0
       ? "On-page editing needs an HTML page in the draft."
@@ -112,6 +138,7 @@ export default function Editor() {
   // rename onto an existing path would silently destroy that file server-side, so we
   // flag it and disable the action; the server is still authoritative (PATH_EXISTS).
   const existingPaths = new Set(draft?.files.map((f) => f.path) ?? []);
+  const indexPathAvailable = !existingPaths.has(ROOT_HTML);
   const addCandidate = normalizeDraftPath(newPath);
   const addDuplicate = addCandidate !== null && existingPaths.has(addCandidate);
   const renameCandidate = normalizeDraftPath(renameTo);
@@ -264,6 +291,32 @@ export default function Editor() {
     }
   }
 
+  async function addIndexFile() {
+    if (!indexPathAvailable) {
+      setAddOpen(true);
+      setNewPath(ROOT_HTML);
+      return;
+    }
+    try {
+      await create.mutateAsync(ROOT_HTML);
+      setSelected(ROOT_HTML);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't add index.html", "error");
+    }
+  }
+
+  async function renameFileToIndex(path: string) {
+    if (!indexPathAvailable || path === ROOT_HTML) return;
+    try {
+      await rename.mutateAsync({ from: path, to: ROOT_HTML });
+      if (selected === path) setSelected(ROOT_HTML);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't rename to index.html", "error");
+    }
+  }
+
   async function confirmRename() {
     if (!renaming) return;
     const to = renameTo.trim();
@@ -388,6 +441,62 @@ export default function Editor() {
   const canPublish = draft.files.length > 0 && (draft.dirty || draft.stale);
   const workspaceHeight = "h-[calc(100dvh-18.5rem)] min-h-[34rem]";
   const paneVisible = (target: EditorPane) => pane === target;
+  const selectedIsHtml = selectedFile ? isHtmlFile(selectedFile) : false;
+  const draftRepairNotice =
+    htmlCount === 0 ? (
+      <DraftRepairNotice
+        title="No HTML page in this draft"
+        description="Add an index.html file so the canvas has a root page to publish."
+        action={
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={create.isPending}
+            onClick={() => void addIndexFile()}
+          >
+            Add index.html
+          </Button>
+        }
+      />
+    ) : rootHtmlFile === null && htmlCount === 1 && htmlFile ? (
+      <DraftRepairNotice
+        title="Home page is inferred"
+        description={`${htmlFile.path} can publish as the only HTML page, but renaming it to index.html makes the canvas root explicit.`}
+        action={
+          indexPathAvailable ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={rename.isPending}
+              onClick={() => void renameFileToIndex(htmlFile.path)}
+            >
+              Rename to index.html
+            </Button>
+          ) : undefined
+        }
+      />
+    ) : rootHtmlFile === null && htmlCount > 1 ? (
+      <DraftRepairNotice
+        title="Choose the root page"
+        description={
+          selectedIsHtml
+            ? "Multiple HTML files need an index.html. Rename the selected page if it should load at the canvas root."
+            : "Multiple HTML files need an index.html. Select the intended home page, then rename it."
+        }
+        action={
+          selected && selectedIsHtml && indexPathAvailable ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={rename.isPending}
+              onClick={() => void renameFileToIndex(selected)}
+            >
+              Rename selected
+            </Button>
+          ) : undefined
+        }
+      />
+    ) : null;
 
   const changePane = (next: EditorPane) => {
     if (next === "preview") setPreviewVisible(true);
@@ -555,6 +664,7 @@ export default function Editor() {
 
   return (
     <TabContentFrame className="space-y-3">
+      {draftRepairNotice}
       <PublishBar
         dirty={draft.dirty}
         stale={draft.stale}

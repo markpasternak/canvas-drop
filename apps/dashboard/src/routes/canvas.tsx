@@ -34,7 +34,7 @@ export default function CanvasLayout() {
   const title = canvas?.title?.trim() || canvas?.slug;
   const actions =
     canvas?.status === "active" ? (
-      <DeployButton canvasId={id} size="sm" label="Deploy new version" />
+      <DeployButton canvasId={id} size="sm" label="Deploy files" />
     ) : canvas?.status === "archived" ? (
       <Button
         size="sm"

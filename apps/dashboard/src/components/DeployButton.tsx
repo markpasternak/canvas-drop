@@ -17,7 +17,7 @@ const METHODS: { id: Method; label: string }[] = [
 ];
 
 /**
- * "Deploy new version" opens a dialog that pushes a new version to an EXISTING
+ * "Deploy files" opens a dialog that pushes a new deploy to an EXISTING
  * canvas (paste / folder / ZIP), the forward counterpart to the Versions tab's
  * "Make live". Self-contained: bundles the trigger, dialog, uploader, and the
  * deploy mutation (which invalidates the canvas + version queries on success).
@@ -26,7 +26,7 @@ export function DeployButton({
   canvasId,
   variant = "primary",
   size = "sm",
-  label = "Deploy new version",
+  label = "Deploy files",
 }: {
   canvasId: string;
   variant?: "primary" | "secondary";
