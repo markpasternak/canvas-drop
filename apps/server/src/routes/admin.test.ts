@@ -80,6 +80,7 @@ describe("admin routes", () => {
     const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
     for (const [method, path] of [
       ["GET", "/api/admin/canvases"],
+      ["GET", "/api/admin/users"],
       ["GET", "/api/admin/overview"],
       ["GET", "/api/admin/ai-usage"],
       ["GET", "/api/admin/settings/models"],
@@ -90,6 +91,8 @@ describe("admin routes", () => {
     }
     const dis = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
     expect(dis.status).toBe(404);
+    const blk = await app.request(`/api/admin/users/${owner.id}/block`, post());
+    expect(blk.status).toBe(404);
   });
 
   it("admin disables a canvas with a reason (audited); enable clears it", async () => {
@@ -199,12 +202,15 @@ describe("admin routes", () => {
       windowMs: 60_000,
       now: Date.now(),
     });
-    await versionsRepository(client).createPending({
+    // A real deploy is a *ready* version (a pending build that never went live is
+    // not a deploy and must not count toward totalDeploys).
+    const v = await versionsRepository(client).createPending({
       canvasId: cv.id,
       number: 1,
       createdBy: a.id,
       source: "folder",
     });
+    await versionsRepository(client).markReady(v.id, { fileCount: 1, totalBytes: 1, manifest: {} });
     const res = await app.request("/api/admin/overview");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -251,7 +257,7 @@ describe("admin routes", () => {
     expect(body).toMatchObject({ aiCostUsd: 0, aiTokens: 0, aiCalls: 0 });
   });
 
-  it("ai-usage returns by-user (email) and by-canvas (slug/title) spend, ordered desc", async () => {
+  it("ai-usage returns by-canvas spend with owner email — never per-user (plan 006)", async () => {
     client = await makeTestDb("sqlite");
     const alice = await seedUser(client, "alice");
     const bob = await seedUser(client, "bob");
@@ -269,35 +275,146 @@ describe("admin routes", () => {
         outputTokens: 5,
         costUsd,
       });
-    // bob outspends alice; canvas cb outspends ca.
+    // canvas cb outspends ca. Note the alice-owned canvas ca is partly spent by bob
+    // (a viewer) — but spend is attributed to the CANVAS/OWNER, never the caller.
     await rec(ca.id, alice.id, 1.0);
+    await rec(ca.id, bob.id, 0.5);
     await rec(cb.id, bob.id, 4.0);
 
     const res = await app.request("/api/admin/ai-usage");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      byUser: Array<{ userId: string; email: string | null; costUsd: number; calls: number }>;
       byCanvas: Array<{
         canvasId: string;
         slug: string | null;
-        title: string | null;
+        ownerEmail: string | null;
         costUsd: number;
       }>;
     };
-    expect(body.byUser.map((u) => u.email)).toEqual(["bob@example.com", "alice@example.com"]);
-    expect(body.byUser[0]?.costUsd).toBeCloseTo(4.0, 10);
+    // No per-user breakdown is exposed at all.
+    expect(body).not.toHaveProperty("byUser");
     expect(body.byCanvas.map((c2) => c2.slug)).toEqual(["cb-1111-2222", "ca-1111-2222"]);
     expect(body.byCanvas[0]?.costUsd).toBeCloseTo(4.0, 10);
+    // Owner email is the canvas's owner (object fact), not the spender.
+    expect(body.byCanvas.find((c2) => c2.slug === "ca-1111-2222")?.ownerEmail).toBe(
+      "alice@example.com",
+    );
+    expect(body.byCanvas.find((c2) => c2.slug === "cb-1111-2222")?.ownerEmail).toBe(
+      "bob@example.com",
+    );
   });
 
-  it("ai-usage returns empty breakdowns (not null) when there is no AI usage", async () => {
+  it("ai-usage returns an empty by-canvas list (not null) when there is no AI usage", async () => {
     client = await makeTestDb("sqlite");
     const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
     const body = (await (await app.request("/api/admin/ai-usage")).json()) as {
-      byUser: unknown[];
       byCanvas: unknown[];
     };
-    expect(body).toEqual({ byUser: [], byCanvas: [] });
+    expect(body).toEqual({ byCanvas: [] });
+  });
+
+  it("lists users with their owned-canvas counts", async () => {
+    client = await makeTestDb("sqlite");
+    const alice = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    await canvases.create({ ownerId: alice.id, slug: "a1-1111-2222", apiKeyHash: "h1" });
+    const res = await app.request("/api/admin/users");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      users: Array<{ id: string; email: string; canvasCount: number; isBlocked: boolean }>;
+      total: number;
+    };
+    const row = body.users.find((u) => u.id === alice.id);
+    expect(row?.canvasCount).toBe(1);
+    expect(row?.isBlocked).toBe(false);
+    expect(body.total).toBeGreaterThanOrEqual(1);
+  });
+
+  it("blocks then unblocks a user (audited); the stored bit flips", async () => {
+    client = await makeTestDb("sqlite");
+    const bob = await seedUser(client, "bob");
+    const users = usersRepository(client);
+    const { app, audit } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    expect((await app.request(`/api/admin/users/${bob.id}/block`, post())).status).toBe(200);
+    expect((await users.findById(bob.id))?.isBlocked).toBe(true);
+    await audit.flush();
+    const rows = (await auditRepository(client).recent(50)) as Array<{
+      action: string;
+      targetId: string | null;
+    }>;
+    expect(rows.some((r) => r.action === "user_block" && r.targetId === bob.id)).toBe(true);
+    expect((await app.request(`/api/admin/users/${bob.id}/unblock`, post())).status).toBe(200);
+    expect((await users.findById(bob.id))?.isBlocked).toBe(false);
+  });
+
+  it("cannot block yourself (400 cannot_block_self)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "admin",
+      isAdmin: true,
+    });
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const res = await app.request(`/api/admin/users/${admin.id}/block`, post());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("cannot_block_self");
+  });
+
+  it("promotes then demotes a user (audited); the grant persists", async () => {
+    client = await makeTestDb("sqlite");
+    const bob = await seedUser(client, "bob");
+    const users = usersRepository(client);
+    // A second DB admin so demoting bob never trips the last-admin guard.
+    await users.upsert({
+      providerSub: "root",
+      email: "root@example.com",
+      name: "root",
+      isAdmin: true,
+    });
+    const { app } = buildAdminApp(client, { id: "ghost-admin", isAdmin: true });
+    expect((await app.request(`/api/admin/users/${bob.id}/promote`, post())).status).toBe(200);
+    expect((await users.findById(bob.id))?.isAdmin).toBe(true);
+    expect((await app.request(`/api/admin/users/${bob.id}/demote`, post())).status).toBe(200);
+    expect((await users.findById(bob.id))?.isAdmin).toBe(false);
+  });
+
+  it("cannot demote yourself (400 cannot_demote_self)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "admin",
+      isAdmin: true,
+    });
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const res = await app.request(`/api/admin/users/${admin.id}/demote`, post());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("cannot_demote_self");
+  });
+
+  it("cannot demote the last admin (409 last_admin)", async () => {
+    client = await makeTestDb("sqlite");
+    // Exactly one DB admin (bob). The actor is admin-by-context (passes the gate) but
+    // isn't a counted DB admin, so demoting bob would zero out platform admins → 409.
+    const bob = await usersRepository(client).upsert({
+      providerSub: "bob",
+      email: "bob@example.com",
+      name: "bob",
+      isAdmin: true,
+    });
+    const { app } = buildAdminApp(client, { id: "ghost-admin", isAdmin: true });
+    const res = await app.request(`/api/admin/users/${bob.id}/demote`, post());
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("last_admin");
+    expect((await usersRepository(client).findById(bob.id))?.isAdmin).toBe(true); // unchanged
+  });
+
+  it("block/promote on a missing user → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    expect((await app.request("/api/admin/users/nope/block", post())).status).toBe(404);
+    expect((await app.request("/api/admin/users/nope/promote", post())).status).toBe(404);
   });
 
   it("manages the model allowlist + quota defaults (audited); rejects invalid bodies", async () => {

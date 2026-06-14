@@ -1,5 +1,5 @@
 import { type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -9,13 +9,51 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** A canvas status the admin list can filter on (admin sees every status). */
 export type AdminCanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
+/** Sort axes for the admin all-canvases list (member-parity, plan 006). */
+export type AdminCanvasSort = "recent" | "created" | "title";
+
 export interface ListAllCanvasesQuery {
   /** Narrow to one status; default returns all non-deleted canvases. */
   status?: AdminCanvasStatus;
-  /** Page size (caller clamps to a sane max). */
+  /** Substring match over title / slug / owner email (case-insensitive). */
+  q?: string;
+  /** Drill-down: restrict to a single owner by user id ("see what they have"). */
+  owner?: string;
+  /** Sort axis; defaults to `recent` (last activity). */
+  sort?: AdminCanvasSort;
   limit: number;
-  /** Keyset cursor: the `id` of the last row from the previous page (see below). */
-  cursor?: string;
+  offset: number;
+}
+
+/** Sort axes for the admin users list (plan 006). */
+export type AdminUserSort = "active" | "created" | "name" | "canvases";
+
+export interface ListUsersQuery {
+  /** Substring match over name / email (case-insensitive). */
+  q?: string;
+  sort?: AdminUserSort;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * One row of the admin user-management table (plan 006). Identity + governance
+ * facts only — `canvasCount` is an OBJECT fact (how much this person owns), never
+ * a behavioral one. No view history, no sessions, no per-user activity (the
+ * "governance without surveillance" line). `lastSeenAt` is a deliberate
+ * admin-hygiene exception (spotting dormant admins).
+ */
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  createdAt: number;
+  lastSeenAt: number | null;
+  /** Non-deleted canvases this user owns (object fact). */
+  canvasCount: number;
 }
 
 /** Platform overview aggregates (§6.10.6 — AI spend deferred to M9). */
@@ -65,24 +103,141 @@ export function adminRepository(client: DbClient) {
 
   return {
     /**
-     * Cross-owner canvas list, newest-first, keyset-paginated on the **UUIDv7 id**.
-     * The id is unique AND time-ordered (its first 48 bits are the creation
-     * timestamp), so ordering + the cursor on `id` alone is exact newest-first
-     * with NO `created_at`-tie row loss — a `created_at`-only keyset drops rows
-     * that share the boundary millisecond (code review). Default excludes
-     * soft-deleted (the deleted-restore view passes `status:"deleted"` explicitly).
+     * Cross-owner canvas list with member-parity filter/search/sort + offset
+     * pagination (plan 006 — replaces the prior keyset list so the admin table can
+     * sort on arbitrary axes, which a single-column keyset cursor can't). The only
+     * non-owner-scoped canvas read in the app (§12.0 #3); reachable solely behind
+     * `requireAdmin`. Default excludes soft-deleted (the deleted-restore view passes
+     * `status:"deleted"` explicitly). Joins `users` so the search can match an owner
+     * email — an OBJECT fact (the canvas's owner), not audience behavior. Two-query
+     * count posture at single-org scale, like the gallery / Your-canvases lists.
      */
-    async listAllCanvases(q: ListAllCanvasesQuery): Promise<Canvas[]> {
-      const filters = [];
+    async listAllCanvasesFiltered(
+      q: ListAllCanvasesQuery,
+    ): Promise<{ items: Canvas[]; total: number }> {
+      const filters: Array<SQL | undefined> = [];
       if (q.status) filters.push(eq(canvasesT.status, q.status));
       else filters.push(ne(canvasesT.status, "deleted"));
-      if (q.cursor !== undefined) filters.push(lt(canvasesT.id, q.cursor));
-      return (await db
-        .select()
+      if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
+
+      const search = q.q?.trim().toLowerCase();
+      if (search) {
+        // Portable, metacharacter-escaped LIKE over the admin-facing identifiers:
+        // title, slug, and the owner's email (the canvas's owner — object fact).
+        const pattern = `%${search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+        filters.push(
+          or(
+            sql`lower(${canvasesT.title}) like ${pattern} escape '\\'`,
+            sql`lower(${canvasesT.slug}) like ${pattern} escape '\\'`,
+            sql`lower(${usersT.email}) like ${pattern} escape '\\'`,
+          ),
+        );
+      }
+      const where = and(...filters);
+
+      // Default is most-recent-activity (updatedAt); `created` and `title` mirror the
+      // member list's axes. Every axis keeps an `id` tiebreak (uuidv7 monotonic) so
+      // pages don't shuffle within an equal sort key.
+      const orderBy =
+        q.sort === "created"
+          ? [desc(canvasesT.createdAt), desc(canvasesT.id)]
+          : q.sort === "title"
+            ? [sql`lower(${canvasesT.title}) asc`, desc(canvasesT.id)]
+            : [desc(canvasesT.updatedAt), desc(canvasesT.id)];
+
+      const rows = (await db
+        .select({ canvas: canvasesT })
         .from(canvasesT)
-        .where(and(...filters))
-        .orderBy(desc(canvasesT.id))
-        .limit(q.limit)) as Canvas[];
+        .leftJoin(usersT, eq(canvasesT.ownerId, usersT.id))
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(q.limit)
+        .offset(q.offset)) as Array<{ canvas: Canvas }>;
+
+      // Each canvas has exactly one owner, so the left join never multiplies rows —
+      // count(*) over the same join is the exact total.
+      const totalRows = (await db
+        .select({ value: sql<number>`count(*)` })
+        .from(canvasesT)
+        .leftJoin(usersT, eq(canvasesT.ownerId, usersT.id))
+        .where(where)) as Array<{ value: number }>;
+
+      return { items: rows.map((r) => r.canvas), total: Number(totalRows[0]?.value ?? 0) };
+    },
+
+    /**
+     * Cross-owner user-management list (plan 006): identity + governance facts with
+     * per-user owned-canvas counts, filter/search/sort + offset pagination. The
+     * count LEFT JOINs canvases (excluding soft-deleted tombstones) so a user with
+     * zero canvases still appears with count 0. `group by users.id` is valid on both
+     * dialects (Postgres functional-dependency on the PK; SQLite is lenient). NO
+     * behavioral data is read here — only object/identity facts (governance without
+     * surveillance).
+     */
+    async listUsers(q: ListUsersQuery): Promise<{ items: AdminUserRow[]; total: number }> {
+      const filters: Array<SQL | undefined> = [];
+      const search = q.q?.trim().toLowerCase();
+      if (search) {
+        const pattern = `%${search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+        filters.push(
+          or(
+            sql`lower(${usersT.name}) like ${pattern} escape '\\'`,
+            sql`lower(${usersT.email}) like ${pattern} escape '\\'`,
+          ),
+        );
+      }
+      const where = filters.length > 0 ? and(...filters) : undefined;
+
+      const countExpr = sql<number>`count(${canvasesT.id})`;
+      const orderBy =
+        q.sort === "created"
+          ? [desc(usersT.createdAt), desc(usersT.id)]
+          : q.sort === "name"
+            ? [sql`lower(${usersT.name}) asc`, desc(usersT.id)]
+            : q.sort === "canvases"
+              ? [sql`${countExpr} desc`, desc(usersT.id)]
+              : // "active" (default): most-recently-seen first; never-seen rows last.
+                [sql`${usersT.lastSeenAt} desc nulls last`, desc(usersT.id)];
+
+      const rows = (await db
+        .select({
+          id: usersT.id,
+          email: usersT.email,
+          name: usersT.name,
+          avatarUrl: usersT.avatarUrl,
+          isAdmin: usersT.isAdmin,
+          isBlocked: usersT.isBlocked,
+          createdAt: usersT.createdAt,
+          lastSeenAt: usersT.lastSeenAt,
+          canvasCount: countExpr,
+        })
+        .from(usersT)
+        .leftJoin(canvasesT, and(eq(canvasesT.ownerId, usersT.id), ne(canvasesT.status, "deleted")))
+        .where(where)
+        .groupBy(usersT.id)
+        .orderBy(...orderBy)
+        .limit(q.limit)
+        .offset(q.offset)) as Array<AdminUserRow>;
+
+      const totalRows = (await db
+        .select({ value: sql<number>`count(*)` })
+        .from(usersT)
+        .where(where)) as Array<{ value: number }>;
+
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          email: r.email,
+          name: r.name,
+          avatarUrl: r.avatarUrl,
+          isAdmin: Boolean(r.isAdmin),
+          isBlocked: Boolean(r.isBlocked),
+          createdAt: Number(r.createdAt),
+          lastSeenAt: r.lastSeenAt === null ? null : Number(r.lastSeenAt),
+          canvasCount: Number(r.canvasCount),
+        })),
+        total: Number(totalRows[0]?.value ?? 0),
+      };
     },
 
     /**
@@ -135,8 +290,12 @@ export function adminRepository(client: DbClient) {
           })
           .from(usageT)
           .where(eq(usageT.type, "view")),
-        // One version row per deploy (a published version is a deploy).
-        db.select({ count: sql<number>`count(*)` }).from(versionsT),
+        // One *ready* version row per deploy. Pending/failed builds never went
+        // live, so they aren't deploys and must not inflate the count.
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(versionsT)
+          .where(eq(versionsT.status, "ready")),
       ]);
       const canvasCountByStatus: Record<string, number> = {};
       for (const r of statusRows as Array<{ status: string; count: number }>) {

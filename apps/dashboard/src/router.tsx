@@ -18,6 +18,7 @@ const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
 const AdminRoute = lazy(() => import("./routes/admin.js"));
+const AdminUsersRoute = lazy(() => import("./routes/admin.users.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
 
 const rootRoute = createRootRoute({
@@ -105,6 +106,11 @@ const adminRoute = createRoute({
   path: "/admin",
   component: AdminRoute,
 });
+const adminUsersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/users",
+  component: AdminUsersRoute,
+});
 const adminSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/settings",
@@ -157,6 +163,7 @@ export const routeTree = rootRoute.addChildren([
   newRoute,
   onboardingRoute,
   adminRoute,
+  adminUsersRoute,
   adminSettingsRoute,
   canvasRoute.addChildren([
     overviewRoute,

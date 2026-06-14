@@ -1,5 +1,11 @@
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { type AdminCanvasStatus, api, type CanvasesQuery, type GalleryQuery } from "./api.js";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  type AdminCanvasesQuery,
+  type AdminUsersQuery,
+  api,
+  type CanvasesQuery,
+  type GalleryQuery,
+} from "./api.js";
 
 export const keys = {
   me: ["me"] as const,
@@ -14,7 +20,8 @@ export const keys = {
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
   usage: (id: string) => ["usage", id] as const,
-  adminCanvases: (status?: AdminCanvasStatus) => ["admin", "canvases", status ?? "all"] as const,
+  adminCanvases: (query: AdminCanvasesQuery) => ["admin", "canvases", query] as const,
+  adminUsers: (query: AdminUsersQuery) => ["admin", "users", query] as const,
   adminOverview: ["admin", "overview"] as const,
   adminAiUsage: ["admin", "ai-usage"] as const,
   adminConfig: ["admin", "config"] as const,
@@ -61,16 +68,24 @@ export function useUsage(id: string, enabled = true) {
 // --- Admin (§6.10, M7) ---
 
 /**
- * The admin all-canvases list, keyset-paginated. Returns every loaded page;
- * callers flatten `data.pages` and drive "Load more" off `hasNextPage`. The
- * server caps each page at 50, so a plain query would silently hide the rest.
+ * The admin all-canvases list with server-side filter/search/sort + offset paging
+ * (plan 006). `keepPreviousData` keeps the table on screen while a new page/filter
+ * loads, mirroring the member Your-canvases list.
  */
-export function useAdminCanvases(status?: AdminCanvasStatus) {
-  return useInfiniteQuery({
-    queryKey: keys.adminCanvases(status),
-    queryFn: ({ pageParam }) => api.admin.listCanvases(status, pageParam),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+export function useAdminCanvases(query: AdminCanvasesQuery = {}) {
+  return useQuery({
+    queryKey: keys.adminCanvases(query),
+    queryFn: () => api.admin.listCanvases(query),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The admin user-management list, server-side filter/search/sort + offset paging. */
+export function useAdminUsers(query: AdminUsersQuery = {}) {
+  return useQuery({
+    queryKey: keys.adminUsers(query),
+    queryFn: () => api.admin.listUsers(query),
+    placeholderData: keepPreviousData,
   });
 }
 

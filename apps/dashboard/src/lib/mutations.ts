@@ -357,6 +357,28 @@ export function useAdminRestoreCanvas() {
   });
 }
 
+// --- Admin user management (plan 006). Block/unblock + promote/demote; each
+//     invalidates the admin tree (the user list + overview counts). The server
+//     enforces self-protection + last-admin guards — the UI just surfaces them. ---
+
+export function useAdminBlockUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, blocked }: { id: string; blocked: boolean }) =>
+      blocked ? api.admin.blockUser(id) : api.admin.unblockUser(id),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useAdminPromoteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, admin }: { id: string; admin: boolean }) =>
+      admin ? api.admin.promoteUser(id) : api.admin.demoteUser(id),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
 /** Set or clear (value === null) a DB override for an editable config setting. */
 export function useAdminSetConfig() {
   const qc = useQueryClient();

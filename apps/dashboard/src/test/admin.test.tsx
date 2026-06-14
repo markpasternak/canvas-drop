@@ -88,9 +88,22 @@ const OVERVIEW = {
 };
 
 const AI_USAGE = {
-  byUser: [{ userId: "u1", email: "alice@example.com", costUsd: 4.0, calls: 9 }],
-  byCanvas: [{ canvasId: "c1", slug: "happy-otter", title: "Happy Otter", costUsd: 4.0, calls: 9 }],
+  byCanvas: [
+    {
+      canvasId: "c1",
+      slug: "happy-otter",
+      title: "Happy Otter",
+      ownerEmail: "alice@example.com",
+      costUsd: 4.0,
+      calls: 9,
+    },
+  ],
 };
+
+/** A canvas page in the offset-pagination shape (plan 006). */
+function canvasPage(rows: unknown[], total = rows.length): Response {
+  return json({ canvases: rows, total, limit: 50, offset: 0 });
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -104,7 +117,8 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
       "GET /api/canvases": () => json({ canvases: [] }),
     });
     renderAt("/admin");
@@ -128,7 +142,8 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
@@ -148,48 +163,53 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     const first = renderAt("/admin");
     const user = userEvent.setup();
     // Wait for the overview data to render, then collapse it.
     expect(await screen.findByText("Total views")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Platform overview/i }));
-    expect(screen.queryByText("Total views")).not.toBeInTheDocument();
+    // Collapsed content stays in the DOM (so aria-controls resolves) but hidden.
+    expect(screen.getByText("Total views")).not.toBeVisible();
     first.unmount();
 
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     // Table renders (render settled), but the overview stayed collapsed via localStorage.
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    expect(screen.queryByText("Total views")).not.toBeInTheDocument();
+    expect(await screen.findByText("Total views")).not.toBeVisible();
   });
 
-  it("renders the AI spend tile and the by-user / by-canvas breakdown (§6.10.7)", async () => {
+  it("renders the AI spend tile and the by-canvas breakdown — no per-user spend (plan 006)", async () => {
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
       "GET /api/admin/ai-usage": () => json(AI_USAGE),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     const user = userEvent.setup();
     // The AI spend tile lives in the always-visible stat strip.
     expect(await screen.findByText("AI spend")).toBeInTheDocument();
     expect(screen.getByText("$1.50")).toBeInTheDocument(); // platform spend
-    // The by-user/by-canvas breakdown sits in a section collapsed by default.
+    // The breakdown sits in a section collapsed by default. There is NO by-user panel.
+    expect(await screen.findByText("AI spend by canvas")).not.toBeVisible();
     expect(screen.queryByText("AI spend by user")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /AI usage/i }));
-    expect(await screen.findByText("AI spend by user")).toBeInTheDocument();
-    expect(screen.getByText("AI spend by canvas")).toBeInTheDocument();
-    // Each breakdown list shows its top spender's cost.
-    expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText("AI spend by canvas")).toBeVisible();
+    expect(screen.getByText("$4.00")).toBeInTheDocument();
+    // Spend is attributed to the canvas's owner (object fact). The owner email also
+    // appears in the canvas table's Owner column, so allow >= 1 occurrence.
+    expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
   });
 
   it("remembers a collapsed section across remounts via localStorage", async () => {
@@ -198,26 +218,26 @@ describe("admin dashboard", () => {
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
       "GET /api/admin/ai-usage": () => json(AI_USAGE),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     };
     mockFetch(handlers);
     const first = renderAt("/admin");
     const user = userEvent.setup();
     // "Top canvases by usage" is open by default; collapse it.
     const toggle = await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(screen.getByText("1,280 ops")).toBeInTheDocument();
+    expect(screen.getByText("1,280 ops")).toBeVisible();
     await user.click(toggle);
-    expect(screen.queryByText("1,280 ops")).not.toBeInTheDocument();
+    expect(screen.getByText("1,280 ops")).not.toBeVisible();
     first.unmount();
 
     // Remount: the collapsed state was persisted, so the list stays hidden.
     mockFetch(handlers);
     renderAt("/admin");
     await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(screen.queryByText("1,280 ops")).not.toBeInTheDocument();
+    expect(await screen.findByText("1,280 ops")).not.toBeVisible();
   });
 
-  it("paginates: loads the next keyset page on 'Load more', then hides the button", async () => {
+  it("paginates with Previous/Next (offset) and shows the X–Y of N range", async () => {
     const page2 = {
       ...ROW,
       id: "c2",
@@ -229,48 +249,40 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      // First page advertises a cursor; the second (fetched with ?cursor=cur1) ends it.
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
-      "GET /api/admin/canvases?cursor=cur1": () => json({ canvases: [page2], nextCursor: null }),
+      // total=60 so a second page exists (50/page); page 2 is fetched at offset=50.
+      "GET /api/admin/canvases?limit=50&offset=50": () => canvasPage([page2], 60),
+      "GET /api/admin/canvases": () => canvasPage([ROW], 60),
     });
     renderAt("/admin");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    // Page 2 not loaded yet.
+    expect(screen.getByText("Showing 1–1 of 60")).toBeInTheDocument();
+    // Page 2 not loaded yet; Previous is disabled on page 1.
     expect(screen.queryByText("Brave Lynx")).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
-    // Both rows present; cursor exhausted → no more "Load more".
-    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
-    );
+    // Page 1's row is no longer shown (offset pages replace, not append).
+    await waitFor(() => expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument());
   });
 
-  it("switching the status filter resets paging: a new keyset query, no stale Load more", async () => {
+  it("switching the status filter resets to page 1 with a fresh query", async () => {
     const activeRow = { ...ROW, id: "a1", slug: "lone-active", title: "Lone Active" };
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      // "All" advertises another page (Load more shows); the Active filter is a single page.
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
-      "GET /api/admin/canvases?status=active": () =>
-        json({ canvases: [activeRow], nextCursor: null }),
+      "GET /api/admin/canvases?status=active&limit=50&offset=0": () => canvasPage([activeRow]),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     const user = userEvent.setup();
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Active" }));
-    // New query key (status=active) → pages reset to just the active page.
+    // New query (status=active) → only the active row shows.
     expect(await screen.findByText("Lone Active")).toBeInTheDocument();
-    expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument();
-    // The "all" view's cursor must not bleed through: no Load more for the single page.
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument());
   });
 
   it("overview failure shows a retry instead of silently vanishing", async () => {
@@ -278,7 +290,7 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json({ error: "boom" }, 500),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     expect(await screen.findByText("Couldn't load the overview")).toBeInTheDocument();
@@ -299,9 +311,8 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases?status=deleted": () =>
-        json({ canvases: [deleted], nextCursor: null }),
-      "GET /api/admin/canvases": () => json({ canvases: [], nextCursor: null }),
+      "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([deleted]),
+      "GET /api/admin/canvases": () => canvasPage([]),
     });
     renderAt("/admin");
     const user = userEvent.setup();
@@ -314,7 +325,8 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
       "POST /api/admin/canvases/c1/disable": () => json({ ok: true }),
     });
     renderAt("/admin");
@@ -335,7 +347,8 @@ describe("admin dashboard", () => {
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: null }),
+      "GET /api/admin/ai-usage": () => json({ byUser: [], byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     const user = userEvent.setup();
@@ -348,23 +361,35 @@ describe("admin dashboard", () => {
     expect(screen.getByText("500/500")).toBeInTheDocument();
   });
 
-  it("dedupes rows that overlap across keyset pages (no duplicate React keys)", async () => {
-    // page 2 (stale cursor after a concurrent shift) repeats ROW from page 1.
-    const other = { ...ROW, id: "c2", slug: "brave-lynx", title: "Brave Lynx" };
+  it("searches: typing filters the list via a debounced q param", async () => {
+    const match = { ...ROW, id: "c7", slug: "weather-map", title: "Weather Map" };
     mockFetch({
       "GET /api/me": () =>
         json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
       "GET /api/admin/overview": () => json(OVERVIEW),
-      "GET /api/admin/canvases": () => json({ canvases: [ROW], nextCursor: "cur1" }),
-      "GET /api/admin/canvases?cursor=cur1": () =>
-        json({ canvases: [ROW, other], nextCursor: null }),
+      "GET /api/admin/canvases?q=weather&limit=50&offset=0": () => canvasPage([match]),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
     });
     renderAt("/admin");
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Load more" }));
-    expect(await screen.findByText("Brave Lynx")).toBeInTheDocument();
-    // ROW ("Happy Otter") was returned by both pages but must render exactly once.
-    expect(screen.getAllByText("Happy Otter")).toHaveLength(1);
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: /search all canvases/i }), "weather");
+    expect(await screen.findByText("Weather Map")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Happy Otter")).not.toBeInTheDocument());
+  });
+
+  it("surfaces an audit-log placeholder (recorded, browser not yet built)", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/overview": () => json(OVERVIEW),
+      "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    renderAt("/admin");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Audit log/i }));
+    expect(await screen.findByText("Audit log — coming soon")).toBeVisible();
   });
 
   it("Configuration view edits the model allowlist via the unified config endpoint", async () => {

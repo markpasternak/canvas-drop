@@ -65,6 +65,20 @@ export function usersRepository(client: DbClient) {
       // provider_sub both INSERT and the second 500s on the unique constraint.
       // is_blocked and created_at are intentionally NOT in the update set, so a
       // login never resurrects a blocked user or rewrites the creation time.
+      //
+      // Bootstrap admin model: the env allowlist (CANVAS_DROP_ADMIN_EMAILS) SEEDS
+      // admins on first insert and can still promote an existing user (idempotently)
+      // on any login — but it NEVER demotes. Once the bit is set (here, or via an
+      // in-app `setAdmin` grant) it persists in the DB, so dropping someone from the
+      // allowlist no longer auto-demotes them and an admin-granted user survives a
+      // re-login. We therefore only ever fold isAdmin=true into the update set.
+      const update: Record<string, unknown> = {
+        email: input.email,
+        name: input.name,
+        avatarUrl: input.avatarUrl ?? null,
+        lastSeenAt: now,
+      };
+      if (input.isAdmin) update.isAdmin = true;
       const rows = await db
         .insert(t)
         .values({
@@ -78,16 +92,7 @@ export function usersRepository(client: DbClient) {
           createdAt: now,
           lastSeenAt: now,
         })
-        .onConflictDoUpdate({
-          target: t.providerSub,
-          set: {
-            email: input.email,
-            name: input.name,
-            avatarUrl: input.avatarUrl ?? null,
-            isAdmin: input.isAdmin,
-            lastSeenAt: now,
-          },
-        })
+        .onConflictDoUpdate({ target: t.providerSub, set: update })
         .returning();
       return rows[0] as User;
     },
@@ -99,6 +104,24 @@ export function usersRepository(client: DbClient) {
     /** Block or unblock a user (admin user-management; gateway rejects blocked users). */
     async setBlocked(id: string, isBlocked: boolean): Promise<void> {
       await db.update(t).set({ isBlocked }).where(eq(t.id, id));
+    },
+
+    /**
+     * Grant or revoke admin (in-app user-management, bootstrap model). Persists in
+     * the DB: a login no longer clobbers it (see {@link upsert}). The route guards
+     * self-demotion and last-admin demotion before calling this.
+     */
+    async setAdmin(id: string, isAdmin: boolean): Promise<void> {
+      await db.update(t).set({ isAdmin }).where(eq(t.id, id));
+    },
+
+    /** Count of admins — backs the route's last-admin demotion guard. */
+    async countAdmins(): Promise<number> {
+      const rows = (await db
+        .select({ count: sql<number>`count(*)` })
+        .from(t)
+        .where(eq(t.isAdmin, true))) as Array<{ count: number }>;
+      return Number(rows[0]?.count ?? 0);
     },
   };
 }

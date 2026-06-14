@@ -273,6 +273,10 @@ const HINTS: Record<string, string> = {
   NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
+  // Admin user-management self-protection (plan 006).
+  cannot_block_self: "You can't block your own account.",
+  cannot_demote_self: "You can't remove your own admin access.",
+  last_admin: "You can't demote the last admin.",
 };
 
 export class ApiError extends Error {
@@ -450,11 +454,63 @@ export interface AdminCanvasRow {
   deletedAt: number | null;
 }
 
-/** One keyset page of the admin all-canvases list. `nextCursor === null` ⇒ last page. */
-export interface AdminCanvasPage {
-  canvases: AdminCanvasRow[];
-  nextCursor: string | null;
+/** Admin all-canvases sort axes (plan 006). `recent` (default) = last activity. */
+export type AdminCanvasSort = "recent" | "created" | "title";
+
+/** Admin all-canvases browse query (plan 006). Mirrors the member CanvasesQuery;
+ *  `owner` is the drill-down filter from the user table ("see what they have"). */
+export interface AdminCanvasesQuery {
+  status?: AdminCanvasStatus;
+  q?: string;
+  owner?: string;
+  sort?: AdminCanvasSort;
+  limit?: number;
+  offset?: number;
 }
+
+/** One page of the admin all-canvases list. `total`/`limit`/`offset` are echoed by
+ *  the server so the view derives "showing X–Y of N" from authoritative values. */
+export interface AdminCanvasesPage {
+  canvases: AdminCanvasRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Admin users sort axes (plan 006). `active` (default) = most-recently-seen. */
+export type AdminUserSort = "active" | "created" | "name" | "canvases";
+
+/** One row of the admin user-management table (plan 006). Identity + governance
+ *  facts only — `canvasCount` is an object fact; no per-user behavioral data. */
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  createdAt: number;
+  lastSeenAt: number | null;
+  canvasCount: number;
+}
+
+export interface AdminUsersQuery {
+  q?: string;
+  sort?: AdminUserSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AdminUsersPage {
+  users: AdminUserRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Admin list page size (plan 006) — denser than the member 24 for a governance
+ *  table. The `limit` AND the page→offset divisor, so page math can't desync. */
+export const ADMIN_PAGE_SIZE = 50;
 
 export interface AdminOverview {
   canvasCountByStatus: Record<string, number>;
@@ -483,13 +539,14 @@ export interface AdminOverview {
   aiCalls: number;
 }
 
-/** Admin AI-usage breakdown (§6.10.7) — top spenders by user and by canvas. */
+/** Admin AI-usage breakdown (§6.10.7) — top-spending canvases and their owners.
+ *  Re-attributed to canvas/owner only (plan 006): no per-user spend, by design. */
 export interface AdminAiUsage {
-  byUser: Array<{ userId: string; email: string | null; costUsd: number; calls: number }>;
   byCanvas: Array<{
     canvasId: string;
     slug: string | null;
     title: string | null;
+    ownerEmail: string | null;
     costUsd: number;
     calls: number;
   }>;
@@ -685,20 +742,45 @@ export const api = {
   restoreToDraft: (id: string, version: number) =>
     request<DraftView>(`/api/canvases/${id}/restore`, jsonBody({ version })),
 
-  // --- Admin (§6.10, M7) ---
+  // --- Admin (§6.10, M7; user-mgmt + member-parity filters plan 006) ---
   admin: {
-    /** One keyset page; pass the previous page's `nextCursor` to fetch the next. */
-    listCanvases: (status?: AdminCanvasStatus, cursor?: string) => {
+    /** All-canvases list with filter/search/sort + offset paging (plan 006).
+     *  Empty/default params are omitted so a clean view has a bare URL. */
+    listCanvases: (query: AdminCanvasesQuery = {}) => {
       const sp = new URLSearchParams();
-      if (status) sp.set("status", status);
-      if (cursor) sp.set("cursor", cursor);
+      if (query.status) sp.set("status", query.status);
+      if (query.q) sp.set("q", query.q);
+      if (query.owner) sp.set("owner", query.owner);
+      if (query.sort && query.sort !== "recent") sp.set("sort", query.sort);
+      if (query.limit !== undefined) sp.set("limit", String(query.limit));
+      if (query.offset !== undefined) sp.set("offset", String(query.offset));
       const qs = sp.toString();
-      return request<AdminCanvasPage>(`/api/admin/canvases${qs ? `?${qs}` : ""}`);
+      return request<AdminCanvasesPage>(`/api/admin/canvases${qs ? `?${qs}` : ""}`);
     },
 
     overview: () => request<AdminOverview>("/api/admin/overview"),
 
     aiUsage: () => request<AdminAiUsage>("/api/admin/ai-usage"),
+
+    /** User-management list with filter/search/sort + offset paging (plan 006). */
+    listUsers: (query: AdminUsersQuery = {}) => {
+      const sp = new URLSearchParams();
+      if (query.q) sp.set("q", query.q);
+      if (query.sort && query.sort !== "active") sp.set("sort", query.sort);
+      if (query.limit !== undefined) sp.set("limit", String(query.limit));
+      if (query.offset !== undefined) sp.set("offset", String(query.offset));
+      const qs = sp.toString();
+      return request<AdminUsersPage>(`/api/admin/users${qs ? `?${qs}` : ""}`);
+    },
+
+    blockUser: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/block`, { method: "POST" }),
+    unblockUser: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/unblock`, { method: "POST" }),
+    promoteUser: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/promote`, { method: "POST" }),
+    demoteUser: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/demote`, { method: "POST" }),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),

@@ -143,26 +143,8 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     });
   });
 
-  it("spendByUser groups by user, orders by spend desc, respects the limit", async () => {
-    client = await makeTestDb(dialect);
-    const a = await seed(client, "a", "ua");
-    const b = await seed(client, "b", "ub");
-    const repo = aiUsageRepository(client);
-    // a spends 1.5 across two calls; b spends 4.0 in one → b ranks first.
-    await repo.record(rec(a.canvasId, a.userId, 0.5));
-    await repo.record(rec(a.canvasId, a.userId, 1.0));
-    await repo.record(rec(b.canvasId, b.userId, 4.0));
-
-    const all = await repo.spendByUser(10);
-    expect(all.map((r) => r.id)).toEqual([b.userId, a.userId]);
-    expect(all[0]?.costUsd).toBeCloseTo(4.0, 10);
-    expect(all[1]?.costUsd).toBeCloseTo(1.5, 10);
-    expect(all[1]?.calls).toBe(2);
-
-    const top1 = await repo.spendByUser(1);
-    expect(top1).toHaveLength(1);
-    expect(top1[0]?.id).toBe(b.userId);
-  });
+  // spendByUser was removed in plan 006 (admin governs canvas/owner spend, not
+  // per-member behavior) — only spendByCanvas remains.
 
   it("spendByCanvas groups by canvas, ordered by spend desc, across multiple users", async () => {
     client = await makeTestDb(dialect);

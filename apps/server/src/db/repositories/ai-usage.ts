@@ -138,14 +138,10 @@ export function aiUsageRepository(client: DbClient) {
       };
     },
 
-    /** Top spenders by user (admin §6.10.7). `id` is the raw user id — the route
-     *  enriches it to an email. Ordered by spend desc, capped at `limit`. */
-    spendByUser(limit: number): Promise<Array<{ id: string; costUsd: number; calls: number }>> {
-      return spendGroupedBy(t.userId, limit);
-    },
-
     /** Top spenders by canvas (admin §6.10.7). `id` is the raw canvas id — the route
-     *  enriches it to slug/title. Ordered by spend desc, capped at `limit`. */
+     *  enriches it to slug/title + owner. Ordered by spend desc, capped at `limit`.
+     *  (Spend-by-user was removed in plan 006 — admin governs canvas/owner spend, not
+     *  per-member behavior.) */
     spendByCanvas(limit: number): Promise<Array<{ id: string; costUsd: number; calls: number }>> {
       return spendGroupedBy(t.canvasId, limit);
     },

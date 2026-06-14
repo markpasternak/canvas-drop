@@ -30,10 +30,21 @@ export interface AdminRoutesDeps {
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
+const CANVAS_SORTS = ["recent", "created", "title"] as const;
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
+  q: z.string().trim().max(200).optional(),
+  owner: z.string().trim().max(100).optional(),
+  sort: z.enum(CANVAS_SORTS).optional().default("recent"),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-  cursor: z.string().optional(), // UUIDv7 id keyset cursor
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+const USER_SORTS = ["active", "created", "name", "canvases"] as const;
+const userListQuery = z.object({
+  q: z.string().trim().max(200).optional(),
+  sort: z.enum(USER_SORTS).optional().default("active"),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
 });
 const disableBody = z.object({ reason: z.string().trim().min(1).max(500) });
 const modelsBody = z.object({ models: z.array(z.string().min(1)).min(1) });
@@ -77,19 +88,26 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
   app.use("*", requireAdmin());
 
-  // --- All-canvases list (§6.10.1): owner / status / size / usage / last-activity ---
+  // --- All-canvases list (§6.10.1): owner / status / size / usage / last-activity.
+  //     Member-parity filter/search/sort + offset paging (plan 006). ---
   app.get("/canvases", async (c) => {
     const q = listQuery.safeParse({
       status: c.req.query("status"),
+      q: c.req.query("q"),
+      owner: c.req.query("owner"),
+      sort: c.req.query("sort"),
       limit: c.req.query("limit"),
-      cursor: c.req.query("cursor"),
+      offset: c.req.query("offset"),
     });
     if (!q.success) return c.json({ error: "invalid_query" }, 400);
 
-    const rows = await deps.admin.listAllCanvases({
+    const { items: rows, total } = await deps.admin.listAllCanvasesFiltered({
       status: q.data.status as AdminCanvasStatus | undefined,
+      q: q.data.q,
+      owner: q.data.owner,
+      sort: q.data.sort,
       limit: q.data.limit,
-      cursor: q.data.cursor,
+      offset: q.data.offset,
     });
 
     const ids = rows.map((cv) => cv.id);
@@ -128,9 +146,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         deletedAt: cv.deletedAt,
       };
     });
-    // Keyset cursor is the last row's id (unique + time-ordered); null = last page.
-    const nextCursor = rows.length === q.data.limit ? (rows.at(-1)?.id ?? null) : null;
-    return c.json({ canvases, nextCursor });
+    // `total` echoed (with limit/offset) so the UI derives "showing X–Y of N" from
+    // authoritative values, mirroring the gallery / Your-canvases lists.
+    return c.json({ canvases, total, limit: q.data.limit, offset: q.data.offset });
   });
 
   // --- Platform usage overview (§6.10.6): totals + top canvases + AI spend ---
@@ -142,7 +160,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     // Enrich the top canvases with slug/title (small N — direct lookups).
     const top = await Promise.all(
       stats.topCanvases.map(async (t) => {
-        const cv = await deps.canvases.findById(t.canvasId);
+        // A single failed lookup must not 500 the whole overview — fall back to null
+        // slug/title (already handled below) for that row.
+        const cv = await deps.canvases.findById(t.canvasId).catch(() => null);
         return {
           canvasId: t.canvasId,
           ops: t.ops,
@@ -170,35 +190,34 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     });
   });
 
-  // --- AI usage breakdown (§6.10.7): top spenders by user and by canvas ---
+  // --- AI usage breakdown (§6.10.7): top-spending canvases (and their owners).
+  //     Re-attributed to canvas/owner only — NOT to the calling user. "Governance
+  //     without surveillance": an admin sees WHICH canvas/owner is burning AI spend
+  //     (a cost/abuse object fact), never which member made which call (plan 006). ---
   app.get("/ai-usage", async (c) => {
-    const [byUserRaw, byCanvasRaw] = await Promise.all([
-      deps.aiUsage.spendByUser(10),
-      deps.aiUsage.spendByCanvas(10),
-    ]);
-    // Enrich ids → email / slug+title. Batch the user lookup (one query), and do
-    // small-N direct canvas lookups (top-10) like the overview's top-canvases.
-    const users = await deps.users.findByIds(byUserRaw.map((r) => r.id));
-    const emailById = new Map(users.map((u) => [u.id, u.email]));
-    const byUser = byUserRaw.map((r) => ({
-      userId: r.id,
-      email: emailById.get(r.id) ?? null,
-      costUsd: r.costUsd,
-      calls: r.calls,
-    }));
-    const byCanvas = await Promise.all(
-      byCanvasRaw.map(async (r) => {
-        const cv = await deps.canvases.findById(r.id);
-        return {
-          canvasId: r.id,
-          slug: cv?.slug ?? null,
-          title: cv?.title ?? null,
-          costUsd: r.costUsd,
-          calls: r.calls,
-        };
-      }),
+    const byCanvasRaw = await deps.aiUsage.spendByCanvas(10);
+    // Small-N direct canvas lookups (top-10), resilient like /overview: one bad
+    // lookup falls back to null, not a 500. Then batch the owner lookup (one query).
+    const canvases = await Promise.all(
+      byCanvasRaw.map((r) => deps.canvases.findById(r.id).catch(() => null)),
     );
-    return c.json({ byUser, byCanvas });
+    const ownerIds = [
+      ...new Set(canvases.filter((cv): cv is Canvas => cv !== null).map((cv) => cv.ownerId)),
+    ];
+    const owners = await deps.users.findByIds(ownerIds);
+    const emailById = new Map(owners.map((u) => [u.id, u.email]));
+    const byCanvas = byCanvasRaw.map((r, i) => {
+      const cv = canvases[i];
+      return {
+        canvasId: r.id,
+        slug: cv?.slug ?? null,
+        title: cv?.title ?? null,
+        ownerEmail: cv ? (emailById.get(cv.ownerId) ?? null) : null,
+        costUsd: r.costUsd,
+        calls: r.calls,
+      };
+    });
+    return c.json({ byCanvas });
   });
 
   // --- Takedown / restore (§6.10.2, §6.10.5) ---
@@ -246,6 +265,92 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     deps.audit.recordAudit({
       action: "canvas_restore",
       actorId: c.get("user").id,
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  // --- User management (plan 006). Identity + governance facts; block/unblock and
+  //     promote/demote. NO per-user behavioral data is exposed. Mutations are
+  //     same-origin-guarded, audited, and self-protected (server-side, not just a
+  //     disabled button). ---
+
+  app.get("/users", async (c) => {
+    const q = userListQuery.safeParse({
+      q: c.req.query("q"),
+      sort: c.req.query("sort"),
+      limit: c.req.query("limit"),
+      offset: c.req.query("offset"),
+    });
+    if (!q.success) return c.json({ error: "invalid_query" }, 400);
+    const { items, total } = await deps.admin.listUsers({
+      q: q.data.q,
+      sort: q.data.sort,
+      limit: q.data.limit,
+      offset: q.data.offset,
+    });
+    return c.json({ users: items, total, limit: q.data.limit, offset: q.data.offset });
+  });
+
+  app.post("/users/:id/block", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    const actor = c.get("user");
+    // Self-protection: you can never block yourself out of the platform.
+    if (id === actor.id) return c.json({ error: "cannot_block_self" }, 400);
+    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    await deps.users.setBlocked(id, true);
+    deps.audit.recordAudit({
+      action: "user_block",
+      actorId: actor.id,
+      targetType: "user",
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  app.post("/users/:id/unblock", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    await deps.users.setBlocked(id, false);
+    deps.audit.recordAudit({
+      action: "user_unblock",
+      actorId: c.get("user").id,
+      targetType: "user",
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  app.post("/users/:id/promote", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    await deps.users.setAdmin(id, true);
+    deps.audit.recordAudit({
+      action: "user_promote",
+      actorId: c.get("user").id,
+      targetType: "user",
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  app.post("/users/:id/demote", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    const actor = c.get("user");
+    // Self-protection #1: you can't demote yourself (avoids accidental lockout).
+    if (id === actor.id) return c.json({ error: "cannot_demote_self" }, 400);
+    const target = await deps.users.findById(id);
+    if (!target) return c.json({ error: "not_found" }, 404);
+    // Self-protection #2: never demote the last remaining admin — a single click
+    // must not leave the org with no administrator.
+    if (target.isAdmin && (await deps.users.countAdmins()) <= 1) {
+      return c.json({ error: "last_admin", message: "cannot demote the last admin" }, 409);
+    }
+    await deps.users.setAdmin(id, false);
+    deps.audit.recordAudit({
+      action: "user_demote",
+      actorId: actor.id,
+      targetType: "user",
       targetId: id,
     });
     return c.json({ ok: true });
