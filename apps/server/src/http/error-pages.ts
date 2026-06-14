@@ -445,7 +445,9 @@ function mediaQuality(accept: string, mediaType: string): number {
   return best;
 }
 
-function escapeHtml(value: string): string {
+/** Escape a string for safe interpolation into HTML text or attribute context.
+ * Shared by every self-rendered server page (error, legal, password gate, docs). */
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
     switch (char) {
       case "&":
@@ -462,6 +464,6 @@ function escapeHtml(value: string): string {
   });
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return escapeHtml(value);
 }

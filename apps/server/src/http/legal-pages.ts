@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
 
@@ -264,25 +265,4 @@ export function renderTermsPage(): string {
     intro: "These Terms govern your use of this Canvasdrop instance. They are intentionally short.",
     body,
   });
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value);
 }
