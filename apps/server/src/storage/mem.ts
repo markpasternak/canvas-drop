@@ -1,4 +1,4 @@
-import type { StorageDriver } from "./driver.js";
+import { type StorageDriver, StorageError } from "./driver.js";
 
 /**
  * In-memory StorageDriver for tests. `failOnPut` makes the Nth `put` throw — used
@@ -13,6 +13,13 @@ export function memStorage(failOnPut?: number): StorageDriver {
       puts++;
       if (failOnPut && puts === failOnPut) throw new Error("storage down");
       store.set(key, bytes);
+    },
+    async copy(srcKey, dstKey) {
+      const bytes = store.get(srcKey);
+      if (bytes === undefined) {
+        throw new StorageError(`source key does not exist: ${srcKey}`, "not_found");
+      }
+      store.set(dstKey, bytes);
     },
     async get(key) {
       return store.get(key) ?? null;
