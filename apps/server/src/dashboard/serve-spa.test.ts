@@ -44,6 +44,8 @@ describe("serveSpa", () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
+    // Allows IdP avatars (e.g. Google) over https while blocking http:/other schemes.
+    expect(csp).toContain("img-src 'self' data: https:");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 

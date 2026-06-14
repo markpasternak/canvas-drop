@@ -34,7 +34,10 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self' data:",
+    // `https:` so a user's IdP avatar (e.g. Google lh3.googleusercontent.com) can
+    // load — provider-agnostic, images only, no http:/other schemes. The avatar
+    // <img> sends no Referer (page Referrer-Policy + img referrerPolicy="no-referrer").
+    "img-src 'self' data: https:",
     "font-src 'self'",
     "connect-src 'self'",
     "frame-ancestors 'none'",

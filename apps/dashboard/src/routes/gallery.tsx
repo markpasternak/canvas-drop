@@ -70,6 +70,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
               <img
                 src={item.owner.avatarUrl}
                 alt=""
+                referrerPolicy="no-referrer"
                 className="size-5 shrink-0 rounded-full bg-surface-sunken"
               />
             ) : (

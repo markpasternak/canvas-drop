@@ -124,6 +124,7 @@ function Avatar({ me, className }: { me: Me; className?: string }) {
       <img
         src={me.avatarUrl}
         alt=""
+        referrerPolicy="no-referrer"
         className={cn("shrink-0 rounded-full bg-surface-sunken object-cover", className)}
       />
     );
