@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "build": "pnpm -r build",
     "test": "vitest run && pnpm --filter @canvas-drop/dashboard test",
     "test:watch": "vitest",
