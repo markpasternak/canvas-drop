@@ -11,13 +11,12 @@ import { useTheme } from "./lib/theme.js";
  *  "Canvases" from lighting on canvas detail pages; `adminOnly` is filtered by
  *  the server-resolved me.isAdmin (UX only — the admin API 404s non-admins). */
 const SECTION_LINKS: ReadonlyArray<{
-  to: "/" | "/archived" | "/admin" | "/gallery";
+  to: "/" | "/admin" | "/gallery";
   label: string;
   exact?: boolean;
   adminOnly?: boolean;
 }> = [
   { to: "/", label: "Canvases", exact: true },
-  { to: "/archived", label: "Archived" },
   { to: "/gallery", label: "Gallery" },
   // Admin sits last — to the right of the member-facing sections, visible only to
   // admins (and the admin API independently 404s non-admins).

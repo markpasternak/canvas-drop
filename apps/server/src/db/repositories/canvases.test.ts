@@ -93,6 +93,10 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const archived = await repo.listArchivedByOwner(ownerId);
     expect(archived.map((c) => c.id)).toEqual([cv.id]);
     expect((await repo.listByOwnerFiltered({ ownerId, limit: 100, offset: 0 })).items).toEqual([]); // gone from the active view
+    // The Active/Archived toggle: `archived` scope lists ONLY archived canvases.
+    const arch = await repo.listByOwnerFiltered({ ownerId, archived: true, limit: 100, offset: 0 });
+    expect(arch.items.map((c) => c.id)).toEqual([cv.id]);
+    expect(arch.total).toBe(1);
   });
 
   it("does NOT archive a disabled canvas (admin takedown can't be self-rescued, §12.0 #5)", async () => {

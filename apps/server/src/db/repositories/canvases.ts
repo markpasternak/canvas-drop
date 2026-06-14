@@ -141,6 +141,8 @@ export interface OwnerListOptions {
   template?: boolean;
   /** Deployment-state: no published version yet (`current_version_id IS NULL`). */
   neverDeployed?: boolean;
+  /** Scope to the owner's ARCHIVED canvases instead of the active set (default). */
+  archived?: boolean;
   sort?: CanvasesSort;
   limit: number;
   offset: number;
@@ -234,7 +236,9 @@ export function canvasesRepository(client: DbClient) {
       // the gallery's filter-array shape that `and(...)` accepts.
       const filters: Array<SQL | undefined> = [
         eq(t.ownerId, opts.ownerId),
-        notInArray(t.status, ["deleted", "archived"]),
+        // Default scope is the active set (excludes archived + deleted); the
+        // `archived` scope lists ONLY archived canvases (the Your-canvases toggle).
+        opts.archived ? eq(t.status, "archived") : notInArray(t.status, ["deleted", "archived"]),
       ];
 
       const q = opts.q?.trim().toLowerCase();

@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
@@ -6,7 +6,6 @@ import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/E
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
 const IndexRoute = lazy(() => import("./routes/index.js"));
-const ArchivedRoute = lazy(() => import("./routes/archived.js"));
 const GalleryRoute = lazy(() => import("./routes/gallery.js"));
 const NewRoute = lazy(() => import("./routes/new.js"));
 const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
@@ -18,6 +17,7 @@ const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
 const AdminRoute = lazy(() => import("./routes/admin.js"));
+const AdminCanvasesRoute = lazy(() => import("./routes/admin.canvases.js"));
 const AdminUsersRoute = lazy(() => import("./routes/admin.users.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
 
@@ -42,6 +42,9 @@ export interface CanvasesSearch {
   listed?: boolean;
   template?: boolean;
   undeployed?: boolean;
+  /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
+   *  archived view (replaces the standalone /archived route). */
+  scope?: "archived";
   /** 1-based page for server-side pagination (plan 005). */
   page?: number;
 }
@@ -54,10 +57,14 @@ const indexRoute = createRoute({
   // `created` sort axis) and break the other routes' typed navigate reducers.
   component: IndexRoute,
 });
+// The standalone Archived view folded into the Your-canvases Active/Archived
+// toggle. Keep the path as a redirect so old links/bookmarks land on the toggle.
 const archivedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/archived",
-  component: ArchivedRoute,
+  beforeLoad: () => {
+    throw redirect({ to: "/", search: { scope: "archived" } });
+  },
 });
 /** Gallery browse search params (shared with the gallery view). Filters + sort
  *  (plan 004) live here too so a filtered view is shareable and back-button-able. */
@@ -105,6 +112,11 @@ const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin",
   component: AdminRoute,
+});
+const adminCanvasesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/canvases",
+  component: AdminCanvasesRoute,
 });
 const adminUsersRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -163,6 +175,7 @@ export const routeTree = rootRoute.addChildren([
   newRoute,
   onboardingRoute,
   adminRoute,
+  adminCanvasesRoute,
   adminUsersRoute,
   adminSettingsRoute,
   canvasRoute.addChildren([

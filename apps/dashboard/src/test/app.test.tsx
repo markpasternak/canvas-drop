@@ -169,20 +169,20 @@ describe("dashboard app", () => {
     await screen.findByText("canvas-drop");
     const user = userEvent.setup();
 
-    // Closed: only the (always-rendered) desktop nav has the Archived link.
-    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+    // Closed: only the (always-rendered) desktop nav has the Gallery link.
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
 
     const toggle = screen.getByRole("button", { name: "Open menu" });
     await user.click(toggle);
     // Open: the mobile menu adds a second copy of each section link.
-    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Close menu" })).toBeInTheDocument();
 
     // Selecting a link in the menu closes it (back to the single desktop copy).
     const menuGallery = screen.getAllByRole("link", { name: "Gallery" }).at(-1);
     if (!menuGallery) throw new Error("expected a menu Gallery link");
     await user.click(menuGallery);
-    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
   });
 
   /** Path-aware stub: lets a test set what /api/me reports for isAdmin. */
@@ -214,7 +214,7 @@ describe("dashboard app", () => {
     const order = within(desktopNav)
       .getAllByRole("link")
       .map((a) => a.textContent);
-    expect(order).toEqual(["Canvases", "Archived", "Gallery", "Admin"]);
+    expect(order).toEqual(["Canvases", "Gallery", "Admin"]);
   });
 
   it("Admin is hidden from non-admins (UX layer of the admin-only boundary)", async () => {
@@ -242,11 +242,11 @@ describe("dashboard app", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
-    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(2);
 
     // The backdrop is aria-hidden (out of the a11y tree), so target it by test id.
     await user.click(screen.getByTestId("menu-backdrop"));
-    expect(screen.getAllByRole("link", { name: "Archived" })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
   });
 

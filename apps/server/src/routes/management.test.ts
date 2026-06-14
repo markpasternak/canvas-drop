@@ -311,6 +311,13 @@ describe("managementRoutes", () => {
       await app.request("/api/canvases/archived"),
     );
     expect(archived.canvases.map((c) => c.id)).toEqual([created.id]);
+
+    // The Active/Archived toggle reads the SAME list endpoint with `?scope=archived`.
+    const scoped = await jsonOf<{ canvases: { id: string }[]; total: number }>(
+      await app.request("/api/canvases?scope=archived"),
+    );
+    expect(scoped.canvases.map((c) => c.id)).toEqual([created.id]);
+    expect(scoped.total).toBe(1);
   });
 
   it("unarchive restores a canvas to the active list", async () => {

@@ -222,6 +222,8 @@ export interface CanvasesQuery {
   template?: boolean;
   /** Never-deployed (no published version) — the URL param is `undeployed`. */
   undeployed?: boolean;
+  /** Lifecycle scope: omit/`active` for the live set, `archived` for the archive. */
+  scope?: "active" | "archived";
   sort?: CanvasesSort;
   limit?: number;
   offset?: number;
@@ -602,6 +604,7 @@ export const api = {
     if (query.listed) sp.set("listed", "1");
     if (query.template) sp.set("template", "1");
     if (query.undeployed) sp.set("undeployed", "1");
+    if (query.scope === "archived") sp.set("scope", "archived");
     if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));

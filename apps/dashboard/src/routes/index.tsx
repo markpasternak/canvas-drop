@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CanvasRow, DefaultRowActions, ListSkeleton } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
+import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, CANVASES_PAGE_SIZE, type CanvasListItem } from "../lib/api.js";
-import { useArchiveCanvas } from "../lib/mutations.js";
+import { cn } from "../lib/cn.js";
+import { useArchiveCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
 import { useArchivedCanvases, useCanvases } from "../lib/queries.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
@@ -71,6 +73,75 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
   );
 }
 
+/** Archived-list row: the live URL 404s while archived, so the trailing actions are
+ * Unarchive (restore it) + Copy (the slug stays reserved), not Open/Archive. */
+function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
+  const toast = useToast();
+  const unarchive = useUnarchiveCanvas(canvas.id);
+  return (
+    <CanvasRow
+      canvas={canvas}
+      actions={
+        <>
+          <CopyButton value={canvas.url} label="Copy link" toastMessage="Link copied" />
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={unarchive.isPending}
+            onClick={async () => {
+              try {
+                await unarchive.mutateAsync();
+                toast("Canvas unarchived");
+              } catch (err) {
+                toast(err instanceof ApiError ? err.hint : "Couldn't unarchive", "error");
+              }
+            }}
+          >
+            Unarchive
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
+/** Active/Archived lifecycle switch. Archived canvases stay offline-but-kept (files,
+ * settings, reserved URL) until restored or deleted — they live one tab away from the
+ * active list here, replacing the old standalone Archived nav section. */
+function ScopeToggle({
+  value,
+  onChange,
+}: {
+  value: "active" | "archived";
+  onChange: (s: "active" | "archived") => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Canvas scope"
+      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
+    >
+      {(["active", "archived"] as const).map((s) => (
+        <button
+          key={s}
+          type="button"
+          role="tab"
+          aria-selected={value === s}
+          onClick={() => onChange(s)}
+          className={cn(
+            "h-8 rounded-md px-3 text-sm font-medium capitalize transition-colors",
+            value === s
+              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
+              : "text-muted hover:text-fg",
+          )}
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Shown when the owner has NO active canvases at all (not merely a filtered-empty
  * view). A brand-new user gets the onboarding first-run page; a user whose canvases
  * are ALL archived gets a pointer to the Archived view instead (showing "get
@@ -87,7 +158,7 @@ function EmptyHome() {
         title="No active canvases"
         description={`All your canvases are archived (${archived.length}). Restore one to bring it back live, or create a new canvas.`}
         action={
-          <Link to="/archived">
+          <Link to="/" search={{ scope: "archived" }}>
             <Button variant="secondary" size="sm">
               View archived
             </Button>
@@ -109,15 +180,25 @@ export default function CanvasList() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
+  // Lifecycle scope: the active list (default) or the archived set. The attribute
+  // chips (Shared/Listed/…) are active-only, so the archived view drops them.
+  const archivedView = search.scope === "archived";
   // This route intentionally has no validateSearch (see router.tsx), so `page` can
   // arrive as a non-numeric string from a hand-edited/stale URL. Coerce defensively
   // — a junk `?page=` falls back to 1 rather than letting NaN wedge the pager.
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * CANVASES_PAGE_SIZE;
-  const filtering = Boolean(
-    q || search.shared || search.protected || search.listed || search.template || search.undeployed,
-  );
+  const filtering = archivedView
+    ? Boolean(q)
+    : Boolean(
+        q ||
+          search.shared ||
+          search.protected ||
+          search.listed ||
+          search.template ||
+          search.undeployed,
+      );
 
   // Local mirror of the search box, debounced into the `q` route param. Seeded on
   // `q` so a shared URL or back-nav populates the field.
@@ -143,11 +224,12 @@ export default function CanvasList() {
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useCanvases({
     q,
-    shared: search.shared,
-    protected: search.protected,
-    listed: search.listed,
-    template: search.template,
-    undeployed: search.undeployed,
+    shared: archivedView ? undefined : search.shared,
+    protected: archivedView ? undefined : search.protected,
+    listed: archivedView ? undefined : search.listed,
+    template: archivedView ? undefined : search.template,
+    undeployed: archivedView ? undefined : search.undeployed,
+    scope: archivedView ? "archived" : "active",
     sort,
     limit: CANVASES_PAGE_SIZE,
     offset,
@@ -182,7 +264,28 @@ export default function CanvasList() {
   }
   function clearFilters() {
     setText("");
-    navigate({ to: "/", search: {} });
+    // Stay in the current scope when clearing attribute/search filters.
+    navigate({ to: "/", search: archivedView ? { scope: "archived" } : {} });
+  }
+  function setScope(next: "active" | "archived") {
+    navigate({
+      to: "/",
+      search: (prev) => ({
+        ...prev,
+        scope: next === "archived" ? "archived" : undefined,
+        // Attribute chips are active-only — drop them when entering the archive.
+        ...(next === "archived"
+          ? {
+              shared: undefined,
+              protected: undefined,
+              listed: undefined,
+              template: undefined,
+              undeployed: undefined,
+            }
+          : {}),
+        page: 1,
+      }),
+    });
   }
   function goToPage(next: number) {
     navigate({ to: "/", search: (prev) => ({ ...prev, page: next }) });
@@ -201,7 +304,8 @@ export default function CanvasList() {
   // onboarding / all-archived pointer, with no filter controls over it. Keyed on
   // an empty result with no active filter (and a zero total), so a populated page
   // always shows its rows.
-  const pristineEmpty = Boolean(data) && items.length === 0 && total === 0 && !filtering;
+  const pristineEmpty =
+    !archivedView && Boolean(data) && items.length === 0 && total === 0 && !filtering;
 
   return (
     <div className="space-y-6">
@@ -232,6 +336,7 @@ export default function CanvasList() {
                 className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
               />
             </div>
+            <ScopeToggle value={archivedView ? "archived" : "active"} onChange={setScope} />
             <FilterSelect
               label="Sort your canvases"
               options={CANVASES_SORT_OPTIONS}
@@ -240,26 +345,29 @@ export default function CanvasList() {
             />
           </div>
 
-          <FilterBar>
-            {STATE_CHIPS.map((chip) => (
-              <FilterChip
-                key={chip.key}
-                active={search[chip.key] === true}
-                onClick={() => toggle(chip.key)}
-              >
-                {chip.label}
-              </FilterChip>
-            ))}
-            {filtering && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-              >
-                Clear all
-              </button>
-            )}
-          </FilterBar>
+          {/* Attribute filters apply to the live set only — hidden in the archive. */}
+          {!archivedView && (
+            <FilterBar>
+              {STATE_CHIPS.map((chip) => (
+                <FilterChip
+                  key={chip.key}
+                  active={search[chip.key] === true}
+                  onClick={() => toggle(chip.key)}
+                >
+                  {chip.label}
+                </FilterChip>
+              ))}
+              {filtering && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+                >
+                  Clear all
+                </button>
+              )}
+            </FilterBar>
+          )}
 
           {isLoading && <ListSkeleton />}
 
@@ -277,7 +385,9 @@ export default function CanvasList() {
 
           {data && items.length === 0 && filtering && (
             <EmptyState
-              title="No canvases match these filters"
+              title={
+                archivedView ? "No archived canvases match" : "No canvases match these filters"
+              }
               description="Try removing a filter, or clear them all to see everything."
               action={
                 <Button variant="secondary" size="sm" onClick={clearFilters}>
@@ -287,12 +397,23 @@ export default function CanvasList() {
             />
           )}
 
+          {archivedView && data && items.length === 0 && !filtering && (
+            <EmptyState
+              title="No archived canvases"
+              description="When you archive a canvas it lands here — offline but kept (files, settings, and its reserved URL) until you restore or delete it."
+            />
+          )}
+
           {items.length > 0 && (
             <>
               <ul className="space-y-2">
-                {items.map((c) => (
-                  <ActiveRow key={c.id} canvas={c} />
-                ))}
+                {items.map((c) =>
+                  archivedView ? (
+                    <ArchivedRow key={c.id} canvas={c} />
+                  ) : (
+                    <ActiveRow key={c.id} canvas={c} />
+                  ),
+                )}
               </ul>
 
               <div className="flex items-center justify-between gap-3 pt-1">

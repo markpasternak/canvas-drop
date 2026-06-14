@@ -149,6 +149,9 @@ const ownerListQuerySchema = z.object({
   listed: boolFlag,
   template: boolFlag,
   undeployed: boolFlag,
+  // Lifecycle scope: the active set (default) or the archived set (Your-canvases
+  // Active/Archived toggle). A junk value falls back to active.
+  scope: z.enum(["active", "archived"]).catch("active"),
   sort: z.enum(["updated", "created", "title"]).catch("updated"),
   limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
   offset: z.coerce.number().int().catch(0),
@@ -273,11 +276,12 @@ export function managementRoutes(deps: ManagementDeps) {
     });
   }
 
-  // List the caller's own ACTIVE canvases (excludes archived + deleted), each
-  // enriched with its last-deploy summary. Server-side filter/search/sort +
-  // offset pagination (plan 005), mirroring the gallery: a malformed query falls
-  // back to all-defaults so the list never 400s, and every param ANDs onto the
-  // owner-scope base in the repo — it can only shrink the caller's own set.
+  // List the caller's own canvases — active by default, or the archived set when
+  // `scope=archived` (the Your-canvases Active/Archived toggle, replacing the old
+  // standalone /archived view). Server-side filter/search/sort + offset pagination
+  // (plan 005): a malformed query falls back to all-defaults so the list never 400s,
+  // and every param ANDs onto the owner-scope base in the repo — it can only shrink
+  // the caller's own set.
   app.get("/", async (c) => {
     const parsed = ownerListQuerySchema.safeParse(c.req.query());
     const data = parsed.success
@@ -289,6 +293,7 @@ export function managementRoutes(deps: ManagementDeps) {
           listed: false,
           template: false,
           undeployed: false,
+          scope: "active" as const,
           sort: "updated" as const,
           limit: CANVASES_PAGE_SIZE,
           offset: 0,
@@ -304,6 +309,7 @@ export function managementRoutes(deps: ManagementDeps) {
       listed: data.listed,
       template: data.template,
       neverDeployed: data.undeployed,
+      archived: data.scope === "archived",
       sort: data.sort,
       limit,
       offset,
