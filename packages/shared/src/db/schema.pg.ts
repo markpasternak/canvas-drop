@@ -84,6 +84,10 @@ export const canvases = pgTable(
     sharedAt: c.epochMs("shared_at"),
     sharedExpiresAt: c.epochMs("shared_expires_at"),
     galleryListed: c.bool("gallery_listed").notNull().default(false),
+    // Opt-in "others may clone this as a template" flag. Invariant: only ever true
+    // when galleryListed is true — every path that clears galleryListed also clears
+    // this in the same write (plan 002 KTD6).
+    galleryTemplatable: c.bool("gallery_templatable").notNull().default(false),
     gallerySummary: c.text("gallery_summary"),
     galleryTags: c.json("gallery_tags"),
     galleryPublishedAt: c.epochMs("gallery_published_at"),
@@ -113,6 +117,9 @@ export const canvases = pgTable(
     // Pointer (not an FK) to the current ready version — avoids a circular FK with
     // versions.canvas_id; nullable until the first deploy lands.
     currentVersionId: c.text("current_version_id"),
+    // Lineage: the canvas this one was cloned from (plan 002). Pointer, not an FK —
+    // the source may be archived/purged independently; null for non-clones.
+    clonedFromCanvasId: c.text("cloned_from_canvas_id"),
     createdAt: c.epochMs("created_at").notNull(),
     updatedAt: c.epochMs("updated_at").notNull(),
     deletedAt: c.epochMs("deleted_at"),

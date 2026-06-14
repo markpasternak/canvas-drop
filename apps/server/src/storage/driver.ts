@@ -20,6 +20,16 @@ export interface StorageDriver {
    * are ignored, matching {@link delete}.
    */
   deleteMany(keys: string[]): Promise<void>;
+  /**
+   * Copy the object at `srcKey` to `dstKey`, creating intermediate structure as
+   * needed and overwriting any existing object at `dstKey`. Throws a
+   * {@link StorageError} with code `not_found` when `srcKey` does not exist — a
+   * manifest referencing an absent blob is corruption, not something to skip.
+   * S3 does this server-side (CopyObject, no download); local copies the file;
+   * mem copies the bytes. Used by the canvas clone path to duplicate blobs into a
+   * new per-canvas namespace (plan 002).
+   */
+  copy(srcKey: string, dstKey: string): Promise<void>;
   /** Whether an object exists at `key`. */
   exists(key: string): Promise<boolean>;
   /** Keys beginning with `prefix`. */

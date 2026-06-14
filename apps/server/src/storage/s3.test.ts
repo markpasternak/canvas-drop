@@ -18,6 +18,18 @@ function fakeS3Client(): S3Client {
       case "PutObjectCommand":
         store.set(key as string, cmd.input.Body as Uint8Array);
         return {};
+      case "CopyObjectCommand": {
+        // CopySource is `bucket/enc/seg/.../key`; drop the bucket, decode each segment.
+        const parts = (cmd.input.CopySource as string).split("/");
+        parts.shift();
+        const srcKey = parts.map(decodeURIComponent).join("/");
+        const bytes = store.get(srcKey);
+        if (!bytes) {
+          throw Object.assign(new Error("NoSuchKey"), { name: "NoSuchKey" });
+        }
+        store.set(key as string, bytes);
+        return {};
+      }
       case "GetObjectCommand": {
         const bytes = store.get(key as string);
         if (!bytes) {
@@ -52,6 +64,22 @@ function fakeS3Client(): S3Client {
 
 describe("S3Driver (in-memory fake)", () => {
   storageContract(() => new S3Driver(fakeS3Client(), "test-bucket"));
+});
+
+describe("S3Driver copy error mapping", () => {
+  it("maps a NoSuchCopySource error to a typed StorageError not_found", async () => {
+    const client: S3Client = {
+      send: async (cmd: { constructor: { name: string } }) => {
+        if (cmd.constructor.name === "CopyObjectCommand") {
+          throw Object.assign(new Error("NoSuchCopySource"), { name: "NoSuchCopySource" });
+        }
+        return {};
+      },
+    } as unknown as S3Client;
+    const driver = new S3Driver(client, "test-bucket");
+    await expect(driver.copy("missing", "dst")).rejects.toBeInstanceOf(StorageError);
+    await expect(driver.copy("missing", "dst")).rejects.toMatchObject({ code: "not_found" });
+  });
 });
 
 describe("S3Driver deleteMany error handling", () => {

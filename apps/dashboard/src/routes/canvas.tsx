@@ -1,4 +1,5 @@
 import { Link, Outlet, useParams } from "@tanstack/react-router";
+import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -71,6 +72,13 @@ export default function CanvasLayout() {
         url={canvas?.url}
         isLoading={isLoading}
         actions={actions}
+        badge={
+          canvas?.galleryTemplatable ? (
+            <Badge tone="accent">Template</Badge>
+          ) : canvas?.galleryListed ? (
+            <Badge tone="neutral">Listed</Badge>
+          ) : null
+        }
       />
 
       {/* Every tab's content runs the full width of the shell (consistent across tabs). */}

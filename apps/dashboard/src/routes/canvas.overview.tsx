@@ -1,6 +1,9 @@
 import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { useState } from "react";
 import { StatusBadge } from "../components/Badge.js";
+import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { CloneDialog } from "../components/CloneDialog.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, MetaGrid, MetaItem, Panel } from "../components/Surface.js";
 import type { RootEntry } from "../lib/api.js";
@@ -75,6 +78,7 @@ export default function Overview() {
   const { live } = useSearch({ strict: false }) as { live?: boolean };
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: versions } = useVersions(id);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const current = versions?.find((v) => v.current);
   // Total disk footprint = every kept (ready) version's bytes, not just the live one.
   const totalBytes = versions?.reduce((sum, v) => sum + v.totalBytes, 0) ?? 0;
@@ -129,8 +133,32 @@ export default function Overview() {
               "Private (owner only)"
             )}
             {canvas.hasPassword && <span className="text-muted">, password-protected</span>}
-            {canvas.galleryListed && <span className="text-muted">, in gallery</span>}
           </MetaItem>
+          <MetaItem label="Gallery">
+            {canvas.galleryTemplatable ? (
+              <span>
+                Listed <span className="text-muted">· template</span>
+              </span>
+            ) : canvas.galleryListed ? (
+              "Listed"
+            ) : (
+              <span className="text-muted">
+                Not listed
+                {!canvas.shared
+                  ? " — share it first"
+                  : canvas.currentVersionId === null
+                    ? " — publish it first"
+                    : canvas.hasPassword
+                      ? " — remove the password"
+                      : ""}
+              </span>
+            )}
+          </MetaItem>
+          {canvas.clonedFromCanvasId && (
+            <MetaItem label="Origin">
+              <span className="text-muted">Cloned from another canvas</span>
+            </MetaItem>
+          )}
           <MetaItem label="Current deploy">
             {current ? (
               <span className="flex flex-wrap gap-x-3 gap-y-1" title={fullTime(current.createdAt)}>
@@ -185,7 +213,7 @@ export default function Overview() {
         </MetaGrid>
       </Panel>
 
-      <div className="flex gap-2">
+      <div className="flex items-center gap-3">
         <Link
           to="/canvases/$id/versions"
           params={{ id }}
@@ -193,7 +221,18 @@ export default function Overview() {
         >
           View deploy history
         </Link>
+        <Button size="sm" variant="secondary" onClick={() => setCloneOpen(true)}>
+          Make a copy
+        </Button>
       </div>
+
+      <CloneDialog
+        open={cloneOpen}
+        onClose={() => setCloneOpen(false)}
+        sourceId={canvas.id}
+        sourceTitle={canvas.title}
+        keepsPassword={canvas.hasPassword}
+      />
     </TabContentFrame>
   );
 }

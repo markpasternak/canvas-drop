@@ -48,6 +48,30 @@ export function storageContract(makeDriver: () => StorageDriver | Promise<Storag
     expect(await d.exists("k/3")).toBe(true);
   });
 
+  it("copy duplicates bytes into a nested key and leaves the source in place", async () => {
+    const d = await makeDriver();
+    await d.put("src/a.txt", new TextEncoder().encode("payload"));
+    await d.copy("src/a.txt", "nested/dst/b.txt");
+    const got = await d.get("nested/dst/b.txt");
+    expect(Buffer.from(got as Uint8Array).toString()).toBe("payload");
+    // copy, not move — the source still exists
+    expect(await d.exists("src/a.txt")).toBe(true);
+  });
+
+  it("copy overwrites an existing destination", async () => {
+    const d = await makeDriver();
+    await d.put("s", new Uint8Array([1]));
+    await d.put("d", new Uint8Array([9, 9]));
+    await d.copy("s", "d");
+    expect(Array.from((await d.get("d")) as Uint8Array)).toEqual([1]);
+  });
+
+  it("copy of a missing source rejects and creates no destination object", async () => {
+    const d = await makeDriver();
+    await expect(d.copy("never-existed", "dst")).rejects.toThrow();
+    expect(await d.exists("dst")).toBe(false);
+  });
+
   it("lists keys by prefix", async () => {
     const d = await makeDriver();
     await d.put("p/1.txt", new Uint8Array([1]));

@@ -11,6 +11,7 @@ import { authRoutes } from "./auth/routes.js";
 import type { SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
 import { canvasAccess } from "./canvas/authorization.js";
+import { cloneService } from "./canvas/clone-service.js";
 import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
@@ -298,6 +299,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       config: deps.config,
       canvases: deps.canvases,
       versions: deps.versions,
+      clone: cloneService({
+        canvases: deps.canvases,
+        versions: deps.versions,
+        drafts: deps.drafts,
+        storage: deps.storage,
+      }),
       audit: deps.audit,
       engine: deps.engine,
       usage: usageEventsRepository(deps.db),

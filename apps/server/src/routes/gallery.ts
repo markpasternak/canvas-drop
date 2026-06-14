@@ -34,7 +34,9 @@ export interface GalleryItemDto {
   title: string;
   summary: string | null;
   tags: string[];
-  hasPassword: boolean;
+  /** Whether a non-owner may clone this canvas as a template (plan 002). Listed
+   *  canvases are always unprotected now, so `hasPassword` is gone from this DTO. */
+  templatable: boolean;
   publishedAt: number | null;
   owner: { name: string; avatarUrl: string | null };
 }
@@ -64,7 +66,7 @@ function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
     title: cv.title,
     summary: cv.gallerySummary,
     tags,
-    hasPassword: cv.passwordHash !== null,
+    templatable: cv.galleryTemplatable,
     publishedAt: cv.galleryPublishedAt,
     owner: { name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
   };

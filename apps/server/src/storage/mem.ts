@@ -1,4 +1,4 @@
-import type { StorageDriver } from "./driver.js";
+import { type StorageDriver, StorageError } from "./driver.js";
 
 /**
  * In-memory StorageDriver for tests. `failOnPut` makes the Nth `put` throw — used
@@ -13,6 +13,15 @@ export function memStorage(failOnPut?: number): StorageDriver {
       puts++;
       if (failOnPut && puts === failOnPut) throw new Error("storage down");
       store.set(key, bytes);
+    },
+    async copy(srcKey, dstKey) {
+      const bytes = store.get(srcKey);
+      if (bytes === undefined) {
+        throw new StorageError(`source key does not exist: ${srcKey}`, "not_found");
+      }
+      // Store an independent copy, matching local (copyFile) and S3 (CopyObject)
+      // semantics — never alias the source buffer under the destination key.
+      store.set(dstKey, bytes.slice());
     },
     async get(key) {
       return store.get(key) ?? null;

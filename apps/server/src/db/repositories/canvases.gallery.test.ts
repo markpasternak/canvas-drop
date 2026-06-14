@@ -82,19 +82,19 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(items.map((i) => i.canvas.id).sort()).toEqual([future, noExpiry].sort());
   });
 
-  it("includes a password-gated canvas (the gallery lists links, the gate enforces on open)", async () => {
+  it("EXCLUDES a password-protected canvas (plan 002: protected canvases are not listable)", async () => {
+    // Reverses the M8 decision — a password gate now makes a canvas invisible in
+    // the gallery (the `password_hash IS NULL` predicate clause), so a protected
+    // canvas is never handed out as a gallery link.
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
     const id = await seedListed(client, owner.id);
     await repo.setPassword(id, "argon2-hash");
 
-    const { items } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
-    expect(items).toHaveLength(1);
-    const [item] = items;
-    if (!item) throw new Error("expected a gallery item");
-    expect(item.canvas.id).toBe(id);
-    expect(item.canvas.passwordHash).toBe("argon2-hash");
+    const { items, total } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
+    expect(items).toHaveLength(0);
+    expect(total).toBe(0);
   });
 
   it("surfaces the correct owner identity across owners (cross-owner join)", async () => {
@@ -212,5 +212,59 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     });
     expect(total).toBe(1);
     expect(items.map((i) => i.canvas.id)).toEqual([match]);
+  });
+});
+
+describe.each(DIALECTS)("canvasesRepository.findCloneableTemplate [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const NOW = 1_000_000;
+
+  it("returns the row when listed AND templatable (the non-owner clone gate)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const id = await seedListed(client, owner.id, { galleryTemplatable: true });
+    const repo = canvasesRepository(client);
+
+    const row = await repo.findCloneableTemplate(id, NOW);
+    expect(row?.id).toBe(id);
+  });
+
+  it("returns null when listed but NOT templatable", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const id = await seedListed(client, owner.id, { galleryTemplatable: false });
+    expect(await canvasesRepository(client).findCloneableTemplate(id, NOW)).toBeNull();
+  });
+
+  it("returns null for a templatable canvas that is not shared, unpublished, or protected", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+
+    // templatable + listed but unshared → predicate (shared=true) excludes it.
+    const unshared = await seedListed(client, owner.id, {
+      galleryTemplatable: true,
+      shared: false,
+    });
+    expect(await repo.findCloneableTemplate(unshared, NOW)).toBeNull();
+
+    // templatable + listed but password-protected → predicate (password_hash IS NULL) excludes it.
+    const protectedId = await seedListed(client, owner.id, { galleryTemplatable: true });
+    await repo.setPassword(protectedId, "argon2-hash");
+    expect(await repo.findCloneableTemplate(protectedId, NOW)).toBeNull();
+  });
+
+  it("returns null for a never-published (undeployed) canvas even if flags were set", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const id = await seedUndeployedCanvas(client, owner.id);
+    // Force the flags on directly (an undeployed canvas can't be listed via the route).
+    await repo.updateSettings(id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    expect(await repo.findCloneableTemplate(id, NOW)).toBeNull();
   });
 });
