@@ -72,6 +72,8 @@ export interface BuildAppDeps {
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
+  /** Env vars explicitly set (from `setEnvVars()` at boot) — admin config source labels. */
+  envPresent?: Set<string>;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
   aiProvider?: ModelProvider;
   /** Shared realtime hub (constructed in index.ts; used by the WS route + revoke hooks). */
@@ -108,6 +110,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const settingsSvc = adminSettingsService({
     settings: settingsRepository(deps.db),
     config: deps.config,
+    // Which env vars were set — for the admin Configuration view's source labels.
+    envPresent: deps.envPresent,
   });
 
   // One shared in-process rate-limit store (§9.7, M7) — used by the broad
@@ -263,7 +267,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
       aiUsage: aiUsageRepository(deps.db),
-      aiProvider: deps.aiProvider ?? anthropicProvider(deps.config),
+      // Tests inject a ready provider; production builds one per request from the
+      // EFFECTIVE key (admin DB override ?? env) via the factory + settings service.
+      aiProvider: deps.aiProvider,
+      makeAiProvider: (apiKey) => anthropicProvider({ apiKey, baseUrl: deps.config.ai.baseUrl }),
+      settings: settingsSvc,
       realtime,
     }),
   );
@@ -293,6 +301,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       files: filesRepository(deps.db),
       aiUsage: aiUsageRepository(deps.db),
       hub: deps.hub,
+      // Effective operator globals (admin DB override ?? env) for the capabilities view.
+      aiEnabled: () => settingsSvc.aiEnabled(),
+      realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
     }),
   );
 

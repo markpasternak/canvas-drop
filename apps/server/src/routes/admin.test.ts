@@ -247,4 +247,64 @@ describe("admin routes", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("GET /config returns every setting; secrets never carry a raw value", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const body = (await (await app.request("/api/admin/config")).json()) as {
+      fields: Array<{ key: string; secret: boolean; editable: boolean; value?: string; set?: boolean }>;
+    };
+    const key = body.fields.find((f) => f.key === "ai.apiKey");
+    expect(key?.secret).toBe(true);
+    expect(key).not.toHaveProperty("value"); // a secret must never serialize its value
+    // The model allowlist is a non-secret editable field with a value.
+    const models = body.fields.find((f) => f.key === "ai.models");
+    expect(models?.editable).toBe(true);
+    expect(typeof models?.value).toBe("string");
+  });
+
+  it("PUT/DELETE /config sets then clears an editable override; read-only is rejected", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const fieldFor = async (k: string) => {
+      const r = (await (await app.request("/api/admin/config")).json()) as {
+        fields: Array<{ key: string; source: string; overridden: boolean; value?: string }>;
+      };
+      return r.fields.find((f) => f.key === k);
+    };
+
+    const set = await app.request("/api/admin/config/ai.models", put({ value: ["m1", "m2"] }));
+    expect(set.status).toBe(200);
+    const after = await fieldFor("ai.models");
+    expect(after?.source).toBe("database");
+    expect(after?.value).toBe("m1, m2");
+
+    const cleared = await app.request("/api/admin/config/ai.models", { method: "DELETE" });
+    expect(cleared.status).toBe(200);
+    expect((await fieldFor("ai.models"))?.overridden).toBe(false);
+
+    // A read-only field cannot be overridden via the API.
+    expect((await app.request("/api/admin/config/auth.mode", put({ value: "oidc" }))).status).toBe(400);
+    // An invalid value (non-positive quota) is rejected.
+    expect(
+      (await app.request("/api/admin/config/quota.ai.user.daily.usd", put({ value: 0 }))).status,
+    ).toBe(400);
+  });
+
+  it("setting the AI provider key never echoes it back; status shows source+last4 only", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const res = await app.request(
+      "/api/admin/config/ai.apiKey",
+      put({ value: "sk-ant-secret-WXYZ" }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain("sk-ant-secret-WXYZ");
+    const r = (await (await app.request("/api/admin/config")).json()) as {
+      fields: Array<{ key: string; set?: boolean; last4?: string; source: string }>;
+    };
+    const key = r.fields.find((f) => f.key === "ai.apiKey");
+    expect(key).toMatchObject({ set: true, last4: "WXYZ", source: "database" });
+    expect(JSON.stringify(r)).not.toContain("sk-ant-secret-WXYZ");
+  });
 });

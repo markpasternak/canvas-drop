@@ -25,6 +25,17 @@ export function settingsRepository(client: DbClient) {
         await db.insert(t).values({ key, value });
       }
     },
+
+    /** Remove a stored override so the value falls back to env/default. */
+    async delete(key: string): Promise<void> {
+      await db.delete(t).where(eq(t.key, key));
+    },
+
+    /** All stored override keys (config view: which settings have a DB override). */
+    async keys(): Promise<string[]> {
+      const rows = await db.select({ key: t.key }).from(t);
+      return rows.map((r: { key: string }) => r.key);
+    },
   };
 }
 

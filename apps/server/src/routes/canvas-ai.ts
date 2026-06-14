@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
+import type { AdminSettingsService } from "../admin/settings-service.js";
 import { costUsd, isPricedModel } from "../ai/pricing.js";
 import type { ModelProvider } from "../ai/provider.js";
 import { checkQuota, dayStartUtc, monthStartUtc } from "../ai/quota.js";
@@ -9,6 +10,12 @@ import { requireCapability } from "../canvas/capability-guard.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+
+/** The slice of the settings service the AI route reads (DB-effective config). */
+export type AiSettings = Pick<
+  AdminSettingsService,
+  "effectiveModels" | "effectiveApiKey" | "aiEnabled"
+>;
 
 /** AI output limits (§6.6). Default modest; hard cap so one call can't run away. */
 export const AI_DEFAULT_MAX_TOKENS = 1024;
@@ -19,8 +26,19 @@ export const USAGE_SETTLE_TIMEOUT_MS = 5_000;
 export interface CanvasAiDeps {
   config: Config;
   aiUsage: AiUsageRepository;
-  /** The model provider seam (default Anthropic; tests inject a fake). */
-  provider: ModelProvider;
+  /**
+   * A ready provider — tests inject a fake. Production omits this and sets
+   * {@link makeProvider}, so the provider is built with the *effective* key
+   * (DB override ?? env) resolved per request.
+   */
+  provider?: ModelProvider;
+  /** Builds a provider from the effective key (production: Anthropic). */
+  makeProvider?: (apiKey: string) => ModelProvider;
+  /**
+   * Unified settings: the effective model allowlist + provider key + aiEnabled
+   * (DB overrides env). Omitted in unit tests, which fall back to `config.ai.*`.
+   */
+  settings?: AiSettings;
 }
 
 const chatSchema = z.object({
@@ -50,7 +68,17 @@ const chatSchema = z.object({
  */
 export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  app.use("*", requireCapability("ai", deps.config));
+  const settings = deps.settings;
+  // The AI capability is gated on the EFFECTIVE provider key (DB override ?? env),
+  // resolved per request so an admin setting/rotating the key takes effect live.
+  app.use(
+    "*",
+    requireCapability(
+      "ai",
+      deps.config,
+      settings ? { aiEnabled: () => settings.aiEnabled() } : undefined,
+    ),
+  );
 
   app.post("/chat", async (c) => {
     const parsed = chatSchema.safeParse(await c.req.json().catch(() => null));
@@ -58,8 +86,12 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     const { model, messages, system } = parsed.data;
     const maxTokens = Math.min(parsed.data.maxTokens ?? AI_DEFAULT_MAX_TOKENS, AI_MAX_TOKENS);
 
-    // Admin allowlist (§6.6.4) — server config is authoritative; out-of-list rejected.
-    if (!deps.config.ai.models.includes(model)) {
+    // Admin allowlist (§6.6.4) — the EFFECTIVE allowlist (admin DB override ?? env)
+    // is authoritative; out-of-list rejected.
+    const allowedModels = deps.settings
+      ? await deps.settings.effectiveModels()
+      : deps.config.ai.models;
+    if (!allowedModels.includes(model)) {
       return c.json({ code: "MODEL_NOT_ALLOWED" }, 400);
     }
     // Fail closed on an allowlisted-but-unpriced model: cost would be recorded as
@@ -88,7 +120,19 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     });
     if (!quota.ok) return c.json({ code: "QUOTA_EXCEEDED", scope: quota.scope }, 429);
 
-    const chat = deps.provider.streamChat({
+    // Build the provider with the EFFECTIVE key (DB override ?? env), resolved now.
+    // The capability gate above already guaranteed a key exists; guard anyway.
+    let provider = deps.provider;
+    if (!provider) {
+      const apiKey = deps.settings ? await deps.settings.effectiveApiKey() : deps.config.ai.apiKey;
+      if (!apiKey || !deps.makeProvider) {
+        c.get("log")?.error("ai: no effective provider key after capability gate");
+        return c.json({ code: "CAPABILITY_DISABLED", capability: "ai" }, 403);
+      }
+      provider = deps.makeProvider(apiKey);
+    }
+
+    const chat = provider.streamChat({
       model,
       system,
       messages,

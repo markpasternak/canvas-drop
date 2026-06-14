@@ -41,7 +41,7 @@ describe("ai provider seam", () => {
     // No CANVAS_DROP_AI_API_KEY set: capability guard would block at the route,
     // but the factory itself must not throw at construction (no eager request).
     const config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
-    const provider = anthropicProvider(config);
+    const provider = anthropicProvider({ apiKey: config.ai.apiKey, baseUrl: config.ai.baseUrl });
     expect(typeof provider.streamChat).toBe("function");
   });
 });

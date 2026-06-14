@@ -414,6 +414,26 @@ export interface AdminQuota {
   override: number | null;
 }
 
+/** One row of the admin Configuration view. Secrets never carry a raw `value`. */
+export interface AdminConfigField {
+  key: string;
+  env: string;
+  group: string;
+  label: string;
+  help?: string;
+  type: "string" | "number" | "boolean" | "enum" | "csv";
+  enumValues?: string[];
+  secret: boolean;
+  editable: boolean;
+  source: "database" | "environment" | "default";
+  overridden: boolean;
+  /** Non-secret effective value (display string). Absent for secrets. */
+  value?: string;
+  /** Secret-only: configured? + last 4 chars. Never the value. */
+  set?: boolean;
+  last4?: string;
+}
+
 export const api = {
   me: () => request<Me>("/api/me"),
 
@@ -601,5 +621,20 @@ export const api = {
         ...jsonBody({ quotas }),
         method: "PUT",
       }),
+
+    /** The unified Configuration view: every setting with value/source/secret-mask. */
+    getConfig: () =>
+      request<{ fields: AdminConfigField[] }>("/api/admin/config").then((r) => r.fields),
+
+    /** Set a DB override for an editable setting (server validates + coerces). */
+    setConfig: (key: string, value: string | number | boolean | string[]) =>
+      request<{ ok: true }>(`/api/admin/config/${encodeURIComponent(key)}`, {
+        ...jsonBody({ value }),
+        method: "PUT",
+      }),
+
+    /** Clear a setting's DB override (revert to env/default). */
+    clearConfig: (key: string) =>
+      request<{ ok: true }>(`/api/admin/config/${encodeURIComponent(key)}`, { method: "DELETE" }),
   },
 };

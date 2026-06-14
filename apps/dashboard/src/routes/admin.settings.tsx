@@ -1,162 +1,215 @@
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
-import { Field, TextareaField } from "../components/Field.js";
 import { PageHeader, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
-import { type AdminQuota, ApiError } from "../lib/api.js";
-import { useAdminSetModels, useAdminSetQuotas } from "../lib/mutations.js";
-import { useAdminModels, useAdminQuotas } from "../lib/queries.js";
+import { type AdminConfigField, ApiError } from "../lib/api.js";
+import { useAdminSetConfig } from "../lib/mutations.js";
+import { useAdminConfig } from "../lib/queries.js";
 
-/** The editable allowlist form. Mounts only AFTER the data loads, so its
- *  `useState` initializer captures the server value once — an effect that re-seeds
- *  on every query settle would clobber in-progress edits (dashboard-spa: seed on
- *  first data, not on the query object). */
-function ModelAllowlistForm({ initial }: { initial: string[] }) {
-  const [text, setText] = useState(initial.join(", "));
-  const setModels = useAdminSetModels();
+/** Source badge: where a setting's effective value comes from. */
+function SourceBadge({ source }: { source: AdminConfigField["source"] }) {
+  const tone = source === "database" ? "success" : source === "environment" ? "neutral" : "warning";
+  const label =
+    source === "database" ? "Database" : source === "environment" ? "Environment" : "Default";
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+/** The display string for a setting's current value (secret-aware, never raw). */
+function valueLabel(f: AdminConfigField): string {
+  if (f.secret) {
+    if (!f.set) return "Not set";
+    return f.last4 ? `Configured · …${f.last4}` : "Configured";
+  }
+  return f.value && f.value !== "" ? f.value : "—";
+}
+
+/** One editable setting: an input pre-filled with the current value + Save/Clear. */
+function EditableRow({ field }: { field: AdminConfigField }) {
+  const setConfig = useAdminSetConfig();
   const toast = useToast();
+  // Secrets are write-only: the input starts empty (we never receive the value).
+  const [draft, setDraft] = useState(field.secret ? "" : (field.value ?? ""));
+
+  async function save() {
+    const raw = draft.trim();
+    if (field.secret && raw === "") {
+      toast("Enter a value, or use Clear to remove it", "error");
+      return;
+    }
+    // Coerce to the field's wire type; the server re-validates against the registry.
+    let value: string | number | string[] = raw;
+    if (field.type === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) {
+        toast(`${field.label} must be a number greater than 0`, "error");
+        return;
+      }
+      value = n;
+    } else if (field.type === "csv") {
+      const list = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (list.length === 0) {
+        toast(`${field.label} needs at least one value`, "error");
+        return;
+      }
+      value = list;
+    }
+    try {
+      await setConfig.mutateAsync({ key: field.key, value });
+      if (field.secret) setDraft("");
+      toast(`${field.label} saved`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+    }
+  }
+
+  async function clear() {
+    try {
+      await setConfig.mutateAsync({ key: field.key, value: null });
+      setDraft(field.secret ? "" : "");
+      toast(
+        `${field.label} reset to ${field.source === "database" ? "environment/default" : "default"}`,
+      );
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't clear", "error");
+    }
+  }
+
   return (
-    <>
-      <TextareaField
-        label="Allowed models"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={3}
-        mono
-      />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          loading={setModels.isPending}
-          onClick={async () => {
-            const list = text
-              .split(",")
-              .map((m) => m.trim())
-              .filter(Boolean);
-            if (list.length === 0) {
-              toast("At least one model is required", "error");
-              return;
-            }
-            try {
-              await setModels.mutateAsync(list);
-              toast("Model allowlist saved");
-            } catch (err) {
-              toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-            }
-          }}
-        >
-          Save allowlist
-        </Button>
+    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-fg">{field.label}</span>
+          <SourceBadge source={field.source} />
+        </div>
+        {field.help ? <p className="text-xs text-muted">{field.help}</p> : null}
+        <p className="font-mono text-[11px] text-muted">
+          {field.env !== "—" ? field.env : field.key} · now: {valueLabel(field)}
+        </p>
       </div>
-    </>
+      <div className="flex items-center gap-2">
+        <input
+          type={field.secret ? "password" : "text"}
+          aria-label={field.label}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
+          autoComplete={field.secret ? "new-password" : "off"}
+          className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+        />
+        <Button size="sm" loading={setConfig.isPending} onClick={save}>
+          Save
+        </Button>
+        {field.overridden ? (
+          <Button size="sm" variant="ghost" onClick={clear}>
+            Clear
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
-/** Model allowlist editor (§6.10.3) — comma-separated plain model IDs. */
-function ModelAllowlist() {
-  const models = useAdminModels();
+/** One read-only setting: shown for transparency, set via the environment only. */
+function ReadonlyRow({ field }: { field: AdminConfigField }) {
   return (
-    <Panel className="space-y-3 p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-fg">AI model allowlist</h2>
-        <p className="text-xs text-muted">
-          Models canvases may call once the AI primitive ships. Comma-separated IDs.
+    <div className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-fg">{field.label}</span>
+          <SourceBadge source={field.source} />
+        </div>
+        <p className="font-mono text-[11px] text-muted">
+          {field.env !== "—" ? field.env : field.key}
         </p>
       </div>
-      {models.data ? (
-        <ModelAllowlistForm initial={models.data.models} />
-      ) : (
+      <span
+        className="shrink-0 max-w-[55%] truncate font-mono text-xs text-muted"
+        title={valueLabel(field)}
+      >
+        {valueLabel(field)}
+      </span>
+    </div>
+  );
+}
+
+const GROUP_ORDER = ["AI", "Limits", "Core", "Access", "Auth", "Database", "Storage", "Logging"];
+
+/** Unified Configuration view: every setting with value/source, a safe editable subset. */
+function Configuration() {
+  const config = useAdminConfig();
+  if (config.isError) {
+    return (
+      <Panel className="p-4">
+        <p className="text-sm text-danger">Couldn't load configuration.</p>
+      </Panel>
+    );
+  }
+  if (!config.data) {
+    return (
+      <Panel className="p-4">
         <p className="text-sm text-muted">Loading…</p>
-      )}
-    </Panel>
+      </Panel>
+    );
+  }
+  const byGroup = new Map<string, AdminConfigField[]>();
+  for (const f of config.data) {
+    const list = byGroup.get(f.group) ?? [];
+    list.push(f);
+    byGroup.set(f.group, list);
+  }
+  const groups = [...byGroup.keys()].sort(
+    (a, b) => (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99),
   );
-}
-
-const QUOTA_LABELS: Record<string, string> = {
-  "kv.keys.shared": "KV keys (shared)",
-  "kv.keys.user": "KV keys (per user)",
-  "files.bytes.file": "Max file size (bytes)",
-  "files.bytes.canvas": "Files per canvas (bytes)",
-  "ai.user.daily.usd": "AI $/user/day",
-  "ai.canvas.monthly.usd": "AI $/canvas/month",
-};
-
-/** Global quota defaults editor (§6.10.4). */
-function QuotaDefaults() {
-  const quotas = useAdminQuotas();
-  const setQuotas = useAdminSetQuotas();
-  const toast = useToast();
-  const [edits, setEdits] = useState<Record<string, string>>({});
-
-  const valueFor = (q: AdminQuota) => edits[q.key] ?? String(q.value);
 
   return (
-    <Panel className="space-y-3 p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-fg">Global quota defaults</h2>
-        <p className="text-xs text-muted">
-          Platform-wide defaults. Per-canvas overrides arrive later.
-        </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {quotas.data?.map((q) => (
-          <Field
-            key={q.key}
-            label={QUOTA_LABELS[q.key] ?? q.key}
-            hint={q.override === null ? "default" : "overridden"}
-            inputMode="numeric"
-            value={valueFor(q)}
-            onChange={(e) => setEdits((prev) => ({ ...prev, [q.key]: e.target.value }))}
-          />
-        ))}
-      </div>
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          loading={setQuotas.isPending}
-          disabled={Object.keys(edits).length === 0}
-          onClick={async () => {
-            const patch: Record<string, number> = {};
-            for (const [key, raw] of Object.entries(edits)) {
-              const n = Number(raw);
-              if (!Number.isFinite(n) || n <= 0) {
-                toast(`${QUOTA_LABELS[key] ?? key} must be a positive number`, "error");
-                return;
-              }
-              patch[key] = n;
-            }
-            try {
-              await setQuotas.mutateAsync(patch);
-              setEdits({});
-              toast("Quota defaults saved");
-            } catch (err) {
-              toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
-            }
-          }}
-        >
-          Save quotas
-        </Button>
-      </div>
-    </Panel>
+    <div className="space-y-5">
+      {groups.map((group) => (
+        <Panel key={group} className="p-4">
+          <h2 className="mb-1 text-sm font-semibold text-fg">{group}</h2>
+          <p className="mb-2 text-xs text-muted">
+            <span className="font-medium">Database</span> overrides{" "}
+            <span className="font-medium">Environment</span> overrides the built-in default.
+            Editable rows can be overridden here; the rest are set via the environment.
+          </p>
+          <div className="divide-y divide-border">
+            {(byGroup.get(group) ?? []).map((f) =>
+              f.editable ? (
+                <EditableRow key={f.key} field={f} />
+              ) : (
+                <ReadonlyRow key={f.key} field={f} />
+              ),
+            )}
+          </div>
+        </Panel>
+      ))}
+    </div>
   );
 }
 
-/** Admin settings (§6.10.3/4) — model allowlist + global quota defaults. */
+/**
+ * Admin Configuration (§6.10) — one consistent view of every setting: its
+ * effective value, where it comes from (database / environment / default), and
+ * whether it's editable. Secrets (e.g. the AI provider key) are write-only and
+ * shown only as configured + last-4; the server never returns their value.
+ */
 export default function AdminSettings() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Admin settings"
-        description="Platform defaults consumed by the primitives and (soon) the AI proxy."
+        title="Configuration"
+        description="Every platform setting in one place. Database overrides environment overrides default. The editable subset (AI key, models, quotas) can be set here without a restart."
         actions={
           <Link to="/admin" className="text-sm font-medium text-accent">
             Back to admin
           </Link>
         }
       />
-      <ModelAllowlist />
-      <QuotaDefaults />
+      <Configuration />
     </div>
   );
 }

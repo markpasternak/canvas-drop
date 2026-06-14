@@ -19,6 +19,7 @@
     "test:dashboard": "node scripts/test-runner.mjs dashboard",
     "test:file": "node scripts/test-runner.mjs file",
     "purge": "pnpm --filter @canvas-drop/server run purge",
+    "seed:showcase": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-showcase.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",

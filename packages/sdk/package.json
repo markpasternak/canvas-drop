@@ -13,7 +13,8 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "esbuild src/browser-entry.ts --bundle --format=iife --minify --outfile=dist/sdk.v1.js"
+    "build": "esbuild src/browser-entry.ts --bundle --format=iife --minify --outfile=dist/sdk.v1.js",
+    "dev": "esbuild src/browser-entry.ts --bundle --format=iife --outfile=dist/sdk.v1.js --watch"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

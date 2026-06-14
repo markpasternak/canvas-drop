@@ -1,12 +1,16 @@
 import { Buffer } from "node:buffer";
-import { type Config, effectiveCapabilities, storedCapabilities } from "@canvas-drop/shared";
+import {
+  type CapabilityGlobals,
+  type Config,
+  effectiveCapabilities,
+  storedCapabilities,
+} from "@canvas-drop/shared";
 import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
-import { capabilityGlobals } from "../canvas/capability-guard.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
@@ -39,6 +43,14 @@ export interface ManagementDeps {
    * live sockets that lost access; a newly-set password drops gated non-owners.
    */
   hub?: RealtimeHub;
+  /**
+   * Effective operator-global resolvers (admin DB override ?? env). Optional —
+   * omitted in unit tests, which fall back to the boot `config` values. Used so
+   * the `effective` capability state the dashboard reads reflects a runtime-set
+   * AI key / realtime switch.
+   */
+  aiEnabled?: () => Promise<boolean>;
+  realtimeEnabled?: () => Promise<boolean>;
 }
 
 const createSchema = z.object({
@@ -77,7 +89,7 @@ const settingsSchema = z.object({
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
  * and other owner-only fields. Misnamed "public" for historical reasons.
  */
-function publicCanvas(config: Config, cv: Canvas) {
+function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
   return {
     id: cv.id,
     slug: cv.slug,
@@ -97,7 +109,9 @@ function publicCanvas(config: Config, cv: Canvas) {
     // explain a feature that's off because the operator disabled it).
     backendEnabled: cv.backendEnabled,
     capabilities: storedCapabilities(cv),
-    effective: effectiveCapabilities(cv, capabilityGlobals(config)),
+    // Effective state ANDs in the operator globals — resolved per request so an
+    // admin's DB override of the AI key / realtime switch is reflected here too.
+    effective: effectiveCapabilities(cv, globals),
     status: cv.status,
     // Admin takedown reason (§6.10.2, M7). Owner/admin-only — see the doc above.
     disabledReason: cv.disabledReason,
@@ -115,6 +129,20 @@ function publicCanvas(config: Config, cv: Canvas) {
 export function managementRoutes(deps: ManagementDeps) {
   const app = new Hono<AppEnv>();
   const sameOrigin = requireSameOrigin(deps.config);
+
+  /** Resolve the operator globals for THIS request (admin DB override ?? env). */
+  async function resolveGlobals(): Promise<CapabilityGlobals> {
+    return {
+      realtimeEnabled: deps.realtimeEnabled
+        ? await deps.realtimeEnabled()
+        : deps.config.realtimeEnabled,
+      aiEnabled: deps.aiEnabled ? await deps.aiEnabled() : !!deps.config.ai.apiKey,
+    };
+  }
+  /** Serialize one canvas with the per-request effective globals. */
+  async function canvasView(cv: Canvas) {
+    return publicCanvas(deps.config, cv, await resolveGlobals());
+  }
 
   /** Load a canvas the caller may manage (owner or admin), else 404. */
   async function ownedCanvas(c: Context<AppEnv>): Promise<Canvas | null> {
@@ -154,7 +182,7 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // apiKey is returned ONCE and never again.
-    return c.json({ ...publicCanvas(deps.config, cv), apiKey }, 201);
+    return c.json({ ...(await canvasView(cv)), apiKey }, 201);
   });
 
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched
@@ -164,10 +192,12 @@ export function managementRoutes(deps: ManagementDeps) {
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
+    // Globals are request-global (not per-canvas) — resolve once, reuse for the row.
+    const globals = await resolveGlobals();
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
-        ...publicCanvas(deps.config, cv),
+        ...publicCanvas(deps.config, cv, globals),
         lastDeploy: v
           ? {
               version: v.number,
@@ -198,7 +228,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    return c.json(publicCanvas(deps.config, cv));
+    return c.json(await canvasView(cv));
   });
 
   // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
@@ -263,7 +293,7 @@ export function managementRoutes(deps: ManagementDeps) {
       await deps.hub.revalidateCanvas(cv.id).catch(() => {});
       if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
     }
-    return c.json(publicCanvas(deps.config, updated));
+    return c.json(await canvasView(updated));
   });
 
   app.patch("/:id/capabilities", sameOrigin, async (c) => {
@@ -272,7 +302,7 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = capabilitiesSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const patch = body.data;
-    if (Object.keys(patch).length === 0) return c.json(publicCanvas(deps.config, cv));
+    if (Object.keys(patch).length === 0) return c.json(await canvasView(cv));
     const updated = await deps.canvases.updateCapabilities(cv.id, patch);
     deps.audit.recordAudit({
       action: "capabilities_update",
@@ -283,7 +313,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Turning realtime (or the backend group) off must drop live sockets — the
     // heartbeat would too, but this makes it instant (D-RT-6).
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    return c.json(publicCanvas(deps.config, updated));
+    return c.json(await canvasView(updated));
   });
 
   app.post("/:id/regenerate-slug", sameOrigin, async (c) => {
@@ -297,7 +327,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Old slug URLs are invalidated — drop all live sockets so clients reconnect
     // under the new slug (D-RT-6 / §12.0 #5).
     deps.hub?.dropCanvas(cv.id);
-    return c.json(publicCanvas(deps.config, updated));
+    return c.json(await canvasView(updated));
   });
 
   app.post("/:id/regenerate-key", sameOrigin, async (c) => {
@@ -342,7 +372,7 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Archived → offline for everyone; drop live sockets (D-RT-6).
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    return c.json(publicCanvas(deps.config, { ...cv, status: "archived" }));
+    return c.json(await canvasView({ ...cv, status: "archived" }));
   });
 
   // Unarchive — restore an archived canvas to active. A 409 on an invalid
@@ -358,7 +388,7 @@ export function managementRoutes(deps: ManagementDeps) {
       actorId: c.get("user").id,
       targetId: cv.id,
     });
-    return c.json(publicCanvas(deps.config, { ...cv, status: "active" }));
+    return c.json(await canvasView({ ...cv, status: "active" }));
   });
 
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
@@ -418,7 +448,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Reflect the swap from known-good data (target.id) rather than re-reading —
     // avoids returning a stale snapshot if a refetch transiently fails.
     return c.json({
-      ...publicCanvas(deps.config, { ...cv, currentVersionId: target.id }),
+      ...(await canvasView({ ...cv, currentVersionId: target.id })),
       version: body.version,
     });
   });
@@ -459,7 +489,7 @@ export function managementRoutes(deps: ManagementDeps) {
         targetId: cv.id,
         meta: { source: "paste", version: deploy.version },
       });
-      return c.json({ ...publicCanvas(deps.config, cv), apiKey, deploy }, 201);
+      return c.json({ ...(await canvasView(cv)), apiKey, deploy }, 201);
     } catch (err) {
       await deps.canvases.setStatus(cv.id, "deleted").catch(() => {});
       if (err instanceof DeployError) {

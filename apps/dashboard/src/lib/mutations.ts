@@ -356,3 +356,19 @@ export function useAdminSetQuotas() {
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminQuotas }),
   });
 }
+
+/** Set or clear (value === null) a DB override for an editable config setting. */
+export function useAdminSetConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      key,
+      value,
+    }: {
+      key: string;
+      value: string | number | boolean | string[] | null;
+    }) => (value === null ? api.admin.clearConfig(key) : api.admin.setConfig(key, value)),
+    // The effective AI key/models also feed the capabilities view; refresh broadly.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+}

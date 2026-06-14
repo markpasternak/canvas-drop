@@ -13,6 +13,7 @@ export const keys = {
   adminOverview: ["admin", "overview"] as const,
   adminModels: ["admin", "models"] as const,
   adminQuotas: ["admin", "quotas"] as const,
+  adminConfig: ["admin", "config"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
 };
 
@@ -72,6 +73,10 @@ export function useAdminModels() {
 
 export function useAdminQuotas() {
   return useQuery({ queryKey: keys.adminQuotas, queryFn: api.admin.getQuotas });
+}
+
+export function useAdminConfig() {
+  return useQuery({ queryKey: keys.adminConfig, queryFn: api.admin.getConfig });
 }
 
 export function useGallery(query: GalleryQuery) {

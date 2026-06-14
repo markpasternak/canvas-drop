@@ -39,12 +39,26 @@ export function assertCapability(canvas: Canvas, capability: Capability, config:
 }
 
 /**
+ * Per-request overrides for the operator globals. The AI key and realtime switch
+ * are admin-tunable at runtime (DB overrides env), so those globals are resolved
+ * per request instead of baked from boot config. Omitted → use the config value.
+ */
+export interface CapabilityGlobalOverrides {
+  aiEnabled?: () => Promise<boolean>;
+  realtimeEnabled?: () => Promise<boolean>;
+}
+
+/**
  * Middleware factory. Must run AFTER `canvasAccess` populates `c.get("canvas")`.
  * Returns 403 `CAPABILITY_DISABLED` when the capability is off for the resolved
  * canvas; 500 if wired before the canvas is resolved (a programming error, not a
  * client one).
  */
-export function requireCapability(capability: Capability, config: Config) {
+export function requireCapability(
+  capability: Capability,
+  config: Config,
+  overrides?: CapabilityGlobalOverrides,
+) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const canvas = c.get("canvas");
     if (!canvas) {
@@ -55,7 +69,11 @@ export function requireCapability(capability: Capability, config: Config) {
       );
       return c.json({ error: "canvas_not_resolved" }, 500);
     }
-    if (!assertCapability(canvas, capability, config)) {
+    const globals = capabilityGlobals(config);
+    // Resolve the admin-tunable globals per request when a resolver is wired.
+    if (overrides?.aiEnabled) globals.aiEnabled = await overrides.aiEnabled();
+    if (overrides?.realtimeEnabled) globals.realtimeEnabled = await overrides.realtimeEnabled();
+    if (!isCapabilityEnabled(canvas, capability, globals)) {
       return c.json({ code: CAPABILITY_DISABLED, capability }, 403);
     }
     await next();

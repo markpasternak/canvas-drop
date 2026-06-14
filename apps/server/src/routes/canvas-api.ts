@@ -18,7 +18,7 @@ import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { canvasApiIsolation } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
-import { canvasAiRoutes } from "./canvas-ai.js";
+import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 import { canvasRealtimeRoutes } from "./canvas-realtime.js";
@@ -36,8 +36,12 @@ export interface CanvasApiDeps {
   /** Admin-tunable quota resolver (M7) — threaded to the KV route's key-limit check. */
   quota?: QuotaResolver;
   aiUsage: AiUsageRepository;
-  /** Model provider for the AI primitive (default Anthropic; tests inject a fake). */
-  aiProvider: ModelProvider;
+  /** Ready provider for the AI primitive — tests inject a fake. */
+  aiProvider?: ModelProvider;
+  /** Production: builds the provider from the effective key (DB override ?? env). */
+  makeAiProvider?: (apiKey: string) => ModelProvider;
+  /** Unified settings (effective model allowlist + provider key); omitted in unit tests. */
+  settings?: AiSettings;
   /**
    * Realtime wiring. Present only when a WebSocket adaptor is available (the Node
    * server in index.ts, or a WS integration test). Omitted in plain unit tests —
@@ -98,7 +102,13 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
   // AI primitive (M9, area H). Behind requireCapability("ai") inside the router.
   app.route(
     "/ai",
-    canvasAiRoutes({ config: deps.config, aiUsage: deps.aiUsage, provider: deps.aiProvider }),
+    canvasAiRoutes({
+      config: deps.config,
+      aiUsage: deps.aiUsage,
+      provider: deps.aiProvider,
+      makeProvider: deps.makeAiProvider,
+      settings: deps.settings,
+    }),
   );
 
   // Realtime primitive (M9, area R). Mounted only when a WebSocket adaptor is wired

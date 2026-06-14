@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>canvas-drop — primitives showcase</title>
+  <meta name="description" content="A live demo of the five canvas-drop backend primitives: identity, KV, files, AI, and realtime — from one folder of static files." />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- One tag. The SDK auto-detects this canvas's slug + API base and exposes `window.canvasdrop`. -->
+  <script src="/sdk/v1.js"></script>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="hero">
+      <span class="wordmark"><span class="dot"></span> canvas-drop</span>
+      <h1>Static files, with backend superpowers.</h1>
+      <p class="lede">
+        This whole page is a folder of static files deployed to a URL — no server code, no build step.
+        It gains a backend only through five small primitives, called from the browser. Everything below is live.
+      </p>
+
+      <div class="how">
+        <h2>How it works</h2>
+        <ol>
+          <li>Drop a folder (HTML/CSS/JS) onto canvas-drop. It serves at a URL.</li>
+          <li>Add one script tag — then call <code>canvasdrop.*</code> from your code:</li>
+        </ol>
+        <pre class="snippet">&lt;script src="/sdk/v1.js"&gt;&lt;/script&gt;
+
+const me = await canvasdrop.me();              // who's viewing
+await canvasdrop.kv.increment("views");        // shared state
+await canvasdrop.files.upload(file);           // file storage
+canvasdrop.ai.stream(messages, { model });     // streamed AI
+canvasdrop.realtime.channel("room").publish(); // live pub/sub</pre>
+      </div>
+
+      <!-- Identity strip, populated by js/identity.js -->
+      <div class="whoami" id="whoami" hidden>
+        <span class="avatar" id="whoami-avatar"></span>
+        <span>
+          <b id="whoami-name">…</b>
+          <span class="muted" id="whoami-email"></span>
+        </span>
+      </div>
+      <div id="whoami-state"></div>
+    </header>
+
+    <!-- ── Identity ─────────────────────────────────────────────────── -->
+    <section class="card" id="sec-identity">
+      <h3><span class="tag">me()</span> Identity</h3>
+      <p class="desc">
+        Every request already carries the viewer's verified org identity (from the login proxy / SSO).
+        <code>canvasdrop.me()</code> reads it server-side — your canvas never has to build auth.
+      </p>
+      <div class="controls">
+        <button type="button"data-act="me-refresh">Read identity</button>
+      </div>
+      <div class="out" id="me-out"></div>
+      <details class="code">
+        <summary>Show the code</summary>
+        <pre class="snippet">const me = await canvasdrop.me();
+// { id, email, name, avatarUrl }
+greeting.textContent = `Hello, ${me.name}`;</pre>
+      </details>
+    </section>
+
+    <!-- ── KV ───────────────────────────────────────────────────────── -->
+    <section class="card" id="sec-kv">
+      <h3><span class="tag">kv</span> Key–value storage</h3>
+      <p class="desc">
+        A tiny persistent store, two namespaces: <b>shared</b> (everyone sees it) and
+        <b>per-user</b> (private to each viewer). Great for counters, settings, and small app state.
+      </p>
+
+      <div class="controls">
+        <span class="metric"><span class="n" id="kv-counter">·</span><span class="muted">shared page views</span></span>
+        <button type="button"data-act="kv-bump" class="ghost">+1 view</button>
+      </div>
+
+      <div class="controls" style="margin-top:16px">
+        <input type="text" id="kv-note" placeholder="A private note — only you can read it" />
+        <button type="button"data-act="kv-save-note" class="ghost">Save to my namespace</button>
+        <button type="button"data-act="kv-load-note" class="ghost">Load mine</button>
+      </div>
+
+      <div class="out" id="kv-out"></div>
+      <details class="code">
+        <summary>Show the code</summary>
+        <pre class="snippet">// shared, atomic — returns the new total
+const views = await canvasdrop.kv.increment("views");
+
+// per-user namespace, isolated per viewer
+await canvasdrop.kv.user.set("note", text);
+const mine = await canvasdrop.kv.user.get("note");</pre>
+      </details>
+    </section>
+
+    <!-- ── Files ────────────────────────────────────────────────────── -->
+    <section class="card" id="sec-files">
+      <h3><span class="tag">files</span> File storage</h3>
+      <p class="desc">
+        Upload, list, and delete files (images, data, anything). Each gets a stable URL you can drop
+        straight into an <code>&lt;img&gt;</code> or link.
+      </p>
+      <div class="controls">
+        <input type="file" id="file-input" />
+        <button type="button"data-act="file-upload">Upload</button>
+        <button type="button"data-act="file-refresh" class="ghost">Refresh list</button>
+      </div>
+      <ul class="filelist" id="file-list"></ul>
+      <div id="files-state"></div>
+      <details class="code">
+        <summary>Show the code</summary>
+        <pre class="snippet">const f = input.files[0];
+const { id, url } = await canvasdrop.files.upload(f);
+img.src = url;                       // or canvasdrop.files.url(id)
+const all = await canvasdrop.files.list();
+await canvasdrop.files.delete(id);</pre>
+      </details>
+    </section>
+
+    <!-- ── AI ───────────────────────────────────────────────────────── -->
+    <section class="card" id="sec-ai">
+      <h3><span class="tag">ai</span> AI chat (streamed)</h3>
+      <p class="desc">
+        A server-side LLM proxy. The provider key stays on the server — never in this page.
+        Responses stream token-by-token; usage and cost come back when it's done.
+      </p>
+      <div class="controls">
+        <label class="field">model
+          <select id="ai-model">
+            <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+            <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+            <option value="claude-opus-4-8">claude-opus-4-8</option>
+          </select>
+        </label>
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <textarea id="ai-input" placeholder="Ask anything… (e.g. “Explain canvas-drop in one sentence.”)"></textarea>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <button type="button"data-act="ai-send">Send</button>
+        <button type="button"data-act="ai-clear" class="ghost">Clear</button>
+      </div>
+      <div class="chatlog" id="ai-log"></div>
+      <div class="usage" id="ai-usage"></div>
+      <div id="ai-state"></div>
+      <details class="code">
+        <summary>Show the code</summary>
+        <pre class="snippet">const messages = [{ role: "user", content: prompt }];
+for await (const delta of canvasdrop.ai.stream(messages, { model })) {
+  bubble.textContent += delta;       // render as it streams
+}</pre>
+      </details>
+    </section>
+
+    <!-- ── Realtime ─────────────────────────────────────────────────── -->
+    <section class="card" id="sec-realtime">
+      <h3><span class="tag">realtime</span> Live presence &amp; pub/sub</h3>
+      <p class="desc">
+        Ephemeral WebSocket channels per canvas: see who's here, broadcast messages, run a live poll.
+        Nothing is persisted — durable state goes in KV.
+      </p>
+      <p class="hint" id="rt-hint">Tip: open this page in a second tab to watch broadcasts and the poll sync live. (Presence lists distinct people — two tabs signed in as the same user count once.)</p>
+
+      <div style="margin-top:6px"><span class="muted" style="font-size:13px">Here now:</span>
+        <div class="presence" id="rt-presence"></div>
+      </div>
+
+      <div class="controls" style="margin-top:16px">
+        <input type="text" id="rt-msg" placeholder="Broadcast a message to everyone here…" />
+        <button type="button"data-act="rt-send">Send</button>
+      </div>
+      <div class="out" id="rt-log"></div>
+
+      <p class="hint" style="margin-top:18px">Live poll — pick your favorite primitive:</p>
+      <div class="controls">
+        <button type="button"data-act="rt-vote" data-opt="kv" class="ghost">KV</button>
+        <button type="button"data-act="rt-vote" data-opt="files" class="ghost">Files</button>
+        <button type="button"data-act="rt-vote" data-opt="ai" class="ghost">AI</button>
+        <button type="button"data-act="rt-vote" data-opt="realtime" class="ghost">Realtime</button>
+      </div>
+      <div class="poll" id="rt-poll"></div>
+
+      <div id="rt-state"></div>
+      <details class="code">
+        <summary>Show the code</summary>
+        <pre class="snippet">const room = canvasdrop.realtime.channel("lobby");
+room.onPresence(users =&gt; renderPresence(users));
+room.subscribe(msg =&gt; addMessage(msg.from.name, msg.data));
+room.publish("chat", { text });</pre>
+      </details>
+    </section>
+
+    <footer>
+      Built on <b>canvas-drop</b> — an open-source, self-hostable platform for deploying small web apps.
+      This page is one folder: <code>index.html</code>, <code>styles.css</code>, and a handful of
+      <code>js/*</code> modules. Copy it as a starting point for your own canvas.
+    </footer>
+
+  </div>
+
+  <!-- App modules. Deferred (type=module) so the DOM is ready; they read window.canvasdrop. -->
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
