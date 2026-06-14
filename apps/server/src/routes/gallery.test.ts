@@ -25,7 +25,7 @@ const ITEM_KEYS = [
   "title",
   "summary",
   "tags",
-  "hasPassword",
+  "templatable",
   "publishedAt",
   "owner",
 ].sort();

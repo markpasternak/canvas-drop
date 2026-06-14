@@ -13,7 +13,7 @@ import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
-import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { CanvasesRepository, CanvasSettingsPatch } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -67,6 +67,7 @@ const settingsSchema = z.object({
   password: z.string().min(1).nullable().optional(), // set, or null to clear
   spaFallback: z.boolean().optional(),
   galleryListed: z.boolean().optional(),
+  galleryTemplatable: z.boolean().optional(),
   gallerySummary: z.string().max(500).nullable().optional(),
   galleryTags: z.array(z.string()).optional(),
 });
@@ -91,9 +92,12 @@ function publicCanvas(config: Config, cv: Canvas) {
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
     galleryListed: cv.galleryListed,
+    galleryTemplatable: cv.galleryTemplatable,
     gallerySummary: cv.gallerySummary,
     // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
     galleryTags: cv.galleryTags as string[] | null,
+    // Lineage (plan 002): the canvas this one was cloned from, for "Cloned from …".
+    clonedFromCanvasId: cv.clonedFromCanvasId,
     // Capability model (plan 006): the master switch, the raw stored feature flags,
     // and the effective state after ANDing operator globals (so the dashboard can
     // explain a feature that's off because the operator disabled it).
@@ -262,11 +266,59 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const p = body.data;
+    const { password, ...rest } = p;
+
+    // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
+    // published AND will be unprotected after this patch; a password set always
+    // un-lists. "Templatable" can only be on when the canvas ends up listed.
+    const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
+    const isPublished = cv.currentVersionId !== null;
+    if (rest.galleryListed === true) {
+      if (!isPublished) {
+        return c.json(
+          {
+            code: "NOT_PUBLISHED",
+            message: "Publish this canvas before listing it in the gallery.",
+          },
+          409,
+        );
+      }
+      if (willBeProtected) {
+        return c.json(
+          {
+            code: "PASSWORD_PROTECTED",
+            message: "Remove the password before listing this canvas in the gallery.",
+          },
+          409,
+        );
+      }
+    }
+    // Setting a password forces the canvas un-listed, so it can never end up listed.
+    const finalListed =
+      typeof password === "string" ? false : (rest.galleryListed ?? cv.galleryListed);
+    if (rest.galleryTemplatable === true && !finalListed) {
+      return c.json(
+        {
+          code: "NOT_LISTED",
+          message: "List this canvas in the gallery before allowing templates.",
+        },
+        409,
+      );
+    }
+
+    // Build the persisted patch. A newly-set password un-lists + clears gallery
+    // metadata (R10) — the server enforces this regardless of what the client sent.
+    const patch: CanvasSettingsPatch = { ...rest };
+    if (typeof password === "string") {
+      patch.galleryListed = false;
+      patch.galleryTemplatable = false;
+      patch.gallerySummary = null;
+      patch.galleryTags = null;
+    }
 
     let updated = cv;
-    const { password, ...rest } = p;
-    if (Object.keys(rest).length > 0) {
-      updated = await deps.canvases.updateSettings(cv.id, rest);
+    if (Object.keys(patch).length > 0) {
+      updated = await deps.canvases.updateSettings(cv.id, patch);
     }
     if (password !== undefined) {
       const hash = password === null ? null : await hashPassword(password);

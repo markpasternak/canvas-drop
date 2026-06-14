@@ -1195,3 +1195,99 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("managementRoutes — listability rules (plan 002 U5)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** Publish (optionally) a canvas owned by `ownerId` and return its id. */
+  async function makeCanvas(ownerId: string, publish: boolean): Promise<string> {
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage: memStorage(),
+      log: silent,
+    });
+    const cv = await canvases.create({
+      ownerId,
+      slug: `s-${ownerId}-${publish}`,
+      apiKeyHash: `k-${ownerId}-${publish}`,
+    });
+    if (publish) await engine.deploy(cv, "folder", folder({ "index.html": "<h1>x</h1>" }), ownerId);
+    return cv.id;
+  }
+
+  function patch(app: ReturnType<typeof buildApp>, id: string, body: unknown) {
+    return app.request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("rejects listing a never-published canvas, then allows it after publishing", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+
+    const unpublished = await makeCanvas(owner.id, false);
+    expect((await patch(app, unpublished, { shared: true, galleryListed: true })).status).toBe(409);
+
+    const published = await makeCanvas(owner.id, true);
+    const res = await patch(app, published, { shared: true, galleryListed: true });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ galleryListed: boolean }>(res)).galleryListed).toBe(true);
+  });
+
+  it("setting a password on a listed canvas un-lists it and clears templatable", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await makeCanvas(owner.id, true);
+    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+
+    const res = await patch(app, id, { password: "secret" });
+    const body = await jsonOf<{
+      galleryListed: boolean;
+      galleryTemplatable: boolean;
+      hasPassword: boolean;
+    }>(res);
+    expect(body.hasPassword).toBe(true);
+    expect(body.galleryListed).toBe(false);
+    expect(body.galleryTemplatable).toBe(false);
+  });
+
+  it("rejects listing a password-protected canvas", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await makeCanvas(owner.id, true);
+    await patch(app, id, { password: "secret" });
+
+    expect((await patch(app, id, { shared: true, galleryListed: true })).status).toBe(409);
+  });
+
+  it("rejects templatable while unlisted, and un-listing clears templatable", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await makeCanvas(owner.id, true);
+
+    // Templatable while unlisted → rejected.
+    expect((await patch(app, id, { galleryTemplatable: true })).status).toBe(409);
+
+    // List + templatable, then un-list → templatable cleared.
+    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    const res = await patch(app, id, { galleryListed: false });
+    const body = await jsonOf<{ galleryListed: boolean; galleryTemplatable: boolean }>(res);
+    expect(body.galleryListed).toBe(false);
+    expect(body.galleryTemplatable).toBe(false);
+  });
+});
