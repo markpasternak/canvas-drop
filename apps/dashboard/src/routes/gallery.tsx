@@ -7,6 +7,7 @@ import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { GenerativeCover } from "../components/GenerativeCover.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
@@ -17,74 +18,90 @@ function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
   const [cloneOpen, setCloneOpen] = useState(false);
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)]">
-      <div className="flex items-start justify-between gap-2">
-        {/* The title IS the open affordance — a direct external link to the live
+    <li className="group flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
+      {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
+          screenshot will later render into this same box with no layout change.
+          Clickable to open, but aria-hidden + not tabbable so the title below stays
+          the single announced open affordance (avoids a duplicate link). */}
+      <a
+        href={item.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-hidden
+        tabIndex={-1}
+        className="block aspect-[16/10] w-full overflow-hidden"
+      >
+        <GenerativeCover seed={item.id} />
+      </a>
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          {/* The title IS the open affordance — a direct external link to the live
             canvas. One primary target, no duplicate "Open" action. */}
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0 truncate text-sm font-semibold text-fg hover:text-accent"
-        >
-          {item.title || "Untitled canvas"}
-        </a>
-        {item.templatable && <Badge tone="accent">Template</Badge>}
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            className="min-w-0 truncate text-sm font-semibold text-fg hover:text-accent"
+          >
+            {item.title || "Untitled canvas"}
+          </a>
+          {item.templatable && <Badge tone="accent">Template</Badge>}
+        </div>
+
+        {item.summary && <p className="line-clamp-3 text-sm text-muted">{item.summary}</p>}
+
+        {item.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {item.tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() =>
+                  navigate({
+                    to: "/gallery",
+                    // Merge, not replace — keep any active search when filtering by tag.
+                    search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
+                  })
+                }
+                className="rounded-md border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-muted transition-colors hover:text-fg"
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+          <div className="flex min-w-0 items-center gap-2">
+            {item.owner.avatarUrl ? (
+              <img
+                src={item.owner.avatarUrl}
+                alt=""
+                className="size-5 shrink-0 rounded-full bg-surface-sunken"
+              />
+            ) : (
+              <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
+            )}
+            <span className="truncate text-xs text-subtle">{item.owner.name}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {item.templatable && (
+              <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
+                Make a copy
+              </Button>
+            )}
+            <CopyButton value={item.url} label="Copy link" toastMessage="Link copied" />
+          </div>
+        </div>
+        {item.templatable && (
+          <CloneDialog
+            open={cloneOpen}
+            onClose={() => setCloneOpen(false)}
+            sourceId={item.id}
+            sourceTitle={item.title}
+          />
+        )}
       </div>
-
-      {item.summary && <p className="line-clamp-3 text-sm text-muted">{item.summary}</p>}
-
-      {item.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {item.tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() =>
-                navigate({
-                  to: "/gallery",
-                  // Merge, not replace — keep any active search when filtering by tag.
-                  search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
-                })
-              }
-              className="rounded-md border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-muted transition-colors hover:text-fg"
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <div className="flex min-w-0 items-center gap-2">
-          {item.owner.avatarUrl ? (
-            <img
-              src={item.owner.avatarUrl}
-              alt=""
-              className="size-5 shrink-0 rounded-full bg-surface-sunken"
-            />
-          ) : (
-            <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
-          )}
-          <span className="truncate text-xs text-subtle">{item.owner.name}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {item.templatable && (
-            <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
-              Make a copy
-            </Button>
-          )}
-          <CopyButton value={item.url} label="Copy link" toastMessage="Link copied" />
-        </div>
-      </div>
-      {item.templatable && (
-        <CloneDialog
-          open={cloneOpen}
-          onClose={() => setCloneOpen(false)}
-          sourceId={item.id}
-          sourceTitle={item.title}
-        />
-      )}
     </li>
   );
 }
@@ -93,11 +110,17 @@ function CardSkeletonGrid() {
   return (
     <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: 6 }, (_, i) => i).map((i) => (
-        <li key={i} className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-3 w-full" />
-          <Skeleton className="h-3 w-4/5" />
-          <Skeleton className="mt-2 h-4 w-1/3" />
+        <li
+          key={i}
+          className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface"
+        >
+          <Skeleton className="aspect-[16/10] w-full rounded-none" />
+          <div className="flex flex-col gap-3 p-4">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="mt-2 h-4 w-1/3" />
+          </div>
         </li>
       ))}
     </ul>
