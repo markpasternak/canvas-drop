@@ -391,6 +391,16 @@ export function useAdminPromoteUser() {
   });
 }
 
+/** Grant/revoke the publish-public capability (U10). */
+export function useAdminPublishPublic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, allowed }: { id: string; allowed: boolean }) =>
+      allowed ? api.admin.grantPublic(id) : api.admin.revokePublic(id),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
 /** Set or clear (value === null) a DB override for an editable config setting. */
 export function useAdminSetConfig() {
   const qc = useQueryClient();

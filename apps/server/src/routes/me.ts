@@ -38,6 +38,9 @@ export function meRoutes(deps: MeRoutesDeps) {
       name: u.name,
       avatarUrl: u.avatarUrl,
       isAdmin: u.isAdmin,
+      // Whether this account may publish public links (U10) — the dashboard offers
+      // the public_link rung only when true.
+      canPublishPublic: u.canPublishPublic,
       authMode: deps.authMode,
     });
   });

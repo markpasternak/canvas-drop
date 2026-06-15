@@ -43,6 +43,16 @@ export function usersRepository(client: DbClient) {
       return (rows[0] as User | undefined) ?? null;
     },
 
+    /** Grant/revoke the publish-public capability (U10). Admin-only at the route. */
+    async setPublishPublic(id: string, value: boolean): Promise<User> {
+      const rows = await db
+        .update(t)
+        .set({ canPublishPublic: value })
+        .where(eq(t.id, id))
+        .returning();
+      return rows[0] as User;
+    },
+
     /** Batched lookup for enriching the admin all-canvases list (M7) — no N+1. */
     async findByIds(ids: readonly string[]): Promise<User[]> {
       if (ids.length === 0) return [];

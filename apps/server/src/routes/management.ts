@@ -87,10 +87,10 @@ const capabilitiesSchema = z.object({
 const settingsSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  // First-class access rung (D4, U4). `public_link` is NOT settable here — it is
-  // admin-gated per account and wired in U10. `shared` remains a deprecated
-  // boolean alias (true→whole_org, false→private) for older clients.
-  access: z.enum(["private", "specific_people", "whole_org"]).optional(),
+  // First-class access rung (D4). `public_link` is admin-gated per account (U10) —
+  // accepted here but rejected unless the owner holds the capability. `shared`
+  // remains a deprecated boolean alias (true→whole_org, false→private).
+  access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
   // Guest-AI opt-in (U9): off by default; cap is a per-canvas monthly USD ceiling.
   guestAiEnabled: z.boolean().optional(),
   guestAiCap: z.number().min(0).optional(),
@@ -428,6 +428,17 @@ export function managementRoutes(deps: ManagementDeps) {
       return c.json(
         { code: "SHARE_REQUIRES_PUBLISH", message: "Publish this canvas before sharing it." },
         409,
+      );
+    }
+    // public_link is admin-gated per account (U10/R19): only an owner the admin has
+    // granted the capability may publish openly.
+    if (targetAccess === "public_link" && !c.get("user").canPublishPublic) {
+      return c.json(
+        {
+          code: "PUBLIC_NOT_ALLOWED",
+          message: "An administrator must grant your account permission to publish public links.",
+        },
+        403,
       );
     }
     if (rest.galleryListed === true) {

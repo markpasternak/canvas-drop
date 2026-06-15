@@ -50,6 +50,8 @@ export interface AdminUserRow {
   avatarUrl: string | null;
   isAdmin: boolean;
   isBlocked: boolean;
+  /** Admin-granted publish-public capability (U10). */
+  canPublishPublic: boolean;
   createdAt: number;
   lastSeenAt: number | null;
   /** Non-deleted canvases this user owns (object fact). */
@@ -207,6 +209,7 @@ export function adminRepository(client: DbClient) {
           avatarUrl: usersT.avatarUrl,
           isAdmin: usersT.isAdmin,
           isBlocked: usersT.isBlocked,
+          canPublishPublic: usersT.canPublishPublic,
           createdAt: usersT.createdAt,
           lastSeenAt: usersT.lastSeenAt,
           canvasCount: countExpr,
@@ -232,6 +235,7 @@ export function adminRepository(client: DbClient) {
           avatarUrl: r.avatarUrl,
           isAdmin: Boolean(r.isAdmin),
           isBlocked: Boolean(r.isBlocked),
+          canPublishPublic: Boolean(r.canPublishPublic),
           createdAt: Number(r.createdAt),
           lastSeenAt: r.lastSeenAt === null ? null : Number(r.lastSeenAt),
           canvasCount: Number(r.canvasCount),

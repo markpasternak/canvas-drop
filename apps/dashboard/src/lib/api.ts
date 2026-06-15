@@ -26,6 +26,8 @@ export interface Me {
   name: string;
   avatarUrl: string | null;
   isAdmin: boolean;
+  /** Whether this account may publish public links (U10). */
+  canPublishPublic: boolean;
   authMode: AuthMode;
 }
 
@@ -190,8 +192,8 @@ export interface PublishResult {
 export interface CanvasSettings {
   title?: string;
   description?: string | null;
-  /** Access rung (D4, U4). `public_link` is not settable here (admin-gated). */
-  access?: "private" | "specific_people" | "whole_org";
+  /** Access rung (D4). `public_link` is accepted only for admin-granted accounts (U10). */
+  access?: "private" | "specific_people" | "whole_org" | "public_link";
   /** Guest-AI opt-in (U9). */
   guestAiEnabled?: boolean;
   shared?: boolean;
@@ -532,6 +534,8 @@ export interface AdminUserRow {
   avatarUrl: string | null;
   isAdmin: boolean;
   isBlocked: boolean;
+  /** Admin-granted publish-public capability (U10). */
+  canPublishPublic: boolean;
   createdAt: number;
   lastSeenAt: number | null;
   canvasCount: number;
@@ -839,6 +843,10 @@ export const api = {
       request<{ ok: true }>(`/api/admin/users/${id}/promote`, { method: "POST" }),
     demoteUser: (id: string) =>
       request<{ ok: true }>(`/api/admin/users/${id}/demote`, { method: "POST" }),
+    grantPublic: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/grant-public`, { method: "POST" }),
+    revokePublic: (id: string) =>
+      request<{ ok: true }>(`/api/admin/users/${id}/revoke-public`, { method: "POST" }),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),

@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { AdminUserRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
 import { relativeTime } from "../lib/format.js";
-import { useAdminBlockUser, useAdminPromoteUser } from "../lib/mutations.js";
+import { useAdminBlockUser, useAdminPromoteUser, useAdminPublishPublic } from "../lib/mutations.js";
 import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { useToast } from "./Toast.js";
@@ -13,11 +13,30 @@ import { useToast } from "./Toast.js";
 function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefined }) {
   const block = useAdminBlockUser();
   const promote = useAdminPromoteUser();
+  const publishPublic = useAdminPublishPublic();
   const toast = useToast();
   const isSelf = user.id === meId;
 
   return (
     <div className="flex items-center justify-end gap-2">
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={publishPublic.isPending}
+        title="Allow this account to publish canvases as static public links"
+        onClick={async () => {
+          try {
+            await publishPublic.mutateAsync({ id: user.id, allowed: !user.canPublishPublic });
+            toast(
+              user.canPublishPublic ? "Public publishing revoked" : "Public publishing granted",
+            );
+          } catch (err) {
+            toast(err instanceof ApiError ? err.hint : "Couldn't update", "error");
+          }
+        }}
+      >
+        {user.canPublishPublic ? "Revoke public" : "Grant public"}
+      </Button>
       <Button
         size="sm"
         variant="secondary"

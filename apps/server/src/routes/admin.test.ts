@@ -559,4 +559,38 @@ describe("admin routes", () => {
     expect(key).toMatchObject({ set: true, last4: "WXYZ", source: "database" });
     expect(JSON.stringify(r)).not.toContain("sk-ant-secret-WXYZ");
   });
+
+  it("grant/revoke publish-public; revoke sweeps the owner's public canvases to private (U10)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const owner = await seedUser(client, "owner");
+    const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const users = usersRepository(client);
+
+    // Grant → the owner gains the capability.
+    expect((await app.request(`/api/admin/users/${owner.id}/grant-public`, post())).status).toBe(
+      200,
+    );
+    expect((await users.findById(owner.id))?.canPublishPublic).toBe(true);
+
+    // The owner publishes a canvas openly.
+    const cv = await canvases.create({ ownerId: owner.id, slug: "pub", apiKeyHash: "h" });
+    await canvases.setAccess(cv.id, "public_link");
+
+    // Revoke → capability cleared AND the public canvas swept back to private.
+    expect((await app.request(`/api/admin/users/${owner.id}/revoke-public`, post())).status).toBe(
+      200,
+    );
+    expect((await users.findById(owner.id))?.canPublishPublic).toBe(false);
+    expect((await canvases.findById(cv.id))?.access).toBe("private");
+  });
+
+  it("publish-public grant/revoke 404s for a non-admin (no existence leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const { app } = buildAdminApp(client, { id: owner.id, isAdmin: false });
+    expect((await app.request(`/api/admin/users/${owner.id}/grant-public`, post())).status).toBe(
+      404,
+    );
+  });
 });

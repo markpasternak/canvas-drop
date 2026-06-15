@@ -28,7 +28,7 @@ import {
   useUpdateSettings,
 } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
-import { useCanvas } from "../lib/queries.js";
+import { useCanvas, useMe } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 /** In-page section anchors drive both the section ids and the floating nav. */
@@ -50,6 +50,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
+  const { data: me } = useMe();
 
   const update = useUpdateSettings(id);
   const regenSlug = useRegenerateSlug(id);
@@ -163,6 +164,7 @@ export default function Settings() {
           <AccessLadder
             value={canvas.access}
             disabled={shareBlocker !== null}
+            allowPublic={me?.canPublishPublic ?? false}
             onChange={(access) => save({ access })}
           />
           {shareBlocker && (
@@ -588,21 +590,27 @@ export default function Settings() {
   );
 }
 
-/** Settable access rungs (D4, U4). `public_link` is admin-gated and not offered here. */
-const RUNGS: { value: "private" | "specific_people" | "whole_org"; label: string; hint: string }[] =
-  [
-    { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
-    {
-      value: "specific_people",
-      label: "Specific people",
-      hint: "Only the people you add below can open it.",
-    },
-    {
-      value: "whole_org",
-      label: "Whole org",
-      hint: "Anyone in your org with the link can open and use it.",
-    },
-  ];
+/** Settable access rungs (D4). `public_link` is offered only to admin-granted accounts (U10). */
+type SettableRung = "private" | "specific_people" | "whole_org" | "public_link";
+const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: boolean }[] = [
+  { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
+  {
+    value: "specific_people",
+    label: "Specific people",
+    hint: "Only the people you add below can open it.",
+  },
+  {
+    value: "whole_org",
+    label: "Whole org",
+    hint: "Anyone in your org with the link can open and use it.",
+  },
+  {
+    value: "public_link",
+    label: "Public link",
+    hint: "Anyone with the link can view it (static only — no backend). Admin-granted.",
+    adminGated: true,
+  },
+];
 
 /** The access-rung selector — a radio group (the security-sensitive control gets a
  *  per-rung description, not a bare toggle). Non-private rungs are disabled until
@@ -610,15 +618,21 @@ const RUNGS: { value: "private" | "specific_people" | "whole_org"; label: string
 function AccessLadder({
   value,
   disabled,
+  allowPublic,
   onChange,
 }: {
   value: AccessRung;
   disabled: boolean;
-  onChange: (rung: "private" | "specific_people" | "whole_org") => void;
+  /** Whether to offer the public_link rung (the account holds the admin grant, U10). */
+  allowPublic: boolean;
+  onChange: (rung: SettableRung) => void;
 }) {
+  // Hide the admin-gated public rung unless the account may publish it — except keep
+  // it visible (read-only state) when the canvas is already public_link.
+  const rungs = RUNGS.filter((r) => !r.adminGated || allowPublic || value === r.value);
   return (
     <fieldset className="space-y-2" aria-label="Who can access this canvas">
-      {RUNGS.map((r) => {
+      {rungs.map((r) => {
         const blocked = disabled && r.value !== "private";
         return (
           <label
@@ -643,9 +657,9 @@ function AccessLadder({
         );
       })}
       {value === "public_link" && (
-        <InlineNotice tone="neutral" className="py-2 text-xs">
-          This canvas is published as a public link (set by an admin). Pick a rung above to make it
-          org-only again.
+        <InlineNotice tone="warning" className="py-2 text-xs">
+          Anyone with the link can view this canvas. It serves static files only — no KV, files, AI,
+          or realtime.
         </InlineNotice>
       )}
     </fieldset>

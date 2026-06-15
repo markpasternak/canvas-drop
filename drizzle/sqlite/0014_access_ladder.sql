@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `can_publish_public` integer DEFAULT false NOT NULL;

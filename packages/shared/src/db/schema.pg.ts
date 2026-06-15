@@ -19,6 +19,9 @@ export const users = pgTable(
     avatarUrl: c.text("avatar_url"),
     isAdmin: c.bool("is_admin").notNull().default(false),
     isBlocked: c.bool("is_blocked").notNull().default(false),
+    // Admin-granted capability to publish a canvas as a static public link (D4
+    // public_link rung, U10). Off by default; server-resolved, never client-asserted.
+    canPublishPublic: c.bool("can_publish_public").notNull().default(false),
     createdAt: c.epochMs("created_at").notNull(),
     lastSeenAt: c.epochMs("last_seen_at"),
   },

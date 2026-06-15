@@ -404,6 +404,15 @@ export function canvasesRepository(client: DbClient) {
       return rows[0] as Canvas;
     },
 
+    /** Revoke-sweep (U10): flip an owner's public_link canvases back to private when
+     *  an admin removes their publish-public capability. Atomic single UPDATE. */
+    async revertPublicForOwner(ownerId: string): Promise<void> {
+      await db
+        .update(t)
+        .set({ access: "private", updatedAt: Date.now() })
+        .where(and(eq(t.ownerId, ownerId), eq(t.access, "public_link")));
+    },
+
     /** Set the access rung directly (D4 ladder). Used by the settings route and the
      *  publish-public revoke sweep (U10). */
     async setAccess(id: string, access: AccessRung): Promise<Canvas> {

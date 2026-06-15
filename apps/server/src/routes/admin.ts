@@ -367,6 +367,35 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     return c.json({ ok: true });
   });
 
+  // Grant/revoke the publish-public capability (U10/R19-R20). Revoking sweeps the
+  // account's public_link canvases back to private so revocation is immediate.
+  app.post("/users/:id/grant-public", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    await deps.users.setPublishPublic(id, true);
+    deps.audit.recordAudit({
+      action: "user_grant_public",
+      actorId: c.get("user").id,
+      targetType: "user",
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  app.post("/users/:id/revoke-public", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    if (!(await deps.users.findById(id))) return c.json({ error: "not_found" }, 404);
+    await deps.users.setPublishPublic(id, false);
+    await deps.canvases.revertPublicForOwner(id);
+    deps.audit.recordAudit({
+      action: "user_revoke_public",
+      actorId: c.get("user").id,
+      targetType: "user",
+      targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
   // --- AI model allowlist (§6.10.3) ---
 
   app.get("/settings/models", async (c) => {

@@ -10,6 +10,7 @@ function makeMe(overrides: Partial<Me> = {}): Me {
     name: "Mark Pasternak",
     avatarUrl: null,
     isAdmin: false,
+    canPublishPublic: false,
     authMode: "oidc",
     ...overrides,
   };

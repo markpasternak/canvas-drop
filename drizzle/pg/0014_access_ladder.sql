@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "can_publish_public" boolean DEFAULT false NOT NULL;

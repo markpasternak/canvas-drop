@@ -35,7 +35,7 @@ async function jsonOf<T>(res: Response): Promise<T> {
 /** Build a management app that authenticates as a chosen user (no gateway needed). */
 function buildApp(
   client: DbClient,
-  actor: { id: string; isAdmin: boolean },
+  actor: { id: string; isAdmin: boolean; canPublishPublic?: boolean },
   storage = memStorage(),
   // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
   hub?: any,
@@ -51,7 +51,12 @@ function buildApp(
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
-    c.set("user", { id: actor.id, isAdmin: actor.isAdmin, name: "Actor" } as never);
+    c.set("user", {
+      id: actor.id,
+      isAdmin: actor.isAdmin,
+      name: "Actor",
+      canPublishPublic: (actor as { canPublishPublic?: boolean }).canPublishPublic ?? false,
+    } as never);
     c.set("clientIp", "127.0.0.1");
     await next();
   });
@@ -1908,7 +1913,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     expect((await jsonOf<{ access: string }>(ok)).access).toBe("specific_people");
   });
 
-  it("public_link is not settable via the settings API (admin-gated, U10)", async () => {
+  it("public_link is rejected for an owner without the publish capability (U10)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
@@ -1916,7 +1921,25 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       `/api/canvases/${id}/settings`,
       { method: "PATCH", headers: mut, body: JSON.stringify({ access: "public_link" }) },
     );
-    expect(res.status).toBe(400); // rejected by the zod enum
+    expect(res.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("public_link is settable by an owner the admin has granted the capability (U10)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await publishedCanvas(owner.id);
+    const res = await buildApp(client, {
+      id: owner.id,
+      isAdmin: false,
+      canPublishPublic: true,
+    }).request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ access: "public_link" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ access: string }>(res)).access).toBe("public_link");
   });
 
   it("adds, lists, and removes an org member on the allowlist", async () => {
