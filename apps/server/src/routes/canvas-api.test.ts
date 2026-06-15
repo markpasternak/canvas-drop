@@ -281,6 +281,9 @@ describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
       backendEnabled: true,
     });
     await repo.setAccess(cv.id, access);
+    // A public_link canvas only exists while its owner holds the publish capability
+    // (U10) — grant it so resolveAccessContext resolves publicEnabled=true.
+    if (access === "public_link") await usersRepository(client).setPublishPublic(owner.id, true);
     if (guestEmail)
       await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: guestEmail });
     return cv;
@@ -290,11 +293,22 @@ describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
     client = await makeTestDb("sqlite");
     await seedCanvas("public_link");
     const app = buildApiAs(client, { kind: "anonymous" });
-    for (const path of ["/v1/c/app/me", "/v1/c/app/kv/shared/k"]) {
+    for (const path of ["/v1/c/app/me", "/v1/c/app/kv/shared/k", "/v1/c/app/files"]) {
       const res = await app.request(path);
       expect(res.status).toBe(403);
       expect((await jsonOf<{ code: string }>(res)).code).toBe("STATIC_ONLY");
     }
+  });
+
+  it("anonymous on a public_link canvas whose owner lost the publish grant is denied (404)", async () => {
+    client = await makeTestDb("sqlite");
+    const cv = await seedCanvas("public_link");
+    // Simulate an admin revoke that didn't sweep the rung: the per-request capability
+    // check (resolveAccessContext → decideCanvasAccess) must still deny (finding #2).
+    await usersRepository(client).setPublishPublic(cv.ownerId, false);
+    const app = buildApiAs(client, { kind: "anonymous" });
+    const res = await app.request("/v1/c/app/me");
+    expect(res.status).toBe(404);
   });
 
   it("guest: me() returns kind:guest + email; KV is attributed to the guest principal", async () => {

@@ -86,12 +86,19 @@ export function guestRepository(client: DbClient) {
         .orderBy(invites.createdAt)) as GuestInvite[];
     },
 
-    /** Mark an invite consumed (pending → active) on first magic-link use. */
-    async markConsumed(inviteId: string): Promise<void> {
-      await db
+    /**
+     * Mark an invite consumed (pending → active) on first magic-link use. Atomic
+     * compare-and-swap on `state='pending'` so two concurrent consumes can't both
+     * mint a session from one single-use token — only the row that actually flips
+     * returns true (KTD: no read-then-write TOCTOU on a single-use credential).
+     */
+    async markConsumed(inviteId: string): Promise<boolean> {
+      const rows = (await db
         .update(invites)
         .set({ state: "active", consumedAt: Date.now() })
-        .where(eq(invites.id, inviteId));
+        .where(and(eq(invites.id, inviteId), eq(invites.state, "pending")))
+        .returning({ id: invites.id })) as Array<{ id: string }>;
+      return rows.length > 0;
     },
 
     /**

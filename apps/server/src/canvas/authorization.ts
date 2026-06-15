@@ -19,7 +19,8 @@ export type AccessDecision =
  * Context the pure decision table can't compute itself (caller-resolved so the
  * table stays I/O-free, KTD4): whether the principal is on this canvas's allowlist
  * (`specific_people`), and whether the owner account may publish public links
- * (`public_link`; defaults true until U10 wires the capability).
+ * (`public_link`, resolved by {@link resolveAccessContext} from the owner's U10
+ * capability; an absent value is treated as not-enabled by the table).
  */
 export interface AccessContext {
   isAllowed?: boolean;
@@ -29,6 +30,18 @@ export interface AccessContext {
 /** Build a member principal from the org-resolved user (the normal gateway path). */
 export function memberPrincipal(user: { id: string; isAdmin: boolean }): Principal {
   return { kind: "member", id: user.id, isAdmin: user.isAdmin };
+}
+
+/**
+ * The allowlist lookup key for a principal: a member matches by user id, a guest by
+ * email, anyone else matches nothing. The single mapping shared by
+ * {@link resolveAccessContext} and the realtime hub's re-auth, so a new principal
+ * kind can't be handled one way here and silently fall through to `{}` there.
+ */
+export function principalLookupKey(principal: Principal): { userId?: string; email?: string } {
+  if (principal.kind === "member") return { userId: principal.id };
+  if (principal.kind === "guest") return { email: principal.email };
+  return {};
 }
 
 /**
@@ -89,8 +102,11 @@ export function decideCanvasAccess(
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "public_link":
-      // Admin-gated per owner account (U10; defaults open until then).
-      if (ctx.publicEnabled === false) return { action: "deny", status: 404, reason: "owner_only" };
+      // Admin-gated per owner account (U10): default-deny unless the caller resolved
+      // the owner's publish capability as enabled (resolveAccessContext). The realtime
+      // hub doesn't resolve it, but it drops every static-only non-owner socket below,
+      // so a public_link socket is never left live by this absence.
+      if (!ctx.publicEnabled) return { action: "deny", status: 404, reason: "owner_only" };
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       // Static-only for every non-owner (anonymous AND org members) — R17.
       return { action: "allow", needsPasswordGate: gate, staticOnly: true };
@@ -111,18 +127,19 @@ export interface CanvasAccessDeps {
  * rung needs the lookup; other rungs short-circuit to no context.
  */
 export async function resolveAccessContext(
-  canvases: Pick<CanvasesRepository, "isPrincipalAllowed">,
+  canvases: Pick<CanvasesRepository, "isPrincipalAllowed" | "isOwnerPublishEnabled">,
   canvas: Canvas | null,
   principal: Principal,
 ): Promise<AccessContext> {
+  // public_link: resolve the owner's publish capability so the decision table can
+  // deny a canvas whose owner lost the grant, independent of the write-time sweep
+  // (defense-in-depth; the two layers together honor §12.0 #3/#5).
+  if (canvas?.access === "public_link") {
+    return { publicEnabled: await canvases.isOwnerPublishEnabled(canvas.ownerId) };
+  }
   if (canvas?.access !== "specific_people") return {};
-  if (principal.kind === "member") {
-    return { isAllowed: await canvases.isPrincipalAllowed(canvas.id, { userId: principal.id }) };
-  }
-  if (principal.kind === "guest") {
-    return { isAllowed: await canvases.isPrincipalAllowed(canvas.id, { email: principal.email }) };
-  }
-  return { isAllowed: false };
+  if (principal.kind === "anonymous") return { isAllowed: false };
+  return { isAllowed: await canvases.isPrincipalAllowed(canvas.id, principalLookupKey(principal)) };
 }
 
 /** The acting principal for a canvas-facing request: the resolver-set guest/

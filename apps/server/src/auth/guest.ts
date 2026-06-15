@@ -78,7 +78,9 @@ export function guestService(config: Config, guests: GuestRepository): GuestServ
       if (invite?.state !== "pending") return null;
       if (invite.expiresAt !== null && invite.expiresAt <= now) return null;
 
-      await guests.markConsumed(invite.id);
+      // Atomic single-use: only the consume that actually flips pending→active mints
+      // a session; a concurrent second consume of the same token no-ops here.
+      if (!(await guests.markConsumed(invite.id))) return null;
       const sessionToken = generateSessionToken();
       await guests.createSession({
         inviteId: invite.id,

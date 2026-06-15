@@ -70,6 +70,8 @@ export interface Canvas {
   shared: boolean;
   /** Guest-AI opt-in (U9): off by default; lets invited guests use the AI primitive. */
   guestAiEnabled: boolean;
+  /** Per-canvas guest-AI spend cap in USD (U9); 0 disables guest AI spend entirely. */
+  guestAiCap: number;
   sharedExpiresAt: number | null;
   hasPassword: boolean;
   spaFallback: boolean;
@@ -196,6 +198,8 @@ export interface CanvasSettings {
   access?: "private" | "specific_people" | "whole_org" | "public_link";
   /** Guest-AI opt-in (U9). */
   guestAiEnabled?: boolean;
+  /** Per-canvas guest-AI spend cap in USD (U9). */
+  guestAiCap?: number;
   shared?: boolean;
   sharedExpiresAt?: number | null;
   password?: string | null;

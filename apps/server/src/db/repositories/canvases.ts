@@ -498,6 +498,22 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
+     * Whether the owner account may currently publish public links (U10 capability).
+     * The defense-in-depth half of the public_link gate: the admin revoke sweep
+     * (revertPublicForOwner) flips canvases to private at write time, and this
+     * per-request check makes the decision table self-sufficient if a public_link
+     * row ever outlives the owner's grant. A missing owner reads as not-enabled.
+     */
+    async isOwnerPublishEnabled(ownerId: string): Promise<boolean> {
+      const rows = (await db
+        .select({ canPublishPublic: usersT.canPublishPublic })
+        .from(usersT)
+        .where(eq(usersT.id, ownerId))
+        .limit(1)) as Array<{ canPublishPublic: boolean }>;
+      return rows[0]?.canPublishPublic === true;
+    },
+
+    /**
      * Update capability flags (plan 006). Writes only the fields present in the
      * patch; turning backend off never clears the feature flags (KTD-2).
      */

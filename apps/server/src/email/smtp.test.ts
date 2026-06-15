@@ -54,4 +54,26 @@ describe("smtpMailer", () => {
       "smtp_send_failed",
     );
   });
+
+  it("bounds the transport with explicit timeouts (no indefinite hang)", async () => {
+    const m = smtpMailer(cfg(), "no-reply@x.com", silent);
+    await m.send({ to: "a@b.com", subject: "s", text: "t" });
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionTimeout: expect.any(Number),
+        socketTimeout: expect.any(Number),
+        greetingTimeout: expect.any(Number),
+      }),
+    );
+  });
+
+  it("never logs the SMTP password on a send failure", async () => {
+    const errored = vi.fn();
+    const log = { info() {}, error: errored, warn() {} } as unknown as Logger;
+    sendMail.mockRejectedValueOnce(new Error("connection refused"));
+    const m = smtpMailer(cfg({ pass: "s3cr3t-smtp-pass" }), "no-reply@x.com", log);
+    await m.send({ to: "a@b.com", subject: "s", text: "t" });
+    expect(errored).toHaveBeenCalled();
+    expect(JSON.stringify(errored.mock.calls)).not.toContain("s3cr3t-smtp-pass");
+  });
 });

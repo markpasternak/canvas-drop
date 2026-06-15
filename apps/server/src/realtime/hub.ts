@@ -1,6 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
-import { decideCanvasAccess } from "../canvas/authorization.js";
+import { decideCanvasAccess, principalLookupKey } from "../canvas/authorization.js";
 import { assertCapability } from "../canvas/capability-guard.js";
 import type { Principal } from "../http/types.js";
 
@@ -298,20 +298,28 @@ export function createHub(deps: HubDeps) {
           id: conn.user.id,
           isAdmin: conn.user.isAdmin,
         };
-        const isAllowed =
-          canvas.access === "specific_people" && deps.isPrincipalAllowed
-            ? await deps.isPrincipalAllowed(
-                canvas.id,
-                principal.kind === "guest"
-                  ? { email: principal.email }
-                  : principal.kind === "member"
-                    ? { userId: principal.id }
-                    : {},
-              )
-            : false;
+        let isAllowed = false;
+        if (canvas.access === "specific_people" && deps.isPrincipalAllowed) {
+          try {
+            isAllowed = await deps.isPrincipalAllowed(canvas.id, principalLookupKey(principal));
+          } catch {
+            // Fail closed: a transient DB error must drop the socket (deny), never
+            // leave a stale grant alive, and never abort the rest of the sweep.
+            isAllowed = false;
+          }
+        }
         const decision = decideCanvasAccess(canvas, principal, now, { isAllowed });
         if (decision.action === "deny") {
           dropConn(conn, CLOSE_UNAUTHORIZED, decision.reason);
+          continue;
+        }
+        // A public_link canvas is static-only for every non-owner (members and
+        // guests): no realtime. The decision allows the slug (files serve) but
+        // staticOnly marks that primitives — including this socket — are refused,
+        // so drop a live socket the instant a rung change makes it static-only
+        // (§12.0 #5 lifecycle; owners hit the owner bypass with staticOnly:false).
+        if (decision.staticOnly) {
+          dropConn(conn, CLOSE_UNAUTHORIZED, "static_only");
           continue;
         }
         if (!assertCapability(canvas, "realtime", deps.config)) {

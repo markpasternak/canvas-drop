@@ -22,6 +22,11 @@ export function smtpMailer(cfg: Config["email"], from: string, log?: Logger): Ma
         port,
         secure,
         auth: user && pass ? { user, pass } : undefined,
+        // Bound the send so a stuck SMTP server can't hang the invite handler for
+        // nodemailer's 10-minute default socket timeout.
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 15_000,
       });
     }
     return transport;

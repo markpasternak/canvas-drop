@@ -36,10 +36,15 @@ export function usersRepository(client: DbClient) {
       return (rows[0] as User | undefined) ?? null;
     },
 
-    /** Find an org user by email (case-sensitive; emails are stored as provided by
-     *  the IdP). Used to resolve a `specific_people` member-add (U4). */
+    /** Find an org user by email, case-insensitively (emails are stored as provided
+     *  by the IdP, which may differ in case from a typed allowlist entry). Used to
+     *  resolve a `specific_people` member-add (U4). */
     async findByEmail(email: string): Promise<User | null> {
-      const rows = await db.select().from(t).where(eq(t.email, email)).limit(1);
+      const rows = await db
+        .select()
+        .from(t)
+        .where(sql`lower(${t.email}) = ${email.trim().toLowerCase()}`)
+        .limit(1);
       return (rows[0] as User | undefined) ?? null;
     },
 

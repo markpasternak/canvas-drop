@@ -43,11 +43,14 @@ Capability: `identity` — it has no separate toggle and is effective exactly wh
 the canvas's **Backend** is on.
 
 ```
-GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl }
+GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind }
 ```
 
-`avatarUrl` may be `null`. This runtime `me()` deliberately omits `isAdmin`; the
-dashboard SPA's `/api/me` is a separate endpoint that includes it.
+`avatarUrl` may be `null`. `kind` is `"member"` (an org user) or `"guest"` (an
+email-invited viewer) so canvas code can branch on who's viewing; an anonymous
+visitor never reaches the runtime API (a `public_link` canvas is static-only).
+This runtime `me()` deliberately omits `isAdmin`; the dashboard SPA's `/api/me`
+is a separate endpoint that includes it.
 
 ## Key–value
 

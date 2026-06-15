@@ -32,6 +32,9 @@ export function mailgunMailer(cfg: Config["email"], from: string, log?: Logger):
           method: "POST",
           headers: { authorization: auth, "content-type": "application/x-www-form-urlencoded" },
           body,
+          // Bound the call so a slow/unreachable Mailgun can't hang the invite
+          // request handler; an AbortError is caught below as `mailgun_unreachable`.
+          signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) {
           // Status only — never log the response body or the key.

@@ -17,6 +17,7 @@ const CANVAS = {
   access: "private",
   shared: false,
   guestAiEnabled: false,
+  guestAiCap: 0,
   sharedExpiresAt: null,
   hasPassword: false,
   spaFallback: false,

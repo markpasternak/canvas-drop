@@ -32,6 +32,9 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 | `CROSS_CANVAS_FORBIDDEN` | 403 | A request targeted another canvas's resources. |
 | `MODEL_NOT_ALLOWED` | 403 | The requested AI model is not in the allow-list. |
 | `DISABLED` | 403 | The canvas has been disabled by an administrator. |
+| `STATIC_ONLY` | 403 | The canvas is a public link (`public_link`) — every backend primitive is refused for non-owners. |
+| `GUEST_AI_DISABLED` | 403 | The canvas owner has not enabled AI for invited guests. |
+| `GUEST_AI_CAP` | 429 | The canvas reached its guest-AI spend cap. |
 | `NOT_FOUND` | 404 | The key, file, or canvas does not exist. |
 | `INVALID_BODY` | 400 | The request body failed validation. |
 | `KEY_TOO_LARGE` | 413 | The KV key exceeds the size limit. |
@@ -64,10 +67,10 @@ table above.
 
 `QuotaExceededError` is the one quota-shaped class, so it's reused for related
 limits: the SDK constructs it with the actual wire `code` and `status` for 409
-and 413 responses (e.g. `KEY_LIMIT`, `VALUE_TOO_LARGE`, `KEY_TOO_LARGE`), and
-realtime constructs it with `code: "CONNECTION_LIMIT"`, `status: 429`. Always
-read `err.code`/`err.status` — don't assume a `QuotaExceededError` is literally
-`QUOTA_EXCEEDED`.
+and 413 responses (e.g. `KEY_LIMIT`, `VALUE_TOO_LARGE`, `KEY_TOO_LARGE`), for the
+guest-AI cap (`code: "GUEST_AI_CAP"`, `status: 429`), and realtime constructs it
+with `code: "CONNECTION_LIMIT"`, `status: 429`. Always read `err.code`/`err.status`
+— don't assume a `QuotaExceededError` is literally `QUOTA_EXCEEDED`.
 
 Classes such as `CrossCanvasForbiddenError`, `ModelNotAllowedError`, and
 `PasswordRequiredError` do **not** exist; those codes arrive on the base

@@ -82,6 +82,18 @@ describe.each(DIALECTS)("guestService [%s]", (dialect) => {
     expect(await (await app.request(`/consume?token=${token}`)).json()).toEqual({ ok: false });
   });
 
+  it("concurrent consumes of one token mint at most one session (atomic single-use)", async () => {
+    client = await makeTestDb(dialect);
+    const canvasId = await seedCanvas(client);
+    const { app, svc } = appFor(client);
+    const { token } = await svc.createInvite(canvasId, "p@acme.com");
+    const run = async () =>
+      (await (await app.request(`/consume?token=${token}`)).json()) as { ok: boolean };
+    const results = await Promise.all([run(), run()]);
+    const okCount = results.filter((r) => r.ok).length;
+    expect(okCount).toBe(1);
+  });
+
   it("an expired invite does not establish a session", async () => {
     client = await makeTestDb(dialect);
     const canvasId = await seedCanvas(client);

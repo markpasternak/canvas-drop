@@ -188,14 +188,28 @@ describe("decideCanvasAccess — allows", () => {
   });
 
   it("public_link: anonymous AND non-owner members are allowed static-only (R17)", () => {
-    expect(decideCanvasAccess(canvas({ access: "public_link" }), anon, NOW)).toEqual({
+    // The owner's publish capability is resolved into ctx.publicEnabled (U10).
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link" }), anon, NOW, { publicEnabled: true }),
+    ).toEqual({
       action: "allow",
       needsPasswordGate: false,
       staticOnly: true,
     });
-    expect(decideCanvasAccess(canvas({ access: "public_link" }), other, NOW)).toMatchObject({
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link" }), other, NOW, { publicEnabled: true }),
+    ).toMatchObject({
       action: "allow",
       staticOnly: true,
+    });
+  });
+
+  it("public_link: default-deny when publicEnabled is unresolved in the ctx (U10)", () => {
+    // The decision table is self-sufficient: an absent publicEnabled denies rather
+    // than failing open, independent of the admin revoke sweep (§12.0 #3 defense-in-depth).
+    expect(decideCanvasAccess(canvas({ access: "public_link" }), anon, NOW)).toMatchObject({
+      action: "deny",
+      status: 404,
     });
   });
 

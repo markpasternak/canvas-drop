@@ -181,6 +181,22 @@ export default function Settings() {
                 checked={canvas.guestAiEnabled}
                 onChange={(guestAiEnabled) => save({ guestAiEnabled })}
               />
+              {canvas.guestAiEnabled && (
+                <Field
+                  label="Guest AI spend cap (USD)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  hint="Total guest AI spend allowed for this canvas. 0 disables guest AI spend."
+                  defaultValue={String(canvas.guestAiCap)}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v >= 0 && v !== canvas.guestAiCap) {
+                      save({ guestAiCap: v });
+                    }
+                  }}
+                />
+              )}
             </>
           )}
           {canvas.shared && (

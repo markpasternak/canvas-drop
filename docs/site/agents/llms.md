@@ -39,7 +39,8 @@ It exposes one global, **`canvasdrop`** (there is no `cd` alias). Mode and slug
 are auto-detected from the canvas URL; every call hits
 `{apiBase}/v1/c/{slug}/...` with `credentials: include`.
 
-- `canvasdrop.me()` → `{ id, email, name, avatarUrl }`.
+- `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` where `kind` is
+  `"member"` (an org user) or `"guest"` (an email-invited viewer).
 - `canvasdrop.kv` and `canvasdrop.kv.user` — `get`, `set`, `delete`, `list`,
   `increment`. User scope is per-viewer; root scope is shared.
 - `canvasdrop.files` — `upload(file)`, `list()`, `delete(id)`, `url(id)`.
@@ -49,6 +50,32 @@ are auto-detected from the canvas URL; every call hits
   `presence`, `onJoin`, `onLeave`, `close`.
 
 Full signatures and types: [SDK overview](/docs/sdk/overview).
+
+## Sharing & access (management API)
+
+These session-authenticated routes (the dashboard's own API, callable by an agent
+holding a logged-in user's session cookie — not the Bearer deploy key) manage who
+can open a canvas. The full model is in [Sharing & access](/docs/authoring/sharing).
+
+- **Set the access rung** — `PATCH {base}/api/canvases/{id}/settings` with
+  `{ "access": "private" | "specific_people" | "whole_org" | "public_link" }`.
+  `public_link` is admin-gated per account (a `403 PUBLIC_NOT_ALLOWED` until an
+  admin grants it). Also accepts `{ "guestAiEnabled": boolean, "guestAiCap": number }`
+  to let invited guests use AI up to a per-canvas cap.
+- **Invite / allowlist** (the `specific_people` rung) —
+  `GET {base}/api/canvases/{id}/allowlist`,
+  `POST {base}/api/canvases/{id}/allowlist` with `{ "email": "..." }` (an org
+  member is added directly; an outside email is emailed a magic-link guest invite),
+  `POST {base}/api/canvases/{id}/allowlist/{entryId}/resend`, and
+  `DELETE {base}/api/canvases/{id}/allowlist/{entryId}`.
+- **Admin: publish-public capability** —
+  `POST {base}/api/admin/users/{id}/grant-public` and
+  `POST {base}/api/admin/users/{id}/revoke-public` (admin session required;
+  revoking sweeps the owner's public canvases back to private).
+
+Guest invites and public links require app-managed sign-in (`oidc`/`dev` modes);
+behind an identity-aware proxy they return `409 GUESTS_UNAVAILABLE`. Sending an
+invite needs email configured (`409 EMAIL_NOT_CONFIGURED` otherwise).
 
 ## Capabilities and errors
 

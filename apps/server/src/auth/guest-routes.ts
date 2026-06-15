@@ -5,6 +5,7 @@ import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { errorResponse } from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
+import { isSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { GuestService } from "./guest.js";
 
@@ -75,6 +76,12 @@ export function guestRoutes(deps: GuestRoutesDeps) {
   });
 
   app.post("/guest/:token", async (c) => {
+    // The consuming POST is same-origin only (it mints a session): a cross-site
+    // form can't burn the single-use token or fixate a victim into a guest session.
+    // Non-browser clients (no fetch-metadata, no Origin) are still allowed.
+    if (!isSameOrigin(c, deps.config)) {
+      return c.json({ error: "cross_origin_forbidden" }, 403);
+    }
     const principal = await deps.guests.consumeMagicLink(c, c.req.param("token"));
     if (principal?.kind !== "guest") return invalidLink(c);
     const canvas = await deps.canvases.findById(principal.canvasId);

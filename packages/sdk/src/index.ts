@@ -29,6 +29,19 @@ export const ERROR_CODES = {
   },
   MODEL_NOT_ALLOWED: { status: 403, summary: "The requested AI model is not in the allow-list." },
   DISABLED: { status: 403, summary: "The canvas has been disabled by an administrator." },
+  STATIC_ONLY: {
+    status: 403,
+    summary:
+      "The canvas is a public link (public_link) — every backend primitive is refused for non-owners.",
+  },
+  GUEST_AI_DISABLED: {
+    status: 403,
+    summary: "The canvas owner has not enabled AI for invited guests.",
+  },
+  GUEST_AI_CAP: {
+    status: 429,
+    summary: "The canvas reached its guest-AI spend cap.",
+  },
   NOT_FOUND: { status: 404, summary: "The key, file, or canvas does not exist." },
   INVALID_BODY: { status: 400, summary: "The request body failed validation." },
   KEY_TOO_LARGE: { status: 413, summary: "The KV key exceeds the size limit." },
@@ -98,9 +111,10 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     return new CapabilityDisabledError(cap);
   }
   if (status === 404) return new NotFoundError();
-  // Quota signalled either by code (AI: 429 QUOTA_EXCEEDED) or by the KV/files
-  // limit statuses (409 KEY_LIMIT, 413 *_TOO_LARGE).
-  if (code === "QUOTA_EXCEEDED" || status === 409 || status === 413) {
+  // Quota signalled either by code (AI: 429 QUOTA_EXCEEDED, or the per-canvas guest
+  // AI cap: 429 GUEST_AI_CAP) or by the KV/files limit statuses (409 KEY_LIMIT,
+  // 413 *_TOO_LARGE).
+  if (code === "QUOTA_EXCEEDED" || code === "GUEST_AI_CAP" || status === 409 || status === 413) {
     return new QuotaExceededError(code || undefined, status);
   }
   return new CanvasdropError(code || "REQUEST_FAILED", status);
@@ -201,6 +215,8 @@ export interface Me {
   email: string;
   name: string;
   avatarUrl: string | null;
+  /** Whether the viewer is an org `member` or an email-invited `guest` (U9). */
+  kind: "member" | "guest";
 }
 
 export interface FileMeta {

@@ -53,8 +53,17 @@ const user = (id: string, isAdmin = false): ConnUser => ({ id, name: id, isAdmin
 function makeHub(
   canvas: Canvas | null = fakeCanvas(),
   isUserActive?: (id: string) => Promise<boolean>,
+  isPrincipalAllowed?: (
+    canvasId: string,
+    p: { userId?: string; email?: string },
+  ) => Promise<boolean>,
 ) {
-  return createHub({ config, resolveCanvas: async () => canvas, isUserActive });
+  return createHub({
+    config,
+    resolveCanvas: async () => canvas,
+    isUserActive,
+    isPrincipalAllowed,
+  });
 }
 
 /** Connect and assert the per-canvas limit wasn't hit (keeps tests assertion-free of `!`). */
@@ -228,6 +237,34 @@ describe("RealtimeHub", () => {
     mc(hub, "c1", user("badguy"), badSock);
     await hub.revalidateCanvas("c1");
     expect(badSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(ownerSock.closed).toBeNull();
+  });
+
+  it("revalidateCanvas drops a non-owner socket when the canvas becomes public_link (static-only), keeps the owner", async () => {
+    // public_link is static-only for non-owners: no realtime. A live socket from
+    // before the rung change must be dropped instantly (§12.0 #5 lifecycle).
+    const hub = makeHub(fakeCanvas({ access: "public_link" }));
+    const ownerSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(ownerSock.closed).toBeNull();
+  });
+
+  it("revalidateCanvas fails closed (drops the socket) when isPrincipalAllowed throws", async () => {
+    // A transient DB error during re-auth must drop the socket (deny), never leave a
+    // stale grant alive, and never abort the rest of the sweep.
+    const hub = makeHub(fakeCanvas({ access: "specific_people" }), undefined, async () => {
+      throw new Error("db down");
+    });
+    const ownerSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock); // owner bypasses the allowlist check
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
     expect(ownerSock.closed).toBeNull();
   });
 

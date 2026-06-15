@@ -561,7 +561,15 @@ export function managementRoutes(deps: ManagementDeps) {
     });
   });
 
-  const allowlistAddSchema = z.object({ email: z.string().email() });
+  // Normalize at the boundary (trim + lowercase) so allowlist/invite dedup on the
+  // unique (canvas_id, email) index is case-insensitive and member matching is
+  // consistent — "Alice@x.com" and "alice@x.com" are one principal.
+  const allowlistAddSchema = z.object({
+    email: z
+      .string()
+      .email()
+      .transform((e) => e.trim().toLowerCase()),
+  });
 
   /** Mint + email a guest invite for `email` on `cv`, and add the guest allowlist
    *  entry. Returns a 409 JSON response on a guard failure, or null on success. */
@@ -583,6 +591,11 @@ export function managementRoutes(deps: ManagementDeps) {
         409,
       );
     }
+    // Persist the allowlist grant + invite BEFORE sending, so the email send is the
+    // last fallible step: a send failure leaves a consistent, resend-able state
+    // (pending invite + grant) — never a delivered magic link with no allowlist grant
+    // behind it (both writes are idempotent upserts, so a resend is safe).
+    await deps.canvases.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email });
     const { token } = await deps.guests.createInvite(cv.id, email);
     const inviteUrl = new URL(
       `/guest/${encodeURIComponent(token)}`,
@@ -597,7 +610,6 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!sent.ok) {
       return c.json({ code: "EMAIL_SEND_FAILED", message: "Couldn't send the invite email." }, 502);
     }
-    await deps.canvases.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email });
     deps.audit.recordAudit({
       action: "guest_invite",
       actorId: c.get("user").id,

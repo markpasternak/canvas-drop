@@ -1,0 +1,1 @@
+CREATE INDEX `guest_sessions_canvas_idx` ON `guest_sessions` (`canvas_id`);

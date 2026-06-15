@@ -71,6 +71,13 @@ describe("errorFromResponse", () => {
     expect(cap).toBeInstanceOf(CapabilityDisabledError);
     expect(cap.code).toBe("CAPABILITY_DISABLED");
   });
+
+  it("maps the 429 GUEST_AI_CAP to QuotaExceededError (per-canvas guest-AI cap)", () => {
+    const err = errorFromResponse(429, { code: "GUEST_AI_CAP" });
+    expect(err).toBeInstanceOf(QuotaExceededError);
+    expect(err.code).toBe("GUEST_AI_CAP");
+    expect(err.status).toBe(429);
+  });
 });
 
 describe("createClient", () => {

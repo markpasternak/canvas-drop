@@ -223,6 +223,8 @@ export const guestSessions = pgTable(
   (t) => [
     uniqueIndex("guest_sessions_token_hash_uq").on(t.tokenHash),
     index("guest_sessions_invite_idx").on(t.inviteId),
+    // revokeAllForCanvas filters by canvas_id (lifecycle sweep on unpublish/archive).
+    index("guest_sessions_canvas_idx").on(t.canvasId),
   ],
 );
 

@@ -1,5 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, User } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
@@ -102,13 +102,22 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       // KV/files/realtime/usage are attributed to `guest:<inviteId>` (KTD2) and
       // `me()` returns the guest's email. AI is gated separately (canvas-ai.ts).
       if (principal.kind === "guest") {
-        c.set("user", {
+        // A complete, guest-safe synthetic User (no `as` escape hatch, so a new User
+        // column forces a guest-safe default here rather than silently reading
+        // `undefined`). A guest never holds org capabilities (isAdmin / canPublishPublic).
+        const guestUser: User = {
           id: principal.id,
+          providerSub: principal.id,
           email: principal.email,
           name: principal.email,
           avatarUrl: null,
           isAdmin: false,
-        } as never);
+          isBlocked: false,
+          canPublishPublic: false,
+          createdAt: Date.now(),
+          lastSeenAt: null,
+        };
+        c.set("user", guestUser);
       }
       await next();
     }),
