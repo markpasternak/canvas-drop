@@ -2,6 +2,7 @@ import { useParams } from "@tanstack/react-router";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
+import { InlineNotice } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
 import type { FeatureCapability } from "../lib/api.js";
 import { useUpdateCapabilities } from "../lib/mutations.js";
@@ -51,6 +52,10 @@ export default function Capabilities() {
   }
 
   const backendOn = canvas.backendEnabled;
+  // A public_link canvas serves static files only — every primitive is refused for
+  // public visitors (R17). Backend may still be on (it works for the owner/admins),
+  // so warn rather than block: the combination is valid but surprising.
+  const publicBackendInert = canvas.access === "public_link" && backendOn;
 
   return (
     <TabContentFrame>
@@ -66,6 +71,12 @@ export default function Capabilities() {
           </a>{" "}
           for the client API.
         </div>
+        {publicBackendInert && (
+          <InlineNotice tone="warning" className="py-2 text-xs">
+            This canvas is shared as a public link, which serves static files only. The backend
+            primitives below won't run for public visitors — only for you and signed-in org members.
+          </InlineNotice>
+        )}
         <Toggle
           label="Enable backend"
           description="Off by default. A canvas is static until you turn this on."

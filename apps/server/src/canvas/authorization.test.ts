@@ -139,17 +139,54 @@ describe("decideCanvasAccess — denials", () => {
 // --- ALLOW PATHS ---
 
 describe("decideCanvasAccess — allows", () => {
-  it("owner/admin reach any rung, full, bypassing the gate", () => {
+  it("owner reaches any rung, full, bypassing the gate", () => {
     const cv = canvas({ access: "private", passwordHash: "h" });
     expect(decideCanvasAccess(cv, owner, NOW)).toEqual({
       action: "allow",
       needsPasswordGate: false,
       staticOnly: false,
     });
-    expect(decideCanvasAccess(cv, admin, NOW)).toMatchObject({
-      action: "allow",
-      staticOnly: false,
+  });
+
+  // Admin CONTENT restriction: an admin is treated like a normal member for content
+  // (private / unlisted specific_people → 404), but keeps the password bypass on the
+  // rungs they CAN reach. Admin management (block/archive/delete) is on other routes.
+  it("admin does NOT bypass the rung for content — private is 404 to a non-owner admin", () => {
+    expect(decideCanvasAccess(canvas({ access: "private" }), admin, NOW)).toEqual({
+      action: "deny",
+      status: 404,
+      reason: "owner_only",
     });
+  });
+
+  it("admin is 404 on a specific_people canvas they're not allowlisted on", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "specific_people" }), admin, NOW, { isAllowed: false }),
+    ).toMatchObject({ status: 404, reason: "owner_only" });
+  });
+
+  it("admin reaches whole_org (as a member) and bypasses its password gate", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), admin, NOW),
+    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+  });
+
+  it("admin sees a public_link canvas static-only, like any non-owner member", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link" }), admin, NOW, { publicEnabled: true }),
+    ).toMatchObject({ action: "allow", staticOnly: true });
+  });
+
+  it("admin is 404 on an expired whole_org share, like a normal member", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", sharedExpiresAt: NOW - 1 }), admin, NOW),
+    ).toMatchObject({ action: "deny", reason: "share_expired" });
+  });
+
+  it("an allowlisted admin reaches a specific_people canvas (explicitly granted)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "specific_people" }), admin, NOW, { isAllowed: true }),
+    ).toMatchObject({ action: "allow", staticOnly: false });
   });
 
   it("whole_org: any member; needsPasswordGate reflects the password", () => {

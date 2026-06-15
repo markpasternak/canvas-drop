@@ -228,7 +228,9 @@ describe("realtime WebSocket route", () => {
 
   it("authenticated handshake upgrades (101) and the dev user can publish/subscribe", async () => {
     client = await makeTestDb("sqlite");
-    await seedCanvas(client, { slug: "app" });
+    // whole_org so the dev user connects as a legitimate org member (not via the
+    // admin bypass, which no longer grants content/realtime access — D-admin-restrict).
+    await seedCanvas(client, { slug: "app", shared: true });
     server = await startFullApp(client);
     const a = track(connect(server.port, "app"));
     await a.opened; // 101 — upgrade traversed gateway + resolve + isolation
@@ -258,7 +260,7 @@ describe("realtime WebSocket route", () => {
 
   it("capability-off: upgrades then closes 4403 with a CAPABILITY_DISABLED frame", async () => {
     client = await makeTestDb("sqlite");
-    await seedCanvas(client, { slug: "app", capRealtime: false });
+    await seedCanvas(client, { slug: "app", shared: true, capRealtime: false });
     server = await startFullApp(client);
     const c = track(connect(server.port, "app"));
     await c.opened; // accept-then-close (capability is a flag, not a security boundary)
@@ -269,10 +271,12 @@ describe("realtime WebSocket route", () => {
 
   it("isolates canvases — a publish in canvas A never reaches a socket on canvas B", async () => {
     client = await makeTestDb("sqlite");
-    await seedCanvas(client, { slug: "a" });
-    await seedCanvas(client, { slug: "b" });
+    // whole_org so the injected member identity is authorized on both canvases
+    // (admin no longer bypasses the rung for content/realtime — D-admin-restrict).
+    await seedCanvas(client, { slug: "a", shared: true });
+    await seedCanvas(client, { slug: "b", shared: true });
     server = await startInjectedApp(client);
-    const a = track(connect(server.port, "a")); // admin (default header)
+    const a = track(connect(server.port, "a")); // injected member (default header)
     const b = track(connect(server.port, "b"));
     await Promise.all([a.opened, b.opened]);
     a.send({ type: "subscribe", channel: "room" });

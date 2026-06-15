@@ -72,8 +72,12 @@ export function decideCanvasAccess(
   if (canvas.status === "disabled") {
     return { action: "deny", status: 403, reason: "disabled" };
   }
-  // Owner / admin (members only) bypass the rung and the gate.
-  if (principal.kind === "member" && (canvas.ownerId === principal.id || principal.isAdmin)) {
+  // Owner (members only) bypasses the rung and the gate. Admins do NOT bypass the
+  // rung for CONTENT: an admin falls through to the per-rung checks below and is
+  // treated like a normal member — a private (or unlisted specific_people) canvas
+  // resolves to 404 for them. Admin *management* (block / archive / delete /
+  // metadata) lives on separate routes (admin/authz.ts) and is unaffected.
+  if (principal.kind === "member" && canvas.ownerId === principal.id) {
     return { action: "allow", needsPasswordGate: false, staticOnly: false };
   }
   // A guest session is scoped to exactly the canvas it was invited to (R11/§12.0 #3):
@@ -83,9 +87,12 @@ export function decideCanvasAccess(
   }
 
   const expired = canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= now;
-  // The magic link is the guest's gate, so guests bypass the per-canvas password;
-  // members and anonymous visitors still face it where set (R4/R21).
-  const gate = principal.kind === "guest" ? false : canvas.passwordHash !== null;
+  // The magic link is the guest's gate, so guests bypass the per-canvas password.
+  // Admins also bypass it (trusted operators) on the rungs they can still reach
+  // (whole_org / public_link); normal members and anonymous visitors still face it
+  // where set (R4/R21). Admins remain blocked from private/unlisted content above.
+  const isAdminMember = principal.kind === "member" && principal.isAdmin;
+  const gate = principal.kind === "guest" || isAdminMember ? false : canvas.passwordHash !== null;
 
   switch (canvas.access) {
     case "private":
