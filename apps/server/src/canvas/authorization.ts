@@ -130,8 +130,17 @@ export async function resolveAccessContext(
 export function requestPrincipal(c: { get: (k: "principal" | "user") => unknown }): Principal {
   const p = c.get("principal") as Principal | undefined;
   if (p) return p;
-  const user = c.get("user") as { id: string; isAdmin: boolean };
-  return memberPrincipal(user);
+  const user = c.get("user") as { id: string; isAdmin: boolean } | undefined;
+  // In production the content/runtime path always has one or the other; fall back
+  // to anonymous defensively rather than dereferencing an absent user.
+  return user ? memberPrincipal(user) : { kind: "anonymous" };
+}
+
+/** Attribution id for audit/usage on the canvas content path (U9/U11): a member or
+ *  guest by principal id, an anonymous public visitor by a stable sentinel. */
+export function principalAttributionId(c: { get: (k: "principal" | "user") => unknown }): string {
+  const p = requestPrincipal(c);
+  return p.kind === "anonymous" ? "anonymous-via-public-link" : p.id;
 }
 
 /**

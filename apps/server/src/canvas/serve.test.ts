@@ -298,18 +298,20 @@ describe("serveCanvas (integration)", () => {
       expect((await usage.countByType(canvas.id, null)).view).toBe(1);
     });
 
-    it("records no view when there is no viewer in context", async () => {
+    it("records an anonymous view for a public-link visitor (U11)", async () => {
       const { canvas, usage, versions } = await setup();
       const app = new Hono<AppEnv>();
       app.use("*", async (c, next) => {
         c.set("canvas", canvas);
-        // no c.set("user", ...) — anonymous serve path
+        // An anonymous public visitor (the U7 carve-out set this principal).
+        c.set("principal", { kind: "anonymous" });
         await next();
       });
       app.all("*", serveCanvas({ config, versions, storage, usage }));
       await app.request("/c/s/index.html");
       await new Promise((r) => setTimeout(r, 20));
-      expect((await usage.countByType(canvas.id, null)).view ?? 0).toBe(0);
+      // The view is recorded and attributed to the anonymous sentinel (R18).
+      expect((await usage.countByType(canvas.id, null)).view ?? 0).toBe(1);
     });
   });
 });

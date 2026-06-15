@@ -10,6 +10,7 @@ import type { AppEnv } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { assetPathFor, resolveAsset } from "./asset-resolver.js";
+import { principalAttributionId } from "./authorization.js";
 import { mimeFor } from "./mime.js";
 import { blobKey } from "./storage-keys.js";
 
@@ -93,12 +94,12 @@ function recordView(
   contentType: string,
 ): void {
   if (!contentType.startsWith("text/html")) return;
-  const user = c.get("user");
-  if (!user) return;
+  // Attribute to the org member, the invited guest, or an anonymous public visitor
+  // (U11) — usage_events.userId is plain text, so all principals are counted.
   void deps.usage
     .recordView({
       canvasId: canvas.id,
-      userId: user.id,
+      userId: principalAttributionId(c),
       windowMs: VIEW_SESSION_MS,
       now: Date.now(),
     })

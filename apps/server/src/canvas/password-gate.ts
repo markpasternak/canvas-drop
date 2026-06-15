@@ -7,6 +7,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import { escapeHtml, SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
+import { principalAttributionId, requestPrincipal } from "./authorization.js";
 import { verifyPassword } from "./password.js";
 
 const GATE_COOKIE = "__canvasdrop_gate";
@@ -74,9 +75,14 @@ export function passwordGate(deps: PasswordGateDeps) {
       // Throttle password-gate attempts (§12.3 5/min/user/canvas) — slows brute
       // force of a protected canvas's password (§12.0 #3).
       if (deps.rateLimitStore && deps.config.rateLimit.enabled) {
+        // Key by the member's id, or by client IP for an anonymous public visitor
+        // (no org user on a public_link canvas, U11).
+        const principal = requestPrincipal(c);
+        const bucket =
+          principal.kind === "member" ? principal.id : `anon:${c.get("clientIp") ?? "unknown"}`;
         const r = takeToken(
           deps.rateLimitStore,
-          `pwgate:${c.get("user").id}:${canvas.id}`,
+          `pwgate:${bucket}:${canvas.id}`,
           deps.config.rateLimit.passwordGatePerMin,
         );
         if (!r.allowed) {
@@ -89,7 +95,7 @@ export function passwordGate(deps: PasswordGateDeps) {
       const ok = canvas.passwordHash ? await verifyPassword(canvas.passwordHash, password) : false;
       deps.audit.recordAudit({
         action: "password_attempt",
-        actorId: c.get("user").id,
+        actorId: principalAttributionId(c),
         targetId: canvas.id,
         meta: { success: ok },
         ip: c.get("clientIp"),
