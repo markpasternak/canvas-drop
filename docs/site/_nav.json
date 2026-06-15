@@ -15,6 +15,11 @@
         "title": "Create & publish"
       },
       {
+        "path": "authoring/sharing",
+        "file": "authoring/sharing.md",
+        "title": "Sharing & access"
+      },
+      {
         "path": "authoring/capabilities",
         "file": "authoring/capabilities.md",
         "title": "Capabilities"

@@ -144,6 +144,27 @@ server-side only and is never exposed to the browser.
 | `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. |
 | `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. |
 
+## Email (guest invites)
+
+Sends the magic-link sign-in emails for **email-invited guests** (the
+`specific_people` access rung). It is a driver-behind-interface like the database
+and storage, so adding a future provider is a config change. Guest invites and
+public links are app-gated-mode features (`oidc`/`dev`); in `proxy` mode the
+upstream IAP owns the boundary and invites are refused. Provider secrets are
+server-side only and never logged.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CANVAS_DROP_EMAIL_DRIVER` | `log` | `log` (writes the link to the server log — zero-setup dev) \| `smtp` \| `mailgun` \| `noop` (disables invites). |
+| `CANVAS_DROP_EMAIL_FROM` | `no-reply@<mailgun domain>` or `no-reply@localhost` | Sender address. |
+| `CANVAS_DROP_SMTP_HOST` | (unset) | SMTP server host (driver `smtp`). |
+| `CANVAS_DROP_SMTP_PORT` | `587` | `587` = STARTTLS, `465` = implicit TLS. |
+| `CANVAS_DROP_SMTP_USER` / `CANVAS_DROP_SMTP_PASS` | (unset) | Omit both for an IP-allowlisted relay. |
+| `CANVAS_DROP_SMTP_SECURE` | `false` | `true` for implicit TLS (port 465). |
+| `CANVAS_DROP_MAILGUN_API_KEY` | (unset) | Mailgun HTTP API key (driver `mailgun`). |
+| `CANVAS_DROP_MAILGUN_DOMAIN` | (unset) | e.g. `mg.example.com`. |
+| `CANVAS_DROP_MAILGUN_BASE_URL` | `https://api.mailgun.net` | Use `https://api.eu.mailgun.net` for EU. |
+
 ## Logging & error tracking
 
 Structured logs go to stdout via pino — no app-side files, rotation, or shipping.

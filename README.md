@@ -22,7 +22,7 @@ People now generate working web interfaces in minutes with AI — but there's no
 ## Why it's different
 
 - **Idea → live URL in under 60 seconds.** No cloud, CI/CD, DNS, TLS, secrets, or database to understand. Four deploy paths: drag a folder, upload a ZIP, paste HTML, or `PUT` it from a script.
-- **Private by default, inside your org.** Every request is authenticated. Canvases are owner-only until *explicitly* shared; shares are revocable and optionally time-boxed. URLs are unguessable random slugs.
+- **Private by default, with a deliberate sharing ladder.** Every request is authenticated. Each canvas picks one access rung — **Private → Specific people → Whole org → Public link** — so an owner can keep it to themselves, restrict it to a named allowlist (org members *or* email-invited outside guests), open it to the whole org, or (admin-permitting) publish a static public link. Shares are revocable and optionally time-boxed; URLs are unguessable random slugs.
 - **Static-first, backend-optional.** A canvas is just static files — no build step, ever. Backend capability arrives only through five fixed primitives, added to a page with one `<script>` tag and **no secrets in the browser**.
 - **AI agents are first-class authors.** Canvas code runs zero-config, the deploy API ships from day one, and the SDK contract lives on one agent-readable page (`/llms.txt`). An agent can write a canvas and ship it with no human in the loop.
 - **Run anywhere.** Database, storage, URL mode, and auth all sit behind interfaces. The same image runs on a laptop, a $5 VPS, or a corporate cloud — swapping any driver is a config change, never a code change.
@@ -131,7 +131,7 @@ The full, agent-optimized contract is served live at **`{base}/llms.txt`** — p
 
 ## Configuration
 
-Everything is configured by environment variables, validated at boot — boot fails loudly with a precise message on an invalid combination. The full surface is in [`.env.example`](.env.example) ([`BUILD_BRIEF.md` §8.1](BUILD_BRIEF.md)). Four swappable drivers:
+Everything is configured by environment variables, validated at boot — boot fails loudly with a precise message on an invalid combination. The full surface is in [`.env.example`](.env.example) ([`BUILD_BRIEF.md` §8.1](BUILD_BRIEF.md)). Swappable drivers:
 
 | Concern | Options | Env |
 |---------|---------|-----|
@@ -139,6 +139,7 @@ Everything is configured by environment variables, validated at boot — boot fa
 | Storage | local disk · S3-compatible (AWS S3, MinIO, Cloudflare R2) | `CANVAS_DROP_STORAGE` |
 | URL mode | path · subdomain | `CANVAS_DROP_URL_MODE` |
 | Auth | `proxy` (recommended prod) · `oidc` · `dev` | `CANVAS_DROP_AUTH_MODE` |
+| Email (guest invites) | `log` (dev) · `smtp` · `mailgun` · `noop` | `CANVAS_DROP_EMAIL_DRIVER` |
 
 Swapping any driver is a config change, never a code change. **The blessed production profile is subdomain mode + an identity-aware proxy** (e.g. Cloudflare Access) verifying a signed JWT, with Postgres and S3.
 
@@ -150,7 +151,7 @@ canvas-drop runs inside a **trusted organization**: everyone reaching it has alr
 
 1. **No impersonation** — identity always comes from the server-side auth context, never anything the client sends.
 2. **No credential or canvas theft** — API keys and tokens are hashed at rest and shown once; canvas passwords are argon2id.
-3. **No unauthorized access** — a canvas is reachable only by its owner, or by allowed org members if it's shared, unexpired, and any password is satisfied. Owner-only canvases **404** to everyone else.
+3. **No unauthorized access** — a canvas is reachable only by its owner/admin; at `whole_org`, allowed org members; at `specific_people`, a principal on its allowlist (an org member, or an invited guest whose magic-link session is for *that* canvas); at `public_link`, anyone — but static-only and only while the owner account holds the admin-granted publish capability. All subject to unexpired + any password. Everything else **404s**; a guest can never reach a canvas it wasn't invited to, and anonymous public visitors get no backend primitives.
 4. **No cross-canvas reach in subdomain mode** — each canvas is its own browser origin and cannot read, write, or act on another's data.
 5. **Lifecycle is honored instantly** — revoke, expiry, disable, delete, slug-regen, and key-regen take effect on the next request and drop live realtime sockets. No stale grants.
 
@@ -204,6 +205,7 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 - ✅ **AI + realtime** — streaming Anthropic proxy with quotas; ephemeral pub/sub + presence
 - ✅ **Gallery + admin hardening** — opt-in gallery, admin panel, rate limits, IAP-trust verification
 - ✅ **Beyond v1** — clone-as-template, usage stats, server-side list filters, in-app docs (`/docs`, `/llms.txt`)
+- ✅ **Sharing access ladder** — per-canvas Private/Specific-people/Whole-org/Public-link, email-invited guest identities (SMTP or Mailgun), admin-gated public links, guest primitive policy (KV/files/realtime yes, AI opt-in, public static-only)
 
 Remaining toward 1.0: ops/packaging — a Docker image + compose file (not in the repo yet), a backup/restore drill, and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
 

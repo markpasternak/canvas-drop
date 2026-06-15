@@ -36,15 +36,22 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    canvas API key, or canvas content. API keys and session tokens are
    SHA-256-hashed at rest (only the hash is stored); API keys are shown once at
    creation, and session tokens live only in an HttpOnly cookie.
-3. **No unauthorized access.** A canvas is reachable only by its owner — or, if
-   shared, not revoked or expired, and any password is satisfied, by allowed org
-   members. Owner-only canvases return `404` to everyone else.
+3. **No unauthorized access.** A canvas is reachable only by its owner/admin; at
+   the `whole_org` rung, allowed org members; at `specific_people`, a principal on
+   its allowlist (an org member, or an invited guest whose magic-link session is
+   for *that* canvas); at `public_link`, anyone — but static-only and only while
+   the owner account holds the admin-granted publish capability. All subject to
+   not revoked/expired and any password. Everything else returns `404`; a guest
+   can never reach a canvas it wasn't invited to, and an anonymous public visitor
+   gets no backend primitives.
 4. **No cross-canvas reach in subdomain mode.** One canvas (or its code, SDK, or
    socket) cannot read, write, or act on another canvas's data, files, AI quota,
    or realtime channels. Path mode has reduced browser isolation (see below).
 5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug
-   regen, and key regen take effect on the next request and drop live realtime
-   sockets — no stale grants.
+   regen, key regen, rung lowering, allowlist removal, guest-invite revocation,
+   and unpublish take effect on the next request and drop live realtime sockets
+   (guest sockets included) — no stale grants. A guest session never outlives its
+   invite's expiry or revocation.
 
 ## Identity is always server-side (invariant #1)
 
