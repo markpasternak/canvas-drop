@@ -18,6 +18,7 @@ const CANVAS: Canvas = {
   url: "http://x/c/quiet-otter",
   title: "Demo",
   description: null,
+  access: "private",
   shared: false,
   sharedExpiresAt: null,
   hasPassword: false,

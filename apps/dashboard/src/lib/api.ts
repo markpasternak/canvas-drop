@@ -54,12 +54,17 @@ export interface CanvasCapabilitiesPatch {
  *  its own state (only the admin purge view surfaces it); computed server-side. */
 export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
 
+/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere). */
+export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
+
 export interface Canvas {
   id: string;
   slug: string;
   url: string;
   title: string;
   description: string | null;
+  /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
+  access: AccessRung;
   shared: boolean;
   sharedExpiresAt: number | null;
   hasPassword: boolean;
@@ -183,6 +188,8 @@ export interface PublishResult {
 export interface CanvasSettings {
   title?: string;
   description?: string | null;
+  /** Access rung (D4, U4). `public_link` is not settable here (admin-gated). */
+  access?: "private" | "specific_people" | "whole_org";
   shared?: boolean;
   sharedExpiresAt?: number | null;
   password?: string | null;
@@ -191,6 +198,16 @@ export interface CanvasSettings {
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
   galleryTags?: string[];
+}
+
+/** One canvas-allowlist entry (D4 `specific_people`, U4). Members carry their org
+ *  email + name; invited guests (U8) carry the invited email and a null name. */
+export interface AllowlistEntry {
+  id: string;
+  kind: "member" | "guest";
+  email: string | null;
+  name: string | null;
+  createdAt: number;
 }
 
 /** One canvas as it appears in the opt-in gallery (M8) — display-only fields. */
@@ -661,6 +678,14 @@ export const api = {
 
   updateSettings: (id: string, patch: CanvasSettings) =>
     request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),
+
+  // Access allowlist (D4 `specific_people`, U4).
+  listAllowlist: (id: string) =>
+    request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
+  addAllowlistMember: (id: string, email: string) =>
+    request<{ ok: true }>(`/api/canvases/${id}/allowlist`, jsonBody({ email })),
+  removeAllowlistEntry: (id: string, entryId: string) =>
+    request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
 
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),

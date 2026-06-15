@@ -115,7 +115,7 @@ export async function resolveAccessContext(
   canvas: Canvas | null,
   principal: Principal,
 ): Promise<AccessContext> {
-  if (!canvas || canvas.access !== "specific_people") return {};
+  if (canvas?.access !== "specific_people") return {};
   if (principal.kind === "member") {
     return { isAllowed: await canvases.isPrincipalAllowed(canvas.id, { userId: principal.id }) };
   }

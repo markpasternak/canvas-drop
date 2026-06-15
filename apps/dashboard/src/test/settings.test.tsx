@@ -14,6 +14,7 @@ const CANVAS = {
   url: "http://x/c/quiet-otter",
   title: "My Canvas",
   description: null,
+  access: "private",
   shared: false,
   sharedExpiresAt: null,
   hasPassword: false,
@@ -232,12 +233,52 @@ describe("settings route — confirm-and-await flows", () => {
     );
   });
 
-  it("disables the Share toggle until the canvas is published", async () => {
+  it("disables the non-private access rungs until the canvas is published", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) }); // base: publicationState "draft"
     renderSettings();
-    const toggle = await screen.findByRole("switch", { name: "Shared" });
-    expect(toggle).toBeDisabled();
+    // Private stays selectable; the sharing rungs are disabled with the publish hint.
+    expect(await screen.findByRole("radio", { name: /private/i })).not.toBeDisabled();
+    expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /specific people/i })).toBeDisabled();
     expect(screen.getByText(/publish this canvas before sharing it/i)).toBeInTheDocument();
+  });
+
+  it("specific_people: shows the allowlist empty state and adds a member", async () => {
+    const user = userEvent.setup();
+    let added = false;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: added
+            ? [
+                {
+                  id: "e1",
+                  kind: "member",
+                  email: "colleague@example.com",
+                  name: "C",
+                  createdAt: 1,
+                },
+              ]
+            : [],
+        }),
+      "POST /api/canvases/c1/allowlist": () => {
+        added = true;
+        return json({ ok: true });
+      },
+    });
+    renderSettings();
+    expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
+    await user.type(await screen.findByLabelText(/add by email/i), "colleague@example.com");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
   });
 
   it("warns when a shared canvas's expiry is already in the past", async () => {

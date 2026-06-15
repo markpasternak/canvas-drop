@@ -15,7 +15,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { ApiError } from "../lib/api.js";
+import { type AccessRung, type AllowlistEntry, ApiError, api } from "../lib/api.js";
 import { deployCurl } from "../lib/deploy-curl.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import {
@@ -158,20 +158,19 @@ export default function Settings() {
         <Section
           id="sharing"
           title="Sharing"
-          description="Private by default. Sharing lets any signed-in colleague with the link open it."
+          description="Private by default. Pick who can open this canvas."
         >
-          <Toggle
-            label="Shared"
-            description="Anyone in your org with the link can open and use this canvas."
-            checked={canvas.shared}
+          <AccessLadder
+            value={canvas.access}
             disabled={shareBlocker !== null}
-            onChange={(shared) => save({ shared })}
+            onChange={(access) => save({ access })}
           />
           {shareBlocker && (
             <InlineNotice tone="neutral" className="py-2 text-xs">
               {shareBlocker}
             </InlineNotice>
           )}
+          {canvas.access === "specific_people" && <Allowlist canvasId={canvas.id} />}
           {canvas.shared && (
             <>
               <Field
@@ -576,5 +575,159 @@ export default function Settings() {
 
       {revealedKey && <ApiKeyReveal apiKey={revealedKey} onClose={() => setRevealedKey(null)} />}
     </TabContentFrame>
+  );
+}
+
+/** Settable access rungs (D4, U4). `public_link` is admin-gated and not offered here. */
+const RUNGS: { value: "private" | "specific_people" | "whole_org"; label: string; hint: string }[] =
+  [
+    { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
+    {
+      value: "specific_people",
+      label: "Specific people",
+      hint: "Only the people you add below can open it.",
+    },
+    {
+      value: "whole_org",
+      label: "Whole org",
+      hint: "Anyone in your org with the link can open and use it.",
+    },
+  ];
+
+/** The access-rung selector — a radio group (the security-sensitive control gets a
+ *  per-rung description, not a bare toggle). Non-private rungs are disabled until
+ *  the canvas is published. `public_link` (admin-set) shows as a read-only note. */
+function AccessLadder({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: AccessRung;
+  disabled: boolean;
+  onChange: (rung: "private" | "specific_people" | "whole_org") => void;
+}) {
+  return (
+    <fieldset className="space-y-2" aria-label="Who can access this canvas">
+      {RUNGS.map((r) => {
+        const blocked = disabled && r.value !== "private";
+        return (
+          <label
+            key={r.value}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 ${
+              value === r.value ? "border-accent bg-surface-sunken" : ""
+            } ${blocked ? "cursor-not-allowed opacity-50" : ""}`}
+          >
+            <input
+              type="radio"
+              name="access-rung"
+              className="mt-1"
+              checked={value === r.value}
+              disabled={blocked}
+              onChange={() => onChange(r.value)}
+            />
+            <span>
+              <span className="block text-sm font-semibold text-fg">{r.label}</span>
+              <span className="block text-xs text-muted">{r.hint}</span>
+            </span>
+          </label>
+        );
+      })}
+      {value === "public_link" && (
+        <InlineNotice tone="neutral" className="py-2 text-xs">
+          This canvas is published as a public link (set by an admin). Pick a rung above to make it
+          org-only again.
+        </InlineNotice>
+      )}
+    </fieldset>
+  );
+}
+
+/** Manage the `specific_people` allowlist: list org members, add by email, remove.
+ *  Inviting an outside email (a guest) arrives with the email-sharing flow (U8). */
+function Allowlist({ canvasId }: { canvasId: string }) {
+  const toast = useToast();
+  const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => {
+    api
+      .listAllowlist(canvasId)
+      .then(setEntries)
+      .catch(() => setEntries([]));
+  };
+  // Load (and reload) the allowlist when the canvas identity changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvasId change only
+  useEffect(() => {
+    reload();
+  }, [canvasId]);
+
+  async function add() {
+    const value = email.trim();
+    if (!value) return;
+    setBusy(true);
+    try {
+      await api.addAllowlistMember(canvasId, value);
+      setEmail("");
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(entryId: string) {
+    try {
+      await api.removeAllowlistEntry(canvasId, entryId);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-3">
+      <p className="text-xs text-muted">
+        Add org members by email. They get access only to this canvas.
+      </p>
+      <div className="flex items-end gap-2">
+        <Field
+          label="Add by email"
+          type="email"
+          placeholder="colleague@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void add();
+            }
+          }}
+        />
+        <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
+          Add
+        </Button>
+      </div>
+      {entries === null ? (
+        <Skeleton className="h-8" />
+      ) : entries.length === 0 ? (
+        <p className="text-xs text-muted">No one added yet — only you and admins can open this.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {entries.map((e) => (
+            <li key={e.id} className="flex items-center justify-between py-2 text-sm">
+              <span>
+                <span className="text-fg">{e.email ?? "(unknown)"}</span>
+                {e.kind === "guest" && <span className="ml-2 text-xs text-muted">guest</span>}
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => remove(e.id)}>
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
