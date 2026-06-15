@@ -51,7 +51,20 @@ export function makeDb(config: Config): DbClient {
       dialect: "sqlite",
       db,
       migrate: async () => {
-        migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
+        // Table-recreation migrations (the SQLite ALTER dance: create __new_x →
+        // copy rows → DROP TABLE x → rename) must run with foreign_keys OFF. Our
+        // runtime sets it ON, and with FK enforcement a DROP TABLE on a *populated*
+        // table does an implicit row-delete that violates child-table FKs and aborts
+        // the migration. The generated migration's own `PRAGMA foreign_keys=OFF` is a
+        // no-op because drizzle wraps each migration in a transaction (SQLite ignores
+        // that pragma mid-transaction). So toggle it on the connection — which has no
+        // open transaction here — around the migrator, then restore it for runtime.
+        sqlite.pragma("foreign_keys = OFF");
+        try {
+          migrateSqlite(db, { migrationsFolder: resolveMigrationsDir("sqlite") });
+        } finally {
+          sqlite.pragma("foreign_keys = ON");
+        }
       },
       ping: async () => {
         db.run(sql`SELECT 1`);
