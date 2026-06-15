@@ -70,6 +70,34 @@ these are the exact traps, with the fix shape. See also [[dual-dialect-drizzle-s
 - [ ] Test the **rejection** paths first (wrong aud/iss/exp/key, untrusted IP,
       state mismatch) — happy-path green says nothing about the gate.
 
+## Non-org principals (guest invites + public links — added 2026-06-15)
+
+The access-ladder work (`docs/plans/2026-06-15-001-…-access-ladder-plan.md`) admits
+**non-org principals** past the gateway for the first time — invited guests and
+anonymous public visitors. New §12.0-shaped failure modes to test rejection-first:
+
+- [ ] **Carve-out never grants** — the pre-gateway resolver only *sets a principal*;
+      authorization stays the single `decideCanvasAccess` table (default-deny). A
+      request that sets no principal must fall through to the org gateway, not pass.
+- [ ] **Resolver derives its own role** — it runs before the role classifier, so it
+      calls `resolveRequest` itself and acts only on `canvas`/`platform-api`
+      surfaces; a guest cookie on a dashboard/management request still hits the org
+      gateway unchanged.
+- [ ] **Guest is scoped to its invited canvas** — a guest session for X 404s on Y
+      (incl. the subdomain `.{baseHost}` shared-cookie case); guest principal id is
+      namespaced (`guest:<inviteId>`) so it never collides in KV/audit/presence.
+- [ ] **Ordering vs `socialPreview`** — the resolver mounts before it, or anonymous
+      public visitors get bounced to login in oidc mode.
+- [ ] **Every `c.get("user").id` keying moves to the principal** — rate limiter
+      (returns `null`/unthrottled with no user), password gate, realtime hub `Conn`.
+- [ ] **Anonymous is static-only** — every primitive (KV reads included) refused;
+      guest-AI off unless per-canvas opt-in; the cap is best-effort (windowed spend).
+- [ ] **Proxy mode** — the resolver is *not mounted* (not merely inert); external
+      rungs are disabled in the UI and rejected by the API.
+- [ ] **Magic link** — high-entropy, hashed at rest, single-use, IP-throttled,
+      consumed only via same-origin POST (no cross-origin GET token burn); the guest
+      session is bounded by the invite's expiry/revocation on every resolve.
+
 ## Calibrate to the trust model (don't over-engineer)
 
 canvas-drop runs **inside a company**: everyone reaching it has passed org SSO,
