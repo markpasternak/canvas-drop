@@ -683,9 +683,14 @@ export const api = {
   listAllowlist: (id: string) =>
     request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
   addAllowlistMember: (id: string, email: string) =>
-    request<{ ok: true }>(`/api/canvases/${id}/allowlist`, jsonBody({ email })),
+    request<{ ok: true; kind: "member" | "guest" }>(
+      `/api/canvases/${id}/allowlist`,
+      jsonBody({ email }),
+    ),
   removeAllowlistEntry: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
+  resendAllowlistInvite: (id: string, entryId: string) =>
+    request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}/resend`, { method: "POST" }),
 
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),

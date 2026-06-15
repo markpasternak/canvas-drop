@@ -135,7 +135,17 @@ function ReadonlyRow({ field }: { field: AdminConfigField }) {
   );
 }
 
-const GROUP_ORDER = ["AI", "Limits", "Core", "Access", "Auth", "Database", "Storage", "Logging"];
+const GROUP_ORDER = [
+  "AI",
+  "Email",
+  "Limits",
+  "Core",
+  "Access",
+  "Auth",
+  "Database",
+  "Storage",
+  "Logging",
+];
 
 /** Unified Configuration view: every setting with value/source, a safe editable subset. */
 function Configuration() {

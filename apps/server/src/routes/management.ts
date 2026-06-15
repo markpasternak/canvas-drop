@@ -11,6 +11,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { GuestService } from "../auth/guest.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
@@ -30,6 +31,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
+import { type Mailer, renderGuestInvite } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
@@ -52,6 +54,10 @@ export interface ManagementDeps {
    * live sockets that lost access; a newly-set password drops gated non-owners.
    */
   hub?: RealtimeHub;
+  /** Guest magic-link service + mailer (U8). Present in oidc/dev; absent in proxy
+   *  mode, where guest invites are refused (the IAP owns the boundary). */
+  guests?: GuestService;
+  mailer?: Mailer;
   /**
    * Effective operator-global resolvers (admin DB override ?? env). Optional —
    * omitted in unit tests, which fall back to the boot `config` values. Used so
@@ -541,50 +547,106 @@ export function managementRoutes(deps: ManagementDeps) {
 
   const allowlistAddSchema = z.object({ email: z.string().email() });
 
-  /** Add an org member to the allowlist by email. An email that is NOT an org
-   *  member is rejected here — inviting an outside email is the guest-invite flow
-   *  (U8), which needs email infra. */
+  /** Mint + email a guest invite for `email` on `cv`, and add the guest allowlist
+   *  entry. Returns a 409 JSON response on a guard failure, or null on success. */
+  async function inviteGuest(c: Context<AppEnv>, cv: Canvas, email: string) {
+    // Guest invites are an app-gated-mode capability (R22): in proxy mode the IAP
+    // owns the boundary and `guests` is absent.
+    if (deps.config.auth.mode === "proxy" || !deps.guests) {
+      return c.json(
+        {
+          code: "GUESTS_UNAVAILABLE",
+          message: "Guest invites need the app to manage sign-in (oidc/dev mode).",
+        },
+        409,
+      );
+    }
+    if (!deps.mailer?.canSend) {
+      return c.json(
+        { code: "EMAIL_NOT_CONFIGURED", message: "Email isn't configured, so invites can't send." },
+        409,
+      );
+    }
+    const { token } = await deps.guests.createInvite(cv.id, email);
+    const inviteUrl = new URL(
+      `/guest/${encodeURIComponent(token)}`,
+      deps.config.baseUrl,
+    ).toString();
+    const msg = renderGuestInvite({
+      canvasTitle: cv.title,
+      inviterName: c.get("user").name,
+      inviteUrl,
+    });
+    const sent = await deps.mailer.send({ ...msg, to: email });
+    if (!sent.ok) {
+      return c.json({ code: "EMAIL_SEND_FAILED", message: "Couldn't send the invite email." }, 502);
+    }
+    await deps.canvases.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email });
+    deps.audit.recordAudit({
+      action: "guest_invite",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { email },
+    });
+    return null;
+  }
+
+  /** Add an org member to the allowlist by email; an outside email becomes an
+   *  email-invited guest (R9 — one mechanism for members and guests). */
   app.post("/:id/allowlist", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = await deps.users.findByEmail(body.data.email);
-    if (!user) {
-      return c.json(
-        {
-          code: "NOT_A_MEMBER",
-          message:
-            "That email isn't an org member. Inviting outside guests arrives with email sharing.",
-        },
-        404,
-      );
+    if (user) {
+      await deps.canvases.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: user.id,
+      });
+      deps.audit.recordAudit({
+        action: "allowlist_add",
+        actorId: c.get("user").id,
+        targetId: cv.id,
+        meta: { kind: "member", userId: user.id },
+      });
+      return c.json({ ok: true, kind: "member" });
     }
-    await deps.canvases.addAllowlistEntry({
-      canvasId: cv.id,
-      principalKind: "member",
-      userId: user.id,
-    });
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: c.get("user").id,
-      targetId: cv.id,
-      meta: { kind: "member", userId: user.id },
-    });
-    return c.json({ ok: true });
+    const failure = await inviteGuest(c, cv, body.data.email);
+    return failure ?? c.json({ ok: true, kind: "guest" });
   });
 
-  /** Remove an allowlist entry; drop any live sockets it no longer permits. */
+  /** Re-send a guest invite (fresh token); only valid for a guest entry. */
+  app.post("/:id/allowlist/:entryId/resend", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const entry = (await deps.canvases.listAllowlist(cv.id)).find(
+      (e) => e.id === c.req.param("entryId"),
+    );
+    if (entry?.principalKind !== "guest" || !entry.email) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const failure = await inviteGuest(c, cv, entry.email);
+    return failure ?? c.json({ ok: true });
+  });
+
+  /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any
+   *  live sockets it no longer permits. */
   app.delete("/:id/allowlist/:entryId", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const entryId = c.req.param("entryId");
+    const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
+    if (entry?.principalKind === "guest" && entry.email && deps.guests) {
+      await deps.guests.revokeInvite(cv.id, entry.email);
+    }
     await deps.canvases.removeAllowlistEntry(cv.id, entryId);
     deps.audit.recordAudit({
       action: "allowlist_remove",
       actorId: c.get("user").id,
       targetId: cv.id,
-      meta: { entryId },
+      meta: { entryId, kind: entry?.principalKind ?? null },
     });
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
     return c.json({ ok: true });
@@ -649,6 +711,7 @@ export function managementRoutes(deps: ManagementDeps) {
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     // Deleted → everyone (incl. owner) loses access; drop their live sockets.
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
     return c.json({ ok: true });
   });
 
@@ -664,8 +727,10 @@ export function managementRoutes(deps: ManagementDeps) {
       actorId: c.get("user").id,
       targetId: cv.id,
     });
-    // Archived → offline for everyone; drop live sockets (D-RT-6).
+    // Archived → offline for everyone; drop live sockets (D-RT-6) and revoke guest
+    // grants so re-publishing later doesn't silently resurrect them.
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
     return c.json(await canvasView({ ...cv, status: "archived", ...CLEARED_PUBLICATION_FIELDS }));
   });
 
@@ -702,8 +767,10 @@ export function managementRoutes(deps: ManagementDeps) {
       actorId: c.get("user").id,
       targetId: cv.id,
     });
-    // Offline for everyone now → drop live sockets (D-RT-6).
+    // Offline for everyone now → drop live sockets (D-RT-6) and revoke guest grants
+    // so re-publishing later doesn't silently resurrect them.
     if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
     return c.json(
       await canvasView({ ...cv, currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS }),
     );

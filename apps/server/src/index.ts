@@ -61,8 +61,10 @@ async function main() {
   //     exists outside proxy mode (in proxy mode the IAP authenticates first).
   const { guestRepository } = await import("./db/repositories/guest.js");
   const { guestService } = await import("./auth/guest.js");
+  const { setupMailer } = await import("./email/factory.js");
   const guests =
     config.auth.mode === "proxy" ? undefined : guestService(config, guestRepository(db));
+  const mailer = config.auth.mode === "proxy" ? undefined : setupMailer(config, rootLogger);
 
   // 4. Realtime hub (single-process, in-memory). Re-fetches the canvas + user for
   //    live re-authorization (revoke-drops-socket + heartbeat).
@@ -96,6 +98,7 @@ async function main() {
     audit,
     sessionSvc,
     guests,
+    mailer,
     oidc,
     hub,
     registerWebSocket: (honoApp) => {

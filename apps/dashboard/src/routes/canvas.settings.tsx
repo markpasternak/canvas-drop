@@ -686,6 +686,15 @@ function Allowlist({ canvasId }: { canvasId: string }) {
     }
   }
 
+  async function resend(entryId: string) {
+    try {
+      await api.resendAllowlistInvite(canvasId, entryId);
+      toast("Invite re-sent");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't resend the invite", "error");
+    }
+  }
+
   return (
     <div className="space-y-3 rounded-lg border border-border p-3">
       <p className="text-xs text-muted">
@@ -721,9 +730,16 @@ function Allowlist({ canvasId }: { canvasId: string }) {
                 <span className="text-fg">{e.email ?? "(unknown)"}</span>
                 {e.kind === "guest" && <span className="ml-2 text-xs text-muted">guest</span>}
               </span>
-              <Button size="sm" variant="ghost" onClick={() => remove(e.id)}>
-                Remove
-              </Button>
+              <span className="flex gap-1">
+                {e.kind === "guest" && (
+                  <Button size="sm" variant="ghost" onClick={() => resend(e.id)}>
+                    Resend
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => remove(e.id)}>
+                  Remove
+                </Button>
+              </span>
             </li>
           ))}
         </ul>

@@ -4,14 +4,18 @@ import { logMailer } from "./log.js";
 import type { Mailer } from "./mailer.js";
 import { mailgunMailer } from "./mailgun.js";
 import { noopMailer } from "./noop.js";
+import { smtpMailer } from "./smtp.js";
 
 /**
- * Build the configured mailer (U5, KTD6). `log` → dev console driver; `mailgun` →
- * the HTTP API driver; `noop` → discards. Mirrors the DB/storage/auth factories:
- * swapping the transport is a config change, not a code change.
+ * Build the configured mailer (U5, KTD6). `log` → dev console driver; `smtp` →
+ * any SMTP server; `mailgun` → the HTTP API driver; `noop` → discards. Mirrors the
+ * DB/storage/auth factories: swapping the transport is a config change, not a code
+ * change — adding a future API provider is a new driver file + a case here.
  */
 export function setupMailer(config: Config, log: Logger): Mailer {
   switch (config.email.driver) {
+    case "smtp":
+      return smtpMailer(config.email, config.email.from, log);
     case "mailgun":
       return mailgunMailer(config.email, config.email.from, log);
     case "noop":

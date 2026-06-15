@@ -18,6 +18,7 @@ import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "../routes/canvas-kv.js";
 export type ConfigGroup =
   | "Core"
   | "AI"
+  | "Email"
   | "Limits"
   | "Access"
   | "Auth"
@@ -172,6 +173,113 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     secret: false,
     editable: false,
     fromConfig: (c) => c.ai.baseUrl,
+  },
+
+  // ── Email (guest invites) — read-only for now ────────────────────────────
+  // Provider secrets are env-only (never DB-editable): invite emails are auth
+  // credentials. Shown for transparency so an operator can confirm the transport.
+  {
+    key: "email.driver",
+    env: "CANVAS_DROP_EMAIL_DRIVER",
+    group: "Email",
+    label: "Email driver",
+    help: "How guest-invite magic links are sent: log (dev), smtp, mailgun, or noop.",
+    type: "enum",
+    enumValues: ["log", "smtp", "mailgun", "noop"],
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.driver,
+  },
+  {
+    key: "email.from",
+    env: "CANVAS_DROP_EMAIL_FROM",
+    group: "Email",
+    label: "From address",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.from,
+  },
+  {
+    key: "email.smtp.host",
+    env: "CANVAS_DROP_SMTP_HOST",
+    group: "Email",
+    label: "SMTP host",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.smtp.host,
+  },
+  {
+    key: "email.smtp.port",
+    env: "CANVAS_DROP_SMTP_PORT",
+    group: "Email",
+    label: "SMTP port",
+    type: "number",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.smtp.port,
+  },
+  {
+    key: "email.smtp.user",
+    env: "CANVAS_DROP_SMTP_USER",
+    group: "Email",
+    label: "SMTP user",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.smtp.user,
+  },
+  {
+    key: "email.smtp.secure",
+    env: "CANVAS_DROP_SMTP_SECURE",
+    group: "Email",
+    label: "SMTP implicit TLS",
+    help: "true = port 465 implicit TLS; false = STARTTLS (port 587).",
+    type: "boolean",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.smtp.secure,
+  },
+  {
+    key: "email.smtp.pass",
+    env: "CANVAS_DROP_SMTP_PASS",
+    group: "Email",
+    label: "SMTP password",
+    type: "string",
+    secret: true,
+    editable: false,
+    fromConfig: (c) => c.email.smtp.pass,
+  },
+  {
+    key: "email.mailgun.domain",
+    env: "CANVAS_DROP_MAILGUN_DOMAIN",
+    group: "Email",
+    label: "Mailgun domain",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.mailgun.domain,
+  },
+  {
+    key: "email.mailgun.baseUrl",
+    env: "CANVAS_DROP_MAILGUN_BASE_URL",
+    group: "Email",
+    label: "Mailgun base URL",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.email.mailgun.baseUrl,
+  },
+  {
+    key: "email.mailgun.apiKey",
+    env: "CANVAS_DROP_MAILGUN_API_KEY",
+    group: "Email",
+    label: "Mailgun API key",
+    type: "string",
+    secret: true,
+    editable: false,
+    fromConfig: (c) => c.email.mailgun.apiKey,
   },
 
   // ── Limits (quotas + rate limits) ────────────────────────────────────────

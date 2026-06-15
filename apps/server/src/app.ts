@@ -9,6 +9,7 @@ import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import type { GuestService } from "./auth/guest.js";
 import { guestPublicResolver, onlyWhenNoPrincipal } from "./auth/guest-public-resolver.js";
+import { guestRoutes } from "./auth/guest-routes.js";
 import { authRoutes } from "./auth/routes.js";
 import type { SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
@@ -32,6 +33,7 @@ import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
 import { docsRoutes } from "./docs/routes.js";
 import { draftService } from "./draft/service.js";
+import type { Mailer } from "./email/mailer.js";
 import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import { resolveClientIp } from "./http/client-ip.js";
@@ -75,6 +77,8 @@ export interface BuildAppDeps {
   sessionSvc?: SessionService;
   /** Guest magic-link service (U6/U7). Present in oidc/dev; enables the carve-out. */
   guests?: GuestService;
+  /** Mailer for guest invites (U8). Present in oidc/dev. */
+  mailer?: Mailer;
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the socket-peer-IP extractor (tests inject a fixed peer). */
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
@@ -220,6 +224,21 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Public session-login routes.
   app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
 
+  // Public guest magic-link routes (U8) — pre-gateway (no org session). GET renders
+  // a landing page that does NOT consume the token; a same-origin POST consumes it.
+  if (deps.guests) {
+    app.route(
+      "/",
+      guestRoutes({
+        config: deps.config,
+        guests: deps.guests,
+        canvases: deps.canvases,
+        audit: deps.audit,
+        rateLimitStore: rlStore,
+      }),
+    );
+  }
+
   // Bearer-key deploy API — its own auth, BEFORE the session gateway.
   app.route(
     "/v1/canvases",
@@ -353,6 +372,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       files: filesRepository(deps.db),
       aiUsage: aiUsageRepository(deps.db),
       hub: deps.hub,
+      guests: deps.guests,
+      mailer: deps.mailer,
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),

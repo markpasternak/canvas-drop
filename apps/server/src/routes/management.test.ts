@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
+import { guestService } from "../auth/guest.js";
 import { cloneService } from "../canvas/clone-service.js";
 import { verifyPassword } from "../canvas/password.js";
 import type { DbClient } from "../db/factory.js";
@@ -11,12 +12,14 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
+import { guestRepository } from "../db/repositories/guest.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { DeployEntry } from "../deploy/ingest.js";
+import { logMailer } from "../email/log.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
@@ -36,6 +39,8 @@ function buildApp(
   storage = memStorage(),
   // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
   hub?: any,
+  // When false, simulate proxy mode (no guest service / mailer wired).
+  withGuests = true,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -46,7 +51,7 @@ function buildApp(
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
-    c.set("user", { id: actor.id, isAdmin: actor.isAdmin } as never);
+    c.set("user", { id: actor.id, isAdmin: actor.isAdmin, name: "Actor" } as never);
     c.set("clientIp", "127.0.0.1");
     await next();
   });
@@ -65,6 +70,8 @@ function buildApp(
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
       hub,
+      guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
+      mailer: withGuests ? logMailer(silent) : undefined,
     }),
   );
   return app;
@@ -1947,16 +1954,67 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     void member;
   });
 
-  it("rejects adding a non-org email (guest invites are the email-sharing flow, U8)", async () => {
+  it("a non-org email becomes an email-invited guest (U8)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+    const res = await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "outsider@partner.com" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ kind: string }>(res)).kind).toBe("guest");
+    // The guest now shows as a pending allowlist entry.
+    const listed = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
+    );
+    expect(
+      listed.entries.some((e) => e.kind === "guest" && e.email === "outsider@partner.com"),
+    ).toBe(true);
+  });
+
+  it("guest invites are refused when the app doesn't own sign-in (proxy mode)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
-    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
-      `/api/canvases/${id}/allowlist`,
-      { method: "POST", headers: mut, body: JSON.stringify({ email: "outsider@partner.com" }) },
+    // withGuests=false simulates proxy mode (no guest service / mailer).
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, undefined, undefined, false);
+    const res = await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "outsider@partner.com" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUESTS_UNAVAILABLE");
+  });
+
+  it("revoking a guest entry revokes its invite + sessions", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+    await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "g@partner.com" }),
+    });
+    const entry = (
+      await jsonOf<{ entries: Array<{ id: string; kind: string }> }>(
+        await app.request(`/api/canvases/${id}/allowlist`),
+      )
+    ).entries.find((e) => e.kind === "guest");
+    if (!entry) throw new Error("expected a guest entry");
+    const del = await app.request(`/api/canvases/${id}/allowlist/${entry.id}`, {
+      method: "DELETE",
+      headers: mut,
+    });
+    expect(del.status).toBe(200);
+    const after = await jsonOf<{ entries: unknown[] }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(res.status).toBe(404);
-    expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_A_MEMBER");
+    expect(after.entries).toHaveLength(0);
   });
 
   it("a non-owner cannot manage another canvas's allowlist (404)", async () => {

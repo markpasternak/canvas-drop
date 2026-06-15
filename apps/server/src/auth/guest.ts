@@ -33,6 +33,10 @@ export interface GuestService {
   consumeMagicLink(c: Context<AppEnv>, token: string): Promise<Principal | null>;
   /** Resolve the guest cookie to a principal, or null. Cross-checks the invite (R12). */
   resolveGuest(c: Context<AppEnv>): Promise<Principal | null>;
+  /** Revoke a guest's invite + sessions for (canvas, email) — drops access next request. */
+  revokeInvite(canvasId: string, email: string): Promise<void>;
+  /** Revoke every guest invite + session for a canvas (unpublish/archive cleanup). */
+  revokeAllForCanvas(canvasId: string): Promise<void>;
   /** Clear the guest cookie (sign-out / dead session). */
   clearCookie(c: Context<AppEnv>): void;
 }
@@ -105,6 +109,14 @@ export function guestService(config: Config, guests: GuestRepository): GuestServ
       await guests.touchSessionExpiry(hashToken(token), next);
       setCookie(c, GUEST_COOKIE, token, { ...cookie(), maxAge: Math.floor(SESSION_TTL_MS / 1000) });
       return guestPrincipal(invite);
+    },
+
+    revokeInvite(canvasId, email) {
+      return guests.revokeInvite(canvasId, email);
+    },
+
+    revokeAllForCanvas(canvasId) {
+      return guests.revokeAllForCanvas(canvasId);
     },
 
     clearCookie(c) {
