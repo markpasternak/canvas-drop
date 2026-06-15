@@ -167,6 +167,57 @@ export const canvasAllowlist = pgTable(
   ],
 );
 
+// Guest invites (D4 email-invited guests, U6). One per (canvas, email): the
+// magic-link token is stored hashed (never plaintext). `state` is pending until
+// first consumed (→ active), or revoked; expiry is the optional per-invite clock.
+export const guestInvites = pgTable(
+  "guest_invites",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    email: c.text("email").notNull(),
+    tokenHash: c.text("token_hash").notNull(),
+    state: c.text("state").notNull().default("pending"), // pending | active | revoked
+    expiresAt: c.epochMs("expires_at"),
+    consumedAt: c.epochMs("consumed_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("guest_invites_token_hash_uq").on(t.tokenHash),
+    uniqueIndex("guest_invites_canvas_email_uq").on(t.canvasId, t.email),
+    check("guest_invites_state_chk", sql`${t.state} in ('pending', 'active', 'revoked')`),
+  ],
+);
+
+// Guest sessions (U6): a magic-link consume mints one. Scoped to the invited
+// canvas; the session token is stored hashed. Honored only while the session AND
+// its invite are live (resolveGuest cross-checks the invite — R12).
+export const guestSessions = pgTable(
+  "guest_sessions",
+  {
+    id: c.text("id").primaryKey(),
+    inviteId: c
+      .text("invite_id")
+      .notNull()
+      .references(() => guestInvites.id),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    tokenHash: c.text("token_hash").notNull(),
+    expiresAt: c.epochMs("expires_at").notNull(),
+    revokedAt: c.epochMs("revoked_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("guest_sessions_token_hash_uq").on(t.tokenHash),
+    index("guest_sessions_invite_idx").on(t.inviteId),
+  ],
+);
+
 export const versions = pgTable(
   "versions",
   {

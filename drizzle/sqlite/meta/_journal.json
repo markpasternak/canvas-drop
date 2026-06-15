@@ -85,6 +85,13 @@
       "when": 1781526565775,
       "tag": "0011_access_ladder",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781548378784,
+      "tag": "0012_access_ladder",
+      "breakpoints": true
     }
   ]
 }

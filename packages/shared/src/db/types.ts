@@ -4,6 +4,8 @@ import type {
   canvases,
   drafts,
   files,
+  guestInvites,
+  guestSessions,
   kvEntries,
   sessions,
   settings,
@@ -42,6 +44,10 @@ export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
 export type AiUsage = typeof aiUsage.$inferSelect;
 export type NewAiUsage = typeof aiUsage.$inferInsert;
+export type GuestInvite = typeof guestInvites.$inferSelect;
+export type NewGuestInvite = typeof guestInvites.$inferInsert;
+export type GuestSession = typeof guestSessions.$inferSelect;
+export type NewGuestSession = typeof guestSessions.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };
