@@ -56,6 +56,7 @@ function buildApp(
     managementRoutes({
       config,
       canvases,
+      users: usersRepository(client),
       versions,
       clone,
       audit,
@@ -1854,5 +1855,119 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     expect(body.total).toBe(1);
     expect(body.canvases).toHaveLength(0);
     expect(body.offset).toBe(50);
+  });
+});
+
+describe("managementRoutes — access ladder + allowlist (U4)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const mut = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" };
+
+  /** Create a published canvas (paste create) owned by `owner`, return its id. */
+  async function publishedCanvas(ownerId: string): Promise<string> {
+    const res = await buildApp(client, { id: ownerId, isAdmin: false }).request(
+      "/api/canvases/paste",
+      { method: "POST", headers: mut, body: JSON.stringify({ html: "<h1>hi</h1>" }) },
+    );
+    return (await jsonOf<{ id: string }>(res)).id;
+  }
+
+  it("sets the access rung to specific_people (published required)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+
+    // Unpublished canvas can't move off private.
+    const draft = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", { method: "POST", headers: mut, body: "{}" }),
+    );
+    const blocked = await app.request(`/api/canvases/${draft.id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ access: "specific_people" }),
+    });
+    expect(blocked.status).toBe(409);
+
+    const id = await publishedCanvas(owner.id);
+    const ok = await app.request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ access: "specific_people" }),
+    });
+    expect(ok.status).toBe(200);
+    expect((await jsonOf<{ access: string }>(ok)).access).toBe("specific_people");
+  });
+
+  it("public_link is not settable via the settings API (admin-gated, U10)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await publishedCanvas(owner.id);
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${id}/settings`,
+      { method: "PATCH", headers: mut, body: JSON.stringify({ access: "public_link" }) },
+    );
+    expect(res.status).toBe(400); // rejected by the zod enum
+  });
+
+  it("adds, lists, and removes an org member on the allowlist", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const member = await seedUser(client, "member");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+
+    const add = await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "member@example.com" }),
+    });
+    expect(add.status).toBe(200);
+
+    const listed = await jsonOf<{ entries: Array<{ id: string; kind: string; email: string }> }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
+    );
+    expect(listed.entries).toHaveLength(1);
+    const entry = listed.entries[0];
+    if (!entry) throw new Error("expected one allowlist entry");
+    expect(entry.kind).toBe("member");
+    expect(entry.email).toBe("member@example.com");
+
+    const del = await app.request(`/api/canvases/${id}/allowlist/${entry.id}`, {
+      method: "DELETE",
+      headers: mut,
+    });
+    expect(del.status).toBe(200);
+    const after = await jsonOf<{ entries: unknown[] }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
+    );
+    expect(after.entries).toHaveLength(0);
+    void member;
+  });
+
+  it("rejects adding a non-org email (guest invites are the email-sharing flow, U8)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await publishedCanvas(owner.id);
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${id}/allowlist`,
+      { method: "POST", headers: mut, body: JSON.stringify({ email: "outsider@partner.com" }) },
+    );
+    expect(res.status).toBe(404);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_A_MEMBER");
+  });
+
+  it("a non-owner cannot manage another canvas's allowlist (404)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const id = await publishedCanvas(owner.id);
+    const res = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/${id}/allowlist`,
+      { method: "POST", headers: mut, body: JSON.stringify({ email: "x@example.com" }) },
+    );
+    expect(res.status).toBe(404);
   });
 });

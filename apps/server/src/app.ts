@@ -314,6 +314,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     managementRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      users: deps.users,
       versions: deps.versions,
       clone: cloneService({
         canvases: deps.canvases,

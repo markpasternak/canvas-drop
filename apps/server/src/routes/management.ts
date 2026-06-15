@@ -25,6 +25,7 @@ import {
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
+import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
@@ -37,6 +38,7 @@ import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 export interface ManagementDeps {
   config: Config;
   canvases: CanvasesRepository;
+  users: UsersRepository;
   versions: VersionsRepository;
   clone: CloneService;
   audit: AuditLog;
@@ -79,6 +81,10 @@ const capabilitiesSchema = z.object({
 const settingsSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
+  // First-class access rung (D4, U4). `public_link` is NOT settable here — it is
+  // admin-gated per account and wired in U10. `shared` remains a deprecated
+  // boolean alias (true→whole_org, false→private) for older clients.
+  access: z.enum(["private", "specific_people", "whole_org"]).optional(),
   shared: z.boolean().optional(),
   sharedExpiresAt: z.number().int().positive().nullable().optional(),
   password: z.string().min(1).nullable().optional(), // set, or null to clear
@@ -383,10 +389,11 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const p = body.data;
-    // U2: the API still speaks a `shared` boolean; the column is now the `access`
-    // rung. Translate shared→access here (U4 replaces this with a first-class
-    // `access` field + allowlist).
-    const { password, shared, ...rest } = p;
+    const { password, shared, access, ...rest } = p;
+    // The target rung: the first-class `access` field wins; else the deprecated
+    // `shared` boolean maps to whole_org/private; else unchanged (undefined).
+    const targetAccess =
+      access ?? (shared === undefined ? undefined : shared ? "whole_org" : "private");
 
     // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
     // shared AND published AND will be unprotected after this patch; a password set
@@ -395,7 +402,8 @@ export function managementRoutes(deps: ManagementDeps) {
     // the at-rest row can't reach a listed-but-invisible state (templatable ⊆ listed
     // ⊆ shared/published/unprotected).
     const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
-    const willBeShared = shared === undefined ? cv.access !== "private" : shared;
+    const effectiveAccess = targetAccess ?? cv.access;
+    const willBeShared = effectiveAccess !== "private";
     // "Published" for the share/gallery preconditions means the full lifecycle
     // state, not just "has a version": an archived canvas keeps its currentVersionId,
     // so guarding on currentVersionId alone would let an admin re-share an archived
@@ -405,7 +413,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // can't expose a URL that serves no live page. Leaving Published reverts share
     // (see the unpublish/archive transitions), so this also keeps the at-rest row
     // from holding shared=true without a current version.
-    if (shared === true && !isPublished) {
+    if (targetAccess !== undefined && targetAccess !== "private" && !isPublished) {
       return c.json(
         { code: "SHARE_REQUIRES_PUBLISH", message: "Publish this canvas before sharing it." },
         409,
@@ -457,10 +465,10 @@ export function managementRoutes(deps: ManagementDeps) {
     // regardless of what the client sent. (updateSettings also clears templatable
     // whenever galleryListed is set false, keeping templatable ⊆ listed.)
     const patch: CanvasSettingsPatch = { ...rest };
-    if (shared !== undefined) patch.access = shared ? "whole_org" : "private";
-    // Un-share un-lists, but KEEPS the gallery summary/tags so re-sharing later
-    // restores them without the owner re-typing (R11).
-    if (shared === false) {
+    if (targetAccess !== undefined) patch.access = targetAccess;
+    // Dropping to private un-lists, but KEEPS the gallery summary/tags so re-sharing
+    // later restores them without the owner re-typing (R11).
+    if (targetAccess === "private") {
       patch.galleryListed = false;
       patch.galleryTemplatable = false;
     }
@@ -487,12 +495,12 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { cleared: password === null },
       });
     }
-    if (shared !== undefined) {
+    if (targetAccess !== undefined) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { shared },
+        meta: { access: targetAccess },
       });
     }
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost
@@ -502,6 +510,84 @@ export function managementRoutes(deps: ManagementDeps) {
       if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
     }
     return c.json(await canvasView(updated));
+  });
+
+  // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------
+  // Members here; invited-guest entries are added by the invite flow (U8).
+
+  /** List a canvas's allowlist entries with member display identity resolved. */
+  app.get("/:id/allowlist", async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const entries = await deps.canvases.listAllowlist(cv.id);
+    const memberIds = entries
+      .filter((e) => e.principalKind === "member" && e.userId)
+      .map((e) => e.userId as string);
+    const byId = new Map((await deps.users.findByIds(memberIds)).map((u) => [u.id, u]));
+    return c.json({
+      entries: entries.map((e) => {
+        const u = e.userId ? byId.get(e.userId) : undefined;
+        return {
+          id: e.id,
+          kind: e.principalKind,
+          // Members carry their org identity; guests carry the invited email.
+          email: e.principalKind === "member" ? (u?.email ?? null) : e.email,
+          name: u?.name ?? null,
+          createdAt: e.createdAt,
+        };
+      }),
+    });
+  });
+
+  const allowlistAddSchema = z.object({ email: z.string().email() });
+
+  /** Add an org member to the allowlist by email. An email that is NOT an org
+   *  member is rejected here — inviting an outside email is the guest-invite flow
+   *  (U8), which needs email infra. */
+  app.post("/:id/allowlist", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = await deps.users.findByEmail(body.data.email);
+    if (!user) {
+      return c.json(
+        {
+          code: "NOT_A_MEMBER",
+          message:
+            "That email isn't an org member. Inviting outside guests arrives with email sharing.",
+        },
+        404,
+      );
+    }
+    await deps.canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: user.id,
+    });
+    deps.audit.recordAudit({
+      action: "allowlist_add",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { kind: "member", userId: user.id },
+    });
+    return c.json({ ok: true });
+  });
+
+  /** Remove an allowlist entry; drop any live sockets it no longer permits. */
+  app.delete("/:id/allowlist/:entryId", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const entryId = c.req.param("entryId");
+    await deps.canvases.removeAllowlistEntry(cv.id, entryId);
+    deps.audit.recordAudit({
+      action: "allowlist_remove",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { entryId },
+    });
+    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    return c.json({ ok: true });
   });
 
   app.patch("/:id/capabilities", sameOrigin, async (c) => {
