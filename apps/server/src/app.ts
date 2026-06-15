@@ -42,6 +42,7 @@ import {
   takeToken,
 } from "./http/rate-limit.js";
 import { securityHeadersMiddleware } from "./http/security-headers.js";
+import { socialPreview } from "./http/social-preview.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
@@ -232,6 +233,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
   // since preflights carry no credentials and must not 401.
   app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
+
+  // Signed-out link unfurls (iMessage/Slack/…) carry no session cookie, so without
+  // this they'd follow the gateway's login redirect and preview the IdP's "Sign in"
+  // page. Intercept those HTML navigations BEFORE the gateway and serve a generic
+  // Open Graph card pointing at /og.png; real humans are redirected on to login.
+  app.use("*", socialPreview(deps.config));
 
   // Everything below requires an org session/identity (login on every request).
   app.use(
