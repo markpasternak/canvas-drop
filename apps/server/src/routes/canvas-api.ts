@@ -7,7 +7,11 @@ import type { UpgradeWebSocket } from "hono/ws";
 import type { QuotaResolver } from "../admin/settings-service.js";
 import type { ModelProvider } from "../ai/provider.js";
 import type { AuditLog } from "../audit/audit-log.js";
-import { decideCanvasAccess } from "../canvas/authorization.js";
+import {
+  decideCanvasAccess,
+  requestPrincipal,
+  resolveAccessContext,
+} from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
 import { GATE_COOKIE, verifyGrant } from "../canvas/password-gate.js";
@@ -67,7 +71,9 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       const slug = c.req.param("slug");
       if (!slug) return c.json({ code: "NOT_FOUND" }, 404);
       const canvas = await deps.canvases.findBySlug(slug);
-      const decision = decideCanvasAccess(canvas, c.get("user"), Date.now());
+      const principal = requestPrincipal(c);
+      const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
+      const decision = decideCanvasAccess(canvas, principal, Date.now(), ctx);
       if (decision.action === "deny") {
         return c.json({ code: decision.reason.toUpperCase() }, decision.status);
       }
@@ -81,6 +87,10 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         return c.json({ code: "PASSWORD_REQUIRED" }, 403);
       }
       c.set("canvas", canvas as Canvas);
+      // staticOnly (public_link, U3): the runtime API is unavailable to a
+      // static-only principal — every primitive is refused (R17). Guest-vs-anonymous
+      // primitive policy lands in U9; here we close the API for the static tier.
+      c.set("staticOnly", decision.staticOnly);
       await next();
     }),
   );

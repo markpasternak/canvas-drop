@@ -59,6 +59,9 @@ export interface HubDeps {
   resolveCanvas(canvasId: string): Promise<Canvas | null>;
   /** Optional liveness check — false drops the socket (blocked / deleted user). */
   isUserActive?(userId: string): Promise<boolean>;
+  /** Allowlist membership for live re-auth of a `specific_people` canvas (U3). When
+   *  omitted, a specific_people canvas re-authorizes as not-allowed (drops). */
+  isPrincipalAllowed?(canvasId: string, principal: { userId: string }): Promise<boolean>;
 }
 
 type PresenceUser = { id: string; name: string };
@@ -279,10 +282,18 @@ export function createHub(deps: HubDeps) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "canvas gone");
           continue;
         }
+        // Conn.user is an org member today (U9 threads guest principals onto Conn).
+        // Resolve allowlist membership for a specific_people canvas so an
+        // allowlisted member's live socket isn't wrongly dropped on re-auth.
+        const isAllowed =
+          canvas.access === "specific_people" && deps.isPrincipalAllowed
+            ? await deps.isPrincipalAllowed(canvas.id, { userId: conn.user.id })
+            : false;
         const decision = decideCanvasAccess(
           canvas,
-          { id: conn.user.id, isAdmin: conn.user.isAdmin },
+          { kind: "member", id: conn.user.id, isAdmin: conn.user.isAdmin },
           now,
+          { isAllowed },
         );
         if (decision.action === "deny") {
           dropConn(conn, CLOSE_UNAUTHORIZED, decision.reason);

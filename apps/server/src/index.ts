@@ -66,6 +66,8 @@ async function main() {
       const u = await users.findById(id);
       return !!u && !u.isBlocked;
     },
+    // Live re-auth of a specific_people canvas needs allowlist membership (U3).
+    isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
   });
 
   // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS
