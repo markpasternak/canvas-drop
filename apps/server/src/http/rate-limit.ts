@@ -100,7 +100,17 @@ interface Classification {
  */
 export function classifyRequest(c: Context<AppEnv>, config: Config): Classification | null {
   const path = c.req.path;
-  const userId = c.get("user")?.id;
+  // The actor key: an org user, or (for the U7 carve-out) the resolved non-org
+  // principal — a guest by its namespaced id, an anonymous visitor by client IP.
+  // Without this, guest/anonymous runtime traffic would bypass the limiter (KTD9).
+  const principal = c.get("principal");
+  const userId =
+    c.get("user")?.id ??
+    (principal?.kind === "guest"
+      ? principal.id
+      : principal?.kind === "anonymous"
+        ? `anon:${c.get("clientIp") ?? "unknown"}`
+        : undefined);
   if (!userId) return null; // unauthenticated paths aren't reached past the gateway
   const rl = config.rateLimit;
 

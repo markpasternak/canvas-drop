@@ -57,6 +57,13 @@ async function main() {
       ? makeOidc({ config, users, sessionSvc, getConfig: makeOidcConfigLoader(config) })
       : undefined;
 
+  // 3b. Guest magic-link service (U6/U7) — the carve-out is app-gated, so it only
+  //     exists outside proxy mode (in proxy mode the IAP authenticates first).
+  const { guestRepository } = await import("./db/repositories/guest.js");
+  const { guestService } = await import("./auth/guest.js");
+  const guests =
+    config.auth.mode === "proxy" ? undefined : guestService(config, guestRepository(db));
+
   // 4. Realtime hub (single-process, in-memory). Re-fetches the canvas + user for
   //    live re-authorization (revoke-drops-socket + heartbeat).
   const hub = createHub({
@@ -88,6 +95,7 @@ async function main() {
     engine,
     audit,
     sessionSvc,
+    guests,
     oidc,
     hub,
     registerWebSocket: (honoApp) => {

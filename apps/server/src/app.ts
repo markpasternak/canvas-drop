@@ -7,6 +7,8 @@ import { adminSettingsService } from "./admin/settings-service.js";
 import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
+import type { GuestService } from "./auth/guest.js";
+import { guestPublicResolver, onlyWhenNoPrincipal } from "./auth/guest-public-resolver.js";
 import { authRoutes } from "./auth/routes.js";
 import type { SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
@@ -71,6 +73,8 @@ export interface BuildAppDeps {
   engine: DeployEngine;
   audit: AuditLog;
   sessionSvc?: SessionService;
+  /** Guest magic-link service (U6/U7). Present in oidc/dev; enables the carve-out. */
+  guests?: GuestService;
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the socket-peer-IP extractor (tests inject a fixed peer). */
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
@@ -238,17 +242,38 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // this they'd follow the gateway's login redirect and preview the IdP's "Sign in"
   // page. Intercept those HTML navigations BEFORE the gateway and serve a generic
   // Open Graph card pointing at /og.png; real humans are redirected on to login.
+  // Guest/public carve-out (U7): runs BEFORE socialPreview + the gateway, derives
+  // the role itself, and sets a guest/anonymous principal for canvas surfaces so
+  // those requests skip the org gateway. Mounted only in app-gated modes
+  // (oidc/dev) — in proxy mode the IAP authenticates first, so it isn't mounted
+  // and a forged guest cookie still hits the gateway (KTD7).
+  if (deps.config.auth.mode !== "proxy" && deps.guests) {
+    app.use(
+      "*",
+      guestPublicResolver({
+        config: deps.config,
+        guests: deps.guests,
+        canvases: deps.canvases,
+      }),
+    );
+  }
+
   app.use("*", socialPreview(deps.config));
 
-  // Everything below requires an org session/identity (login on every request).
+  // Everything below requires an org session/identity (login on every request) —
+  // UNLESS the carve-out above already set a guest/anonymous principal, in which
+  // case the gateway steps aside (onlyWhenNoPrincipal) and authorization is left
+  // to decideCanvasAccess (the sole gate).
   app.use(
     "*",
-    authGateway({
-      strategy: deps.strategy,
-      config: deps.config,
-      users: deps.users,
-      audit: deps.audit,
-    }),
+    onlyWhenNoPrincipal(
+      authGateway({
+        strategy: deps.strategy,
+        config: deps.config,
+        users: deps.users,
+        audit: deps.audit,
+      }),
+    ),
   );
 
   // Classify the request once; canvas middlewares key off the role.

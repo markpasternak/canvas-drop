@@ -44,6 +44,9 @@ function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua:
 
 export function socialPreview(config: Config) {
   return createMiddleware<AppEnv>(async (c, next) => {
+    // A guest/anonymous principal was already resolved (U7) — this is a real
+    // visitor to an invited or public canvas, not a signed-out human to bounce.
+    if (c.get("principal")) return next();
     // Only oidc bounces to an external login page; other modes don't have the bug.
     if (config.auth.mode !== "oidc") return next();
     // Only GET/HEAD navigations; never touch mutations or the API surface.
