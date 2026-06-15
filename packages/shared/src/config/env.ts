@@ -182,6 +182,16 @@ const rawSchema = z
     CANVAS_DROP_AI_USER_DAILY_USD: num(5),
     CANVAS_DROP_AI_CANVAS_MONTHLY_USD: num(50),
 
+    // Email (guest invites, U5). Driver-behind-interface like DB/storage. `log`
+    // (default) writes the message + magic link to the logger — zero-setup for dev;
+    // `mailgun` sends via the Mailgun HTTP API; `noop` discards. The Mailgun API key
+    // is env-only (never DB-overridable) since invite emails are auth credentials.
+    CANVAS_DROP_EMAIL_DRIVER: z.enum(["log", "mailgun", "noop"]).optional().default("log"),
+    CANVAS_DROP_EMAIL_FROM: z.string().optional(),
+    CANVAS_DROP_MAILGUN_API_KEY: z.string().optional(),
+    CANVAS_DROP_MAILGUN_DOMAIN: z.string().optional(),
+    CANVAS_DROP_MAILGUN_BASE_URL: z.url().optional().default("https://api.mailgun.net"),
+
     // Logging
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
@@ -436,6 +446,22 @@ const rawSchema = z
         models: r.CANVAS_DROP_AI_MODELS,
         userDailyUsd: r.CANVAS_DROP_AI_USER_DAILY_USD,
         canvasMonthlyUsd: r.CANVAS_DROP_AI_CANVAS_MONTHLY_USD,
+      },
+
+      email: {
+        driver: r.CANVAS_DROP_EMAIL_DRIVER,
+        // Sender; defaults to a no-reply at the Mailgun domain when one is set, else
+        // a generic local address (the `log`/`noop` drivers don't send anyway).
+        from:
+          r.CANVAS_DROP_EMAIL_FROM ??
+          (r.CANVAS_DROP_MAILGUN_DOMAIN
+            ? `no-reply@${r.CANVAS_DROP_MAILGUN_DOMAIN}`
+            : "no-reply@localhost"),
+        mailgun: {
+          apiKey: r.CANVAS_DROP_MAILGUN_API_KEY?.trim() || undefined,
+          domain: r.CANVAS_DROP_MAILGUN_DOMAIN?.trim() || undefined,
+          baseUrl: r.CANVAS_DROP_MAILGUN_BASE_URL,
+        },
       },
 
       log: {
