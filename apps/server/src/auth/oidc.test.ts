@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import * as client from "openid-client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
@@ -31,6 +32,7 @@ function deps(client: DbClient): OidcDeps {
   return {
     config,
     users: usersRepository(client),
+    allowedEmails: allowedEmailsRepository(client),
     sessionSvc: sessionService(config, sessionsRepository(client)),
     // Discovery must NOT run in these tests — they exercise pre-/post-exchange logic.
     getConfig: () => Promise.reject(new Error("discovery should not run")),
@@ -70,6 +72,7 @@ describe("oidc login — authorization request", () => {
       config,
       // biome-ignore lint/suspicious/noExplicitAny: repos unused by login()
       users: {} as any,
+      allowedEmails: { isAllowed: async () => false },
       // biome-ignore lint/suspicious/noExplicitAny: session svc unused by login()
       sessionSvc: {} as any,
       getConfig: () => Promise.resolve(cfg),

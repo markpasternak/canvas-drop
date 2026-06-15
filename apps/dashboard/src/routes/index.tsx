@@ -15,6 +15,7 @@ import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import {
+  type AccessRung,
   ApiError,
   CANVASES_PAGE_SIZE,
   type CanvasListItem,
@@ -54,6 +55,16 @@ const CANVASES_SORT_OPTIONS = [
   { value: "updated", label: "Recently updated" },
   { value: "created", label: "Newest" },
   { value: "title", label: "Title A–Z" },
+];
+
+// Access-rung filter (D4) — the finer-grained companion to the coarse "Shared" chip;
+// "Public" lets an owner see exactly which canvases are exposed beyond the org.
+const ACCESS_OPTIONS = [
+  { value: "all", label: "All access" },
+  { value: "private", label: "Private" },
+  { value: "specific_people", label: "Specific people" },
+  { value: "whole_org", label: "Whole org" },
+  { value: "public_link", label: "Public" },
 ];
 
 function RowOverflowMenu({
@@ -354,6 +365,8 @@ export default function CanvasList() {
   // Lifecycle scope: the active list (default) or the archived set. The attribute
   // chips (Shared/Listed/…) are active-only, so the archived view drops them.
   const archivedView = search.scope === "archived";
+  // The access-rung filter, like the attribute chips, applies to the live set only.
+  const access = archivedView ? undefined : search.access;
   // This route intentionally has no validateSearch (see router.tsx), so `page` can
   // arrive as a non-numeric string from a hand-edited/stale URL. Coerce defensively
   // — a junk `?page=` falls back to 1 rather than letting NaN wedge the pager.
@@ -364,6 +377,7 @@ export default function CanvasList() {
     ? Boolean(q)
     : Boolean(
         q ||
+          access ||
           search.shared ||
           search.protected ||
           search.listed ||
@@ -376,6 +390,7 @@ export default function CanvasList() {
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useCanvases({
     q,
+    access,
     shared: archivedView ? undefined : search.shared,
     protected: archivedView ? undefined : search.protected,
     listed: archivedView ? undefined : search.listed,
@@ -414,6 +429,16 @@ export default function CanvasList() {
       }),
     });
   }
+  function setAccess(next: string) {
+    navigate({
+      to: "/",
+      search: (prev) => ({
+        ...prev,
+        access: next === "all" ? undefined : (next as AccessRung),
+        page: 1,
+      }),
+    });
+  }
   function clearFilters() {
     setText("");
     // Stay in the current scope when clearing attribute/search filters.
@@ -425,9 +450,10 @@ export default function CanvasList() {
       search: (prev) => ({
         ...prev,
         scope: next === "archived" ? "archived" : undefined,
-        // Attribute chips are active-only — drop them when entering the archive.
+        // Attribute chips + the access filter are active-only — drop on entering the archive.
         ...(next === "archived"
           ? {
+              access: undefined,
               shared: undefined,
               protected: undefined,
               listed: undefined,
@@ -506,6 +532,14 @@ export default function CanvasList() {
               onChange={setScope}
               summary={summary}
             />
+            {!archivedView && (
+              <FilterSelect
+                label="Filter by access"
+                options={ACCESS_OPTIONS}
+                value={access ?? "all"}
+                onValueChange={setAccess}
+              />
+            )}
             <FilterSelect
               label="Sort your canvases"
               options={CANVASES_SORT_OPTIONS}

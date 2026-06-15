@@ -263,6 +263,8 @@ export type CanvasesSort = "updated" | "created" | "title";
 /** Your-canvases browse query (plan 005). State flags map 1:1 to the row pills. */
 export interface CanvasesQuery {
   q?: string;
+  /** Access-rung filter (D4); `shared` stays as the legacy coarse boolean. */
+  access?: AccessRung;
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -493,6 +495,8 @@ export interface AdminCanvasRow {
   url: string;
   title: string;
   status: string;
+  /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
+  access: AccessRung;
   disabledReason: string | null;
   owner: { id: string; email: string; name: string } | null;
   sizeBytes: number;
@@ -503,6 +507,14 @@ export interface AdminCanvasRow {
   deletedAt: number | null;
 }
 
+/** One individual sign-in allowlist entry (D14 supplement to the env email domains). */
+export interface AllowedEmail {
+  id: string;
+  email: string;
+  createdBy: string | null;
+  createdAt: number;
+}
+
 /** Admin all-canvases sort axes (plan 006). `recent` (default) = last activity. */
 export type AdminCanvasSort = "recent" | "created" | "title";
 
@@ -510,6 +522,7 @@ export type AdminCanvasSort = "recent" | "created" | "title";
  *  `owner` is the drill-down filter from the user table ("see what they have"). */
 export interface AdminCanvasesQuery {
   status?: AdminCanvasStatus;
+  access?: AccessRung;
   q?: string;
   owner?: string;
   sort?: AdminCanvasSort;
@@ -648,6 +661,7 @@ export const api = {
   listCanvases: (query: CanvasesQuery = {}) => {
     const sp = new URLSearchParams();
     if (query.q) sp.set("q", query.q);
+    if (query.access) sp.set("access", query.access);
     if (query.shared) sp.set("shared", "1");
     if (query.protected) sp.set("protected", "1");
     if (query.listed) sp.set("listed", "1");
@@ -815,6 +829,7 @@ export const api = {
     listCanvases: (query: AdminCanvasesQuery = {}) => {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
+      if (query.access) sp.set("access", query.access);
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
       if (query.sort && query.sort !== "recent") sp.set("sort", query.sort);
@@ -851,6 +866,14 @@ export const api = {
       request<{ ok: true }>(`/api/admin/users/${id}/grant-public`, { method: "POST" }),
     revokePublic: (id: string) =>
       request<{ ok: true }>(`/api/admin/users/${id}/revoke-public`, { method: "POST" }),
+
+    /** Individual sign-in allowlist (D14 supplement to the env email domains). */
+    listAllowedEmails: () =>
+      request<{ emails: AllowedEmail[] }>("/api/admin/allowed-emails").then((r) => r.emails),
+    addAllowedEmail: (email: string) =>
+      request<{ ok: true; entry: AllowedEmail }>("/api/admin/allowed-emails", jsonBody({ email })),
+    removeAllowedEmail: (id: string) =>
+      request<{ ok: true }>(`/api/admin/allowed-emails/${id}`, { method: "DELETE" }),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),

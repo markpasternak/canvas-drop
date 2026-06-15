@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Canvas, PublicationState } from "../lib/api.js";
+import type { AccessRung, Canvas, PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 
 type Tone = "neutral" | "accent" | "success" | "danger" | "warning";
@@ -62,7 +62,27 @@ export function PublicationBadge({ state }: { state: PublicationState }) {
   );
 }
 
-/** Visibility axis: who can reach the canvas. */
+/** Access axis (D4 ladder): who can reach the canvas. `public_link` is the only
+ *  rung open beyond the org, so it reads as a distinct, attention-toned "Public"
+ *  pill (with a dot) everywhere access is shown — owners and admins alike. */
+const ACCESS_BADGE: Record<AccessRung, { tone: Tone; label: string; dot: boolean }> = {
+  private: { tone: "neutral", label: "Private", dot: false },
+  specific_people: { tone: "accent", label: "Specific people", dot: false },
+  whole_org: { tone: "accent", label: "Whole org", dot: false },
+  public_link: { tone: "warning", label: "Public", dot: true },
+};
+
+export function AccessBadge({ access }: { access: AccessRung }) {
+  const s = ACCESS_BADGE[access] ?? ACCESS_BADGE.private;
+  return (
+    <Badge tone={s.tone}>
+      {s.dot && <span className="size-1.5 rounded-full bg-current" aria-hidden />}
+      {s.label}
+    </Badge>
+  );
+}
+
+/** Visibility axis (legacy boolean): kept for callers that only know `shared`. */
 export function VisibilityBadge({ shared }: { shared: boolean }) {
   return <Badge tone={shared ? "accent" : "neutral"}>{shared ? "Shared" : "Private"}</Badge>;
 }

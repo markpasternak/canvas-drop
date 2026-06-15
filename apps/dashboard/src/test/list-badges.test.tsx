@@ -98,22 +98,41 @@ afterEach(() => {
 });
 
 describe("list row badges", () => {
-  it("splits access state into the Visibility column instead of mixing every state badge", async () => {
+  it("splits the access rung into the Visibility column, distinctly flagging Public", async () => {
     renderListWith([
-      canvas({ id: "a", slug: "s-plain", title: "Plain one", shared: false, hasPassword: false }),
-      canvas({ id: "b", slug: "s-shared", title: "Shared one", shared: true, hasPassword: false }),
-      canvas({ id: "c", slug: "s-locked", title: "Locked one", shared: false, hasPassword: true }),
-      canvas({ id: "d", slug: "s-both", title: "Both one", shared: true, hasPassword: true }),
+      canvas({ id: "a", slug: "s-priv", title: "Private one", access: "private", shared: false }),
+      canvas({ id: "b", slug: "s-org", title: "Org one", access: "whole_org", shared: true }),
+      canvas({
+        id: "c",
+        slug: "s-people",
+        title: "People one",
+        access: "specific_people",
+        shared: true,
+      }),
+      canvas({ id: "d", slug: "s-pub", title: "Public one", access: "public_link", shared: true }),
+      canvas({
+        id: "e",
+        slug: "s-prot",
+        title: "Protected one",
+        access: "whole_org",
+        shared: true,
+        hasPassword: true,
+      }),
     ]);
-    await screen.findByText("Plain one"); // list rendered
+    await screen.findByText("Private one"); // list rendered
 
-    expect(screen.getByText("Private")).toBeInTheDocument();
-    expect(screen.getByText("Owner only")).toBeInTheDocument();
-    expect(screen.getAllByText("Shared").length).toBeGreaterThan(1);
-    expect(screen.getByText("Public link")).toBeInTheDocument();
-    expect(screen.getAllByText("Protected").length).toBeGreaterThan(1);
-    expect(screen.getByText("Password set")).toBeInTheDocument();
-    expect(screen.getByText("Shared + protected")).toBeInTheDocument();
+    // Each rung renders its own Visibility cell. The rung *names* also appear once in
+    // the access FilterSelect options, so assert on the unique secondary lines (which
+    // only the rows render) to prove each rung's cell is present.
+    expect(screen.getByText("Owner only")).toBeInTheDocument(); // private
+    expect(screen.getByText("Org members")).toBeInTheDocument(); // whole_org
+    expect(screen.getByText("Invited only")).toBeInTheDocument(); // specific_people
+    expect(screen.getByText("Anyone with the link")).toBeInTheDocument(); // public_link
+    // Public is the only beyond-the-org rung: a distinct near-title pill PLUS the
+    // Visibility column (plus the filter option), so it appears at least twice.
+    expect(screen.getAllByText("Public").length).toBeGreaterThan(1);
+    // A password layered on a shared rung surfaces in both the primary and secondary.
+    expect(screen.getByText("Whole org + protected")).toBeInTheDocument();
     expect(screen.getByText("Password required")).toBeInTheDocument();
   });
 

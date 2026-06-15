@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
+import { AllowedEmailsPanel } from "../components/AllowedEmailsPanel.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterSelect } from "../components/Filters.js";
@@ -82,6 +83,8 @@ export default function AdminUsers() {
         title="Users"
         description="Members, their owned canvases, and governance — block access or grant admin."
       />
+
+      <AllowedEmailsPanel />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[14rem] flex-1">

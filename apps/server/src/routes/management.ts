@@ -171,6 +171,8 @@ const boolFlag = z
  */
 const ownerListQuerySchema = z.object({
   q: z.string().trim().min(1).optional(),
+  // Access-rung filter (D4); `shared` stays as the legacy coarse boolean.
+  access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
   shared: boolFlag,
   protected: boolFlag,
   listed: boolFlag,
@@ -315,6 +317,7 @@ export function managementRoutes(deps: ManagementDeps) {
       ? parsed.data
       : {
           q: undefined,
+          access: undefined,
           shared: false,
           protected: false,
           listed: false,
@@ -335,6 +338,7 @@ export function managementRoutes(deps: ManagementDeps) {
       deps.canvases.listByOwnerFiltered({
         ownerId: userId,
         q: data.q,
+        access: data.access,
         shared: data.shared,
         protected: data.protected,
         listed: data.listed,

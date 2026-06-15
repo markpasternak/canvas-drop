@@ -155,6 +155,7 @@ export interface OwnerListOptions {
   ownerId: string;
   q?: string;
   /** Access/gallery-state filters — each maps to one canvas column. */
+  access?: AccessRung;
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -308,6 +309,7 @@ export function canvasesRepository(client: DbClient) {
 
       // Column-based state filters (plan 005 KTD3). `protected` keys off a set
       // password hash; `neverDeployed` off the absence of a published version.
+      if (opts.access) filters.push(eq(t.access, opts.access));
       if (opts.shared) filters.push(ne(t.access, "private"));
       if (opts.protected) filters.push(isNotNull(t.passwordHash));
       if (opts.listed) filters.push(eq(t.galleryListed, true));

@@ -10,9 +10,10 @@ your config decisions keep it intact.
 ## The trust boundary
 
 A request only becomes a *user* after the auth gateway resolves a server-side
-identity, checks the email-domain allowlist, maps it to a user, and rejects
-blocked users. Identity always comes from the server-side strategy — never from
-anything the client sends. Pick the strategy with `CANVAS_DROP_AUTH_MODE`:
+identity, checks the email allowlist (the env domain list **or** an admin-managed
+list of individual emails), maps it to a user, and rejects blocked users. Identity
+always comes from the server-side strategy — never from anything the client sends.
+Pick the strategy with `CANVAS_DROP_AUTH_MODE`:
 
 - `dev` — auto-logs-in a fixed local user, no external verification. Localhost
   only; a stub for trying the product.

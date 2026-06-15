@@ -391,13 +391,36 @@ export function useAdminPromoteUser() {
   });
 }
 
-/** Grant/revoke the publish-public capability (U10). */
+/** Grant/revoke the publish-public capability (U10). Revoking sweeps the owner's
+ *  public_link canvases back to private, so invalidate the canvas lists too — not
+ *  just the admin views — or an owner's open list/detail shows a stale rung. */
 export function useAdminPublishPublic() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, allowed }: { id: string; allowed: boolean }) =>
       allowed ? api.admin.grantPublic(id) : api.admin.revokePublic(id),
-    onSuccess: () => invalidateAdmin(qc),
+    onSuccess: () => {
+      invalidateAdmin(qc);
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/** Add an individual sign-in allowlist email (D14 supplement to env domains). */
+export function useAddAllowedEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) => api.admin.addAllowedEmail(email),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminAllowedEmails }),
+  });
+}
+
+/** Remove an individual sign-in allowlist email. */
+export function useRemoveAllowedEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.admin.removeAllowedEmail(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminAllowedEmails }),
   });
 }
 

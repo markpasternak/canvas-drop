@@ -24,6 +24,7 @@ export const keys = {
   adminOverview: ["admin", "overview"] as const,
   adminAiUsage: ["admin", "ai-usage"] as const,
   adminConfig: ["admin", "config"] as const,
+  adminAllowedEmails: ["admin", "allowed-emails"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
   galleryFacets: ["gallery", "facets"] as const,
 };
@@ -94,6 +95,10 @@ export function useAdminAiUsage() {
 
 export function useAdminConfig() {
   return useQuery({ queryKey: keys.adminConfig, queryFn: api.admin.getConfig });
+}
+
+export function useAdminAllowedEmails() {
+  return useQuery({ queryKey: keys.adminAllowedEmails, queryFn: api.admin.listAllowedEmails });
 }
 
 export function useGallery(query: GalleryQuery) {

@@ -1,9 +1,10 @@
 import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
-import { isEmailDomainAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import { isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
 import type { AuthStrategy } from "./strategy.js";
 
 /** An auth-lifecycle event for the audit log. Implemented by U10's audit sink. */
@@ -24,6 +25,8 @@ export interface AuthGatewayDeps {
   strategy: AuthStrategy;
   config: Config;
   users: UsersRepository;
+  /** Admin-managed individual email allowlist (D14 supplement to the env domains). */
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">;
   audit?: AuthEventSink;
 }
 
@@ -44,7 +47,7 @@ export function authGateway(deps: AuthGatewayDeps) {
       return unauthorized(c, deps.config);
     }
 
-    if (!isEmailDomainAllowed(identity.email, deps.config)) {
+    if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails))) {
       deps.audit?.record({
         action: "auth_denied",
         reason: "domain_not_allowed",

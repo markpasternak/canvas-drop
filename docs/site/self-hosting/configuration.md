@@ -56,6 +56,13 @@ from the server-side auth strategy, never from anything the client sends.
 | `CANVAS_DROP_AUTH_MODE` | `dev` | `dev` \| `proxy` \| `oidc`. `dev` is **rejected when `NODE_ENV=production`**. |
 | `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` | (empty) | CSV, lowercased. **Required (≥1) in `proxy`/`oidc`.** |
 
+> **Individual email allowlist.** Beyond the domain list above, an admin can allow
+> specific outside emails to sign in (e.g. a contractor or a test account) under
+> **Admin → Users → Allowed sign-in emails**. It's an additive, DB-managed layer:
+> the env domain list is unchanged, and an email passes if its domain is allowed
+> **or** it's on this list. Removing an entry revokes that email's access on its
+> next sign-in.
+
 ### dev mode
 
 Auto-logs-in a fixed local user; zero setup, localhost only.

@@ -226,6 +226,23 @@ export const guestSessions = sqliteTable(
   ],
 );
 
+/**
+ * Admin-managed individual sign-in allowlist (D14 supplement). Emails here may sign
+ * in as org members even when their domain isn't in CANVAS_DROP_ALLOWED_EMAIL_DOMAINS
+ * — an additive layer the domain allowlist (env) is unaware of. Stored lowercased.
+ */
+export const allowedEmails = sqliteTable(
+  "allowed_emails",
+  {
+    id: c.text("id").primaryKey(),
+    email: c.text("email").notNull(),
+    /** Admin who added it (plain text; informational, no FK). */
+    createdBy: c.text("created_by"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("allowed_emails_email_uq").on(t.email)],
+);
+
 export const versions = sqliteTable(
   "versions",
   {

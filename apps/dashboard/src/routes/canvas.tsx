@@ -1,5 +1,5 @@
 import { Link, Outlet, useParams } from "@tanstack/react-router";
-import { GalleryBadge, PublicationBadge, VisibilityBadge } from "../components/Badge.js";
+import { AccessBadge, GalleryBadge, PublicationBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -78,7 +78,7 @@ export default function CanvasLayout() {
           canvas ? (
             <span className="flex flex-wrap items-center gap-1.5">
               <PublicationBadge state={canvas.publicationState} />
-              <VisibilityBadge shared={canvas.shared} />
+              <AccessBadge access={canvas.access} />
               <GalleryBadge canvas={canvas} />
             </span>
           ) : null

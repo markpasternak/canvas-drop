@@ -22,6 +22,10 @@ import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
 import { aiUsageRepository } from "./db/repositories/ai-usage.js";
+import {
+  type AllowedEmailsRepository,
+  allowedEmailsRepository,
+} from "./db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
@@ -68,6 +72,10 @@ export interface BuildAppDeps {
   rootLogger: Logger;
   strategy: AuthStrategy;
   users: UsersRepository;
+  /** Admin-managed individual sign-in allowlist (D14 supplement to env domains).
+   *  Optional: defaults to a repo over `db` (so tests that omit it get the real,
+   *  empty allowlist — domain-only sign-in, the legacy behavior). */
+  allowedEmails?: AllowedEmailsRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   drafts: DraftsRepository;
@@ -115,6 +123,10 @@ export interface BuildAppDeps {
  */
 export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // The individual sign-in allowlist (D14 supplement). Resolve once: callers may
+  // inject one, else build a repo over `db` (an empty allowlist = domain-only).
+  const allowedEmails = deps.allowedEmails ?? allowedEmailsRepository(deps.db);
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -290,6 +302,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         strategy: deps.strategy,
         config: deps.config,
         users: deps.users,
+        allowedEmails,
         audit: deps.audit,
       }),
     ),
@@ -393,6 +406,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       files: filesRepository(deps.db),
       aiUsage: aiUsageRepository(deps.db),
       settings: settingsSvc,
+      allowedEmails,
       audit: deps.audit,
     }),
   );

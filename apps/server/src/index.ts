@@ -7,6 +7,7 @@ import { setupAuth } from "./auth/factory.js";
 import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
 import { makeDb } from "./db/factory.js";
 import { runMigrations } from "./db/migrate.js";
+import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
@@ -40,6 +41,7 @@ async function main() {
   await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
   const storage = makeStorage(config);
   const users = usersRepository(db);
+  const allowedEmails = allowedEmailsRepository(db);
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
   const drafts = draftsRepository(db);
@@ -54,7 +56,13 @@ async function main() {
   // 3. OIDC login routes (oidc mode only).
   const oidc =
     config.auth.mode === "oidc" && sessionSvc
-      ? makeOidc({ config, users, sessionSvc, getConfig: makeOidcConfigLoader(config) })
+      ? makeOidc({
+          config,
+          users,
+          allowedEmails,
+          sessionSvc,
+          getConfig: makeOidcConfigLoader(config),
+        })
       : undefined;
 
   // 3b. Guest magic-link service (U6/U7) — the carve-out is app-gated, so it only
@@ -90,6 +98,7 @@ async function main() {
     rootLogger,
     strategy,
     users,
+    allowedEmails,
     canvases,
     versions,
     drafts,

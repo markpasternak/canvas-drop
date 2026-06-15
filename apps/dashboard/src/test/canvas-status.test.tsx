@@ -12,6 +12,7 @@ const CANVAS = {
   url: "http://x/c/quiet-otter",
   title: "My Canvas",
   description: null,
+  access: "whole_org",
   shared: true,
   sharedExpiresAt: null,
   hasPassword: false,
@@ -117,8 +118,8 @@ describe("canvas Status tab", () => {
     expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     expect(screen.getByText("Unlisted")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New version" })).toBeInTheDocument();
-    // "Shared" appears in both the header Visibility chip and the Access fact.
-    expect(screen.getAllByText("Shared").length).toBeGreaterThan(0);
+    // "Whole org" appears in both the header access chip and the Access fact.
+    expect(screen.getAllByText("Whole org").length).toBeGreaterThan(0);
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
@@ -161,7 +162,16 @@ describe("canvas Status tab", () => {
   });
 
   it("handles a canvas with no live deploy yet", async () => {
-    mockStatus({ ...CANVAS, currentVersionId: null, shared: false, publicationState: "draft" }, []);
+    mockStatus(
+      {
+        ...CANVAS,
+        access: "private",
+        currentVersionId: null,
+        shared: false,
+        publicationState: "draft",
+      },
+      [],
+    );
     renderStatus();
 
     expect(await screen.findByText("Not published yet")).toBeInTheDocument();

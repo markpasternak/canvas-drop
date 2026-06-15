@@ -2,6 +2,7 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
@@ -42,6 +43,7 @@ function buildApp(
       strategy: opts.strategy ?? devStrategy(config),
       config,
       users: usersRepository(client),
+      allowedEmails: allowedEmailsRepository(client),
       audit,
     }),
   );
@@ -82,6 +84,36 @@ describe("authGateway", () => {
     expect(
       events.some((e) => e.action === "auth_denied" && e.reason === "domain_not_allowed"),
     ).toBe(true);
+  });
+
+  it("admits an out-of-domain email only once it's on the individual allowlist (D14)", async () => {
+    client = await makeTestDb("sqlite");
+    const outsider: AuthStrategy = {
+      async resolveIdentity() {
+        return { sub: "partner", email: "partner@external.com" };
+      },
+    };
+    // Rejection path first: an out-of-domain email is denied until allowlisted.
+    const denied = await buildApp(client, { strategy: outsider }).request("/me");
+    expect(denied.status).toBe(401);
+
+    // After an admin adds the individual email, the same identity signs in.
+    await allowedEmailsRepository(client).add("partner@external.com", null);
+    const ok = await buildApp(client, { strategy: outsider }).request("/me");
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { email: string }).email).toBe("partner@external.com");
+  });
+
+  it("still rejects an out-of-domain email that is NOT individually allowlisted", async () => {
+    client = await makeTestDb("sqlite");
+    await allowedEmailsRepository(client).add("someone@external.com", null);
+    const other: AuthStrategy = {
+      async resolveIdentity() {
+        return { sub: "x", email: "different@external.com" };
+      },
+    };
+    const res = await buildApp(client, { strategy: other }).request("/me");
+    expect(res.status).toBe(401);
   });
 
   it("creates exactly one user across repeat requests (upsert, no duplicate)", async () => {

@@ -1,5 +1,6 @@
 import type {
   aiUsage,
+  allowedEmails,
   auditLog,
   canvases,
   drafts,
@@ -48,6 +49,8 @@ export type GuestInvite = typeof guestInvites.$inferSelect;
 export type NewGuestInvite = typeof guestInvites.$inferInsert;
 export type GuestSession = typeof guestSessions.$inferSelect;
 export type NewGuestSession = typeof guestSessions.$inferInsert;
+export type AllowedEmail = typeof allowedEmails.$inferSelect;
+export type NewAllowedEmail = typeof allowedEmails.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

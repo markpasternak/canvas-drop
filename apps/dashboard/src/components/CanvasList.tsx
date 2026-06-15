@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { CanvasListItem, PublicationState } from "../lib/api.js";
 import { formatBytes, relativeTime } from "../lib/format.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
-import { Badge, PublicationBadge } from "./Badge.js";
+import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
 
@@ -38,6 +38,8 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       {canvas.publicationState !== "published" && (
         <PublicationBadge state={canvas.publicationState} />
       )}
+      {/* Public is the only beyond-the-org rung — flag it prominently by the title. */}
+      {canvas.access === "public_link" && <AccessBadge access="public_link" />}
       {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
       {canvas.hasPassword && (
         <Badge tone="neutral">
@@ -74,12 +76,25 @@ function RowTags({ tags }: { tags: string[] }) {
 }
 
 function visibility(canvas: CanvasListItem): { primary: string; secondary: string } {
-  if (canvas.shared && canvas.hasPassword) {
-    return { primary: "Shared + protected", secondary: "Password required" };
+  const gated = canvas.hasPassword;
+  switch (canvas.access) {
+    case "public_link":
+      // Public ignores the password gate for anonymous visitors? No — public_link
+      // still honors a password; but the headline is the exposure, so lead with it.
+      return { primary: "Public", secondary: gated ? "Anyone (password)" : "Anyone with the link" };
+    case "whole_org":
+      return {
+        primary: gated ? "Whole org + protected" : "Whole org",
+        secondary: gated ? "Password required" : "Org members",
+      };
+    case "specific_people":
+      return {
+        primary: gated ? "Specific people + protected" : "Specific people",
+        secondary: gated ? "Password required" : "Invited only",
+      };
+    default:
+      return { primary: "Private", secondary: "Owner only" };
   }
-  if (canvas.shared) return { primary: "Shared", secondary: "Public link" };
-  if (canvas.hasPassword) return { primary: "Protected", secondary: "Password set" };
-  return { primary: "Private", secondary: "Owner only" };
 }
 
 function galleryState(canvas: CanvasListItem): { primary: string; secondary: string } {

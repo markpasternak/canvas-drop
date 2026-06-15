@@ -10,6 +10,7 @@ import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AdminCanvasStatus, AdminRepository } from "../db/repositories/admin.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -27,13 +28,16 @@ export interface AdminRoutesDeps {
   files: FilesRepository;
   aiUsage: AiUsageRepository;
   settings: AdminSettingsService;
+  allowedEmails: AllowedEmailsRepository;
   audit: AuditLog;
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
+const ACCESS_RUNGS = ["private", "specific_people", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
+  access: z.enum(ACCESS_RUNGS).optional(),
   q: z.string().trim().max(200).optional(),
   owner: z.string().trim().max(100).optional(),
   sort: z.enum(CANVAS_SORTS).optional().default("recent"),
@@ -94,6 +98,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   app.get("/canvases", async (c) => {
     const q = listQuery.safeParse({
       status: c.req.query("status"),
+      access: c.req.query("access"),
       q: c.req.query("q"),
       owner: c.req.query("owner"),
       sort: c.req.query("sort"),
@@ -104,6 +109,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
 
     const { items: rows, total } = await deps.admin.listAllCanvasesFiltered({
       status: q.data.status as AdminCanvasStatus | undefined,
+      access: q.data.access,
       q: q.data.q,
       owner: q.data.owner,
       sort: q.data.sort,
@@ -135,6 +141,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         url: canvasUrl(deps.config, cv.slug),
         title: cv.title,
         status: cv.status,
+        access: cv.access,
         publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
         disabledReason: cv.disabledReason,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
@@ -392,6 +399,43 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       actorId: c.get("user").id,
       targetType: "user",
       targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  // --- Sign-in email allowlist (D14 supplement): individual emails that may sign in
+  //     even when their domain isn't in CANVAS_DROP_ALLOWED_EMAIL_DOMAINS. The env
+  //     domain list is unchanged; this is an additive, admin-managed layer. ---
+  const allowedEmailBody = z.object({
+    email: z
+      .string()
+      .email()
+      .transform((e) => e.trim().toLowerCase()),
+  });
+
+  app.get("/allowed-emails", async (c) => {
+    return c.json({ emails: await deps.allowedEmails.list() });
+  });
+
+  app.post("/allowed-emails", sameOrigin, async (c) => {
+    const body = allowedEmailBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const entry = await deps.allowedEmails.add(body.data.email, c.get("user").id);
+    deps.audit.recordAudit({
+      action: "allowed_email_add",
+      actorId: c.get("user").id,
+      meta: { email: body.data.email },
+    });
+    return c.json({ ok: true, entry });
+  });
+
+  app.delete("/allowed-emails/:id", sameOrigin, async (c) => {
+    const id = c.req.param("id");
+    await deps.allowedEmails.remove(id);
+    deps.audit.recordAudit({
+      action: "allowed_email_remove",
+      actorId: c.get("user").id,
+      meta: { id },
     });
     return c.json({ ok: true });
   });

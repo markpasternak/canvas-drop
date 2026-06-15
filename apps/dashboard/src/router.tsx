@@ -2,7 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/
 import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
-import type { AdminCanvasSort, AdminCanvasStatus } from "./lib/api.js";
+import type { AccessRung, AdminCanvasSort, AdminCanvasStatus } from "./lib/api.js";
 
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
@@ -38,6 +38,8 @@ export type CanvasesSortParam = "updated" | "created" | "title";
 export interface CanvasesSearch {
   q?: string;
   sort?: CanvasesSortParam;
+  /** Access-rung filter (D4); `shared` stays as the legacy coarse boolean chip. */
+  access?: AccessRung;
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -112,6 +114,8 @@ const onboardingRoute = createRoute({
  *  the other route search types so views don't import it across sibling route files. */
 export interface AdminCanvasesSearch {
   status?: AdminCanvasStatus;
+  /** Access-rung governance filter (e.g. find every `public_link`). */
+  access?: AccessRung;
   q?: string;
   sort?: AdminCanvasSort;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */

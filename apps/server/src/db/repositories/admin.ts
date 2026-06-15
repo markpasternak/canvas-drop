@@ -1,4 +1,4 @@
-import { type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
+import { type AccessRung, type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import { and, desc, eq, gte, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
@@ -19,6 +19,8 @@ export interface ListAllCanvasesQuery {
   q?: string;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */
   owner?: string;
+  /** Governance filter: narrow to one access rung (e.g. find every `public_link`). */
+  access?: AccessRung;
   /** Sort axis; defaults to `recent` (last activity). */
   sort?: AdminCanvasSort;
   limit: number;
@@ -121,6 +123,7 @@ export function adminRepository(client: DbClient) {
       if (q.status) filters.push(eq(canvasesT.status, q.status));
       else filters.push(ne(canvasesT.status, "deleted"));
       if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
+      if (q.access) filters.push(eq(canvasesT.access, q.access));
 
       const search = q.q?.trim().toLowerCase();
       if (search) {

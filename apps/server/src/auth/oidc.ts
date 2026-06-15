@@ -2,9 +2,10 @@ import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import * as client from "openid-client";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
-import { claimsToIdentity, isEmailDomainAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import { claimsToIdentity, isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
 import type { SessionService } from "./session.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
@@ -14,6 +15,8 @@ const OIDC_TX_COOKIE = "__canvasdrop_oidc";
 export interface OidcDeps {
   config: Config;
   users: UsersRepository;
+  /** Admin-managed individual email allowlist (D14 supplement to the env domains). */
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">;
   sessionSvc: SessionService;
   /** Lazily-resolved, discovery-cached openid-client configuration. */
   getConfig: () => Promise<client.Configuration>;
@@ -138,7 +141,7 @@ export async function completeLogin(
   c: Context<AppEnv>,
   identity: ResolvedIdentity,
 ) {
-  if (!isEmailDomainAllowed(identity.email, deps.config)) {
+  if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails))) {
     return c.json({ error: "email_domain_not_allowed" }, 403);
   }
   const user = await mapIdentityToUser(deps.users, identity, deps.config);

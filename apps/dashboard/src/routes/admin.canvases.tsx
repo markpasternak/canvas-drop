@@ -6,7 +6,12 @@ import { AdminHeader } from "../components/AdminHeader.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
-import { ADMIN_PAGE_SIZE, type AdminCanvasSort, type AdminCanvasStatus } from "../lib/api.js";
+import {
+  type AccessRung,
+  ADMIN_PAGE_SIZE,
+  type AdminCanvasSort,
+  type AdminCanvasStatus,
+} from "../lib/api.js";
 import { useAdminCanvases } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import type { AdminCanvasesSearch } from "../router.js";
@@ -25,6 +30,16 @@ const ADMIN_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
 ];
 
+// Access-rung filter (governance): the "Public" option is how an admin finds every
+// publicly-exposed canvas in one place.
+const ACCESS_OPTIONS = [
+  { value: "all", label: "All access" },
+  { value: "private", label: "Private" },
+  { value: "specific_people", label: "Specific people" },
+  { value: "whole_org", label: "Whole org" },
+  { value: "public_link", label: "Public" },
+];
+
 /** Admin all-canvases governance table (§6.10.1). Split from the overview so
  *  owner drill-downs land directly on the table with their filter context visible. */
 export default function AdminCanvases() {
@@ -32,6 +47,7 @@ export default function AdminCanvases() {
   const navigate = useNavigate();
 
   const status = search.status;
+  const access = search.access;
   const owner = search.owner;
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "recent";
@@ -40,10 +56,11 @@ export default function AdminCanvases() {
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q || status || owner);
+  const filtering = Boolean(q || status || access || owner);
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
     status,
+    access,
     q,
     owner,
     sort,
@@ -65,6 +82,16 @@ export default function AdminCanvases() {
 
   function setStatus(next: AdminCanvasStatus | undefined) {
     navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, status: next, page: 1 }) });
+  }
+  function setAccess(next: string) {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({
+        ...prev,
+        access: next === "all" ? undefined : (next as AccessRung),
+        page: 1,
+      }),
+    });
   }
   function setSort(next: string) {
     navigate({
@@ -139,6 +166,12 @@ export default function AdminCanvases() {
             className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
           />
         </div>
+        <FilterSelect
+          label="Filter by access"
+          options={ACCESS_OPTIONS}
+          value={access ?? "all"}
+          onValueChange={setAccess}
+        />
         <FilterSelect
           label="Sort canvases"
           options={ADMIN_SORT_OPTIONS}

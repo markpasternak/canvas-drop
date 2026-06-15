@@ -7,6 +7,7 @@ import { createAuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { adminRepository } from "../db/repositories/admin.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
@@ -41,6 +42,7 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
       settings: adminSettingsService({ settings: settingsRepository(client), config }),
+      allowedEmails: allowedEmailsRepository(client),
       audit,
     }),
   );
@@ -592,5 +594,55 @@ describe("admin routes", () => {
     expect((await app.request(`/api/admin/users/${owner.id}/grant-public`, post())).status).toBe(
       404,
     );
+  });
+
+  it("allowed-emails: add (normalized), list, remove (D14 individual sign-in allowlist)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+
+    // Add normalizes to lowercase.
+    const added = await app.request(
+      "/api/admin/allowed-emails",
+      post({ email: "Partner@External.com" }),
+    );
+    expect(added.status).toBe(200);
+    const entry = ((await added.json()) as { entry: { id: string; email: string } }).entry;
+    expect(entry.email).toBe("partner@external.com");
+
+    // List reflects it.
+    const list = await app.request("/api/admin/allowed-emails");
+    const emails = ((await list.json()) as { emails: Array<{ email: string }> }).emails;
+    expect(emails.map((e) => e.email)).toContain("partner@external.com");
+
+    // Remove drops it.
+    expect(
+      (await app.request(`/api/admin/allowed-emails/${entry.id}`, { method: "DELETE" })).status,
+    ).toBe(200);
+    const after = await app.request("/api/admin/allowed-emails");
+    expect(((await after.json()) as { emails: unknown[] }).emails).toHaveLength(0);
+  });
+
+  it("allowed-emails CRUD 404s for a non-admin (no existence leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const { app } = buildAdminApp(client, { id: owner.id, isAdmin: false });
+    expect((await app.request("/api/admin/allowed-emails")).status).toBe(404);
+  });
+
+  it("canvases list filters by access rung (admin governance — find every public canvas)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const pub = await canvases.create({ ownerId: admin.id, slug: "pub", apiKeyHash: "h1" });
+    await canvases.setAccess(pub.id, "public_link");
+    await canvases.create({ ownerId: admin.id, slug: "priv", apiKeyHash: "h2" }); // private
+
+    const res = await app.request("/api/admin/canvases?access=public_link");
+    expect(res.status).toBe(200);
+    const rows = ((await res.json()) as { canvases: Array<{ slug: string; access: string }> })
+      .canvases;
+    expect(rows.map((r) => r.slug)).toEqual(["pub"]);
+    expect(rows[0]?.access).toBe("public_link");
   });
 });

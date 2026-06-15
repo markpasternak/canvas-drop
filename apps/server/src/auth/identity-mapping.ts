@@ -1,5 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
 import type { User } from "@canvas-drop/shared/db";
+import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
@@ -27,6 +28,20 @@ export function isEmailDomainAllowed(email: string, config: Config): boolean {
   if (at < 0) return false;
   const domain = email.slice(at + 1).toLowerCase();
   return config.auth.allowedEmailDomains.includes(domain);
+}
+
+/**
+ * Whether an email may sign in: its domain is in the env allowlist (D14), OR it is
+ * an admin-added individual email (the DB allowlist supplement). The DB lookup only
+ * fires when the domain check fails, so the hot path stays a synchronous array check.
+ */
+export async function isEmailAllowed(
+  email: string,
+  config: Config,
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">,
+): Promise<boolean> {
+  if (isEmailDomainAllowed(email, config)) return true;
+  return allowedEmails.isAllowed(email);
 }
 
 /** Whether an email is a bootstrap admin (CANVAS_DROP_ADMIN_EMAILS, D14). */

@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AdminCanvasRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
@@ -7,7 +8,7 @@ import {
   useAdminEnableCanvas,
   useAdminRestoreCanvas,
 } from "../lib/mutations.js";
-import { StatusBadge } from "./Badge.js";
+import { AccessBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 import { TextareaField } from "./Field.js";
@@ -141,6 +142,8 @@ export function AdminCanvasTable({
   canvases: AdminCanvasRow[];
   onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
 }) {
+  const navigate = useNavigate();
+  const openCanvas = (id: string) => navigate({ to: "/canvases/$id", params: { id } });
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-left text-sm">
@@ -148,6 +151,7 @@ export function AdminCanvasTable({
           <tr>
             <th className="px-3 py-2 font-medium">Canvas</th>
             <th className="px-3 py-2 font-medium">Owner</th>
+            <th className="px-3 py-2 font-medium">Access</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 text-right font-medium">Size</th>
             <th className="px-3 py-2 text-right font-medium">Usage</th>
@@ -159,7 +163,14 @@ export function AdminCanvasTable({
           {canvases.map((c) => (
             <tr key={c.id} className="align-middle">
               <td className="px-3 py-2">
-                <div className="font-medium text-fg">{c.title || c.slug}</div>
+                <button
+                  type="button"
+                  onClick={() => openCanvas(c.id)}
+                  className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
+                  aria-label={`Open ${c.title || c.slug}`}
+                >
+                  {c.title || c.slug}
+                </button>
                 <div className="font-mono text-xs text-muted">{c.slug}</div>
                 {c.disabledReason && (
                   <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>
@@ -187,6 +198,9 @@ export function AdminCanvasTable({
                 ) : (
                   "—"
                 )}
+              </td>
+              <td className="px-3 py-2">
+                <AccessBadge access={c.access} />
               </td>
               <td className="px-3 py-2">
                 <StatusBadge status={c.status} />

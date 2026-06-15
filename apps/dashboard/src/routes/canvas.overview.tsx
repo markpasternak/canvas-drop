@@ -8,7 +8,7 @@ import { DeployButton } from "../components/DeployButton.js";
 import { IconLink } from "../components/IconButton.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
-import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
+import type { AccessRung, Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
@@ -26,12 +26,20 @@ function galleryLabel(canvas: Canvas): string {
   return "Not listed";
 }
 
+const ACCESS_RUNG_LABEL: Record<AccessRung, string> = {
+  private: "Private",
+  specific_people: "Specific people",
+  whole_org: "Whole org",
+  public_link: "Public",
+};
+
 function accessLabel(canvas: Canvas): string {
-  const parts = [
-    canvas.shared
-      ? `Shared${canvas.sharedExpiresAt ? ` (${expiryLabel(canvas.sharedExpiresAt)})` : ""}`
-      : "Private",
-  ];
+  const base = ACCESS_RUNG_LABEL[canvas.access];
+  const head =
+    canvas.access !== "private" && canvas.sharedExpiresAt
+      ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})`
+      : base;
+  const parts = [head];
   if (canvas.hasPassword) parts.push("password");
   return parts.join(", ");
 }
@@ -254,7 +262,17 @@ export default function Overview() {
             <PublicationBadge state={canvas.publicationState} />
           </Fact>
           <Fact label="Access">
-            <span className={canvas.shared ? "text-fg" : "text-muted"}>{accessLabel(canvas)}</span>
+            <span
+              className={cn(
+                canvas.access === "public_link"
+                  ? "font-medium text-warning"
+                  : canvas.access !== "private"
+                    ? "text-fg"
+                    : "text-muted",
+              )}
+            >
+              {accessLabel(canvas)}
+            </span>
           </Fact>
           <Fact label="Current version">
             <span title={current ? fullTime(current.createdAt) : undefined}>

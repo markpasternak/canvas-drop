@@ -113,6 +113,13 @@
       "when": 1781553889540,
       "tag": "0015_guest_sessions_canvas_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781559585437,
+      "tag": "0016_allowed_emails",
+      "breakpoints": true
     }
   ]
 }
