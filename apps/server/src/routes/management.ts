@@ -104,7 +104,9 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
     url: canvasUrl(config, cv.slug),
     title: cv.title,
     description: cv.description,
-    shared: cv.shared,
+    access: cv.access,
+    // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
+    shared: cv.access !== "private",
     sharedExpiresAt: cv.sharedExpiresAt,
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
@@ -381,7 +383,10 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const p = body.data;
-    const { password, ...rest } = p;
+    // U2: the API still speaks a `shared` boolean; the column is now the `access`
+    // rung. Translate shared→access here (U4 replaces this with a first-class
+    // `access` field + allowlist).
+    const { password, shared, ...rest } = p;
 
     // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
     // shared AND published AND will be unprotected after this patch; a password set
@@ -390,7 +395,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // the at-rest row can't reach a listed-but-invisible state (templatable ⊆ listed
     // ⊆ shared/published/unprotected).
     const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
-    const willBeShared = rest.shared === undefined ? cv.shared : rest.shared;
+    const willBeShared = shared === undefined ? cv.access !== "private" : shared;
     // "Published" for the share/gallery preconditions means the full lifecycle
     // state, not just "has a version": an archived canvas keeps its currentVersionId,
     // so guarding on currentVersionId alone would let an admin re-share an archived
@@ -400,7 +405,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // can't expose a URL that serves no live page. Leaving Published reverts share
     // (see the unpublish/archive transitions), so this also keeps the at-rest row
     // from holding shared=true without a current version.
-    if (rest.shared === true && !isPublished) {
+    if (shared === true && !isPublished) {
       return c.json(
         { code: "SHARE_REQUIRES_PUBLISH", message: "Publish this canvas before sharing it." },
         409,
@@ -452,9 +457,10 @@ export function managementRoutes(deps: ManagementDeps) {
     // regardless of what the client sent. (updateSettings also clears templatable
     // whenever galleryListed is set false, keeping templatable ⊆ listed.)
     const patch: CanvasSettingsPatch = { ...rest };
+    if (shared !== undefined) patch.access = shared ? "whole_org" : "private";
     // Un-share un-lists, but KEEPS the gallery summary/tags so re-sharing later
     // restores them without the owner re-typing (R11).
-    if (rest.shared === false) {
+    if (shared === false) {
       patch.galleryListed = false;
       patch.galleryTemplatable = false;
     }
@@ -481,12 +487,12 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { cleared: password === null },
       });
     }
-    if (p.shared !== undefined) {
+    if (shared !== undefined) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { shared: p.shared },
+        meta: { shared },
       });
     }
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost

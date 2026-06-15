@@ -48,7 +48,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
       galleryListed: true,
     });
     // not listed (but shared)
-    await repo.updateSettings(await seedPublishedCanvas(client, owner.id), { shared: true });
+    await repo.updateSettings(await seedPublishedCanvas(client, owner.id), { access: "whole_org" });
     // archived
     const archived = await seedListed(client, owner.id);
     await repo.archive(archived);
@@ -62,7 +62,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     await seedListed(client, owner.id, { sharedExpiresAt: NOW - 1 });
     // never deployed (listed+shared but currentVersionId IS NULL → would be a dead link)
     const undeployed = await seedUndeployedCanvas(client, owner.id);
-    await repo.updateSettings(undeployed, { shared: true, galleryListed: true });
+    await repo.updateSettings(undeployed, { access: "whole_org", galleryListed: true });
 
     const { items, total } = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
     expect(total).toBe(1);
@@ -275,7 +275,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     });
     // unlisted (fails gallery_listed)
     await repo.updateSettings(await seedPublishedCanvas(client, alice.id), {
-      shared: true,
+      access: "whole_org",
       galleryTemplatable: true,
     });
     // protected (fails password_hash IS NULL)
@@ -284,7 +284,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     // never deployed (fails current_version_id IS NOT NULL)
     const undeployed = await seedUndeployedCanvas(client, alice.id);
     await repo.updateSettings(undeployed, {
-      shared: true,
+      access: "whole_org",
       galleryListed: true,
       galleryTemplatable: true,
     });
@@ -356,7 +356,7 @@ describe.each(DIALECTS)("canvasesRepository.listGalleryFacets [%s]", (dialect) =
     await seedListed(client, alice.id); // alice appears once despite two canvases
     await seedListed(client, bob.id);
     // carol has only a non-visible canvas (unlisted) → absent from facets.
-    await repo.updateSettings(await seedPublishedCanvas(client, carol.id), { shared: true });
+    await repo.updateSettings(await seedPublishedCanvas(client, carol.id), { access: "whole_org" });
 
     const { owners } = await repo.listGalleryFacets(NOW);
     expect(owners.map((o) => o.name)).toEqual(["alice", "bob"]);
@@ -376,7 +376,7 @@ describe.each(DIALECTS)("canvasesRepository.listGalleryFacets [%s]", (dialect) =
     await seedListed(client, owner.id, { galleryTags: ["charts", "games"] });
     // A non-visible (unlisted) canvas's tag must NOT leak into the facets.
     await repo.updateSettings(await seedPublishedCanvas(client, owner.id), {
-      shared: true,
+      access: "whole_org",
       galleryTags: ["secret"],
     });
 
@@ -418,7 +418,7 @@ describe.each(DIALECTS)("canvasesRepository.findCloneableTemplate [%s]", (dialec
     // templatable + listed but unshared → predicate (shared=true) excludes it.
     const unshared = await seedListed(client, owner.id, {
       galleryTemplatable: true,
-      shared: false,
+      access: "private",
     });
     expect(await repo.findCloneableTemplate(unshared, NOW)).toBeNull();
 
@@ -434,7 +434,11 @@ describe.each(DIALECTS)("canvasesRepository.findCloneableTemplate [%s]", (dialec
     const repo = canvasesRepository(client);
     const id = await seedUndeployedCanvas(client, owner.id);
     // Force the flags on directly (an undeployed canvas can't be listed via the route).
-    await repo.updateSettings(id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    await repo.updateSettings(id, {
+      access: "whole_org",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
     expect(await repo.findCloneableTemplate(id, NOW)).toBeNull();
   });
 });

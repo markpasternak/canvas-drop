@@ -201,7 +201,7 @@ describe("RealtimeHub", () => {
   });
 
   it("revalidateCanvas drops a non-owner when the canvas is un-shared, keeps the owner", async () => {
-    const hub = makeHub(fakeCanvas({ shared: false }));
+    const hub = makeHub(fakeCanvas({ access: "private" }));
     const ownerSock = new FakeSocket();
     const viewerSock = new FakeSocket();
     mc(hub, "c1", user("owner"), ownerSock); // ownerId = "owner"

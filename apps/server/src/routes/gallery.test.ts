@@ -64,14 +64,14 @@ describe("galleryRoutes", () => {
     const listed = await seedListed(client, alice.id);
     await seedListed(client, bob.id); // a second owner's listed canvas
     await repo.updateSettings(await seedPublishedCanvas(client, alice.id), { galleryListed: true }); // not shared
-    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), { shared: true }); // not listed
+    await repo.updateSettings(await seedPublishedCanvas(client, alice.id), { access: "whole_org" }); // not listed
     await repo.setStatus(await seedListed(client, alice.id), "disabled");
     await repo.setStatus(await seedListed(client, alice.id), "deleted");
     await repo.archive(await seedListed(client, alice.id));
     await seedListed(client, alice.id, { sharedExpiresAt: 1 }); // long expired
     // never deployed (listed+shared but no current version → would be a dead link)
     await repo.updateSettings(await seedUndeployedCanvas(client, alice.id), {
-      shared: true,
+      access: "whole_org",
       galleryListed: true,
     });
 

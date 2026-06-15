@@ -64,7 +64,7 @@ async function setup(client: DbClient, backendEnabled = true, capKv = true) {
     backendEnabled,
   });
   // Shared so non-owner viewers can use the runtime API (kv.user is per-viewer).
-  await canvasesRepository(client).updateSettings(cv.id, { shared: true });
+  await canvasesRepository(client).updateSettings(cv.id, { access: "whole_org" });
   if (!capKv) await canvasesRepository(client).updateCapabilities(cv.id, { kv: false });
   return { ownerId: owner.id, canvasId: cv.id };
 }

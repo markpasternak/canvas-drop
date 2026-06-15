@@ -15,8 +15,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     title: "",
     description: null,
     ownerId: "owner",
-    shared: false,
-    sharedAt: null,
+    access: "private",
     sharedExpiresAt: null,
     galleryListed: false,
     galleryTemplatable: false,
@@ -51,12 +50,12 @@ const admin: AccessUser = { id: "admin", isAdmin: true };
 
 describe("decideCanvasAccess — denials", () => {
   it("owner-only canvas: 404 to a different user (don't confirm existence)", () => {
-    const d = decideCanvasAccess(canvas({ shared: false }), other, NOW);
+    const d = decideCanvasAccess(canvas({ access: "private" }), other, NOW);
     expect(d).toEqual({ action: "deny", status: 404, reason: "owner_only" });
   });
 
   it("revoked share: a once-shared canvas set shared=false is 404 (owner_only) to non-owners now", () => {
-    expect(decideCanvasAccess(canvas({ shared: false, sharedAt: NOW - 1 }), other, NOW)).toEqual({
+    expect(decideCanvasAccess(canvas({ access: "private" }), other, NOW)).toEqual({
       action: "deny",
       status: 404,
       reason: "owner_only",
@@ -71,12 +70,16 @@ describe("decideCanvasAccess — denials", () => {
   });
 
   it("expired share: 404 to non-owner once past sharedExpiresAt", () => {
-    const d = decideCanvasAccess(canvas({ shared: true, sharedExpiresAt: NOW - 1 }), other, NOW);
+    const d = decideCanvasAccess(
+      canvas({ access: "whole_org", sharedExpiresAt: NOW - 1 }),
+      other,
+      NOW,
+    );
     expect(d).toEqual({ action: "deny", status: 404, reason: "share_expired" });
   });
 
   it("disabled: 403 to non-owner", () => {
-    const d = decideCanvasAccess(canvas({ status: "disabled", shared: true }), other, NOW);
+    const d = decideCanvasAccess(canvas({ status: "disabled", access: "whole_org" }), other, NOW);
     expect(d).toEqual({ action: "deny", status: 403, reason: "disabled" });
   });
 
@@ -103,7 +106,12 @@ describe("decideCanvasAccess — denials", () => {
   it("archived overrides share: a shared, live, archived canvas is still 404", () => {
     // archive precedes the share/password branches — it is never evaluated against them.
     const d = decideCanvasAccess(
-      canvas({ status: "archived", shared: true, sharedExpiresAt: NOW + 1000, passwordHash: "h" }),
+      canvas({
+        status: "archived",
+        access: "whole_org",
+        sharedExpiresAt: NOW + 1000,
+        passwordHash: "h",
+      }),
       other,
       NOW,
     );
@@ -123,23 +131,25 @@ describe("decideCanvasAccess — denials", () => {
 
 describe("decideCanvasAccess — allows", () => {
   it("owner always reaches their own canvas regardless of share state, bypassing the gate", () => {
-    const d = decideCanvasAccess(canvas({ shared: false, passwordHash: "h" }), owner, NOW);
+    const d = decideCanvasAccess(canvas({ access: "private", passwordHash: "h" }), owner, NOW);
     expect(d).toEqual({ action: "allow", needsPasswordGate: false });
   });
 
   it("admin reaches an owner-only canvas (takedown/restore), bypassing the gate", () => {
-    expect(decideCanvasAccess(canvas({ shared: false }), admin, NOW)).toEqual({
+    expect(decideCanvasAccess(canvas({ access: "private" }), admin, NOW)).toEqual({
       action: "allow",
       needsPasswordGate: false,
     });
   });
 
   it("shared + live: allowed for any member; needsPasswordGate reflects the password", () => {
-    expect(decideCanvasAccess(canvas({ shared: true }), other, NOW)).toEqual({
+    expect(decideCanvasAccess(canvas({ access: "whole_org" }), other, NOW)).toEqual({
       action: "allow",
       needsPasswordGate: false,
     });
-    expect(decideCanvasAccess(canvas({ shared: true, passwordHash: "h" }), other, NOW)).toEqual({
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), other, NOW),
+    ).toEqual({
       action: "allow",
       needsPasswordGate: true,
     });
@@ -147,7 +157,8 @@ describe("decideCanvasAccess — allows", () => {
 
   it("shared with a future expiry: allowed before the deadline", () => {
     expect(
-      decideCanvasAccess(canvas({ shared: true, sharedExpiresAt: NOW + 1000 }), other, NOW).action,
+      decideCanvasAccess(canvas({ access: "whole_org", sharedExpiresAt: NOW + 1000 }), other, NOW)
+        .action,
     ).toBe("allow");
   });
 });
@@ -212,8 +223,8 @@ describe("canvasAccess — disabled-canvas rendering", () => {
   it("404 denials are opaque — archived/owner-only/expired all return { error: not_found }", async () => {
     const denied: Canvas[] = [
       canvas({ status: "archived" }), // archived → 404
-      canvas({ status: "active", shared: false }), // owner-only → 404 to `other`
-      canvas({ status: "active", shared: true, sharedExpiresAt: NOW - 1 }), // expired → 404
+      canvas({ status: "active", access: "private" }), // owner-only → 404 to `other`
+      canvas({ status: "active", access: "whole_org", sharedExpiresAt: NOW - 1 }), // expired → 404
     ];
     for (const cv of denied) {
       const res = await appFor(cv, other).request("/", { headers: { accept: "application/json" } });

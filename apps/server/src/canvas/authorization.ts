@@ -52,7 +52,10 @@ export function decideCanvasAccess(
   if (isOwner || user.isAdmin) {
     return { action: "allow", needsPasswordGate: false }; // owner/admin bypass the gate
   }
-  if (!canvas.shared) {
+  // U2: only `whole_org` is reachable by a non-owner (the former `shared = true`).
+  // U3 enriches this into the full principal/rung-aware table (specific_people,
+  // public_link, guest/anonymous principals).
+  if (canvas.access !== "whole_org") {
     return { action: "deny", status: 404, reason: "owner_only" };
   }
   if (canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= now) {

@@ -141,10 +141,10 @@ describe.each(DIALECTS)("cloneService (%s)", (dialect) => {
     const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k" });
     await engine.deploy(src, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);
     // Source is shared + listed.
-    await canvases.updateSettings(src.id, { shared: true, galleryListed: true });
+    await canvases.updateSettings(src.id, { access: "whole_org", galleryListed: true });
 
     const { canvas } = await clone.clone(await reload(src.id), cloner.id);
-    expect(canvas.shared).toBe(false);
+    expect(canvas.access).toBe("private");
     expect(canvas.galleryListed).toBe(false);
     expect(canvas.galleryTemplatable).toBe(false);
     expect(canvas.galleryPublishedAt).toBeNull();

@@ -1439,7 +1439,7 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     const src = await seedCanvas(storage, owner.id, {
       slug: "tmpl",
       apiKeyHash: "k1",
-      settings: { shared: true, galleryListed: true, galleryTemplatable: true },
+      settings: { access: "whole_org", galleryListed: true, galleryTemplatable: true },
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
@@ -1459,7 +1459,7 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     const src = await seedCanvas(storage, owner.id, {
       slug: "tmpl",
       apiKeyHash: "k1",
-      settings: { shared: true, galleryListed: true }, // not templatable
+      settings: { access: "whole_org", galleryListed: true }, // not templatable
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
@@ -1497,7 +1497,7 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
       slug: "tmpl",
       apiKeyHash: "k1",
       publish: false,
-      settings: { shared: true, galleryListed: true, galleryTemplatable: true },
+      settings: { access: "whole_org", galleryListed: true, galleryTemplatable: true },
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(

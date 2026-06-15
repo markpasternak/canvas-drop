@@ -44,7 +44,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(cv.id).toMatch(UUID_RE);
     expect(cv.slug).toBe("quiet-otter-x7k2");
     expect(cv.status).toBe("active");
-    expect(cv.shared).toBe(false);
+    expect(cv.access).toBe("private");
     expect(cv.currentVersionId).toBeNull();
   });
 
@@ -116,7 +116,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const cv = await repo.create({ ownerId, slug: "pub-1", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
-      shared: true,
+      access: "whole_org",
       galleryListed: true,
       galleryTemplatable: true,
     });
@@ -125,7 +125,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("active"); // still active + editable, just Draft now
     expect(after?.currentVersionId).toBeNull();
-    expect(after?.shared).toBe(false); // leaving Published reverts share
+    expect(after?.access).toBe("private"); // leaving Published reverts share
     expect(after?.galleryListed).toBe(false);
     expect(after?.galleryTemplatable).toBe(false);
   });
@@ -136,13 +136,13 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "re-1", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId, 1);
-    await repo.updateSettings(cv.id, { shared: true });
+    await repo.updateSettings(cv.id, { access: "whole_org" });
     await repo.unpublish(cv.id);
     // Re-publish by pointing at a fresh ready version (what a new deploy does).
     await deploy(client, cv.id, ownerId, 2);
     const after = await repo.findById(cv.id);
     expect(after?.currentVersionId).not.toBeNull(); // published again
-    expect(after?.shared).toBe(false); // sharing was NOT silently restored
+    expect(after?.access).toBe("private"); // sharing was NOT silently restored
   });
 
   it("archive reverts share + gallery (leaving Published)", async () => {
@@ -152,7 +152,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const cv = await repo.create({ ownerId, slug: "sh-1", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
-      shared: true,
+      access: "whole_org",
       galleryListed: true,
       galleryTemplatable: true,
     });
@@ -160,7 +160,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(await repo.archive(cv.id)).toBe(true);
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("archived");
-    expect(after?.shared).toBe(false);
+    expect(after?.access).toBe("private");
     expect(after?.galleryListed).toBe(false);
     expect(after?.galleryTemplatable).toBe(false);
     expect(after?.currentVersionId).not.toBeNull(); // version pointer kept for unarchive
@@ -202,13 +202,13 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId);
-    await repo.updateSettings(cv.id, { shared: true });
+    await repo.updateSettings(cv.id, { access: "whole_org" });
     await repo.setPassword(cv.id, "argon2hash");
     await repo.archive(cv.id); // reverts share (invariant: shared ⟹ published)
     expect(await repo.unarchive(cv.id)).toBe(true);
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("active");
-    expect(after?.shared).toBe(false); // archive reverted share; owner re-shares deliberately
+    expect(after?.access).toBe("private"); // archive reverted share; owner re-shares deliberately
     expect(after?.passwordHash).toBe("argon2hash"); // password + slug survive the round-trip
     expect(after?.slug).toBe("s");
   });
@@ -290,18 +290,16 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(await repo.findByApiKeyHash("k")).toBeNull();
   });
 
-  it("updates settings: shared toggle sets shared_at; expiry persists", async () => {
+  it("updates settings: access rung persists; expiry persists", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h" });
-    const shared = await repo.updateSettings(cv.id, { shared: true, sharedExpiresAt: 9999 });
-    expect(shared.shared).toBe(true);
-    expect(shared.sharedAt).toBeGreaterThan(0);
+    const shared = await repo.updateSettings(cv.id, { access: "whole_org", sharedExpiresAt: 9999 });
+    expect(shared.access).toBe("whole_org");
     expect(shared.sharedExpiresAt).toBe(9999);
-    const unshared = await repo.updateSettings(cv.id, { shared: false });
-    expect(unshared.shared).toBe(false);
-    expect(unshared.sharedAt).toBeNull();
+    const unshared = await repo.updateSettings(cv.id, { access: "private" });
+    expect(unshared.access).toBe("private");
   });
 
   it("setPassword bumps passwordVersion (invalidates gate cookies)", async () => {
@@ -499,7 +497,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const prot = await repo.create({ ownerId: me, slug: "prot", apiKeyHash: "k-prot" });
     const listed = await repo.create({ ownerId: me, slug: "listed", apiKeyHash: "k-listed" });
     const tmpl = await repo.create({ ownerId: me, slug: "tmpl", apiKeyHash: "k-tmpl" });
-    await repo.updateSettings(shared.id, { shared: true });
+    await repo.updateSettings(shared.id, { access: "whole_org" });
     await repo.setPassword(prot.id, "argon2hash");
     await repo.updateSettings(listed.id, { galleryListed: true });
     await repo.updateSettings(tmpl.id, { galleryTemplatable: true });
@@ -537,7 +535,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await repo.create({ ownerId: other, slug: "other", apiKeyHash: "ko" });
 
     await deploy(client, deployed.id, me);
-    await repo.updateSettings(shared.id, { shared: true });
+    await repo.updateSettings(shared.id, { access: "whole_org" });
     await repo.setPassword(protectedCanvas.id, "argon2hash");
     await repo.updateSettings(listed.id, { galleryListed: true });
     await repo.updateSettings(template.id, { galleryListed: true, galleryTemplatable: true });
@@ -562,8 +560,8 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const both = await repo.create({ ownerId: me, slug: "both", apiKeyHash: "k-both" });
     const sharedOnly = await repo.create({ ownerId: me, slug: "shared-only", apiKeyHash: "k-so" });
     const tmplOnly = await repo.create({ ownerId: me, slug: "tmpl-only", apiKeyHash: "k-to" });
-    await repo.updateSettings(both.id, { shared: true, galleryTemplatable: true });
-    await repo.updateSettings(sharedOnly.id, { shared: true });
+    await repo.updateSettings(both.id, { access: "whole_org", galleryTemplatable: true });
+    await repo.updateSettings(sharedOnly.id, { access: "whole_org" });
     await repo.updateSettings(tmplOnly.id, { galleryTemplatable: true });
 
     const { items, total } = await repo.listByOwnerFiltered({
@@ -629,5 +627,86 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     });
     expect(res.items).toEqual([]);
     expect(res.total).toBe(0);
+  });
+});
+
+describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("setAccess persists each rung; default is private on create", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "a", apiKeyHash: "h" });
+    expect(cv.access).toBe("private");
+    for (const rung of ["specific_people", "whole_org", "public_link", "private"] as const) {
+      const after = await repo.setAccess(cv.id, rung);
+      expect(after.access).toBe(rung);
+    }
+  });
+
+  it("allowlist add/list/remove round-trips for members and guests", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedOwner(client);
+    const member = await seedOwner(client, "member");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "b", apiKeyHash: "h" });
+
+    const m = await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: member,
+    });
+    const g = await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "partner@acme.com",
+    });
+    expect(m.principalKind).toBe("member");
+    expect(g.email).toBe("partner@acme.com");
+
+    const list = await repo.listAllowlist(cv.id);
+    expect(list).toHaveLength(2);
+
+    await repo.removeAllowlistEntry(cv.id, m.id);
+    const after = await repo.listAllowlist(cv.id);
+    expect(after.map((e) => e.id)).toEqual([g.id]);
+  });
+
+  it("addAllowlistEntry is idempotent on the unique (canvas,user)/(canvas,email) index", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedOwner(client);
+    const member = await seedOwner(client, "member");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "c", apiKeyHash: "h" });
+
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: member });
+    // A concurrent duplicate invite must be a no-op, not a constraint crash.
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: member });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: "x@y.com" });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: "x@y.com" });
+    expect(await repo.listAllowlist(cv.id)).toHaveLength(2);
+  });
+
+  it("isPrincipalAllowed matches a listed member or guest, rejects others", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedOwner(client);
+    const member = await seedOwner(client, "member");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "d", apiKeyHash: "h" });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: member });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: "in@acme.com" });
+
+    expect(await repo.isPrincipalAllowed(cv.id, { userId: member })).toBe(true);
+    expect(await repo.isPrincipalAllowed(cv.id, { email: "in@acme.com" })).toBe(true);
+    expect(await repo.isPrincipalAllowed(cv.id, { userId: "nobody" })).toBe(false);
+    expect(await repo.isPrincipalAllowed(cv.id, { email: "out@acme.com" })).toBe(false);
+    expect(await repo.isPrincipalAllowed(cv.id, {})).toBe(false);
+    // Scoped per canvas: a different canvas's allowlist never grants.
+    const other = await repo.create({ ownerId: owner, slug: "e", apiKeyHash: "h2" });
+    expect(await repo.isPrincipalAllowed(other.id, { userId: member })).toBe(false);
   });
 });

@@ -1,5 +1,7 @@
 import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
+  type AccessRung,
+  type AllowlistPrincipalKind,
   type Canvas,
   type CanvasStatus,
   type Json,
@@ -34,8 +36,7 @@ import type { DbClient } from "../factory.js";
  * the optimistic response can never clear different fields. One source of truth.
  */
 export const CLEARED_PUBLICATION_FIELDS = {
-  shared: false,
-  sharedAt: null,
+  access: "private",
   sharedExpiresAt: null,
   galleryListed: false,
   galleryTemplatable: false,
@@ -78,7 +79,7 @@ export interface CanvasCapabilitiesPatch {
 export interface CanvasSettingsPatch {
   title?: string;
   description?: string | null;
-  shared?: boolean;
+  access?: AccessRung;
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
   galleryListed?: boolean;
@@ -165,6 +166,16 @@ export interface OwnerListOptions {
   offset: number;
 }
 
+/** One canvas-allowlist entry (D4 `specific_people` rung). */
+export interface AllowlistEntry {
+  id: string;
+  canvasId: string;
+  principalKind: AllowlistPrincipalKind;
+  userId: string | null;
+  email: string | null;
+  createdAt: number;
+}
+
 export interface OwnerCanvasSummary {
   active: number;
   archived: number;
@@ -185,6 +196,8 @@ export function canvasesRepository(client: DbClient) {
   const t = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
   const versionsT = client.dialect === "sqlite" ? sqliteSchema.versions : pgSchema.versions;
   const usersT = client.dialect === "sqlite" ? sqliteSchema.users : pgSchema.users;
+  const allowlistT =
+    client.dialect === "sqlite" ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
 
   /**
    * The §12 gallery-visibility predicate, shared by {@link listGallery} and the
@@ -197,7 +210,8 @@ export function canvasesRepository(client: DbClient) {
    */
   const galleryVisibilityFilters = (now: number) => [
     eq(t.status, "active"),
-    eq(t.shared, true),
+    // Gallery-eligible = org-visible or public (the former `shared = true`).
+    inArray(t.access, ["whole_org", "public_link"]),
     eq(t.galleryListed, true),
     or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
     isNotNull(t.currentVersionId),
@@ -215,7 +229,7 @@ export function canvasesRepository(client: DbClient) {
           title: input.title ?? "",
           description: input.description ?? null,
           ownerId: input.ownerId,
-          shared: false,
+          access: "private",
           galleryListed: false,
           galleryTemplatable: false,
           passwordHash: input.passwordHash ?? null,
@@ -292,7 +306,7 @@ export function canvasesRepository(client: DbClient) {
 
       // Column-based state filters (plan 005 KTD3). `protected` keys off a set
       // password hash; `neverDeployed` off the absence of a published version.
-      if (opts.shared) filters.push(eq(t.shared, true));
+      if (opts.shared) filters.push(ne(t.access, "private"));
       if (opts.protected) filters.push(isNotNull(t.passwordHash));
       if (opts.listed) filters.push(eq(t.galleryListed, true));
       if (opts.template) filters.push(eq(t.galleryTemplatable, true));
@@ -344,7 +358,7 @@ export function canvasesRepository(client: DbClient) {
         .select({
           active: sumCase(isActive),
           archived: sumCase(eq(t.status, "archived")),
-          shared: sumCase(and(isActive, eq(t.shared, true))),
+          shared: sumCase(and(isActive, ne(t.access, "private"))),
           protected: sumCase(and(isActive, isNotNull(t.passwordHash))),
           listed: sumCase(and(isActive, eq(t.galleryListed, true))),
           templates: sumCase(and(isActive, eq(t.galleryTemplatable, true))),
@@ -381,12 +395,93 @@ export function canvasesRepository(client: DbClient) {
       if (patch.galleryListed === false) set.galleryTemplatable = false;
       if (patch.gallerySummary !== undefined) set.gallerySummary = patch.gallerySummary;
       if (patch.galleryTags !== undefined) set.galleryTags = patch.galleryTags;
-      if (patch.shared !== undefined) {
-        set.shared = patch.shared;
-        set.sharedAt = patch.shared ? Date.now() : null;
-      }
+      if (patch.access !== undefined) set.access = patch.access;
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       return rows[0] as Canvas;
+    },
+
+    /** Set the access rung directly (D4 ladder). Used by the settings route and the
+     *  publish-public revoke sweep (U10). */
+    async setAccess(id: string, access: AccessRung): Promise<Canvas> {
+      const rows = await db
+        .update(t)
+        .set({ access, updatedAt: Date.now() })
+        .where(eq(t.id, id))
+        .returning();
+      return rows[0] as Canvas;
+    },
+
+    /** All allowlist entries for a canvas (D4 `specific_people`), oldest first. */
+    async listAllowlist(canvasId: string): Promise<AllowlistEntry[]> {
+      return (await db
+        .select()
+        .from(allowlistT)
+        .where(eq(allowlistT.canvasId, canvasId))
+        .orderBy(allowlistT.createdAt)) as AllowlistEntry[];
+    },
+
+    /**
+     * Add one allowlist entry. Atomic upsert on the (canvas, user_id) /
+     * (canvas, email) unique index so a concurrent duplicate invite is a no-op,
+     * not a constraint crash. Returns the resulting entry.
+     */
+    async addAllowlistEntry(input: {
+      canvasId: string;
+      principalKind: AllowlistPrincipalKind;
+      userId?: string | null;
+      email?: string | null;
+    }): Promise<AllowlistEntry> {
+      const conflictTarget =
+        input.principalKind === "member" ? allowlistT.userId : allowlistT.email;
+      const rows = await db
+        .insert(allowlistT)
+        .values({
+          id: uuidv7(),
+          canvasId: input.canvasId,
+          principalKind: input.principalKind,
+          userId: input.userId ?? null,
+          email: input.email ?? null,
+          createdAt: Date.now(),
+        })
+        .onConflictDoUpdate({
+          target: [allowlistT.canvasId, conflictTarget],
+          // No-op update so the existing row is returned rather than crashing.
+          set: { canvasId: input.canvasId },
+        })
+        .returning();
+      return rows[0] as AllowlistEntry;
+    },
+
+    /** Remove an allowlist entry by its id (scoped to the canvas for safety). */
+    async removeAllowlistEntry(canvasId: string, entryId: string): Promise<void> {
+      await db
+        .delete(allowlistT)
+        .where(and(eq(allowlistT.canvasId, canvasId), eq(allowlistT.id, entryId)));
+    },
+
+    /**
+     * The single canonical allowlist membership check (D4). True when the given
+     * principal is on the canvas's allowlist: a `member` matches by user_id, a
+     * `guest` matches by email. Every access-decision caller routes through this so
+     * the predicate can't drift across the content chain / runtime API / realtime.
+     */
+    async isPrincipalAllowed(
+      canvasId: string,
+      principal: { userId?: string | null; email?: string | null },
+    ): Promise<boolean> {
+      const match =
+        principal.userId != null
+          ? eq(allowlistT.userId, principal.userId)
+          : principal.email != null
+            ? eq(allowlistT.email, principal.email)
+            : null;
+      if (!match) return false;
+      const rows = (await db
+        .select({ id: allowlistT.id })
+        .from(allowlistT)
+        .where(and(eq(allowlistT.canvasId, canvasId), match))
+        .limit(1)) as Array<{ id: string }>;
+      return rows.length > 0;
     },
 
     /**

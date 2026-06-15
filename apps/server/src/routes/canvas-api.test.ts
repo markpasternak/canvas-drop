@@ -199,7 +199,7 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
   it("a password-protected shared canvas's API stays closed without a gate grant (§12.0 #3)", async () => {
     client = await makeTestDb("sqlite");
     const { cv } = await canvas(true);
-    await canvasesRepository(client).updateSettings(cv.id, { shared: true });
+    await canvasesRepository(client).updateSettings(cv.id, { access: "whole_org" });
     await canvasesRepository(client).setPassword(cv.id, "argon2hash");
     const other = await usersRepository(client).upsert({
       providerSub: "viewer",

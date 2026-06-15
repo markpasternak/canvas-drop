@@ -203,7 +203,7 @@ async function seedCanvas(
   });
   let updated = cv;
   if (opts.shared)
-    updated = await canvasesRepository(client).updateSettings(cv.id, { shared: true });
+    updated = await canvasesRepository(client).updateSettings(cv.id, { access: "whole_org" });
   if (opts.capRealtime === false) {
     updated = await canvasesRepository(client).updateCapabilities(cv.id, { realtime: false });
   }
@@ -295,7 +295,7 @@ describe("realtime WebSocket route", () => {
     await viewer.waitFor((m) => m.type === "subscribed");
 
     // Owner un-shares; the management hook calls revalidateCanvas.
-    await canvasesRepository(client).updateSettings(cv.id, { shared: false });
+    await canvasesRepository(client).updateSettings(cv.id, { access: "private" });
     await server.hub.revalidateCanvas(cv.id);
 
     const closed = await viewer.closed;

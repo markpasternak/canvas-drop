@@ -61,7 +61,7 @@ export async function seedListed(
 ): Promise<string> {
   const id = await seedPublishedCanvas(client, ownerId);
   await canvasesRepository(client).updateSettings(id, {
-    shared: true,
+    access: "whole_org",
     galleryListed: true,
     gallerySummary: "A useful canvas",
     galleryTags: ["charts"],

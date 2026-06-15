@@ -49,5 +49,23 @@ export type Manifest = Record<string, ManifestEntry>;
 
 /** Canvas status values (stored as text, validated by zod at the boundary). */
 export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
+
+/**
+ * Canvas access rung (D4 ladder). One rung per canvas, stored as text:
+ *  - `private`         — owner/admin only (default)
+ *  - `specific_people` — a named allowlist (org members and/or invited guests)
+ *  - `whole_org`       — any authenticated org member with the link (the former "shared")
+ *  - `public_link`     — anyone with the link; admin-gated per account; static-only
+ */
+export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
+export const ACCESS_RUNGS: readonly AccessRung[] = [
+  "private",
+  "specific_people",
+  "whole_org",
+  "public_link",
+];
+
+/** A canvas-allowlist principal kind (members reference a user row; guests an email). */
+export type AllowlistPrincipalKind = "member" | "guest";
 /** Version source values (`editor` = published from the in-browser draft, M5). */
 export type DeploySource = "folder" | "zip" | "paste" | "api" | "editor";

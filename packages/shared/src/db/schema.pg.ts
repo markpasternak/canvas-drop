@@ -80,8 +80,9 @@ export const canvases = pgTable(
       .text("owner_id")
       .notNull()
       .references(() => users.id),
-    shared: c.bool("shared").notNull().default(false),
-    sharedAt: c.epochMs("shared_at"),
+    // Access rung (D4 ladder): private | specific_people | whole_org | public_link.
+    // Replaces the former `shared` boolean — `whole_org` is its successor.
+    access: c.text("access").notNull().default("private"),
     sharedExpiresAt: c.epochMs("shared_expires_at"),
     galleryListed: c.bool("gallery_listed").notNull().default(false),
     // Opt-in "others may clone this as a template" flag. Invariant: only ever true
@@ -133,6 +134,36 @@ export const canvases = pgTable(
     // Soft-delete purge sweep: WHERE status='deleted' AND deleted_at <= cutoff.
     index("canvases_status_deleted_idx").on(t.status, t.deletedAt),
     check("canvases_status_chk", sql`${t.status} in ('active', 'disabled', 'archived', 'deleted')`),
+    check(
+      "canvases_access_chk",
+      sql`${t.access} in ('private', 'specific_people', 'whole_org', 'public_link')`,
+    ),
+  ],
+);
+
+// Per-canvas access allowlist (D4 `specific_people` rung). Each row is one
+// principal allowed to reach the canvas: an org `member` (by user_id) or a `guest`
+// (by email — the guest's magic-link session is keyed back to this entry). Unique
+// per (canvas, user_id) and (canvas, email). Removing a row revokes on the next
+// request (no cached grants).
+export const canvasAllowlist = pgTable(
+  "canvas_allowlist",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    principalKind: c.text("principal_kind").notNull(), // member | guest
+    userId: c.text("user_id").references(() => users.id),
+    email: c.text("email"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    index("canvas_allowlist_canvas_idx").on(t.canvasId),
+    uniqueIndex("canvas_allowlist_canvas_user_uq").on(t.canvasId, t.userId),
+    uniqueIndex("canvas_allowlist_canvas_email_uq").on(t.canvasId, t.email),
+    check("canvas_allowlist_kind_chk", sql`${t.principalKind} in ('member', 'guest')`),
   ],
 );
 
