@@ -13,7 +13,10 @@ export function deployCurl({
   /** The live key in the create flow; a placeholder like `$CANVAS_DROP_KEY` in settings. */
   apiKey: string;
 }): string {
-  return `curl -X PUT "${new URL(url).origin}/v1/canvases/${id}/deploy" \\
+  return `# Ships static files only. To use the browser SDK, first enable Backend +
+# the capabilities you need (kv, files, ai, realtime) in the canvas's Backend tab —
+# the deploy key can't toggle them.
+curl -X PUT "${new URL(url).origin}/v1/canvases/${id}/deploy" \\
   -H "Authorization: Bearer ${apiKey}" \\
   --data-binary @site.zip`;
 }

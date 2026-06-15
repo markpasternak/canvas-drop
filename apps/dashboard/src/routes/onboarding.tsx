@@ -14,7 +14,9 @@ curl -X PUT "<app-url>/v1/canvases/<canvas-id>/deploy" \\
   --data-binary @site.zip
 
 # The browser SDK (global \`canvasdrop\`) is available in every canvas:
-#   canvasdrop.kv.get/set, canvasdrop.files.upload, canvasdrop.ai.chat, canvasdrop.me()`;
+#   canvasdrop.kv.get/set, canvasdrop.files.upload, canvasdrop.ai.chat, canvasdrop.me()
+# Deploy ships files only — the key can't enable the backend. Turn on Backend +
+# the capabilities you use (kv, files, ai, realtime) in the canvas's Backend tab first.`;
 
 function PathCard({
   icon,

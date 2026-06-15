@@ -27,6 +27,9 @@ version is created and the canvas points at it. Deploys via this key are attribu
 to the canvas owner and audited as `source: "api"`.
 
 ```bash
+# Ships static files only. To use the browser SDK, first enable Backend +
+# the capabilities you need (kv, files, ai, realtime) in the canvas's Backend tab —
+# the deploy key can't toggle them.
 curl -X PUT "{base}/v1/canvases/{id}/deploy" \
   -H "Authorization: Bearer $CANVAS_KEY" \
   --data-binary @site.zip
