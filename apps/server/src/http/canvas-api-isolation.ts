@@ -35,7 +35,7 @@ export function expectedCanvasOrigin(config: Config, slug: string): string | nul
   return new URL(canvasUrl(config, slug)).origin;
 }
 
-function applyCors(c: Context<AppEnv>, origin: string): void {
+export function applyCors(c: Context<AppEnv>, origin: string): void {
   c.header("Access-Control-Allow-Origin", origin);
   c.header("Access-Control-Allow-Credentials", "true");
   c.header("Vary", "Origin");

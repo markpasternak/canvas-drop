@@ -19,7 +19,11 @@ import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { KvRepository } from "../db/repositories/kv.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
-import { canvasApiIsolation } from "../http/canvas-api-isolation.js";
+import {
+  applyCors,
+  canvasApiIsolation,
+  expectedCanvasOrigin,
+} from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
@@ -70,6 +74,16 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
     createMiddleware<AppEnv>(async (c, next) => {
       const slug = c.req.param("slug");
       if (!slug) return c.json({ code: "NOT_FOUND" }, 404);
+      // Apply credentialed CORS up-front (subdomain mode) for a request from this
+      // canvas's own origin, so the EARLY refusals below (STATIC_ONLY on a public
+      // canvas, password gate, not-found) reach the SDK as readable JSON errors
+      // instead of opaque "blocked by CORS" failures. A mismatched/cross-canvas
+      // origin gets no header and is rejected by canvasApiIsolation below.
+      const reqOrigin = c.req.header("origin");
+      const expectedOrigin = expectedCanvasOrigin(deps.config, slug);
+      if (reqOrigin && expectedOrigin && reqOrigin === expectedOrigin) {
+        applyCors(c, reqOrigin);
+      }
       const canvas = await deps.canvases.findBySlug(slug);
       const principal = requestPrincipal(c);
       const ctx = await resolveAccessContext(deps.canvases, canvas, principal);

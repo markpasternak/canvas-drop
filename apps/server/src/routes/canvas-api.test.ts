@@ -300,6 +300,21 @@ describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
     }
   });
 
+  it("the STATIC_ONLY refusal carries credentialed CORS (subdomain) so the SDK reads a clean error, not an opaque CORS failure", async () => {
+    client = await makeTestDb("sqlite");
+    await seedCanvas("public_link");
+    const origin = "https://app.canvases.example.com"; // the canvas's own origin
+    const res = await buildApiAs(client, { kind: "anonymous" }, subConfig).request("/v1/c/app/me", {
+      headers: { origin },
+    });
+    expect(res.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("STATIC_ONLY");
+    // Without these the browser blocks the cross-subdomain response and the SDK
+    // surfaces "Failed to fetch" instead of the STATIC_ONLY code.
+    expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+  });
+
   it("anonymous on a public_link canvas whose owner lost the publish grant is denied (404)", async () => {
     client = await makeTestDb("sqlite");
     const cv = await seedCanvas("public_link");
