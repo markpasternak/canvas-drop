@@ -1,5 +1,5 @@
 import { type AllowedEmail, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -34,12 +34,13 @@ export function allowedEmailsRepository(client: DbClient) {
       await db.delete(t).where(eq(t.id, id));
     },
 
-    /** Whether an email is individually allowlisted (case-insensitive). */
+    /** Whether an email is individually allowlisted. Emails are stored lowercased
+     *  (by add()), so a plain equality on the normalized input uses the unique index. */
     async isAllowed(email: string): Promise<boolean> {
       const rows = (await db
         .select({ id: t.id })
         .from(t)
-        .where(sql`lower(${t.email}) = ${email.trim().toLowerCase()}`)
+        .where(eq(t.email, email.trim().toLowerCase()))
         .limit(1)) as Array<{ id: string }>;
       return rows.length > 0;
     },

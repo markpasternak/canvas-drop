@@ -171,8 +171,12 @@ const boolFlag = z
  */
 const ownerListQuerySchema = z.object({
   q: z.string().trim().min(1).optional(),
-  // Access-rung filter (D4); `shared` stays as the legacy coarse boolean.
-  access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
+  // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
+  // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
+  access: z
+    .enum(["private", "specific_people", "whole_org", "public_link"])
+    .optional()
+    .catch(undefined),
   shared: boolFlag,
   protected: boolFlag,
   listed: boolFlag,

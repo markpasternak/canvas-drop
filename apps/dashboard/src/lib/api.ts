@@ -495,6 +495,8 @@ export interface AdminCanvasRow {
   url: string;
   title: string;
   status: string;
+  /** Derived publication lifecycle (server-projected), for parity with the row's status. */
+  publicationState: PublicationState;
   /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
   access: AccessRung;
   disabledReason: string | null;

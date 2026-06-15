@@ -41,7 +41,14 @@ export async function isEmailAllowed(
   allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">,
 ): Promise<boolean> {
   if (isEmailDomainAllowed(email, config)) return true;
-  return allowedEmails.isAllowed(email);
+  // Fail closed: a DB error on the individual-allowlist lookup denies sign-in
+  // (the caller records auth_denied) rather than throwing a 500 on the auth hot
+  // path. Domain-allowed identities short-circuit above and never reach here.
+  try {
+    return await allowedEmails.isAllowed(email);
+  } catch {
+    return false;
+  }
 }
 
 /** Whether an email is a bootstrap admin (CANVAS_DROP_ADMIN_EMAILS, D14). */

@@ -1,6 +1,7 @@
 import { ArrowSquareOut, CaretDown, MagnifyingGlass } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import {
   CanvasListHeader,
@@ -55,16 +56,6 @@ const CANVASES_SORT_OPTIONS = [
   { value: "updated", label: "Recently updated" },
   { value: "created", label: "Newest" },
   { value: "title", label: "Title A–Z" },
-];
-
-// Access-rung filter (D4) — the finer-grained companion to the coarse "Shared" chip;
-// "Public" lets an owner see exactly which canvases are exposed beyond the org.
-const ACCESS_OPTIONS = [
-  { value: "all", label: "All access" },
-  { value: "private", label: "Private" },
-  { value: "specific_people", label: "Specific people" },
-  { value: "whole_org", label: "Whole org" },
-  { value: "public_link", label: "Public" },
 ];
 
 function RowOverflowMenu({
@@ -535,7 +526,7 @@ export default function CanvasList() {
             {!archivedView && (
               <FilterSelect
                 label="Filter by access"
-                options={ACCESS_OPTIONS}
+                options={ACCESS_FILTER_OPTIONS}
                 value={access ?? "all"}
                 onValueChange={setAccess}
               />

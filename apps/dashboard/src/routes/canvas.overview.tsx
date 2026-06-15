@@ -1,14 +1,14 @@
 import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { PublicationBadge } from "../components/Badge.js";
+import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { IconLink } from "../components/IconButton.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
-import type { AccessRung, Canvas, RootEntry, VersionInfo } from "../lib/api.js";
+import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
@@ -26,15 +26,8 @@ function galleryLabel(canvas: Canvas): string {
   return "Not listed";
 }
 
-const ACCESS_RUNG_LABEL: Record<AccessRung, string> = {
-  private: "Private",
-  specific_people: "Specific people",
-  whole_org: "Whole org",
-  public_link: "Public",
-};
-
 function accessLabel(canvas: Canvas): string {
-  const base = ACCESS_RUNG_LABEL[canvas.access];
+  const base = accessRungLabel(canvas.access);
   const head =
     canvas.access !== "private" && canvas.sharedExpiresAt
       ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})`

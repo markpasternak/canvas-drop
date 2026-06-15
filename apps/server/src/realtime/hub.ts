@@ -282,7 +282,15 @@ export function createHub(deps: HubDeps) {
     async revalidateCanvas(canvasId: string): Promise<void> {
       const live = [...conns(canvasId)];
       if (live.length === 0) return;
-      const canvas = await deps.resolveCanvas(canvasId);
+      // Fail closed: if the canvas lookup errors, drop every live socket rather than
+      // abandoning the sweep and leaving stale grants alive.
+      let canvas: Canvas | null;
+      try {
+        canvas = await deps.resolveCanvas(canvasId);
+      } catch {
+        for (const conn of live) dropConn(conn, CLOSE_UNAUTHORIZED, "revalidation_error");
+        return;
+      }
       const now = Date.now();
       for (const conn of live) {
         if (conn.closed) continue;
@@ -326,7 +334,17 @@ export function createHub(deps: HubDeps) {
           dropConn(conn, CLOSE_CAPABILITY_DISABLED, "realtime disabled");
           continue;
         }
-        if (deps.isUserActive && !(await deps.isUserActive(conn.user.id))) {
+        // Fail closed on a transient error too: drop the socket and keep sweeping
+        // the rest, never abort the loop (mirrors the isPrincipalAllowed guard above).
+        let isActive = true;
+        if (deps.isUserActive) {
+          try {
+            isActive = await deps.isUserActive(conn.user.id);
+          } catch {
+            isActive = false;
+          }
+        }
+        if (!isActive) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "user inactive");
         }
       }

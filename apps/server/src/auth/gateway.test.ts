@@ -25,7 +25,12 @@ const nonAdminConfig = loadConfig({
 
 function buildApp(
   client: DbClient,
-  opts: { strategy?: AuthStrategy; config?: Config; events?: AuthEvent[] } = {},
+  opts: {
+    strategy?: AuthStrategy;
+    config?: Config;
+    events?: AuthEvent[];
+    allowedEmails?: { isAllowed: (email: string) => Promise<boolean> };
+  } = {},
 ) {
   const config = opts.config ?? adminConfig;
   const audit: AuthEventSink | undefined = opts.events
@@ -43,7 +48,7 @@ function buildApp(
       strategy: opts.strategy ?? devStrategy(config),
       config,
       users: usersRepository(client),
-      allowedEmails: allowedEmailsRepository(client),
+      allowedEmails: opts.allowedEmails ?? allowedEmailsRepository(client),
       audit,
     }),
   );
@@ -114,6 +119,24 @@ describe("authGateway", () => {
     };
     const res = await buildApp(client, { strategy: other }).request("/me");
     expect(res.status).toBe(401);
+  });
+
+  it("fails closed (denies, not 500) when the allowlist DB lookup throws", async () => {
+    client = await makeTestDb("sqlite");
+    const outsider: AuthStrategy = {
+      async resolveIdentity() {
+        return { sub: "partner", email: "partner@external.com" };
+      },
+    };
+    const throwing = {
+      isAllowed: async () => {
+        throw new Error("db down");
+      },
+    };
+    const res = await buildApp(client, { strategy: outsider, allowedEmails: throwing }).request(
+      "/me",
+    );
+    expect(res.status).toBe(401); // denied, not a 500 from a thrown error
   });
 
   it("creates exactly one user across repeat requests (upsert, no duplicate)", async () => {

@@ -72,6 +72,22 @@ const ACCESS_BADGE: Record<AccessRung, { tone: Tone; label: string; dot: boolean
   public_link: { tone: "warning", label: "Public", dot: true },
 };
 
+/** The canonical rung→label string (single source; reused by non-badge surfaces
+ *  like the Status "Access" fact so the label can't drift). */
+export function accessRungLabel(access: AccessRung): string {
+  return (ACCESS_BADGE[access] ?? ACCESS_BADGE.private).label;
+}
+
+/** Options for an access-rung filter dropdown (owner + admin canvas lists), derived
+ *  from ACCESS_BADGE so the rung labels never drift from the pills. `all` clears it. */
+export const ACCESS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "all", label: "All access" },
+  ...(Object.keys(ACCESS_BADGE) as AccessRung[]).map((a) => ({
+    value: a,
+    label: ACCESS_BADGE[a].label,
+  })),
+];
+
 export function AccessBadge({ access }: { access: AccessRung }) {
   const s = ACCESS_BADGE[access] ?? ACCESS_BADGE.private;
   return (

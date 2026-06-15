@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { AdminHeader } from "../components/AdminHeader.js";
+import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
@@ -28,16 +29,6 @@ const ADMIN_SORT_OPTIONS = [
   { value: "recent", label: "Recent activity" },
   { value: "created", label: "Newest" },
   { value: "title", label: "Title A–Z" },
-];
-
-// Access-rung filter (governance): the "Public" option is how an admin finds every
-// publicly-exposed canvas in one place.
-const ACCESS_OPTIONS = [
-  { value: "all", label: "All access" },
-  { value: "private", label: "Private" },
-  { value: "specific_people", label: "Specific people" },
-  { value: "whole_org", label: "Whole org" },
-  { value: "public_link", label: "Public" },
 ];
 
 /** Admin all-canvases governance table (§6.10.1). Split from the overview so
@@ -168,7 +159,7 @@ export default function AdminCanvases() {
         </div>
         <FilterSelect
           label="Filter by access"
-          options={ACCESS_OPTIONS}
+          options={ACCESS_FILTER_OPTIONS}
           value={access ?? "all"}
           onValueChange={setAccess}
         />

@@ -268,6 +268,21 @@ describe("RealtimeHub", () => {
     expect(ownerSock.closed).toBeNull();
   });
 
+  it("revalidateCanvas fails closed (drops sockets) when isUserActive throws, without aborting the sweep", async () => {
+    const hub = makeHub(fakeCanvas({ access: "whole_org" }), async () => {
+      throw new Error("db down");
+    });
+    const ownerSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    // Both reach the isUserActive stage (whole_org admits members); a throw drops
+    // each rather than aborting the loop or leaving a stale grant.
+    expect(ownerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
   it("revalidateCanvas drops everyone when the canvas is gone", async () => {
     const hub = makeHub(null);
     const s = new FakeSocket();

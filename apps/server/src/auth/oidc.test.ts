@@ -163,4 +163,16 @@ describe("oidc completeLogin — security seam", () => {
     expect(res.status).toBe(403);
     expect((await jsonOf<{ error: string }>(res)).error).toBe("email_domain_not_allowed");
   });
+
+  it("admits an out-of-domain email that is on the individual allowlist (D14)", async () => {
+    client = await makeTestDb("sqlite");
+    // Rejection path first: out-of-domain is denied until allowlisted.
+    expect((await buildApp(client).request("/complete?email=partner@external.com")).status).toBe(
+      403,
+    );
+    await allowedEmailsRepository(client).add("partner@external.com", null);
+    const res = await buildApp(client).request("/complete?email=partner@external.com");
+    expect(res.status).toBe(302);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith(SESSION_COOKIE))).toBe(true);
+  });
 });

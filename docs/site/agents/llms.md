@@ -72,6 +72,12 @@ can open a canvas. The full model is in [Sharing & access](/docs/authoring/shari
   `POST {base}/api/admin/users/{id}/grant-public` and
   `POST {base}/api/admin/users/{id}/revoke-public` (admin session required;
   revoking sweeps the owner's public canvases back to private).
+- **Admin: individual sign-in allowlist** —
+  `GET {base}/api/admin/allowed-emails`,
+  `POST {base}/api/admin/allowed-emails` with `{ "email": "..." }` (lets that
+  address sign in even if its domain isn't in `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`),
+  and `DELETE {base}/api/admin/allowed-emails/{id}` (admin session required;
+  removal revokes access on the next sign-in).
 
 Guest invites and public links require app-managed sign-in (`oidc`/`dev` modes);
 behind an identity-aware proxy they return `409 GUESTS_UNAVAILABLE`. Sending an

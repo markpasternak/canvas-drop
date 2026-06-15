@@ -401,7 +401,11 @@ export function useAdminPublishPublic() {
       allowed ? api.admin.grantPublic(id) : api.admin.revokePublic(id),
     onSuccess: () => {
       invalidateAdmin(qc);
+      // The revoke sweep flips canvases to private — invalidate BOTH the list
+      // (['canvases']) and every canvas detail (['canvas', id]) so an owner with a
+      // detail tab open doesn't keep rendering a stale "Public" rung.
       qc.invalidateQueries({ queryKey: keys.canvases });
+      qc.invalidateQueries({ queryKey: ["canvas"] });
     },
   });
 }

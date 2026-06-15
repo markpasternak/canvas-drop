@@ -1854,6 +1854,31 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     expect(shared.total).toBe(0);
   });
 
+  it("GET /?access= filters the owner list by rung; a junk value keeps the other filters", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId: owner.id, slug: "priv", apiKeyHash: "k1", title: "Keep me" });
+    const pub = await repo.create({ ownerId: owner.id, slug: "pub", apiKeyHash: "k2" });
+    await repo.setAccess(pub.id, "whole_org");
+
+    // access= narrows to the matching rung.
+    const filtered = await jsonOf<{ canvases: Array<{ slug: string }> }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        "/api/canvases?access=whole_org",
+      ),
+    );
+    expect(filtered.canvases.map((c) => c.slug)).toEqual(["pub"]);
+
+    // A junk ?access= (.catch) drops only itself — the q= filter still applies.
+    const junk = await jsonOf<{ canvases: Array<{ slug: string }> }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        "/api/canvases?q=Keep&access=garbage",
+      ),
+    );
+    expect(junk.canvases.map((c) => c.slug)).toEqual(["priv"]);
+  });
+
   it("GET / returns an empty page (not a 404) when offset is past the total", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
