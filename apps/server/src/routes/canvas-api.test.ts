@@ -137,6 +137,32 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     expect(res.headers.get("access-control-allow-credentials")).toBe("true");
   });
 
+  it("subdomain mode: file CONTENT carries credentialed CORS (raw-Response regression, §9.4)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await canvas(true);
+    const origin = "https://app.canvases.example.com";
+    // One app instance so upload + content share the in-memory storage.
+    const app = buildApi(client, { id: owner.id }, subConfig);
+
+    const form = new FormData();
+    form.set("file", new File(["# hello"], "doc.md", { type: "text/markdown" }));
+    const up = await app.request("/v1/c/app/files", {
+      method: "POST",
+      body: form,
+      headers: { origin },
+    });
+    expect(up.status).toBe(201);
+    const { id } = await jsonOf<{ id: string }>(up);
+
+    const res = await app.request(`/v1/c/app/files/${id}/content`, { headers: { origin } });
+    expect(res.status).toBe(200);
+    // The bug: the content handler returned a raw `new Response`, dropping the
+    // CORS headers the isolation middleware set → cross-origin fetch() was blocked.
+    expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(await res.text()).toBe("# hello");
+  });
+
   it("subdomain mode: a different canvas's Origin is rejected (cross-canvas, §12.0 #4)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await canvas(true);

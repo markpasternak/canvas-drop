@@ -107,9 +107,15 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
     const got = await deps.files.content(canvas(c).id, c.req.param("id"));
     if (!got) return c.json({ code: "NOT_FOUND" }, 404);
     meter(c, "download");
-    return new Response(new Uint8Array(got.bytes), {
-      headers: safeServeHeaders(got.row.mime, got.row.filename),
-    });
+    // Set the safe-serve headers via the Hono context (NOT a raw `new Response`),
+    // so the credentialed CORS headers the isolation middleware already applied
+    // (§9.4) survive onto the response. A raw Response would drop them, which
+    // CORS-blocks any cross-origin `fetch()` of file content in subdomain mode —
+    // e.g. an SDK canvas reading its own files via `canvasdrop.files.url(id)`.
+    for (const [k, v] of Object.entries(safeServeHeaders(got.row.mime, got.row.filename))) {
+      c.header(k, v);
+    }
+    return c.body(new Uint8Array(got.bytes));
   });
 
   return app;
