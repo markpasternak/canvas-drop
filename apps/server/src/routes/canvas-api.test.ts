@@ -88,13 +88,14 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     return { owner, cv };
   }
 
-  it("me returns exactly {id,email,name,avatarUrl} (no isAdmin) when backend is on", async () => {
+  it("me returns {id,email,name,avatarUrl,kind} (no isAdmin) when backend is on", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await canvas(true);
     const res = await buildApi(client, { id: owner.id, isAdmin: true }).request("/v1/c/app/me");
     expect(res.status).toBe(200);
     const body = (await jsonOf<Record<string, unknown>>(res)) as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(["avatarUrl", "email", "id", "name"]);
+    expect(Object.keys(body).sort()).toEqual(["avatarUrl", "email", "id", "kind", "name"]);
+    expect(body.kind).toBe("member");
     expect(body.isAdmin).toBeUndefined();
   });
 
@@ -223,5 +224,133 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
       headers: { "sec-fetch-site": "same-origin" },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  const aiConfig: Config = loadConfig({
+    CANVAS_DROP_AUTH_MODE: "dev",
+    CANVAS_DROP_AI_API_KEY: "sk-test",
+  });
+
+  /** Mount the runtime API with a pre-set non-org principal (the U7 carve-out's
+   *  job in production), no org user — mirrors a guest/anonymous request. */
+  function buildApiAs(
+    client: DbClient,
+    principal: import("../http/types.js").Principal,
+    config = devConfig,
+  ) {
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("principal", principal);
+      await next();
+    });
+    app.route(
+      "/v1/c/:slug",
+      canvasApiRoutes({
+        config,
+        canvases: canvasesRepository(client),
+        kv: kvRepository(client),
+        files: filesService({ files: filesRepository(client), storage: memStorage() }),
+        usage: usageEventsRepository(client),
+        audit: noopAudit,
+        aiUsage: aiUsageRepository(client),
+        aiProvider: fakeProvider({ deltas: ["ok"] }),
+      }),
+    );
+    return app;
+  }
+
+  async function seedCanvas(access: "public_link" | "specific_people", guestEmail?: string) {
+    const owner = await usersRepository(client).upsert({
+      providerSub: "o",
+      email: "o@example.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId: owner.id,
+      slug: "app",
+      apiKeyHash: "h",
+      backendEnabled: true,
+    });
+    await repo.setAccess(cv.id, access);
+    if (guestEmail)
+      await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: guestEmail });
+    return cv;
+  }
+
+  it("anonymous on a public_link canvas: every runtime primitive is refused (STATIC_ONLY)", async () => {
+    client = await makeTestDb("sqlite");
+    await seedCanvas("public_link");
+    const app = buildApiAs(client, { kind: "anonymous" });
+    for (const path of ["/v1/c/app/me", "/v1/c/app/kv/shared/k"]) {
+      const res = await app.request(path);
+      expect(res.status).toBe(403);
+      expect((await jsonOf<{ code: string }>(res)).code).toBe("STATIC_ONLY");
+    }
+  });
+
+  it("guest: me() returns kind:guest + email; KV is attributed to the guest principal", async () => {
+    client = await makeTestDb("sqlite");
+    const cv = await seedCanvas("specific_people", "g@x.com");
+    const principal = {
+      kind: "guest" as const,
+      id: "guest:inv1",
+      inviteId: "inv1",
+      canvasId: cv.id,
+      email: "g@x.com",
+    };
+    const app = buildApiAs(client, principal);
+    const me = await jsonOf<{ kind: string; email: string }>(await app.request("/v1/c/app/me"));
+    expect(me).toMatchObject({ kind: "guest", email: "g@x.com" });
+
+    const set = await app.request("/v1/c/app/kv/user/pref", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ value: 1 }),
+    });
+    expect(set.status).toBeLessThan(300);
+    // Stored under the guest principal's per-user scope (attribution = guest:<id>).
+    expect(await kvRepository(client).get(cv.id, principal.id, "pref")).toEqual({ value: 1 });
+  });
+
+  it("guest AI is refused unless the owner opts the canvas in", async () => {
+    client = await makeTestDb("sqlite");
+    const cv = await seedCanvas("specific_people", "g@x.com");
+    const principal = {
+      kind: "guest" as const,
+      id: "guest:inv1",
+      inviteId: "inv1",
+      canvasId: cv.id,
+      email: "g@x.com",
+    };
+    const off = await buildApiAs(client, principal, aiConfig).request("/v1/c/app/ai/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(off.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(off)).code).toBe("GUEST_AI_DISABLED");
+
+    await canvasesRepository(client).updateSettings(cv.id, { guestAiEnabled: true });
+    const on = await buildApiAs(client, principal, aiConfig).request("/v1/c/app/ai/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    expect(on.status).toBe(200);
   });
 });

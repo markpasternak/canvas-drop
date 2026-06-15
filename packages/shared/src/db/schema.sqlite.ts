@@ -106,6 +106,11 @@ export const canvases = sqliteTable(
     capFiles: c.bool("cap_files").notNull().default(true),
     capAi: c.bool("cap_ai").notNull().default(true),
     capRealtime: c.bool("cap_realtime").notNull().default(true),
+    // Guest-AI opt-in (U9, KTD5): AI is off for invited guests by default (the
+    // metered-$ surface). The owner may opt a canvas in; `guest_ai_cap` is the
+    // per-canvas monthly USD ceiling for guest AI (0 = no extra cap beyond org).
+    guestAiEnabled: c.bool("guest_ai_enabled").notNull().default(false),
+    guestAiCap: c.real("guest_ai_cap").notNull().default(0),
     apiKeyHash: c.text("api_key_hash").notNull(),
     status: c.text("status").notNull().default("active"), // active | disabled | archived | deleted
     // Admin takedown reason (§6.10.2 / M7). Owner-facing durable state so the owner
@@ -279,10 +284,9 @@ export const usageEvents = sqliteTable(
       .text("canvas_id")
       .notNull()
       .references(() => canvases.id),
-    userId: c
-      .text("user_id")
-      .notNull()
-      .references(() => users.id),
+    // Attribution: an org user id OR a guest principal id (`guest:<inviteId>`, U9),
+    // so guest primitive ops are attributed — not an FK to users for that reason.
+    userId: c.text("user_id").notNull(),
     type: c.text("type").notNull(), // kv_op | file_op | view | deploy | rt_connect
     meta: c.json("meta"), // op detail, e.g. { op: 'set' }
     createdAt: c.epochMs("created_at").notNull(),
@@ -316,10 +320,8 @@ export const kvEntries = sqliteTable(
     scope: c.text("scope").notNull(), // 'shared' | <userId>
     key: c.text("key").notNull(),
     value: c.json("value").notNull(),
-    updatedBy: c
-      .text("updated_by")
-      .notNull()
-      .references(() => users.id),
+    // Attribution holds an org user id OR a guest principal id (U9) — not an FK.
+    updatedBy: c.text("updated_by").notNull(),
     updatedAt: c.epochMs("updated_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.scope, t.key] })],
@@ -340,10 +342,8 @@ export const files = sqliteTable(
     mime: c.text("mime").notNull(),
     sizeBytes: c.int("size_bytes").notNull(),
     storageKey: c.text("storage_key").notNull(),
-    uploadedBy: c
-      .text("uploaded_by")
-      .notNull()
-      .references(() => users.id),
+    // Attribution holds an org user id OR a guest principal id (U9) — not an FK.
+    uploadedBy: c.text("uploaded_by").notNull(),
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [index("files_canvas_id_idx").on(t.canvasId)],
@@ -363,10 +363,8 @@ export const aiUsage = sqliteTable(
       .text("canvas_id")
       .notNull()
       .references(() => canvases.id),
-    userId: c
-      .text("user_id")
-      .notNull()
-      .references(() => users.id),
+    // Attribution holds an org user id OR a guest principal id (U9) — not an FK.
+    userId: c.text("user_id").notNull(),
     provider: c.text("provider").notNull(),
     model: c.text("model").notNull(),
     inputTokens: c.int("input_tokens").notNull(),

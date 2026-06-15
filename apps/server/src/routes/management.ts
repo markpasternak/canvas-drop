@@ -91,6 +91,9 @@ const settingsSchema = z.object({
   // admin-gated per account and wired in U10. `shared` remains a deprecated
   // boolean alias (true→whole_org, false→private) for older clients.
   access: z.enum(["private", "specific_people", "whole_org"]).optional(),
+  // Guest-AI opt-in (U9): off by default; cap is a per-canvas monthly USD ceiling.
+  guestAiEnabled: z.boolean().optional(),
+  guestAiCap: z.number().min(0).optional(),
   shared: z.boolean().optional(),
   sharedExpiresAt: z.number().int().positive().nullable().optional(),
   password: z.string().min(1).nullable().optional(), // set, or null to clear
@@ -119,6 +122,8 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
     access: cv.access,
     // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
     shared: cv.access !== "private",
+    guestAiEnabled: cv.guestAiEnabled,
+    guestAiCap: cv.guestAiCap,
     sharedExpiresAt: cv.sharedExpiresAt,
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,

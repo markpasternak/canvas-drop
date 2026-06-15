@@ -20,6 +20,7 @@ const CANVAS: Canvas = {
   description: null,
   access: "private",
   shared: false,
+  guestAiEnabled: false,
   sharedExpiresAt: null,
   hasPassword: false,
   spaFallback: false,

@@ -115,12 +115,26 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     const canvas = requireCanvas(c);
     const user = c.get("user");
 
+    // Guest-AI gate (U9, KTD5): AI is off for invited guests unless the owner opts
+    // this canvas in. The metered-$ surface is the one primitive guests don't get
+    // by default. (Anonymous never reaches here — refused as static-only.)
+    const isGuest = c.get("principal")?.kind === "guest";
+    if (isGuest && !canvas.guestAiEnabled) {
+      return c.json({ code: "GUEST_AI_DISABLED" }, 403);
+    }
+
     // Pre-call quota check (D-AI-4, best-effort): per-user daily + per-canvas monthly.
     const now = Date.now();
     const [userSpend, canvasSpend] = await Promise.all([
       deps.aiUsage.userSpendSince(user.id, dayStartUtc(now)),
       deps.aiUsage.canvasSpendSince(canvas.id, monthStartUtc(now)),
     ]);
+    // Per-canvas guest-AI cap (best-effort, windowed like the org quota): when a
+    // guest is calling and the owner set a cap, the canvas's monthly AI spend must
+    // be under it (0 = no extra cap beyond the org quotas).
+    if (isGuest && canvas.guestAiCap > 0 && canvasSpend >= canvas.guestAiCap) {
+      return c.json({ code: "GUEST_AI_CAP", scope: "guest" }, 429);
+    }
     // USD caps are admin-tunable defaults (DB override ?? env), resolved per call so
     // an admin lowering the spend cap to halt runaway cost takes effect immediately.
     const [userDailyUsd, canvasMonthlyUsd] = settings

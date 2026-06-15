@@ -80,6 +80,8 @@ export interface CanvasSettingsPatch {
   title?: string;
   description?: string | null;
   access?: AccessRung;
+  guestAiEnabled?: boolean;
+  guestAiCap?: number;
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
   galleryListed?: boolean;
@@ -396,6 +398,8 @@ export function canvasesRepository(client: DbClient) {
       if (patch.gallerySummary !== undefined) set.gallerySummary = patch.gallerySummary;
       if (patch.galleryTags !== undefined) set.galleryTags = patch.galleryTags;
       if (patch.access !== undefined) set.access = patch.access;
+      if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
+      if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       return rows[0] as Canvas;
     },

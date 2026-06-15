@@ -66,6 +66,8 @@ export interface Canvas {
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
   shared: boolean;
+  /** Guest-AI opt-in (U9): off by default; lets invited guests use the AI primitive. */
+  guestAiEnabled: boolean;
   sharedExpiresAt: number | null;
   hasPassword: boolean;
   spaFallback: boolean;
@@ -190,6 +192,8 @@ export interface CanvasSettings {
   description?: string | null;
   /** Access rung (D4, U4). `public_link` is not settable here (admin-gated). */
   access?: "private" | "specific_people" | "whole_org";
+  /** Guest-AI opt-in (U9). */
+  guestAiEnabled?: boolean;
   shared?: boolean;
   sharedExpiresAt?: number | null;
   password?: string | null;

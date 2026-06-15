@@ -170,7 +170,17 @@ export default function Settings() {
               {shareBlocker}
             </InlineNotice>
           )}
-          {canvas.access === "specific_people" && <Allowlist canvasId={canvas.id} />}
+          {canvas.access === "specific_people" && (
+            <>
+              <Allowlist canvasId={canvas.id} />
+              <Toggle
+                label="Let invited guests use AI"
+                description="Off by default. Guests can always use KV, files, and realtime; AI is the metered-cost primitive, so it's opt-in per canvas."
+                checked={canvas.guestAiEnabled}
+                onChange={(guestAiEnabled) => save({ guestAiEnabled })}
+              />
+            </>
+          )}
           {canvas.shared && (
             <>
               <Field

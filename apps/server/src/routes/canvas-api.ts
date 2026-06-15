@@ -87,10 +87,29 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         return c.json({ code: "PASSWORD_REQUIRED" }, 403);
       }
       c.set("canvas", canvas as Canvas);
-      // staticOnly (public_link, U3): the runtime API is unavailable to a
-      // static-only principal — every primitive is refused (R17). Guest-vs-anonymous
-      // primitive policy lands in U9; here we close the API for the static tier.
       c.set("staticOnly", decision.staticOnly);
+      // Static-only (public_link non-owner / anonymous, R17): the runtime API is
+      // entirely closed — every primitive refused. Static files still serve via the
+      // content chain, not here.
+      if (decision.staticOnly) {
+        return c.json(
+          { code: "STATIC_ONLY", message: "This canvas is public and static-only." },
+          403,
+        );
+      }
+      // A guest reaches the primitives as a known, attributable principal (U9). The
+      // downstream routes attribute by `c.get("user").id`; set a synthetic user so
+      // KV/files/realtime/usage are attributed to `guest:<inviteId>` (KTD2) and
+      // `me()` returns the guest's email. AI is gated separately (canvas-ai.ts).
+      if (principal.kind === "guest") {
+        c.set("user", {
+          id: principal.id,
+          email: principal.email,
+          name: principal.email,
+          avatarUrl: null,
+          isAdmin: false,
+        } as never);
+      }
       await next();
     }),
   );
@@ -102,7 +121,10 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
   // gated (→ 403 when backend is off). Explicit fields, never a row spread.
   app.get("/me", requireCapability("identity", deps.config), (c) => {
     const u = c.get("user");
-    return c.json({ id: u.id, email: u.email, name: u.name, avatarUrl: u.avatarUrl });
+    // `kind` lets canvas code branch on member vs guest (anonymous never reaches
+    // the runtime API — it's refused above as static-only). U9.
+    const kind = c.get("principal")?.kind === "guest" ? "guest" : "member";
+    return c.json({ id: u.id, email: u.email, name: u.name, avatarUrl: u.avatarUrl, kind });
   });
 
   // KV primitive (U6) and Files primitive (U7).

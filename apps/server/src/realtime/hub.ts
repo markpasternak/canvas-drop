@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { decideCanvasAccess } from "../canvas/authorization.js";
 import { assertCapability } from "../canvas/capability-guard.js";
+import type { Principal } from "../http/types.js";
 
 /**
  * In-memory realtime pub/sub + presence hub (§6.7 / D22, plan 009 / M9, D-RT-3).
@@ -41,6 +42,9 @@ export interface ConnUser {
   id: string;
   name: string;
   isAdmin: boolean;
+  /** The full principal (U9) so live re-auth re-decides guests/anonymous correctly,
+   *  not as a member. Defaults to a member principal for callers that omit it. */
+  principal?: Principal;
 }
 
 export interface Conn {
@@ -59,9 +63,13 @@ export interface HubDeps {
   resolveCanvas(canvasId: string): Promise<Canvas | null>;
   /** Optional liveness check — false drops the socket (blocked / deleted user). */
   isUserActive?(userId: string): Promise<boolean>;
-  /** Allowlist membership for live re-auth of a `specific_people` canvas (U3). When
-   *  omitted, a specific_people canvas re-authorizes as not-allowed (drops). */
-  isPrincipalAllowed?(canvasId: string, principal: { userId: string }): Promise<boolean>;
+  /** Allowlist membership for live re-auth of a `specific_people` canvas (U3/U9).
+   *  Matches a member by userId or a guest by email. When omitted, a
+   *  specific_people canvas re-authorizes as not-allowed (drops). */
+  isPrincipalAllowed?(
+    canvasId: string,
+    principal: { userId?: string; email?: string },
+  ): Promise<boolean>;
 }
 
 type PresenceUser = { id: string; name: string };
@@ -282,19 +290,26 @@ export function createHub(deps: HubDeps) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "canvas gone");
           continue;
         }
-        // Conn.user is an org member today (U9 threads guest principals onto Conn).
-        // Resolve allowlist membership for a specific_people canvas so an
-        // allowlisted member's live socket isn't wrongly dropped on re-auth.
+        // Re-decide against the socket's actual principal (member or guest, U9) so a
+        // guest isn't mistaken for a member. Resolve allowlist membership for a
+        // specific_people canvas (member by id, guest by email).
+        const principal: Principal = conn.user.principal ?? {
+          kind: "member",
+          id: conn.user.id,
+          isAdmin: conn.user.isAdmin,
+        };
         const isAllowed =
           canvas.access === "specific_people" && deps.isPrincipalAllowed
-            ? await deps.isPrincipalAllowed(canvas.id, { userId: conn.user.id })
+            ? await deps.isPrincipalAllowed(
+                canvas.id,
+                principal.kind === "guest"
+                  ? { email: principal.email }
+                  : principal.kind === "member"
+                    ? { userId: principal.id }
+                    : {},
+              )
             : false;
-        const decision = decideCanvasAccess(
-          canvas,
-          { kind: "member", id: conn.user.id, isAdmin: conn.user.isAdmin },
-          now,
-          { isAllowed },
-        );
+        const decision = decideCanvasAccess(canvas, principal, now, { isAllowed });
         if (decision.action === "deny") {
           dropConn(conn, CLOSE_UNAUTHORIZED, decision.reason);
           continue;

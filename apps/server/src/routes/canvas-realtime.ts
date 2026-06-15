@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import type { UpgradeWebSocket } from "hono/ws";
+import { requestPrincipal } from "../canvas/authorization.js";
 import { assertCapability } from "../canvas/capability-guard.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
@@ -65,7 +66,7 @@ export function canvasRealtimeRoutes(deps: CanvasRealtimeDeps): Hono<AppEnv> {
           }
           conn = deps.hub.connect(
             canvas.id,
-            { id: user.id, name: user.name, isAdmin: user.isAdmin },
+            { id: user.id, name: user.name, isAdmin: user.isAdmin, principal: requestPrincipal(c) },
             socket,
           );
           if (!conn) {
