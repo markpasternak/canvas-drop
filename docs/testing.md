@@ -82,7 +82,7 @@ overlapping agent runs from sharing tables or object keys.
 | `test-sqlite` | root suite on SQLite (still runs both dialects in-process via PGlite) |
 | `test-dashboard` | dashboard/jsdom suite |
 | `test-postgres` | root suite on PGlite/Postgres **plus** real `postgres:16` + MinIO smoke tests |
-| `build` | the server compiles (`tsc`) |
+| `build` | every workspace package builds (`pnpm build` → `pnpm -r build`: shared, sdk, dashboard, server) |
 | `dependency-audit` | advisory `pnpm audit` (non-blocking) |
 
 A change that passes on SQLite but breaks Postgres fails `test-postgres`. CI is the explicit, authoritative gate; server-side branch protection on `main` arrives when the repo goes public or on Pro.

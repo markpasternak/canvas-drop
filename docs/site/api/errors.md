@@ -5,11 +5,12 @@ an HTTP `status`. The browser SDK throws typed errors extending `CanvasdropError
 (each with a readonly `.code` and `.status`). Branch on `err.code`, never on
 message text.
 
-```js
-import { NotFoundError } from "@canvas-drop/sdk"; // or use the global `window.canvasdrop`
+The global is `window.canvasdrop` (loaded from `/sdk/v1.js`); the error classes
+are also named exports of `@canvas-drop/sdk`. There is no `cd` alias.
 
+```js
 try {
-  const prefs = await canvasdrop.kv.get("prefs");
+  await canvasdrop.kv.set("prefs", { theme: "dark" });
 } catch (err) {
   if (err.code === "QUOTA_EXCEEDED") showQuotaBanner();
   else throw err;

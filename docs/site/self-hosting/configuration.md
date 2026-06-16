@@ -44,7 +44,7 @@ change, never a code change.
 | `CANVAS_DROP_ADMIN_EMAILS` | (empty) | CSV; lowercased. Grants the admin surface. |
 | `CANVAS_DROP_REALTIME` | `on` | `on` \| `off`. |
 | `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE` | `false` | Must be `true` to boot `path` mode with `proxy`/`oidc` auth (path mode has reduced browser isolation). |
-| `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the dashboard build path; defaults to `apps/dashboard/dist`. |
+| `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the built dashboard SPA path; defaults to a location resolved from the server module. |
 
 ## Auth
 
@@ -147,7 +147,7 @@ server-side only and is never exposed to the browser.
 | `CANVAS_DROP_AI_PROVIDER` | `anthropic` | |
 | `CANVAS_DROP_AI_API_KEY` | (unset) | Unset/blank disables AI. |
 | `CANVAS_DROP_AI_BASE_URL` | (unset) | Override the provider base URL. |
-| `CANVAS_DROP_AI_MODELS` | `claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8` | CSV allowlist. |
+| `CANVAS_DROP_AI_MODELS` | `claude-haiku-4-5,claude-sonnet-4-6,claude-opus-4-8` | CSV allowlist. |
 | `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. |
 | `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. |
 

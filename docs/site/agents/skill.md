@@ -1,14 +1,14 @@
 # Agent skill
 
-An installable skill that teaches a coding agent to deploy and extend canvases
-against this instance. It uses the standard skill format: a `SKILL.md` with
-`name`/`description` frontmatter and a when-to-use trigger, so an agent loads it
-automatically when a task matches.
+Install the skill so your coding agent deploys and extends canvases against this
+instance without manual correction. It uses the standard skill format — a
+`SKILL.md` with `name`/`description` frontmatter and a when-to-use trigger — so an
+agent loads it automatically when a task matches.
 
 ## Download
 
-The packaged skill is a public zip — no session or API key required, so an agent
-can fetch it directly:
+`GET /skill.zip` is public — no session or API key required — so an agent can
+fetch it directly:
 
 ```bash
 curl -fLO "{base}/skill.zip"

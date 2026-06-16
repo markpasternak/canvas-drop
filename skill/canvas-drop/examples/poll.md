@@ -50,6 +50,7 @@ SDK is served at `/sdk/v1.js` and auto-detects the canvas slug — no keys, no c
 Notes:
 - `kv.increment(key, by?)` is atomic and returns the new number — concurrent votes are safe.
 - Votes here use the shared scope (`canvasdrop.kv`), so every viewer sees the same totals.
-  For per-viewer state, use `canvasdrop.kv.user.*` (same five methods, scoped to the caller).
+  For per-viewer state, use `canvasdrop.kv.user.*` (same five methods — `get`, `set`,
+  `delete`, `list`, `increment` — scoped to the caller server-side).
 - No keys in the page; identity and storage ride the signed-in session cookie
   (requests go to `/v1/c/<slug>/kv/...` with `credentials: "include"`).

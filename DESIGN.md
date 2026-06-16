@@ -48,7 +48,7 @@ pairings target **WCAG 2.1 AA** (body ≥4.5:1, large/UI ≥3:1, placeholders 4.
 - `--accent-fg` — text/icon on an accent fill (≥4.5:1).
 - `--accent-subtle` — selected-row / badge / info backgrounds; `text-accent` on it clears 4.5:1.
 
-### Semantic — `success` (green ~152), `warning` (amber ~64), `danger` (red ~27)
+### Semantic — `success` (green ~152), `warning` (amber ~58; ~80 in dark for AA), `danger` (red ~27)
 Each has a foreground and a `-subtle` background. **Never encode state in color
 alone** — always pair with a dot, icon, or label (see `StatusBadge`).
 
@@ -111,8 +111,8 @@ active, disabled, loading**. Half a set is a bug.
   `rounded-md`, `active:translate-y-px`, spinner on `loading`.
 - **Inputs / fields** — `surface-raised`, `border-strong`, `rounded-md`; focus shows the
   accent ring; error state borders `--danger` with a message (never color alone).
-- **Toggles** — accent track when on, `surface-sunken` when off; thumb lifts with `--shadow-xs`.
-- **Badges** — `rounded-sm`, subtle-tinted by tone; `StatusBadge` always carries a dot.
+- **Toggles** — accent track when on, `border-strong` when off; thumb lifts with `--shadow-xs`.
+- **Badges** — `rounded-md`, subtle-tinted by tone; `StatusBadge` always carries a dot.
 - **Panels / panes** (`Panel`, `WorkspacePane`) — `surface`, `border`, `rounded-xl`,
   `--shadow-panel`. Section internals divide with borders, not nested cards.
 - **Nav** — section nav is a sunken segmented well; the active item is a raised

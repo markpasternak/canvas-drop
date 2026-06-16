@@ -64,8 +64,8 @@ type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser };
 - **Capability off:** if `realtime` is disabled for the canvas or instance, the
   server closes the socket and `presence()` / `publish()` reject or throw a
   `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`).
-- **Connection limit:** there is a cap of 30 concurrent connections per canvas;
-  exceeding it surfaces as a `QuotaExceededError` (`code: "CONNECTION_LIMIT"`).
+- **Connection limit:** too many concurrent connections to the canvas surface as
+  a `QuotaExceededError` (`code: "CONNECTION_LIMIT"`).
 - **Not signed in:** an expired or missing session surfaces as a
   `NotAuthenticatedError` (`code: "NOT_AUTHENTICATED"`).
 

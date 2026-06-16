@@ -179,7 +179,7 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 1. Login on every request via configured auth mode (D16) [v1]
 2. Allowed-email-domain restriction, verified server-side [v1]
 3. Owner-only visibility by default [v1]
-4. "Shared" toggle: any authenticated member with the link can open and use the canvas, including canvas-facing APIs [v1]
+4. Access ladder (D1/D4): per-canvas visibility rung — `private` (owner only) · `specific_people` (email-invited allowlist, incl. guest invites) · `whole_org` (any authenticated member with the link) · `public_link` (admin-gated shareable link); each rung gates canvas-facing APIs too [v1]
 5. Revoke share (instant: non-owners → 404, open realtime sockets dropped, gate cookies invalidated) [v1]
 6. Optional share expiry (timestamp; auto-revokes; owner sees countdown/expired state) [v1]
 7. Per-canvas password (argon2id; gate page; scoped cookie) [v1]
@@ -187,7 +187,7 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 9. App-managed sessions for `oidc`/`dev`: HttpOnly Secure cookies, 14-day rolling, revocation on logout [v1]
 10. View/access/API audit attribution [v1]
 11. Opt-in gallery listing for explicitly shared canvases with owner-provided metadata [v1]
-12. Share-to-specific-people allowlist [later]
+12. Share-to-specific-people allowlist — shipped as the `specific_people` rung with email guest invites [v1]
 13. Team/group visibility [later]
 14. External/anonymous access [never]
 
@@ -248,7 +248,7 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 12. Message history / replay, KV-backed sync, server-authoritative rooms [later — explicit non-goal for v1, keeps the surface thin (D22)]
 
 ### 6.8 Identity primitive
-1. `canvasdrop.me()` → `{ id, email, name, avatarUrl }` [v1]
+1. `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` (`kind`: `member` | `guest`) [v1]
 2. Served from resolved identity/user row — no provider calls per request [v1]
 3. Shape versioned for later directory fields [v1]
 4. Group membership checks [later]
@@ -391,7 +391,7 @@ CANVAS_DROP_OIDC_ISSUER=... CANVAS_DROP_OIDC_CLIENT_ID=... CANVAS_DROP_OIDC_CLIE
 CANVAS_DROP_AI_PROVIDER=anthropic              # v1 supported provider; future providers reuse the same boundary
 CANVAS_DROP_AI_API_KEY=...                     # Anthropic key (server-side only)
 CANVAS_DROP_AI_BASE_URL=...                    # optional: self-host/gateway/proxy endpoint override
-CANVAS_DROP_AI_MODELS=claude-fast,claude-smart # admin panel can override
+CANVAS_DROP_AI_MODELS=claude-haiku-4-5,claude-sonnet-4-6,claude-opus-4-8  # admin panel can override
 CANVAS_DROP_AI_USER_DAILY_USD=5  CANVAS_DROP_AI_CANVAS_MONTHLY_USD=50
 
 # Logging (standard structured JSON to stdout — see §8.5)
@@ -521,7 +521,7 @@ ai_usage         id · canvas_id · user_id · model · input_tokens · output_t
                  cost_usd (numeric-as-text on sqlite) · status · latency_ms · created_at
 
 usage_events     id · canvas_id · user_id · type (view|kv_op|file_op|deploy|rt_connect) · meta (json) · created_at
-                 (high-volume; daily rollup table usage_daily powers the per-canvas stats in D24/§6.9.6)
+                 (high-volume; per-canvas stats in D24/§6.9.6 are aggregated directly from this table — no separate rollup; AI usage is metered separately in ai_usage)
 
 -- Realtime is intentionally NOT persisted: channels, presence, and messages live in process memory
 -- only. The sole realtime footprint in the DB is the rt_connect usage_event used for stats.
@@ -539,10 +539,10 @@ Indexes: `canvases(owner_id)`, `canvases(slug)`, `kv_entries(canvas_id, scope)`,
 ## 11. API surface
 
 ### 11.1 Browser SDK (`packages/sdk`, served at `{base}/sdk/v1.js` + npm ESM)
-Zero-config: global `canvasdrop` (alias `cd`); no init call needed — mode and slug auto-detected from location.
+Zero-config: global `canvasdrop`; no init call needed — mode and slug auto-detected from location.
 
 ```ts
-canvasdrop.me(): Promise<{ id, email, name, avatarUrl }>
+canvasdrop.me(): Promise<{ id, email, name, avatarUrl, kind }>   // kind: 'member' | 'guest'
 
 canvasdrop.kv.get(key): Promise<Json | null>
 canvasdrop.kv.set(key, value): Promise<void>
@@ -561,9 +561,12 @@ canvasdrop.ai.stream(messages, opts): AsyncIterable<string>   // SSE under the h
 
 canvasdrop.realtime.channel(name): Channel               // WebSocket under the hood, auto-reconnect
   channel.publish(event, data): void                    // ephemeral broadcast to this canvas's channel
-  channel.subscribe((msg) => void): () => void          // returns unsubscribe; msg carries { from: userId }
+  channel.subscribe((msg) => void): void                // msg: { event, data, from: { id, name } }
+  channel.unsubscribe(): void                           // stop receiving on this channel
   channel.presence(): Promise<{ id, name }[]>           // who's connected now (deduped per user)
-  channel.on('join' | 'leave', (member) => void): void
+  channel.onJoin((user) => void): void                  // user: { id, name }
+  channel.onLeave((user) => void): void
+  channel.onPresence((users) => void): void             // full roster on every change
   channel.close(): void
 ```
 

@@ -57,9 +57,15 @@ Pick exactly one proxy trust path — they do not compose:
 Proxy mode refuses to boot without either a JWKS URL or a trusted-proxy IP set. See
 the [Security model](/docs/self-hosting/security-model) for the full §12.5 invariant.
 
-Two other auth modes exist for production: `oidc` and `dev`. In `proxy` and `oidc`
-modes you must set `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (≥1 domain). `dev` mode is
-rejected when `NODE_ENV=production`.
+Two other auth modes exist: `oidc` and `dev`. In `proxy` and `oidc` modes you must
+set `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (≥1 domain; CSV, lowercased) — it is enforced
+on every request. `dev` mode auto-logs-in a fixed local user with zero verification
+and is rejected at boot when `NODE_ENV=production`.
+
+In `proxy` mode the app is sessionless: the IAP owns the session and identity is
+verified per request. In `oidc` mode the app issues its own session cookie
+(`__canvasdrop_session`, HttpOnly always, Secure in production, SameSite=Lax,
+14-day rolling).
 
 ## Without a proxy
 
@@ -95,11 +101,15 @@ pnpm build
 node --conditions=node-dist apps/server/dist/index.js
 ```
 
+`pnpm build` builds the shared package's `dist/` first; the `node-dist` export
+condition makes `@canvas-drop/shared` resolve to that compiled JS, so production
+runs without `tsx`. The Node engine requirement is ≥ 24.
+
 Supply env via your process manager rather than a `.env` file — the `.env` file is
 only read by `pnpm dev`. A systemd unit with `EnvironmentFile=` and a TLS proxy
 (Caddy, nginx, Cloudflare Tunnel, etc.) in front is enough to run a small instance
 on one box: the app binds a local port (default `3000`) and the proxy reverse-proxies
-to it.
+to it. Set `CANVAS_DROP_SESSION_SECRET` (≥32 chars) — it is required in production.
 
 ## Graduating later (config only)
 
@@ -117,8 +127,9 @@ Start simple, scale by changing env — never code:
 
 The backup target is the data directory: the SQLite DB (`CANVAS_DROP_SQLITE_PATH`,
 default `./data/canvasdrop.db`) and local storage (`CANVAS_DROP_STORAGE_PATH`,
-default `./data/storage`). On the blessed profile, back up Postgres with nightly
-`pg_dump` and rely on object-store versioning for files.
+default `./data/storage`). Use SQLite's `.backup` for a consistent snapshot of a
+live DB rather than copying the file. On the Postgres + S3 profile, back up Postgres
+with nightly `pg_dump` and rely on object-store versioning for files.
 
 ## Logs
 

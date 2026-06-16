@@ -13,8 +13,13 @@ primitives showcase). `BUILD_BRIEF.md` §16 and the README Status section are th
 status; defer to them.
 
 The only open milestone is **M10 — ops/packaging** (Docker image + compose, backup/restore
-drill, single-VPS load test, IAP pilot), which has no code yet. There is also one in-flight
-fix plan (`docs/plans/2026-06-14-001-fix-draft-data-loss-cluster-plan.md`, `status: active`).
+drill, single-VPS load test, IAP pilot), which has no code yet — no `Dockerfile` or compose
+file exists in the repo. The full sharing access ladder (private / specific-people / whole-org /
+public-link, guest magic-link invites, admin-gated public links) is also shipped and merged.
+
+Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
+though their scope is merged — the header pointers are stale. The working tree is clean and no
+fix plan is in flight; defer to `BUILD_BRIEF.md` §16 and the README Status section.
 
 Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md
 "Read first"), and pick up a unit from a plan in `docs/plans/`.

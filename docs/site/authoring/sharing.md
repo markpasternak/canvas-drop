@@ -1,48 +1,63 @@
 # Sharing & access
 
-Every canvas is **private by default** — only you, its owner, can open it. When
-you're ready to let others in, you pick one **access rung** in **Settings →
-Sharing**. Sharing a canvas requires it to be published.
+Control who can open a canvas from its **Share** tab. Every canvas is
+**private by default** — only you, its owner, can open it. To let others in, pick
+one **access rung**, then optionally layer a password or an expiry on top.
 
-> Admins don't get a back door into your content. For a canvas they don't own an
-> admin is treated like any other org member: a private or unlisted one returns a
-> 404, a password prompts them too, and they can't open the editor or change its
+> Admins don't get a back door into your content. For a canvas they don't own, an
+> admin is treated like any other org member: a private canvas returns a 404, a
+> password prompts them too, and they can't open the editor or change its
 > settings. An admin's cross-owner power is moderation only — see it in the
 > all-canvases list and disable / re-enable / restore it.
 
 ## The access ladder
 
+One rung per canvas, stored as the `access` field (default `private`):
+
 | Rung | Who can open it | Backend primitives |
 | --- | --- | --- |
-| **Private** | Only you, the owner. | — (owner has full access) |
+| **Private** | Only you, the owner. | Full, for the owner. |
 | **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
-| **Whole org** | Anyone in your org with the link. | Full, for org members. |
-| **Public link** | Anyone with the link (no sign-in). Admin-granted per account. | **None** — static files only. |
+| **Whole org** | Any signed-in org member with the link. | Full, for org members. |
+| **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
-Password and expiry are modifiers you can layer on top (the **Public link** and
-**Whole org** rungs honor a password; an invited guest's magic link is itself the
-gate, so they're never prompted).
+Password and expiry are modifiers you can add on top of any rung. The unguessable
+random slug in each canvas URL is defense-in-depth, not a substitute for a rung.
 
 ## Inviting specific people
 
 Choose **Specific people**, then add by email:
 
-- An **org member's** email is added straight to the allowlist — they open the
-  canvas with their normal sign-in.
-- An **outside email** becomes an **invited guest**: we email them a one-time
-  magic sign-in link. Clicking it gives them a lightweight guest session scoped to
-  **only that canvas** — they can never reach your other canvases. You'll see each
-  guest as a named entry (pending / active) with **Resend** and **Remove**.
+- An **org member's** email goes straight onto the allowlist — they open the
+  canvas with their normal sign-in. Matched by user id.
+- An **outside email** becomes an **invited guest**: the app emails them a
+  single-use magic sign-in link. Clicking it opens a confirm page; a same-origin
+  POST consumes the token and establishes a **guest session scoped to that one
+  canvas** — guests can never reach your other canvases. Matched by email. Each
+  guest shows in the People list as pending or active, with **Resend** and
+  **Remove**.
 
-Removing someone — or lowering the rung — cuts their access on their next request
-and drops any live realtime connection. Guests get **KV, files, and realtime**;
-**AI is off for guests** unless you turn on *“Let invited guests use AI”* for that
-canvas (AI is the metered-cost primitive, so it's opt-in).
+Guests get **KV, files, and realtime**. **AI is off for guests** unless you turn
+it on for the canvas (the *Guest permissions* section), and when you do you set a
+**USD spend cap** — AI is the metered-cost primitive, so it's opt-in and bounded.
 
-> Email-invited guests and public links work when the app manages sign-in
-> (`oidc`/`dev` modes). Behind an identity-aware proxy (`proxy` mode), the proxy
-> owns the boundary, so these options are unavailable unless your operator carves
-> out a path for them.
+A guest is never prompted for the canvas password; their magic link is the gate.
+Owners are never prompted either. Other non-owners are prompted when a password
+is set.
+
+> Email-invited guests work when the app manages sign-in (`oidc` / `dev` modes).
+> Behind an identity-aware proxy (`proxy` mode), the proxy owns the sign-in
+> boundary, so guest invites depend on your operator's setup.
+
+## Password & expiry
+
+- **Password** (the *Locks* section): set a password and non-owners are prompted
+  before the canvas opens (argon2id-hashed, scoped cookie). Owners and invited
+  guests are never prompted.
+- **Share expiry**: set a timestamp and access auto-revokes when it passes. You
+  see a countdown, then an expired state.
+
+A canvas with a password cannot be listed in the gallery.
 
 ## Public links
 
@@ -50,14 +65,20 @@ canvas (AI is the metered-cost primitive, so it's opt-in).
 **static-only**: the page and its files serve, while every backend primitive (KV,
 files, AI, realtime) is refused, so the open internet can never touch your org's
 spend or stored data. It's a guarded capability: an **admin grants it per
-account** (Admin → Users → *Grant public*), and the rung only appears in your
-settings once you've been granted it. Revoking the grant returns your public
-canvases to private immediately.
+account**, and the rung only appears in your Share tab once you've been granted
+it. For everyone except the owner, a public-link canvas is always static-only.
+
+## Listing in the gallery
+
+The Share tab also has an opt-in **gallery** listing (summary, tags, and an
+optional *use as template* toggle). A canvas can only be listed when it has a
+shared access rung, a published version, and **no password** set.
 
 ## Revoking
 
-Access is always revocable and never cached: lowering the rung, removing an
-allowlist entry, revoking a guest, hitting an expiry, or unpublishing the canvas
-takes effect on the **next request** and drops live sockets. Re-publishing a
-canvas does **not** silently restore old guest grants — invite people again
-deliberately.
+Access is always revocable and never cached. Lowering the rung, removing an
+allowlist entry, revoking a guest invite, hitting an expiry, regenerating the
+slug, or unpublishing the canvas takes effect on the **next request** and drops
+live realtime sockets — no stale grants. A guest session never outlives its
+invite's expiry or revocation. Re-publishing a canvas does **not** silently
+restore old guest grants; invite people again deliberately.

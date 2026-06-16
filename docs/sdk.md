@@ -29,10 +29,11 @@ patches) without redeploying. A breaking change would ship under a new path
 ## Identity
 
 ```js
-const me = await canvasdrop.me(); // { id, email, name, avatarUrl }
+const me = await canvasdrop.me(); // { id, email, name, avatarUrl, kind }
 ```
 
-`avatarUrl` is `string | null`.
+`avatarUrl` is `string | null`. `kind` is `"member"` (a signed-in org member)
+or `"guest"` (someone the owner invited to this canvas).
 
 ## Key–value storage
 
@@ -141,13 +142,16 @@ stable `.code` and `.status`). Four subclasses exist:
 | Error | `.code` | When |
 |-------|---------|------|
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | the feature (or Backend) is off for this canvas (403) |
-| `QuotaExceededError` | `QUOTA_EXCEEDED` (or `CONNECTION_LIMIT`) | a value/file too large, key-count limit, or spend/rate/connection quota hit (409/413/429) |
+| `QuotaExceededError` | `QUOTA_EXCEEDED` (also `GUEST_AI_CAP`, `CONNECTION_LIMIT`, and any 409/413 status) | a spend/rate/connection quota, or a too-large value/file or key-count limit (409/413/429) |
 | `NotFoundError` | `NOT_FOUND` | the key/file doesn't exist (404) |
 | `NotAuthenticatedError` | `NOT_AUTHENTICATED` | the viewer isn't signed in (401) |
 
-Other failures throw the base `CanvasdropError` carrying the wire code directly —
-e.g. `INVALID_BODY` (400), `KEY_TOO_LARGE` / `VALUE_TOO_LARGE` / `FILE_TOO_LARGE`
-(413), `KEY_LIMIT` (409), `NOT_NUMERIC` (409), `MODEL_NOT_ALLOWED` (403),
+`QuotaExceededError` carries the specific wire code on `.code` (e.g.
+`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`, `KEY_LIMIT`, `NOT_NUMERIC`,
+`GUEST_AI_CAP`, `CONNECTION_LIMIT`) — anything the server returns with status 409
+or 413 maps to this class. All other failures throw the base `CanvasdropError`
+carrying the wire code directly — e.g. `INVALID_BODY` (400),
+`MODEL_NOT_ALLOWED` / `STATIC_ONLY` / `PASSWORD_REQUIRED` (403),
 `AI_STREAM_TRUNCATED` / `AI_UPSTREAM_ERROR` (502), or `REQUEST_FAILED`. Branch on
 `err.code`:
 

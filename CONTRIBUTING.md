@@ -11,9 +11,9 @@ canvas-drop is built by humans and AI coding agents working together. The same r
 ## Workflow
 
 1. One **GitHub issue** tracks each plan/phase, with implementation units (U-IDs) as a checklist.
-2. Branch per unit: `feat/u<N>-<slug>`. Agents use isolated git worktrees so parallel work never collides.
-3. Implement the unit **with the test scenarios from the plan**. Feature-bearing units must have tests.
-4. Open a **PR per unit**, titled `U<N>: <what> (#<issue>)`.
+2. Branch in an isolated git worktree so parallel work never collides. Branch name `feat/u<N>-<slug>` for a single unit, or `feat/<plan-slug>` when a whole approved plan ships on one branch.
+3. Implement **with the test scenarios from the plan**, one unit at a time. Feature-bearing units must have tests.
+4. Open a **PR** titled `U<N>: <what> (#<issue>)`. PR-per-unit is the default; an approved plan run end-to-end may ship its whole scope as one branch / one PR.
 5. CI (lint, typecheck, tests on **both** SQLite and Postgres, build) must pass before merge.
 6. Capture anything non-obvious as a learning in `docs/solutions/` (`/ce-compound`) so knowledge compounds.
 
@@ -37,4 +37,4 @@ pnpm lint && pnpm typecheck && pnpm test
 
 ## Security
 
-The auth gateway and the five security invariants (`BUILD_BRIEF.md` §12.0) are the highest bar. Changes to auth, identity, sharing, or the proxy-trust path get extra review and test-first treatment.
+The auth gateway and the §12.0/§12.5 invariants (`BUILD_BRIEF.md`) are the highest bar: identity always comes from the server-side auth context, never the client; in `proxy` mode only the trusted proxy may assert identity (verified JWT, or headers trusted solely from `CANVAS_DROP_TRUSTED_PROXY_IPS`). Changes to auth, identity, sharing, or the proxy-trust path get extra review and test-first treatment — run `/ce-code-review` before opening the PR, and read `docs/solutions/2026-06-13-auth-invariant-checklist.md` first.

@@ -32,9 +32,11 @@ that communicates better as a working artifact than as a screenshot or a slide.
   independently; `me()` is on whenever backend is on.
 - **Version & roll back.** Every publish is an immutable version (last 10 kept);
   one-click **Make current** switches the served version.
-- **Share** the URL. Access follows your instance's sign-in. Share a canvas
-  publicly, set an expiry, or lock it with a per-canvas password; opt into the
-  gallery to let colleagues browse it.
+- **Share** the URL on a per-canvas access rung: `private` (owner only),
+  `specific_people` (named org members and email-invited guests), `whole_org`
+  (any signed-in member with the link), or `public_link` (anyone with the link —
+  admin-gated per owner, and static-only). Layer on a per-canvas password or a
+  share expiry, and opt into the gallery to let colleagues browse it.
 
 ## Where to go next
 

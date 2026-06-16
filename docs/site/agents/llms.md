@@ -2,14 +2,15 @@
 
 If you are an agent deploying a canvas, start here. canvas-drop serves a single
 plain-text contract at [`{base}/llms.txt`](/llms.txt) — no markup chrome,
-designed to be dropped straight into context. It is **public** (readable without
-a session) so you can learn the API before you hold credentials.
+designed to be dropped straight into context. It is **public** (served from the
+docs band, readable without a session) so you can learn the API before you hold
+credentials.
 
 ## Deploy in two steps
 
 1. **Get a per-canvas API key** — the canvas owner creates the canvas in the
-   dashboard (or `POST {base}/api/canvases`) and hands you the secret key, shown
-   once.
+   dashboard (the `api` create method mints the canvas plus a one-time secret
+   key) and hands you that key, shown once.
 2. **Push your artifact** with the Bearer key and a ZIP body:
 
    ```
@@ -20,7 +21,7 @@ a session) so you can learn the API before you hold credentials.
 
    This publishes a new live version directly — no draft loop. Companion routes:
    `GET /v1/canvases/{id}`, `GET /v1/canvases/{id}/versions`,
-   `POST /v1/canvases/{id}/rollback`. See the
+   `POST /v1/canvases/{id}/unpublish`, `POST /v1/canvases/{id}/rollback`. See the
    [Deploy API](/docs/api/deploy-api).
 
 `{base}` is the instance origin. The key is verified per-canvas; it only
@@ -37,65 +38,57 @@ the session cookie:
 
 It exposes one global, **`canvasdrop`** (there is no `cd` alias). Mode and slug
 are auto-detected from the canvas URL; every call hits
-`{apiBase}/v1/c/{slug}/...` with `credentials: include`.
+`{apiBase}/v1/c/{slug}/...` with `credentials: "include"`.
 
 - `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` where `kind` is
   `"member"` (an org user) or `"guest"` (an email-invited viewer).
-- `canvasdrop.kv` and `canvasdrop.kv.user` — `get`, `set`, `delete`, `list`,
-  `increment`. User scope is per-viewer; root scope is shared.
-- `canvasdrop.files` — `upload(file)`, `list()`, `delete(id)`, `url(id)`.
-- `canvasdrop.ai` — `chat(messages, { model })` and
-  `stream(messages, { model })` (SSE; server-side provider key only).
-- `canvasdrop.realtime.channel(name)` — `publish`, `subscribe(handler)`,
-  `presence`, `onJoin`, `onLeave`, `close`.
+- `canvasdrop.kv` and `canvasdrop.kv.user` — `get(key)`, `set(key, value)`,
+  `delete(key)`, `list({ prefix?, cursor?, limit? })`, `increment(key, by = 1)`.
+  `get` returns `null` on a missing key; `kv.user` is per-viewer, the root scope
+  is shared.
+- `canvasdrop.files` — `upload(file)` → `{ id, name, size, url }`, `list()`,
+  `delete(id)`, `url(id)` (synchronous; returns the content URL).
+- `canvasdrop.ai` — `chat(messages, { model })` → `{ text, usage, cost }`, and
+  `stream(messages, { model })` → `AsyncIterable<string>` (SSE; the provider key
+  is server-side only). `model` is required.
+- `canvasdrop.realtime.channel(name)` — `publish(event, data)`,
+  `subscribe(handler)`, `unsubscribe()`, `presence()`, `onPresence`, `onJoin`,
+  `onLeave`, `close()`. There is no generic `.on(...)`.
 
 Full signatures and types: [SDK overview](/docs/sdk/overview).
 
-## Sharing & access (management API)
+## Sharing & access
 
-These session-authenticated routes (the dashboard's own API, callable by an agent
-holding a logged-in user's session cookie — not the Bearer deploy key) manage who
-can open a canvas. The full model is in [Sharing & access](/docs/authoring/sharing).
+Sharing is one **access rung** per canvas, set by the owner from the dashboard's
+Share tab (or its session-authenticated management API). The rung is one of:
 
-- **Set the access rung** — `PATCH {base}/api/canvases/{id}/settings` with
-  `{ "access": "private" | "specific_people" | "whole_org" | "public_link" }`.
-  `public_link` is admin-gated per account (a `403 PUBLIC_NOT_ALLOWED` until an
-  admin grants it). Also accepts `{ "guestAiEnabled": boolean, "guestAiCap": number }`
-  to let invited guests use AI up to a per-canvas cap.
-- **Invite / allowlist** (the `specific_people` rung) —
-  `GET {base}/api/canvases/{id}/allowlist`,
-  `POST {base}/api/canvases/{id}/allowlist` with `{ "email": "..." }` (an org
-  member is added directly; an outside email is emailed a magic-link guest invite),
-  `POST {base}/api/canvases/{id}/allowlist/{entryId}/resend`, and
-  `DELETE {base}/api/canvases/{id}/allowlist/{entryId}`.
-- **Admin: publish-public capability** —
-  `POST {base}/api/admin/users/{id}/grant-public` and
-  `POST {base}/api/admin/users/{id}/revoke-public` (admin session required;
-  revoking sweeps the owner's public canvases back to private).
-- **Admin: individual sign-in allowlist** —
-  `GET {base}/api/admin/allowed-emails`,
-  `POST {base}/api/admin/allowed-emails` with `{ "email": "..." }` (lets that
-  address sign in even if its domain isn't in `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`),
-  and `DELETE {base}/api/admin/allowed-emails/{id}` (admin session required;
-  removal revokes access on the next sign-in).
+- `private` — owner only.
+- `specific_people` — a named allowlist of org members and/or email-invited
+  guests.
+- `whole_org` — any authenticated org member with the link.
+- `public_link` — anyone with the link. Admin-gated per owner account
+  (`canPublishPublic`), and **static-only** for non-owners: every backend
+  primitive is refused, returning `403 STATIC_ONLY`.
 
-Guest invites and public links require app-managed sign-in (`oidc`/`dev` modes);
-behind an identity-aware proxy they return `409 GUESTS_UNAVAILABLE`. Sending an
-invite needs email configured (`409 EMAIL_NOT_CONFIGURED` otherwise).
+Invited guests get KV, files, and realtime; **AI is opt-in per canvas** with a
+USD spend cap (`guestAiEnabled` / `guestAiCap`). The full model — guest
+magic-link invites, password locks, share expiry — is in
+[Sharing & access](/docs/authoring/sharing).
 
 ## Capabilities and errors
 
 A canvas must opt into **backend** (off by default); then `kv`, `files`, `ai`,
 and `realtime` toggle independently. Identity (`me()`) is on whenever backend
-is. A disabled feature returns `403 CAPABILITY_DISABLED`.
+is. AI also requires a configured provider key and realtime an enabled operator
+global. A disabled feature returns `403 CAPABILITY_DISABLED`.
 
 Errors are machine-readable: every failure carries a stable string `.code`
-(e.g. `NOT_AUTHENTICATED`, `NOT_FOUND`, `CROSS_CANVAS_FORBIDDEN`,
-`MODEL_NOT_ALLOWED`, `QUOTA_EXCEEDED`, `VALUE_TOO_LARGE`). Every error is a
-`CanvasdropError` with a stable `.code` (some codes also have dedicated
-subclasses, e.g. `NotAuthenticatedError`, `NotFoundError`,
-`CapabilityDisabledError`, `QuotaExceededError`); branch on `.code`, not on
-message text.
+(e.g. `NOT_AUTHENTICATED` (401), `NOT_FOUND` (404), `CROSS_CANVAS_FORBIDDEN`
+(403), `STATIC_ONLY` (403), `MODEL_NOT_ALLOWED` (403), `QUOTA_EXCEEDED` (429),
+`VALUE_TOO_LARGE` (413)). In the browser SDK every error is a `CanvasdropError`
+with that `.code`; four codes also have dedicated subclasses —
+`NotAuthenticatedError`, `NotFoundError`, `CapabilityDisabledError`,
+`QuotaExceededError`. Branch on `.code`, not on message text.
 
 For a packaged, installable version of this guidance, see the
 [Agent skill](/docs/agents/skill).

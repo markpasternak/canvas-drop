@@ -11,8 +11,9 @@ All routes live under `{base}/v1/c/{slug}`. The path is identical in both URL mo
 
 > **Auth:** every request is credentialed with the **session cookie**, sent
 > automatically by the browser. Identity is resolved server-side from that session —
-> the canvas never asserts who the viewer is. Unauthenticated requests get `401`
-> before any route runs. (This differs from the Bearer-key
+> the canvas never asserts who the viewer is. Unauthenticated requests are stopped
+> by the auth gateway before any route runs — a `401` in `proxy`/`dev` mode, or a
+> `302` redirect to `/auth/login` in `oidc` mode. (This differs from the Bearer-key
 > [Deploy API](/docs/api/deploy-api).)
 >
 > **Capabilities:** each primitive is gated by its capability (`identity`, `kv`,
@@ -22,25 +23,28 @@ All routes live under `{base}/v1/c/{slug}`. The path is identical in both URL mo
 ## Pipeline errors
 
 Before any handler runs, every `/v1/c/{slug}/*` request passes through resolve +
-authorize + isolation. These can return before your handler:
+authorize + isolation + capability checks. These can return before your handler:
 
 | Code | HTTP | When |
 |---|---|---|
-| `401` | 401 | Not signed in (auth gateway, no body). |
-| `NOT_FOUND` | 404 | Missing or unknown canvas slug. |
-| `PASSWORD_REQUIRED` | 403 | Password-gated shared canvas, no valid grant. |
-| `CROSS_CANVAS_FORBIDDEN` | 403 | Request origin/referrer targets another canvas. |
-| `CROSS_SITE_FORBIDDEN` | 403 | Disallowed cross-site origin (subdomain mode). |
+| `NOT_FOUND` | 404 | Missing slug param, or the resolver denies (canvas not found / not authorized). |
+| `PASSWORD_REQUIRED` | 403 | Password-gated shared canvas, gate cookie not satisfied. |
+| `STATIC_ONLY` | 403 | A `public_link` canvas accessed by a non-owner or anonymous viewer — the runtime API is fully closed. |
 | `CAPABILITY_DISABLED` | 403 | The route's capability is off. Body: `{ code, capability }`. |
 
-Subdomain mode additionally enforces Origin-matches-slug and emits credentialed
-CORS (the `CROSS_*` errors); path mode is same-origin. All `code` values are stable
-— see [Error codes](/docs/api/errors).
+Preflight `OPTIONS /v1/c/{slug}/*` is answered before the auth gateway. In
+`subdomain` mode the runtime API emits credentialed CORS for the canvas's exact
+subdomain origin; in `path` mode the canvas is same-origin and no cross-origin CORS
+header is sent. The path itself is identical in both modes.
+
+A request that reaches a handler unauthenticated is stopped by the auth gateway before
+the pipeline runs — a `401` in `proxy`/`dev` mode, or a `302` redirect to `/auth/login`
+in `oidc` mode. All `code` values are stable — see
+[Error codes](/docs/api/errors).
 
 ## Identity
 
-Capability: `identity` — it has no separate toggle and is effective exactly when
-the canvas's **Backend** is on.
+Capability: `identity`. Returns `403 CAPABILITY_DISABLED` when identity is off.
 
 ```
 GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind }
@@ -48,9 +52,9 @@ GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind }
 
 `avatarUrl` may be `null`. `kind` is `"member"` (an org user) or `"guest"` (an
 email-invited viewer) so canvas code can branch on who's viewing; an anonymous
-visitor never reaches the runtime API (a `public_link` canvas is static-only).
-This runtime `me()` deliberately omits `isAdmin`; the dashboard SPA's `/api/me`
-is a separate endpoint that includes it.
+visitor never reaches the runtime API (a `public_link` canvas is static-only and
+returns `STATIC_ONLY`). This runtime `me()` deliberately omits `isAdmin`; the
+dashboard SPA's `/api/me` is a separate endpoint that includes it.
 
 ## Key–value
 
@@ -91,7 +95,7 @@ Upload returns `url` pointing at the content route (`/v1/c/{slug}/files/{id}/con
 Content is served with `X-Content-Type-Options: nosniff` and a sanitized filename;
 SVGs are forced to `attachment` to neutralize inline scripts. Errors: `INVALID_BODY`
 (400, missing/invalid file), `FILE_TOO_LARGE` (413, over the per-file size limit),
-`QUOTA_EXCEEDED` (409, canvas storage quota).
+and a `409` when the canvas storage quota is exceeded.
 
 ## AI
 
@@ -124,9 +128,11 @@ Success is an SSE stream (`text/event-stream`): zero or more
 Errors are split by when they occur:
 
 - **Pre-stream** (status set before the body): `INVALID_BODY` (400),
-  `MODEL_NOT_ALLOWED` (403, model not in the allowlist or unpriced),
-  `QUOTA_EXCEEDED` (429, per-user daily or per-canvas monthly USD cap; body
-  `{ code, scope }`), `CAPABILITY_DISABLED` (403).
+  `MODEL_NOT_ALLOWED` (403, model not in the allowlist or allowlisted-but-unpriced),
+  `GUEST_AI_DISABLED` (403, a guest called AI on a canvas that hasn't opted guests
+  in), `GUEST_AI_CAP` (429, guest spend cap reached; body `{ code, scope: "guest" }`),
+  `QUOTA_EXCEEDED` (429, spend/rate cap; body `{ code, scope }`),
+  `CAPABILITY_DISABLED` (403, no effective provider key after the gate).
 - **In-stream** (HTTP already 200): an SSE
   `{ type: "error", code: "AI_UPSTREAM_ERROR", message }` event. Usage and quota are
   recorded even if the client aborts mid-stream.
@@ -144,41 +150,27 @@ Auth, authorization, password-gate, and Origin are all enforced **before** the
 upgrade — a failure refuses the `101` (no socket). The capability check is the one
 post-upgrade gate: if `realtime` is off, the server accepts then sends
 `{ type: "error", code: "CAPABILITY_DISABLED", capability: "realtime" }` and closes
-with code `4403`.
+with code `4403`. A socket that hits the connection limit is closed with `4429`.
 
-**Client → server frames** (JSON, ≤ 16 KiB):
-
-| `type` | Fields | Effect |
-|---|---|---|
-| `subscribe` | `channel` | Join a channel. |
-| `unsubscribe` | `channel` | Leave a channel. |
-| `publish` | `channel`, `event`, `data` | Broadcast to the channel (server attaches `from` from server-side identity). |
-| `presence` | `channel` | Request the current presence list. |
-
-**Server → client frames:** `subscribed`, `presence`
-(`{ channel, users: [{ id, name }] }`), `join` / `leave`
-(`{ channel, user: { id, name } }`), `message`
-(`{ channel, event, data, from: { id, name } }`), and `error`
-(`{ code, message }`, codes `MESSAGE_TOO_LARGE`, `INVALID_FRAME`, `UNKNOWN_FRAME`,
-`RATE_LIMITED`).
-
-**Close codes:** `4401` unauthorized, `4403` capability disabled, `4429` connection
-limit. The server can drop a live socket with `4401`/`4403` when access, capability,
-password, or user-active state changes. Limits: 30 connections per canvas, 100
-messages/min, 16 KiB per frame.
+The frame protocol — `publish`, `subscribe`, `unsubscribe`, `presence`, and the
+`message` / `presence` / `join` / `leave` frames the server sends back — is managed
+by the realtime hub. Use the SDK's `realtime.channel(name)` API rather than driving
+the socket by hand; it handles framing, reconnection, and presence for you. See the
+[SDK reference](/docs/sdk/overview).
 
 ## Adjacent endpoints
 
 These are part of the client surface but not under `/v1/c/{slug}`:
 
 ```
-GET {base}/api/me      dashboard SPA identity → { id, email, name, avatarUrl, isAdmin, authMode }
+GET {base}/api/me      dashboard SPA identity → { id, email, name, avatarUrl, isAdmin, canPublishPublic, authMode }
 GET {base}/sdk/v1.js   the served browser SDK bundle (503 if not built)
 ```
 
-`/api/me` sits behind the auth gateway but is **not** capability-gated, and unlike
-the runtime `me()` it includes `isAdmin` and the instance `authMode`. `/sdk/v1.js` is
-served `application/javascript; charset=utf-8` with `cache-control: public,
+`/api/me` sits behind the session gateway but is **not** capability-gated, and unlike
+the runtime `me()` it adds `isAdmin`, `canPublishPublic`, and the instance `authMode`
+(`proxy` | `oidc` | `dev` — config, not user data). `/sdk/v1.js` is served behind the
+auth gateway as `application/javascript; charset=utf-8` with `cache-control: public,
 max-age=3600`.
 
 ## Errors

@@ -31,16 +31,17 @@ and S3, all of which are config swaps, not code changes.
 
 ## Create a canvas
 
-From the dashboard, click **New**. Four ways to publish:
+From the dashboard, click **Create canvas**. Four ways to publish:
 
 - **Paste HTML** — a single `index.html`, created and published in one step.
-- **Files / folder** — drag files or a folder; relative paths are kept at the
+- **Files or folder** — drag files or a folder; relative paths are kept at the
   canvas root.
-- **ZIP** — upload an archive; it's extracted server-side.
+- **Upload ZIP** — upload an archive; it's extracted server-side.
 - **Use the API** — get a slug and a per-canvas key for programmatic deploys.
 
-Each canvas gets a slug and a URL. In `path` mode that's `{base}/c/{slug}/`; in
-`subdomain` mode it's `{slug}.{base}` (e.g. `http://localhost:3000/c/{slug}/`).
+Each canvas gets a slug and a URL. In `path` mode that's `{base}/c/{slug}/` (e.g.
+`http://localhost:3000/c/{slug}/`); in `subdomain` mode it's `{slug}.{base}` (e.g.
+`{slug}.canvases.example.com`).
 
 ## Add some content
 
@@ -78,10 +79,12 @@ whenever Backend is on. See the [SDK overview](/docs/sdk/overview).
 ## Publish & share
 
 Open the canvas, edit in the **Editor** tab, then **Publish** to snapshot an
-immutable version and point the canvas URL at it. Switch the current version from
-the **Versions** tab. Who can open a canvas follows your instance's sign-in —
-canvases are private to your org by default, and sharing is available once a
-canvas is published.
+immutable version and point the canvas URL at it. Roll back or switch the current
+version from the **Versions** tab. Set who can open it in the **Share** tab: the
+access ladder runs `private` (owner only, the default) → `specific_people` →
+`whole_org` → `public_link` (anyone with the link, admin-gated per owner). You can
+also add a password gate or share expiry, invite email guests, and list the
+canvas in the gallery once a version is published.
 
 ## Deploying as an agent
 

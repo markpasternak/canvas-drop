@@ -1,9 +1,10 @@
 # Key–value storage
 
-`canvasdrop.kv` is JSON key–value storage scoped to the canvas. Two namespaces
-share the same five methods: **shared** (canvas-global) and **user**
-(`canvasdrop.kv.user`, auto-scoped to the signed-in viewer). Identity comes from
-the session — the canvas never handles keys or credentials.
+Store and read JSON values from a canvas with `canvasdrop.kv`. Two namespaces
+share the same five methods (`get`, `set`, `delete`, `list`, `increment`):
+**shared** (canvas-global) and **user** (`canvasdrop.kv.user`, auto-scoped to the
+signed-in viewer). Identity comes from the session — your code never handles keys
+or credentials.
 
 ## Shared
 
@@ -18,7 +19,7 @@ const { entries, nextCursor } = await canvasdrop.kv.list({ prefix: "p:", limit: 
 
 `increment(key, by = 1)` is atomic and returns the new number — safe for
 concurrent polls, counters, and votes. It throws `NOT_NUMERIC` (409) if the
-stored value isn't a number.
+stored value isn't a number. `set(key, value)` and `delete(key)` return nothing.
 
 `get<T>(key)` returns the stored value (typed as `T`, default `unknown`) or
 `null` when the key is absent. `list(opts?)` takes `{ prefix?, cursor?, limit? }`

@@ -11,17 +11,18 @@ canvas is identified by its own URL.
 <script src="/sdk/v1.js"></script>
 ```
 
-That defines the global `window.canvasdrop` (no other global name). The SDK
-auto-detects the canvas slug and the API base from the page's location — path mode
-`/c/{slug}/…` (same origin) or subdomain `{slug}.{base}` — and sends every request
-with `credentials: "include"`, so identity rides the existing session cookie. Each
-call hits `{apiBase}/v1/c/{slug}/…`; you never pass the slug or any key yourself.
+That defines the global `window.canvasdrop` (the only global name — there is no
+`cd` alias). The SDK auto-detects the canvas slug and the API base from the page's
+location:
 
-> `/sdk/v1.js` is served to signed-in canvas pages — it rides the same session as
-> the canvas. The stable `/sdk/v1.js` path is additive and backward-compatible
-> within v1, so pointing a `<script>` at it means you receive fixes (including
-> security patches) without redeploying. A breaking change would ship under a new
-> path (`/sdk/v2.js`).
+- **Path mode** — a path like `/c/{slug}/…` is matched; the slug is the segment
+  after `/c/`, and the API base is the page's own origin.
+- **Subdomain mode** — otherwise, the slug is the first label of the hostname
+  (`{slug}.{base}`), and the API base is the rest of the host.
+
+Every request goes to `{apiBase}/v1/c/{slug}/…` with `credentials: "include"`, so
+identity rides the existing session cookie. You never pass the slug or any key
+yourself.
 
 ## Enable the capability first
 
@@ -31,7 +32,7 @@ canvas's **Backend** tab. A method whose capability is off throws a
 
 ## The surface
 
-- [`canvasdrop.me()`](/docs/sdk/identity) — the signed-in viewer (`{ id, email, name, avatarUrl }`).
+- [`canvasdrop.me()`](/docs/sdk/identity) — the signed-in viewer (`{ id, email, name, avatarUrl, kind }`, where `kind` is `"member"` or `"guest"`).
 - [`canvasdrop.kv`](/docs/sdk/kv) — `get`/`set`/`delete`/`list`/`increment`, shared plus per-viewer (`canvasdrop.kv.user`).
 - [`canvasdrop.files`](/docs/sdk/files) — `upload`/`list`/`delete`/`url`.
 - [`canvasdrop.ai`](/docs/sdk/ai) — server-side model calls: `chat` and streaming `stream`.
@@ -39,8 +40,13 @@ canvas's **Backend** tab. A method whose capability is off throws a
 
 ## Errors
 
-Every failure throws a typed error extending `CanvasdropError`, each carrying a
-stable `.code` and `.status`. See the [error code reference](/docs/api/errors).
+Every failure throws an error extending `CanvasdropError`, which carries a string
+`.code` and a numeric `.status`. Four typed subclasses are thrown directly —
+`NotAuthenticatedError` (401), `NotFoundError` (404), `CapabilityDisabledError`
+(403), and `QuotaExceededError` (429/409/413, the spend/rate and size-limit
+failures — the `*_TOO_LARGE` codes surface here too) — and everything else surfaces as the
+base `CanvasdropError`. Switch on `.code` to handle the rest. See the
+[error code reference](/docs/api/errors).
 
 ```js
 try {
@@ -54,5 +60,5 @@ try {
 }
 ```
 
-If you import `@canvas-drop/sdk` as a module instead of the global script, the
-error classes are exported for `instanceof` checks.
+If you import the SDK package as a module instead of using the global script, the
+error classes (and `createClient`) are exported for `instanceof` checks.

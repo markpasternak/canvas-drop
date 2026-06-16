@@ -49,8 +49,10 @@ The key is verified per-canvas. Companion deploy-API operations (same Bearer aut
 - `GET {base}/v1/canvases/{id}` — current state
 - `GET {base}/v1/canvases/{id}/versions` — version history (last 10 kept)
 - `POST {base}/v1/canvases/{id}/rollback` with JSON body `{"version": N}` — sets the
-  live pointer to ready version N (find N via the `/versions` list). Returns 404 if
-  that version is not available.
+  live pointer to ready version N (find N via the `/versions` list, where each entry
+  has a `number`). A missing/non-number `version` returns `400 INVALID_PATH`; an
+  unknown or non-ready version returns `404 INVALID_PATH`; a version removed by a
+  concurrent prune returns `409 VERSION_UNAVAILABLE` (retry).
 
 A deploy-API key only works while the canvas is active; if the canvas is archived or
 disabled, the key is not recognized and the request returns 401 unauthorized. (The 409
@@ -68,7 +70,7 @@ so the same file works in both path and subdomain URL modes:
 ```
 
 ```js
-// Identity — { id, email, name, avatarUrl }
+// Identity — { id, email, name, avatarUrl, kind }; kind is "member" or "guest"
 const me = await canvasdrop.me();
 
 // KV (shared scope) + kv.user (per-viewer scope) — same five methods on each

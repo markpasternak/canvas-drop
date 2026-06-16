@@ -1,7 +1,12 @@
 # Install
 
-canvas-drop is 12-factor and self-hostable. The simplest way to try it is locally
-with the bundled dev profile.
+Stand up a canvas-drop instance. The fastest path is locally with the bundled dev
+profile; everything you swap for production is a config change, never a code change.
+
+## Prerequisites
+
+- Node.js >= 24
+- pnpm 11
 
 ## Local (dev profile)
 
@@ -13,11 +18,14 @@ cp .env.example .env
 pnpm dev
 ```
 
-That boots a logged-in instance on `http://localhost:3000` using the zero-config
-dev profile: path URLs, SQLite (`./data/canvasdrop.db`), local file storage
-(`./data/storage`), and `dev` auth (auto-login as `dev@example.com`). `dev` auth
-is rejected when `NODE_ENV=production` — it is for local use only. Open the
-dashboard and deploy your first canvas — see the [Quickstart](/docs/quickstart).
+That boots a logged-in instance using the zero-config dev profile: path URLs,
+SQLite (`./data/canvasdrop.db`), local file storage (`./data/storage`), and `dev`
+auth (auto-login as `dev@example.com`). `dev` auth is rejected when
+`NODE_ENV=production` — it is for local use only. In dev, `pnpm dev` runs the Hono
+API on `http://localhost:3000` and the dashboard SPA (Vite, with HMR) on
+`http://localhost:5173`; the API server serves the built SPA on `:3000` only in
+production after `pnpm build`. Open the dashboard at `http://localhost:5173` and
+deploy your first canvas — see the [Quickstart](/docs/quickstart).
 
 ## What you choose at install time
 

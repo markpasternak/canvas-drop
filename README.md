@@ -98,7 +98,7 @@ The global `canvasdrop` appears. Identity rides the signed-in session; the canva
 
 ```js
 // Identity — who's viewing, straight from the server-side auth context
-const me = await canvasdrop.me();                  // { id, email, name, avatarUrl }
+const me = await canvasdrop.me();                  // { id, email, name, avatarUrl, kind: "member" | "guest" }
 
 // KV — canvas-global, or auto-scoped per viewer; atomic increment for polls/counters
 const votes = await canvasdrop.kv.increment("votes", 1);
@@ -122,7 +122,7 @@ ch.publish("cursor", { x, y });
 | **KV** | Shared (`kv.*`) and per-viewer (`kv.user.*`) key/value with `list` + atomic `increment`. |
 | **Files** | Per-canvas file upload/list/delete; served as safe, non-executable bytes. |
 | **AI** | Anthropic-first proxy behind a provider abstraction — streaming, model allowlist, metered quotas. The provider key stays server-side. |
-| **Identity** | `me()` — id, email, name, avatar, resolved from org auth (never the client). |
+| **Identity** | `me()` — id, email, name, avatar, and `kind` (`member` or `guest`), resolved from org auth (never the client). |
 | **Realtime** | Ephemeral broadcast + presence per canvas; durable state stays in KV. Revoking a share drops the socket instantly. |
 
 The full, agent-optimized contract is served live at **`{base}/llms.txt`** — point an agent at it and it can write a working canvas. See also [`docs/sdk.md`](docs/sdk.md).
@@ -221,7 +221,7 @@ pnpm test:pg      # postgres leg only
 pnpm lint         # biome check
 pnpm format       # biome check --write (also sorts imports)
 pnpm typecheck    # tsc --noEmit across server, sdk, dashboard
-pnpm build        # compile the server + SDK bundle
+pnpm build        # build all workspace packages (shared, sdk, dashboard, server)
 pnpm purge        # reclaim storage from soft-deleted canvases (see below)
 ```
 

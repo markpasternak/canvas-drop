@@ -40,8 +40,18 @@ condition is true:
 KV and Files have no operator-level switch — your two toggles are the whole
 story. AI and Realtime each carry an extra operator gate, so a feature you've
 turned on can still report as off if the instance isn't set up for it. The
-Backend tab shows all three layers (Backend, your toggles, and the effective
-state) so you can see *why* a feature is off.
+Backend tab shows the **Backend** master switch and your feature toggles, and
+surfaces a hint on a feature that's gated by the operator — so you can see *why*
+a feature you've enabled is still off.
+
+## Public links are static-only
+
+If a canvas is shared as a **public link** (the `public_link` access rung,
+anyone with the link), every primitive is inert for non-owner viewers — the
+Backend tab shows a warning that the canvas serves static files only, and the
+server refuses backend calls with `STATIC_ONLY` (status 403). Public-link
+canvases are static files only; use a more restricted access rung if the canvas
+needs a backend.
 
 ## What happens when a feature is off
 

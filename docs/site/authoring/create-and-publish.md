@@ -1,9 +1,11 @@
 # Create & publish
 
-Publish a canvas from static files. Every published version is the same thing:
-an immutable, versioned set of files served at the canvas URL. There are four
-sources — three from the dashboard (paste, files/folder, ZIP) and one
-programmatic (the Deploy API).
+Get a canvas live from static files. Every published version is the same thing:
+an immutable, versioned set of files served at the canvas URL. Three deploy paths
+publish a version directly — drag a folder/files, upload a ZIP, or paste HTML
+(all from the create flow at `/new` or an existing canvas), plus the programmatic
+Deploy API. A fourth source, the in-browser editor, saves a draft first and lets
+you publish when ready.
 
 ## Drag-and-drop files or a folder
 
@@ -35,9 +37,9 @@ directly. See [The editor](/docs/authoring/editor).
 ## Deploy API
 
 Ship from CI or an agent with a per-canvas secret key over HTTP — no human and no
-dashboard session required. The body is a ZIP; the response is machine-readable.
-This path publishes a version **directly to live** (no draft loop). "Deploy" is
-the API/CLI term for this publish-from-files contract:
+dashboard session required. The body is a ZIP/tar archive; the response is
+machine-readable. This path publishes a version **directly to live** (no draft
+loop). "Deploy" is the API term for this publish-from-files contract:
 
 ```bash
 curl -X PUT "{base}/v1/canvases/{id}/deploy" \
@@ -45,10 +47,12 @@ curl -X PUT "{base}/v1/canvases/{id}/deploy" \
   --data-binary @site.zip
 ```
 
-The key (format `cd_...`) is shown once when the canvas is created and can be
-regenerated from Settings. It is a Bearer secret, not a session cookie, and works
-**only on its own canvas** (a key for a different canvas returns `403`; an unknown
-or missing key returns `401`).
+Create a canvas wired for this path from the **API** method in the create flow
+(`/new`): it mints the canvas and a one-time secret key. The key (format `cd_...`)
+is shown once and can be regenerated later from the **Settings** tab (Deploy API
+section). It is a Bearer secret, not a session cookie, and works **only on its
+own canvas** (a key for a different canvas returns `403`; an unknown or missing
+key returns `401`).
 
 On success you get the new version's details:
 
@@ -63,21 +67,22 @@ repair and retry:
 { "code": "ZIP_SLIP_REJECTED", "message": "...", "path": "../evil" }
 ```
 
-Codes include `EMPTY_DEPLOY`, `INVALID_ZIP`, `INVALID_PATH`, `TOO_MANY_FILES`,
-`FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `ZIP_SLIP_REJECTED`, and
-`ZIP_BOMB_REJECTED`. Limits: 100 MB/canvas, 25 MB/file, 2000 files. The endpoint
-is rate-limited to 10 deploys/min/canvas (`429 rate_limited` with `Retry-After`
-over the limit). `warnings[]` carries non-fatal notices — e.g. a file that may
-contain a canvas API key you should remove before publishing.
+Codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
+`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`,
+`PATH_EXISTS`, `VERSION_UNAVAILABLE`. Limits: 100 MB/canvas, 25 MB/file, 2000
+files. The endpoint is rate-limited to 10 deploys/min/canvas (`429
+rate_limited` with `Retry-After` over the limit). `warnings[]` carries non-fatal
+notices — e.g. a file that may contain a canvas API key you should remove before
+publishing.
 
-Create a canvas without publishing via `POST {base}/api/canvases` (returns the
-slug and the secret key, shown once), then push files with `PUT .../deploy`. See
-the [Deploy API reference](/docs/api/deploy-api).
+The Deploy API also exposes `GET /v1/canvases/:id` (metadata), `GET
+.../versions`, `POST .../unpublish`, and `POST .../rollback` (body `{ version }`).
+See the [Deploy API reference](/docs/api/deploy-api).
 
 ## Versions and rollback
 
 Every publish creates a new immutable version; the canvas always serves its
-**current** version. Switch which version is current from the dashboard (the
-**Versions** tab → **Make current**) or the API. Files are content-addressed —
-only changed files are stored and re-publishing identical files is cheap. The
-last 10 versions are kept.
+**current** version. Roll back to an earlier version from the dashboard (the
+**Versions** tab → the **Make current** button) or the API (`POST
+/v1/canvases/:id/rollback`). Files are content-addressed — only changed files are
+stored and re-publishing identical files is cheap. The last 10 versions are kept.

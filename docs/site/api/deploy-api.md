@@ -6,12 +6,19 @@ operates only on its own canvas, and every response is machine-readable so an ag
 can repair and retry without a human.
 
 > **Auth:** `Authorization: Bearer cd_...` — the canvas secret key, not a session
-> cookie. The key format is `cd_<base64url-32B>`; it is shown once at creation and
-> stored hashed (SHA-256). This path takes no cookies and no CORS, and is distinct
-> from the session-cookie auth the [Runtime API](/docs/api/runtime-api) and browser
-> SDK use.
+> cookie. It is shown once at creation and stored hashed (SHA-256). This path takes
+> no cookies and no CORS, and is distinct from the session-cookie auth the
+> [Runtime API](/docs/api/runtime-api) and browser SDK use.
 
 Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id (not the slug).
+
+| Method | Path | Purpose |
+|---|---|---|
+| `PUT` | `/v1/canvases/{id}/deploy` | Publish a live version from an archive body |
+| `GET` | `/v1/canvases/{id}` | Canvas metadata |
+| `GET` | `/v1/canvases/{id}/versions` | List versions |
+| `POST` | `/v1/canvases/{id}/rollback` | Restore a prior ready version |
+| `POST` | `/v1/canvases/{id}/unpublish` | Take the canvas back to Draft |
 
 ## Deploy a version
 
@@ -19,12 +26,12 @@ Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id (not the slug).
 PUT {base}/v1/canvases/{id}/deploy
 Authorization: Bearer cd_...
 Content-Type: application/zip
-<zip body>
+<archive body>
 ```
 
-The raw request body is ingested as a **ZIP** (put `index.html` at its root). A new
-version is created and the canvas points at it. Deploys via this key are attributed
-to the canvas owner and audited as `source: "api"`.
+The raw request body is ingested as a **ZIP** archive (put `index.html` at its
+root); the body is always read with the ZIP reader regardless of `Content-Type`. A new version is created and the canvas points at it. Deploys via this key
+are attributed to the canvas owner and audited as `source: "api"`.
 
 ```bash
 # Ships static files only. To use the browser SDK, first enable Backend +
@@ -55,10 +62,13 @@ curl -X PUT "{base}/v1/canvases/{id}/deploy" \
   do not fail the deploy.
 
 **Limits:** 100 MB/canvas, 25 MB/file, 2000 files. The body is also capped before
-buffering; an over-limit body returns `413 CANVAS_TOO_LARGE`.
+buffering at 110 MB (canvas cap + 10 MB); an over-limit body returns
+`413 { "code": "CANVAS_TOO_LARGE" }`. An empty body returns
+`400 { "code": "EMPTY_DEPLOY" }`.
 
-**Rate limit:** 10 deploys/min per canvas. Over-limit returns `429 { "error":
-"rate_limited" }` with a `Retry-After` header.
+**Rate limit:** deploy and rollback are throttled at 10/min per canvas (keyed after
+the key is verified). Over-limit returns `429 { "error": "rate_limited" }` with a
+`Retry-After` header.
 
 ## Get a canvas
 
@@ -67,10 +77,8 @@ GET {base}/v1/canvases/{id}
 Authorization: Bearer cd_...
 ```
 
-Returns `{ id, slug, url, title, status, publicationState, currentVersionId }`.
-`publicationState` is the derived lifecycle — one of `draft`, `published`,
-`archived`, or `disabled` (precedence `disabled > archived > published > draft`) —
-so an agent can confirm a canvas is live without interpreting `status` +
+Returns `{ id, slug, url, title, status, publicationState, currentVersionId }`, so
+an agent can confirm a canvas is live without interpreting `status` +
 `currentVersionId` itself.
 
 ## List versions
@@ -80,8 +88,7 @@ GET {base}/v1/canvases/{id}/versions
 Authorization: Bearer cd_...
 ```
 
-Returns one entry per version: `{ number, source, status, createdBy, createdAt,
-fileCount, totalBytes, current }`.
+Returns the canvas's versions, newest first.
 
 ## Roll back
 
@@ -93,10 +100,12 @@ Content-Type: application/json
 { "version": 5 }
 ```
 
-Points the canvas back at version `5`. Returns `{ url, version }`.
-
-- `404 INVALID_PATH` — no ready version with that number.
-- `409 VERSION_UNAVAILABLE` — the target version was pruned out from under the request.
+Restores a prior ready version and points the canvas back at it. Rollback shares the
+10/min-per-canvas rate limit with deploy. A target version that doesn't exist or
+isn't ready returns `404 { "code": "INVALID_PATH" }`; a missing or non-numeric
+`version` field returns `400 { "code": "INVALID_PATH" }`; and if the target was
+pruned between selection and the swap you get `409 { "code": "VERSION_UNAVAILABLE" }`
+(refresh and retry). See [Errors](#errors).
 
 ## Unpublish
 
@@ -105,35 +114,40 @@ POST {base}/v1/canvases/{id}/unpublish
 Authorization: Bearer cd_...
 ```
 
-Takes a published canvas back to **Draft**: the public URL goes offline (404) and
-the canvas leaves the gallery, while its draft and version history are kept.
-Returns `{ url, publicationState: "draft", currentVersionId: null }`. Re-publish
-later with `PUT .../deploy` or by rolling back to a kept version.
+Takes the canvas back to **Draft**: the public URL goes offline and any live
+realtime sockets are dropped, while the draft and version history are kept.
+Re-publish later with `PUT .../deploy` or by rolling back to a kept version.
 
-- `409 CANNOT_UNPUBLISH` — the canvas isn't currently published (already a draft,
-  archived, or disabled).
+Unpublishing a canvas that isn't currently published returns
+`409 { "code": "CANNOT_UNPUBLISH" }`.
 
 ## Errors
 
-Validation failures return a stable `code` so agents can repair from the body:
+Validation failures return a stable `code` so agents can repair from the body.
+`DeployError` validation failures on **deploy** are **`400`**:
 
 ```json
 { "code": "<DeployErrorCode>", "message": "...", "path": "<offending path, optional>" }
 ```
 
-All `DeployError` validation failures are **`400`**. Codes: `EMPTY_DEPLOY`,
-`TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `ZIP_SLIP_REJECTED`,
-`ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`, `PATH_EXISTS`,
-`VERSION_UNAVAILABLE`. See [Error codes](/docs/api/errors) for the full table.
+Codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
+`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`,
+`PATH_EXISTS`, `VERSION_UNAVAILABLE`, `CANNOT_UNPUBLISH`. See
+[Error codes](/docs/api/errors) for the full table.
 
-Auth and limit failures use their own shapes:
+Rollback reuses some of these codes at non-`400` statuses: `INVALID_PATH` at `404`
+when there's no ready version of that number, and `VERSION_UNAVAILABLE` at `409`
+when the target was pruned during the swap. Unpublish returns `CANNOT_UNPUBLISH`
+at `409` when the canvas isn't currently published.
+
+Auth, size, and rate-limit failures use their own shapes:
 
 | Status | Body | Cause |
 |---|---|---|
-| `400` | `{ "code": "EMPTY_DEPLOY", "message": "empty body" }` | empty request body on deploy |
+| `400` | `{ "code": "EMPTY_DEPLOY", ... }` | empty request body on deploy |
 | `401` | `{ "error": "unauthorized" }` | missing or unknown Bearer key |
 | `403` | `{ "error": "unauthorized" }` | key resolves to a different canvas than `{id}` |
 | `413` | `{ "code": "CANVAS_TOO_LARGE", ... }` | body over the size cap |
-| `429` | `{ "error": "rate_limited" }` | over 10 deploys/min for this canvas (`Retry-After` header) |
+| `429` | `{ "error": "rate_limited" }` | over 10/min for this canvas (`Retry-After` header) |
 
 A key used against a canvas it does not own returns `403`, not `404`.
