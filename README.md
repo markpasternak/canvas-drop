@@ -179,16 +179,21 @@ The admin panel covers the all-canvases list with usage, disable/takedown/restor
 
 ### Self-host with Docker (~5 min)
 
-The repo ships a one-command demo stack that runs canvas-drop in its **real `proxy` mode** behind an identity-aware proxy (oauth2-proxy) and a **bundled demo IdP** (Dex), so you can try the production shape with zero external setup:
+Requires **Docker** and **Docker Compose v2** (`docker compose`, not the legacy `docker-compose`). The repo ships a one-command demo stack that runs canvas-drop in its **real `proxy` mode** behind an identity-aware proxy (oauth2-proxy) and a **bundled demo IdP** (Dex), so you can try the production shape with zero external setup:
 
 ```bash
-docker compose up --build
+docker compose up --build          # add -d to run in the background; the first build takes a few minutes
 # then open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+
+docker compose stop                # later: pause the stack (keeps your data)
+docker compose down -v             # or: tear it down and wipe all data
 ```
 
-The app verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you'd run in production — with Postgres for data and an optional MinIO profile for S3. The app is never directly exposed; only the proxy is. `./scripts/compose-smoke.sh` boots the stack and asserts the launch invariants (no host exposure, unauth blocked, forged headers rejected, real login, restart persistence).
+The app verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you'd run in production — with Postgres for data and an optional MinIO profile for S3 (`docker compose --profile minio up`). The app is never directly exposed; only the proxy is. `./scripts/compose-smoke.sh` boots the stack and asserts the launch invariants (no host exposure, unauth blocked, forged headers rejected, real login, restart persistence).
 
-**Going to production** is a config change, not a code change: copy [`.env.production.example`](.env.production.example), point the proxy/JWKS at your real IdP, and switch storage/DB as needed. The full walkthrough — including the graduation checklist — is in [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
+> **⚠️ The demo stack is for local evaluation only — don't expose it to the internet as-is.** Its bundled Dex / oauth2-proxy secrets and the `demo@example.com` login are public, fake placeholders, and it runs on plain HTTP in `path` mode (weaker cross-canvas isolation). Rotate every secret and follow the graduation checklist before any real use.
+
+**Going to production** is a configuration change rather than a code change — though not a thoughtless one: copy [`.env.production.example`](.env.production.example), point the proxy/JWKS at your real IdP, move to subdomain mode behind real TLS, and rotate all secrets. The full walkthrough — including the graduation checklist — is in [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
 
 ---
 
@@ -209,6 +214,8 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 ## Status
 
 **v1 is feature-complete** and being hardened toward a public release. Built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md), every milestone on `main` with CI green on both dialects:
+
+> **Maturity, honestly:** canvas-drop is **not yet running in production anywhere serious.** It is built and verified — boots, passes a dual-dialect test suite, and self-hosts via Docker — but it hasn't been battle-tested under a real org's load and usage yet. That's exactly what's next, and I'd love to see it: real usage, and the hardening that comes from contact with reality. Self-host reports, issues, and PRs are very welcome.
 
 - ✅ **Foundation** — config, the four pluggable drivers, structured logging, audit log, auth gateway
 - ✅ **Hosting + deploy** — folder/ZIP/paste/API deploy, versioning, rollback
