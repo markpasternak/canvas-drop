@@ -1,11 +1,28 @@
 # Contributing to canvas-drop
 
-canvas-drop is built by humans and AI coding agents working together. The same rules apply to both.
+canvas-drop is built by humans and AI coding agents working together. The same rules apply to both. It's early, and outside contributions are genuinely welcome.
+
+## Found a bug, or have an idea? (start here)
+
+You don't need to be plugged into the plan loop to help. For a bug, a docs fix, or a small improvement:
+
+1. **Open an issue first** — a [bug report](.github/ISSUE_TEMPLATE/bug-report.md) or a [feature request](.github/ISSUE_TEMPLATE/feature-request.md). For anything beyond a trivial fix, a quick discussion saves a wasted PR.
+2. **Get it running locally** — see the [README quickstart](README.md#quickstart-local-dev): `pnpm install && cp .env.example .env && pnpm dev`.
+3. **Open a PR against `main`** with a clear title and a link to the issue. A small external PR **does not** need a plan or a `U<N>` id — that convention (below) is for the internal plan-driven loop, not for drive-by fixes.
+4. Be kind — see the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+**Security issues:** please do **not** open a public issue — see [`SECURITY.md`](SECURITY.md) for private disclosure.
+
+By contributing, you agree your contributions are licensed under the project's [MIT License](LICENSE) (inbound = outbound).
+
+---
+
+The rest of this doc describes the **plan-driven loop** that humans and AI agents follow for larger, tracked work.
 
 ## Before you start
 
 - Read **`BUILD_BRIEF.md`** — the locked product spec. It wins any conflict.
-- Find the relevant plan in **`docs/plans/`** and the matching GitHub issue. Work flows from plans, not ad-hoc ideas.
+- Find the relevant plan in **`docs/plans/`** and the matching GitHub issue. Substantial, tracked work flows from plans — small external fixes (above) don't need one.
 - AI agents: read **`AGENTS.md`** and **`docs/agent-workflow.md`** — they define the worktree + issue + compounding loop.
 
 ## Workflow
