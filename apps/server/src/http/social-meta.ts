@@ -1,6 +1,17 @@
 import { escapeHtml } from "./error-pages.js";
 
 /**
+ * Favicon / icon `<link>`s for the self-rendered public pages (landing, legal,
+ * docs), mirroring the dashboard SPA's `index.html`. The targets are served
+ * pre-gateway by `brandAssetRoutes`, so they resolve while signed out. Kept
+ * separate from {@link ogMeta} (icons are page chrome, not SEO).
+ */
+export const FAVICON_LINKS = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+<link rel="manifest" href="/site.webmanifest">`;
+
+/**
  * One consistent block of SEO + Open Graph + Twitter card tags for the indexable,
  * self-rendered public pages — the landing (`/`), legal (`/privacy`, `/terms`),
  * and docs (`/docs/*`). Centralizing it means every shared link unfurls

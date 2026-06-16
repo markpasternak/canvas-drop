@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
-import { ogMeta } from "./social-meta.js";
+import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
 /**
@@ -72,6 +72,7 @@ function renderLegalPage(opts: {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(opts.title)} · canvas-drop</title>
 ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
+${FAVICON_LINKS}
 <style>
   :root {
     --canvas: #f5f5f2;

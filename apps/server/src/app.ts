@@ -40,6 +40,7 @@ import { docsRoutes } from "./docs/routes.js";
 import { draftService } from "./draft/service.js";
 import type { Mailer } from "./email/mailer.js";
 import { checkHealth } from "./health.js";
+import { brandAssetRoutes } from "./http/brand-assets.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import { resolveClientIp } from "./http/client-ip.js";
 import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
@@ -206,6 +207,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     const health = await checkHealth(deps.db);
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
+
+  // Public favicon / brand icons (`/favicon.svg`, `/site.webmanifest`, `/brand/*`).
+  // Pre-gateway so the signed-out landing/legal/docs pages + crawlers get an icon
+  // (the SPA serves the same files, but behind the gateway they'd 302 to login).
+  app.route("/", brandAssetRoutes());
 
   // Public legal pages (`/privacy`, `/terms`) — mounted BEFORE the auth gateway so
   // the Google OAuth consent screen's reviewers can open them while signed out.

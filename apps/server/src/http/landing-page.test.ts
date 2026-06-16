@@ -48,6 +48,9 @@ describe("landing page — rendered content", () => {
     // The marketing page — unlike the gated surfaces — is meant to be indexed.
     expect(html).toContain('name="robots" content="index,follow"');
     expect(html).toContain("application/ld+json");
+    // Favicon links so the signed-out page shows an icon (served pre-gateway).
+    expect(html).toContain('rel="icon" href="/favicon.svg"');
+    expect(html).toContain('rel="manifest" href="/site.webmanifest"');
   });
 
   it("targets the auth-mode-appropriate sign-in destination", () => {

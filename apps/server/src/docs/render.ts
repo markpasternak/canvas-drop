@@ -5,7 +5,7 @@ import {
   SYSTEM_PAGE_BRAND_INLINE,
   SYSTEM_PAGE_STYLES,
 } from "../http/error-pages.js";
-import { ogMeta } from "../http/social-meta.js";
+import { FAVICON_LINKS, ogMeta } from "../http/social-meta.js";
 import { DOC_NAV, DOC_PAGES, type DocPage } from "./generated-content.js";
 
 /**
@@ -247,6 +247,7 @@ export function renderDocPage(path: string, origin = ""): string | null {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 ${socialMeta(path, `${page.title} · canvas-drop docs`, description, origin)}
+${FAVICON_LINKS}
 <script src="/docs/theme.js"></script>
 <style>
 ${DOCS_STYLES}

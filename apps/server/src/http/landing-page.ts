@@ -5,7 +5,7 @@ import { SESSION_COOKIE } from "../auth/session.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
-import { ogMeta } from "./social-meta.js";
+import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
 /**
@@ -207,6 +207,7 @@ function head(origin: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 ${ogMeta({ origin, path: "/", title, description: desc })}
+${FAVICON_LINKS}
 <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable docs">
 <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
