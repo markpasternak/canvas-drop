@@ -361,6 +361,7 @@ CANVAS_DROP_BASE_URL=http://localhost:3000   # subdomain mode: https://canvases.
 CANVAS_DROP_SESSION_SECRET=...               # 256-bit
 CANVAS_DROP_ADMIN_EMAILS=mark@example.com    # bootstrap admins
 CANVAS_DROP_REALTIME=on|off                  # ephemeral pub/sub + presence; default on (single-process, in-memory)
+CANVAS_DROP_MCP=on|off                        # remote MCP server + its OAuth endpoints (agent control plane) at /mcp; default on
 CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=false # explicit unsafe opt-in; only for trusted own-hosting
 
 # Database

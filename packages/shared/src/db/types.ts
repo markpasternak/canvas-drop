@@ -8,6 +8,9 @@ import type {
   guestInvites,
   guestSessions,
   kvEntries,
+  mcpTokens,
+  oauthClients,
+  oauthCodes,
   sessions,
   settings,
   usageEvents,
@@ -51,6 +54,12 @@ export type GuestSession = typeof guestSessions.$inferSelect;
 export type NewGuestSession = typeof guestSessions.$inferInsert;
 export type AllowedEmail = typeof allowedEmails.$inferSelect;
 export type NewAllowedEmail = typeof allowedEmails.$inferInsert;
+export type OauthClient = typeof oauthClients.$inferSelect;
+export type NewOauthClient = typeof oauthClients.$inferInsert;
+export type OauthCode = typeof oauthCodes.$inferSelect;
+export type NewOauthCode = typeof oauthCodes.$inferInsert;
+export type McpToken = typeof mcpTokens.$inferSelect;
+export type NewMcpToken = typeof mcpTokens.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

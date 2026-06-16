@@ -125,6 +125,10 @@ const rawSchema = z
     CANVAS_DROP_SESSION_SECRET: z.string().optional(),
     CANVAS_DROP_ADMIN_EMAILS: csv(),
     CANVAS_DROP_REALTIME: z.enum(["on", "off"]).optional().default("on"),
+    // Remote MCP server + its OAuth authorization endpoints (the connect-once agent
+    // control plane). Default on; an operator disables it to drop the surface entirely
+    // (the routes are not mounted, not merely 403'd).
+    CANVAS_DROP_MCP: z.enum(["on", "off"]).optional().default("on"),
     CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: bool(false),
     // Where the built dashboard SPA lives. Defaults (in serveSpa) to a path
     // resolved from the server module; override for non-standard layouts.
@@ -391,6 +395,7 @@ const rawSchema = z
       sessionSecret: r.CANVAS_DROP_SESSION_SECRET ?? "dev-insecure-session-secret",
       adminEmails,
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
+      mcp: { enabled: r.CANVAS_DROP_MCP === "on" },
       allowMultiUserPathMode: r.CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE,
       dashboardDist: r.CANVAS_DROP_DASHBOARD_DIST,
 
