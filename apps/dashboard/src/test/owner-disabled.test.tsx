@@ -86,7 +86,7 @@ describe("owner sees takedown reason (R3)", () => {
       "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
     renderOverview();
-    await screen.findByText(/status/i);
+    await screen.findByText(/overview/i);
     expect(screen.queryByText(/an administrator disabled/i)).not.toBeInTheDocument();
   });
 });
