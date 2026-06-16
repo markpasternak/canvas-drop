@@ -17,6 +17,6 @@
     "dev": "esbuild src/browser-entry.ts --bundle --format=iife --outfile=dist/sdk.v1.js --watch"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.1"
   }
 }
