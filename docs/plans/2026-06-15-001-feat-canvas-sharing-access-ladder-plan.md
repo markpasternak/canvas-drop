@@ -63,7 +63,7 @@ Carried from the origin requirements doc; R-IDs preserved.
 - R22. Guest and public access function in `oidc`/`dev` modes (app owns the gate). In `proxy` mode they require an operator upstream carve-out; absent that, the rungs are documented non-functional and the UI communicates the constraint rather than silently failing.
 
 **Spec amendments**
-- R23. BUILD_BRIEF D1/D4/D19 and the §12.0 invariant set are amended to admit invited-guest and admin-gated public access under these constraints, preserving the hard invariant that a canvas is reachable only by owner/admin, an allowed org member, an invited guest on its allowlist, or — when public and admin-permitted — an anonymous visitor to a static canvas; everything else 404s.
+- R23. BUILD_BRIEF D1/D4/D19 and the §12.0 invariant set are amended to admit invited-guest and admin-gated public access under these constraints, preserving the hard invariant that a canvas is reachable only by its owner, an allowed org member, an invited guest on its allowlist, or — when public and admin-permitted — an anonymous visitor to a static canvas; everything else 404s. (Post-impl, D-admin-restrict: an admin has **no content bypass** on canvases it doesn't own — it's treated as an ordinary org member for content/runtime/realtime; cross-owner admin power is management-only.)
 
 ---
 
@@ -106,9 +106,13 @@ flowchart TB
 flowchart TB
   S{canvas status} -->|deleted/archived| N1[404]
   S -->|disabled| F1[403 disabled page]
-  S -->|active| OWN{owner or admin?}
+  S -->|active| OWN{owner?}
   OWN -->|yes| A1[allow, no gate]
   OWN -->|no| RUNG{access rung}
+  %% NOTE (post-impl, D-admin-restrict): a non-owner admin is NOT a bypass here — it
+  %% flows down the `no` branch and is treated like an ordinary member, so a non-owned
+  %% private/unlisted canvas 404s for an admin too. Admins keep only the password-gate
+  %% bypass on rungs they can reach. Cross-owner admin power is management-only.
   RUNG -->|private| N2[404]
   RUNG -->|specific_people| AL{principal on allowlist?<br/>member id or guest inviteId}
   RUNG -->|whole_org| MEMQ{principal kind == member?}
@@ -164,7 +168,7 @@ Grouped into three phases. Build in order; each unit is one atomic commit with i
 - **Requirements:** R1, R2, R3, R4, R6, R8, R17 (static-only flag surfaced for the serve layer).
 - **Dependencies:** U2.
 - **Files:** `apps/server/src/canvas/authorization.ts` (+ `.test.ts`), `apps/server/src/http/types.ts` (add a discriminated `Principal` slot to AppEnv, distinct from the org-only `user: User` slot — see KTD9), and the two other `decideCanvasAccess` callers that the signature change breaks: `apps/server/src/routes/canvas-api.ts` (line ~70) and `apps/server/src/realtime/hub.ts` (`revalidateCanvas`, line ~282). All three move to the new signature in this one commit so the build stays green.
-- **Approach:** Introduce a discriminated `Principal` (`member`/`guest`/`anonymous`, KTD2). Change `decideCanvasAccess(canvas, principal, now)` to branch on rung after the existing status/owner checks: `private` → owner/admin only; `specific_people` → allow if the principal is on the allowlist (member id or guest inviteId — passed in as a resolved boolean from the canonical `isPrincipalAllowed` repo lookup, so the table stays I/O-free and exhaustively unit-testable); `whole_org` → allow if principal kind is `member`; `public_link` → allow with `staticOnly: true` for **any non-owner** (anonymous OR member — R17). Preserve order (deleted/archived/disabled/owner first). Every unmatched branch denies 404. Note for callers: AppEnv keeps `user: User` for dashboard/management; the canvas/runtime path reads `principal` — `/me`, `/v1/c/:slug/me`, and realtime must branch on kind, never assume an org user row exists.
+- **Approach:** Introduce a discriminated `Principal` (`member`/`guest`/`anonymous`, KTD2). Change `decideCanvasAccess(canvas, principal, now)` to branch on rung after the existing status/owner checks: `private` → owner only (a non-owner admin falls through to the rung, treated as a member — D-admin-restrict, post-impl); `specific_people` → allow if the principal is on the allowlist (member id or guest inviteId — passed in as a resolved boolean from the canonical `isPrincipalAllowed` repo lookup, so the table stays I/O-free and exhaustively unit-testable); `whole_org` → allow if principal kind is `member`; `public_link` → allow with `staticOnly: true` for **any non-owner** (anonymous OR member — R17). Preserve order (deleted/archived/disabled/owner first). Every unmatched branch denies 404. Note for callers: AppEnv keeps `user: User` for dashboard/management; the canvas/runtime path reads `principal` — `/me`, `/v1/c/:slug/me`, and realtime must branch on kind, never assume an org user row exists.
 - **Technical design (directional):** `AccessDecision` gains `{ action: "allow"; needsPasswordGate: boolean; staticOnly: boolean }`. The allowlist membership is passed in as a resolved boolean (caller does the lookup) so the table stays I/O-free and exhaustively unit-testable.
 - **Patterns to follow:** The existing pure-table style and exhaustive branch tests in `authorization.test.ts`; default-deny posture (§12.1.4 existence non-confirmation).
 - **Test scenarios:**

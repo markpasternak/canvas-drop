@@ -50,7 +50,9 @@ export function principalLookupKey(principal: Principal): { userId?: string; ema
  * API, and the realtime handshake). Order matters (KTD-6):
  *   1. deleted/archived   → 404 (gone / offline; opaque even to the owner)
  *   2. disabled           → 403 (owner/admin still learn why)
- *   3. owner or admin     → allow, full (members only)
+ *   3. owner               → allow, full (members only; a non-owner admin gets NO
+ *                            content bypass — it falls through to the per-rung check
+ *                            at step 5 and is treated like an ordinary member)
  *   4. guest scoped to another canvas → 404 (a guest can't reach an un-invited canvas)
  *   5. per-rung principal check → allow (with expiry + password modifiers) or 404
  *

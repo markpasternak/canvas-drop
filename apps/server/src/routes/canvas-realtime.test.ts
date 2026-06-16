@@ -258,6 +258,18 @@ describe("realtime WebSocket route", () => {
     await expect(c.opened).rejects.toMatchObject({ status: 404 }); // owner_only → 404
   });
 
+  it("refuses the upgrade for a private canvas hit by a non-owner ADMIN (admin content restriction)", async () => {
+    client = await makeTestDb("sqlite");
+    // The default injected identity is an admin (id 'admin', isAdmin true). Against a
+    // private canvas it does not own, the realtime handshake is refused — admins no
+    // longer bypass the access rung for content/realtime (D-admin-restrict). Guards
+    // against a regression that re-adds the admin content bypass to decideCanvasAccess.
+    await seedCanvas(client, { slug: "app", shared: false });
+    server = await startInjectedApp(client);
+    const c = track(connect(server.port, "app")); // no header → admin identity
+    await expect(c.opened).rejects.toMatchObject({ status: 404 });
+  });
+
   it("capability-off: upgrades then closes 4403 with a CAPABILITY_DISABLED frame", async () => {
     client = await makeTestDb("sqlite");
     await seedCanvas(client, { slug: "app", shared: true, capRealtime: false });

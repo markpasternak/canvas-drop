@@ -34,3 +34,20 @@ export function rootEntry(manifest: Manifest): RootEntry {
   ).length;
   return { path: null, reason: htmlCount > 1 ? "ambiguous" : "none" };
 }
+
+/**
+ * Whether two manifests have identical content: same path set and same content
+ * hash for every path (size/mime are derived from the bytes, so the hash is the
+ * authoritative equality key). The single comparator for "did these files change",
+ * shared by the editor's dirty check (draft vs live) and the deploy engine's
+ * post-publish draft reconciliation (draft vs its base version) so the two can't
+ * drift apart.
+ */
+export function manifestsEqual(a: Manifest, b: Manifest): boolean {
+  const ak = Object.keys(a);
+  if (ak.length !== Object.keys(b).length) return false;
+  for (const path of ak) {
+    if (a[path]?.hash !== b[path]?.hash) return false;
+  }
+  return true;
+}

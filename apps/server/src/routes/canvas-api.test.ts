@@ -120,6 +120,21 @@ describe("canvasApiRoutes (runtime seam + me)", () => {
     expect((await jsonOf<{ code: string }>(asAdmin)).code).toBe("DISABLED");
   });
 
+  it("runtime API: a non-owner admin gets 404 on a private canvas (admin content restriction)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await canvas(true); // private by default, backend on
+    // A different user who is an admin — admins no longer bypass the rung for the
+    // runtime API; a private canvas they don't own is 404, same as any non-member.
+    const asAdmin = await buildApi(client, { id: "other-admin", isAdmin: true }).request(
+      "/v1/c/app/me",
+    );
+    expect(asAdmin.status).toBe(404);
+    expect((await jsonOf<{ code: string }>(asAdmin)).code).toBe("OWNER_ONLY");
+    // Sanity: the owner still reaches it.
+    const asOwner = await buildApi(client, { id: owner.id }).request("/v1/c/app/me");
+    expect(asOwner.status).toBe(200);
+  });
+
   it("404s a nonexistent / hidden canvas (no existence leak)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client);

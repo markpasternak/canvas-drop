@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { type Config, loadConfig } from "@canvas-drop/shared";
+import type { Manifest } from "@canvas-drop/shared/db";
 import { zipSync } from "fflate";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
@@ -84,6 +85,58 @@ describe("deployEngine", () => {
     expect(r2.version).toBe(2);
     const after2 = await canvases.findById(canvas.id);
     expect(after2?.currentVersionId).not.toBe(after?.currentVersionId);
+  });
+
+  // --- post-deploy draft reconciliation: the editor must reflect a direct/API
+  //     publish unless the owner has genuine unpublished edits to protect. ---
+  it("a direct deploy with no existing draft seeds the draft to the published version", async () => {
+    const { engine, canvases, drafts, canvas, ownerId } = await setup();
+    await engine.deploy(canvas, "api", folder({ "index.html": "v1" }), ownerId);
+    const after = await canvases.findById(canvas.id);
+    const draft = await drafts.getByCanvas(canvas.id);
+    expect(draft?.stale).toBe(false);
+    expect(draft?.baseVersionId).toBe(after?.currentVersionId);
+    expect(Object.keys((draft?.manifest ?? {}) as Manifest)).toEqual(["index.html"]);
+  });
+
+  it("an API deploy syncs an UNTOUCHED draft to the new version (no phantom stale/dirty)", async () => {
+    // Repro of the reported bug: a draft that merely mirrors the previous version
+    // (the editor's working copy, no real edits) must not be flagged stale by a
+    // later API deploy — the editor should show what was just deployed.
+    const { engine, canvases, versions, drafts, canvas, ownerId } = await setup();
+    await engine.deploy(canvas, "folder", folder({ "old.html": "<h1>v1</h1>" }), ownerId);
+    const v1Id = (await canvases.findById(canvas.id))?.currentVersionId as string;
+    const v1Manifest = (await versions.findById(v1Id))?.manifest as Manifest;
+    await drafts.resetToBase(canvas.id, v1Manifest, v1Id); // untouched working copy of v1
+
+    await engine.deploy(canvas, "api", folder({ "new.html": "<h1>v2</h1>" }), ownerId);
+    const v2Id = (await canvases.findById(canvas.id))?.currentVersionId as string;
+    const draft = await drafts.getByCanvas(canvas.id);
+    expect(draft?.stale).toBe(false); // no "a newer version was published"
+    expect(draft?.baseVersionId).toBe(v2Id); // rebased onto the deploy
+    expect(Object.keys((draft?.manifest ?? {}) as Manifest)).toEqual(["new.html"]); // shows v2
+  });
+
+  it("an API deploy PRESERVES a genuinely-edited draft and flags it stale", async () => {
+    const { engine, canvases, versions, drafts, canvas, ownerId } = await setup();
+    await engine.deploy(canvas, "folder", folder({ "old.html": "<h1>v1</h1>" }), ownerId);
+    const v1Id = (await canvases.findById(canvas.id))?.currentVersionId as string;
+    const v1Manifest = (await versions.findById(v1Id))?.manifest as Manifest;
+    await drafts.resetToBase(canvas.id, v1Manifest, v1Id);
+    // A real held edit: an extra file the owner added in the editor but didn't publish.
+    await drafts.setManifest(canvas.id, {
+      ...v1Manifest,
+      "extra.html": { size: 3, hash: "deadbeef", mime: "text/html" },
+    });
+
+    await engine.deploy(canvas, "api", folder({ "new.html": "<h1>v2</h1>" }), ownerId);
+    const draft = await drafts.getByCanvas(canvas.id);
+    expect(draft?.stale).toBe(true); // editor warns "a newer version was published"
+    // Held edits are preserved, not clobbered by the deploy.
+    expect(Object.keys((draft?.manifest ?? {}) as Manifest).sort()).toEqual([
+      "extra.html",
+      "old.html",
+    ]);
   });
 
   it("strips dotfiles and warns on blocked executables (served as text)", async () => {

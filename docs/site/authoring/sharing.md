@@ -1,14 +1,19 @@
 # Sharing & access
 
-Every canvas is **private by default** — only you (and admins) can open it. When
+Every canvas is **private by default** — only you, its owner, can open it. When
 you're ready to let others in, you pick one **access rung** in **Settings →
 Sharing**. Sharing a canvas requires it to be published.
+
+> Admins don't get a back door into your content: an admin can *manage* any canvas
+> (disable, archive, delete, and see it in the admin list) but is treated like any
+> other org member for *opening* it — a private or unlisted canvas they don't own
+> returns a 404 to them too.
 
 ## The access ladder
 
 | Rung | Who can open it | Backend primitives |
 | --- | --- | --- |
-| **Private** | Only you and admins. | — (owner has full access) |
+| **Private** | Only you, the owner. | — (owner has full access) |
 | **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
 | **Whole org** | Anyone in your org with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Admin-granted per account. | **None** — static files only. |

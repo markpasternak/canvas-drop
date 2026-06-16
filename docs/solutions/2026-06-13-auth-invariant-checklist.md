@@ -97,6 +97,12 @@ anonymous public visitors. New §12.0-shaped failure modes to test rejection-fir
 - [ ] **Magic link** — high-entropy, hashed at rest, single-use, IP-throttled,
       consumed only via same-origin POST (no cross-origin GET token burn); the guest
       session is bounded by the invite's expiry/revocation on every resolve.
+- [ ] **Admins are not a content bypass** (D-admin-restrict, 2026-06-16) — only the
+      *owner* bypasses the rung in `decideCanvasAccess`; a non-owner admin is treated
+      as an ordinary member (non-owned `private`/unlisted `specific_people` → 404).
+      Cross-owner admin power is management-only. The spec text (`§12.0 #3`, README,
+      docs) must say "owner", not "owner or admin". See
+      [[2026-06-16-admin-content-restriction-and-deploy-draft-sync]].
 
 ## Calibrate to the trust model (don't over-engineer)
 

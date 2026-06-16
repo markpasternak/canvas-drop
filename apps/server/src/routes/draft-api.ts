@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
+import { manifestsEqual } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -42,13 +43,7 @@ function draftView(draft: Draft, liveManifest: Manifest | null) {
 /** Whether the draft manifest diverges from the live version's (path set or any hash). */
 function isDirty(draft: Manifest, live: Manifest | null): boolean {
   if (!live) return Object.keys(draft).length > 0;
-  const dk = Object.keys(draft);
-  const lk = Object.keys(live);
-  if (dk.length !== lk.length) return true;
-  for (const path of dk) {
-    if (draft[path]?.hash !== live[path]?.hash) return true;
-  }
-  return false;
+  return !manifestsEqual(draft, live);
 }
 
 function previewNotFound(c: Context<AppEnv>): Response {

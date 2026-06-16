@@ -37,14 +37,19 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    canvas API key, or canvas content. API keys and session tokens are
    SHA-256-hashed at rest (only the hash is stored); API keys are shown once at
    creation, and session tokens live only in an HttpOnly cookie.
-3. **No unauthorized access.** A canvas is reachable only by its owner/admin; at
+3. **No unauthorized access.** A canvas is reachable only by its owner; at
    the `whole_org` rung, allowed org members; at `specific_people`, a principal on
    its allowlist (an org member, or an invited guest whose magic-link session is
    for *that* canvas); at `public_link`, anyone — but static-only and only while
    the owner account holds the admin-granted publish capability. All subject to
-   not revoked/expired and any password. Everything else returns `404`; a guest
-   can never reach a canvas it wasn't invited to, and an anonymous public visitor
-   gets no backend primitives.
+   not revoked/expired and any password. An **admin has no content bypass on
+   canvases they don't own** — for someone else's canvas an admin is treated as an
+   ordinary org member (the rung applies), so a non-owned private or unlisted
+   canvas `404`s for them too; cross-owner admin power is limited to management
+   actions (disable/archive/delete/metadata), never canvas content, the runtime
+   API, or realtime. Everything else returns `404`; a guest can never reach a
+   canvas it wasn't invited to, and an anonymous public visitor gets no backend
+   primitives.
 4. **No cross-canvas reach in subdomain mode.** One canvas (or its code, SDK, or
    socket) cannot read, write, or act on another canvas's data, files, AI quota,
    or realtime channels. Path mode has reduced browser isolation (see below).

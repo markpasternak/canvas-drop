@@ -147,4 +147,17 @@ describe("capabilities tab", () => {
     renderCapabilities();
     expect(await screen.findByText("Always on")).toBeInTheDocument();
   });
+
+  it("warns that backend is inert when a public_link canvas has backend enabled", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...ON, access: "public_link" }) });
+    renderCapabilities();
+    expect(await screen.findByText(/won't run for public visitors/i)).toBeInTheDocument();
+  });
+
+  it("does NOT show the public-backend warning on a non-public canvas", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...ON, access: "private" }) });
+    renderCapabilities();
+    await screen.findByRole("switch", { name: "Enable backend" });
+    expect(screen.queryByText(/won't run for public visitors/i)).not.toBeInTheDocument();
+  });
 });

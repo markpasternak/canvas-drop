@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
-import type { Canvas, DeploySource, Manifest, Version } from "@canvas-drop/shared/db";
+import type { Canvas, DeploySource, Draft, Manifest, Version } from "@canvas-drop/shared/db";
 import { looksLikeApiKey } from "../canvas/api-key.js";
 import { collectGarbage } from "../canvas/blob-gc.js";
-import { soleHtmlEntry } from "../canvas/manifest.js";
+import { manifestsEqual, soleHtmlEntry } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -165,27 +165,27 @@ export function deployEngine(deps: DeployEngineDeps) {
       await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
       // Reconcile the in-browser draft with this direct publish (deploy API / folder
-      // / ZIP / paste). If there are real held edits (a non-empty draft), preserve
-      // them and just flag the draft stale so the editor shows the "a newer version
-      // was published" notice (M5 R15/F3/AE5). But if there's no draft — or the draft
-      // is empty, so there is nothing to lose — seed/sync it to the just-published
-      // version (manifest + base = this version, stale cleared), exactly as the
-      // editor's own Publish leaves things. That way an API/agent publish leaves the
-      // editor reflecting production instead of an empty, perpetually-"behind" draft.
+      // / ZIP / paste). The editor must end up showing what was just deployed UNLESS
+      // the owner has genuine unpublished edits to protect. We decide that by what the
+      // draft holds RELATIVE TO ITS BASE VERSION, not merely whether it is non-empty:
+      // the editor seeds a draft from the current version on open, so a draft that
+      // still matches its base is an untouched working copy with nothing to lose — the
+      // earlier "non-empty ⇒ held edits" heuristic wrongly flagged those stale, so an
+      // API/agent deploy left the editor stuck on "a newer version was published" with
+      // phantom unpublished changes (the reported bug). Now:
+      //   - no draft yet            → seed it to the just-published version
+      //   - draft == its base       → no real edits → sync to the new version
+      //   - draft diverges from base → genuine held edits → preserve + flag stale
+      //     so the editor shows the "a newer version was published" notice (R15/F3/AE5)
       // Best-effort — never fail the deploy over draft bookkeeping.
       try {
         const draft = await deps.drafts.getByCanvas(canvas.id);
-        // `manifest` is a nullable JSON column at the type level; guard before
-        // Object.keys so a null manifest is treated as empty rather than throwing
-        // into the catch (which would silently skip the sync after a clean deploy).
-        const draftManifest = (draft?.manifest as Manifest | null) ?? {};
-        const draftEmpty = !draft || Object.keys(draftManifest).length === 0;
-        if (!draftEmpty) {
-          await deps.drafts.markStale(canvas.id);
-        } else if (draft) {
-          await deps.drafts.resetToBase(canvas.id, manifest, version.id);
-        } else {
+        if (!draft) {
           await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: version.id });
+        } else if (await this.draftHasUnpublishedEdits(draft)) {
+          await deps.drafts.markStale(canvas.id);
+        } else {
+          await deps.drafts.resetToBase(canvas.id, manifest, version.id);
         }
       } catch (err) {
         deps.log.warn({ err, canvasId: canvas.id }, "post-deploy draft sync failed");
@@ -226,6 +226,25 @@ export function deployEngine(deps: DeployEngineDeps) {
         }
       }
       throw lastErr;
+    },
+
+    /**
+     * Whether the draft holds genuine unpublished edits relative to the version it
+     * was derived from — the signal for whether a direct publish must preserve it.
+     *   - empty draft               → no edits (nothing to lose)
+     *   - no/unknown base version    → treat as edits (author had no version to
+     *     diverge from, or the base was pruned — preserve rather than risk clobbering)
+     *   - manifest == base manifest  → untouched working copy → no edits
+     *   - manifest != base manifest  → real held edits
+     */
+    async draftHasUnpublishedEdits(draft: Draft): Promise<boolean> {
+      const draftManifest = (draft.manifest as Manifest | null) ?? {};
+      if (Object.keys(draftManifest).length === 0) return false;
+      if (!draft.baseVersionId) return true;
+      const base = await deps.versions.findById(draft.baseVersionId);
+      const baseManifest = base?.manifest as Manifest | null;
+      if (!baseManifest) return true;
+      return !manifestsEqual(draftManifest, baseManifest);
     },
 
     /**
