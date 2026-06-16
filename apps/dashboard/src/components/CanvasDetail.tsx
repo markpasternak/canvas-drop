@@ -8,7 +8,7 @@ import { IconLink } from "./IconButton.js";
 import { Skeleton } from "./Skeleton.js";
 
 const TABS = [
-  { to: "/canvases/$id", label: "Status", exact: true, path: (id: string) => `/canvases/${id}` },
+  { to: "/canvases/$id", label: "Overview", exact: true, path: (id: string) => `/canvases/${id}` },
   {
     to: "/canvases/$id/editor",
     label: "Editor",

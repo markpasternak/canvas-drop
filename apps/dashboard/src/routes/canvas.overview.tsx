@@ -1,16 +1,18 @@
 import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
+import { Field, TextareaField } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
+import { useUpdateSettings } from "../lib/mutations.js";
 import { useCanvas, useVersions } from "../lib/queries.js";
 
 function rootWorks(entry?: RootEntry): boolean {
@@ -214,18 +216,30 @@ function Fact({
   );
 }
 
-/** Status tab: live health, the public URL, and the current deploy at a glance. Shows
- * the one-time "Your canvas is live" annotation right after a first deploy. */
+/** Overview tab: identity, live health, the public URL, and the current deploy at
+ * a glance. Shows the one-time "Your canvas is live" annotation after publish. */
 export default function Overview() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { live } = useSearch({ strict: false }) as { live?: boolean };
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: versions } = useVersions(id);
+  const update = useUpdateSettings(id);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const current = versions?.find((v) => v.current);
   // Total disk footprint = every kept (ready) version's bytes, not just the live one.
   const totalBytes = versions?.reduce((sum, v) => sum + v.totalBytes, 0) ?? 0;
   const deployCount = versions?.length ?? 0;
   const hasHomePageFact = current?.entry.path !== null && current?.entry.path !== undefined;
+
+  // Seed editable identity fields on canvas identity only so optimistic writes
+  // elsewhere don't clobber an in-progress title/description edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
+  useEffect(() => {
+    if (!canvas) return;
+    setTitle(canvas.title);
+    setDescription(canvas.description ?? "");
+  }, [canvas?.id]);
 
   if (isLoading || !canvas) {
     return (
@@ -235,6 +249,8 @@ export default function Overview() {
       </TabContentFrame>
     );
   }
+
+  const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
 
   return (
     <TabContentFrame>
@@ -246,6 +262,33 @@ export default function Overview() {
             : "Fix the root page before sharing."}
         </InlineNotice>
       )}
+
+      <Panel>
+        <div className="mb-5 space-y-1">
+          <h2 className="text-sm font-semibold text-fg">Basics</h2>
+          <p className="text-xs text-muted">Name this canvas so it is easy to scan and share.</p>
+        </div>
+        <div className="space-y-4">
+          <Field
+            label="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => title !== canvas.title && save({ title })}
+            maxLength={200}
+          />
+          <TextareaField
+            label="Description"
+            value={description}
+            rows={3}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={() =>
+              (description || null) !== canvas.description &&
+              save({ description: description || null })
+            }
+            maxLength={2000}
+          />
+        </div>
+      </Panel>
 
       <HealthCard canvas={canvas} current={current} />
 

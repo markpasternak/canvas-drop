@@ -1,13 +1,12 @@
 import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
-import { Field, TextareaField } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
@@ -29,7 +28,6 @@ import { useCanvas } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const SECTIONS = [
-  { id: "basics", label: "Basics" },
   { id: "url-routing", label: "URL & routing" },
   { id: "deploy-api", label: "Deploy API" },
   { id: "lifecycle", label: "Lifecycle" },
@@ -38,7 +36,7 @@ const SECTIONS = [
 const SECTION_IDS = SECTIONS.map((s) => s.id);
 
 /** Canvas settings for durable configuration and owner-only lifecycle actions.
- * Sharing and audience controls live in the Share tab. */
+ * Identity lives in Overview; sharing and audience controls live in Share. */
 export default function Settings() {
   const { id } = useParams({ strict: false }) as { id: string };
   const navigate = useNavigate();
@@ -60,18 +58,6 @@ export default function Settings() {
   >(null);
   const urlCopyRef = useRef<HTMLButtonElement>(null);
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-
-  // Seed local field mirrors on canvas identity only. Optimistic settings writes
-  // replace the cached canvas object; keying on id preserves in-progress edits.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
-  useEffect(() => {
-    if (!canvas) return;
-    setTitle(canvas.title);
-    setDescription(canvas.description ?? "");
-  }, [canvas?.id]);
-
   const { active: activeSection, select: selectSection } = useSectionNav(SECTION_IDS, !!canvas);
 
   if (isLoading || !canvas) {
@@ -84,27 +70,6 @@ export default function Settings() {
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav sections={SECTIONS} active={activeSection} onSelect={selectSection} />
       <div className="space-y-6">
-        <Section id="basics" title="Basics">
-          <Field
-            label="Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => title !== canvas.title && save({ title })}
-            maxLength={200}
-          />
-          <TextareaField
-            label="Description"
-            value={description}
-            rows={3}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={() =>
-              (description || null) !== canvas.description &&
-              save({ description: description || null })
-            }
-            maxLength={2000}
-          />
-        </Section>
-
         <Section
           id="url-routing"
           title="URL & routing"

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -53,15 +54,20 @@ function json(body: unknown, status = 200): Response {
 }
 
 function mockStatus(canvas = CANVAS, versions: unknown[] = [VERSION]) {
+  const calls: { method: string; url: string; body?: string }[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
       const path = new URL(url, "http://localhost").pathname;
+      calls.push({ method, url: path, body: init?.body as string | undefined });
       if (path === "/api/canvases/c1") return json(canvas);
+      if (path === "/api/canvases/c1/settings") return json(canvas);
       if (path === "/api/canvases/c1/versions") return json({ versions });
       return json({ error: "not_mocked" }, 500);
     }),
   );
+  return calls;
 }
 
 function renderStatus() {
@@ -84,12 +90,12 @@ function renderStatus() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("canvas Status tab", () => {
+describe("canvas Overview tab", () => {
   it("uses the new canvas workspace labels without changing route hrefs", async () => {
     mockStatus();
     renderStatus();
 
-    expect(await screen.findByRole("link", { name: "Status" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Overview" })).toHaveAttribute(
       "href",
       "/canvases/c1",
     );
@@ -123,6 +129,33 @@ describe("canvas Status tab", () => {
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
+  });
+
+  it("edits the canvas title and description from Overview", async () => {
+    const calls = mockStatus();
+    const user = userEvent.setup();
+    renderStatus();
+
+    await user.clear(await screen.findByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Roadshow prototype");
+    await user.tab();
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain("Roadshow prototype");
+    });
+
+    await user.type(screen.getByLabelText("Description"), "Shared with the launch team.");
+    await user.tab();
+
+    await vi.waitFor(() => {
+      const patches = calls.filter(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patches.at(-1)?.body).toContain("Shared with the launch team.");
+    });
   });
 
   it("turns a deploy without HTML into a repair workflow", async () => {
