@@ -397,15 +397,22 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .foot-links a:hover { color: var(--fg); }
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
 
-/* product tour carousel */
+/* product tour carousel — native CSS scroll-snap (the browser positions the
+   slides; JS only drives autoplay + the dot/arrow controls). No transform math. */
 .carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-.viewport { overflow: hidden; }
-.slides { display: flex; transition: transform .55s var(--ease); }
-/* Each slide is EXACTLY the track width (flex-basis 100%, no grow/shrink, and
-   min-width:0 so the image's natural width can't push it wider) — so the JS
-   translate by one viewport lands precisely. margin:0 resets the UA default
-   figure margin-inline (40px), which otherwise offsets every slide and clips it. */
-.slide { flex: 0 0 100%; min-width: 0; margin: 0; }
+.viewport {
+  display: flex;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;            /* Firefox — hide the scrollbar */
+  -ms-overflow-style: none;
+}
+.viewport::-webkit-scrollbar { display: none; }
+/* Each slide is exactly the viewport width and a snap target. margin:0 resets the
+   UA default figure margin-inline (40px), which would otherwise offset the slide. */
+.slide { flex: 0 0 100%; min-width: 0; margin: 0; scroll-snap-align: start; scroll-snap-stop: always; }
 .slide .shot { box-shadow: var(--shadow-lg); }
 .slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
 .slide figcaption strong { color: var(--fg); font-weight: 600; }
@@ -458,7 +465,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .hero [data-stagger="5"] { animation-delay: .44s; }
 @keyframes rise { to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
+  html, .viewport { scroll-behavior: auto; }
   .reveal, .hero [data-stagger] { opacity: 1; transform: none; animation: none; transition: none; }
 }
 `;
@@ -551,9 +558,7 @@ ${head(origin)}
       <p class="s-sub reveal">Create, edit, share, and govern. Every surface of canvas-drop, in one place.</p>
       <div class="carousel reveal" data-carousel aria-roledescription="carousel" aria-label="Product tour">
         <div class="viewport">
-          <div class="slides">
 ${TOUR.map(tourSlide).join("\n")}
-          </div>
         </div>
         <button class="car-btn car-prev" type="button" aria-label="Previous screen">${arrowLeft}</button>
         <button class="car-btn car-next" type="button" aria-label="Next screen">${arrow}</button>
@@ -653,31 +658,40 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
   }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 })();
-// Product-tour carousel — manual controls always work; auto-advance pauses on
-// hover/focus and is disabled under reduced-motion.
+// Product-tour carousel — native CSS scroll-snap. JS only scrolls the viewport
+// for the arrows/dots/autoplay and reflects the current slide in the dots. The
+// browser owns positioning, so there's no transform math to get wrong.
 (function () {
   document.querySelectorAll('[data-carousel]').forEach(function (car) {
-    var track = car.querySelector('.slides');
+    var vp = car.querySelector('.viewport');
     var slides = car.querySelectorAll('.slide');
     var dots = car.querySelectorAll('.dot');
-    var i = 0, timer = null;
-    function go(n) {
-      i = (n + slides.length) % slides.length;
-      track.style.transform = 'translateX(' + (-i * 100) + '%)';
+    var timer = null, scrollT = null;
+    function index() { return Math.round(vp.scrollLeft / vp.clientWidth); }
+    function goTo(n) {
+      var from = index();
+      var i = (n + slides.length) % slides.length;
+      // Wrapping (a multi-step jump) snaps instantly; a single step animates.
+      vp.scrollTo({ left: i * vp.clientWidth, behavior: (REDUCE || Math.abs(i - from) > 1) ? 'auto' : 'smooth' });
+    }
+    function syncDots() {
+      var i = index();
       dots.forEach(function (d, k) { d.setAttribute('aria-current', k === i ? 'true' : 'false'); });
     }
-    function stop() { if (timer) { clearInterval(timer); timer = null; } }
-    function start() { stop(); if (!REDUCE) timer = setInterval(function () { go(i + 1); }, 5200); }
     var prev = car.querySelector('.car-prev');
     var next = car.querySelector('.car-next');
-    if (prev) prev.addEventListener('click', function () { go(i - 1); start(); });
-    if (next) next.addEventListener('click', function () { go(i + 1); start(); });
-    dots.forEach(function (d, k) { d.addEventListener('click', function () { go(k); start(); }); });
+    if (prev) prev.addEventListener('click', function () { goTo(index() - 1); restart(); });
+    if (next) next.addEventListener('click', function () { goTo(index() + 1); restart(); });
+    dots.forEach(function (d, k) { d.addEventListener('click', function () { goTo(k); restart(); }); });
+    vp.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(syncDots, 80); }, { passive: true });
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function start() { stop(); if (!REDUCE) timer = setInterval(function () { goTo(index() + 1); }, 5200); }
+    function restart() { start(); }
     car.addEventListener('mouseenter', stop);
     car.addEventListener('mouseleave', start);
     car.addEventListener('focusin', stop);
     car.addEventListener('focusout', start);
-    go(0); start();
+    syncDots(); start();
   });
 })();
 </script>
