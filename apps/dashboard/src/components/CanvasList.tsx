@@ -2,7 +2,7 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem, PublicationState } from "../lib/api.js";
-import { formatBytes, relativeTime } from "../lib/format.js";
+import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
 import { CopyButton } from "./CopyButton.js";
@@ -132,6 +132,12 @@ function publication(canvas: CanvasListItem): { primary: string; secondary: stri
   };
 }
 
+/** Most recent activity on a canvas: the later of its last edit (settings/deploy
+ *  bump `updatedAt`) and its last publish. Drives the "Last active" row hint. */
+function lastActivity(canvas: CanvasListItem): number {
+  return Math.max(canvas.updatedAt, canvas.lastDeploy?.createdAt ?? 0);
+}
+
 function DataCell({
   label,
   primary,
@@ -246,6 +252,12 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
             </span>
           </div>
           <div className="mt-1 truncate font-mono text-xs text-subtle">{canvas.slug}</div>
+          <div
+            className="mt-0.5 truncate text-xs text-subtle"
+            title={fullTime(lastActivity(canvas))}
+          >
+            Last active {relativeTime(lastActivity(canvas))}
+          </div>
         </div>
 
         <DataCell label="Visibility" primary={access.primary} secondary={access.secondary} />

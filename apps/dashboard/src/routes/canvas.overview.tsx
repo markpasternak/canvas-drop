@@ -293,7 +293,7 @@ export default function Overview() {
       <HealthCard canvas={canvas} current={current} />
 
       <Panel className="p-0 sm:p-0">
-        <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+        <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Publication">
             <PublicationBadge state={canvas.publicationState} />
           </Fact>
@@ -319,6 +319,12 @@ export default function Overview() {
             <span className={canvas.galleryListed ? "text-fg" : "text-muted"}>
               {galleryLabel(canvas)}
             </span>
+          </Fact>
+          <Fact label="Created">
+            <span title={fullTime(canvas.createdAt)}>{relativeTime(canvas.createdAt)}</span>
+          </Fact>
+          <Fact label="Updated">
+            <span title={fullTime(canvas.updatedAt)}>{relativeTime(canvas.updatedAt)}</span>
           </Fact>
         </dl>
       </Panel>
