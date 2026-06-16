@@ -25,6 +25,7 @@ const pgTables = {
   oauthClients: pg.oauthClients,
   oauthCodes: pg.oauthCodes,
   mcpTokens: pg.mcpTokens,
+  uploadSessions: pg.uploadSessions,
 };
 const sqliteTables = {
   users: sq.users,
@@ -45,6 +46,7 @@ const sqliteTables = {
   oauthClients: sq.oauthClients,
   oauthCodes: sq.oauthCodes,
   mcpTokens: sq.mcpTokens,
+  uploadSessions: sq.uploadSessions,
 };
 
 const TABLE_KEYS = Object.keys(pgTables) as Array<keyof typeof pgTables>;
