@@ -4,13 +4,60 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import * as client from "openid-client";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { errorResponse } from "../http/error-pages.js";
 import type { AppEnv } from "../http/types.js";
 import { claimsToIdentity, isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import { loginUrl, safeReturnTo } from "./return-to.js";
 import type { SessionService } from "./session.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
-/** Short-lived cookie carrying the PKCE verifier + state across the redirect. */
+/** Short-lived cookie carrying the PKCE verifier + state (+ returnTo) across the redirect. */
 const OIDC_TX_COOKIE = "__canvasdrop_oidc";
+
+/**
+ * Cookie options for the short-lived OIDC transaction cookie. In `subdomain` mode
+ * login can begin on a canvas subdomain (`<slug>.{host}`) while the callback runs
+ * on the apex (the `redirect_uri` is built from `baseUrl`), so the cookie MUST be
+ * scoped to the parent domain — a host-only cookie set on the subdomain is invisible
+ * at the apex callback, which surfaces as `missing_oidc_state` or (with a stale apex
+ * cookie) `state_mismatch`. Mirrors the session/guest cookies (session.ts, guest.ts).
+ */
+function txCookieOptions(config: Config) {
+  return {
+    httpOnly: true,
+    secure: config.isProduction,
+    sameSite: "Lax" as const,
+    path: "/",
+    ...(config.urlMode === "subdomain" ? { domain: `.${new URL(config.baseUrl).hostname}` } : {}),
+  };
+}
+
+/**
+ * A recoverable sign-in failure (stale/missing transaction, token exchange hiccup):
+ * render a friendly page whose action restarts login — carrying the returnTo when we
+ * still have it — instead of dead-ending the visitor on a raw error. Falls back to
+ * JSON for non-browser clients via the shared error-page seam.
+ */
+function recoverableAuthError(
+  c: Context<AppEnv>,
+  config: Config,
+  code: string,
+  message: string,
+  returnTo?: string,
+) {
+  return errorResponse(
+    c,
+    {
+      status: 400,
+      code,
+      title: "Sign-in didn't finish",
+      message,
+      actionHref: loginUrl(config, returnTo),
+      actionLabel: "Try signing in again",
+    },
+    { error: code },
+  );
+}
 
 export interface OidcDeps {
   config: Config;
@@ -54,6 +101,10 @@ export function makeOidc(deps: OidcDeps) {
       const verifier = client.randomPKCECodeVerifier();
       const challenge = await client.calculatePKCECodeChallenge(verifier);
       const state = client.randomState();
+      // Where to send the visitor after a successful sign-in. Validated here so the
+      // (untrusted) query param can't become an open redirect; it rides the tx
+      // cookie across to the callback.
+      const returnTo = safeReturnTo(deps.config, c.req.query("returnTo"));
       const url = client.buildAuthorizationUrl(cfg, {
         redirect_uri: redirectUri,
         scope: "openid email profile",
@@ -69,26 +120,38 @@ export function makeOidc(deps: OidcDeps) {
         // extra prompt is rare.
         prompt: "login",
       });
-      setCookie(c, OIDC_TX_COOKIE, JSON.stringify({ state, verifier }), {
-        httpOnly: true,
-        secure: deps.config.isProduction,
-        sameSite: "Lax",
-        path: "/",
-        maxAge: 600,
-      });
+      setCookie(
+        c,
+        OIDC_TX_COOKIE,
+        JSON.stringify({ state, verifier, ...(returnTo ? { returnTo } : {}) }),
+        { ...txCookieOptions(deps.config), maxAge: 600 },
+      );
       return c.redirect(url.href);
     },
 
     /** Complete login: verify state, exchange code, establish the app session. */
     async callback(c: Context<AppEnv>) {
       const tx = readTx(c);
-      deleteCookie(c, OIDC_TX_COOKIE, { path: "/" });
-      if (!tx) return c.json({ error: "missing_oidc_state" }, 400);
+      deleteCookie(c, OIDC_TX_COOKIE, txCookieOptions(deps.config));
+      if (!tx) {
+        return recoverableAuthError(
+          c,
+          deps.config,
+          "missing_oidc_state",
+          "This sign-in link expired or was already used. Start again and we'll take you where you were headed.",
+        );
+      }
 
       const currentUrl = new URL(c.req.url);
       const stateParam = currentUrl.searchParams.get("state");
       if (!stateParam || stateParam !== tx.state) {
-        return c.json({ error: "state_mismatch" }, 400);
+        return recoverableAuthError(
+          c,
+          deps.config,
+          "state_mismatch",
+          "Your sign-in didn't match this browser's request. Start over and we'll take you where you were going.",
+          tx.returnTo,
+        );
       }
 
       let claims: Record<string, unknown> | undefined;
@@ -107,7 +170,13 @@ export function makeOidc(deps: OidcDeps) {
         claims = tokens.claims() as Record<string, unknown> | undefined;
       } catch (err) {
         c.get("log")?.error({ err }, "oidc token exchange failed");
-        return c.json({ error: "token_exchange_failed" }, 400);
+        return recoverableAuthError(
+          c,
+          deps.config,
+          "token_exchange_failed",
+          "We couldn't complete sign-in with your identity provider. Please try again.",
+          tx.returnTo,
+        );
       }
 
       const identity = claims ? claimsToIdentity(claims, "oidc") : null;
@@ -119,7 +188,7 @@ export function makeOidc(deps: OidcDeps) {
         c.get("log")?.warn({ email: identity.email }, "oidc email not verified");
         return c.json({ error: "email_not_verified" }, 403);
       }
-      return completeLogin(deps, c, identity);
+      return completeLogin(deps, c, identity, tx.returnTo);
     },
   };
 }
@@ -157,6 +226,7 @@ export async function completeLogin(
   deps: OidcDeps,
   c: Context<AppEnv>,
   identity: ResolvedIdentity,
+  returnTo?: string,
 ) {
   if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails))) {
     return c.json({ error: "email_domain_not_allowed" }, 403);
@@ -164,16 +234,22 @@ export async function completeLogin(
   const user = await mapIdentityToUser(deps.users, identity, deps.config);
   if (user.isBlocked) return c.json({ error: "forbidden" }, 403);
   await deps.sessionSvc.issue(c, user.id);
-  return c.redirect("/");
+  // Re-validate at the seam: the tx cookie is httpOnly but unsigned, so never trust
+  // its returnTo without re-checking it can't escape this instance (defense in depth).
+  return c.redirect(safeReturnTo(deps.config, returnTo) ?? "/");
 }
 
-function readTx(c: Context<AppEnv>): { state: string; verifier: string } | null {
+function readTx(c: Context<AppEnv>): { state: string; verifier: string; returnTo?: string } | null {
   const raw = getCookie(c, OIDC_TX_COOKIE);
   if (!raw) return null;
   try {
-    const v = JSON.parse(raw) as { state?: unknown; verifier?: unknown };
+    const v = JSON.parse(raw) as { state?: unknown; verifier?: unknown; returnTo?: unknown };
     if (typeof v.state === "string" && typeof v.verifier === "string") {
-      return { state: v.state, verifier: v.verifier };
+      return {
+        state: v.state,
+        verifier: v.verifier,
+        returnTo: typeof v.returnTo === "string" ? v.returnTo : undefined,
+      };
     }
   } catch {
     // malformed cookie → treat as no transaction

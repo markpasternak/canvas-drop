@@ -39,9 +39,11 @@ describe("socialPreview", () => {
     // Absolute og:image on THIS host (subdomain), not the apex.
     expect(body).toContain('property="og:image" content="https://showcase.canvas-drop.com/og.png"');
     expect(body).toContain('name="twitter:card" content="summary_large_image"');
-    // Humans are redirected on to login (parity with the gateway).
-    expect(body).toContain("url=/auth/login");
-    expect(body).toContain('location.replace("/auth/login")');
+    // Humans are redirected on to login (parity with the gateway), carrying a
+    // returnTo so they land back on this shared canvas, not the apex welcome page.
+    const returnTo = encodeURIComponent("https://showcase.canvas-drop.com/");
+    expect(body).toContain(`url=/auth/login?returnTo=${returnTo}`);
+    expect(body).toContain(`location.replace("/auth/login?returnTo=${returnTo}")`);
     // Never indexed.
     expect(res.headers.get("x-robots-tag")).toBe("noindex");
   });

@@ -1,10 +1,11 @@
 import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
+import { loginUrl, requestReturnTo } from "../auth/return-to.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
-import { escapeHtml } from "./error-pages.js";
+import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
 
@@ -105,8 +106,12 @@ export function socialPreview(config: Config, canvases?: CanvasesRepository) {
     ) {
       return next();
     }
-    const origin = originOf(c.req.header("host") ?? "", config);
-    return htmlResponse(renderPreviewShell(origin, c.req.path));
+    const host = c.req.header("host") ?? "";
+    const origin = originOf(host, config);
+    // Forward where the visitor was headed so they return to the shared canvas after
+    // sign-in, not the apex welcome page.
+    const loginHref = loginUrl(config, requestReturnTo(config, host, c.req.url));
+    return htmlResponse(renderPreviewShell(origin, c.req.path, { loginHref }));
   });
 }
 
@@ -131,7 +136,7 @@ function htmlResponse(html: string): Response {
 export function renderPreviewShell(
   origin: string,
   path: string,
-  opts: { title?: string; description?: string; redirect?: boolean } = {},
+  opts: { title?: string; description?: string; redirect?: boolean; loginHref?: string } = {},
 ): string {
   const base = origin.replace(/\/$/, "");
   const image = escapeHtml(`${base}/og.png`);
@@ -139,12 +144,18 @@ export function renderPreviewShell(
   const title = escapeHtml(opts.title ?? PREVIEW_TITLE);
   const desc = escapeHtml(opts.description ?? PREVIEW_DESC);
   const redirect = opts.redirect ?? true;
+  // The href is built from validated input (loginUrl → safeReturnTo) and the query
+  // value is percent-encoded, so it carries no HTML/JS metacharacters; escape it for
+  // the attribute and JS-string contexts anyway as defense in depth.
+  const loginHref = opts.loginHref ?? "/auth/login";
+  const loginAttr = escapeAttribute(loginHref);
+  const loginJs = escapeHtml(loginHref);
   const redirectHead = redirect
-    ? `<meta http-equiv="refresh" content="0; url=/auth/login">
-<script>location.replace("/auth/login");</script>`
+    ? `<meta http-equiv="refresh" content="0; url=${loginAttr}">
+<script>location.replace("${loginJs}");</script>`
     : "";
   const body = redirect
-    ? `<p>Redirecting to sign in… <a href="/auth/login">Continue</a></p>`
+    ? `<p>Sign in to open this shared canvas… <a href="${loginAttr}">Continue</a></p>`
     : `<p>${title}</p>`;
   return `<!doctype html>
 <html lang="en">

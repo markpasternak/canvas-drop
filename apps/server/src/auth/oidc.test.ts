@@ -55,7 +55,12 @@ function buildApp(client: DbClient) {
   });
   app.get("/auth/callback", (c) => oidc.callback(c));
   app.get("/complete", (c) =>
-    completeLogin(d, c, { sub: "s", email: c.req.query("email") ?? "a@example.com" }),
+    completeLogin(
+      d,
+      c,
+      { sub: "s", email: c.req.query("email") ?? "a@example.com" },
+      c.req.query("returnTo"),
+    ),
   );
   return app;
 }
@@ -98,7 +103,37 @@ describe("oidc login — authorization request", () => {
     expect(loc.searchParams.get("scope")).toBe("openid email profile");
     expect(loc.searchParams.get("state")).toBeTruthy();
   });
+
+  it("scopes the transaction cookie to the parent domain in subdomain mode so the apex callback can read it", async () => {
+    // Regression: a host-only tx cookie set on a canvas subdomain is invisible at the
+    // apex /auth/callback (redirect_uri is built from baseUrl), causing state_mismatch.
+    const res = await loginApp().request("/auth/login");
+    const txCookie = res.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`)) as string;
+    expect(txCookie).toBeTruthy();
+    expect(txCookie).toMatch(/Domain=\.?canvases\.example\.com/i);
+  });
+
+  it("captures and round-trips a validated returnTo through the tx cookie", async () => {
+    const target = "https://my-canvas.canvases.example.com/";
+    const res = await loginApp().request(`/auth/login?returnTo=${encodeURIComponent(target)}`);
+    expect(readTxCookie(res).returnTo).toBe(target);
+  });
+
+  it("drops an off-host returnTo rather than storing it", async () => {
+    const res = await loginApp().request("/auth/login?returnTo=https%3A%2F%2Fevil.com%2F");
+    expect(readTxCookie(res).returnTo).toBeUndefined();
+  });
 });
+
+/** Decode the JSON payload of the OIDC transaction Set-Cookie on a login response. */
+function readTxCookie(res: Response): { state?: string; verifier?: string; returnTo?: string } {
+  const header = res.headers.getSetCookie().find((c) => c.startsWith(`${OIDC_TX_COOKIE}=`));
+  const pair = header?.split(";")[0] ?? "";
+  const value = pair.slice(pair.indexOf("=") + 1);
+  return JSON.parse(decodeURIComponent(value));
+}
 
 describe("oidc callback — pre-exchange guards", () => {
   let client: DbClient;
@@ -178,6 +213,19 @@ describe("oidc completeLogin — security seam", () => {
     expect(res.headers.get("location")).toBe("/");
     expect(res.headers.getSetCookie().some((c) => c.startsWith(SESSION_COOKIE))).toBe(true);
     expect(await usersRepository(client).findByProviderSub("s")).not.toBeNull();
+  });
+
+  it("redirects to a validated returnTo after login, but ignores an off-host one", async () => {
+    client = await makeTestDb("sqlite");
+    const ok = await buildApp(client).request(
+      "/complete?email=ada@example.com&returnTo=https%3A%2F%2Fart.canvases.example.com%2F",
+    );
+    expect(ok.headers.get("location")).toBe("https://art.canvases.example.com/");
+
+    const evil = await buildApp(client).request(
+      "/complete?email=ada@example.com&returnTo=https%3A%2F%2Fevil.com%2F",
+    );
+    expect(evil.headers.get("location")).toBe("/");
   });
 
   it("rejects a login whose email domain is not allowed", async () => {

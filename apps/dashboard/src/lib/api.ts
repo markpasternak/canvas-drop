@@ -350,7 +350,11 @@ let redirecting = false;
 let onAuthExpired = () => {
   if (redirecting) return;
   redirecting = true;
-  window.location.assign("/auth/login");
+  // Carry the current dashboard route so login returns the user to where they were,
+  // not the welcome page. The dashboard is same-origin, so a relative path suffices;
+  // the server re-validates it against open-redirect abuse.
+  const returnTo = window.location.pathname + window.location.search;
+  window.location.assign(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
 };
 export function setAuthExpiredHandler(fn: () => void) {
   onAuthExpired = fn;

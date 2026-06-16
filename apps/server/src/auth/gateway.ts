@@ -5,6 +5,7 @@ import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
 import { isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import { loginUrl, requestReturnTo } from "./return-to.js";
 import type { AuthStrategy } from "./strategy.js";
 
 /** An auth-lifecycle event for the audit log. Implemented by U10's audit sink. */
@@ -72,6 +73,12 @@ export function authGateway(deps: AuthGatewayDeps) {
 function unauthorized(c: Context<AppEnv>, config: Config) {
   // In oidc mode the app owns login; elsewhere a missing identity is a hard 401
   // (proxy mode should never reach the app unauthenticated — the IAP bounces it).
-  if (config.auth.mode === "oidc") return c.redirect("/auth/login");
+  if (config.auth.mode === "oidc") {
+    // Carry where the visitor was headed so login returns them there (a shared
+    // canvas on a subdomain, not the apex welcome page). Rebuild from the forwarded
+    // Host — c.req.url is the proxy's internal http origin behind Caddy.
+    const returnTo = requestReturnTo(config, c.req.header("host"), c.req.url);
+    return c.redirect(loginUrl(config, returnTo));
+  }
   return c.json({ error: "unauthorized" }, 401);
 }
