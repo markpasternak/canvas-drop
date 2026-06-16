@@ -100,6 +100,73 @@ const AI_USAGE = {
   ],
 };
 
+const CONFIG_FIELDS = [
+  {
+    key: "ai.models",
+    env: "CANVAS_DROP_AI_MODELS",
+    group: "AI",
+    label: "Model allowlist",
+    help: "Models canvases may call. Comma-separated plain IDs.",
+    type: "csv",
+    secret: false,
+    editable: true,
+    source: "environment",
+    overridden: false,
+    value: "claude-fast",
+  },
+  {
+    key: "ai.apiKey",
+    env: "CANVAS_DROP_AI_API_KEY",
+    group: "AI",
+    label: "Provider API key",
+    help: "Server-side only. Used by the server to call the AI provider.",
+    type: "string",
+    secret: true,
+    editable: true,
+    source: "database",
+    overridden: true,
+    set: true,
+    last4: "1234",
+  },
+  {
+    key: "email.smtp.host",
+    env: "CANVAS_DROP_SMTP_HOST",
+    group: "Email",
+    label: "SMTP host",
+    help: "Outgoing mail server for guest invites.",
+    type: "string",
+    secret: false,
+    editable: false,
+    source: "default",
+    overridden: false,
+    value: "smtp.local",
+  },
+  {
+    key: "auth.mode",
+    env: "CANVAS_DROP_AUTH_MODE",
+    group: "Auth",
+    label: "Auth mode",
+    type: "enum",
+    secret: false,
+    editable: false,
+    source: "environment",
+    overridden: false,
+    value: "oidc",
+  },
+  {
+    key: "storage.s3.secretKey",
+    env: "CANVAS_DROP_S3_SECRET_KEY",
+    group: "Storage",
+    label: "S3 secret key",
+    type: "string",
+    secret: true,
+    editable: false,
+    source: "default",
+    overridden: false,
+    set: false,
+  },
+];
+
 const USER_ROW = {
   id: "u1",
   email: "alice@example.com",
@@ -173,10 +240,9 @@ describe("admin dashboard", () => {
     expect(screen.getByText("Unique viewers")).toBeInTheDocument();
     expect(screen.getByText("Deploys")).toBeInTheDocument();
     expect(screen.getByText("27")).toBeInTheDocument(); // deploys
-    expect(screen.getByRole("link", { name: /Happy Otter/ })).toHaveAttribute(
-      "href",
-      "/canvases/c1",
-    );
+    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
+    expect(screen.getByText("happy-otter")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Happy Otter/ })).not.toBeInTheDocument();
     const adminNav = screen.getByRole("navigation", { name: "Admin sections" });
     expect(within(adminNav).getByRole("link", { name: "Overview" })).toHaveAttribute(
       "aria-current",
@@ -479,6 +545,87 @@ describe("admin dashboard", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Audit log/i }));
     expect(await screen.findByText("Audit log — coming soon")).toBeVisible();
+  });
+
+  it("Configuration finder searches labels, keys, env vars, groups, help, source, and values", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/config": () => json({ fields: CONFIG_FIELDS }),
+    });
+    renderAt("/admin/settings");
+    const user = userEvent.setup();
+    const search = await screen.findByRole("searchbox", {
+      name: /search configuration settings/i,
+    });
+
+    const checks = [
+      { term: "Provider", visible: "Provider API key", hidden: "SMTP host" },
+      { term: "CANVAS_DROP_AI_MODELS", visible: "Model allowlist", hidden: "SMTP host" },
+      { term: "Email", visible: "SMTP host", hidden: "Auth mode" },
+      { term: "guest invites", visible: "SMTP host", hidden: "Model allowlist" },
+      { term: "smtp.local", visible: "SMTP host", hidden: "Provider API key" },
+      { term: "environment", visible: "Auth mode", hidden: "SMTP host" },
+    ];
+
+    for (const check of checks) {
+      await user.clear(search);
+      await user.type(search, check.term);
+      expect(screen.getByText(check.visible)).toBeVisible();
+      await waitFor(() => expect(screen.queryByText(check.hidden)).not.toBeInTheDocument());
+    }
+  });
+
+  it("Configuration quick filters narrow editable, overridden, secret, and read-only rows", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/config": () => json({ fields: CONFIG_FIELDS }),
+    });
+    renderAt("/admin/settings");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Model allowlist")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Editable" }));
+    expect(screen.getByText("Model allowlist")).toBeVisible();
+    expect(screen.getByText("Provider API key")).toBeVisible();
+    expect(screen.queryByText("SMTP host")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Overridden" }));
+    expect(screen.getByText("Provider API key")).toBeVisible();
+    expect(screen.queryByText("Model allowlist")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Secrets" }));
+    expect(screen.getByText("Provider API key")).toBeVisible();
+    expect(screen.getByText("S3 secret key")).toBeVisible();
+    expect(screen.queryByText("SMTP host")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Read-only" }));
+    expect(screen.getByText("SMTP host")).toBeVisible();
+    expect(screen.getByText("Auth mode")).toBeVisible();
+    expect(screen.getByText("S3 secret key")).toBeVisible();
+    expect(screen.queryByText("Provider API key")).not.toBeInTheDocument();
+  });
+
+  it("Configuration finder shows a clearable empty state", async () => {
+    mockFetch({
+      "GET /api/me": () =>
+        json({ id: "u1", email: "a@x", name: "A", avatarUrl: null, isAdmin: true }),
+      "GET /api/admin/config": () => json({ fields: CONFIG_FIELDS }),
+    });
+    renderAt("/admin/settings");
+    const user = userEvent.setup();
+    const search = (await screen.findByRole("searchbox", {
+      name: /search configuration settings/i,
+    })) as HTMLInputElement;
+
+    await user.type(search, "not-a-setting");
+    expect(await screen.findByText("No settings match")).toBeVisible();
+    expect(screen.queryByText("Model allowlist")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(search).toHaveValue("");
+    expect(await screen.findByText("Model allowlist")).toBeVisible();
   });
 
   it("Configuration view edits the model allowlist via the unified config endpoint", async () => {

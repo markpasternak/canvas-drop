@@ -1,7 +1,10 @@
+import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useState } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { EmptyState } from "../components/EmptyState.js";
+import { FilterBar, FilterChip } from "../components/Filters.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { type AdminConfigField, ApiError } from "../lib/api.js";
@@ -147,9 +150,44 @@ const GROUP_ORDER = [
   "Logging",
 ];
 
+type SettingsFilter = "all" | "editable" | "overridden" | "secret" | "readonly";
+
+const QUICK_FILTERS: Array<{ value: SettingsFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "editable", label: "Editable" },
+  { value: "overridden", label: "Overridden" },
+  { value: "secret", label: "Secrets" },
+  { value: "readonly", label: "Read-only" },
+];
+
+function matchesFilter(field: AdminConfigField, filter: SettingsFilter): boolean {
+  if (filter === "editable") return field.editable;
+  if (filter === "overridden") return field.overridden;
+  if (filter === "secret") return field.secret;
+  if (filter === "readonly") return !field.editable;
+  return true;
+}
+
+function searchableText(field: AdminConfigField): string {
+  return [
+    field.label,
+    field.key,
+    field.env,
+    field.group,
+    field.help,
+    field.source,
+    valueLabel(field),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 /** Unified Configuration view: every setting with value/source, a safe editable subset. */
 function Configuration() {
   const config = useAdminConfig();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SettingsFilter>("all");
   if (config.isError) {
     return (
       <Panel className="p-4">
@@ -164,8 +202,22 @@ function Configuration() {
       </Panel>
     );
   }
+  const search = query.trim().toLowerCase();
+  const allFields = config.data;
+  const filteredFields = allFields.filter((f) => {
+    if (!matchesFilter(f, filter)) return false;
+    if (!search) return true;
+    return searchableText(f).includes(search);
+  });
+
+  const allByGroup = new Map<string, AdminConfigField[]>();
+  for (const f of allFields) {
+    const list = allByGroup.get(f.group) ?? [];
+    list.push(f);
+    allByGroup.set(f.group, list);
+  }
   const byGroup = new Map<string, AdminConfigField[]>();
-  for (const f of config.data) {
+  for (const f of filteredFields) {
     const list = byGroup.get(f.group) ?? [];
     list.push(f);
     byGroup.set(f.group, list);
@@ -173,28 +225,102 @@ function Configuration() {
   const groups = [...byGroup.keys()].sort(
     (a, b) => (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99),
   );
+  const activeFiltering = Boolean(search || filter !== "all");
+  const editableCount = allFields.filter((f) => f.editable).length;
+  const overriddenCount = allFields.filter((f) => f.overridden).length;
+
+  function clearFilters() {
+    setQuery("");
+    setFilter("all");
+  }
 
   return (
     <div className="space-y-5">
-      {groups.map((group) => (
-        <Panel key={group} className="p-4">
-          <h2 className="mb-1 text-sm font-semibold text-fg">{group}</h2>
-          <p className="mb-2 text-xs text-muted">
-            <span className="font-medium">Database</span> overrides{" "}
-            <span className="font-medium">Environment</span> overrides the built-in default.
-            Editable rows can be overridden here; the rest are set via the environment.
-          </p>
-          <div className="divide-y divide-border">
-            {(byGroup.get(group) ?? []).map((f) =>
-              f.editable ? (
-                <EditableRow key={f.key} field={f} />
-              ) : (
-                <ReadonlyRow key={f.key} field={f} />
-              ),
-            )}
+      <div className="space-y-3">
+        <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm text-muted">
+          <span className="font-medium text-fg">Database</span> overrides{" "}
+          <span className="font-medium text-fg">Environment</span>, which overrides the built-in
+          default. Editable rows can be changed here; read-only rows move through environment
+          config.
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[14rem] flex-1">
+            <MagnifyingGlass
+              size={16}
+              className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search settings, env vars, values"
+              aria-label="Search configuration settings"
+              className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
+            />
           </div>
-        </Panel>
-      ))}
+          {activeFiltering ? (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear all
+            </Button>
+          ) : null}
+        </div>
+
+        <FilterBar>
+          {QUICK_FILTERS.map((chip) => (
+            <FilterChip
+              key={chip.value}
+              active={filter === chip.value}
+              onClick={() => setFilter(chip.value)}
+            >
+              {chip.label}
+            </FilterChip>
+          ))}
+        </FilterBar>
+
+        <p className="text-xs text-subtle">
+          Showing {filteredFields.length} of {allFields.length} settings · {editableCount} editable
+          · {overriddenCount} overridden
+        </p>
+      </div>
+
+      {filteredFields.length === 0 ? (
+        <EmptyState
+          title="No settings match"
+          description="Try a different search, or clear the filters to see every configuration field."
+          action={
+            <Button variant="secondary" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          }
+        />
+      ) : (
+        groups.map((group) => {
+          const fields = byGroup.get(group) ?? [];
+          const total = allByGroup.get(group)?.length ?? fields.length;
+          const groupEditable = (allByGroup.get(group) ?? []).filter((f) => f.editable).length;
+          return (
+            <Panel key={group} className="p-4">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold text-fg">{group}</h2>
+                <p className="text-xs text-subtle">
+                  {fields.length} of {total} settings · {groupEditable} editable
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                {fields.map((f) =>
+                  f.editable ? (
+                    <EditableRow key={f.key} field={f} />
+                  ) : (
+                    <ReadonlyRow key={f.key} field={f} />
+                  ),
+                )}
+              </div>
+            </Panel>
+          );
+        })
+      )}
     </div>
   );
 }
