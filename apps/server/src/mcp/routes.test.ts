@@ -116,7 +116,11 @@ describe("MCP routes (config-gated mount)", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toContain("resource_metadata");
+    // The resource_metadata URL is built from the configured base URL (with its
+    // port/scheme), not the request origin — so it's correct behind a TLS proxy.
+    expect(res.headers.get("www-authenticate")).toContain(
+      'resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource"',
+    );
   });
 
   it("rejects an invalid bearer token on /mcp", async () => {

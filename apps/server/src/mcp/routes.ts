@@ -68,6 +68,11 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
     }),
   );
 
+  // Built from the configured base URL (not the request origin) so the scheme is
+  // correct behind a TLS-terminating proxy — the internal hop is plain http, which
+  // would otherwise advertise an http:// metadata URL on an https instance.
+  const resourceMetadataUrl = `${new URL(deps.config.baseUrl).origin}/.well-known/oauth-protected-resource`;
+
   // The MCP endpoint, guarded by a verified access token. The bearer check resolves
   // the caller's identity from the token store (never the request) and stashes it for
   // the tool layer. A failure returns 401 directly (not a thrown HTTPException, which
@@ -76,7 +81,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   app.all(
     "/mcp",
     async (c, next) => {
-      const challenge = `Bearer error="Unauthorized", resource_metadata="${new URL(c.req.url).origin}/.well-known/oauth-protected-resource"`;
+      const challenge = `Bearer error="Unauthorized", resource_metadata="${resourceMetadataUrl}"`;
       const deny = () => {
         c.header("WWW-Authenticate", challenge);
         return c.json({ error: "unauthorized" }, 401);
