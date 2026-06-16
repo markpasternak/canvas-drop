@@ -156,23 +156,49 @@ export function deployEngine(deps: DeployEngineDeps) {
         throw err;
       }
 
+      await this.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
+
+      return {
+        url: canvasUrl(deps.config, canvas.slug),
+        version: version.number,
+        fileCount,
+        totalBytes,
+        warnings,
+      };
+    },
+
+    /**
+     * Commit a `pending` version that already has its blobs in storage: mark it
+     * ready, swap the live pointer, reconcile the draft, and kick async prune.
+     * Shared by `deploy()` (blobs written inline) and the two-channel upload
+     * finalize (blobs pre-staged, plan 003) — one commit tail, no parallel logic.
+     */
+    async commitReadyVersion(
+      canvas: Canvas,
+      version: Version,
+      manifest: Manifest,
+      fileCount: number,
+      totalBytes: number,
+    ): Promise<void> {
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
       // swap is the commit — a crash before it leaves the old version live. If the
       // swap throws, the version is ready-but-not-current (orphaned): its blobs may
       // be shared with the live version so they're left for GC, and the orphaned
       // ready row is pruned by keep-10. Nothing is served from it (never current).
+      // `markReady` asserts exactly one row updated — a finalize whose canvas was
+      // purged between createPending and here fails cleanly (plan 003 guard).
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
       await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
       // Reconcile the in-browser draft with this direct publish (deploy API / folder
-      // / ZIP / paste). The editor must end up showing what was just deployed UNLESS
-      // the owner has genuine unpublished edits to protect. We decide that by what the
-      // draft holds RELATIVE TO ITS BASE VERSION, not merely whether it is non-empty:
-      // the editor seeds a draft from the current version on open, so a draft that
-      // still matches its base is an untouched working copy with nothing to lose — the
-      // earlier "non-empty ⇒ held edits" heuristic wrongly flagged those stale, so an
-      // API/agent deploy left the editor stuck on "a newer version was published" with
-      // phantom unpublished changes (the reported bug). Now:
+      // / ZIP / paste / upload). The editor must end up showing what was just deployed
+      // UNLESS the owner has genuine unpublished edits to protect. We decide that by
+      // what the draft holds RELATIVE TO ITS BASE VERSION, not merely whether it is
+      // non-empty: the editor seeds a draft from the current version on open, so a
+      // draft that still matches its base is an untouched working copy with nothing to
+      // lose — the earlier "non-empty ⇒ held edits" heuristic wrongly flagged those
+      // stale, so an API/agent deploy left the editor stuck on "a newer version was
+      // published" with phantom unpublished changes (the reported bug). Now:
       //   - no draft yet            → seed it to the just-published version
       //   - draft == its base       → no real edits → sync to the new version
       //   - draft diverges from base → genuine held edits → preserve + flag stale
@@ -195,14 +221,6 @@ export function deployEngine(deps: DeployEngineDeps) {
       // never block or fail the deploy. `.catch` guards against an unhandled
       // rejection if prune throws synchronously.
       this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
-
-      return {
-        url: canvasUrl(deps.config, canvas.slug),
-        version: version.number,
-        fileCount,
-        totalBytes,
-        warnings,
-      };
     },
 
     /** Create the pending version, retrying on a (canvas_id, number) collision. */
