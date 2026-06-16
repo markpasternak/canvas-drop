@@ -2,8 +2,9 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
+import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { socialPreview } from "./social-preview.js";
-import type { AppEnv } from "./types.js";
+import type { AppEnv, Principal } from "./types.js";
 
 const oidc: Config = loadConfig({
   CANVAS_DROP_AUTH_MODE: "oidc",
@@ -77,6 +78,79 @@ describe("socialPreview", () => {
 
   it("is a no-op outside oidc mode (dev/proxy don't bounce to an external login)", async () => {
     const res = await app(dev).request("/", { headers: { host: "localhost", ...HTML } });
+    expect(res.status).toBe(418);
+  });
+});
+
+/** Stub repo returning a canvas with the given title (or null = not found). */
+function canvasRepo(title: string | null): CanvasesRepository {
+  return {
+    findBySlug: async () => (title === null ? null : { title }),
+  } as unknown as CanvasesRepository;
+}
+
+/** Mount socialPreview behind a middleware that pre-sets a non-org principal. */
+function appAs(config: Config, principal: Principal, repo: CanvasesRepository) {
+  const a = new Hono<AppEnv>();
+  a.use("*", async (c, next) => {
+    c.set("principal", principal);
+    await next();
+  });
+  a.use("*", socialPreview(config, repo));
+  a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+  return a;
+}
+
+const ANON: Principal = { kind: "anonymous" };
+
+describe("socialPreview — public_link per-canvas card", () => {
+  it("serves a per-canvas OG card (with the canvas title) to a crawler", async () => {
+    const res = await appAs(oidc, ANON, canvasRepo("Quarterly Planner")).request("/", {
+      headers: { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('property="og:title" content="Quarterly Planner"');
+    expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
+    // Crawler-only card → no human redirect injected.
+    expect(body).not.toContain("location.replace");
+  });
+
+  it("falls through to the real canvas for a human visitor (no crawler UA)", async () => {
+    const res = await appAs(oidc, ANON, canvasRepo("Quarterly Planner")).request("/", {
+      headers: {
+        host: "planner.canvas-drop.com",
+        ...HTML,
+        "user-agent": "Mozilla/5.0 (Macintosh)",
+      },
+    });
+    expect(res.status).toBe(418);
+  });
+
+  it("escapes a hostile canvas title in the card (user-controlled content)", async () => {
+    const res = await appAs(oidc, ANON, canvasRepo("<img src=x onerror=alert(1)>")).request("/", {
+      headers: { host: "x.canvas-drop.com", accept: "*/*", "user-agent": "Twitterbot/1.0" },
+    });
+    const body = await res.text();
+    expect(body).not.toContain("<img src=x");
+    expect(body).toContain("&lt;img");
+  });
+
+  it("does NOT serve a per-canvas card for a guest principal (semi-private)", async () => {
+    const guest: Principal = {
+      kind: "guest",
+      id: "guest:1",
+      inviteId: "1",
+      canvasId: "c1",
+      email: "g@example.com",
+    };
+    const res = await appAs(oidc, guest, canvasRepo("Secret Canvas")).request("/", {
+      headers: {
+        host: "secret.canvas-drop.com",
+        accept: "*/*",
+        "user-agent": "facebookexternalhit/1.1",
+      },
+    });
     expect(res.status).toBe(418);
   });
 });

@@ -21,7 +21,9 @@ export function authRoutes(deps: AuthRoutesDeps) {
 
   app.get("/logout", async (c) => {
     await deps.sessionSvc.revoke(c);
-    return c.redirect("/");
+    // Land on the public welcome page (always-on landing alias) rather than `/`,
+    // which would re-challenge the now-signed-out visitor straight into login.
+    return c.redirect("/welcome");
   });
 
   return app;

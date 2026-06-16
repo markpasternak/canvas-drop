@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { UpgradeWebSocket } from "hono/ws";
 import { adminSettingsService } from "./admin/settings-service.js";
@@ -11,7 +12,7 @@ import type { GuestService } from "./auth/guest.js";
 import { guestPublicResolver, onlyWhenNoPrincipal } from "./auth/guest-public-resolver.js";
 import { guestRoutes } from "./auth/guest-routes.js";
 import { authRoutes } from "./auth/routes.js";
-import type { SessionService } from "./auth/session.js";
+import { SESSION_COOKIE, type SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
 import { canvasAccess } from "./canvas/authorization.js";
 import { cloneService } from "./canvas/clone-service.js";
@@ -42,6 +43,7 @@ import { checkHealth } from "./health.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
 import { resolveClientIp } from "./http/client-ip.js";
 import { errorPageMiddleware, errorResponse } from "./http/error-pages.js";
+import { landingGate, landingResponse } from "./http/landing-page.js";
 import { legalRoutes } from "./http/legal-pages.js";
 import {
   inProcessRateLimitStore,
@@ -209,6 +211,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // the Google OAuth consent screen's reviewers can open them while signed out.
   app.route("/", legalRoutes(deps.config));
 
+  // Public marketing landing, always-on alias (`/welcome`). Unlike `/` — which is
+  // session-branched by `landingGate` so signed-in members get the dashboard — this
+  // path ALWAYS renders the landing, so the in-app "About" link and the post-logout
+  // redirect can reach the marketing page regardless of session. Pre-gateway.
+  app.get("/welcome", (c) =>
+    landingResponse(deps.config, { signedIn: !!getCookie(c, SESSION_COOKIE) }),
+  );
+
   // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
   // the gateway so signed-out agents and OSS browsers can read it on every host.
   // `/llms.txt` here REPLACES the formerly-private one in serve-sdk.ts (U4).
@@ -289,7 +299,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     );
   }
 
-  app.use("*", socialPreview(deps.config));
+  // Public marketing front door: a signed-out `GET /` renders the landing page
+  // (oidc mode only). Mounted BEFORE socialPreview so crawlers scrape the real,
+  // indexable landing HTML (with its own OG tags) rather than the generic unfurl
+  // card. Signed-in visitors and every non-root path fall straight through.
+  app.use("*", landingGate({ config: deps.config }));
+
+  app.use("*", socialPreview(deps.config, deps.canvases));
 
   // Everything below requires an org session/identity (login on every request) —
   // UNLESS the carve-out above already set a guest/anonymous principal, in which

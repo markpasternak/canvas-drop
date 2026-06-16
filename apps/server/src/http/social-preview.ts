@@ -2,6 +2,8 @@ import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
+import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import { resolveRequest } from "../routing/resolve-request.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
@@ -14,17 +16,21 @@ import type { AppEnv } from "./types.js";
  * carries the session cookie, so it follows that redirect and scrapes the IdP's
  * "Sign in" page — the shared link previews as *Google's* login, not canvas-drop.
  *
- * Fix: BEFORE the gateway, intercept signed-out top-level HTML navigations and
- * return a tiny public page carrying generic Open Graph / Twitter tags that point
- * at the branded `/og.png` card. Crawlers scrape that; real humans are redirected
- * straight on to `/auth/login` (parity with the gateway), so their flow is
- * unchanged bar an instant client redirect.
+ * Two cards, both pointing at the branded `/og.png` image:
  *
- * Deliberately GENERIC for now — one card for every link. It never looks up or
- * leaks anything about the specific canvas (title/existence) pre-auth; per-canvas
- * preview images are a later, opt-in step. Only active in `oidc` mode: `proxy`
- * mode never reaches the app unauthenticated (the IAP bounces it) and `dev` mode
- * is always signed in.
+ *  1. **Per-canvas card** for a `public_link` canvas. The carve-out resolver sets
+ *     an `anonymous` principal ONLY for `public_link` canvases (gated canvases —
+ *     org-only, guest, password — never reach that branch), so the canvas's title
+ *     is already public and surfacing it here cannot leak a private canvas's
+ *     existence (§12.0). Served ONLY to actual crawler user-agents; a real human
+ *     visitor falls through to the canvas itself.
+ *  2. **Generic card** for any other signed-out top-level HTML navigation in `oidc`
+ *     mode — one card for every gated link, leaking nothing about the target. Real
+ *     humans are redirected straight on to `/auth/login` (parity with the gateway).
+ *
+ * Only active in `oidc` mode: `proxy` never reaches the app unauthenticated (the
+ * IAP bounces it) and `dev` is always signed in. (The per-canvas branch keys off
+ * the `anonymous` principal, which only exists in app-gated modes anyway.)
  */
 
 const PREVIEW_TITLE = "canvas-drop";
@@ -42,33 +48,64 @@ function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua:
   return CRAWLER_UA.test(ua);
 }
 
-export function socialPreview(config: Config) {
+/** Absolute origin for THIS request — the instance's configured scheme + the
+ *  request host (works on canvas subdomains; `/og.png` is served host-agnostically). */
+function originOf(host: string, config: Config): string {
+  const scheme = config.baseUrl.startsWith("https") ? "https" : "http";
+  const resolvedHost = host || new URL(config.baseUrl).host;
+  return `${scheme}://${resolvedHost}`;
+}
+
+export function socialPreview(config: Config, canvases?: CanvasesRepository) {
   return createMiddleware<AppEnv>(async (c, next) => {
-    // A guest/anonymous principal was already resolved (U7) — this is a real
-    // visitor to an invited or public canvas, not a signed-out human to bounce.
-    if (c.get("principal")) return next();
-    // Only oidc bounces to an external login page; other modes don't have the bug.
+    const principal = c.get("principal");
+    const method = c.req.method;
+    const isGetDoc = method === "GET" || method === "HEAD";
+    const ua = c.req.header("user-agent") ?? "";
+
+    // (1) A public_link canvas (anonymous principal) shared to a CRAWLER → a
+    //     per-canvas card with the canvas's already-public title. A real visitor
+    //     (non-crawler UA) falls through and gets the canvas itself.
+    if (principal?.kind === "anonymous") {
+      if (canvases && isGetDoc && CRAWLER_UA.test(ua)) {
+        const { canvasSlug } = resolveRequest(
+          { host: c.req.header("host") ?? "", pathname: c.req.path },
+          config,
+        );
+        const canvas = canvasSlug ? await canvases.findBySlug(canvasSlug) : null;
+        if (canvas) {
+          const origin = originOf(c.req.header("host") ?? "", config);
+          const title = canvas.title?.trim() || PREVIEW_TITLE;
+          return htmlResponse(
+            renderPreviewShell(origin, c.req.path, {
+              title,
+              description: `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`,
+              redirect: false,
+            }),
+          );
+        }
+      }
+      return next();
+    }
+
+    // (2) A guest/org principal is a real visitor → serve the real content.
+    if (principal) return next();
+
+    // (3) Signed-out navigation: generic card + redirect to login (oidc only).
     if (config.auth.mode !== "oidc") return next();
-    // Only GET/HEAD navigations; never touch mutations or the API surface.
-    if (c.req.method !== "GET" && c.req.method !== "HEAD") return next();
+    if (!isGetDoc) return next();
     // A session cookie means a (possibly signed-in) human — let the gateway decide.
     if (getCookie(c, SESSION_COOKIE)) return next();
     if (
       !looksLikeDocument(
         c.req.header("accept") ?? "",
         c.req.header("sec-fetch-dest") ?? undefined,
-        c.req.header("user-agent") ?? "",
+        ua,
       )
     ) {
       return next();
     }
-
-    // Absolute og:image/og:url on THIS host (works on canvas subdomains too —
-    // `/og.png` is served host-agnostically before the gateway). Mirror the
-    // instance's configured scheme rather than the proxy→app hop's plain http.
-    const scheme = config.baseUrl.startsWith("https") ? "https" : "http";
-    const host = c.req.header("host") ?? new URL(config.baseUrl).host;
-    const origin = `${scheme}://${host}`;
+    const origin = originOf(c.req.header("host") ?? "", config);
     return htmlResponse(renderPreviewShell(origin, c.req.path));
   });
 }
@@ -79,19 +116,36 @@ function htmlResponse(html: string): Response {
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("Content-Security-Policy", "frame-ancestors 'none'");
   // Don't cache (a later sign-in must reach real content) and keep the gated app
-  // out of search indexes.
+  // out of search indexes. A public_link's card is also kept out of search — a
+  // public link is "anyone with the URL", not "search-discoverable".
   headers.set("Cache-Control", "no-store");
   headers.set("X-Robots-Tag", "noindex");
   return new Response(html, { status: 200, headers });
 }
 
-/** The signed-out preview page: generic OG card + an immediate redirect to login. */
-export function renderPreviewShell(origin: string, path: string): string {
+/**
+ * The signed-out preview page: OG/Twitter card + (for the generic gated card) an
+ * immediate redirect to login. The per-canvas public card passes `redirect:false`
+ * — it is served only to crawlers, so there is no human to forward.
+ */
+export function renderPreviewShell(
+  origin: string,
+  path: string,
+  opts: { title?: string; description?: string; redirect?: boolean } = {},
+): string {
   const base = origin.replace(/\/$/, "");
   const image = escapeHtml(`${base}/og.png`);
   const url = escapeHtml(`${base}${path}`);
-  const title = escapeHtml(PREVIEW_TITLE);
-  const desc = escapeHtml(PREVIEW_DESC);
+  const title = escapeHtml(opts.title ?? PREVIEW_TITLE);
+  const desc = escapeHtml(opts.description ?? PREVIEW_DESC);
+  const redirect = opts.redirect ?? true;
+  const redirectHead = redirect
+    ? `<meta http-equiv="refresh" content="0; url=/auth/login">
+<script>location.replace("/auth/login");</script>`
+    : "";
+  const body = redirect
+    ? `<p>Redirecting to sign in… <a href="/auth/login">Continue</a></p>`
+    : `<p>${title}</p>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -112,8 +166,7 @@ export function renderPreviewShell(origin: string, path: string): string {
 <meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${desc}">
 <meta name="twitter:image" content="${image}">
-<meta http-equiv="refresh" content="0; url=/auth/login">
-<script>location.replace("/auth/login");</script>
+${redirectHead}
 <style>
   body { margin: 0; min-height: 100dvh; display: grid; place-items: center;
     font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -122,7 +175,7 @@ export function renderPreviewShell(origin: string, path: string): string {
 </style>
 </head>
 <body>
-  <p>Redirecting to sign in… <a href="/auth/login">Continue</a></p>
+  ${body}
 </body>
 </html>`;
 }

@@ -65,6 +65,14 @@ describe("buildApp", () => {
     });
   });
 
+  it("GET /welcome serves the public landing page (always-on, pre-gateway)", async () => {
+    client = await makeTestDb("sqlite");
+    const res = await app(client).request("/welcome");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(await res.text()).toContain("Share it out.");
+  });
+
   it("GET /healthz returns 503 when the DB ping fails", async () => {
     client = await makeTestDb("sqlite");
     await client.close(); // closing the underlying handle makes the ping throw

@@ -60,9 +60,12 @@ ${LIGHT_TOKENS}
   .topbar {
     position: sticky; top: 0; z-index: 20;
     display: flex; align-items: center; gap: .75rem;
-    padding: .6rem 1rem;
+    padding: .55rem clamp(1rem, 3vw, 1.5rem);
     border-bottom: 1px solid var(--border);
-    background: var(--surface-raised);
+    /* Translucent + blurred, matching the landing header. Theme-aware via the
+       surface token, so it reads correctly in both light and dark. */
+    background: color-mix(in oklab, var(--surface-raised) 82%, transparent);
+    backdrop-filter: blur(12px) saturate(1.4);
   }
   .topbar .brand { padding: 0; border: 0; background: none; }
   .topbar .to-app {
@@ -113,9 +116,21 @@ ${LIGHT_TOKENS}
   }
   nav.toc a:hover { background: var(--surface-sunken); color: var(--fg); }
   nav.toc a[aria-current="page"] { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
-  .content { min-width: 0; padding: clamp(1.5rem, 4vw, 2.75rem); }
+  /* <main> inherits a centered card (border/radius/shadow/42rem width) from the
+     shared SYSTEM_PAGE_STYLES. Docs want an open content column, not a card — reset
+     those so the content doesn't collide with the sidebar + topbar. */
+  .content {
+    min-width: 0; width: auto; max-width: none;
+    border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible;
+    padding: clamp(2rem, 4vw, 3.5rem) clamp(1.5rem, 4vw, 2.75rem);
+  }
   .doc { max-width: 46rem; }
   .doc h1 { margin: 0 0 1rem; font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.1; letter-spacing: -.02em; }
+  /* Lede treatment: the page's opening heading reads larger, and the intro
+     paragraph that follows it is set as a muted lede with a hairline rule, so each
+     doc opens deliberately instead of dropping straight into body copy. */
+  .doc > h1:first-child { font-size: clamp(2rem, 5vw, 2.75rem); letter-spacing: -.028em; margin-bottom: .85rem; }
+  .doc > h1:first-child + p { font-size: 1.075rem; line-height: 1.65; color: var(--muted); padding-bottom: 1.4rem; margin-bottom: 1.6rem; border-bottom: 1px solid var(--border); }
   .doc h2 { margin: 2rem 0 .6rem; font-size: 1.25rem; letter-spacing: -.01em; scroll-margin-top: 4rem; }
   .doc h3 { margin: 1.5rem 0 .5rem; font-size: 1.05rem; scroll-margin-top: 4rem; }
   .doc p, .doc li { color: var(--muted); }

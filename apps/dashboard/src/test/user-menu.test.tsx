@@ -80,6 +80,14 @@ describe("UserMenu", () => {
     expect(screen.queryByRole("menuitem", { name: /sign out/i })).not.toBeInTheDocument();
   });
 
+  it("links to the public welcome page via 'About canvas-drop'", () => {
+    render(<UserMenu me={makeMe()} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const about = screen.getByRole("menuitem", { name: /about canvas-drop/i });
+    // Real navigation to the server-rendered landing — not an SPA route.
+    expect(about).toHaveAttribute("href", "/welcome");
+  });
+
   it("closes on Escape and on an outside click", () => {
     render(<UserMenu me={makeMe()} />);
     const trigger = screen.getByRole("button", { name: /account/i });

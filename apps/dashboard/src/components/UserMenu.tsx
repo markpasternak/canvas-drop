@@ -1,4 +1,4 @@
-import { CaretDown, ShieldCheck, SignOut } from "@phosphor-icons/react";
+import { CaretDown, Info, ShieldCheck, SignOut } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { Me } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -102,11 +102,21 @@ export function UserMenu({ me }: { me: Me }) {
             </div>
           </div>
 
+          {/* Real navigation to the server-rendered public landing — not an SPA route. */}
+          <a
+            href="/welcome"
+            role="menuitem"
+            className="flex items-center gap-2.5 px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
+          >
+            <Info size={16} aria-hidden className="text-muted" />
+            About canvas-drop
+          </a>
+
           {canSignOut && (
             <a
               href="/auth/logout"
               role="menuitem"
-              className="flex items-center gap-2.5 px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
+              className="flex items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
             >
               <SignOut size={16} aria-hidden className="text-muted" />
               Sign out
