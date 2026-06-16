@@ -93,6 +93,15 @@ describe("draftApiRoutes", () => {
     expect(
       (await adminApp.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`)).status,
     ).toBe(404);
+    // …and a mutating content route (publish) is 404 for the admin too.
+    expect(
+      (
+        await adminApp.request(`/api/canvases/${canvas.id}/publish`, {
+          method: "POST",
+          headers: SO,
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it("PUT writes a draft file (dirty), GET file returns its bytes", async () => {

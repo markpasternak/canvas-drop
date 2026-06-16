@@ -15,6 +15,7 @@ import type { GuestService } from "../auth/guest.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
+import { requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -105,8 +106,8 @@ const settingsSchema = z.object({
 });
 
 /**
- * OWNER/ADMIN canvas view (never leaks `api_key_hash` / `password_hash`). Every
- * caller of this projection is gated by `ownedCanvas` (owner/admin) or
+ * OWNER canvas view (never leaks `api_key_hash` / `password_hash`). Every
+ * caller of this projection is gated by `ownedCanvas` (owner-only) or
  * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
  * sees why"). It is NOT a public/shared projection: any future non-owner-facing
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
@@ -146,7 +147,7 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
     // Single derived lifecycle (Draft/Published/Archived/Disabled) the dashboard
     // renders as the Publication chip — one authoritative value, never stored.
     publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
-    // Admin takedown reason (§6.10.2, M7). Owner/admin-only — see the doc above.
+    // Admin takedown reason (§6.10.2, M7). Owner-only surface — see the doc above.
     disabledReason: cv.disabledReason,
     currentVersionId: cv.currentVersionId,
     createdAt: cv.createdAt,
@@ -213,20 +214,11 @@ export function managementRoutes(deps: ManagementDeps) {
     return publicCanvas(deps.config, cv, await resolveGlobals());
   }
 
-  /** Load a canvas the caller may manage (owner or admin), else 404. */
-  async function ownedCanvas(c: Context<AppEnv>): Promise<Canvas | null> {
-    const id = c.req.param("id");
-    if (!id) return null;
-    const cv = await deps.canvases.findById(id);
-    if (!cv || cv.status === "deleted") return null;
-    const user = c.get("user");
-    // Owner-only. A non-owner admin is treated like any other member here: it gets a
-    // 404 (no existence leak) and cannot view, edit, deploy, configure, or delete
-    // someone else's canvas through the owner management surface. Cross-owner admin
-    // power lives only on the dedicated admin routes (list + disable/enable/restore).
-    if (cv.ownerId !== user.id) return null;
-    return cv;
-  }
+  /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
+   *  surface, shared with draft-api.ts so the two can't drift. A non-owner admin is
+   *  treated like any other member here (404); cross-owner admin power is the admin
+   *  routes only (list + disable/enable/restore). */
+  const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
 
   /** 409 body for deploy/rollback on a non-active (archived/disabled) canvas.
    *  Publishing to a canvas whose public URL 404s is incoherent — make the caller
@@ -371,7 +363,7 @@ export function managementRoutes(deps: ManagementDeps) {
 
   // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
   // realtime connect count (M9), derived from usage_events + files + ai_usage.
-  // Owner-or-admin only (ownedCanvas), dashboard-session gated — NOT the runtime router.
+  // Owner-only (ownedCanvas), dashboard-session gated — NOT the runtime router.
   // Realtime is ephemeral, so "peak concurrent connections" isn't derivable; we
   // surface the connect count (rt_connect events) instead.
   app.get("/:id/usage", async (c) => {
@@ -818,7 +810,7 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
-  // endpoint — owner/admin only, no existence leak. GET, so no same-origin guard.
+  // endpoint — owner-only, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);

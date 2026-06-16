@@ -43,8 +43,11 @@ it throttles).
      Fixed by re-guarding `archive` to `WHERE status='active'` only.
   2. Owner `delete`→admin-`restore` would relaunch a taken-down canvas as `active`
      (an admin restoring from the deleted view doesn't know it was a takedown).
-     Fixed by **blocking an owner from deleting a disabled canvas** (409; an admin
-     still can), and `restore` clears `disabled_reason` so no stale note rides onto
+     Fixed by **blocking deletion of a disabled canvas** (409). *(Updated 2026-06-16,
+     D-admin-restrict: the admin delete-of-disabled shortcut was removed — it now 409s
+     for everyone; the canvas must be re-enabled via the admin route, then the owner
+     deletes it. See [[2026-06-16-admin-content-restriction-and-deploy-draft-sync]].)*
+     `restore` clears `disabled_reason` so no stale note rides onto
      a live row. *Lesson:* when you add an admin-authoritative state, walk EVERY
      owner-initiated transition out of it — the guard on the obvious one (archive)
      isn't enough.

@@ -61,7 +61,7 @@ export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 /**
  * Canvas access rung (D4 ladder). One rung per canvas, stored as text:
- *  - `private`         — owner/admin only (default)
+ *  - `private`         — owner only (default; a non-owner admin is treated as any member)
  *  - `specific_people` — a named allowlist (org members and/or invited guests)
  *  - `whole_org`       — any authenticated org member with the link (the former "shared")
  *  - `public_link`     — anyone with the link; admin-gated per account; static-only

@@ -91,7 +91,7 @@ export interface Canvas {
   status: string;
   /** Single derived lifecycle the UI renders as the Publication chip (server-computed). */
   publicationState: PublicationState;
-  /** Admin takedown reason (§6.10.2) — owner/admin-only; null unless disabled. */
+  /** Admin takedown reason (§6.10.2) — owner-only surface; null unless disabled. */
   disabledReason: string | null;
   currentVersionId: string | null;
   createdAt: number;

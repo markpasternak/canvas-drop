@@ -14,7 +14,7 @@ and [[dual-dialect-drizzle-seam]].
 `apps/server/src/canvas/authorization.ts` splits into `decideCanvasAccess(canvas,
 user, now)` (pure, exhaustively unit-tested) and the `canvasAccess` middleware
 (HTTP glue). **Order is the invariant** (and is itself tested): deleted→404 →
-disabled→403 → owner/admin→allow → not-shared→404 (owner-only, no existence leak)
+disabled→403 → owner→allow → not-shared→404 (owner-only, no existence leak; a non-owner admin falls through to the rung like any member — D-admin-restrict)
 → expired→404 → shared+live→allow (defer to gate). No cached grants — re-read
 `findBySlug` every request so revoke/expiry/disable are honored on the next hit.
 Any new canvas-scoped surface (KV, files, realtime) should reuse `canvasAccess`,

@@ -255,6 +255,11 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}`,
     );
     expect(res.status).toBe(404);
+    // …but the owner still reaches it (the owner check, not isAdmin, is the gate).
+    const asOwner = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}`,
+    );
+    expect(asOwner.status).toBe(200);
   });
 
   it("settings: shared toggle, password set (argon2id hash) and clear", async () => {
@@ -1471,6 +1476,21 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     expect(res.status).toBe(201);
     const body = await jsonOf<{ id: string }>(res);
     expect((await canvasesRepository(client).findById(body.id))?.ownerId).toBe(other.id);
+  });
+
+  it("an admin CANNOT clone another owner's private (non-template) canvas → 404 (no content exfil)", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const admin = await seedUser(client, "admin", true);
+    // Default seedCanvas is private + not gallery-listed. An admin is treated like any
+    // non-owner here (clone reads no isAdmin), so it can't clone it into an owned copy.
+    const src = await seedCanvas(storage, owner.id, { slug: "src", apiKeyHash: "k1" });
+    const res = await buildApp(client, { id: admin.id, isAdmin: true }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(404);
   });
 
   it("non-owner cannot clone a listed-but-NOT-templatable canvas → 404 (opaque)", async () => {

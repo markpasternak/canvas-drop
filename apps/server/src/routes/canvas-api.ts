@@ -93,7 +93,8 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       }
       // Password gate: a shared, password-protected canvas's API stays closed
       // until the viewer has satisfied the gate (same lock as the content path —
-      // §12.0 #3). Owners/admins bypass it (needsPasswordGate is false for them).
+      // §12.0 #3). The owner bypasses it (needsPasswordGate is false for them); a
+      // non-owner admin faces the gate like any other member.
       if (
         decision.needsPasswordGate &&
         !verifyGrant(deps.config.sessionSecret, canvas as Canvas, getCookie(c, GATE_COOKIE))

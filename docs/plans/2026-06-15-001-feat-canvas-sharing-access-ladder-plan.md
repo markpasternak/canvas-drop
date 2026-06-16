@@ -178,7 +178,7 @@ Grouped into three phases. Build in order; each unit is one atomic commit with i
   - `whole_org`: member → allow; guest → 404; anonymous → 404.
   - `private`: non-owner member → 404; owner → allow.
   - `public_link`: anonymous → allow with `staticOnly: true`; member non-owner → allow (static-only too).
-  - Owner/admin bypass the rung at every rung; disabled fires before owner; expiry passed → 404; password set → `needsPasswordGate` true for non-owner.
+  - Owner bypasses the rung at every rung; disabled fires before owner; expiry passed → 404; password set → `needsPasswordGate` true for every non-owner (incl. a non-owner admin — D-admin-restrict, post-impl).
   - Order invariants unchanged (deleted/archived/disabled precede owner).
 - **Verification:** All `decideCanvasAccess` branches covered for the new rung×principal matrix; dual-dialect test green.
 
