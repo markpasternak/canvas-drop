@@ -133,6 +133,12 @@ export function makeOidc(deps: OidcDeps) {
     async callback(c: Context<AppEnv>) {
       const tx = readTx(c);
       deleteCookie(c, OIDC_TX_COOKIE, txCookieOptions(deps.config));
+      // Also reap any legacy host-only tx cookie left over from before the cookie
+      // was domain-scoped — the domain-scoped delete above won't match it, and a
+      // stale one coexisting on the apex could itself trigger a state_mismatch.
+      if (deps.config.urlMode === "subdomain") {
+        deleteCookie(c, OIDC_TX_COOKIE, { path: "/" });
+      }
       if (!tx) {
         return recoverableAuthError(
           c,

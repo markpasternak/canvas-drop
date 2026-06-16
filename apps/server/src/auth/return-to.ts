@@ -33,12 +33,20 @@ export function publicOrigin(config: Config, host: string | undefined | null): s
  * safe destination — a same-site relative path, or an absolute URL on this instance
  * or one of its canvas subdomains — or `undefined` to fall back to the default.
  *
- * Rejected: protocol-relative (`//evil`, `/\evil`) and backslash tricks, off-host
- * absolute URLs, scheme downgrades/upgrades, and any `/auth/*` target (which would
- * just bounce the user back into the login dance).
+ * Rejected: control-char smuggling, protocol-relative (`//evil`, `/\evil`) and
+ * backslash tricks, off-host absolute URLs, scheme downgrades/upgrades, and any
+ * `/auth/*` target (which would just bounce the user back into the login dance).
  */
 export function safeReturnTo(config: Config, raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
+
+  // Reject ASCII control chars and spaces up front. The WHATWG URL parser (and the
+  // browser, and the Location header) STRIP tab/CR/LF from anywhere in a value
+  // before resolving it, so `/\t//evil.com` would slip past the prefix denylist
+  // below (its pathname parses as "/") yet navigate to `//evil.com` once stripped.
+  // Legitimate destinations are percent-encoded and contain no raw control/space.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberate — these are exactly the chars browsers strip.
+  if (/[\u0000-\u0020\u007f]/.test(raw)) return undefined;
 
   let result: string;
   let pathname: string;

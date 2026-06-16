@@ -1,7 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
-import { loginUrl, requestReturnTo } from "../auth/return-to.js";
+import { loginUrl, publicOrigin, requestReturnTo } from "../auth/return-to.js";
 import { SESSION_COOKIE } from "../auth/session.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
@@ -49,14 +49,6 @@ function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua:
   return CRAWLER_UA.test(ua);
 }
 
-/** Absolute origin for THIS request — the instance's configured scheme + the
- *  request host (works on canvas subdomains; `/og.png` is served host-agnostically). */
-function originOf(host: string, config: Config): string {
-  const scheme = config.baseUrl.startsWith("https") ? "https" : "http";
-  const resolvedHost = host || new URL(config.baseUrl).host;
-  return `${scheme}://${resolvedHost}`;
-}
-
 export function socialPreview(config: Config, canvases?: CanvasesRepository) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const principal = c.get("principal");
@@ -75,7 +67,7 @@ export function socialPreview(config: Config, canvases?: CanvasesRepository) {
         );
         const canvas = canvasSlug ? await canvases.findBySlug(canvasSlug) : null;
         if (canvas) {
-          const origin = originOf(c.req.header("host") ?? "", config);
+          const origin = publicOrigin(config, c.req.header("host"));
           const title = canvas.title?.trim() || PREVIEW_TITLE;
           return htmlResponse(
             renderPreviewShell(origin, c.req.path, {
@@ -107,7 +99,7 @@ export function socialPreview(config: Config, canvases?: CanvasesRepository) {
       return next();
     }
     const host = c.req.header("host") ?? "";
-    const origin = originOf(host, config);
+    const origin = publicOrigin(config, host);
     // Forward where the visitor was headed so they return to the shared canvas after
     // sign-in, not the apex welcome page.
     const loginHref = loginUrl(config, requestReturnTo(config, host, c.req.url));

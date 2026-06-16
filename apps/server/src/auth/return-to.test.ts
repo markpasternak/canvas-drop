@@ -35,6 +35,16 @@ describe("safeReturnTo — open-redirect defense", () => {
     expect(safeReturnTo(subdomain, "/%2Fevil.com")).toBeUndefined();
   });
 
+  it("rejects control-char smuggling that the browser strips into a protocol-relative URL", () => {
+    // `/\t//evil.com` parses to pathname "/" (passing the prefix denylist) but the
+    // browser strips the TAB from the Location header → `//evil.com` → off-origin.
+    expect(safeReturnTo(subdomain, "/\t//evil.com")).toBeUndefined();
+    expect(safeReturnTo(subdomain, "/\r//evil.com")).toBeUndefined();
+    expect(safeReturnTo(subdomain, "/\n//evil.com")).toBeUndefined();
+    expect(safeReturnTo(subdomain, "/foo\tbar")).toBeUndefined();
+    expect(safeReturnTo(subdomain, "https://canvases.example.com/\t//evil.com")).toBeUndefined();
+  });
+
   it("rejects off-host absolute URLs and lookalike suffixes", () => {
     expect(safeReturnTo(subdomain, "https://evil.com/")).toBeUndefined();
     // Not a real subdomain — a sibling host that merely ends with the brand string.
