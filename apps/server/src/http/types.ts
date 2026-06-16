@@ -12,7 +12,13 @@ import type { Logger } from "../log/logger.js";
 export type Principal =
   | { kind: "member"; id: string; isAdmin: boolean }
   | { kind: "guest"; id: string; inviteId: string; canvasId: string; email: string }
-  | { kind: "anonymous" };
+  | { kind: "anonymous" }
+  // The internal screenshot worker rendering one canvas+version for a capture
+  // (plan 004 / U3). Set ONLY by the internal capture middleware after verifying a
+  // server-minted HMAC token — never by a public-surface resolver, never from a
+  // client header. Scoped to one canvas; `decideCanvasAccess` grants it exactly
+  // what the owner sees and nothing on any other canvas (§12.0).
+  | { kind: "capture"; canvasId: string; versionId: string };
 
 /**
  * Hono context variables available across the app. Populated by the middleware

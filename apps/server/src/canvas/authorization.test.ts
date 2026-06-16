@@ -352,3 +352,53 @@ describe("principalLookupKey — allowlist match parity", () => {
     expect(principalLookupKey(anon)).toEqual({});
   });
 });
+
+// --- Internal capture principal (plan 004 / U3, §12.0) ---
+
+describe("decideCanvasAccess — internal capture principal", () => {
+  const capture = (canvasId = "cv1"): Principal => ({
+    kind: "capture",
+    canvasId,
+    versionId: "v1",
+  });
+
+  it("allows capture of its OWN canvas at every access rung (private/gated included)", () => {
+    for (const access of ["private", "specific_people", "whole_org", "public_link"] as const) {
+      expect(decideCanvasAccess(canvas({ access }), capture("cv1"), NOW)).toEqual({
+        action: "allow",
+        needsPasswordGate: false,
+        staticOnly: false,
+      });
+    }
+  });
+
+  it("captures full view even when a password gate is set (owner-equivalent, no prompt)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), capture("cv1"), NOW),
+    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+  });
+
+  it("DENIES a capture credential scoped to a DIFFERENT canvas (no cross-canvas render)", () => {
+    // Even against an otherwise-public canvas, a token minted for cv1 cannot render cv2.
+    expect(decideCanvasAccess(canvas({ id: "cv2", access: "public_link" }), capture("cv1"), NOW, {
+      publicEnabled: true,
+    })).toEqual({ action: "deny", status: 404, reason: "not_found" });
+    expect(decideCanvasAccess(canvas({ id: "cv2", access: "private" }), capture("cv1"), NOW)).toEqual(
+      { action: "deny", status: 404, reason: "not_found" },
+    );
+  });
+
+  it("does NOT bypass deleted/archived/disabled (lifecycle is honored first)", () => {
+    expect(decideCanvasAccess(canvas({ status: "deleted" }), capture("cv1"), NOW).action).toBe(
+      "deny",
+    );
+    expect(decideCanvasAccess(canvas({ status: "archived" }), capture("cv1"), NOW).action).toBe(
+      "deny",
+    );
+    expect(decideCanvasAccess(canvas({ status: "disabled" }), capture("cv1"), NOW)).toEqual({
+      action: "deny",
+      status: 403,
+      reason: "disabled",
+    });
+  });
+});

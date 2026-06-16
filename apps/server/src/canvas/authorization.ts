@@ -85,6 +85,19 @@ export function decideCanvasAccess(
   if (principal.kind === "member" && canvas.ownerId === principal.id) {
     return { action: "allow", needsPasswordGate: false, staticOnly: false };
   }
+  // Internal capture (plan 004 / U3): the screenshot worker rendering THIS canvas at
+  // a pinned version. Set only by the internal capture middleware from a verified
+  // server-minted token (§12.0 #1) — never a client header on a public surface. It
+  // does NOT bypass the deleted/archived/disabled checks above (those fire first),
+  // is scoped to exactly one canvas (a credential for another canvas denies here — no
+  // cross-canvas render), and grants only the owner-equivalent VIEW so a private/gated
+  // canvas can be captured for its authenticated dashboard cover. No primitive
+  // elevation: neutering happens in the capture engine (U4), not here.
+  if (principal.kind === "capture") {
+    return principal.canvasId === canvas.id
+      ? { action: "allow", needsPasswordGate: false, staticOnly: false }
+      : { action: "deny", status: 404, reason: "not_found" };
+  }
   // A guest session is scoped to exactly the canvas it was invited to (R11/§12.0 #3):
   // a guest invited to X can never reach Y, at any rung.
   if (principal.kind === "guest" && principal.canvasId !== canvas.id) {
@@ -167,7 +180,10 @@ export function requestPrincipal(c: { get: (k: "principal" | "user") => unknown 
  *  guest by principal id, an anonymous public visitor by a stable sentinel. */
 export function principalAttributionId(c: { get: (k: "principal" | "user") => unknown }): string {
   const p = requestPrincipal(c);
-  return p.kind === "anonymous" ? "anonymous-via-public-link" : p.id;
+  if (p.kind === "member" || p.kind === "guest") return p.id;
+  // `capture` never reaches the content attribution path (it's the internal worker,
+  // which records no usage events) — handle it defensively for exhaustiveness.
+  return p.kind === "capture" ? `capture:${p.canvasId}` : "anonymous-via-public-link";
 }
 
 /**
