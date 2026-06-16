@@ -12,6 +12,9 @@ export type MeAuthMode = AuthMode;
 
 export interface MeRoutesDeps {
   authMode: AuthMode;
+  /** Instance URL shape (plan 004) — lets the dashboard render a faithful slug URL preview. */
+  urlMode: "path" | "subdomain";
+  baseUrl: string;
 }
 
 /**
@@ -42,6 +45,10 @@ export function meRoutes(deps: MeRoutesDeps) {
       // the public_link rung only when true.
       canPublishPublic: u.canPublishPublic,
       authMode: deps.authMode,
+      // Instance URL config (plan 004) — UX-only, like authMode; NEVER an authz signal.
+      // The dashboard uses these to preview a custom slug's final URL before create.
+      urlMode: deps.urlMode,
+      baseUrl: deps.baseUrl,
     });
   });
 

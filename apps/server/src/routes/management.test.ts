@@ -16,7 +16,7 @@ import { guestRepository } from "../db/repositories/guest.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { DeployEntry } from "../deploy/ingest.js";
 import { logMailer } from "../email/log.js";
@@ -60,7 +60,10 @@ function buildApp(
     c.set("clientIp", "127.0.0.1");
     await next();
   });
-  app.route("/api/me", meRoutes({ authMode: "dev" }));
+  app.route(
+    "/api/me",
+    meRoutes({ authMode: "dev", urlMode: "path", baseUrl: "http://localhost:8787" }),
+  );
   app.route(
     "/api/canvases",
     managementRoutes({
@@ -326,6 +329,159 @@ describe("managementRoutes", () => {
     );
     expect(rekey.apiKey).toMatch(/^cd_/);
     expect(rekey.apiKey).not.toBe(created.apiKey);
+  });
+
+  describe("custom slugs (plan 004)", () => {
+    const hdrs = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" };
+
+    async function post(app: ReturnType<typeof buildApp>, path: string, body: unknown) {
+      return app.request(path, { method: "POST", headers: hdrs, body: JSON.stringify(body) });
+    }
+
+    it("create accepts a valid custom slug and marks it custom", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const res = await post(app, "/api/canvases", { slug: "team-dashboard" });
+      expect(res.status).toBe(201);
+      const body = await jsonOf<{ slug: string; slugCustom: boolean; url: string }>(res);
+      expect(body.slug).toBe("team-dashboard");
+      expect(body.slugCustom).toBe(true);
+      expect(body.url).toContain("team-dashboard");
+    });
+
+    it("create with no slug stays random and not custom", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const body = await jsonOf<{ slug: string; slugCustom: boolean }>(
+        await post(app, "/api/canvases", {}),
+      );
+      expect(body.slug).toMatch(/^[a-z]+-[a-z]+-[a-z0-9]{13}$/);
+      expect(body.slugCustom).toBe(false);
+    });
+
+    it("create rejects invalid and reserved slugs with 400", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      for (const slug of ["UPPER", "-bad", "has space", "mcp", "api"]) {
+        const res = await post(app, "/api/canvases", { slug });
+        expect(res.status, slug).toBe(400);
+      }
+    });
+
+    // Run the 409 catch path on BOTH dialects: it exercises isUniqueViolation against
+    // the real driver error, whose shape differs (better-sqlite3 vs pglite-under-.cause).
+    // The rest of this suite is sqlite-only by design (see file header); this case
+    // specifically guards the dialect-aware catch in the route (KTD7).
+    it.each(
+      DIALECTS,
+    )("create returns 409 when the custom slug is already taken [%s]", async (dialect) => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      expect((await post(app, "/api/canvases", { slug: "taken-one" })).status).toBe(201);
+      const dup = await post(app, "/api/canvases", { slug: "taken-one" });
+      expect(dup.status).toBe(409);
+      expect((await jsonOf<{ error: string }>(dup)).error).toBe("slug_taken");
+    });
+
+    it("paste accepts a custom slug; a taken slug 409s and leaves no orphan", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const ok = await post(app, "/api/canvases/paste", {
+        html: "<h1>hi</h1>",
+        slug: "pasted-site",
+      });
+      expect(ok.status).toBe(201);
+      expect((await jsonOf<{ slugCustom: boolean }>(ok)).slugCustom).toBe(true);
+      // Re-paste with the same slug: the create() throws before any row exists.
+      const dup = await post(app, "/api/canvases/paste", {
+        html: "<h1>again</h1>",
+        slug: "pasted-site",
+      });
+      expect(dup.status).toBe(409);
+      // No orphan: exactly one canvas holds the slug.
+      expect((await canvasesRepository(client).findBySlug("pasted-site")) !== null).toBe(true);
+      const list = await canvasesRepository(client).listByOwnerFiltered({
+        ownerId: owner.id,
+        limit: 100,
+        offset: 0,
+      });
+      expect(list.items.filter((c) => c.slug === "pasted-site").length).toBe(1);
+    });
+
+    it("regenerate-slug sets a custom slug, or a random one when empty", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const created = await jsonOf<{ id: string; slug: string }>(
+        await post(app, "/api/canvases", {}),
+      );
+      const renamed = await jsonOf<{ slug: string; slugCustom: boolean }>(
+        await post(app, `/api/canvases/${created.id}/regenerate-slug`, { slug: "renamed-canvas" }),
+      );
+      expect(renamed.slug).toBe("renamed-canvas");
+      expect(renamed.slugCustom).toBe(true);
+      // Old slug no longer resolves; new one does.
+      expect(await canvasesRepository(client).findBySlug(created.slug)).toBeNull();
+      expect((await canvasesRepository(client).findBySlug("renamed-canvas"))?.id).toBe(created.id);
+      // Empty body → random, not custom.
+      const back = await jsonOf<{ slug: string; slugCustom: boolean }>(
+        await post(app, `/api/canvases/${created.id}/regenerate-slug`, {}),
+      );
+      expect(back.slugCustom).toBe(false);
+    });
+
+    it("regenerate-slug rejects invalid (400) and taken (409) custom slugs", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      await post(app, "/api/canvases", { slug: "occupied" });
+      const target = await jsonOf<{ id: string }>(await post(app, "/api/canvases", {}));
+      expect(
+        (await post(app, `/api/canvases/${target.id}/regenerate-slug`, { slug: "API" })).status,
+      ).toBe(400);
+      const taken = await post(app, `/api/canvases/${target.id}/regenerate-slug`, {
+        slug: "occupied",
+      });
+      expect(taken.status).toBe(409);
+    });
+
+    it("GET /slug-available reports availability and never shadows /:id", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      await post(app, "/api/canvases", { slug: "is-taken" });
+      const check = async (slug: string) =>
+        jsonOf<{ available: boolean; reason?: string }>(
+          await app.request(`/api/canvases/slug-available?slug=${encodeURIComponent(slug)}`),
+        );
+      expect(await check("wide-open")).toEqual({ available: true });
+      expect(await check("is-taken")).toEqual({ available: false, reason: "taken" });
+      expect(await check("UPPER")).toEqual({ available: false, reason: "invalid" });
+      expect(await check("mcp")).toEqual({ available: false, reason: "reserved" });
+      // The literal `slug-available` segment resolves to this handler, not GET /:id.
+      const raw = await app.request("/api/canvases/slug-available?slug=anything");
+      expect(raw.status).toBe(200);
+    });
+
+    it("a slug freed only by soft-delete still reports taken (agrees with the index)", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const app = buildApp(client, { id: owner.id, isAdmin: false });
+      const cv = await jsonOf<{ id: string }>(await post(app, "/api/canvases", { slug: "ghost" }));
+      await app.request(`/api/canvases/${cv.id}`, {
+        method: "DELETE",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+      });
+      const body = await jsonOf<{ available: boolean; reason?: string }>(
+        await app.request("/api/canvases/slug-available?slug=ghost"),
+      );
+      expect(body).toEqual({ available: false, reason: "taken" });
+    });
   });
 
   it("DELETE soft-deletes and excludes from the owner's list", async () => {
@@ -892,15 +1048,20 @@ describe("managementRoutes", () => {
       } as never);
       await next();
     });
-    app.route("/api/me", meRoutes({ authMode: "oidc" }));
+    app.route(
+      "/api/me",
+      meRoutes({ authMode: "oidc", urlMode: "subdomain", baseUrl: "https://example.com" }),
+    );
     const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));
     expect(Object.keys(body).sort()).toEqual([
       "authMode",
       "avatarUrl",
+      "baseUrl",
       "email",
       "id",
       "isAdmin",
       "name",
+      "urlMode",
     ]);
     expect(body.providerSub).toBeUndefined();
     expect(body.isBlocked).toBeUndefined();

@@ -4,6 +4,7 @@ import {
   type Config,
   effectiveCapabilities,
   storedCapabilities,
+  validateSlug,
 } from "@canvas-drop/shared";
 import type { Canvas, CanvasStatus, Manifest } from "@canvas-drop/shared/db";
 import { publicationState } from "@canvas-drop/shared/db";
@@ -29,6 +30,7 @@ import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
@@ -72,9 +74,32 @@ export interface ManagementDeps {
 const createSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(2000).optional(),
+  // Optional owner-chosen slug (plan 004). Absent/empty → readable-random. Grammar +
+  // reserved-word + uniqueness are enforced below; the cap matches the slug length limit.
+  slug: z.string().max(63).optional(),
   // Backend-group master switch chosen at create time (plan 006). Off by default.
   backendEnabled: z.boolean().optional(),
 });
+
+/**
+ * Resolve the slug for a create/paste request (plan 004): a non-empty custom slug is
+ * validated and marked custom; absent/empty falls back to the readable-random generator.
+ * Returns the chosen slug + whether it is custom, or a 400 reason for an invalid/reserved
+ * value. Uniqueness is NOT checked here — the `canvases_slug_uq` index is the authority and
+ * the caller maps its violation to 409 (KTD4/KTD7).
+ */
+async function resolveCreateSlug(
+  raw: string | undefined,
+  exists: (slug: string) => Promise<boolean>,
+): Promise<{ slug: string; custom: boolean } | { error: "invalid_slug" }> {
+  const trimmed = raw?.trim();
+  if (trimmed) {
+    const check = validateSlug(trimmed);
+    if (!check.ok) return { error: "invalid_slug" };
+    return { slug: trimmed, custom: true };
+  }
+  return { slug: await generateUniqueSlug(exists), custom: false };
+}
 
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
 const capabilitiesSchema = z.object({
@@ -117,6 +142,8 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
   return {
     id: cv.id,
     slug: cv.slug,
+    // Owner-chosen vs readable-random — drives the public+custom heads-up (plan 004).
+    slugCustom: cv.slugCustom,
     url: canvasUrl(config, cv.slug),
     title: cv.title,
     description: cv.description,
@@ -233,18 +260,27 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = createSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
-    const slug = await generateUniqueSlug(
-      async (s) => (await deps.canvases.findBySlug(s)) !== null,
-    );
+    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
+    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
-    const cv = await deps.canvases.create({
-      ownerId: user.id,
-      slug,
-      apiKeyHash: hashApiKey(apiKey),
-      title: body.data.title,
-      description: body.data.description,
-      backendEnabled: body.data.backendEnabled,
-    });
+    let cv: Canvas;
+    try {
+      cv = await deps.canvases.create({
+        ownerId: user.id,
+        slug: resolved.slug,
+        slugCustom: resolved.custom,
+        apiKeyHash: hashApiKey(apiKey),
+        title: body.data.title,
+        description: body.data.description,
+        backendEnabled: body.data.backendEnabled,
+      });
+    } catch (err) {
+      // A custom slug racing another insert loses against `canvases_slug_uq` (KTD7).
+      if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+        return c.json({ error: "slug_taken" }, 409);
+      }
+      throw err;
+    }
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // apiKey is returned ONCE and never again.
     return c.json({ ...(await canvasView(cv)), apiKey }, 201);
@@ -353,6 +389,19 @@ export function managementRoutes(deps: ManagementDeps) {
     ]);
     const canvases = await withLastDeploy(items);
     return c.json({ canvases, total, limit, offset, summary });
+  });
+
+  // Slug availability for live UX (plan 004 U4). MUST be registered BEFORE `/:id` or
+  // Hono captures it as `id="slug-available"`. No `sameOrigin` — it's a read GET, like
+  // its siblings (that guard is for mutating routes). Authenticated via the gateway.
+  // The body carries ONLY { available, reason? } — no canvas fields leak (§12.2). The
+  // existence check is status-unaware so it agrees with the unconditional unique index.
+  app.get("/slug-available", async (c) => {
+    const raw = (c.req.query("slug") ?? "").trim();
+    const check = validateSlug(raw);
+    if (!check.ok) return c.json({ available: false, reason: check.reason });
+    const taken = await deps.canvases.slugTaken(raw);
+    return c.json(taken ? { available: false, reason: "taken" } : { available: true });
   });
 
   app.get("/:id", async (c) => {
@@ -707,10 +756,22 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/regenerate-slug", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const slug = await generateUniqueSlug(
-      async (s) => (await deps.canvases.findBySlug(s)) !== null,
-    );
-    const updated = await deps.canvases.regenerateSlug(cv.id, slug);
+    // Optional custom slug (plan 004): absent/empty → random (existing behavior).
+    const body = z
+      .object({ slug: z.string().max(63).optional() })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
+    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+    let updated: Canvas;
+    try {
+      updated = await deps.canvases.regenerateSlug(cv.id, resolved.slug, resolved.custom);
+    } catch (err) {
+      if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+        return c.json({ error: "slug_taken" }, 409);
+      }
+      throw err;
+    }
     deps.audit.recordAudit({ action: "slug_regen", actorId: c.get("user").id, targetId: cv.id });
     // Old slug URLs are invalidated — drop all live sockets so clients reconnect
     // under the new slug (D-RT-6 / §12.0 #5).
@@ -879,22 +940,34 @@ export function managementRoutes(deps: ManagementDeps) {
       .object({
         html: z.string().min(1),
         title: z.string().max(200).optional(),
+        slug: z.string().max(63).optional(),
         backendEnabled: z.boolean().optional(),
       })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
-    const slug = await generateUniqueSlug(
-      async (s) => (await deps.canvases.findBySlug(s)) !== null,
-    );
+    const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
+    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
-    const cv = await deps.canvases.create({
-      ownerId: user.id,
-      slug,
-      apiKeyHash: hashApiKey(apiKey),
-      title: body.data.title,
-      backendEnabled: body.data.backendEnabled,
-    });
+    // A taken custom slug throws inside create() — BEFORE any row exists and before the
+    // deploy try-block below — so map it to 409 here; there is no orphan to clean up
+    // (the deploy-failure soft-delete further down is a separate concern). (plan 004 KTD8)
+    let cv: Canvas;
+    try {
+      cv = await deps.canvases.create({
+        ownerId: user.id,
+        slug: resolved.slug,
+        slugCustom: resolved.custom,
+        apiKeyHash: hashApiKey(apiKey),
+        title: body.data.title,
+        backendEnabled: body.data.backendEnabled,
+      });
+    } catch (err) {
+      if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+        return c.json({ error: "slug_taken" }, 409);
+      }
+      throw err;
+    }
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // Deploy directly (typed result) rather than re-parsing a Response body. If
     // the deploy fails, soft-delete the just-created canvas so no orphan + its

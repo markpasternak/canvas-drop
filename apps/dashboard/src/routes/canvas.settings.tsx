@@ -8,6 +8,7 @@ import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { IconLink } from "../components/IconButton.js";
+import { RenameSlugDialog } from "../components/RenameSlugDialog.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -24,7 +25,7 @@ import {
   useUnpublishCanvas,
   useUpdateSettings,
 } from "../lib/mutations.js";
-import { useCanvas } from "../lib/queries.js";
+import { useCanvas, useMe } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const SECTIONS = [
@@ -42,6 +43,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
+  const me = useMe().data;
 
   const update = useUpdateSettings(id);
   const regenSlug = useRegenerateSlug(id);
@@ -89,7 +91,7 @@ export default function Settings() {
               <ArrowSquareOut size={15} weight="bold" aria-hidden />
             </IconLink>
             <Button size="sm" variant="secondary" onClick={() => setConfirm("slug")}>
-              Regenerate slug
+              Change slug
             </Button>
           </Row>
           <RowDivider />
@@ -216,27 +218,23 @@ export default function Settings() {
         </Section>
       </div>
 
-      <ConfirmDialog
+      <RenameSlugDialog
         open={confirm === "slug"}
         onClose={() => setConfirm(null)}
-        onConfirm={async () => {
+        onConfirm={async (slug) => {
           try {
-            await regenSlug.mutateAsync();
+            await regenSlug.mutateAsync(slug);
             setConfirm(null);
-            toast("Slug regenerated");
+            toast(slug ? "Slug changed" : "Slug regenerated");
             requestAnimationFrame(() => urlCopyRef.current?.focus());
           } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't regenerate slug", "error");
+            toast(err instanceof ApiError ? err.hint : "Couldn't change the slug", "error");
           }
         }}
-        title="Regenerate the slug?"
-        actionLabel="Regenerate"
+        me={me}
+        shared={canvas.shared}
         loading={regenSlug.isPending}
-      >
-        The current URL will stop working
-        {canvas.shared ? ", including the link you've shared with others" : ""}. A new URL is
-        generated and shown here.
-      </ConfirmDialog>
+      />
 
       <ConfirmDialog
         open={confirm === "key"}
