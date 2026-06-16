@@ -220,7 +220,11 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await deps.canvases.findById(id);
     if (!cv || cv.status === "deleted") return null;
     const user = c.get("user");
-    if (cv.ownerId !== user.id && !user.isAdmin) return null; // 404, don't confirm existence
+    // Owner-only. A non-owner admin is treated like any other member here: it gets a
+    // 404 (no existence leak) and cannot view, edit, deploy, configure, or delete
+    // someone else's canvas through the owner management surface. Cross-owner admin
+    // power lives only on the dedicated admin routes (list + disable/enable/restore).
+    if (cv.ownerId !== user.id) return null;
     return cv;
   }
 
@@ -734,10 +738,11 @@ export function managementRoutes(deps: ManagementDeps) {
   app.delete("/:id", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    // An OWNER cannot delete a canvas an admin has taken down (§12.0 #5): deleting
-    // then having an admin restore it would launder the takedown into an active
-    // canvas. The admin must `enable` it first, or an admin can delete it directly.
-    if (cv.status === "disabled" && !c.get("user").isAdmin) {
+    // A canvas an admin has taken down cannot be deleted (§12.0 #5): deleting then
+    // having an admin restore it would launder the takedown into an active canvas. It
+    // must be `enable`d (admin route) first. This holds for every owner — there is no
+    // admin shortcut, and an admin has no owner access to someone else's canvas anyway.
+    if (cv.status === "disabled") {
       return c.json(
         { code: "DISABLED", message: "this canvas was disabled by an administrator" },
         409,

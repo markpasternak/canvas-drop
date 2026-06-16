@@ -42,14 +42,15 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    its allowlist (an org member, or an invited guest whose magic-link session is
    for *that* canvas); at `public_link`, anyone — but static-only and only while
    the owner account holds the admin-granted publish capability. All subject to
-   not revoked/expired and any password. An **admin has no content bypass on
-   canvases they don't own** — for someone else's canvas an admin is treated as an
-   ordinary org member (the rung applies), so a non-owned private or unlisted
-   canvas `404`s for them too; cross-owner admin power is limited to management
-   actions (disable/archive/delete/metadata), never canvas content, the runtime
-   API, or realtime. Everything else returns `404`; a guest can never reach a
-   canvas it wasn't invited to, and an anonymous public visitor gets no backend
-   primitives.
+   not revoked/expired and any password. An **admin has no special access to
+   canvases it doesn't own** — for someone else's canvas an admin is treated as an
+   ordinary org member: the rung applies (a non-owned private or unlisted canvas
+   `404`s for them) and a password-protected rung prompts the admin too. Cross-owner
+   admin power is limited to the dedicated admin routes (the all-canvases list +
+   disable/enable/restore); it never extends to canvas content, the owner
+   management/editor surface, the runtime API, or realtime. Everything else returns
+   `404`; a guest can never reach a canvas it wasn't invited to, and an anonymous
+   public visitor gets no backend primitives.
 4. **No cross-canvas reach in subdomain mode.** One canvas (or its code, SDK, or
    socket) cannot read, write, or act on another canvas's data, files, AI quota,
    or realtime channels. Path mode has reduced browser isolation (see below).

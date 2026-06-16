@@ -4,10 +4,11 @@ Every canvas is **private by default** — only you, its owner, can open it. Whe
 you're ready to let others in, you pick one **access rung** in **Settings →
 Sharing**. Sharing a canvas requires it to be published.
 
-> Admins don't get a back door into your content: an admin can *manage* any canvas
-> (disable, archive, delete, and see it in the admin list) but is treated like any
-> other org member for *opening* it — a private or unlisted canvas they don't own
-> returns a 404 to them too.
+> Admins don't get a back door into your content. For a canvas they don't own an
+> admin is treated like any other org member: a private or unlisted one returns a
+> 404, a password prompts them too, and they can't open the editor or change its
+> settings. An admin's cross-owner power is moderation only — see it in the
+> all-canvases list and disable / re-enable / restore it.
 
 ## The access ladder
 

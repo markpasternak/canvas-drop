@@ -165,10 +165,16 @@ describe("decideCanvasAccess — allows", () => {
     ).toMatchObject({ status: 404, reason: "owner_only" });
   });
 
-  it("admin reaches whole_org (as a member) and bypasses its password gate", () => {
+  it("admin reaches whole_org (as a member) and FACES its password gate, like any member", () => {
+    // Admins get no password bypass on canvases they don't own — treated as a member.
     expect(
       decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), admin, NOW),
-    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+    ).toEqual({ action: "allow", needsPasswordGate: true, staticOnly: false });
+    // …and no gate when the canvas has no password.
+    expect(decideCanvasAccess(canvas({ access: "whole_org" }), admin, NOW)).toMatchObject({
+      action: "allow",
+      needsPasswordGate: false,
+    });
   });
 
   it("admin sees a public_link canvas static-only, like any non-owner member", () => {

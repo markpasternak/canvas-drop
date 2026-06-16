@@ -19,17 +19,28 @@ treated as an ordinary org member:
 
 - non-owned `private` → **404**; non-owned unlisted `specific_people` → **404**
 - `whole_org` / `public_link` → reachable as any member would be
-- admins **keep** the password-gate bypass on the rungs they can still reach
-  (`whole_org` / `public_link`) — that's the deliberate line between "restrict
-  content" (chosen) and "also prompt admins for passwords" (not chosen).
+- a password-protected rung **prompts the admin too** — no password bypass on a
+  canvas it doesn't own (only the owner is never prompted)
+
+The final boundary (after a follow-up): **an admin is fully like any other member
+for canvases it doesn't own.** Beyond the content path, this also locked the *owner
+management/editor surface* — `ownedCanvas` in `management.ts` AND `draft-api.ts` is
+now **owner-only** (was owner-OR-admin), so a non-owner admin can't view/edit a
+draft, preview, deploy, change settings, archive, or delete someone else's canvas
+(all `404`). The admin's delete-a-disabled-canvas shortcut was removed with it (a
+disabled canvas now can't be deleted by anyone until re-enabled). `hub.dropGatedNonOwners`
+now drops admin sockets too (they face the gate). The admin dashboard's overview
+lists (top-canvases, AI-spend) no longer deep-link to `/canvases/$id` since that page
+404s for admins; moderation is the all-canvases table's inline actions.
 
 **Why it's safe / correct.** The original "private canvas visible to any logged-in
 user" report was an admin viewing via the blanket bypass — *intended* under the old
 spec but not what the org wanted. The change makes the code match plan **R3**
 ("owner/admin always reach *their own* canvas") and follows the existing M7
 precedent that admins are **not** exempted from the `disabled` branch. Cross-owner
-admin power is now strictly **management-only** (disable/archive/delete/metadata via
-the admin routes + `adminRepository`), never content, the runtime API, or realtime.
+admin power is now strictly the **dedicated admin routes** (the all-canvases list +
+disable/enable/restore via `adminRepository`), never content, the owner management
+surface, the runtime API, or realtime.
 
 **The trap (why this needed a spec amendment, not just a code edit).** A
 `/ce-code-review` flagged it **P0**: `BUILD_BRIEF §12.0 #3` still read "reachable
@@ -43,13 +54,20 @@ future agent reading the spec would "restore" the bypass:
 
 **Enforcement is one seam, three consumers.** `decideCanvasAccess` is called by the
 content middleware (`app.ts`), the runtime API (`canvas-api.ts`), and the realtime
-hub (`revalidateCanvas`, `hub.ts`). Changing the table fixed all three at once.
-`hub.dropGatedNonOwners` still keeps admin sockets, but that stays consistent
-because admins retain the password-gate bypass and a non-owner admin can never hold
-a socket on a rung they can't reach (the handshake 404s first). Regression tests
-live at the decision-table level (`authorization.test.ts`) **and** the route level
-(`canvas-api.test.ts`, `canvas-realtime.test.ts`) — the route tests guard against a
-re-added bypass that a unit test alone wouldn't catch.
+hub (`revalidateCanvas`, `hub.ts`). Changing the table fixed all three at once;
+separately, the owner management/editor surface is gated by `ownedCanvas` (its own
+owner check in `management.ts` + `draft-api.ts`), which had to be locked too — the
+decision table alone does NOT cover the dashboard editor/draft/preview/settings
+routes. Regression tests live at the decision-table level (`authorization.test.ts`)
+**and** the route level (`canvas-api.test.ts`, `canvas-realtime.test.ts`,
+`management.test.ts`) — the route tests guard against a re-added bypass that a unit
+test alone wouldn't catch.
+
+**Two enforcement seams, not one.** The lesson worth keeping: "admins can't reach
+others' content" needed BOTH `decideCanvasAccess` (public serve / runtime / realtime)
+AND `ownedCanvas` (dashboard management/editor). The first guards what *visitors*
+hit; the second guards what the *owner UI* hits. Restricting only the first leaves
+admins able to read/edit drafts through the editor.
 
 ## Post-deploy draft reconciliation: the editor must show what was deployed
 

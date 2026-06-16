@@ -197,12 +197,14 @@ describe("managementRoutes", () => {
     );
     expect(asOwner.status).toBe(409);
     expect((await canvasesRepository(client).findById(created.id))?.status).toBe("disabled");
-    // An admin CAN delete it (legitimate purge).
+    // An admin has no owner access to someone else's canvas: the management DELETE
+    // route 404s for a non-owner admin (it must be re-enabled, then the owner deletes).
     const asAdmin = await buildApp(client, { id: "admin", isAdmin: true }).request(
       `/api/canvases/${created.id}`,
       { method: "DELETE", headers: { "Sec-Fetch-Site": "same-origin" } },
     );
-    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.status).toBe(404);
+    expect((await canvasesRepository(client).findById(created.id))?.status).toBe("disabled");
   });
 
   it("a disabled canvas's reason reaches the OWNER but never a non-owner (M7, §12.0 #3)", async () => {
@@ -236,7 +238,7 @@ describe("managementRoutes", () => {
     expect(await asOther.text()).not.toContain("HR investigation");
   });
 
-  it("an admin can read another user's canvas", async () => {
+  it("an admin CANNOT read another user's canvas via the owner management route (404)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const admin = await seedUser(client, "admin", true);
@@ -247,10 +249,12 @@ describe("managementRoutes", () => {
         body: "{}",
       }),
     );
+    // Owner management is owner-only — an admin is treated like any other member here
+    // (no existence leak). Cross-owner admin power lives on the admin routes only.
     const res = await buildApp(client, { id: admin.id, isAdmin: true }).request(
       `/api/canvases/${created.id}`,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
   });
 
   it("settings: shared toggle, password set (argon2id hash) and clear", async () => {
@@ -556,7 +560,7 @@ describe("managementRoutes", () => {
     expect(after?.currentVersionId).not.toBeNull();
   });
 
-  it("an admin can unpublish another owner's published canvas", async () => {
+  it("an admin CANNOT unpublish another owner's canvas (owner management is owner-only, 404)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const admin = await seedUser(client, "admin", true);
@@ -571,14 +575,16 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}/unpublish`,
       { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
     );
-    expect(res.status).toBe(200);
-    expect((await jsonOf<{ publicationState: string }>(res)).publicationState).toBe("draft");
+    expect(res.status).toBe(404);
+    // The canvas is untouched — still published.
+    expect(
+      (await canvasesRepository(client).findById(created.id))?.currentVersionId,
+    ).not.toBeNull();
   });
 
-  it("share guard: an admin cannot re-share an ARCHIVED canvas (published means active + current version)", async () => {
+  it("share guard: the OWNER cannot re-share an ARCHIVED canvas (published means active + current version)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
-    const admin = await seedUser(client, "admin", true);
     const repo = canvasesRepository(client);
     const created = await jsonOf<{ id: string }>(
       await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases/paste", {
@@ -588,7 +594,7 @@ describe("managementRoutes", () => {
       }),
     );
     await repo.archive(created.id); // archived keeps currentVersionId
-    const res = await buildApp(client, { id: admin.id, isAdmin: true }).request(
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
       `/api/canvases/${created.id}/settings`,
       {
         method: "PATCH",
@@ -682,7 +688,7 @@ describe("managementRoutes", () => {
     expect((await jsonOf<{ code: string }>(rollback)).code).toBe("NOT_ACTIVE");
   });
 
-  it("a non-owner cannot archive (404, no existence leak); an admin can", async () => {
+  it("a non-owner cannot archive (404, no existence leak) — including an admin", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const other = await seedUser(client, "intruder");
@@ -700,11 +706,14 @@ describe("managementRoutes", () => {
     );
     expect(denied.status).toBe(404);
 
+    // Archive is owner-only; a non-owner admin gets the same 404 (no owner powers on
+    // another user's canvas — moderation is the admin routes' disable/enable/restore).
     const asAdmin = await buildApp(client, { id: admin.id, isAdmin: true }).request(
       `/api/canvases/${created.id}/archive`,
       { method: "POST", headers: { "Sec-Fetch-Site": "same-origin" } },
     );
-    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.status).toBe(404);
+    expect((await canvasesRepository(client).findById(created.id))?.status).toBe("active");
   });
 
   it("archive/unarchive require same-origin", async () => {

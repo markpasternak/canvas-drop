@@ -351,9 +351,11 @@ export function createHub(deps: HubDeps) {
     },
 
     /**
-     * Drop every non-owner/non-admin socket of a canvas (D-RT-6). Called when a
-     * password is newly set: those viewers hold no re-verified gate grant, so they
-     * must re-handshake through the gate.
+     * Drop every non-owner socket of a canvas (D-RT-6). Called when a password is
+     * newly set: those viewers hold no re-verified gate grant, so they must
+     * re-handshake through the gate. Only the owner is exempt — a non-owner admin
+     * faces the gate like any member (it bypasses neither the rung nor the password),
+     * so its live socket is dropped too.
      */
     async dropGatedNonOwners(canvasId: string): Promise<void> {
       const live = [...conns(canvasId)];
@@ -362,7 +364,7 @@ export function createHub(deps: HubDeps) {
       for (const conn of live) {
         if (conn.closed) continue;
         const isOwner = !!canvas && canvas.ownerId === conn.user.id;
-        if (!isOwner && !conn.user.isAdmin) {
+        if (!isOwner) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "password gate");
         }
       }

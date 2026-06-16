@@ -291,7 +291,7 @@ describe("RealtimeHub", () => {
     expect(s.closed?.code).toBe(CLOSE_UNAUTHORIZED);
   });
 
-  it("dropGatedNonOwners closes non-owners, keeps owner + admin", async () => {
+  it("dropGatedNonOwners closes every non-owner, including an admin (admins face the gate)", async () => {
     const hub = makeHub(fakeCanvas());
     const ownerSock = new FakeSocket();
     const adminSock = new FakeSocket();
@@ -301,8 +301,9 @@ describe("RealtimeHub", () => {
     mc(hub, "c1", user("viewer"), viewerSock);
     await hub.dropGatedNonOwners("c1");
     expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    // A non-owner admin gets no password bypass — its socket is dropped too.
+    expect(adminSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
     expect(ownerSock.closed).toBeNull();
-    expect(adminSock.closed).toBeNull();
   });
 
   it("a throwing socket in a broadcast does not starve the other subscribers", () => {

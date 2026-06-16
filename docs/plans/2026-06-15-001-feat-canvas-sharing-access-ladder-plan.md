@@ -111,8 +111,10 @@ flowchart TB
   OWN -->|no| RUNG{access rung}
   %% NOTE (post-impl, D-admin-restrict): a non-owner admin is NOT a bypass here — it
   %% flows down the `no` branch and is treated like an ordinary member, so a non-owned
-  %% private/unlisted canvas 404s for an admin too. Admins keep only the password-gate
-  %% bypass on rungs they can reach. Cross-owner admin power is management-only.
+  %% private/unlisted canvas 404s for an admin and a password prompts it too (only the
+  %% owner is never prompted). The owner management/editor surface (ownedCanvas in
+  %% management.ts + draft-api.ts) is likewise owner-only. Cross-owner admin power is
+  %% the dedicated admin routes only (list + disable/enable/restore).
   RUNG -->|private| N2[404]
   RUNG -->|specific_people| AL{principal on allowlist?<br/>member id or guest inviteId}
   RUNG -->|whole_org| MEMQ{principal kind == member?}

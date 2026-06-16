@@ -1,5 +1,4 @@
-import { CaretRight } from "@phosphor-icons/react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Button } from "../components/Button.js";
@@ -71,21 +70,21 @@ function SpendPanel({
       ) : (
         <ul className="divide-y divide-border text-sm">
           {rows.map((r) => (
-            <li key={r.key}>
-              <Link
-                to="/canvases/$id"
-                params={{ id: r.key }}
-                className="flex items-center justify-between gap-3 px-4 py-2.5 text-muted transition-colors hover:bg-surface-hover"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-fg">{r.label}</span>
-                  {r.sub && <span className="block truncate text-xs text-subtle">{r.sub}</span>}
-                </span>
-                <span className="shrink-0 text-right tabular-nums">
-                  <span className="block font-medium text-fg">{formatUsd(r.costUsd)}</span>
-                  <span className="text-xs text-subtle">{r.calls.toLocaleString()} calls</span>
-                </span>
-              </Link>
+            // Not a link: admins have no owner access to other people's canvases, so
+            // the per-canvas detail page (/canvases/$id) 404s for them. This is a
+            // read-only aggregate; moderation lives in the all-canvases table.
+            <li
+              key={r.key}
+              className="flex items-center justify-between gap-3 px-4 py-2.5 text-muted"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-fg">{r.label}</span>
+                {r.sub && <span className="block truncate text-xs text-subtle">{r.sub}</span>}
+              </span>
+              <span className="shrink-0 text-right tabular-nums">
+                <span className="block font-medium text-fg">{formatUsd(r.costUsd)}</span>
+                <span className="text-xs text-subtle">{r.calls.toLocaleString()} calls</span>
+              </span>
             </li>
           ))}
         </ul>
@@ -204,8 +203,10 @@ function AdminOverview() {
         ) : null}
       </CollapsibleSection>
 
-      {/* Top canvases by usage — an aggregate object fact (most-active canvases by
-          recorded ops), contract-safe. Clickable so admins can inspect the canvas. */}
+      {/* Top canvases by usage — a read-only aggregate (most-active canvases by
+          recorded ops). NOT clickable: admins have no owner access to other people's
+          canvases, so the per-canvas detail page 404s for them; per-canvas moderation
+          lives in the all-canvases table below. */}
       {ov && ov.topCanvases.length > 0 && (
         <CollapsibleSection title="Top canvases by usage" storageKey="admin:section:topCanvases">
           <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-sunken/40 text-sm">
@@ -213,29 +214,18 @@ function AdminOverview() {
               const title = t.title || t.slug || t.canvasId;
               const meta = t.title && t.slug ? t.slug : t.canvasId;
               return (
-                <li key={t.canvasId}>
-                  <Link
-                    to="/canvases/$id"
-                    params={{ id: t.canvasId }}
-                    className="group grid grid-cols-[2rem_1fr_auto_1rem] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-hover"
-                  >
-                    <span className="text-right text-xs text-subtle tabular-nums">{index + 1}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium text-fg transition-colors group-hover:text-accent">
-                        {title}
-                      </span>
-                      <span className="block truncate text-xs text-subtle">{meta}</span>
-                    </span>
-                    <span className="shrink-0 text-sm text-muted tabular-nums">
-                      {t.ops.toLocaleString()} ops
-                    </span>
-                    <CaretRight
-                      size={14}
-                      weight="bold"
-                      aria-hidden
-                      className="text-subtle transition-colors group-hover:text-accent"
-                    />
-                  </Link>
+                <li
+                  key={t.canvasId}
+                  className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 px-3 py-2.5"
+                >
+                  <span className="text-right text-xs text-subtle tabular-nums">{index + 1}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-fg">{title}</span>
+                    <span className="block truncate text-xs text-subtle">{meta}</span>
+                  </span>
+                  <span className="shrink-0 text-sm text-muted tabular-nums">
+                    {t.ops.toLocaleString()} ops
+                  </span>
                 </li>
               );
             })}

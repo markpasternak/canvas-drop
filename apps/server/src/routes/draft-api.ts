@@ -77,7 +77,10 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     const cv = await deps.canvases.findById(id);
     if (!cv || cv.status === "deleted") return null;
     const user = c.get("user");
-    if (cv.ownerId !== user.id && !user.isAdmin) return null; // 404, no existence leak
+    // Owner-only: the editor/draft/preview surface exposes canvas CONTENT, so a
+    // non-owner admin gets a 404 here too (no content bypass — it is treated like any
+    // other member). Cross-owner admin power is moderation-only (the admin routes).
+    if (cv.ownerId !== user.id) return null; // 404, no existence leak
     return cv;
   }
 

@@ -76,7 +76,7 @@ describe("draftApiRoutes", () => {
     expect(body.dirty).toBe(false);
   });
 
-  it("a non-owner gets 404 on every draft route (owner-only)", async () => {
+  it("a non-owner gets 404 on every draft route (owner-only) — including an admin", async () => {
     const { appAs, other, canvas } = await setup();
     const app = appAs(other.id);
     expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(404);
@@ -86,6 +86,13 @@ describe("draftApiRoutes", () => {
       body: enc("x"),
     });
     expect(put.status).toBe(404);
+    // The editor/draft surface exposes canvas CONTENT, so a non-owner ADMIN is also
+    // 404'd — admins get no content bypass on canvases they don't own (D-admin-restrict).
+    const adminApp = appAs("an-admin", true);
+    expect((await adminApp.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(404);
+    expect(
+      (await adminApp.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`)).status,
+    ).toBe(404);
   });
 
   it("PUT writes a draft file (dirty), GET file returns its bytes", async () => {

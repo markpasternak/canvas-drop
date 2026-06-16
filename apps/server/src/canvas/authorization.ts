@@ -74,11 +74,11 @@ export function decideCanvasAccess(
   if (canvas.status === "disabled") {
     return { action: "deny", status: 403, reason: "disabled" };
   }
-  // Owner (members only) bypasses the rung and the gate. Admins do NOT bypass the
-  // rung for CONTENT: an admin falls through to the per-rung checks below and is
-  // treated like a normal member — a private (or unlisted specific_people) canvas
-  // resolves to 404 for them. Admin *management* (block / archive / delete /
-  // metadata) lives on separate routes (admin/authz.ts) and is unaffected.
+  // Owner (members only) bypasses the rung and the gate. A non-owner admin gets NO
+  // bypass for content: it falls through to the per-rung checks below and is treated
+  // exactly like an ordinary member — a private (or unlisted specific_people) canvas
+  // 404s for them, and a password-protected rung prompts them too. Cross-owner admin
+  // power is limited to the dedicated admin routes (list + disable/enable/restore).
   if (principal.kind === "member" && canvas.ownerId === principal.id) {
     return { action: "allow", needsPasswordGate: false, staticOnly: false };
   }
@@ -90,11 +90,9 @@ export function decideCanvasAccess(
 
   const expired = canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= now;
   // The magic link is the guest's gate, so guests bypass the per-canvas password.
-  // Admins also bypass it (trusted operators) on the rungs they can still reach
-  // (whole_org / public_link); normal members and anonymous visitors still face it
-  // where set (R4/R21). Admins remain blocked from private/unlisted content above.
-  const isAdminMember = principal.kind === "member" && principal.isAdmin;
-  const gate = principal.kind === "guest" || isAdminMember ? false : canvas.passwordHash !== null;
+  // Everyone else — including a non-owner admin — faces it where set (R4/R21); only
+  // the owner (handled above) is never prompted.
+  const gate = principal.kind === "guest" ? false : canvas.passwordHash !== null;
 
   switch (canvas.access) {
     case "private":
