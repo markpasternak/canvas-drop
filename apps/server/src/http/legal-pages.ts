@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
+import { ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
 /**
@@ -49,31 +50,11 @@ function htmlResponse(html: string): Response {
   return new Response(html, { status: 200, headers });
 }
 
-/** Open Graph + Twitter card tags. `origin` (config.baseUrl) makes the image/URL
- *  absolute — social crawlers require that; the card is served publicly at /og.png. */
+/** SEO + Open Graph + Twitter tags via the shared {@link ogMeta} builder, so the
+ *  legal pages unfurl identically to the landing + docs. The title is suffixed
+ *  with the brand; the page stays light-only (no `theme-color` is added here). */
 function socialMeta(path: string, title: string, description: string, origin: string): string {
-  const base = origin.replace(/\/$/, "");
-  const t = escapeHtml(`${title} · canvas-drop`);
-  const d = escapeHtml(
-    description
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
-  const image = escapeHtml(`${base}/og.png`);
-  return `<meta name="description" content="${d}">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="canvas-drop">
-<meta property="og:title" content="${t}">
-<meta property="og:description" content="${d}">
-<meta property="og:url" content="${escapeHtml(`${base}${path}`)}">
-<meta property="og:image" content="${image}">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${t}">
-<meta name="twitter:description" content="${d}">
-<meta name="twitter:image" content="${image}">`;
+  return ogMeta({ origin, path, title: `${title} · canvas-drop`, description });
 }
 
 /** Shared minimal, light-mode-only page chrome (logo + wordmark, title, body). */

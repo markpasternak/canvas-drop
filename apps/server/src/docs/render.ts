@@ -5,6 +5,7 @@ import {
   SYSTEM_PAGE_BRAND_INLINE,
   SYSTEM_PAGE_STYLES,
 } from "../http/error-pages.js";
+import { ogMeta } from "../http/social-meta.js";
 import { DOC_NAV, DOC_PAGES, type DocPage } from "./generated-content.js";
 
 /**
@@ -225,28 +226,11 @@ function summarize(text: string): string {
   return flat.length > 160 ? `${flat.slice(0, 157).trimEnd()}…` : flat;
 }
 
-/** Open Graph + Twitter card tags for a doc page. `origin` is the instance's
- *  public base URL (config.baseUrl) so the image/URL are absolute — social
- *  crawlers require that. The card image is served publicly at `/og.png`. */
+/** SEO + Open Graph + Twitter tags via the shared {@link ogMeta} builder, so a
+ *  doc page unfurls identically to the landing + legal pages. `path` is the raw
+ *  doc path; `href` maps it to the public `/docs/...` URL for canonical + og:url. */
 function socialMeta(path: string, title: string, description: string, origin: string): string {
-  const base = origin.replace(/\/$/, "");
-  const url = `${base}${href(path)}`;
-  const image = `${base}/og.png`;
-  const t = escapeHtml(title);
-  const d = escapeHtml(description);
-  return `<meta name="description" content="${d}">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="canvas-drop">
-<meta property="og:title" content="${t}">
-<meta property="og:description" content="${d}">
-<meta property="og:url" content="${escapeHtml(url)}">
-<meta property="og:image" content="${escapeHtml(image)}">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${t}">
-<meta name="twitter:description" content="${d}">
-<meta name="twitter:image" content="${escapeHtml(image)}">`;
+  return ogMeta({ origin, path: href(path), title, description });
 }
 
 /** Render the full HTML for a doc page, or null if the path is unknown.

@@ -5,6 +5,7 @@ import { SESSION_COOKIE } from "../auth/session.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
+import { ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
 /**
@@ -194,7 +195,6 @@ function head(origin: string): string {
   const title = `${SITE.name} · ${SITE.tagline}`;
   const desc = SITE.metaDescription;
   const url = `${base}/`;
-  const image = `${base}/og.png`;
   const jsonLd = JSON.stringify({
     "@context": "https://schema.org",
     "@type": "WebSite",
@@ -206,25 +206,10 @@ function head(origin: string): string {
   return `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<meta name="description" content="${escapeHtml(desc)}">
-<link rel="canonical" href="${escapeHtml(url)}">
+${ogMeta({ origin, path: "/", title, description: desc })}
 <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable docs">
-<meta name="robots" content="index,follow">
 <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="${escapeHtml(SITE.name)}">
-<meta property="og:title" content="${escapeHtml(title)}">
-<meta property="og:description" content="${escapeHtml(desc)}">
-<meta property="og:url" content="${escapeHtml(url)}">
-<meta property="og:image" content="${escapeHtml(image)}">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="${escapeHtml(SITE.name)}">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${escapeHtml(title)}">
-<meta name="twitter:description" content="${escapeHtml(desc)}">
-<meta name="twitter:image" content="${escapeHtml(image)}">
 <script type="application/ld+json">${jsonLd}</script>
 <style>${STYLES}</style>`;
 }
@@ -346,7 +331,7 @@ header {
   mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 72%);
   opacity: .5;
 }
-.hero-inner { position: relative; padding-block: clamp(1.4rem, 3.2vw, 2.4rem) clamp(2.5rem, 6vw, 4rem); }
+.hero-inner { position: relative; padding-block: clamp(0.75rem, 2vw, 1.5rem) clamp(1.25rem, 2.5vw, 2rem); }
 .eyebrow {
   display: inline-flex; align-items: center; gap: .5rem;
   font-size: .8rem; letter-spacing: .02em; color: var(--on-ink-muted);
@@ -366,7 +351,7 @@ h1 .accent { color: oklch(0.78 0.15 274); }
 
 /* hero product shot in a browser frame */
 .frame {
-  margin-top: clamp(2.5rem, 6vw, 4rem);
+  margin-top: clamp(1.5rem, 3.5vw, 2.5rem);
   border: 1px solid var(--on-ink-border); border-radius: .875rem; overflow: hidden;
   background: var(--ink-2); box-shadow: var(--shadow-lg);
 }
@@ -376,13 +361,13 @@ h1 .accent { color: oklch(0.78 0.15 274); }
 .frame img { display: block; width: 100%; height: auto; }
 
 /* --- section scaffolding --- */
-section { padding-block: clamp(3.5rem, 8vw, 6rem); }
+section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .kicker { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
 .s-head { max-width: 34ch; margin: .7rem 0 0; font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.08; letter-spacing: -.025em; font-weight: 640; }
 .s-sub { max-width: 52ch; margin: .9rem 0 0; color: var(--muted); font-size: 1.05rem; }
 
 /* value band */
-.values { display: grid; gap: clamp(1.5rem, 4vw, 2.5rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(2rem, 5vw, 3rem); }
+.values { display: grid; gap: clamp(1.5rem, 4vw, 2.5rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 @media (max-width: 800px) { .values { grid-template-columns: 1fr; } }
 .value h3 { margin: 0 0 .5rem; font-size: 1.15rem; letter-spacing: -.01em; }
 .value .num { font-family: "Geist Mono Variable", ui-monospace, monospace; color: var(--accent); font-size: .85rem; }
@@ -390,7 +375,7 @@ section { padding-block: clamp(3.5rem, 8vw, 6rem); }
 .value { border-top: 1px solid var(--border); padding-top: 1.1rem; }
 
 /* primitives showcase */
-.prims { display: grid; gap: 1px; grid-template-columns: repeat(5, 1fr); margin-top: clamp(2rem, 5vw, 3rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
+.prims { display: grid; gap: 1px; grid-template-columns: repeat(5, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
 @media (max-width: 900px) { .prims { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 520px) { .prims { grid-template-columns: 1fr; } }
 .prim { background: var(--surface); padding: 1.5rem 1.35rem; transition: background .15s var(--ease), transform .15s var(--ease); }
@@ -422,7 +407,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
 
 /* product tour carousel */
-.carousel { position: relative; margin-top: clamp(2rem, 5vw, 3rem); }
+.carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 .viewport { overflow: hidden; }
 .slides { display: flex; transition: transform .55s var(--ease); }
 .slide { min-width: 100%; padding: 0 .25rem; }
@@ -451,7 +436,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .dot[aria-current="true"] { background: var(--accent); width: 1.5rem; }
 
 /* feature grids (Built for teams / Private by design) */
-.feats { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1.25rem, 3vw, 2.25rem); margin-top: clamp(2rem, 5vw, 3rem); }
+.feats { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1.25rem, 3vw, 2.25rem); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 @media (max-width: 720px) { .feats { grid-template-columns: 1fr; } }
 .feat { border-top: 1px solid var(--border); padding-top: 1rem; }
 .feat h3 { margin: 0 0 .35rem; display: flex; align-items: flex-start; gap: .55rem; font-size: 1.05rem; letter-spacing: -.01em; }
@@ -569,16 +554,6 @@ ${head(origin)}
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <p class="kicker reveal">Why canvas-drop</p>
-      <h2 class="s-head reveal">From “I built a thing” to “the team is using it” — without a deploy pipeline.</h2>
-      <div class="values">
-${values}
-      </div>
-    </div>
-  </section>
-
   <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
     <div class="wrap">
       <p class="kicker reveal">A guided tour</p>
@@ -601,6 +576,16 @@ ${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" ari
 
   <section>
     <div class="wrap">
+      <p class="kicker reveal">Why canvas-drop</p>
+      <h2 class="s-head reveal">From “I built a thing” to “the team is using it” — without a deploy pipeline.</h2>
+      <div class="values">
+${values}
+      </div>
+    </div>
+  </section>
+
+  <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
+    <div class="wrap">
       <p class="kicker reveal">Five primitives</p>
       <h2 class="s-head reveal">Static canvases, real backend power.</h2>
       <p class="s-sub reveal">Canvases ship as static files — no server build. When a canvas needs more, it reaches exactly five audited primitives. Secrets stay server-side, always.</p>
@@ -610,7 +595,7 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
     </div>
   </section>
 
-  <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
+  <section>
     <div class="wrap">
       <p class="kicker reveal">Built for teams</p>
       <h2 class="s-head reveal">Control, without the overhead.</h2>
