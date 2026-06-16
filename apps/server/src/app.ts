@@ -32,6 +32,7 @@ import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
 import { oauthRepository } from "./db/repositories/oauth.js";
+import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
@@ -499,6 +500,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         storage: deps.storage,
         audit: deps.audit,
         log: deps.rootLogger,
+        // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
+        // them. Only wired when the pipeline is enabled.
+        screenshots: deps.config.screenshots.enabled
+          ? screenshotsRepository(deps.db)
+          : undefined,
       }),
     }),
   );

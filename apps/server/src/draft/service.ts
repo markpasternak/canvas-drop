@@ -22,6 +22,13 @@ export interface DraftServiceDeps {
   storage: StorageDriver;
   audit: AuditLog;
   log: Logger;
+  /**
+   * Screenshot capture enqueue (plan 004 / U6). Optional — present only when the
+   * screenshot pipeline is enabled. Publishing schedules a (coalesced) capture of the
+   * new version; the in-process worker picks it up. Best-effort: a failure here must
+   * never fail the publish.
+   */
+  screenshots?: { enqueue(canvasId: string, versionId: string): Promise<void> };
 }
 
 export interface PublishResult {
@@ -192,6 +199,17 @@ export function draftService(deps: DraftServiceDeps) {
         .catch((err) =>
           deps.log.warn({ err, canvasId: canvas.id }, "post-publish draft reset failed"),
         );
+
+      // Schedule a screenshot capture of the freshly published version (plan 004 / U6).
+      // Coalesced (one job per canvas, latest version wins) and best-effort — a failed
+      // enqueue must never fail a publish that already succeeded. Only when enabled.
+      if (deps.config.screenshots.enabled && deps.screenshots) {
+        await deps.screenshots
+          .enqueue(canvas.id, version.id)
+          .catch((err) =>
+            deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"),
+          );
+      }
 
       // Prune old rows + reclaim unreferenced blobs, async + best-effort.
       service.pruneAndCollect(canvas.id);

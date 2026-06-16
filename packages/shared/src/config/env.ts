@@ -129,6 +129,18 @@ const rawSchema = z
     // control plane). Default on; an operator disables it to drop the surface entirely
     // (the routes are not mounted, not merely 403'd).
     CANVAS_DROP_MCP: z.enum(["on", "off"]).optional().default("on"),
+    // Canvas screenshot pipeline (plan 004). OFF by default — turning it on makes the
+    // server launch a headless Chromium worker (a real runtime dependency + memory
+    // cost on the single VPS), so it is opt-in. Tuning values bound the worker's
+    // memory/retry behavior; see docs/plans/2026-06-16-004-feat-canvas-screenshots-plan.md.
+    CANVAS_DROP_SCREENSHOTS: z.enum(["on", "off"]).optional().default("off"),
+    CANVAS_DROP_SCREENSHOTS_CONCURRENCY: posInt(1),
+    CANVAS_DROP_SCREENSHOTS_TIMEOUT_MS: posInt(20_000),
+    CANVAS_DROP_SCREENSHOTS_RECYCLE_EVERY: posInt(50),
+    CANVAS_DROP_SCREENSHOTS_LEASE_MS: posInt(120_000),
+    CANVAS_DROP_SCREENSHOTS_MAX_ATTEMPTS: posInt(3),
+    CANVAS_DROP_SCREENSHOTS_FAILED_TTL_MS: posInt(86_400_000),
+    CANVAS_DROP_SCREENSHOTS_TOKEN_TTL_MS: posInt(60_000),
     CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: bool(false),
     // Where the built dashboard SPA lives. Defaults (in serveSpa) to a path
     // resolved from the server module; override for non-standard layouts.
@@ -396,6 +408,16 @@ const rawSchema = z
       adminEmails,
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
       mcp: { enabled: r.CANVAS_DROP_MCP === "on" },
+      screenshots: {
+        enabled: r.CANVAS_DROP_SCREENSHOTS === "on",
+        concurrency: r.CANVAS_DROP_SCREENSHOTS_CONCURRENCY,
+        timeoutMs: r.CANVAS_DROP_SCREENSHOTS_TIMEOUT_MS,
+        recycleEvery: r.CANVAS_DROP_SCREENSHOTS_RECYCLE_EVERY,
+        leaseMs: r.CANVAS_DROP_SCREENSHOTS_LEASE_MS,
+        maxAttempts: r.CANVAS_DROP_SCREENSHOTS_MAX_ATTEMPTS,
+        failedTtlMs: r.CANVAS_DROP_SCREENSHOTS_FAILED_TTL_MS,
+        tokenTtlMs: r.CANVAS_DROP_SCREENSHOTS_TOKEN_TTL_MS,
+      },
       allowMultiUserPathMode: r.CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE,
       dashboardDist: r.CANVAS_DROP_DASHBOARD_DIST,
 

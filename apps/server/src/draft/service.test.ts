@@ -255,3 +255,69 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     expect(Object.keys(same.manifest as object)).toEqual(["new.html"]);
   });
 });
+
+const enabledConfig: Config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_SCREENSHOTS: "on",
+});
+
+describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** Build a draftService with a spy enqueue and a non-empty draft ready to publish. */
+  async function setup(cfg: Config, enqueue?: (c: string, v: string) => Promise<void>) {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const audit = createAuditLog(auditRepository(client), silent);
+    const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
+    const svc = draftService({
+      config: cfg,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      audit,
+      log: silent,
+      screenshots: enqueue ? { enqueue } : undefined,
+    });
+    const owner = await users.upsert({ providerSub: "o", email: "o@e.com", name: "O", isAdmin: false });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "k" });
+    // Deploy v1 so the draft is non-empty and publish() can snapshot it into v2.
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);
+    const live = (await canvases.findById(cv.id)) as Canvas;
+    return { svc, canvas: live, owner };
+  }
+
+  it("publishing enqueues a capture for the new version when enabled", async () => {
+    const calls: Array<[string, string]> = [];
+    const { svc, canvas, owner } = await setup(enabledConfig, async (c, v) => {
+      calls.push([c, v]);
+    });
+    const result = await svc.publish(canvas, owner.id);
+    expect(calls).toEqual([[canvas.id, result.versionId]]);
+  });
+
+  it("does not enqueue when the pipeline is disabled (default config)", async () => {
+    const calls: Array<[string, string]> = [];
+    const { svc, canvas, owner } = await setup(config, async (c, v) => {
+      calls.push([c, v]);
+    });
+    await svc.publish(canvas, owner.id);
+    expect(calls).toEqual([]);
+  });
+
+  it("a failing enqueue never fails the publish (best-effort)", async () => {
+    const { svc, canvas, owner } = await setup(enabledConfig, async () => {
+      throw new Error("enqueue boom");
+    });
+    const result = await svc.publish(canvas, owner.id);
+    expect(result.versionId).toBeTruthy();
+  });
+});
