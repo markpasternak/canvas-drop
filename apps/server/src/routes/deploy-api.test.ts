@@ -443,4 +443,35 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { code: string }).code).toBe("BLOB_HASH_MISMATCH");
   });
+
+  it("a second finalize of the same handle maps to 409 UPLOAD_ALREADY_FINALIZED", async () => {
+    const { app, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    const content = "<h1>x</h1>";
+    const begun = (await (
+      await app.request(`/v1/canvases/${a.id}/uploads`, {
+        method: "POST",
+        headers: h(a.key),
+        body: JSON.stringify({
+          manifest: [{ path: "index.html", hash: sha(content), size: enc2(content).byteLength }],
+        }),
+      })
+    ).json()) as { uploadId: string };
+    await app.request(`/v1/canvases/${a.id}/uploads/${begun.uploadId}/blobs/${sha(content)}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: enc2(content),
+    });
+    const first = await app.request(`/v1/canvases/${a.id}/uploads/${begun.uploadId}/finalize`, {
+      method: "POST",
+      headers: h(a.key),
+    });
+    expect(first.status).toBe(200);
+    const second = await app.request(`/v1/canvases/${a.id}/uploads/${begun.uploadId}/finalize`, {
+      method: "POST",
+      headers: h(a.key),
+    });
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { code: string }).code).toBe("UPLOAD_ALREADY_FINALIZED");
+  });
 });

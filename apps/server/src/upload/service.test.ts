@@ -185,14 +185,35 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
     ).rejects.toMatchObject({ code: "BLOB_HASH_MISMATCH" });
   });
 
-  it("enforces the aggregate canvas-size cap at finalize", async () => {
+  it("rejects an oversized single file at begin (per-file cap)", async () => {
     const { svc, canvas, ownerId } = await setup();
-    // Declare a manifest whose summed size exceeds 100 MB without staging the bytes.
-    const huge: ManifestInput[] = [{ path: "big.bin", hash: sha("x"), size: 200 * 1024 * 1024 }];
-    const { uploadId } = await svc.begin(canvas, ownerId, huge);
-    await expect(svc.finalize(uploadId, ownerId, canvas.id)).rejects.toMatchObject({
+    await expect(
+      svc.begin(canvas, ownerId, [{ path: "big.bin", hash: sha("x"), size: 26 * 1024 * 1024 }]),
+    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
+  });
+
+  it("rejects a manifest whose declared total exceeds the canvas cap at begin", async () => {
+    const { svc, canvas, ownerId } = await setup();
+    // 5 files × 25 MB = 125 MB > 100 MB, each within the per-file cap.
+    const huge: ManifestInput[] = Array.from({ length: 5 }, (_, i) => ({
+      path: `f${i}.bin`,
+      hash: sha(`f${i}`),
+      size: 25 * 1024 * 1024,
+    }));
+    await expect(svc.begin(canvas, ownerId, huge)).rejects.toMatchObject({
       code: "CANVAS_TOO_LARGE",
     });
+  });
+
+  it("rejects staged bytes whose length disagrees with the declared size", async () => {
+    const { svc, canvas, ownerId } = await setup();
+    // Declare size 1 for a hash, then stage bytes of a different length.
+    const { uploadId } = await svc.begin(canvas, ownerId, [
+      { path: "index.html", hash: sha("aaaa"), size: 1 },
+    ]);
+    await expect(
+      svc.stageBlob(uploadId, ownerId, canvas.id, sha("aaaa"), enc("aaaa")),
+    ).rejects.toMatchObject({ code: "BLOB_HASH_MISMATCH" });
   });
 
   it("expires a session past its TTL", async () => {

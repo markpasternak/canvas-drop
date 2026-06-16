@@ -183,9 +183,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "deploy_canvas",
     {
       description:
-        "Deploy static files to a canvas you own in a single call. Provide EITHER a base64 ZIP " +
-        "(zipBase64) OR a files array (text as UTF-8, binary as base64) — not both. For large " +
-        "or incremental deploys use begin_deploy/add_files/finalize_deploy instead.",
+        "Deploy a canvas you own in ONE call — best for a FIRST publish of a small canvas. " +
+        "Provide EITHER a base64 ZIP (zipBase64) OR a files array (text as UTF-8, binary as " +
+        "base64) — not both. The entire payload travels in this call, so prefer " +
+        "begin_deploy/add_files/finalize_deploy for ANY re-deploy of a canvas that already has " +
+        "content, or when it has many/large/binary files: that flow reports exactly which files " +
+        "changed so you resend only those (far fewer tokens) and can chunk big uploads.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         zipBase64: z
@@ -252,9 +255,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "begin_deploy",
     {
       description:
-        "Open a staged upload for a canvas you own. Give the file manifest (path, sha256 hash, " +
-        "size); returns an uploadId and the subset of hashes you still need to send via " +
-        "add_files. Follow with add_files then finalize_deploy.",
+        "Open a staged deploy for a canvas you own. PREFER THIS over deploy_canvas whenever the " +
+        "canvas already has content (any re-deploy) or has many/large/binary files. Give the " +
+        "file manifest (path, sha256 hash, size); returns an uploadId and missingHashes — the " +
+        "files NOT already stored — so you resend only what changed (a re-deploy of mostly-" +
+        "unchanged files sends almost nothing). Then add_files for those hashes, then " +
+        "finalize_deploy.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         manifest: z

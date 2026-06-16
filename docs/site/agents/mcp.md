@@ -45,21 +45,30 @@ there is no cross-owner access and no existence leak.
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
 
-### Staged uploads (large or incremental)
+### Which deploy tool to use
 
-`deploy_canvas` is the one-call path for small canvases. For large or
-frequently-re-deployed canvases, the staged flow keeps file bytes out of the
-model's context and only uploads what changed:
+`deploy_canvas` sends the whole payload in one call — use it for the **first
+publish of a small canvas**. Prefer the staged flow (`begin_deploy` →
+`add_files` → `finalize_deploy`) whenever the canvas **already has content (any
+re-deploy)** or has **many / large / binary files**. The decision is simple and
+reliable: *fresh tiny canvas → `deploy_canvas`; everything else → staged.*
+
+The staged flow's win:
 
 1. **`begin_deploy`** with the full manifest (`path`, `hash` = sha256 of the
    bytes, `size`). The server replies with `missingHashes` — the blobs it doesn't
-   already have (content-addressed, so an unchanged file is never re-sent).
-2. **`add_files`** the contents for those hashes, in as many calls as you like.
+   already have (content-addressed, so an unchanged file is **never re-sent**). A
+   re-deploy that changed one file sends one file.
+2. **`add_files`** the contents for those hashes, in as many calls as you like
+   (chunk a large set; avoid one oversized tool call).
 3. **`finalize_deploy`** to publish. The handle is single-use and short-lived; a
    finalize that's missing a blob fails cleanly and can be retried after staging it.
 
-The same staging flow is available over plain HTTP on the keyed
-[Deploy API](/docs/api/deploy-api) for agents that can `curl` directly.
+Over MCP, `add_files` content still travels in the tool call — the token win
+comes from **not resending unchanged files** and from chunking. For bytes that
+never touch the model at all, an agent that can `curl` uses the same staged flow
+over plain HTTP on the keyed [Deploy API](/docs/api/deploy-api), PUTting each
+blob's raw bytes directly to the server.
 
 Tool calls are rate-limited per account and recorded in the audit log alongside every
 other deploy and lifecycle event.

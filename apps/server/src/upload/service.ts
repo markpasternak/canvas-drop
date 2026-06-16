@@ -85,11 +85,28 @@ export function uploadService(deps: UploadServiceDeps) {
     await deps.storage.put(key, bytes);
   }
 
-  /** Stage one blob: verify its hash matches its bytes, write it, record it staged. */
+  /** Stage one blob: verify its size + hash, write it, record it staged. */
   async function stageOne(session: UploadSession, hash: string, bytes: Uint8Array): Promise<void> {
+    // Per-file cap on the ACTUAL bytes — both staging channels share it (the HTTP
+    // route also has a body limit; the MCP add_files channel relies on this).
+    if (bytes.byteLength > LIMITS.maxFileBytes) {
+      throw new DeployError("FILE_TOO_LARGE", `staged blob exceeds ${LIMITS.maxFileBytes} bytes`);
+    }
     const actual = createHash("sha256").update(bytes).digest("hex");
     if (actual !== hash) {
       throw new DeployError("BLOB_HASH_MISMATCH", `blob bytes do not match hash ${hash}`);
+    }
+    // Finalize sums the manifest's DECLARED sizes for the canvas cap, so tie the
+    // declared size to reality here: a client must not declare a small size and
+    // stage large bytes (that would under-report totalBytes and slip past the
+    // aggregate cap). Referenced (manifest) hashes carry an authoritative size.
+    const manifest = (session.manifest as Manifest | null) ?? {};
+    const expected = Object.values(manifest).find((e) => e.hash === hash);
+    if (expected && bytes.byteLength !== expected.size) {
+      throw new DeployError(
+        "BLOB_HASH_MISMATCH",
+        `staged size ${bytes.byteLength} != declared ${expected.size} for ${hash}`,
+      );
     }
     await putBlobIfAbsent(session.canvasId, hash, bytes);
     const staged = new Set((session.stagedHashes as string[]) ?? []);
@@ -124,6 +141,23 @@ export function uploadService(deps: UploadServiceDeps) {
       }
       if (Object.keys(manifest).length === 0) {
         throw new DeployError("INVALID_MANIFEST", "manifest has no deployable files");
+      }
+
+      // Fail fast on the declared manifest: reject oversized files / total / count
+      // up front (stageOne re-checks actual bytes, and finalize re-checks the sum,
+      // so a lying declared size can't slip the cap — this is just early rejection).
+      let declaredBytes = 0;
+      for (const e of Object.values(manifest)) {
+        if (e.size > LIMITS.maxFileBytes) {
+          throw new DeployError("FILE_TOO_LARGE", `a file exceeds ${LIMITS.maxFileBytes} bytes`);
+        }
+        declaredBytes += e.size;
+      }
+      if (Object.keys(manifest).length > LIMITS.maxFiles) {
+        throw new DeployError("TOO_MANY_FILES", "manifest exceeds 2000 files");
+      }
+      if (declaredBytes > LIMITS.maxCanvasBytes) {
+        throw new DeployError("CANVAS_TOO_LARGE", "manifest exceeds 100 MB total");
       }
 
       // Content-addressed diff: only request hashes not already in this canvas's
