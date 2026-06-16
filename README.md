@@ -195,6 +195,16 @@ The app verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic 
 
 **Going to production** is a configuration change rather than a code change — though not a thoughtless one: copy [`.env.production.example`](.env.production.example), point the proxy/JWKS at your real IdP, move to subdomain mode behind real TLS, and rotate all secrets. The full walkthrough — including the graduation checklist — is in [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
 
+### Branding (and how to white-label it)
+
+It ships as **canvas-drop**, and you're welcome to run it under that name — it's MIT, the name comes with it. If you'd rather **white-label** your instance, the brand isn't a config flag, but it's centralized to a few spots:
+
+- **Logo (SVG mark):** the dashboard's [`apps/dashboard/src/components/Brand.tsx`](apps/dashboard/src/components/Brand.tsx) and the server's [`apps/server/src/http/brand.ts`](apps/server/src/http/brand.ts) (`BRAND_MARK`, shared by the landing, docs, gate, legal, and error pages). Both colour the mark from the `--logo-frame` / `--logo-drop` CSS variables, so a **recolour is a theme change, not an SVG edit**.
+- **Favicon, app icons, web manifest:** [`apps/server/src/http/brand-assets.ts`](apps/server/src/http/brand-assets.ts) (served at `/favicon.svg`, `/brand/*`, `/site.webmanifest`), plus the social-preview card built by `pnpm og:build` (`/og.png`).
+- **The name string itself:** `grep -ri "canvas-drop" apps/dashboard/src apps/server/src` finds the user-facing copy — the dashboard wordmark ([`app-layout.tsx`](apps/dashboard/src/app-layout.tsx)), the "About" menu, the onboarding / new-canvas copy, and the page `<title>` / `og:site_name` ([`apps/server/src/http/social-meta.ts`](apps/server/src/http/social-meta.ts)).
+
+**Leave these alone** — they're the config/code contract, not branding, and renaming them only breaks things: the `CANVAS_DROP_*` environment-variable names and the `@canvas-drop/*` workspace package names.
+
 ---
 
 ## Architecture
