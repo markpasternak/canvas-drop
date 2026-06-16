@@ -24,7 +24,7 @@ People now generate working web interfaces in minutes with AI — but there's no
 - **Idea → live URL in under 60 seconds.** No cloud, CI/CD, DNS, TLS, secrets, or database to understand. Four deploy paths: drag a folder, upload a ZIP, paste HTML, or `PUT` it from a script.
 - **Private by default, with a deliberate sharing ladder.** Every request is authenticated. Each canvas picks one access rung — **Private → Specific people → Whole org → Public link** — so an owner can keep it to themselves, restrict it to a named allowlist (org members *or* email-invited outside guests), open it to the whole org, or (admin-permitting) publish a static public link. Shares are revocable and optionally time-boxed; URLs are unguessable random slugs.
 - **Static-first, backend-optional.** A canvas is just static files — no build step, ever. Backend capability arrives only through five fixed primitives, added to a page with one `<script>` tag and **no secrets in the browser**.
-- **AI agents are first-class authors.** Canvas code runs zero-config, the deploy API ships from day one, and the SDK contract lives on one agent-readable page (`/llms.txt`). An agent can write a canvas and ship it with no human in the loop.
+- **AI agents are first-class authors.** Canvas code runs zero-config, the deploy API ships from day one, and the SDK contract lives on one agent-readable page (`/llms.txt`). An agent can write a canvas and ship it with no human in the loop — over the keyed deploy API, the installable [agent skill](docs/site/agents/skill.md), or a connect-once **[MCP server](docs/site/agents/mcp.md)** that signs in through the org's own login (OAuth) and exposes identity-scoped create/deploy/manage tools.
 - **Run anywhere.** Database, storage, URL mode, and auth all sit behind interfaces. The same image runs on a laptop, a $5 VPS, or a corporate cloud — swapping any driver is a config change, never a code change.
 - **The constraint is the product.** A small, fixed set of primitives done extremely well, deliberately smaller than Heroku/Vercel/Firebase/Retool. It gets very good at saying no.
 
@@ -78,7 +78,7 @@ curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \
   --data-binary @site.zip
 ```
 
-The key operates only on its own canvas and **never belongs in canvas files**. `GET /v1/canvases/:id`, `GET …/versions`, and `POST …/rollback` round out the programmatic surface — the future CLI and agent skills are thin clients of exactly this.
+The key operates only on its own canvas and **never belongs in canvas files**. `GET /v1/canvases/:id`, `GET …/versions`, and `POST …/rollback` round out the programmatic surface. The packaged agent skill and the **MCP server** (`{base}/mcp`, OAuth via the org's own login) are thin clients of exactly this — MCP adds identity scoping so an agent can also create and list canvases across the account, not just deploy to one.
 
 Storage is **content-addressed**: blobs are keyed by hash, versions and drafts are manifests over shared blobs, so only changed files are ever written and re-uploads are cheap.
 
@@ -238,6 +238,8 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 - ✅ **Sharing access ladder** — per-canvas Private/Specific-people/Whole-org/Public-link, email-invited guest identities (SMTP or Mailgun), admin-gated public links, guest primitive policy (KV/files/realtime yes, AI opt-in, public static-only)
 
 - ✅ **OSS packaging** — multi-stage Docker image + one-command compose demo (real proxy/JWKS auth via a bundled Dex IdP), pedagogical prod config, `SECURITY.md`/`CODE_OF_CONDUCT.md`/`NOTICE`, blocking secret-scan in CI, starter examples
+
+- ✅ **Agent MCP server** — connect-once remote MCP at `/mcp` (OAuth 2.1 via the instance's own login, PKCE + dynamic client registration), identity-scoped create/deploy/manage tools, on by default and config-disablable
 
 Remaining toward 1.0: a backup/restore drill and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
 

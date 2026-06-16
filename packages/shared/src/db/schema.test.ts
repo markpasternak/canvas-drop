@@ -22,6 +22,9 @@ const pgTables = {
   kvEntries: pg.kvEntries,
   files: pg.files,
   aiUsage: pg.aiUsage,
+  oauthClients: pg.oauthClients,
+  oauthCodes: pg.oauthCodes,
+  mcpTokens: pg.mcpTokens,
 };
 const sqliteTables = {
   users: sq.users,
@@ -39,6 +42,9 @@ const sqliteTables = {
   kvEntries: sq.kvEntries,
   files: sq.files,
   aiUsage: sq.aiUsage,
+  oauthClients: sq.oauthClients,
+  oauthCodes: sq.oauthCodes,
+  mcpTokens: sq.mcpTokens,
 };
 
 const TABLE_KEYS = Object.keys(pgTables) as Array<keyof typeof pgTables>;

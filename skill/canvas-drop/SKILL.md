@@ -1,6 +1,6 @@
 ---
 name: canvas-drop
-description: Deploy and extend small web artifacts ("canvases") on a canvas-drop instance. Use when the user wants to ship static HTML/JS to a shared URL, or give a canvas backend capability (key-value, files, identity, AI, realtime) via the zero-config browser SDK.
+description: Deploy and extend small web artifacts ("canvases") on a canvas-drop instance. Use when the user wants to ship static HTML/JS to a shared URL, or give a canvas backend capability (key-value, files, identity, AI, realtime) via the zero-config browser SDK. Connect over MCP for an identity-scoped, multi-tool surface, or deploy over HTTP with a per-canvas key.
 ---
 
 # canvas-drop
@@ -30,7 +30,39 @@ Replace `{base}` below with the instance's base URL (ask the user if unknown).
   owner enables the **Backend** master switch plus the feature in the **Backend** tab.
   Identity (`me()`) has no separate toggle — it is on whenever Backend is on.
 
-## Deploy a canvas
+## Two ways to act on canvases
+
+- **Connect over MCP (recommended when your client supports it).** One connect, no
+  key to paste — you get identity-scoped tools across all the canvases you own.
+- **Deploy over HTTP with a per-canvas key (below).** No session needed; best for a
+  keyed, sessionless agent or a CI step that was handed one canvas's key.
+
+## Connect over MCP
+
+If your agent host speaks MCP (Claude, ChatGPT, …), add the instance's MCP endpoint:
+
+```
+{base}/mcp
+```
+
+The client walks an OAuth sign-in once (your normal org login + a consent screen) —
+**no secret to copy**. Once connected you have these tools, each scoped to your
+account and the canvases you own:
+
+- `whoami` — the connected account.
+- `create_canvas` — make a canvas; returns its id, URL, and a one-time deploy key.
+- `list_canvases` — the canvases you own.
+- `get_canvas` / `list_versions` — current state and version history.
+- `deploy_canvas` — publish static files (a base64 ZIP) directly to live.
+- `rollback_canvas` — point the canvas back at an earlier version number.
+- `unpublish_canvas` — take a published canvas back to draft.
+
+A tool only ever acts on canvases you own; a canvas you don't own reads as not found.
+Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
+
+See [`{base}/docs/agents/mcp`]({base}/docs/agents/mcp) for the full reference.
+
+## Deploy a canvas (HTTP)
 
 The deploy API publishes a version directly to live (no draft loop). You need the
 canvas `id` and its per-canvas secret key, both from the dashboard create flow (the

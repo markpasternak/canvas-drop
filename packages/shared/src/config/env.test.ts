@@ -28,6 +28,18 @@ describe("loadConfig", () => {
     expect(config.rateLimit.passwordGatePerMin).toBe(5);
   });
 
+  it("defaults the MCP agent control plane to enabled", () => {
+    expect(loadConfig({}).mcp.enabled).toBe(true);
+  });
+
+  it("disables the MCP surface when CANVAS_DROP_MCP=off", () => {
+    expect(loadConfig({ CANVAS_DROP_MCP: "off" }).mcp.enabled).toBe(false);
+  });
+
+  it("rejects an invalid CANVAS_DROP_MCP value instead of coercing", () => {
+    expect(() => loadConfig({ CANVAS_DROP_MCP: "yes" })).toThrow();
+  });
+
   it("honors rate-limit overrides and the master disable flag", () => {
     const config = loadConfig({
       CANVAS_DROP_RATELIMIT_ENABLED: "false",

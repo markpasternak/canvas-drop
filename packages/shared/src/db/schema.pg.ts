@@ -57,6 +57,65 @@ export const settings = pgTable("settings", {
   value: c.json("value").notNull(),
 });
 
+// Remote MCP OAuth (agent control plane). DCR-registered clients, single-use
+// authorization codes, and hashed access/refresh tokens — all minted only after
+// the user authenticates via the existing login. Structurally identical to
+// schema.sqlite.ts; parity is enforced by schema.test.ts (KTD-1).
+export const oauthClients = pgTable("oauth_clients", {
+  id: c.text("id").primaryKey(),
+  // Full OAuthClientInformationFull blob, round-tripped for DCR fidelity.
+  clientInfo: c.json("client_info").notNull(),
+  createdAt: c.epochMs("created_at").notNull(),
+});
+
+export const oauthCodes = pgTable(
+  "oauth_codes",
+  {
+    id: c.text("id").primaryKey(),
+    codeHash: c.text("code_hash").notNull(),
+    clientId: c.text("client_id").notNull(),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    redirectUri: c.text("redirect_uri").notNull(),
+    codeChallenge: c.text("code_challenge").notNull(),
+    codeChallengeMethod: c.text("code_challenge_method"),
+    scopes: c.json("scopes"),
+    resource: c.text("resource"),
+    expiresAt: c.epochMs("expires_at").notNull(),
+    consumedAt: c.epochMs("consumed_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("oauth_codes_code_hash_uq").on(t.codeHash),
+    index("oauth_codes_user_id_idx").on(t.userId),
+  ],
+);
+
+export const mcpTokens = pgTable(
+  "mcp_tokens",
+  {
+    id: c.text("id").primaryKey(),
+    tokenHash: c.text("token_hash").notNull(),
+    // "access" | "refresh".
+    kind: c.text("kind").notNull(),
+    clientId: c.text("client_id").notNull(),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    scopes: c.json("scopes"),
+    expiresAt: c.epochMs("expires_at"),
+    revokedAt: c.epochMs("revoked_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("mcp_tokens_token_hash_uq").on(t.tokenHash),
+    index("mcp_tokens_user_id_idx").on(t.userId),
+  ],
+);
+
 export const auditLog = pgTable(
   "audit_log",
   {

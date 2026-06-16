@@ -66,6 +66,7 @@
   {
     "section": "For agents",
     "pages": [
+      { "path": "agents/mcp", "file": "agents/mcp.md", "title": "MCP server" },
       { "path": "agents/llms", "file": "agents/llms.md", "title": "llms.txt" },
       { "path": "agents/skill", "file": "agents/skill.md", "title": "Agent skill" }
     ]

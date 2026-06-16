@@ -89,7 +89,7 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Deploy in seconds",
-    body: "Drag a folder or push from your agent. A canvas is just static files, so there's no build to wait on and nothing to provision.",
+    body: "Drag a folder, push from a script, or connect your AI agent over MCP — sign in once and it can create and deploy canvases for you. A canvas is just static files: no build to wait on, nothing to provision.",
   },
   {
     title: "Shared with your org",
@@ -548,7 +548,7 @@ ${head(origin)}
         <a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a>
         <a class="btn btn-ghost" href="/docs">Read the docs</a>
       </div>
-      <p class="cue" data-stagger="4">Or deploy from your agent: <span class="mono">curl -F</span> a folder and it's live.</p>
+      <p class="cue" data-stagger="4">Or connect your agent over <span class="mono">MCP</span> — or <span class="mono">curl -F</span> a folder — and it's live.</p>
     </div>
   </section>
 

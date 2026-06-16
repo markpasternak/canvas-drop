@@ -30,6 +30,9 @@ export interface AdminRoutesDeps {
   settings: AdminSettingsService;
   allowedEmails: AllowedEmailsRepository;
   audit: AuditLog;
+  /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
+   *  plane honors the block instantly, not just on the token's next use. */
+  revokeMcpTokensForUser?: (userId: string) => Promise<void>;
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
@@ -316,6 +319,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       return c.json({ error: "last_admin", message: "cannot block the last admin" }, 409);
     }
     await deps.users.setBlocked(id, true);
+    // Kill any live MCP tokens immediately so the agent control plane honors the
+    // block on the spot (the token surface also re-checks per call, defense in depth).
+    await deps.revokeMcpTokensForUser?.(id);
     deps.audit.recordAudit({
       action: "user_block",
       actorId: actor.id,

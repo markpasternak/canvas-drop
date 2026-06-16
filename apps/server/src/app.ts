@@ -31,6 +31,7 @@ import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { oauthRepository } from "./db/repositories/oauth.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
@@ -57,6 +58,7 @@ import { socialPreview } from "./http/social-preview.js";
 import type { AppEnv } from "./http/types.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
+import { mcpRoutes } from "./mcp/routes.js";
 import type { RealtimeHub } from "./realtime/hub.js";
 import { adminRoutes } from "./routes/admin.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
@@ -281,6 +283,38 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     }),
   );
 
+  // Remote MCP surface (agent control plane) — OAuth AS + `/mcp`, its own auth,
+  // BEFORE the session gateway. Default on; mounted only when enabled so disabling
+  // it removes the routes entirely rather than 403'ing them.
+  if (deps.config.mcp.enabled) {
+    app.route(
+      "/",
+      mcpRoutes({
+        config: deps.config,
+        strategy: deps.strategy,
+        users: deps.users,
+        allowedEmails,
+        oauth: oauthRepository(deps.db),
+        canvases: deps.canvases,
+        versions: deps.versions,
+        engine: deps.engine,
+        audit: deps.audit,
+        // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
+        oauthAudit: {
+          record: (e) =>
+            deps.audit.recordAudit({
+              action: e.action,
+              actorId: e.actorId,
+              ip: e.ip,
+              meta: e.reason ? { reason: e.reason } : undefined,
+            }),
+        },
+        rateLimitStore: rlStore,
+        hub: deps.hub,
+      }),
+    );
+  }
+
   // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
   // since preflights carry no credentials and must not 401.
   app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
@@ -430,6 +464,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       settings: settingsSvc,
       allowedEmails,
       audit: deps.audit,
+      revokeMcpTokensForUser: (id) => oauthRepository(deps.db).tokens.revokeAllForUser(id),
     }),
   );
 

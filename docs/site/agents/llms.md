@@ -27,6 +27,16 @@ credentials.
 `{base}` is the instance origin. The key is verified per-canvas; it only
 deploys to the one canvas it belongs to.
 
+## Connect over MCP (no key to paste)
+
+If your host speaks the Model Context Protocol, add `{base}/mcp` instead of handling
+keys. You sign in once through the instance's normal org login (OAuth, with automatic
+client registration) and then get identity-scoped tools across every canvas you own:
+`whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
+`deploy_canvas`, `rollback_canvas`, `unpublish_canvas`. A tool only touches canvases
+you own. Typical flow: `create_canvas` then `deploy_canvas`. Full reference:
+[MCP server](/docs/agents/mcp).
+
 ## Backend capability: the browser SDK
 
 Inside a canvas, load the zero-config SDK — no keys in page code; identity rides

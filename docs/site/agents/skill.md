@@ -35,6 +35,9 @@ to this instance by its base URL — it asks the user for `{base}` when unknown.
 The zip is built from an explicit allowlist (`SKILL.md` plus `examples/*.md`), so
 it never carries a stray secret. It covers:
 
+- **Connect over MCP** — add `{base}/mcp`, sign in once, and use the identity-scoped
+  tools (`create_canvas`, `deploy_canvas`, `list_canvases`, …) with no key to paste.
+  See the [MCP server](/docs/agents/mcp).
 - **Deploy over HTTP** with a per-canvas API key —
   `PUT {base}/v1/canvases/{id}/deploy` (Bearer auth, ZIP body), plus the companion
   state/`versions`/`rollback` operations. See [Deploy API](/docs/api/deploy-api).

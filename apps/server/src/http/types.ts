@@ -49,6 +49,10 @@ export interface AppVariables {
   canvas?: Canvas;
   /** Whether the password gate must run before serving — set by canvasAccess (U15). */
   needsPasswordGate?: boolean;
+  /** The verified MCP OAuth caller — set by the `/mcp` bearer-auth middleware from a
+   *  validated access token. Identity (`userId`) comes only from the server-side token
+   *  store, never the client. Tools read this to scope every action to the caller. */
+  mcpAuth?: { token: string; clientId: string; userId: string; scopes: string[] };
 }
 
 /** The Hono `Env` binding for every route and middleware in the server. */
