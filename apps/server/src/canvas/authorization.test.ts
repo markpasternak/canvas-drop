@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { AppEnv, Principal } from "../http/types.js";
-import { canvasAccess, decideCanvasAccess } from "./authorization.js";
+import { canvasAccess, decideCanvasAccess, principalLookupKey } from "./authorization.js";
 
 const NOW = 1_000_000;
 
@@ -334,5 +334,21 @@ describe("canvasAccess — disabled-canvas rendering", () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: "not_found" });
     }
+  });
+});
+
+describe("principalLookupKey — allowlist match parity", () => {
+  it("normalizes a guest email to trim+lowercase so casing/whitespace never spuriously denies", () => {
+    // Allowlist rows are stored trim+lowercased (allowlistAddSchema); the lookup
+    // key must match that form or a legitimately-invited guest gets denied.
+    expect(principalLookupKey(guest("cv1", "  Guest@Acme.COM "))).toEqual({
+      email: "guest@acme.com",
+    });
+    expect(principalLookupKey(guest("cv1", "g@x.com"))).toEqual({ email: "g@x.com" });
+  });
+
+  it("keys a member by id and an anonymous principal by nothing", () => {
+    expect(principalLookupKey(owner)).toEqual({ userId: "owner" });
+    expect(principalLookupKey(anon)).toEqual({});
   });
 });

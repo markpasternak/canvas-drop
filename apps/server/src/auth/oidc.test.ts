@@ -8,7 +8,13 @@ import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
-import { callbackUrl, completeLogin, makeOidc, type OidcDeps } from "./oidc.js";
+import {
+  callbackUrl,
+  completeLogin,
+  emailExplicitlyUnverified,
+  makeOidc,
+  type OidcDeps,
+} from "./oidc.js";
 import { SESSION_COOKIE, sessionService } from "./session.js";
 
 async function jsonOf<T>(res: Response): Promise<T> {
@@ -139,6 +145,23 @@ describe("oidc callbackUrl — proxy redirect_uri reconstruction", () => {
     );
     expect(`${u.origin}${u.pathname}`).toBe("https://canvases.example.com/auth/callback");
     expect(u.searchParams.get("code")).toBe("x");
+  });
+});
+
+describe("oidc emailExplicitlyUnverified — email_verified trust", () => {
+  it("rejects only an explicitly-unverified claim (boolean or string false)", () => {
+    expect(emailExplicitlyUnverified({ email: "a@example.com", email_verified: false })).toBe(true);
+    expect(emailExplicitlyUnverified({ email: "a@example.com", email_verified: "false" })).toBe(
+      true,
+    );
+  });
+
+  it("tolerates a verified or absent claim so conformant IdPs still work", () => {
+    expect(emailExplicitlyUnverified({ email: "a@example.com", email_verified: true })).toBe(false);
+    expect(emailExplicitlyUnverified({ email: "a@example.com", email_verified: "true" })).toBe(
+      false,
+    );
+    expect(emailExplicitlyUnverified({ email: "a@example.com" })).toBe(false);
   });
 });
 

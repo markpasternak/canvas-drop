@@ -40,7 +40,10 @@ export function memberPrincipal(user: { id: string; isAdmin: boolean }): Princip
  */
 export function principalLookupKey(principal: Principal): { userId?: string; email?: string } {
   if (principal.kind === "member") return { userId: principal.id };
-  if (principal.kind === "guest") return { email: principal.email };
+  // Normalize to match the allowlist's stored form (trim + lowercase, applied at
+  // write time by allowlistAddSchema) so casing/whitespace can never cause a
+  // spurious denial of a legitimately-invited guest. Fail-safe either way.
+  if (principal.kind === "guest") return { email: principal.email.trim().toLowerCase() };
   return {};
 }
 

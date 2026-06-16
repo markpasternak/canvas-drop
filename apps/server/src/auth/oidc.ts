@@ -112,9 +112,26 @@ export function makeOidc(deps: OidcDeps) {
 
       const identity = claims ? claimsToIdentity(claims, "oidc") : null;
       if (!identity) return c.json({ error: "no_email_claim" }, 400);
+      // Defense-in-depth: never trust an email the IdP explicitly says it did not
+      // verify (a permissive provider could let a user self-assert an allowlisted
+      // address).
+      if (claims && emailExplicitlyUnverified(claims)) {
+        c.get("log")?.warn({ email: identity.email }, "oidc email not verified");
+        return c.json({ error: "email_not_verified" }, 403);
+      }
       return completeLogin(deps, c, identity);
     },
   };
+}
+
+/**
+ * Whether the IdP explicitly marked the email claim as NOT verified. We reject
+ * only this case — an absent `email_verified` claim is tolerated so conformant
+ * IdPs that omit it still work. Accepts both the boolean and the string forms
+ * (`false` / `"false"`) some providers emit.
+ */
+export function emailExplicitlyUnverified(claims: Record<string, unknown>): boolean {
+  return claims.email_verified === false || claims.email_verified === "false";
 }
 
 /**
