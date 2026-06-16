@@ -47,7 +47,7 @@ const SITE = {
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
   metaDescription:
-    "canvas-drop is your organization's place to deploy and share small web tools, prototypes, and dashboards built with AI — static canvases, served in seconds, behind your org's sign-in.",
+    "Deploy and share the small web tools your org builds with AI — static canvases, live in seconds, behind your organization's sign-in.",
 } as const;
 
 /** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
@@ -588,7 +588,7 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
     <div class="wrap">
       <p class="kicker reveal">Built for teams</p>
       <h2 class="s-head reveal">Control, without the overhead.</h2>
-      <p class="s-sub reveal">canvas-drop is multi-tenant for your org from day one — access, limits, and accountability are built in, not bolted on.</p>
+      <p class="s-sub reveal">canvas-drop is built for your whole org from day one — access, limits, and accountability come standard, not bolted on.</p>
       <div class="feats reveal">
 ${TEAM.map(featItem).join("\n")}
       </div>
@@ -611,7 +611,7 @@ ${PRIVACY.map(featItem).join("\n")}
     <div class="wrap">
       <p class="kicker reveal" style="color:oklch(0.78 0.15 274)">Open source</p>
       <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
-      <p class="s-sub reveal">canvas-drop is open source and 12-factor — one binary, your database, your storage, your sign-in. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
+      <p class="s-sub reveal">canvas-drop is open source and self-contained — one binary, your database, your storage, your sign-in. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">
         <a class="btn btn-ghost" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a>
         <a class="btn btn-ghost" href="/docs">Self-host guide ${arrow}</a>
