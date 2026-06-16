@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
+import { resolveRequest } from "../routing/resolve-request.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
@@ -723,6 +724,15 @@ export function landingGate(deps: { config: Config }) {
     if (c.get("principal")) return next();
     // A session cookie → (possibly) signed-in human → let the gateway serve the SPA.
     if (getCookie(c, SESSION_COOKIE)) return next();
+    // Only the BASE host has a marketing front door. On a canvas subdomain, `/` is the
+    // canvas root — falling through lets social-preview/the gateway redirect to login
+    // carrying a returnTo, so a signed-out visitor lands back on the canvas after
+    // sign-in instead of on the generic welcome page (which has no returnTo CTA).
+    const { role } = resolveRequest(
+      { host: c.req.header("host") ?? "", pathname: c.req.path },
+      deps.config,
+    );
+    if (role === "canvas") return next();
     return landingResponse(deps.config);
   });
 }

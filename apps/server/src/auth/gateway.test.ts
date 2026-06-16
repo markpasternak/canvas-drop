@@ -164,4 +164,32 @@ describe("authGateway", () => {
     const res = await app.request("/me");
     expect(res.status).toBe(403);
   });
+
+  it("oidc mode: an unauthenticated request redirects to login carrying the public returnTo", async () => {
+    client = await makeTestDb("sqlite");
+    const oidcConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "oidc",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_OIDC_ISSUER: "https://idp.example.com",
+      CANVAS_DROP_OIDC_CLIENT_ID: "client",
+      CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+    });
+    const anon: AuthStrategy = {
+      async resolveIdentity() {
+        return null;
+      },
+    };
+    // Host header is the canvas subdomain; c.req.url is the internal proxy origin.
+    const res = await buildApp(client, { strategy: anon, config: oidcConfig }).request("/c/deck/", {
+      headers: { host: "my-deck.canvases.example.com" },
+    });
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") as string;
+    expect(loc.startsWith("/auth/login?returnTo=")).toBe(true);
+    const returnTo = new URL(loc, "https://canvases.example.com").searchParams.get("returnTo");
+    expect(returnTo).toBe("https://my-deck.canvases.example.com/c/deck/");
+  });
 });
