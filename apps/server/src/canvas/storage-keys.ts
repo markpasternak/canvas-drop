@@ -24,3 +24,37 @@ export function blobKey(canvasId: string, hash: string): string {
 export function hashFromBlobKey(canvasId: string, key: string): string {
   return key.slice(canvasBlobPrefix(canvasId).length);
 }
+
+/**
+ * Screenshot renditions (plan 004). One captured screenshot is stored as several
+ * sized WebP renditions, keyed by the canvas + the *version identity* it was
+ * captured from (`versions.id`) so a new publish writes a fresh key and the old
+ * one becomes reclaimable. Deliberately **outside** {@link canvasBlobPrefix} so
+ * the content blob GC never touches it — screenshots have their own sweep
+ * (`screenshots/gc.ts`).
+ */
+export type ScreenshotRendition = "og" | "card";
+
+/** Prefix holding every screenshot rendition for a canvas: `screenshots/{canvasId}/`. */
+export function screenshotPrefix(canvasId: string): string {
+  return `screenshots/${canvasId}/`;
+}
+
+/** Prefix for one captured version's renditions: `screenshots/{canvasId}/{versionId}/`. */
+export function screenshotVersionPrefix(canvasId: string, versionId: string): string {
+  return `${screenshotPrefix(canvasId)}${versionId}/`;
+}
+
+/** Storage key for one rendition: `screenshots/{canvasId}/{versionId}/{rendition}.webp`. */
+export function screenshotKey(
+  canvasId: string,
+  versionId: string,
+  rendition: ScreenshotRendition,
+): string {
+  return `${screenshotVersionPrefix(canvasId, versionId)}${rendition}.webp`;
+}
+
+/** Recover the versionId segment from a full key under {@link screenshotPrefix}. */
+export function versionIdFromScreenshotKey(canvasId: string, key: string): string {
+  return key.slice(screenshotPrefix(canvasId).length).split("/")[0] ?? "";
+}
