@@ -154,7 +154,9 @@ describe("serveCanvas (integration)", () => {
     const res = await app.request("/c/s/index.html");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
-    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    // 'self' (not 'none') so a canvas can frame itself (same-origin tools like
+    // reveal.js speaker notes); cross-canvas framing is still blocked in subdomain mode.
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'self'");
     expect(res.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
   });
 

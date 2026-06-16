@@ -124,7 +124,13 @@ function securityHeaders(headers: Headers): void {
   // Shared §12.4 baseline (nosniff, Referrer-Policy, COOP — COOP newly added for
   // canvas content, M7 audit), plus the canvas-content-specific frame-ancestors.
   baseSecurityHeaders(headers);
-  headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  // `'self'`, not `'none'`: a canvas may frame *itself* (same origin) so same-origin
+  // tools work — e.g. reveal.js speaker notes, which embeds the deck in an iframe. In
+  // subdomain mode (the recommended multi-user prod) every canvas is its own origin,
+  // so this still blocks framing by any OTHER canvas and by the dashboard — the
+  // cross-canvas / canvas→management isolation (§12.2) is unchanged. In path mode
+  // canvases share an origin, but that is the documented reduced-isolation mode.
+  headers.set("Content-Security-Policy", "frame-ancestors 'self'");
 }
 
 type NotFoundReason = "unpublished" | "no-home" | "missing";
