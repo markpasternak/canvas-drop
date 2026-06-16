@@ -120,6 +120,22 @@ describe("landingGate — front-door routing", () => {
     expect(await res.text()).toContain("Share it out.");
   });
 
+  it("renders the landing for the BASE host root (apex front door)", async () => {
+    const res = await app(oidc).request("/", { headers: { ...HTML, host: "canvas-drop.com" } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Share it out.");
+  });
+
+  it("falls through on a canvas SUBDOMAIN root so the gateway can redirect to login with a returnTo", async () => {
+    // A gated canvas root visited signed-out must NOT show the generic welcome page —
+    // it should reach the login redirect (which now carries a returnTo to the canvas).
+    const res = await app(oidc).request("/", {
+      headers: { ...HTML, host: "dusky-thistle-abc.canvas-drop.com" },
+    });
+    expect(res.status).toBe(418);
+    expect(await res.text()).toBe("FELL_THROUGH");
+  });
+
   it("falls through to the dashboard when a session cookie is present", async () => {
     const res = await app(oidc).request("/", { headers: SIGNED_IN });
     expect(res.status).toBe(418);
