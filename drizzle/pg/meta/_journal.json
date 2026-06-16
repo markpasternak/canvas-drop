@@ -134,6 +134,13 @@
       "when": 1781641512806,
       "tag": "0018_upload_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781647283905,
+      "tag": "0019_screenshot_jobs",
+      "breakpoints": true
     }
   ]
 }

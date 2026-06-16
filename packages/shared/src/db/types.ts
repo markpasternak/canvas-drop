@@ -11,6 +11,7 @@ import type {
   mcpTokens,
   oauthClients,
   oauthCodes,
+  screenshotJobs,
   sessions,
   settings,
   uploadSessions,
@@ -63,6 +64,11 @@ export type McpToken = typeof mcpTokens.$inferSelect;
 export type NewMcpToken = typeof mcpTokens.$inferInsert;
 export type UploadSession = typeof uploadSessions.$inferSelect;
 export type NewUploadSession = typeof uploadSessions.$inferInsert;
+export type ScreenshotJob = typeof screenshotJobs.$inferSelect;
+export type NewScreenshotJob = typeof screenshotJobs.$inferInsert;
+
+/** Screenshot job status values (stored as text, CHECK-constrained in the schema). */
+export type ScreenshotJobStatus = "pending" | "running" | "done" | "failed";
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };

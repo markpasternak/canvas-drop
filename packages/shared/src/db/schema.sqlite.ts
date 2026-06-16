@@ -498,3 +498,43 @@ export const aiUsage = sqliteTable(
     index("ai_usage_user_created_idx").on(t.userId, t.createdAt),
   ],
 );
+
+// Screenshot capture jobs (plan 004 / U2). ONE row per canvas (unique canvas_id):
+// publishing upserts it to `pending` with the new version_id, coalescing any prior
+// pending capture to the latest version (only the newest is worth a shot) and
+// bounding the table to one row per canvas. An in-process worker claims the oldest
+// claimable row (pending, OR a `running` row whose lease expired — restart-safe),
+// captures, and marks it done/failed. Screenshot-specific by design (no job_type
+// column) — a second job type means a new table, not reuse (focused-pipeline KTD).
+// Structurally identical to schema.pg.ts; parity enforced by schema.test.ts (KTD-1).
+export const screenshotJobs = sqliteTable(
+  "screenshot_jobs",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    versionId: c.text("version_id").notNull(),
+    status: c.text("status").notNull().default("pending"), // pending | running | done | failed
+    attempts: c.int("attempts").notNull().default(0),
+    // In-progress lease: set when claimed, cleared on terminal/retry. A `running` row
+    // whose lease is older than the worker's lease window is reclaimed (restart-safe).
+    leasedAt: c.epochMs("leased_at"),
+    lastError: c.text("last_error"),
+    createdAt: c.epochMs("created_at").notNull(),
+    updatedAt: c.epochMs("updated_at").notNull(),
+  },
+  (t) => [
+    // One job per canvas — the coalesce upsert's conflict target.
+    uniqueIndex("screenshot_jobs_canvas_uq").on(t.canvasId),
+    // claim/reclaim scan: pending rows + running rows past their lease.
+    index("screenshot_jobs_status_leased_idx").on(t.status, t.leasedAt),
+    // failed-row sweep: WHERE status='failed' AND updated_at <= cutoff.
+    index("screenshot_jobs_status_updated_idx").on(t.status, t.updatedAt),
+    check(
+      "screenshot_jobs_status_chk",
+      sql`${t.status} in ('pending', 'running', 'done', 'failed')`,
+    ),
+  ],
+);
