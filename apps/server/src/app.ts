@@ -502,9 +502,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         log: deps.rootLogger,
         // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
         // them. Only wired when the pipeline is enabled.
-        screenshots: deps.config.screenshots.enabled
-          ? screenshotsRepository(deps.db)
-          : undefined,
+        screenshots: deps.config.screenshots.enabled ? screenshotsRepository(deps.db) : undefined,
       }),
     }),
   );

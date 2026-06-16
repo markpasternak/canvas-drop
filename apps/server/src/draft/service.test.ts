@@ -287,7 +287,12 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
       log: silent,
       screenshots: enqueue ? { enqueue } : undefined,
     });
-    const owner = await users.upsert({ providerSub: "o", email: "o@e.com", name: "O", isAdmin: false });
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
     const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "k" });
     // Deploy v1 so the draft is non-empty and publish() can snapshot it into v2.
     await engine.deploy(cv, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);

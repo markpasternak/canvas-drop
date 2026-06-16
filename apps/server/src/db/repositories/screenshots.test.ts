@@ -8,6 +8,12 @@ import { usersRepository } from "./users.js";
 const V1 = "0190b000-0000-7000-8000-0000000000a1";
 const V2 = "0190b000-0000-7000-8000-0000000000a2";
 
+/** Assert a claim returned a row and hand back its id (claimNext is `| null`). */
+const idOf = (job: { id: string } | null): string => {
+  if (!job) throw new Error("expected a claimed job");
+  return job.id;
+};
+
 describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
   let client: DbClient;
   let jobs: ReturnType<typeof screenshotsRepository>;
@@ -60,7 +66,7 @@ describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
   it("re-enqueue resets a failed/done row back to pending with attempts cleared", async () => {
     await jobs.enqueue(canvasId, V1);
     const claimed = await jobs.claimNext(Date.now(), Date.now() - 1000);
-    await jobs.markFailedOrRetry(claimed!.id, "boom", 1); // attempts (1) >= max (1) → failed
+    await jobs.markFailedOrRetry(idOf(claimed), "boom", 1); // attempts (1) >= max (1) → failed
     expect((await jobs.findByCanvas(canvasId))?.status).toBe("failed");
 
     await jobs.enqueue(canvasId, V2);
@@ -101,7 +107,7 @@ describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
   it("markDone marks the job done and clears the lease", async () => {
     await jobs.enqueue(canvasId, V1);
     const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
-    await jobs.markDone(claimed!.id);
+    await jobs.markDone(idOf(claimed));
     const done = await jobs.findByCanvas(canvasId);
     expect(done?.status).toBe("done");
     expect(done?.leasedAt).toBeNull();
@@ -111,12 +117,12 @@ describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
     await jobs.enqueue(canvasId, V1);
     const now = Date.now();
     const first = await jobs.claimNext(now, now - 30_000); // attempts = 1
-    await jobs.markFailedOrRetry(first!.id, "err1", 2); // 1 < 2 → pending
+    await jobs.markFailedOrRetry(idOf(first), "err1", 2); // 1 < 2 → pending
     expect((await jobs.findByCanvas(canvasId))?.status).toBe("pending");
     expect((await jobs.findByCanvas(canvasId))?.lastError).toBe("err1");
 
     const second = await jobs.claimNext(now, now - 30_000); // attempts = 2
-    await jobs.markFailedOrRetry(second!.id, "err2", 2); // 2 >= 2 → failed
+    await jobs.markFailedOrRetry(idOf(second), "err2", 2); // 2 >= 2 → failed
     expect((await jobs.findByCanvas(canvasId))?.status).toBe("failed");
   });
 
@@ -140,7 +146,7 @@ describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
   it("sweepFailed deletes failed rows past the cutoff, keeps fresh ones", async () => {
     await jobs.enqueue(canvasId, V1);
     const claimed = await jobs.claimNext(Date.now(), Date.now() - 1000);
-    await jobs.markFailedOrRetry(claimed!.id, "boom", 1); // failed, updatedAt ~ now
+    await jobs.markFailedOrRetry(idOf(claimed), "boom", 1); // failed, updatedAt ~ now
     await jobs.sweepFailed(Date.now() - 60_000); // cutoff in the past → keep
     expect(await jobs.findByCanvas(canvasId)).not.toBeNull();
     await jobs.sweepFailed(Date.now() + 60_000); // cutoff in the future → sweep

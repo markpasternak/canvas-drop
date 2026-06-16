@@ -206,9 +206,7 @@ export function draftService(deps: DraftServiceDeps) {
       if (deps.config.screenshots.enabled && deps.screenshots) {
         await deps.screenshots
           .enqueue(canvas.id, version.id)
-          .catch((err) =>
-            deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"),
-          );
+          .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"));
       }
 
       // Prune old rows + reclaim unreferenced blobs, async + best-effort.

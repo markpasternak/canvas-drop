@@ -21,7 +21,12 @@ describe("capture token (plan 004 / U3)", () => {
     });
 
     it("rejects a token signed with a different secret", () => {
-      const token = mintCaptureToken("other-secret-also-32-chars-minimum-x", CANVAS, VERSION, 60_000);
+      const token = mintCaptureToken(
+        "other-secret-also-32-chars-minimum-x",
+        CANVAS,
+        VERSION,
+        60_000,
+      );
       expect(verifyCaptureToken(SECRET, token)).toBeNull();
     });
 

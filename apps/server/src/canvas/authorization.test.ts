@@ -380,12 +380,14 @@ describe("decideCanvasAccess — internal capture principal", () => {
 
   it("DENIES a capture credential scoped to a DIFFERENT canvas (no cross-canvas render)", () => {
     // Even against an otherwise-public canvas, a token minted for cv1 cannot render cv2.
-    expect(decideCanvasAccess(canvas({ id: "cv2", access: "public_link" }), capture("cv1"), NOW, {
-      publicEnabled: true,
-    })).toEqual({ action: "deny", status: 404, reason: "not_found" });
-    expect(decideCanvasAccess(canvas({ id: "cv2", access: "private" }), capture("cv1"), NOW)).toEqual(
-      { action: "deny", status: 404, reason: "not_found" },
-    );
+    expect(
+      decideCanvasAccess(canvas({ id: "cv2", access: "public_link" }), capture("cv1"), NOW, {
+        publicEnabled: true,
+      }),
+    ).toEqual({ action: "deny", status: 404, reason: "not_found" });
+    expect(
+      decideCanvasAccess(canvas({ id: "cv2", access: "private" }), capture("cv1"), NOW),
+    ).toEqual({ action: "deny", status: 404, reason: "not_found" });
   });
 
   it("does NOT bypass deleted/archived/disabled (lifecycle is honored first)", () => {
