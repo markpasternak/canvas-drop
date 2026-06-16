@@ -1,0 +1,42 @@
+# Keep the build context lean and secret-free.
+# Dependencies and build output (rebuilt fresh inside the image)
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+
+# Secrets / env (never copy real env into the image)
+.env
+.env.*
+!.env.example
+
+# Local data (SQLite, local storage)
+data
+*.db
+*.db-shm
+*.db-wal
+
+# VCS / CI / agent-local state
+.git
+.github
+.claude
+.codex
+.agents
+.worktrees
+
+# Deployment infra (gitignored anyway), docs, and examples — none are needed at
+# build or runtime (the server serves a pre-generated docs module), so keep them
+# out of the build context and the image.
+deploy
+docs
+examples
+
+# Tests / coverage / misc
+coverage
+.nyc_output
+*.log
+logs
+.cache
+tmp
+.DS_Store

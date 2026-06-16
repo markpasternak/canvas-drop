@@ -177,6 +177,19 @@ Docker-first and vendor-neutral — **one application image** plus off-the-shelf
 
 The admin panel covers the all-canvases list with usage, disable/takedown/restore, the AI model allowlist, and global quota defaults.
 
+### Self-host with Docker (~5 min)
+
+The repo ships a one-command demo stack that runs canvas-drop in its **real `proxy` mode** behind an identity-aware proxy (oauth2-proxy) and a **bundled demo IdP** (Dex), so you can try the production shape with zero external setup:
+
+```bash
+docker compose up --build
+# then open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+```
+
+The app verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you'd run in production — with Postgres for data and an optional MinIO profile for S3. The app is never directly exposed; only the proxy is. `./scripts/compose-smoke.sh` boots the stack and asserts the launch invariants (no host exposure, unauth blocked, forged headers rejected, real login, restart persistence).
+
+**Going to production** is a config change, not a code change: copy [`.env.production.example`](.env.production.example), point the proxy/JWKS at your real IdP, and switch storage/DB as needed. The full walkthrough — including the graduation checklist — is in [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
+
 ---
 
 ## Architecture
@@ -207,7 +220,9 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 - ✅ **Beyond v1** — clone-as-template, usage stats, server-side list filters, in-app docs (`/docs`, `/llms.txt`)
 - ✅ **Sharing access ladder** — per-canvas Private/Specific-people/Whole-org/Public-link, email-invited guest identities (SMTP or Mailgun), admin-gated public links, guest primitive policy (KV/files/realtime yes, AI opt-in, public static-only)
 
-Remaining toward 1.0: ops/packaging — a Docker image + compose file (not in the repo yet), a backup/restore drill, and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
+- ✅ **OSS packaging** — multi-stage Docker image + one-command compose demo (real proxy/JWKS auth via a bundled Dex IdP), pedagogical prod config, `SECURITY.md`/`CODE_OF_CONDUCT.md`/`NOTICE`, blocking secret-scan in CI, starter examples
+
+Remaining toward 1.0: a backup/restore drill and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
 
 ---
 

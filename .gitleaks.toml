@@ -1,0 +1,21 @@
+# gitleaks config for canvas-drop secret scanning (U5).
+#
+# Extends the default ruleset and allowlists ONLY specific known-fake values —
+# test fixtures and the clearly-labeled DEMO-ONLY secrets in the bundled compose
+# stack. The allowlist is scoped to exact secret values, NOT to file paths or
+# rules, so a REAL secret added anywhere (including next to these) is still caught.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-fake test fixtures and demo-only placeholders (not real secrets)."
+regexes = [
+  # Dashboard test fixture API key — apps/dashboard/src/test/settings.test.tsx.
+  '''cd_brandnewkey123''',
+  # docker/ bundled demo stack — clearly-labeled DEMO ONLY placeholders.
+  '''demo-only-not-a-real-client-secret''',
+  '''CANVAS-DROP-DEMO-ONLY-COOKIE-32B''',
+  '''demo-only-session-secret-change-me-0123456789''',
+  '''\$2y\$10\$TM1QyKyQuSDLfTgXh5oYwOPtfTnI643BEsm4EfJ0jxdh7YzJy7pmm''',
+]

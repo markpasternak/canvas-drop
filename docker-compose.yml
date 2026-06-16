@@ -1,0 +1,122 @@
+# canvas-drop — one-command demo stack (BUILD_BRIEF §8.3).
+#
+#   docker compose up --build
+#   → open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+#
+# This runs canvas-drop in its real production `proxy` mode: an identity-aware
+# proxy (oauth2-proxy) authenticates against a bundled demo IdP (Dex) and forwards
+# a signed JWT that the app verifies against Dex's JWKS (§12.5 — the cryptographic
+# trust path, not a plaintext header). Graduating to a real IdP is a config change,
+# not a code change — see docs/site/self-hosting/deploy.md "Graduating".
+#
+# ⚠️  The Dex/oauth2-proxy secrets here are DEMO-ONLY placeholders. Rotate them and
+# point at your real IdP before exposing this to anyone.
+
+name: canvas-drop
+
+services:
+  # The ONLY service with a published port. The app is never directly reachable.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - oauth2-proxy
+      - dex
+
+  # Identity-aware proxy: authenticates via Dex, forwards the signed JWT to the app.
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    restart: unless-stopped
+    command: ["--config=/etc/oauth2-proxy.cfg"]
+    volumes:
+      - ./docker/oauth2-proxy.cfg:/etc/oauth2-proxy.cfg:ro
+    depends_on:
+      - app
+      - dex
+
+  # Bundled DEMO identity provider (one seeded user). Replace with your real IdP.
+  dex:
+    image: dexidp/dex:v2.41.1
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./docker/dex/config.yaml:/etc/dex/config.yaml:ro
+
+  # canvas-drop itself — real `proxy`/JWKS mode. NO published port (only Caddy is
+  # exposed); identity comes only from a Dex-signed JWT it cryptographically verifies.
+  app:
+    build: .
+    image: canvas-drop:dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # --- URL + base ---
+      # The runnable demo uses `path` mode — `subdomain` needs real wildcard DNS +
+      # TLS and cannot boot on localhost. `.env.production.example` teaches subdomain.
+      CANVAS_DROP_URL_MODE: path
+      # ⚠️ path mode shares one browser origin across all canvases — cross-canvas
+      # isolation is weaker than subdomain mode (§12.2). Fine for a single-user demo;
+      # switch to subdomain + real wildcard DNS/TLS for multi-user production.
+      CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: "true"
+      CANVAS_DROP_BASE_URL: http://localhost:8080
+      CANVAS_DROP_PORT: "3000"
+      # --- auth: proxy mode, JWKS (cryptographic) trust path (§12.5) ---
+      CANVAS_DROP_AUTH_MODE: proxy
+      # oauth2-proxy forwards the signed access token (a Dex JWT) in this header.
+      CANVAS_DROP_AUTH_PROXY_JWT_HEADER: X-Forwarded-Access-Token
+      # Fetch keys straight from Dex on the internal network; validate the iss claim
+      # against the browser-facing issuer string (the two are intentionally decoupled).
+      CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL: http://dex:5556/dex/keys
+      CANVAS_DROP_AUTH_PROXY_JWT_ISSUER: http://localhost:8080/dex
+      # Must equal the Dex/oauth2-proxy client id (docker/dex/config.yaml + oauth2-proxy.cfg).
+      CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE: canvas-drop-demo
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: example.com
+      CANVAS_DROP_ADMIN_EMAILS: demo@example.com
+      # DEMO-ONLY session secret (≥32 chars) — rotate for real use.
+      CANVAS_DROP_SESSION_SECRET: demo-only-session-secret-change-me-0123456789
+      # --- data ---
+      CANVAS_DROP_DB: postgres
+      CANVAS_DROP_DATABASE_URL: postgres://canvasdrop:canvasdrop@postgres:5432/canvasdrop
+      CANVAS_DROP_STORAGE: local
+    volumes:
+      - app-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: canvasdrop
+      POSTGRES_PASSWORD: canvasdrop
+      POSTGRES_DB: canvasdrop
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canvasdrop -d canvasdrop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional S3-compatible storage. Enable with:  docker compose --profile minio up
+  # (and set CANVAS_DROP_STORAGE=s3 + the S3 vars on `app`).
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    profiles: [minio]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+
+volumes:
+  app-data:
+  pg-data:
+  minio-data:

@@ -1,0 +1,49 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Blocking gate (KTD4): scans the working TREE on every PR — a clean checkout
+      # contains only tracked files (the gitignored deploy/ infra secrets are never in
+      # the repo). Tree mode (not history) keeps the gate fast and avoids re-flagging
+      # secrets in superseded commits that squash-merge will discard. The full-history
+      # sweep is a separate one-time check, not this recurring gate. The value-scoped
+      # allowlist in .gitleaks.toml suppresses only the known-fake demo/test placeholders.
+      - name: gitleaks (blocking)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            dir /repo --config /repo/.gitleaks.toml --no-banner --redact --exit-code 1
+
+      # Self-test: prove the gate actually bites. Plant a secret OUTSIDE the demo-config
+      # allowlist and scan it WITH the project config — so this proves the real
+      # .gitleaks.toml allowlist still detects a non-allowlisted secret (i.e. the
+      # allowlist is narrow and did not silently defang the scanner).
+      - name: gitleaks self-test (the gate must bite)
+        run: |
+          tmp="$(mktemp -d)"
+          # A fake-but-rule-matching GitHub PAT (NOT a real token; not in the allowlist).
+          # Assembled from two halves so the contiguous token literal never appears in
+          # this committed file (otherwise the blocking scan above would flag it here).
+          pat="ghp_A1b2C3d4E5f6G7h8""I9j0K1l2M3n4O5p6Q7r8"
+          echo "github_token = \"$pat\"" > "$tmp/planted-secret.txt"
+          if docker run --rm -v "$tmp:/scan" -v "${{ github.workspace }}/.gitleaks.toml:/cfg.toml:ro" \
+               ghcr.io/gitleaks/gitleaks:v8.30.1 \
+               dir /scan --config /cfg.toml --no-banner --redact --exit-code 1; then
+            echo "::error::gitleaks did NOT detect a planted secret — the gate (or the allowlist) is defanged"
+            exit 1
+          fi
+          echo "✓ gitleaks detected the planted secret under the real config (allowlist is narrow, gate bites)"

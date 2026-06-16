@@ -86,11 +86,47 @@ cookie — real auth with no extra infrastructure. `oidc` mode also accepts
 `CANVAS_DROP_TRUSTED_PROXY_IPS` so login rate-limiting keys on the real client IP
 when you front it with a plain TLS proxy.
 
-## Running the process
+## Run with Docker (recommended)
 
-There is no app Dockerfile or `docker-compose.yml` in the repo yet — the
-multi-stage image and compose stack are a documented target, not shipped. Today you
-run the built Node process directly.
+The repo ships a multi-stage `Dockerfile` (one slim, non-root application image) and a
+`docker-compose.yml` that boots the **whole production shape with zero external setup**:
+canvas-drop in real `proxy` mode behind Caddy + oauth2-proxy + a bundled **Dex** demo IdP,
+with Postgres and an optional MinIO (S3) profile.
+
+```
+docker compose up --build
+# open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+```
+
+The app verifies a Dex-signed JWT against Dex's JWKS — the cryptographic §12.5 trust path,
+not a plaintext header. The app publishes no host port; only Caddy is reachable.
+`./scripts/compose-smoke.sh` boots the stack and asserts the launch invariants (no host
+exposure, unauthenticated requests blocked, forged identity headers rejected, a real login
+resolves the demo identity, and data survives a restart).
+
+The bundled Dex/oauth2-proxy secrets in `docker/` are **clearly-labeled demo-only
+placeholders** — see "Graduating" below before exposing the stack to anyone.
+
+### Graduating to a real IdP (config, not code)
+
+Moving off the bundled demo IdP is a configuration change — no app code changes — but it is
+not thoughtless. Work the checklist:
+
+1. Point oauth2-proxy (or your own IAP) and `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` /
+   `…_ISSUER` / `…_AUDIENCE` at your real provider (Google, Okta, Cloudflare Access, …).
+2. Confirm **which JWT claim carries the verified email** and that it maps to identity.
+3. Confirm `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` covers your real users.
+4. Switch `CANVAS_DROP_URL_MODE=subdomain` once you have real wildcard DNS + a wildcard cert
+   (the demo runs `path` mode because subdomain can't boot on localhost).
+5. Rotate every demo secret; set `cookie_secure=true` at the proxy once TLS terminates there.
+6. Re-run the forged-token rejection check against the new wiring.
+
+Prefer the **JWKS path** in production: it is cryptographic and does not depend on pinning
+trusted-proxy IPs. See `.env.production.example` for the full annotated prod profile.
+
+## Running the bare process
+
+If you prefer not to use Docker, run the built Node process directly.
 
 Build, then start the server (production uses the `node-dist` export condition so the
 shared package resolves to compiled JS, not TS source):

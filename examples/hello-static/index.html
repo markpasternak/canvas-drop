@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hello, canvas-drop</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font: 16px/1.6 system-ui, sans-serif; text-align: center;
+      background: #0f1115; color: #e8eaed;
+    }
+    .card { padding: 3rem 2.5rem; }
+    h1 { font-size: clamp(1.8rem, 5vw, 2.8rem); margin: 0 0 .5rem; }
+    p { margin: .25rem 0; color: #9aa0a6; }
+    code { background: #1b1e24; padding: .15em .45em; border-radius: 5px; color: #e8eaed; }
+    .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; background: #6ee7b7; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1><span class="dot"></span> Hello, canvas-drop</h1>
+    <p>This is a single static <code>index.html</code> — no build step, no server code.</p>
+    <p>Drop the folder in, get a URL out.</p>
+  </main>
+</body>
+</html>

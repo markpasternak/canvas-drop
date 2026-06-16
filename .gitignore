@@ -11,6 +11,7 @@ build/
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Local data (SQLite, local file storage)
 data/

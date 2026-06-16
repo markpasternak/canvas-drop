@@ -1,0 +1,40 @@
+canvas-drop
+Copyright (c) the canvas-drop contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party dependencies
+================================================================================
+
+canvas-drop's runtime application image bundles its npm production dependencies
+(the pruned node_modules of @canvas-drop/server and its workspace packages).
+Every bundled production dependency is under a permissive, MIT-compatible
+license. As of the latest audit, the production dependency tree (147 packages)
+breaks down as:
+
+    MIT            87
+    Apache-2.0     48
+    ISC             8
+    BSD-3-Clause    3
+    BSD-2-Clause    1
+    0BSD            1
+    MIT OR WTFPL    1
+
+No copyleft (GPL/LGPL/MPL/EUPL/CDDL) licenses are present. Apache-2.0 components
+are redistributed under the terms of that license; this NOTICE preserves their
+attribution requirement.
+
+Reproduce this inventory at any time with:
+
+    pnpm --filter @canvas-drop/server licenses list --prod
+
+--------------------------------------------------------------------------------
+Redistribution boundary
+--------------------------------------------------------------------------------
+
+This NOTICE covers the npm dependencies bundled into the canvas-drop application
+image. It does NOT cover the off-the-shelf container images that docker-compose
+references and pulls at runtime — Dex, oauth2-proxy, Caddy, PostgreSQL, MinIO,
+and the node:24-slim base image. Those are pulled from their own registries
+under their own licenses and are not redistributed by this project.

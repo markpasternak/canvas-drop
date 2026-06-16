@@ -1,0 +1,37 @@
+# Dex — bundled DEMO identity provider for the docker-compose stack.
+#
+# ⚠️  DEMO ONLY. This issues a single throwaway login so `docker compose up` gives
+# you a working canvas-drop in real `proxy`/JWKS mode with zero external setup.
+# To graduate to production you replace this with your real IdP (Google, Okta,
+# Cloudflare Access, …) — see docs/site/self-hosting/deploy.md "Graduating".
+#
+# The issuer is the BROWSER-facing URL (through Caddy). The app and oauth2-proxy
+# reach Dex's token/keys endpoints directly at http://dex:5556 on the internal
+# network — the issuer string and the JWKS-fetch URL are intentionally decoupled.
+issuer: http://localhost:8080/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: canvas-drop-demo
+    name: canvas-drop (demo)
+    # DEMO-ONLY client secret — NOT a real secret. Rotate before any real use.
+    secret: demo-only-not-a-real-client-secret
+    redirectURIs:
+      - http://localhost:8080/oauth2/callback
+
+enablePasswordDB: true
+staticPasswords:
+  # Demo login:  demo@example.com  /  canvasdrop
+  - email: demo@example.com
+    # bcrypt("canvasdrop") — DEMO ONLY.
+    hash: "$2y$10$TM1QyKyQuSDLfTgXh5oYwOPtfTnI643BEsm4EfJ0jxdh7YzJy7pmm"
+    username: demo
+    userID: "00000000-0000-0000-0000-000000000001"

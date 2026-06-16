@@ -1,0 +1,37 @@
+# Caddy — the edge reverse proxy for the demo stack.
+#
+# In production this terminates TLS. For the zero-setup demo it runs plain HTTP on
+# :8080 and does two jobs:
+#   1. Strip any client-supplied identity/token headers before they reach the auth
+#      layer, so a client cannot inject an identity (§12.5 defense-in-depth). The
+#      cryptographic JWT verification in canvas-drop is the real control; this is
+#      belt-and-suspenders.
+#   2. Route the browser to Dex's login page (/dex/*) and everything else to
+#      oauth2-proxy, which authenticates and forwards the signed token to the app.
+
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	# Dex's browser-facing endpoints (login form, auth/callback redirects).
+	handle /dex/* {
+		reverse_proxy dex:5556
+	}
+
+	# Everything else goes through the identity-aware proxy.
+	handle {
+		reverse_proxy oauth2-proxy:4180 {
+			# Strip client-supplied identity/token headers — only oauth2-proxy may set them.
+			# NOTE: -Authorization also drops the Bearer key the deploy API (/v1/canvases/*)
+			# uses. That API is intentionally unreachable in this demo (oauth2-proxy guards
+			# every route); if you ever expose it, scope this strip so /v1 keeps Authorization.
+			header_up -X-Forwarded-Access-Token
+			header_up -X-Auth-Request-Email
+			header_up -X-Auth-Request-User
+			header_up -X-Auth-Request-Preferred-Username
+			header_up -Authorization
+		}
+	}
+}
