@@ -17,7 +17,26 @@ export type DeployErrorCode =
   | "PATH_EXISTS"
   // Rollback target was pruned between selection and the pointer swap (a
   // concurrent deploy's prune won the race); the client should refresh + retry.
-  | "VERSION_UNAVAILABLE";
+  | "VERSION_UNAVAILABLE"
+  // --- Two-channel upload flow (plan 003) ---
+  // Unknown / wrong-owner / wrong-canvas upload handle. Deliberately one code for
+  // all three so a non-owner can't distinguish "no such handle" from "not yours"
+  // (no existence leak, §12.0). Maps to 404.
+  | "UPLOAD_HANDLE_INVALID"
+  // The upload session passed its TTL before finalize.
+  | "UPLOAD_EXPIRED"
+  // The handle was already finalized (terminal); a fresh `begin` is required.
+  | "UPLOAD_ALREADY_FINALIZED"
+  // Another finalize attempt currently holds the in-progress lease; retry shortly.
+  | "UPLOAD_IN_PROGRESS"
+  // Finalize referenced a manifest hash whose blob was never staged / is absent.
+  | "UPLOAD_MISSING_BLOB"
+  // A staged blob's sha256 did not match the hash it was uploaded under.
+  | "BLOB_HASH_MISMATCH"
+  // A `files[]` entry declared an encoding other than utf8/base64.
+  | "INVALID_ENCODING"
+  // The begin manifest was empty or malformed.
+  | "INVALID_MANIFEST";
 
 export class DeployError extends Error {
   constructor(
