@@ -145,6 +145,16 @@ export default function Share() {
               {shareBlocker}
             </InlineNotice>
           )}
+          {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
+              audiences the URL itself is no longer a secret — lean on the access controls,
+              not obscurity. Informational, never a blocker. */}
+          {canvas.slugCustom &&
+            (canvas.access === "whole_org" || canvas.access === "public_link") && (
+              <InlineNotice tone="accent" className="py-2 text-xs">
+                This canvas has a custom, human-readable URL — easy to guess. Anyone allowed by the
+                access level above can reach it; don't rely on the URL being secret.
+              </InlineNotice>
+            )}
         </Section>
 
         {canvas.access === "specific_people" && (

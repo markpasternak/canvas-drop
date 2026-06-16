@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
+import { isUniqueViolation, SLUG_UNIQUE } from "../unique-violation.js";
 import { canvasesRepository, type OwnerListOptions } from "./canvases.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
@@ -54,6 +55,70 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const repo = canvasesRepository(client);
     await repo.create({ ownerId, slug: "dup", apiKeyHash: "h" });
     await expect(repo.create({ ownerId, slug: "dup", apiKeyHash: "h2" })).rejects.toThrow();
+  });
+
+  it("a real slug-collision throw is recognized by isUniqueViolation (both dialects)", async () => {
+    // Proves the dialect-aware detection (KTD7) matches the actual driver error
+    // shape on this leg — not just synthesized error objects.
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId, slug: "dup", slugCustom: true, apiKeyHash: "h" });
+    let caught: unknown;
+    try {
+      await repo.create({ ownerId, slug: "dup", slugCustom: true, apiKeyHash: "h2" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(isUniqueViolation(caught, SLUG_UNIQUE)).toBe(true);
+  });
+
+  it("an api-key-hash collision is NOT mistaken for a slug violation (both dialects)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    await repo.create({ ownerId, slug: "k1", apiKeyHash: "same-hash" });
+    let caught: unknown;
+    try {
+      await repo.create({ ownerId, slug: "k2", apiKeyHash: "same-hash" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(isUniqueViolation(caught, SLUG_UNIQUE)).toBe(false);
+  });
+
+  it("persists slugCustom on create and regenerate", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const random = await repo.create({ ownerId, slug: "auto-slug", apiKeyHash: "h" });
+    expect(random.slugCustom).toBe(false);
+    const custom = await repo.create({
+      ownerId,
+      slug: "my-app",
+      slugCustom: true,
+      apiKeyHash: "h2",
+    });
+    expect(custom.slugCustom).toBe(true);
+    // regenerate to a random one clears the flag; to a custom one sets it.
+    expect((await repo.regenerateSlug(custom.id, "fresh-random")).slugCustom).toBe(false);
+    expect((await repo.regenerateSlug(custom.id, "renamed", true)).slugCustom).toBe(true);
+  });
+
+  it("slugTaken is status-unaware (matches the unconditional unique index)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "held", apiKeyHash: "h" });
+    expect(await repo.slugTaken("held")).toBe(true);
+    expect(await repo.slugTaken("free")).toBe(false);
+    // A soft-deleted canvas still occupies the slug in the unique index, so slugTaken
+    // must still report it taken even though findBySlug hides it (KTD8).
+    await repo.setStatus(cv.id, "deleted");
+    expect(await repo.findBySlug("held")).toBeNull();
+    expect(await repo.slugTaken("held")).toBe(true);
   });
 
   it("finds by slug and id; excludes soft-deleted from find-by-slug", async () => {

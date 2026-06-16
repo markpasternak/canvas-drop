@@ -137,6 +137,56 @@ describe("share route", () => {
     expect(screen.getAllByText(/publish this canvas before sharing it/i).length).toBeGreaterThan(0);
   });
 
+  it("shows the human-guessable heads-up for a custom slug on a link-reachable rung", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          slugCustom: true,
+          publicationState: "published",
+          access: "whole_org",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+    });
+    renderShare();
+    expect(await screen.findByText(/custom, human-readable URL/i)).toBeInTheDocument();
+  });
+
+  it("hides the heads-up for a random slug on a link-reachable rung", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          slugCustom: false,
+          publicationState: "published",
+          access: "whole_org",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /whole org/i });
+    expect(screen.queryByText(/custom, human-readable URL/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the heads-up for a custom slug kept private (obscurity still applies)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          slugCustom: true,
+          publicationState: "published",
+          access: "private",
+          shared: false,
+          currentVersionId: "v1",
+        }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /private/i });
+    expect(screen.queryByText(/custom, human-readable URL/i)).not.toBeInTheDocument();
+  });
+
   it("specific_people: shows the allowlist empty state and adds a member", async () => {
     const user = userEvent.setup();
     let added = false;

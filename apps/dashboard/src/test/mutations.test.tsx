@@ -15,6 +15,7 @@ import { keys } from "../lib/queries.js";
 const CANVAS: Canvas = {
   id: "c1",
   slug: "quiet-otter",
+  slugCustom: false,
   url: "http://x/c/quiet-otter",
   title: "Demo",
   description: null,

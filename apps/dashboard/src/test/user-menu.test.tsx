@@ -12,6 +12,8 @@ function makeMe(overrides: Partial<Me> = {}): Me {
     isAdmin: false,
     canPublishPublic: false,
     authMode: "oidc",
+    urlMode: "path",
+    baseUrl: "http://localhost:8787",
     ...overrides,
   };
 }

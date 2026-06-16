@@ -1,0 +1,1 @@
+ALTER TABLE `canvases` ADD `slug_custom` integer DEFAULT false NOT NULL;

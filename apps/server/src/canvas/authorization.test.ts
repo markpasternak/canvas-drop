@@ -12,6 +12,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
   return {
     id: "cv1",
     slug: "s",
+    slugCustom: false,
     title: "",
     description: null,
     ownerId: "owner",
