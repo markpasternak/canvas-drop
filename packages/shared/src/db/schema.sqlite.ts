@@ -315,7 +315,7 @@ export const versions = sqliteTable(
       .text("created_by")
       .notNull()
       .references(() => users.id),
-    source: c.text("source").notNull(), // folder | zip | paste | api
+    source: c.text("source").notNull(), // folder | zip | paste | api | editor | upload
     status: c.text("status").notNull().default("pending"), // pending | ready
     fileCount: c.int("file_count").notNull().default(0),
     totalBytes: c.int("total_bytes").notNull().default(0),
@@ -327,7 +327,47 @@ export const versions = sqliteTable(
     // number (history, prune, nextNumber's max). No separate created_at index needed.
     uniqueIndex("versions_canvas_number_uq").on(t.canvasId, t.number),
     check("versions_status_chk", sql`${t.status} in ('pending', 'ready')`),
-    check("versions_source_chk", sql`${t.source} in ('folder', 'zip', 'paste', 'api', 'editor')`),
+    check(
+      "versions_source_chk",
+      sql`${t.source} in ('folder', 'zip', 'paste', 'api', 'editor', 'upload')`,
+    ),
+  ],
+);
+
+// Staging area for the two-channel upload flow (plan 003). One row per in-flight
+// `begin → stage* → finalize` session: an owner+canvas-scoped, hashed, single-use
+// handle plus the target manifest (recorded at begin, before any blob is staged —
+// so the blob-GC live set always covers a staged blob's hash). Blobs land in the
+// shared content-addressed store (canvases/{id}/blobs/{hash}); this row tracks
+// which hashes have been staged and the finalize lifecycle. `finalizingAt` is the
+// idempotent in-progress lease (cleared on transient failure so a legitimate retry
+// can resume); `consumedAt` is terminal, set only on a successful pointer swap.
+export const uploadSessions = sqliteTable(
+  "upload_sessions",
+  {
+    id: c.text("id").primaryKey(),
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    ownerId: c
+      .text("owner_id")
+      .notNull()
+      .references(() => users.id),
+    handleHash: c.text("handle_hash").notNull(),
+    // Target manifest (path -> { size, hash, mime }) recorded at begin.
+    manifest: c.json("manifest").notNull(),
+    // Hashes physically staged so far (subset of manifest hashes not already present).
+    stagedHashes: c.json("staged_hashes").notNull(),
+    expiresAt: c.epochMs("expires_at").notNull(),
+    finalizingAt: c.epochMs("finalizing_at"),
+    consumedAt: c.epochMs("consumed_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("upload_sessions_handle_hash_uq").on(t.handleHash),
+    index("upload_sessions_canvas_idx").on(t.canvasId),
+    index("upload_sessions_expires_idx").on(t.expiresAt),
   ],
 );
 

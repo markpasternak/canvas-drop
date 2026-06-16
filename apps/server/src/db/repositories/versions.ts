@@ -72,6 +72,13 @@ export function versionsRepository(client: DbClient) {
         })
         .where(eq(t.id, id))
         .returning();
+      // Assert exactly one row updated. A finalize whose canvas (and its version
+      // rows) was purged between begin and commit would otherwise silently mark a
+      // gone version ready; here it fails cleanly so the upload service can abort
+      // before swapping the live pointer (plan 003, purge-vs-staged-finalize guard).
+      if (rows.length !== 1) {
+        throw new Error(`markReady expected to update 1 version row, updated ${rows.length}`);
+      }
       return rows[0] as Version;
     },
 

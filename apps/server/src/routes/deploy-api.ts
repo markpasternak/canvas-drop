@@ -10,11 +10,18 @@ import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
+import { DeployError } from "../deploy/errors.js";
 import { fromZip } from "../deploy/ingest.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
-import { deployBodyLimit, deployResponse } from "./deploy-common.js";
+import type { UploadService } from "../upload/service.js";
+import {
+  blobBodyLimit,
+  deployBodyLimit,
+  deployErrorResponse,
+  deployResponse,
+} from "./deploy-common.js";
 
 export interface DeployApiDeps {
   config: Config;
@@ -29,6 +36,9 @@ export interface DeployApiDeps {
   /** Realtime hub for drop-sockets on unpublish (D-RT-6). Optional — omitted in
    *  unit tests and when realtime is disabled. */
   hub?: RealtimeHub;
+  /** Two-channel staging upload service (plan 003). Optional — when absent the
+   *  `/uploads` routes are not registered. */
+  upload?: UploadService;
 }
 
 /**
@@ -74,6 +84,81 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     // Key-authenticated deploy: attribute to the canvas owner (no user session).
     return deployResponse(c, deps.engine, deps.audit, auth, "api", fromZip(body), auth.ownerId);
   });
+
+  // --- Two-channel staging upload (plan 003) -----------------------------------
+  // begin → PUT each missing blob directly (bytes never touch an agent's context)
+  // → finalize. Same UploadService the MCP tools use; key auth + the deploy
+  // throttle gate it. Registered only when the upload service is wired.
+  const upload = deps.upload;
+  if (upload) {
+    // Open a session: body { manifest: [{ path, hash, size }] }. Returns the
+    // uploadId + the subset of hashes not already stored for this canvas.
+    app.post("/:id/uploads", async (c) => {
+      const auth = await authCanvas(c);
+      if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+      const limited = deployThrottle(c, auth.id);
+      if (limited) return limited;
+      let body: { manifest?: unknown };
+      try {
+        body = await c.req.json();
+      } catch {
+        return c.json({ code: "INVALID_MANIFEST", message: "body must be JSON" }, 400);
+      }
+      const manifest = (body as { manifest?: unknown }).manifest;
+      if (!Array.isArray(manifest)) {
+        return c.json({ code: "INVALID_MANIFEST", message: "manifest must be an array" }, 400);
+      }
+      try {
+        const result = await upload.begin(auth, auth.ownerId, manifest);
+        return c.json(result);
+      } catch (err) {
+        if (err instanceof DeployError) return deployErrorResponse(c, err);
+        throw err;
+      }
+    });
+
+    // Stage one blob (raw body). The handle is bound to :id — a handle minted for
+    // another canvas is rejected as UPLOAD_HANDLE_INVALID (404, no existence leak).
+    app.put("/:id/uploads/:uploadId/blobs/:hash", blobBodyLimit, async (c) => {
+      const auth = await authCanvas(c);
+      if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      try {
+        await upload.stageBlob(
+          c.req.param("uploadId"),
+          auth.ownerId,
+          auth.id,
+          c.req.param("hash"),
+          bytes,
+        );
+        return c.body(null, 204);
+      } catch (err) {
+        if (err instanceof DeployError) return deployErrorResponse(c, err);
+        throw err;
+      }
+    });
+
+    // Finalize: publish a new version from the staged manifest.
+    app.post("/:id/uploads/:uploadId/finalize", async (c) => {
+      const auth = await authCanvas(c);
+      if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+      const limited = deployThrottle(c, auth.id);
+      if (limited) return limited;
+      try {
+        const result = await upload.finalize(c.req.param("uploadId"), auth.ownerId, auth.id);
+        deps.audit.recordAudit({
+          action: "deploy",
+          actorId: auth.ownerId,
+          targetId: auth.id,
+          meta: { source: "upload", version: result.version, fileCount: result.fileCount },
+        });
+        return c.json(result);
+      } catch (err) {
+        if (err instanceof DeployError) return deployErrorResponse(c, err);
+        throw err;
+      }
+    });
+  }
 
   app.get("/:id", async (c) => {
     const auth = await authCanvas(c);

@@ -33,6 +33,7 @@ import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
 import { oauthRepository } from "./db/repositories/oauth.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
@@ -70,6 +71,7 @@ import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import type { StorageDriver } from "./storage/driver.js";
+import { uploadService } from "./upload/service.js";
 
 export interface BuildAppDeps {
   config: Config;
@@ -269,6 +271,17 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     );
   }
 
+  // Two-channel staging upload service (plan 003) — shared by the Bearer-key
+  // deploy API and the MCP surface, over one content-addressed core.
+  const upload = uploadService({
+    config: deps.config,
+    canvases: deps.canvases,
+    users: deps.users,
+    uploadSessions: uploadSessionsRepository(deps.db),
+    storage: deps.storage,
+    engine: deps.engine,
+  });
+
   // Bearer-key deploy API — its own auth, BEFORE the session gateway.
   app.route(
     "/v1/canvases",
@@ -280,6 +293,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       audit: deps.audit,
       rateLimitStore: rlStore,
       hub: deps.hub,
+      upload,
     }),
   );
 
@@ -298,6 +312,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         canvases: deps.canvases,
         versions: deps.versions,
         engine: deps.engine,
+        upload,
         audit: deps.audit,
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {

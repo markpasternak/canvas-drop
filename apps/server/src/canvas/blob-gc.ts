@@ -1,5 +1,6 @@
 import type { Manifest } from "@canvas-drop/shared/db";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -10,6 +11,9 @@ export interface BlobGcDeps {
   drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
+  /** In-flight upload sessions (plan 003). When present, their recorded manifests
+   *  join the live set so a staged-but-not-yet-finalized blob is never swept. */
+  uploadSessions?: UploadSessionsRepository;
 }
 
 /** Collect every content hash referenced by a set of manifests. */
@@ -51,9 +55,17 @@ export async function collectGarbage(deps: BlobGcDeps, canvasId: string): Promis
     const existing = await deps.storage.list(prefix);
     const versions = await deps.versions.listByCanvas(canvasId);
     const draft = await deps.drafts.getByCanvas(canvasId);
+    // In-flight upload sessions recorded their full target manifest at `begin`,
+    // BEFORE any blob was staged — so unioning them here closes the
+    // stage-then-record window: a staged blob's hash is always already in the live
+    // set, even if the physical `put` lands after this list (plan 003 U7/A2).
+    const activeSessions = deps.uploadSessions
+      ? await deps.uploadSessions.listActiveByCanvas(canvasId, Date.now())
+      : [];
     const live = hashesOf([
       ...versions.filter((v) => v.status === "ready").map((v) => v.manifest as Manifest | null),
       (draft?.manifest as Manifest | null) ?? null,
+      ...activeSessions.map((s) => s.manifest as Manifest | null),
     ]);
 
     const garbage = existing.filter((key) => !live.has(hashFromBlobKey(canvasId, key)));

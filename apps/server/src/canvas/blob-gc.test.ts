@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -120,5 +121,29 @@ describe.each(DIALECTS)("collectGarbage (blob mark-sweep) [%s]", (dialect) => {
     await expect(
       collectGarbage({ versions, drafts, storage, log }, canvasId),
     ).resolves.toBeUndefined();
+  });
+
+  it("keeps a blob referenced only by an active upload session, sweeps it once expired (plan 003 U7)", async () => {
+    const { versions, drafts, canvasId, owner } = await setup();
+    const uploadSessions = uploadSessionsRepository(client);
+    const storage = memStorage();
+    // A blob staged into an active session — referenced by no version or draft yet.
+    await storage.put(blobKey(canvasId, "staged"), enc("staged"));
+    await uploadSessions.create({
+      canvasId,
+      ownerId: owner.id,
+      handleHash: "h".repeat(64),
+      manifest: m(["staged"]),
+      stagedHashes: ["staged"],
+      expiresAt: Date.now() + 60_000,
+    });
+
+    await collectGarbage({ versions, drafts, storage, log, uploadSessions }, canvasId);
+    expect(await storage.list(canvasBlobPrefix(canvasId))).toHaveLength(1); // retained — session live
+
+    // Expire + prune the session: the blob is now an orphan and is reclaimed.
+    await uploadSessions.deleteExpired(Date.now() + 120_000);
+    await collectGarbage({ versions, drafts, storage, log, uploadSessions }, canvasId);
+    expect(await storage.list(canvasBlobPrefix(canvasId))).toHaveLength(0);
   });
 });

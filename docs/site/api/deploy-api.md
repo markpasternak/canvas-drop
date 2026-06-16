@@ -15,6 +15,9 @@ Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id (not the slug).
 | Method | Path | Purpose |
 |---|---|---|
 | `PUT` | `/v1/canvases/{id}/deploy` | Publish a live version from an archive body |
+| `POST` | `/v1/canvases/{id}/uploads` | Open a staged upload from a manifest |
+| `PUT` | `/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}` | Stage one file's bytes |
+| `POST` | `/v1/canvases/{id}/uploads/{uploadId}/finalize` | Publish from the staged upload |
 | `GET` | `/v1/canvases/{id}` | Canvas metadata |
 | `GET` | `/v1/canvases/{id}/versions` | List versions |
 | `POST` | `/v1/canvases/{id}/rollback` | Restore a prior ready version |
@@ -69,6 +72,56 @@ buffering at 110 MB (canvas cap + 10 MB); an over-limit body returns
 **Rate limit:** deploy and rollback are throttled at 10/min per canvas (keyed after
 the key is verified). Over-limit returns `429 { "error": "rate_limited" }` with a
 `Retry-After` header.
+
+## Staged upload (large or incremental)
+
+`PUT .../deploy` sends the whole archive in one request. For large canvases — or
+when you re-deploy often and want to send only what changed — use the three-step
+staged flow. Bytes go straight to the server (never base64'd through an agent's
+context), and content-addressing means an unchanged file is never re-uploaded.
+
+**1 — begin.** Send the full manifest: each file's `path`, `hash` (sha256 hex of
+its bytes), and `size`.
+
+```
+POST {base}/v1/canvases/{id}/uploads
+Authorization: Bearer cd_...
+Content-Type: application/json
+
+{ "manifest": [ { "path": "index.html", "hash": "<sha256>", "size": 1234 } ] }
+```
+
+Returns the handle and the subset of hashes the server doesn't already have:
+
+```json
+{ "uploadId": "up_...", "missingHashes": ["<sha256>", "..."] }
+```
+
+**2 — stage each missing blob** (raw bytes; the path is irrelevant here — blobs are
+content-addressed by `{hash}`):
+
+```
+PUT {base}/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}
+Authorization: Bearer cd_...
+<raw file bytes>
+```
+
+`204` on success. The bytes must hash to `{hash}` (else `400 BLOB_HASH_MISMATCH`),
+the blob is capped at 25 MB (`413 FILE_TOO_LARGE`), and a handle minted for a
+different canvas is rejected `404 UPLOAD_HANDLE_INVALID` (no existence leak).
+
+**3 — finalize** to publish a version from the staged manifest:
+
+```
+POST {base}/v1/canvases/{id}/uploads/{uploadId}/finalize
+Authorization: Bearer cd_...
+```
+
+Returns the same `DeployResult` shape as `PUT .../deploy`. The handle is
+**single-use** and short-lived (15 min). A finalize before every blob is staged
+returns `400 UPLOAD_MISSING_BLOB` and can be retried after staging the rest — the
+handle is consumed only on a successful publish. Attributed to the owner, audited
+as `source: "upload"`.
 
 ## Get a canvas
 
@@ -134,6 +187,12 @@ Codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
 `ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`,
 `PATH_EXISTS`, `VERSION_UNAVAILABLE`, `CANNOT_UNPUBLISH`. See
 [Error codes](/docs/api/errors) for the full table.
+
+Staged-upload codes: `INVALID_MANIFEST` (`400`), `UPLOAD_HANDLE_INVALID` (`404` —
+unknown / wrong-owner / wrong-canvas handle, no existence leak), `UPLOAD_EXPIRED`
+(`400`), `UPLOAD_ALREADY_FINALIZED` / `UPLOAD_IN_PROGRESS` (`409`),
+`UPLOAD_MISSING_BLOB` (`400`), `BLOB_HASH_MISMATCH` (`400`), `INVALID_ENCODING`
+(`400`).
 
 Rollback reuses some of these codes at non-`400` statuses: `INVALID_PATH` at `404`
 when there's no ready version of that number, and `VERSION_UNAVAILABLE` at `409`

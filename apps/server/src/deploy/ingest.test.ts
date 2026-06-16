@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { DeployError } from "./errors.js";
-import { type DeployEntry, fromPasteHtml, fromZip } from "./ingest.js";
+import { type DeployEntry, fromFilesArray, fromPasteHtml, fromZip } from "./ingest.js";
 
 /** Build a ZIP buffer from a {path: string-or-bytes} map. */
 function makeZip(files: Record<string, Uint8Array>): Buffer {
@@ -60,5 +60,35 @@ describe("fromZip", () => {
 
   it("throws INVALID_ZIP on a non-zip buffer", async () => {
     await expect(collect(fromZip(Buffer.from("not a zip")))).rejects.toBeInstanceOf(DeployError);
+  });
+});
+
+describe("fromFilesArray", () => {
+  it("round-trips UTF-8 text byte-exact and yields every entry", () => {
+    const out = fromFilesArray([
+      { path: "index.html", content: "<h1>hi</h1>" },
+      { path: "a/b.css", content: "body{}", encoding: "utf8" },
+    ]);
+    expect(out.map((e) => e.path)).toEqual(["index.html", "a/b.css"]);
+    expect(out.map((e) => new TextDecoder().decode(e.bytes))).toEqual(["<h1>hi</h1>", "body{}"]);
+  });
+
+  it("decodes base64 binary to exact bytes", () => {
+    const raw = new Uint8Array([0, 1, 2, 250, 255]);
+    const b64 = Buffer.from(raw).toString("base64");
+    const out = fromFilesArray([{ path: "f.bin", content: b64, encoding: "base64" }]);
+    expect(Array.from(out[0]?.bytes ?? [])).toEqual(Array.from(raw));
+  });
+
+  it("does not throw on empty/garbage base64 (drops to fewer bytes)", () => {
+    const out = fromFilesArray([{ path: "f", content: "", encoding: "base64" }]);
+    expect(out[0]?.bytes.byteLength).toBe(0);
+  });
+
+  it("throws INVALID_ENCODING on an unknown encoding", () => {
+    expect(() =>
+      // @ts-expect-error — exercising the runtime guard
+      fromFilesArray([{ path: "f", content: "x", encoding: "hex" }]),
+    ).toThrowError(DeployError);
   });
 });

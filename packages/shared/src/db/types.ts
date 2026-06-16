@@ -13,6 +13,7 @@ import type {
   oauthCodes,
   sessions,
   settings,
+  uploadSessions,
   usageEvents,
   users,
   versions,
@@ -60,6 +61,8 @@ export type OauthCode = typeof oauthCodes.$inferSelect;
 export type NewOauthCode = typeof oauthCodes.$inferInsert;
 export type McpToken = typeof mcpTokens.$inferSelect;
 export type NewMcpToken = typeof mcpTokens.$inferInsert;
+export type UploadSession = typeof uploadSessions.$inferSelect;
+export type NewUploadSession = typeof uploadSessions.$inferInsert;
 
 /** A deployed version's file manifest: path → content metadata. */
 export type ManifestEntry = { size: number; hash: string; mime: string };
@@ -85,5 +88,8 @@ export const ACCESS_RUNGS: readonly AccessRung[] = [
 
 /** A canvas-allowlist principal kind (members reference a user row; guests an email). */
 export type AllowlistPrincipalKind = "member" | "guest";
-/** Version source values (`editor` = published from the in-browser draft, M5). */
-export type DeploySource = "folder" | "zip" | "paste" | "api" | "editor";
+/**
+ * Version source values (`editor` = published from the in-browser draft, M5;
+ * `upload` = published via the two-channel staging→finalize flow, plan 003).
+ */
+export type DeploySource = "folder" | "zip" | "paste" | "api" | "editor" | "upload";

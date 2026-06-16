@@ -14,6 +14,38 @@ export function fromPasteHtml(html: string): DeployEntry[] {
   return [{ path: "index.html", bytes: new TextEncoder().encode(html) }];
 }
 
+/** One file in a `files[]` payload: path + content in the declared encoding. */
+export interface FileInput {
+  path: string;
+  content: string;
+  /** `utf8` (default) for text, `base64` for binary. */
+  encoding?: "utf8" | "base64";
+}
+
+/**
+ * Decode a `files[]` array into deploy entries (plan 003). Text travels as plain
+ * UTF-8 (no base64 round-trip — the corruption-prone path for the common case),
+ * binary as base64. Path safety (zip-slip / dotfile stripping) is applied
+ * downstream: the inline `deploy_canvas` path runs entries through the engine's
+ * `normalizeEntryPath`; the staging path validates manifest paths at `begin`.
+ * `Buffer.from(str, "base64")` never throws (it drops invalid chars), so a bad
+ * string just yields fewer bytes — no try/catch needed.
+ */
+export function fromFilesArray(files: FileInput[]): DeployEntry[] {
+  return files.map((f) => {
+    const encoding = f.encoding ?? "utf8";
+    let bytes: Uint8Array;
+    if (encoding === "utf8") {
+      bytes = new TextEncoder().encode(f.content);
+    } else if (encoding === "base64") {
+      bytes = new Uint8Array(Buffer.from(f.content, "base64"));
+    } else {
+      throw new DeployError("INVALID_ENCODING", `unknown encoding: ${encoding}`, f.path);
+    }
+    return { path: f.path, bytes };
+  });
+}
+
 /** yauzl rejects traversal/absolute entry names at the library level — map those
  *  to the stable ZIP_SLIP_REJECTED code; everything else is a malformed archive. */
 function zipError(message: string, path?: string): DeployError {

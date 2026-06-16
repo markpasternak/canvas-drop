@@ -9,6 +9,7 @@ import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -31,6 +32,8 @@ export interface DeployEngineDeps {
   drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
+  /** In-flight upload sessions (plan 003) — joins the blob-GC live set + pruned on sweep. */
+  uploadSessions?: UploadSessionsRepository;
 }
 
 /** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
@@ -156,23 +159,49 @@ export function deployEngine(deps: DeployEngineDeps) {
         throw err;
       }
 
+      await this.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
+
+      return {
+        url: canvasUrl(deps.config, canvas.slug),
+        version: version.number,
+        fileCount,
+        totalBytes,
+        warnings,
+      };
+    },
+
+    /**
+     * Commit a `pending` version that already has its blobs in storage: mark it
+     * ready, swap the live pointer, reconcile the draft, and kick async prune.
+     * Shared by `deploy()` (blobs written inline) and the two-channel upload
+     * finalize (blobs pre-staged, plan 003) — one commit tail, no parallel logic.
+     */
+    async commitReadyVersion(
+      canvas: Canvas,
+      version: Version,
+      manifest: Manifest,
+      fileCount: number,
+      totalBytes: number,
+    ): Promise<void> {
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
       // swap is the commit — a crash before it leaves the old version live. If the
       // swap throws, the version is ready-but-not-current (orphaned): its blobs may
       // be shared with the live version so they're left for GC, and the orphaned
       // ready row is pruned by keep-10. Nothing is served from it (never current).
+      // `markReady` asserts exactly one row updated — a finalize whose canvas was
+      // purged between createPending and here fails cleanly (plan 003 guard).
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
       await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
       // Reconcile the in-browser draft with this direct publish (deploy API / folder
-      // / ZIP / paste). The editor must end up showing what was just deployed UNLESS
-      // the owner has genuine unpublished edits to protect. We decide that by what the
-      // draft holds RELATIVE TO ITS BASE VERSION, not merely whether it is non-empty:
-      // the editor seeds a draft from the current version on open, so a draft that
-      // still matches its base is an untouched working copy with nothing to lose — the
-      // earlier "non-empty ⇒ held edits" heuristic wrongly flagged those stale, so an
-      // API/agent deploy left the editor stuck on "a newer version was published" with
-      // phantom unpublished changes (the reported bug). Now:
+      // / ZIP / paste / upload). The editor must end up showing what was just deployed
+      // UNLESS the owner has genuine unpublished edits to protect. We decide that by
+      // what the draft holds RELATIVE TO ITS BASE VERSION, not merely whether it is
+      // non-empty: the editor seeds a draft from the current version on open, so a
+      // draft that still matches its base is an untouched working copy with nothing to
+      // lose — the earlier "non-empty ⇒ held edits" heuristic wrongly flagged those
+      // stale, so an API/agent deploy left the editor stuck on "a newer version was
+      // published" with phantom unpublished changes (the reported bug). Now:
       //   - no draft yet            → seed it to the just-published version
       //   - draft == its base       → no real edits → sync to the new version
       //   - draft diverges from base → genuine held edits → preserve + flag stale
@@ -195,14 +224,6 @@ export function deployEngine(deps: DeployEngineDeps) {
       // never block or fail the deploy. `.catch` guards against an unhandled
       // rejection if prune throws synchronously.
       this.prune(canvas.id).catch((err) => deps.log.error({ err }, "prune dispatch failed"));
-
-      return {
-        url: canvasUrl(deps.config, canvas.slug),
-        version: version.number,
-        fileCount,
-        totalBytes,
-        warnings,
-      };
     },
 
     /** Create the pending version, retrying on a (canvas_id, number) collision. */
@@ -261,10 +282,24 @@ export function deployEngine(deps: DeployEngineDeps) {
       } catch (err) {
         deps.log.error({ err, canvasId }, "version row prune failed (live version unaffected)");
       }
+      // Reclaim expired upload-session rows BEFORE the sweep so their (now dead)
+      // manifests drop out of the live set and their orphan blobs are reclaimed in
+      // this same pass (plan 003 U7). Best-effort; global + idempotent.
+      if (deps.uploadSessions) {
+        await deps.uploadSessions
+          .deleteExpired(Date.now())
+          .catch((err) => deps.log.error({ err, canvasId }, "expired upload-session prune failed"));
+      }
       // Blob GC runs after row-pruning so dropped versions are out of the live set.
       // Best-effort and self-contained (logs its own failures).
       await collectGarbage(
-        { versions: deps.versions, drafts: deps.drafts, storage: deps.storage, log: deps.log },
+        {
+          versions: deps.versions,
+          drafts: deps.drafts,
+          storage: deps.storage,
+          log: deps.log,
+          uploadSessions: deps.uploadSessions,
+        },
         canvasId,
       );
     },
