@@ -11,6 +11,7 @@ import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
+import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
@@ -45,8 +46,17 @@ async function main() {
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
   const drafts = draftsRepository(db);
+  const uploadSessions = uploadSessionsRepository(db);
   const audit = createAuditLog(auditRepository(db), rootLogger);
-  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: rootLogger });
+  const engine = deployEngine({
+    config,
+    canvases,
+    versions,
+    drafts,
+    storage,
+    log: rootLogger,
+    uploadSessions,
+  });
   const { strategy, sessionSvc } = setupAuth(config, {
     users,
     sessions: (await import("./db/repositories/sessions.js")).sessionsRepository(db),

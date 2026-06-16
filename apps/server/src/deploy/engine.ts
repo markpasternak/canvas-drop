@@ -9,6 +9,7 @@ import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -31,6 +32,8 @@ export interface DeployEngineDeps {
   drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
+  /** In-flight upload sessions (plan 003) — joins the blob-GC live set + pruned on sweep. */
+  uploadSessions?: UploadSessionsRepository;
 }
 
 /** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
@@ -279,10 +282,24 @@ export function deployEngine(deps: DeployEngineDeps) {
       } catch (err) {
         deps.log.error({ err, canvasId }, "version row prune failed (live version unaffected)");
       }
+      // Reclaim expired upload-session rows BEFORE the sweep so their (now dead)
+      // manifests drop out of the live set and their orphan blobs are reclaimed in
+      // this same pass (plan 003 U7). Best-effort; global + idempotent.
+      if (deps.uploadSessions) {
+        await deps.uploadSessions
+          .deleteExpired(Date.now())
+          .catch((err) => deps.log.error({ err, canvasId }, "expired upload-session prune failed"));
+      }
       // Blob GC runs after row-pruning so dropped versions are out of the live set.
       // Best-effort and self-contained (logs its own failures).
       await collectGarbage(
-        { versions: deps.versions, drafts: deps.drafts, storage: deps.storage, log: deps.log },
+        {
+          versions: deps.versions,
+          drafts: deps.drafts,
+          storage: deps.storage,
+          log: deps.log,
+          uploadSessions: deps.uploadSessions,
+        },
         canvasId,
       );
     },
