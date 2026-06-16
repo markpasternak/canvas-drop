@@ -35,12 +35,31 @@ there is no cross-owner access and no existence leak.
 | `create_canvas` | Create a canvas; returns its id, URL, and a one-time deploy key. |
 | `get_canvas` | Current state of a canvas you own. |
 | `list_versions` | Published version history of a canvas you own. |
-| `deploy_canvas` | Publish static files (a base64-encoded ZIP) directly to live. |
+| `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
+| `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
+| `add_files` | Stage files into an open upload (text as UTF-8, binary as base64); call repeatedly to chunk a large set. |
+| `finalize_deploy` | Publish a new version from a staged upload. Single-use. |
 | `rollback_canvas` | Point a canvas back at an earlier version number. |
 | `unpublish_canvas` | Take a published canvas back to draft. |
 
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
+
+### Staged uploads (large or incremental)
+
+`deploy_canvas` is the one-call path for small canvases. For large or
+frequently-re-deployed canvases, the staged flow keeps file bytes out of the
+model's context and only uploads what changed:
+
+1. **`begin_deploy`** with the full manifest (`path`, `hash` = sha256 of the
+   bytes, `size`). The server replies with `missingHashes` — the blobs it doesn't
+   already have (content-addressed, so an unchanged file is never re-sent).
+2. **`add_files`** the contents for those hashes, in as many calls as you like.
+3. **`finalize_deploy`** to publish. The handle is single-use and short-lived; a
+   finalize that's missing a blob fails cleanly and can be retried after staging it.
+
+The same staging flow is available over plain HTTP on the keyed
+[Deploy API](/docs/api/deploy-api) for agents that can `curl` directly.
 
 Tool calls are rate-limited per account and recorded in the audit log alongside every
 other deploy and lifecycle event.
