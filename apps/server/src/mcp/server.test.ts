@@ -217,7 +217,11 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
     const both = await mcp.callTool({
       name: "deploy_canvas",
-      arguments: { id: made.id, zipBase64: zip({ "index.html": "x" }), files: [{ path: "a", content: "b" }] },
+      arguments: {
+        id: made.id,
+        zipBase64: zip({ "index.html": "x" }),
+        files: [{ path: "a", content: "b" }],
+      },
     });
     expect(isError(both)).toBe(true);
     const neither = await mcp.callTool({ name: "deploy_canvas", arguments: { id: made.id } });
@@ -250,11 +254,19 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     // Chunk the upload across two add_files calls.
     await mcp.callTool({
       name: "add_files",
-      arguments: { id: made.id, uploadId: begun.uploadId, files: [{ path: "index.html", content: files["index.html"] }] },
+      arguments: {
+        id: made.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "index.html", content: files["index.html"] }],
+      },
     });
     await mcp.callTool({
       name: "add_files",
-      arguments: { id: made.id, uploadId: begun.uploadId, files: [{ path: "app.js", content: files["app.js"] }] },
+      arguments: {
+        id: made.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "app.js", content: files["app.js"] }],
+      },
     });
 
     const result = payload(

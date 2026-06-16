@@ -69,22 +69,20 @@ describe("fromFilesArray", () => {
       { path: "index.html", content: "<h1>hi</h1>" },
       { path: "a/b.css", content: "body{}", encoding: "utf8" },
     ]);
-    expect(out).toHaveLength(2);
-    expect(new TextDecoder().decode(out[0].bytes)).toBe("<h1>hi</h1>");
-    expect(out[1].path).toBe("a/b.css");
+    expect(out.map((e) => e.path)).toEqual(["index.html", "a/b.css"]);
+    expect(out.map((e) => new TextDecoder().decode(e.bytes))).toEqual(["<h1>hi</h1>", "body{}"]);
   });
 
   it("decodes base64 binary to exact bytes", () => {
     const raw = new Uint8Array([0, 1, 2, 250, 255]);
     const b64 = Buffer.from(raw).toString("base64");
-    const [entry] = fromFilesArray([{ path: "f.bin", content: b64, encoding: "base64" }]);
-    expect(Array.from(entry.bytes)).toEqual(Array.from(raw));
+    const out = fromFilesArray([{ path: "f.bin", content: b64, encoding: "base64" }]);
+    expect(Array.from(out[0]?.bytes ?? [])).toEqual(Array.from(raw));
   });
 
   it("does not throw on empty/garbage base64 (drops to fewer bytes)", () => {
-    expect(() => fromFilesArray([{ path: "f", content: "", encoding: "base64" }])).not.toThrow();
-    const [entry] = fromFilesArray([{ path: "f", content: "", encoding: "base64" }]);
-    expect(entry.bytes.byteLength).toBe(0);
+    const out = fromFilesArray([{ path: "f", content: "", encoding: "base64" }]);
+    expect(out[0]?.bytes.byteLength).toBe(0);
   });
 
   it("throws INVALID_ENCODING on an unknown encoding", () => {

@@ -110,7 +110,9 @@ export function uploadSessionsRepository(client: DbClient) {
       return (await db
         .select()
         .from(t)
-        .where(and(eq(t.canvasId, canvasId), isNull(t.consumedAt), gt(t.expiresAt, now)))) as UploadSession[];
+        .where(
+          and(eq(t.canvasId, canvasId), isNull(t.consumedAt), gt(t.expiresAt, now)),
+        )) as UploadSession[];
     },
 
     /** Reclaim sessions past their expiry (abandoned or long-since consumed). */

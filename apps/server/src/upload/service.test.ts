@@ -43,8 +43,18 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
     const uploadSessions = uploadSessionsRepository(client);
     const storage = memStorage();
     const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
-    const owner = await users.upsert({ providerSub: "o", email: "o@e.com", name: "O", isAdmin: false });
-    const other = await users.upsert({ providerSub: "x", email: "x@e.com", name: "X", isAdmin: false });
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const other = await users.upsert({
+      providerSub: "x",
+      email: "x@e.com",
+      name: "X",
+      isAdmin: false,
+    });
     const canvas = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
     const svc = uploadService({
       config,
@@ -56,7 +66,16 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
       log: silent,
       now: () => clock,
     });
-    return { svc, users, canvases, versions, storage, canvas, ownerId: owner.id, otherId: other.id };
+    return {
+      svc,
+      users,
+      canvases,
+      versions,
+      storage,
+      canvas,
+      ownerId: owner.id,
+      otherId: other.id,
+    };
   }
 
   async function stageAll(
@@ -169,9 +188,7 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
   it("enforces the aggregate canvas-size cap at finalize", async () => {
     const { svc, canvas, ownerId } = await setup();
     // Declare a manifest whose summed size exceeds 100 MB without staging the bytes.
-    const huge: ManifestInput[] = [
-      { path: "big.bin", hash: sha("x"), size: 200 * 1024 * 1024 },
-    ];
+    const huge: ManifestInput[] = [{ path: "big.bin", hash: sha("x"), size: 200 * 1024 * 1024 }];
     const { uploadId } = await svc.begin(canvas, ownerId, huge);
     await expect(svc.finalize(uploadId, ownerId, canvas.id)).rejects.toMatchObject({
       code: "CANVAS_TOO_LARGE",

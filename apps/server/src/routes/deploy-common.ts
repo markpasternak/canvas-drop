@@ -53,7 +53,10 @@ export function deployErrorStatus(code: DeployErrorCode): 400 | 404 | 409 | 413 
 
 /** Render a {@link DeployError} as the stable `{ code, message, path? }` shape at its mapped status. */
 export function deployErrorResponse(c: Context<AppEnv>, err: DeployError): Response {
-  return c.json({ code: err.code, message: err.message, path: err.path }, deployErrorStatus(err.code));
+  return c.json(
+    { code: err.code, message: err.message, path: err.path },
+    deployErrorStatus(err.code),
+  );
 }
 
 /**

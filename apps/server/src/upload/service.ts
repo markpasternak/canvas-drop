@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, Manifest, UploadSession } from "@canvas-drop/shared/db";
+import { soleHtmlEntry } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { blobKey, canvasBlobPrefix, hashFromBlobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -8,7 +9,6 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { DeployEngine, DeployResult } from "../deploy/engine.js";
-import { soleHtmlEntry } from "../canvas/manifest.js";
 import { DeployError, LIMITS } from "../deploy/errors.js";
 import { type FileInput, fromFilesArray } from "../deploy/ingest.js";
 import { normalizeEntryPath } from "../deploy/validate.js";
@@ -40,7 +40,7 @@ export interface UploadServiceDeps {
   uploadSessions: UploadSessionsRepository;
   storage: StorageDriver;
   engine: DeployEngine;
-  log: Logger;
+  log?: Logger;
   /** Injectable clock for tests; defaults to Date.now. */
   now?: () => number;
 }
@@ -243,7 +243,11 @@ export function uploadService(deps: UploadServiceDeps) {
           );
         }
 
-        const version = await deps.engine.createVersionWithRetry(canvasId, claimed.ownerId, "upload");
+        const version = await deps.engine.createVersionWithRetry(
+          canvasId,
+          claimed.ownerId,
+          "upload",
+        );
         await deps.engine.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
         await deps.uploadSessions.markConsumed(claimed.id);
 

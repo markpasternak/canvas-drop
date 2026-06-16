@@ -32,8 +32,8 @@ import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
 import { oauthRepository } from "./db/repositories/oauth.js";
-import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
@@ -64,7 +64,6 @@ import type { RealtimeHub } from "./realtime/hub.js";
 import { adminRoutes } from "./routes/admin.js";
 import { canvasApiRoutes } from "./routes/canvas-api.js";
 import { deployApiRoutes } from "./routes/deploy-api.js";
-import { uploadService } from "./upload/service.js";
 import { draftApiRoutes } from "./routes/draft-api.js";
 import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
@@ -72,6 +71,7 @@ import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import type { StorageDriver } from "./storage/driver.js";
+import { uploadService } from "./upload/service.js";
 
 export interface BuildAppDeps {
   config: Config;

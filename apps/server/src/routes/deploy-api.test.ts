@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { zipSync } from "fflate";
 import { Hono } from "hono";
@@ -10,7 +11,6 @@ import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
-import { createHash } from "node:crypto";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -311,7 +311,12 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
     const audit = createAuditLog(auditRepository(client), silent);
     const storage = memStorage();
     const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
-    const owner = await users.upsert({ providerSub: "o", email: "o@e.com", name: "O", isAdmin: false });
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
     const upload = uploadService({
       config,
       canvases,
@@ -321,7 +326,10 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
       engine,
     });
     const app = new Hono<AppEnv>();
-    app.route("/v1/canvases", deployApiRoutes({ config, canvases, versions, engine, audit, upload }));
+    app.route(
+      "/v1/canvases",
+      deployApiRoutes({ config, canvases, versions, engine, audit, upload }),
+    );
 
     async function mkCanvas() {
       const key = generateApiKey();
@@ -335,7 +343,10 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
     return { app, mkCanvas };
   }
 
-  const h = (key: string) => ({ Authorization: `Bearer ${key}`, "content-type": "application/json" });
+  const h = (key: string) => ({
+    Authorization: `Bearer ${key}`,
+    "content-type": "application/json",
+  });
 
   it("full flow: begin → PUT each blob → finalize publishes the canvas", async () => {
     const { app, mkCanvas } = await setup();
