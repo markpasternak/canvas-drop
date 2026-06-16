@@ -99,6 +99,90 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
 ];
 
+/** Product-tour carousel slides → committed dark screenshots at /docs/assets.
+ *  Refresh with `pnpm landing:screenshots` (after `pnpm seed:canvases`). */
+const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
+  {
+    img: "landing-dashboard",
+    label: "Your dashboard",
+    caption: "Every canvas your org has built — versions, sharing, and status in one place.",
+  },
+  {
+    img: "tour-editor",
+    label: "In-browser editor",
+    caption: "Edit files, preview, and publish a new version. No local setup, no deploy pipeline.",
+  },
+  {
+    img: "landing-gallery",
+    label: "Shared gallery",
+    caption: "Browse, search, and clone what the team has made — not screenshots buried in a DM.",
+  },
+  {
+    img: "tour-sharing",
+    label: "Sharing & access",
+    caption: "Per canvas: keep it org-only, invite a guest, or open an admin-gated public link.",
+  },
+  {
+    img: "tour-capabilities",
+    label: "Backend in a click",
+    caption: "Switch on the primitives a canvas can use — KV, files, AI, identity, realtime.",
+  },
+  {
+    img: "tour-admin",
+    label: "Admin & control",
+    caption: "Tune quotas, manage members, and set who can publish — from the admin console.",
+  },
+  {
+    img: "tour-usage",
+    label: "Usage insight",
+    caption: "See what's actually getting used, per canvas — not guesswork.",
+  },
+];
+
+/** "Built for teams" — admin & control capabilities. */
+const TEAM: ReadonlyArray<{ title: string; body: string }> = [
+  {
+    title: "Org sign-in (SSO)",
+    body: "Everyone signs in with your Google / OIDC org account — gated by email domain and an admin allowlist.",
+  },
+  {
+    title: "Admin console",
+    body: "Set global quotas and defaults, and choose which members may publish public links.",
+  },
+  {
+    title: "Member management",
+    body: "See who's in, grant or revoke admin, and block access in a click.",
+  },
+  {
+    title: "Audit log",
+    body: "Significant actions are recorded — there's always an account of what changed.",
+  },
+];
+
+/** "Private by design" — the privacy / security posture. */
+const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
+  {
+    title: "Org-only by default",
+    body: "Every canvas sits behind your sign-in until you deliberately share it.",
+  },
+  {
+    title: "No telemetry, ever",
+    body: "canvas-drop never phones home — no tracking, no analytics, no third-party beacons.",
+  },
+  {
+    title: "Secrets stay server-side",
+    body: "AI and provider keys live on the server and are never shipped to the browser.",
+  },
+  {
+    title: "Isolated runtimes",
+    body: "Canvases are sandboxed — they can't reach each other or the platform's internals.",
+  },
+  {
+    title: "Your infrastructure",
+    body: "Self-host on your own VPS or cloud; your data lives where you put it.",
+  },
+];
+
 /**
  * Full document `<head>` — title, description, canonical, Open Graph + Twitter
  * card, theme-color, and JSON-LD. The OG/Twitter image is the shared `/og.png`
@@ -317,14 +401,9 @@ section { padding-block: clamp(3.5rem, 8vw, 6rem); }
 .prim .tag { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: .72rem; color: var(--subtle); }
 .prim p { margin: .5rem 0 0; font-size: .9rem; color: var(--muted); line-height: 1.5; }
 
-/* gallery split */
-.split { display: grid; grid-template-columns: 1.05fr 1fr; gap: clamp(2rem, 5vw, 4rem); align-items: center; }
-@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+/* framed screenshot (carousel slides) */
 .shot { border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-panel); background: var(--surface); }
 .shot img { display: block; width: 100%; height: auto; }
-.checks { margin: 1.4rem 0 0; padding: 0; list-style: none; display: grid; gap: .6rem; }
-.checks li { display: flex; gap: .6rem; color: var(--muted); }
-.checks svg { width: 1.1rem; height: 1.1rem; color: var(--accent); flex: 0 0 auto; margin-top: .2rem; }
 
 /* open-source CTA */
 .oss { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-block: 1px solid var(--on-ink-border); }
@@ -341,6 +420,53 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .foot-links a { color: var(--muted); font-size: .92rem; transition: color .15s var(--ease); }
 .foot-links a:hover { color: var(--fg); }
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
+
+/* product tour carousel */
+.carousel { position: relative; margin-top: clamp(2rem, 5vw, 3rem); }
+.viewport { overflow: hidden; }
+.slides { display: flex; transition: transform .55s var(--ease); }
+.slide { min-width: 100%; padding: 0 .25rem; }
+.slide figure { margin: 0; }
+.slide .shot { box-shadow: var(--shadow-lg); }
+.slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
+.slide figcaption strong { color: var(--fg); font-weight: 600; }
+.car-btn {
+  position: absolute; top: calc(50% - 2.5rem); transform: translateY(-50%);
+  display: grid; place-items: center; width: 2.6rem; height: 2.6rem;
+  border-radius: 100px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--fg); cursor: pointer; box-shadow: var(--shadow-panel);
+  transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
+}
+.car-btn:hover { border-color: var(--accent); color: var(--accent); }
+.car-btn:active { transform: translateY(-50%) scale(.94); }
+.car-btn svg { width: 1.2rem; height: 1.2rem; }
+.car-prev { left: -.6rem; }
+.car-next { right: -.6rem; }
+@media (max-width: 760px) { .car-btn { display: none; } }
+.dots { display: flex; gap: .5rem; justify-content: center; margin-top: 1.4rem; }
+.dot {
+  width: .5rem; height: .5rem; padding: 0; border: 0; border-radius: 100px;
+  background: var(--border); cursor: pointer; transition: background .2s var(--ease), width .2s var(--ease);
+}
+.dot[aria-current="true"] { background: var(--accent); width: 1.5rem; }
+
+/* feature grids (Built for teams / Private by design) */
+.feats { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1.25rem, 3vw, 2.25rem); margin-top: clamp(2rem, 5vw, 3rem); }
+@media (max-width: 720px) { .feats { grid-template-columns: 1fr; } }
+.feat { border-top: 1px solid var(--border); padding-top: 1rem; }
+.feat h3 { margin: 0 0 .35rem; display: flex; align-items: flex-start; gap: .55rem; font-size: 1.05rem; letter-spacing: -.01em; }
+.feat h3 svg { width: 1.05rem; height: 1.05rem; flex: 0 0 auto; margin-top: .15rem; color: var(--accent); }
+.feat p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.55; }
+
+/* dark band (Private by design) — reuse the hero ink + on-ink tokens */
+.band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
+.band-dark .s-sub { color: var(--on-ink-muted); }
+.band-dark .kicker { color: oklch(0.78 0.15 274); }
+.band-dark .feat { border-top-color: var(--on-ink-border); }
+.band-dark .feat h3 { color: var(--on-ink); }
+.band-dark .feat h3 svg { color: oklch(0.8 0.13 274); }
+.band-dark .feat p { color: var(--on-ink-muted); }
+.band-dark a { color: oklch(0.8 0.13 274); }
 
 /* --- entrance + scroll reveal --- */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
@@ -361,6 +487,20 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 const check = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 13 4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.1.63-1.35-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>`;
 const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const arrowLeft = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/** One carousel slide: a framed dark screenshot + a caption. */
+function tourSlide(t: (typeof TOUR)[number]): string {
+  return `<figure class="slide">
+  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1600" height="900" alt="${escapeHtml(`${t.label} — ${t.caption}`)}" loading="lazy" decoding="async"></div>
+  <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
+</figure>`;
+}
+
+/** One feature item (check glyph + title + blurb) for the Teams / Privacy grids. */
+function featItem(f: { title: string; body: string }): string {
+  return `<div class="feat"><h3>${check}${escapeHtml(f.title)}</h3><p>${escapeHtml(f.body)}</p></div>`;
+}
 
 function primitiveCard(p: (typeof PRIMITIVES)[number]): string {
   return `<div class="prim">
@@ -441,6 +581,26 @@ ${values}
 
   <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
     <div class="wrap">
+      <p class="kicker reveal">A guided tour</p>
+      <h2 class="s-head reveal">See it across the whole workflow.</h2>
+      <p class="s-sub reveal">Create, edit, share, and govern — every surface of canvas-drop, in one place.</p>
+      <div class="carousel reveal" data-carousel aria-roledescription="carousel" aria-label="Product tour">
+        <div class="viewport">
+          <div class="slides">
+${TOUR.map(tourSlide).join("\n")}
+          </div>
+        </div>
+        <button class="car-btn car-prev" type="button" aria-label="Previous screen">${arrowLeft}</button>
+        <button class="car-btn car-next" type="button" aria-label="Next screen">${arrow}</button>
+        <div class="dots" role="tablist" aria-label="Choose screen">
+${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
       <p class="kicker reveal">Five primitives</p>
       <h2 class="s-head reveal">Static canvases, real backend power.</h2>
       <p class="s-sub reveal">Canvases ship as static files — no server build. When a canvas needs more, it reaches exactly five audited primitives. Secrets stay server-side, always.</p>
@@ -450,21 +610,26 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
     </div>
   </section>
 
-  <section>
-    <div class="wrap split">
-      <div class="reveal">
-        <p class="kicker">A shared gallery</p>
-        <h2 class="s-head">See what your organization is building.</h2>
-        <p class="s-sub">Published canvases land in a gallery your whole org can browse — the antidote to tools that die in a DM as a screenshot.</p>
-        <ul class="checks">
-          <li>${check}<span>Browse, search, and clone canvases as templates.</span></li>
-          <li>${check}<span>Owner controls who can view: org-only, guests, or an admin-gated public link.</span></li>
-          <li>${check}<span>Usage stays visible — see what's actually getting used.</span></li>
-        </ul>
+  <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
+    <div class="wrap">
+      <p class="kicker reveal">Built for teams</p>
+      <h2 class="s-head reveal">Control, without the overhead.</h2>
+      <p class="s-sub reveal">canvas-drop is multi-tenant for your org from day one — access, limits, and accountability are built in, not bolted on.</p>
+      <div class="feats reveal">
+${TEAM.map(featItem).join("\n")}
       </div>
-      <div class="shot reveal">
-        <img src="/docs/assets/landing-gallery.webp" width="1600" height="900" alt="The canvas-drop gallery of an organization's shared canvases" loading="lazy" decoding="async">
+    </div>
+  </section>
+
+  <section class="band-dark">
+    <div class="wrap">
+      <p class="kicker reveal">Private by design</p>
+      <h2 class="s-head reveal">Your tools, your data, your infrastructure.</h2>
+      <p class="s-sub reveal">Privacy isn't a setting here — it's the default posture. canvas-drop keeps the minimum it needs to run, and nothing leaves your instance.</p>
+      <div class="feats reveal">
+${PRIVACY.map(featItem).join("\n")}
       </div>
+      <p class="s-sub reveal" style="margin-top:1.75rem">Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.</p>
     </div>
   </section>
 
@@ -499,8 +664,10 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
 </footer>
 
 <script>
+var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Scroll-reveal (skipped entirely under reduced-motion).
 (function () {
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (REDUCE) {
     document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
     return;
   }
@@ -510,6 +677,33 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
     });
   }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+})();
+// Product-tour carousel — manual controls always work; auto-advance pauses on
+// hover/focus and is disabled under reduced-motion.
+(function () {
+  document.querySelectorAll('[data-carousel]').forEach(function (car) {
+    var track = car.querySelector('.slides');
+    var slides = car.querySelectorAll('.slide');
+    var dots = car.querySelectorAll('.dot');
+    var i = 0, timer = null;
+    function go(n) {
+      i = (n + slides.length) % slides.length;
+      track.style.transform = 'translateX(' + (-i * 100) + '%)';
+      dots.forEach(function (d, k) { d.setAttribute('aria-current', k === i ? 'true' : 'false'); });
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function start() { stop(); if (!REDUCE) timer = setInterval(function () { go(i + 1); }, 5200); }
+    var prev = car.querySelector('.car-prev');
+    var next = car.querySelector('.car-next');
+    if (prev) prev.addEventListener('click', function () { go(i - 1); start(); });
+    if (next) next.addEventListener('click', function () { go(i + 1); start(); });
+    dots.forEach(function (d, k) { d.addEventListener('click', function () { go(k); start(); }); });
+    car.addEventListener('mouseenter', stop);
+    car.addEventListener('mouseleave', start);
+    car.addEventListener('focusin', stop);
+    car.addEventListener('focusout', start);
+    go(0); start();
+  });
 })();
 </script>
 </body>

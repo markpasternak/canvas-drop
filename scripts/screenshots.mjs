@@ -6,18 +6,19 @@
 // screens map to which asset names):
 //
 //   pnpm docs:screenshots       # docs shots: LIGHT, org-agnostic EMPTY screens
-//   pnpm landing:screenshots    # landing shots: DARK, populated (seed first)
+//   pnpm landing:screenshots    # landing shots: DARK, populated product tour
 //
 // The landing shots are the dark, populated product imagery the marketing page
-// (apps/server/src/http/landing-page.ts) embeds. Seed generic demo data first so
-// they aren't empty: `pnpm seed:canvases` (neutral tool names, @example.com
-// owners — no real org data, so the shots stay org-agnostic, R11). The docs shots
-// stay deliberately empty/light.
+// (apps/server/src/http/landing-page.ts) embeds — hero + the product-tour
+// carousel (dashboard, editor, gallery, sharing, capabilities, admin, usage).
+// Seed generic demo data first so they aren't empty: `pnpm seed:canvases`
+// (neutral tool names, @example.com owners — no real org data, so the shots stay
+// org-agnostic, R11). The landing capture DISCOVERS a canvas id from the
+// dashboard so the canvas-scoped tour screens (editor/sharing/…) work without a
+// hard-coded slug. The docs shots stay deliberately empty/light.
 //
 // NOT part of the CI matrix — it needs a browser + a live server. The optimized
 // .webp outputs are committed so the docs + landing render without running this.
-//
-// Reproducible: `pnpm docs:screenshots` / `pnpm landing:screenshots`.
 
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,31 +32,55 @@ const MAX_WIDTH = 1600;
 const BASE = process.env.CANVAS_DROP_DASHBOARD_URL ?? "http://localhost:5173";
 
 const LANDING = process.argv.includes("--landing");
+const COLOR_SCHEME = LANDING ? "dark" : "light";
+const WEBP_QUALITY = LANDING ? 82 : 80;
+// The canvas list / gallery / admin views load data after first paint; networkidle
+// can fire before rows render, so the landing (populated) shots wait a beat.
+const SETTLE_MS = LANDING ? 1800 : 0;
 
-/** Per-mode capture settings. */
-const MODE = LANDING
-  ? {
-      colorScheme: "dark",
-      quality: 82,
-      // The canvas list / gallery loads its data after first paint; networkidle can
-      // fire before the rows/cards render. Wait so the shot isn't an empty state.
-      settleMs: 1800,
-      shots: [
-        { path: "/", name: "landing-dashboard.webp" },
-        { path: "/gallery", name: "landing-gallery.webp" },
-      ],
-    }
-  : {
-      colorScheme: "light",
-      quality: 80,
-      settleMs: 0,
-      // Keep to screens without seeded data (org-agnostic, R11).
-      shots: [
-        { path: "/", name: "dashboard-home.webp" },
-        { path: "/new", name: "new-canvas.webp" },
-        { path: "/gallery", name: "gallery.webp" },
-      ],
-    };
+/** Find the first canvas id linked from the dashboard, for the canvas-scoped tour
+ *  screens. Returns null if none is seeded (those shots are then skipped). */
+async function discoverCanvasId(page) {
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
+  await page.waitForTimeout(SETTLE_MS || 1200);
+  return page.evaluate(() => {
+    const href = Array.from(document.querySelectorAll("a[href]"))
+      .map((a) => a.getAttribute("href"))
+      .find((h) => /^\/canvases\/[0-9a-f-]+$/.test(h ?? ""));
+    return href ? href.split("/")[2] : null;
+  });
+}
+
+/** Resolve the list of {path, name} shots for the active mode. */
+async function resolveShots(page) {
+  if (!LANDING) {
+    // Keep to screens without seeded data (org-agnostic, R11).
+    return [
+      { path: "/", name: "dashboard-home.webp" },
+      { path: "/new", name: "new-canvas.webp" },
+      { path: "/gallery", name: "gallery.webp" },
+    ];
+  }
+  const shots = [
+    { path: "/", name: "landing-dashboard.webp" },
+    { path: "/gallery", name: "landing-gallery.webp" },
+    { path: "/admin/settings", name: "tour-admin.webp" },
+  ];
+  const id = await discoverCanvasId(page);
+  if (id) {
+    shots.push(
+      { path: `/canvases/${id}/editor`, name: "tour-editor.webp" },
+      { path: `/canvases/${id}/share`, name: "tour-sharing.webp" },
+      { path: `/canvases/${id}/capabilities`, name: "tour-capabilities.webp" },
+      { path: `/canvases/${id}/usage`, name: "tour-usage.webp" },
+    );
+  } else {
+    console.warn(
+      "! no seeded canvas found — skipping canvas-scoped tour shots. Run `pnpm seed:canvases`.",
+    );
+  }
+  return shots;
+}
 
 async function main() {
   let chromium;
@@ -76,19 +101,20 @@ async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
-    colorScheme: MODE.colorScheme,
+    colorScheme: COLOR_SCHEME,
   });
 
-  for (const shot of MODE.shots) {
+  const shots = await resolveShots(page);
+  for (const shot of shots) {
     const url = BASE + shot.path;
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
-      if (MODE.settleMs) await page.waitForTimeout(MODE.settleMs);
+      if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
       const png = await page.screenshot({ fullPage: false });
       const out = join(OUT_DIR, shot.name);
       await sharp(png)
         .resize({ width: MAX_WIDTH, withoutEnlargement: true })
-        .webp({ quality: MODE.quality })
+        .webp({ quality: WEBP_QUALITY })
         .toFile(out);
       const kb = (statSync(out).size / 1024).toFixed(1);
       console.log(`✓ ${shot.path} → docs/site/assets/${shot.name} (${kb} KB)`);

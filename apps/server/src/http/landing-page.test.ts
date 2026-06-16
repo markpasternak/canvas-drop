@@ -76,6 +76,15 @@ describe("landing page — rendered content", () => {
     expect(html).toContain('src="/docs/assets/landing-dashboard.webp"');
     expect(html).toContain('src="/docs/assets/landing-gallery.webp"');
   });
+
+  it("includes the product-tour carousel and the team + privacy sections", () => {
+    const html = renderLandingPage();
+    expect(html).toContain("data-carousel");
+    expect(html).toContain('src="/docs/assets/tour-editor.webp"');
+    expect(html).toContain("Built for teams");
+    expect(html).toContain("Private by design");
+    expect(html).toContain("No telemetry, ever");
+  });
 });
 
 describe("landingResponse — headers", () => {
