@@ -7,16 +7,15 @@ export function SettingsNav({
   sections,
   active,
   onSelect,
+  ariaLabel = "Settings sections",
 }: {
   sections: readonly { id: string; label: string }[];
   active: string;
   onSelect: (id: string) => void;
+  ariaLabel?: string;
 }) {
   return (
-    <nav
-      aria-label="Settings sections"
-      className="hidden lg:block lg:sticky lg:top-20 lg:self-start"
-    >
+    <nav aria-label={ariaLabel} className="hidden lg:block lg:sticky lg:top-20 lg:self-start">
       <ul className="border-l border-border">
         {sections.map((s) => (
           <li key={s.id}>

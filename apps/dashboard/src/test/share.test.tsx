@@ -1,0 +1,337 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "../components/Toast.js";
+import { ThemeProvider } from "../lib/theme.js";
+import { routeTree } from "../router.js";
+
+const CANVAS = {
+  id: "c1",
+  slug: "quiet-otter",
+  url: "http://x/c/quiet-otter",
+  title: "My Canvas",
+  description: null,
+  access: "private",
+  shared: false,
+  guestAiEnabled: false,
+  guestAiCap: 0,
+  sharedExpiresAt: null,
+  hasPassword: false,
+  spaFallback: false,
+  galleryListed: false,
+  galleryTemplatable: false,
+  gallerySummary: null,
+  galleryTags: null,
+  clonedFromCanvasId: null,
+  status: "active",
+  publicationState: "draft",
+  disabledReason: null,
+  currentVersionId: null,
+  createdAt: 0,
+  updatedAt: 0,
+};
+
+const ME = {
+  id: "u1",
+  email: "owner@example.com",
+  name: "Owner",
+  avatarUrl: null,
+  isAdmin: false,
+  canPublishPublic: false,
+  authMode: "dev",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function mockFetch(handlers: Record<string, () => Response>) {
+  const calls: { method: string; url: string; body?: string }[] = [];
+  const defaults: Record<string, () => Response> = {
+    "GET /api/me": () => json(ME),
+  };
+  const fn = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const path = new URL(url, "http://localhost").pathname;
+    calls.push({ method, url: path, body: init?.body as string | undefined });
+    const handler = handlers[`${method} ${path}`] ?? defaults[`${method} ${path}`];
+    if (handler) return handler();
+    return json({ error: "not_mocked" }, 500);
+  });
+  vi.stubGlobal("fetch", fn);
+  return calls;
+}
+
+function renderShare() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/canvases/c1/share"] }),
+  });
+  render(
+    <ThemeProvider>
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          {/* biome-ignore lint/suspicious/noExplicitAny: test router instance */}
+          <RouterProvider router={router as any} />
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>,
+  );
+  return router;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+describe("share route", () => {
+  it("sets a password via PATCH", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "PATCH /api/canvases/c1/settings": () => json({ ...CANVAS, hasPassword: true }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.type(await screen.findByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: /set password/i }));
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch).toBeTruthy();
+      expect(patch?.body).toContain("hunter2");
+    });
+  });
+
+  it("Generate fills a strong password and reveals it for copying", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    const user = userEvent.setup();
+    renderShare();
+
+    const input = (await screen.findByLabelText("Password")) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(input.value.length).toBeGreaterThanOrEqual(16);
+    expect(input.type).toBe("text");
+  });
+
+  it("disables the non-private access rungs until the canvas is published", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    renderShare();
+
+    expect(await screen.findByRole("radio", { name: /private/i })).not.toBeDisabled();
+    expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /specific people/i })).toBeDisabled();
+    expect(screen.getAllByText(/publish this canvas before sharing it/i).length).toBeGreaterThan(0);
+  });
+
+  it("specific_people: shows the allowlist empty state and adds a member", async () => {
+    const user = userEvent.setup();
+    let added = false;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: added
+            ? [
+                {
+                  id: "e1",
+                  kind: "member",
+                  email: "colleague@example.com",
+                  name: "C",
+                  createdAt: 1,
+                },
+              ]
+            : [],
+        }),
+      "POST /api/canvases/c1/allowlist": () => {
+        added = true;
+        return json({ ok: true });
+      },
+    });
+    renderShare();
+
+    expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
+    await user.type(await screen.findByLabelText(/add by email/i), "colleague@example.com");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
+  });
+
+  it("updates guest AI settings for specific people access", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+          guestAiEnabled: true,
+        }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("switch", { name: /let invited guests use ai/i }));
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain("guestAiEnabled");
+      expect(patch?.body).toContain("true");
+    });
+  });
+
+  it("warns when a shared canvas's expiry is already in the past", async () => {
+    const past = Date.now() - 60 * 60 * 1000;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: past }),
+    });
+    renderShare();
+
+    expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/non-owners now get a 404/i)).toBeInTheDocument();
+  });
+
+  it("shows no expiry warning when the expiry is still in the future", async () => {
+    const future = Date.now() + 24 * 60 * 60 * 1000;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: future }),
+    });
+    renderShare();
+
+    expect(await screen.findByText(/share expiry/i)).toBeInTheDocument();
+    expect(screen.queryByText(/this share expired/i)).toBeNull();
+  });
+
+  it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: false }) });
+    renderShare();
+
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/choose a shared access level/i)).toBeInTheDocument();
+  });
+
+  it("gallery-listing control is enabled once the canvas is shared AND published", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", shared: true, currentVersionId: "v1" }),
+    });
+    renderShare();
+
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeEnabled();
+  });
+
+  it("gallery-listing is blocked for a shared-but-unpublished canvas", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: null }),
+    });
+    renderShare();
+
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/publish this canvas before listing/i)).toBeInTheDocument();
+  });
+
+  it("gallery-listing is blocked for a password-protected canvas", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+    });
+    renderShare();
+
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/remove the password before listing/i)).toBeInTheDocument();
+  });
+
+  it("shows the template toggle once listed, and warns before a password unlists", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    expect(
+      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: /set password/i }));
+    expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: /add password & remove from gallery/i }));
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain("hunter2");
+    });
+  });
+
+  it("surfaces a gallery-toggle server rejection as an error toast", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ code: "NOT_PUBLISHED", message: "Publish this canvas before listing it." }, 409),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(
+      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
+    );
+    expect(
+      await screen.findByText(/publish this canvas before listing it in the gallery/i),
+    ).toBeInTheDocument();
+  });
+});

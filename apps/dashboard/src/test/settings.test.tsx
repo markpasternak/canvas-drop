@@ -41,7 +41,6 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Mock fetch by `${METHOD} ${pathname}`; records every call for assertions. */
 function mockFetch(handlers: Record<string, () => Response>) {
   const calls: { method: string; url: string; body?: string }[] = [];
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -81,40 +80,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("settings route — confirm-and-await flows", () => {
-  it("sets a password via PATCH", async () => {
-    const calls = mockFetch({
-      "GET /api/canvases/c1": () => json(CANVAS),
-      "PATCH /api/canvases/c1/settings": () => json({ ...CANVAS, hasPassword: true }),
-    });
-    const user = userEvent.setup();
-    renderSettings();
-
-    await user.type(await screen.findByLabelText("Password"), "hunter2");
-    await user.click(screen.getByRole("button", { name: /set password/i }));
-
-    await vi.waitFor(() => {
-      const patch = calls.find(
-        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
-      );
-      expect(patch).toBeTruthy();
-      expect(patch?.body).toContain("hunter2");
-    });
-  });
-
-  it("Generate fills a strong password and reveals it for copying", async () => {
+describe("settings route", () => {
+  it("adds a Share tab before Versions", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
-    const user = userEvent.setup();
     renderSettings();
 
-    const input = (await screen.findByLabelText("Password")) as HTMLInputElement;
-    expect(input.value).toBe("");
-    expect(input.type).toBe("password");
-
-    await user.click(screen.getByRole("button", { name: "Generate" }));
-    // a non-trivial value appears and is shown (not masked) so it can be copied
-    expect(input.value.length).toBeGreaterThanOrEqual(16);
-    expect(input.type).toBe("text");
+    const share = await screen.findByRole("link", { name: "Share" });
+    expect(share).toHaveAttribute("href", "/canvases/c1/share");
   });
 
   it("regenerate-slug confirms, then POSTs", async () => {
@@ -126,7 +98,6 @@ describe("settings route — confirm-and-await flows", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("button", { name: /regenerate slug/i }));
-    // a confirm dialog appears with a verb-labeled action
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Regenerate" }));
 
@@ -137,12 +108,30 @@ describe("settings route — confirm-and-await flows", () => {
     );
   });
 
-  it("hides Unpublish for a Draft canvas", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) }); // base: publicationState "draft"
+  it("toggles single-page app mode via PATCH", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "PATCH /api/canvases/c1/settings": () => json({ ...CANVAS, spaFallback: true }),
+    });
+    const user = userEvent.setup();
     renderSettings();
-    // Settings loaded (the Lifecycle section's Archive control is present)...
+
+    await user.click(await screen.findByRole("switch", { name: /single-page app mode/i }));
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain("spaFallback");
+      expect(patch?.body).toContain("true");
+    });
+  });
+
+  it("hides Unpublish for a Draft canvas", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    renderSettings();
+
     expect(await screen.findByRole("button", { name: "Archive canvas" })).toBeInTheDocument();
-    // ...but a Draft canvas has nothing to unpublish.
     expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
   });
 
@@ -179,7 +168,6 @@ describe("settings route — confirm-and-await flows", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Regenerate" }));
 
-    // the reveal modal shows the once-shown key
     expect(await screen.findByText("cd_brandnewkey123")).toBeInTheDocument();
     expect(screen.getByText(/save your canvas key/i)).toBeInTheDocument();
   });
@@ -218,193 +206,17 @@ describe("settings route — confirm-and-await flows", () => {
 
     await user.click(await screen.findByRole("button", { name: /delete canvas/i }));
     const dialog = await screen.findByRole("dialog");
-    // No type-to-confirm gate: the press-and-hold gesture is the confirmation.
     expect(within(dialog).queryByRole("textbox")).toBeNull();
     const action = within(dialog).getByRole("button", { name: /hold to delete/i });
 
-    // A click (press + immediate release) must NOT delete — releasing early cancels.
     await user.click(action);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
 
-    // Holding past the threshold fires the delete (real timers — HOLD_MS wall time).
     fireEvent.pointerDown(action);
     await waitFor(
       () =>
         expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/canvases/c1")).toBe(true),
       { timeout: HOLD_MS + 1500 },
     );
-  });
-
-  it("disables the non-private access rungs until the canvas is published", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) }); // base: publicationState "draft"
-    renderSettings();
-    // Private stays selectable; the sharing rungs are disabled with the publish hint.
-    expect(await screen.findByRole("radio", { name: /private/i })).not.toBeDisabled();
-    expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: /specific people/i })).toBeDisabled();
-    expect(screen.getByText(/publish this canvas before sharing it/i)).toBeInTheDocument();
-  });
-
-  it("specific_people: shows the allowlist empty state and adds a member", async () => {
-    const user = userEvent.setup();
-    let added = false;
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({
-          ...CANVAS,
-          publicationState: "published",
-          access: "specific_people",
-          shared: true,
-          currentVersionId: "v1",
-        }),
-      "GET /api/canvases/c1/allowlist": () =>
-        json({
-          entries: added
-            ? [
-                {
-                  id: "e1",
-                  kind: "member",
-                  email: "colleague@example.com",
-                  name: "C",
-                  createdAt: 1,
-                },
-              ]
-            : [],
-        }),
-      "POST /api/canvases/c1/allowlist": () => {
-        added = true;
-        return json({ ok: true });
-      },
-    });
-    renderSettings();
-    expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
-    await user.type(await screen.findByLabelText(/add by email/i), "colleague@example.com");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
-  });
-
-  it("warns when a shared canvas's expiry is already in the past", async () => {
-    const past = Date.now() - 60 * 60 * 1000; // an hour ago
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: past }),
-    });
-    renderSettings();
-    expect(await screen.findByText(/this share expired/i)).toBeInTheDocument();
-    expect(screen.getByText(/non-owners now get a 404/i)).toBeInTheDocument();
-  });
-
-  it("shows no expiry warning when the expiry is still in the future", async () => {
-    const future = Date.now() + 24 * 60 * 60 * 1000; // tomorrow
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, publicationState: "published", shared: true, sharedExpiresAt: future }),
-    });
-    renderSettings();
-    // The Sharing section renders (shared toggle on); the expired notice does not.
-    expect(await screen.findByText(/share expiry/i)).toBeInTheDocument();
-    expect(screen.queryByText(/this share expired/i)).toBeNull();
-  });
-
-  it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: false }) });
-    renderSettings();
-    // The control is visible (not hidden) even on a private canvas...
-    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    // ...with a hint explaining the prerequisite.
-    expect(screen.getByText(/turn on/i)).toBeInTheDocument();
-    expect(screen.getByText(/to list this canvas in the gallery/i)).toBeInTheDocument();
-  });
-
-  it("gallery-listing control is enabled once the canvas is shared AND published", async () => {
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, publicationState: "published", shared: true, currentVersionId: "v1" }),
-    });
-    renderSettings();
-    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeEnabled();
-  });
-
-  it("gallery-listing is blocked (disabled) for a shared-but-unpublished canvas", async () => {
-    mockFetch({
-      "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: null }),
-    });
-    renderSettings();
-    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/publish this canvas before listing/i)).toBeInTheDocument();
-  });
-
-  it("gallery-listing is blocked (disabled) for a password-protected canvas", async () => {
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({
-          ...CANVAS,
-          publicationState: "published",
-          shared: true,
-          currentVersionId: "v1",
-          hasPassword: true,
-        }),
-    });
-    renderSettings();
-    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/remove the password before listing/i)).toBeInTheDocument();
-  });
-
-  it("shows the template toggle once listed, and warns before a password unlists — confirming fires the PATCH", async () => {
-    const calls = mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
-      "PATCH /api/canvases/c1/settings": () =>
-        json({
-          ...CANVAS,
-          publicationState: "published",
-          shared: true,
-          currentVersionId: "v1",
-          hasPassword: true,
-        }),
-    });
-    const user = userEvent.setup();
-    renderSettings();
-    // Template toggle is offered for a listed canvas.
-    expect(
-      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
-    ).toBeInTheDocument();
-    // Setting a password on a listed canvas warns first (doesn't fire immediately).
-    await user.type(screen.getByLabelText("Password"), "hunter2");
-    await user.click(screen.getByRole("button", { name: /set password/i }));
-    expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();
-    // No PATCH yet — the warning gates the write.
-    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
-    // Confirming fires the password PATCH.
-    await user.click(screen.getByRole("button", { name: /add password & remove from gallery/i }));
-    await vi.waitFor(() => {
-      const patch = calls.find(
-        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
-      );
-      expect(patch?.body).toContain("hunter2");
-    });
-  });
-
-  it("surfaces a gallery-toggle server rejection as an error toast (not a silent rollback)", async () => {
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
-      "PATCH /api/canvases/c1/settings": () =>
-        json({ code: "NOT_PUBLISHED", message: "Publish this canvas before listing it." }, 409),
-    });
-    const user = userEvent.setup();
-    renderSettings();
-
-    // Toggling the template switch hits saveGallery → the 409 must toast its hint.
-    await user.click(
-      await screen.findByRole("switch", { name: /allow others to use as a template/i }),
-    );
-    expect(
-      await screen.findByText(/publish this canvas before listing it in the gallery/i),
-    ).toBeInTheDocument();
   });
 });

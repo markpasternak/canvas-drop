@@ -13,6 +13,7 @@ const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
 const CanvasLayout = lazy(() => import("./routes/canvas.js"));
 const OverviewRoute = lazy(() => import("./routes/canvas.overview.js"));
 const EditorRoute = lazy(() => import("./routes/canvas.editor.js"));
+const ShareRoute = lazy(() => import("./routes/canvas.share.js"));
 const VersionsRoute = lazy(() => import("./routes/canvas.versions.js"));
 const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
@@ -165,6 +166,11 @@ const editorRoute = createRoute({
   path: "/editor",
   component: EditorRoute,
 });
+const shareRoute = createRoute({
+  getParentRoute: () => canvasRoute,
+  path: "/share",
+  component: ShareRoute,
+});
 const versionsRoute = createRoute({
   getParentRoute: () => canvasRoute,
   path: "/versions",
@@ -199,6 +205,7 @@ export const routeTree = rootRoute.addChildren([
   canvasRoute.addChildren([
     overviewRoute,
     editorRoute,
+    shareRoute,
     versionsRoute,
     settingsRoute,
     capabilitiesRoute,

@@ -16,16 +16,16 @@ const TABS = [
     path: (id: string) => `/canvases/${id}/editor`,
   },
   {
+    to: "/canvases/$id/share",
+    label: "Share",
+    exact: false,
+    path: (id: string) => `/canvases/${id}/share`,
+  },
+  {
     to: "/canvases/$id/versions",
     label: "Versions",
     exact: false,
     path: (id: string) => `/canvases/${id}/versions`,
-  },
-  {
-    to: "/canvases/$id/settings",
-    label: "Settings",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/settings`,
   },
   {
     to: "/canvases/$id/capabilities",
@@ -38,6 +38,12 @@ const TABS = [
     label: "Usage",
     exact: false,
     path: (id: string) => `/canvases/${id}/usage`,
+  },
+  {
+    to: "/canvases/$id/settings",
+    label: "Settings",
+    exact: false,
+    path: (id: string) => `/canvases/${id}/settings`,
   },
 ] as const;
 
