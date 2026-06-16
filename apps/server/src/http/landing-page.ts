@@ -42,12 +42,12 @@ const SITE = {
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "People build working web tools with AI in minutes — but nowhere safe to put them. canvas-drop is the creation-and-sharing layer: deploy a static canvas in seconds, share it with your team, skip the screenshots and slide decks.",
+    "People build working web tools with AI in minutes, but they have nowhere safe to put them. canvas-drop is the creation-and-sharing layer: deploy a static canvas in seconds, share it with your team, and skip the screenshots and slide decks.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
   metaDescription:
-    "Deploy and share the small web tools your org builds with AI — static canvases, live in seconds, behind your organization's sign-in.",
+    "Deploy and share the small web tools your org builds with AI. Static canvases, live in seconds, behind your organization's sign-in.",
 } as const;
 
 /** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
@@ -55,7 +55,7 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
   {
     name: "Key–value",
     tag: "kv",
-    blurb: "Persist state with a tiny get/set store — no database to run.",
+    blurb: "Persist state with a tiny get/set store. No database to run.",
     glyph: "M4 7h16M4 12h16M4 17h10",
   },
   {
@@ -67,13 +67,13 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
   {
     name: "AI",
     tag: "ai",
-    blurb: "Call the model through a server-side proxy — no keys in the browser.",
+    blurb: "Call the model through a server-side proxy, with no keys in the browser.",
     glyph: "M12 3v4M12 17v4M3 12h4M17 12h4M7 7l2 2M15 15l2 2M17 7l-2 2M9 15l-2 2",
   },
   {
     name: "Identity",
     tag: "me",
-    blurb: "Know who's viewing — `me()` returns the signed-in org member.",
+    blurb: "Know who's viewing. `me()` returns the signed-in org member.",
     glyph: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M5 20a7 7 0 0 1 14 0",
   },
   {
@@ -88,7 +88,7 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Deploy in seconds",
-    body: "Drag a folder or push from your agent. A canvas is just static files — there's no build to wait on and nothing to provision.",
+    body: "Drag a folder or push from your agent. A canvas is just static files, so there's no build to wait on and nothing to provision.",
   },
   {
     title: "Shared with your org",
@@ -106,7 +106,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   {
     img: "landing-dashboard",
     label: "Your dashboard",
-    caption: "Every canvas your org has built — versions, sharing, and status in one place.",
+    caption: "Every canvas your org has built, with versions, sharing, and status in one place.",
   },
   {
     img: "tour-editor",
@@ -116,7 +116,8 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   {
     img: "landing-gallery",
     label: "Shared gallery",
-    caption: "Browse, search, and clone what the team has made — not screenshots buried in a DM.",
+    caption:
+      "Browse, search, and clone what the team has made, instead of screenshots buried in a DM.",
   },
   {
     img: "tour-sharing",
@@ -126,17 +127,17 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   {
     img: "tour-capabilities",
     label: "Backend in a click",
-    caption: "Switch on the primitives a canvas can use — KV, files, AI, identity, realtime.",
+    caption: "Switch on the primitives a canvas can use: KV, files, AI, identity, realtime.",
   },
   {
     img: "tour-admin",
     label: "Admin & control",
-    caption: "Tune quotas, manage members, and set who can publish — from the admin console.",
+    caption: "Tune quotas, manage members, and set who can publish, all from the admin console.",
   },
   {
     img: "tour-usage",
     label: "Usage insight",
-    caption: "See what's actually getting used, per canvas — not guesswork.",
+    caption: "See what's actually getting used, per canvas. No guesswork.",
   },
 ];
 
@@ -144,7 +145,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
 const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Org sign-in (SSO)",
-    body: "Everyone signs in with your Google / OIDC org account — gated by email domain and an admin allowlist.",
+    body: "Everyone signs in with your Google or OIDC org account, gated by email domain and an admin allowlist.",
   },
   {
     title: "Admin console",
@@ -156,7 +157,7 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Audit log",
-    body: "Significant actions are recorded — there's always an account of what changed.",
+    body: "Significant actions are recorded, so there's always an account of what changed.",
   },
 ];
 
@@ -168,7 +169,7 @@ const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "No telemetry, ever",
-    body: "canvas-drop never phones home — no tracking, no analytics, no third-party beacons.",
+    body: "canvas-drop never phones home. No tracking, no analytics, no third-party beacons.",
   },
   {
     title: "Secrets stay server-side",
@@ -176,7 +177,7 @@ const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Isolated runtimes",
-    body: "Canvases are sandboxed — they can't reach each other or the platform's internals.",
+    body: "Canvases are sandboxed, so they can't reach each other or the platform's internals.",
   },
   {
     title: "Your infrastructure",
@@ -470,7 +471,7 @@ const arrowLeft = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path
 /** One carousel slide: a framed dark screenshot + a caption. */
 function tourSlide(t: (typeof TOUR)[number]): string {
   return `<figure class="slide">
-  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1440" height="900" alt="${escapeHtml(`${t.label} — ${t.caption}`)}" loading="lazy" decoding="async"></div>
+  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
   <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
 </figure>`;
 }
@@ -539,7 +540,7 @@ ${head(origin)}
         <a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a>
         <a class="btn btn-ghost" href="/docs">Read the docs</a>
       </div>
-      <p class="cue" data-stagger="4">Or deploy from your agent — <span class="mono">curl -F</span> a folder and it's live.</p>
+      <p class="cue" data-stagger="4">Or deploy from your agent: <span class="mono">curl -F</span> a folder and it's live.</p>
     </div>
   </section>
 
@@ -547,7 +548,7 @@ ${head(origin)}
     <div class="wrap">
       <p class="kicker reveal">A guided tour</p>
       <h2 class="s-head reveal">See it across the whole workflow.</h2>
-      <p class="s-sub reveal">Create, edit, share, and govern — every surface of canvas-drop, in one place.</p>
+      <p class="s-sub reveal">Create, edit, share, and govern. Every surface of canvas-drop, in one place.</p>
       <div class="carousel reveal" data-carousel aria-roledescription="carousel" aria-label="Product tour">
         <div class="viewport">
           <div class="slides">
@@ -566,7 +567,7 @@ ${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" ari
   <section>
     <div class="wrap">
       <p class="kicker reveal">Why canvas-drop</p>
-      <h2 class="s-head reveal">From “I built a thing” to “the team is using it” — without a deploy pipeline.</h2>
+      <h2 class="s-head reveal">From “I built a thing” to “the team is using it,” without a deploy pipeline.</h2>
       <div class="values">
 ${values}
       </div>
@@ -577,7 +578,7 @@ ${values}
     <div class="wrap">
       <p class="kicker reveal">Five primitives</p>
       <h2 class="s-head reveal">Static canvases, real backend power.</h2>
-      <p class="s-sub reveal">Canvases ship as static files — no server build. When a canvas needs more, it reaches exactly five audited primitives. Secrets stay server-side, always.</p>
+      <p class="s-sub reveal">Canvases ship as static files, with no server build. When a canvas needs more, it reaches exactly five audited primitives. Secrets stay server-side, always.</p>
       <div class="prims reveal">
 ${PRIMITIVES.map(primitiveCard).join("\n")}
       </div>
@@ -588,7 +589,7 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
     <div class="wrap">
       <p class="kicker reveal">Built for teams</p>
       <h2 class="s-head reveal">Control, without the overhead.</h2>
-      <p class="s-sub reveal">canvas-drop is built for your whole org from day one — access, limits, and accountability come standard, not bolted on.</p>
+      <p class="s-sub reveal">canvas-drop is built for your whole org from day one. Access, limits, and accountability come standard, not bolted on.</p>
       <div class="feats reveal">
 ${TEAM.map(featItem).join("\n")}
       </div>
@@ -599,7 +600,7 @@ ${TEAM.map(featItem).join("\n")}
     <div class="wrap">
       <p class="kicker reveal">Private by design</p>
       <h2 class="s-head reveal">Your tools, your data, your infrastructure.</h2>
-      <p class="s-sub reveal">Privacy isn't a setting here — it's the default posture. canvas-drop keeps the minimum it needs to run, and nothing leaves your instance.</p>
+      <p class="s-sub reveal">Privacy isn't a setting here. It's the default posture: canvas-drop keeps the minimum it needs to run, and nothing leaves your instance.</p>
       <div class="feats reveal">
 ${PRIVACY.map(featItem).join("\n")}
       </div>
@@ -611,7 +612,7 @@ ${PRIVACY.map(featItem).join("\n")}
     <div class="wrap">
       <p class="kicker reveal" style="color:oklch(0.78 0.15 274)">Open source</p>
       <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
-      <p class="s-sub reveal">canvas-drop is open source and self-contained — one binary, your database, your storage, your sign-in. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
+      <p class="s-sub reveal">canvas-drop is open source and self-contained: one binary, your database, your storage, your sign-in. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">
         <a class="btn btn-ghost" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a>
         <a class="btn btn-ghost" href="/docs">Self-host guide ${arrow}</a>
@@ -633,7 +634,7 @@ ${PRIVACY.map(featItem).join("\n")}
         <a href="${cta.href}">${cta.short}</a>
       </nav>
     </div>
-    <div class="colophon">${escapeHtml(SITE.name)} — your organization's creation-and-sharing layer for AI-built tools. Open source under the MIT license.</div>
+    <div class="colophon">${escapeHtml(SITE.name)} is your organization's creation-and-sharing layer for AI-built tools. Open source under the MIT license.</div>
   </div>
 </footer>
 
