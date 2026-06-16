@@ -400,8 +400,11 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 .viewport { overflow: hidden; }
 .slides { display: flex; transition: transform .55s var(--ease); }
-.slide { min-width: 100%; padding: 0 .25rem; }
-.slide figure { margin: 0; }
+/* Each slide is EXACTLY the track width (flex-basis 100%, no grow/shrink, and
+   min-width:0 so the image's natural width can't push it wider) — so the JS
+   translate by one viewport lands precisely. margin:0 resets the UA default
+   figure margin-inline (40px), which otherwise offsets every slide and clips it. */
+.slide { flex: 0 0 100%; min-width: 0; margin: 0; }
 .slide .shot { box-shadow: var(--shadow-lg); }
 .slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
 .slide figcaption strong { color: var(--fg); font-weight: 600; }
@@ -467,7 +470,7 @@ const arrowLeft = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path
 /** One carousel slide: a framed dark screenshot + a caption. */
 function tourSlide(t: (typeof TOUR)[number]): string {
   return `<figure class="slide">
-  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1600" height="900" alt="${escapeHtml(`${t.label} — ${t.caption}`)}" loading="lazy" decoding="async"></div>
+  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1440" height="900" alt="${escapeHtml(`${t.label} — ${t.caption}`)}" loading="lazy" decoding="async"></div>
   <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
 </figure>`;
 }
