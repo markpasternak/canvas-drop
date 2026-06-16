@@ -1,14 +1,34 @@
 # Install
 
-Stand up a canvas-drop instance. The fastest path is locally with the bundled dev
-profile; everything you swap for production is a config change, never a code change.
+Stand up a canvas-drop instance. Two easy starting points: a one-command **Docker**
+stack that boots the real production shape, or the **Node dev profile** for hacking on
+the code. Everything you swap for production is a config change, never a code change.
 
-## Prerequisites
+## With Docker (one command)
 
-- Node.js >= 24
-- pnpm 11
+Requires **Docker** and **Docker Compose v2** (`docker compose`, not the legacy
+`docker-compose`). From a clone of the repo:
 
-## Local (dev profile)
+```bash
+docker compose up --build
+# then open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+```
+
+This boots the whole production shape with zero external setup: canvas-drop in real
+`proxy` mode behind Caddy + oauth2-proxy + a bundled **Dex** demo IdP, with Postgres
+and an optional MinIO (S3) profile (`docker compose --profile minio up`). The app
+verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you
+would run in production. Only the proxy is exposed on the host; pause the stack with
+`docker compose stop`, or tear it down and wipe data with `docker compose down -v`.
+
+> The bundled Dex/oauth2-proxy secrets and the `demo@example.com` login are public,
+> demo-only placeholders, and the stack runs on plain HTTP in path mode — **do not
+> expose it to the internet as-is.** Rotate every secret and work the
+> [graduation checklist](/docs/self-hosting/deploy) before any real use.
+
+## Node dev profile
+
+For developing canvas-drop itself. Requires **Node.js >= 24** and **pnpm 11**.
 
 ```bash
 git clone <your-fork-or-the-repo>
