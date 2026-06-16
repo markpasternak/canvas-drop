@@ -350,17 +350,6 @@ h1 .accent { color: oklch(0.78 0.15 274); }
 .cue { margin-top: 1rem; font-size: .85rem; color: var(--on-ink-muted); }
 .cue .mono { color: var(--on-ink); }
 
-/* hero product shot in a browser frame */
-.frame {
-  margin-top: clamp(1.5rem, 3.5vw, 2.5rem);
-  border: 1px solid var(--on-ink-border); border-radius: .875rem; overflow: hidden;
-  background: var(--ink-2); box-shadow: var(--shadow-lg);
-}
-.frame-bar { display: flex; align-items: center; gap: .45rem; padding: .7rem .85rem; border-bottom: 1px solid var(--on-ink-border); background: oklch(1 0 0 / 0.03); }
-.frame-bar i { width: .68rem; height: .68rem; border-radius: 100px; background: var(--on-ink-border); display: inline-block; }
-.frame-bar .addr { margin-left: .6rem; font-size: .78rem; color: var(--on-ink-muted); }
-.frame img { display: block; width: 100%; height: auto; }
-
 /* --- section scaffolding --- */
 section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .kicker { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
@@ -548,10 +537,6 @@ ${head(origin)}
         <a class="btn btn-ghost" href="/docs">Read the docs</a>
       </div>
       <p class="cue" data-stagger="4">Or deploy from your agent — <span class="mono">curl -F</span> a folder and it's live.</p>
-      <div class="frame reveal" data-stagger="5">
-        <div class="frame-bar"><i></i><i></i><i></i><span class="addr mono">${escapeHtml(SITE.domain)}/dashboard</span></div>
-        <img src="/docs/assets/landing-dashboard.webp" width="1600" height="900" alt="The canvas-drop dashboard listing an organization's canvases" loading="eager" decoding="async">
-      </div>
     </div>
   </section>
 
