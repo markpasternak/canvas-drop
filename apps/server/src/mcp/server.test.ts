@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { loadConfig } from "@canvas-drop/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -9,11 +10,13 @@ import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import { memStorage } from "../storage/mem.js";
+import { uploadService } from "../upload/service.js";
 import { buildMcpServer, type McpCaller } from "./server.js";
 
 const silent = pino({ level: "silent" });
@@ -35,13 +38,22 @@ async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
   const storage = memStorage();
+  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
   const server = buildMcpServer(
     {
       config,
       users: usersRepository(client),
       canvases,
       versions,
-      engine: deployEngine({ config, canvases, versions, drafts, storage, log: silent }),
+      engine,
+      upload: uploadService({
+        config,
+        canvases,
+        users: usersRepository(client),
+        uploadSessions: uploadSessionsRepository(client),
+        storage,
+        engine,
+      }),
       audit: createAuditLog(auditRepository(client), silent),
     },
     caller,
@@ -68,6 +80,8 @@ const zip = (files: Record<string, string>) =>
       Object.fromEntries(Object.entries(files).map(([k, v]) => [k, new TextEncoder().encode(v)])),
     ),
   ).toString("base64");
+
+const sha = (s: string) => createHash("sha256").update(new TextEncoder().encode(s)).digest("hex");
 
 describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
   let client: DbClient;
@@ -178,5 +192,92 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       arguments: { id: made.id, zipBase64: Buffer.from("not a zip").toString("base64") },
     });
     expect(isError(res)).toBe(true);
+  });
+
+  it("deploy_canvas accepts an inline files array (one-call publish)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const deployed = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, files: [{ path: "index.html", content: "<h1>hi</h1>" }] },
+      }),
+    );
+    expect(deployed.version).toBe(1);
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: made.id } }));
+    expect(got.publicationState).toBe("published");
+  });
+
+  it("deploy_canvas rejects both files+zipBase64 and neither", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const both = await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: made.id, zipBase64: zip({ "index.html": "x" }), files: [{ path: "a", content: "b" }] },
+    });
+    expect(isError(both)).toBe(true);
+    const neither = await mcp.callTool({ name: "deploy_canvas", arguments: { id: made.id } });
+    expect(isError(neither)).toBe(true);
+  });
+
+  it("begin_deploy → add_files → finalize_deploy publishes (chunked, text as utf8)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const files = { "index.html": "<h1>x</h1>", "app.js": "console.log(1)" };
+    const begun = payload(
+      await mcp.callTool({
+        name: "begin_deploy",
+        arguments: {
+          id: made.id,
+          manifest: Object.entries(files).map(([path, content]) => ({
+            path,
+            hash: sha(content),
+            size: new TextEncoder().encode(content).byteLength,
+          })),
+        },
+      }),
+    );
+    expect(begun.uploadId).toBeTruthy();
+    expect(begun.missingHashes).toHaveLength(2);
+
+    // Chunk the upload across two add_files calls.
+    await mcp.callTool({
+      name: "add_files",
+      arguments: { id: made.id, uploadId: begun.uploadId, files: [{ path: "index.html", content: files["index.html"] }] },
+    });
+    await mcp.callTool({
+      name: "add_files",
+      arguments: { id: made.id, uploadId: begun.uploadId, files: [{ path: "app.js", content: files["app.js"] }] },
+    });
+
+    const result = payload(
+      await mcp.callTool({
+        name: "finalize_deploy",
+        arguments: { id: made.id, uploadId: begun.uploadId },
+      }),
+    );
+    expect(result.version).toBe(1);
+    expect(result.fileCount).toBe(2);
+  });
+
+  it("the new upload tools refuse a canvas owned by another user", async () => {
+    client = await makeTestDb(dialect);
+    const ownerA = await seedUser(client, "a@example.com");
+    const ownerB = await seedUser(client, "b@example.com");
+    const aClient = await connect(client, { userId: ownerA });
+    const made = payload(await aClient.callTool({ name: "create_canvas", arguments: {} }));
+    const bClient = await connect(client, { userId: ownerB });
+    const begin = await bClient.callTool({
+      name: "begin_deploy",
+      arguments: { id: made.id, manifest: [{ path: "index.html", hash: sha("x"), size: 1 }] },
+    });
+    expect(isError(begin)).toBe(true);
   });
 });

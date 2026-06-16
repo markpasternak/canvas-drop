@@ -11,8 +11,10 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
-import { fromZip } from "../deploy/ingest.js";
+import { DeployError } from "../deploy/errors.js";
+import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import type { UploadService } from "../upload/service.js";
 
 export interface McpToolDeps {
   config: Config;
@@ -20,6 +22,7 @@ export interface McpToolDeps {
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;
+  upload: UploadService;
   audit: AuditLog;
   hub?: RealtimeHub;
 }
@@ -180,22 +183,49 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "deploy_canvas",
     {
       description:
-        "Deploy static files to a canvas you own. Publishes a new live version directly.",
+        "Deploy static files to a canvas you own in a single call. Provide EITHER a base64 ZIP " +
+        "(zipBase64) OR a files array (text as UTF-8, binary as base64) — not both. For large " +
+        "or incremental deploys use begin_deploy/add_files/finalize_deploy instead.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
-        zipBase64: z.string().describe("A base64-encoded ZIP archive of the canvas files."),
+        zipBase64: z
+          .string()
+          .optional()
+          .describe("A base64-encoded ZIP archive of the canvas files."),
+        files: z
+          .array(
+            z.object({
+              path: z.string(),
+              content: z.string(),
+              encoding: z.enum(["utf8", "base64"]).optional(),
+            }),
+          )
+          .optional()
+          .describe("Inline files: text as utf8 (default), binary as base64."),
       },
     },
-    async ({ id, zipBase64 }) => {
+    async ({ id, zipBase64, files }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
-      // Buffer.from(..,"base64") never throws — it drops invalid chars — so a bad
-      // string just yields fewer/zero bytes; the empty guard and the downstream
-      // DeployError (caught below) cover malformed input.
-      const buffer = Buffer.from(zipBase64, "base64");
-      if (buffer.byteLength === 0) return fail("empty deploy");
+      // Exactly one payload form — an ambiguous both / empty neither is a client error.
+      if (zipBase64 != null && files != null) {
+        return fail("INVALID_REQUEST: provide either zipBase64 or files, not both");
+      }
+      if (zipBase64 == null && (files == null || files.length === 0)) {
+        return fail("INVALID_REQUEST: provide zipBase64 or a non-empty files array");
+      }
       try {
-        const result = await deps.engine.deploy(cv, "api", fromZip(buffer), caller.userId);
+        let result: Awaited<ReturnType<typeof deps.engine.deploy>>;
+        if (files != null) {
+          result = await deps.engine.deploy(cv, "upload", fromFilesArray(files), caller.userId);
+        } else {
+          // Buffer.from(..,"base64") never throws — it drops invalid chars — so a bad
+          // string just yields fewer/zero bytes; the empty guard and the downstream
+          // DeployError (caught below) cover malformed input.
+          const buffer = Buffer.from(zipBase64 as string, "base64");
+          if (buffer.byteLength === 0) return fail("empty deploy");
+          result = await deps.engine.deploy(cv, "api", fromZip(buffer), caller.userId);
+        }
         deps.audit.recordAudit({
           action: "deploy",
           actorId: caller.userId,
@@ -208,6 +238,104 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         const code = (e as { code?: string }).code;
         const message = (e as { message?: string }).message ?? "deploy failed";
         return fail(code ? `${code}: ${message}` : message);
+      }
+    },
+  );
+
+  /** Surface an upload-service DeployError as a stable `CODE: message` fail. */
+  function failDeploy(e: unknown): ToolResult {
+    if (e instanceof DeployError) return fail(`${e.code}: ${e.message}`);
+    throw e;
+  }
+
+  server.registerTool(
+    "begin_deploy",
+    {
+      description:
+        "Open a staged upload for a canvas you own. Give the file manifest (path, sha256 hash, " +
+        "size); returns an uploadId and the subset of hashes you still need to send via " +
+        "add_files. Follow with add_files then finalize_deploy.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        manifest: z
+          .array(
+            z.object({
+              path: z.string(),
+              hash: z.string().describe("sha256 hex of the file's bytes."),
+              size: z.number().int().nonnegative(),
+            }),
+          )
+          .describe("The full set of files this deploy will publish."),
+      },
+    },
+    async ({ id, manifest }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      try {
+        return ok(await deps.upload.begin(cv, caller.userId, manifest));
+      } catch (e) {
+        return failDeploy(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "add_files",
+    {
+      description:
+        "Stage files into an open upload (from begin_deploy). Text as utf8 (default), binary as " +
+        "base64. Call repeatedly to chunk a large set; only send the hashes begin_deploy reported missing.",
+      inputSchema: {
+        id: z.string().describe("The canvas id (must own it)."),
+        uploadId: z.string().describe("The uploadId from begin_deploy."),
+        files: z
+          .array(
+            z.object({
+              path: z.string(),
+              content: z.string(),
+              encoding: z.enum(["utf8", "base64"]).optional(),
+            }),
+          )
+          .describe("Files to stage this call."),
+      },
+    },
+    async ({ id, uploadId, files }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      try {
+        await deps.upload.stageFiles(uploadId, caller.userId, cv.id, files);
+        return ok({ staged: files.length });
+      } catch (e) {
+        return failDeploy(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "finalize_deploy",
+    {
+      description:
+        "Publish a new live version from a staged upload (from begin_deploy). Single-use; fails " +
+        "if any manifest blob is still missing.",
+      inputSchema: {
+        id: z.string().describe("The canvas id (must own it)."),
+        uploadId: z.string().describe("The uploadId from begin_deploy."),
+      },
+    },
+    async ({ id, uploadId }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      try {
+        const result = await deps.upload.finalize(uploadId, caller.userId, cv.id);
+        deps.audit.recordAudit({
+          action: "deploy",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { source: "mcp-upload", version: result.version },
+        });
+        return ok(result);
+      } catch (e) {
+        return failDeploy(e);
       }
     },
   );
