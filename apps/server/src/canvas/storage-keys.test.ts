@@ -3,10 +3,9 @@ import {
   blobKey,
   canvasBlobPrefix,
   hashFromBlobKey,
+  SCREENSHOT_RENDITIONS,
   screenshotKey,
   screenshotPrefix,
-  screenshotVersionPrefix,
-  versionIdFromScreenshotKey,
 } from "./storage-keys.js";
 
 describe("content-addressed storage keys (M5)", () => {
@@ -36,42 +35,27 @@ describe("content-addressed storage keys (M5)", () => {
   });
 });
 
-describe("screenshot storage keys (plan 004)", () => {
+describe("screenshot storage keys (plan 004, KTD-6 — one preview per canvas)", () => {
   const canvasId = "0190a000-0000-7000-8000-000000000001";
-  const versionId = "0190b000-0000-7000-8000-0000000000aa";
 
-  it("screenshotKey nests the rendition under the canvas + version prefix", () => {
-    expect(screenshotKey(canvasId, versionId, "og")).toBe(
-      `screenshots/${canvasId}/${versionId}/og.webp`,
-    );
-    expect(screenshotKey(canvasId, versionId, "card")).toBe(
-      `screenshots/${canvasId}/${versionId}/card.webp`,
-    );
+  it("screenshotKey is canvas-stable (no versionId) so a republish overwrites", () => {
+    expect(screenshotKey(canvasId, "og")).toBe(`screenshots/${canvasId}/og.webp`);
+    expect(screenshotKey(canvasId, "card")).toBe(`screenshots/${canvasId}/card.webp`);
+    expect(screenshotKey(canvasId, "thumb")).toBe(`screenshots/${canvasId}/thumb.webp`);
   });
 
-  it("the screenshot prefix is a strict superpath of all its keys", () => {
-    expect(screenshotKey(canvasId, versionId, "og").startsWith(screenshotPrefix(canvasId))).toBe(
-      true,
-    );
-    expect(
-      screenshotVersionPrefix(canvasId, versionId).startsWith(screenshotPrefix(canvasId)),
-    ).toBe(true);
-  });
-
-  it("versionIdFromScreenshotKey round-trips screenshotKey", () => {
-    expect(versionIdFromScreenshotKey(canvasId, screenshotKey(canvasId, versionId, "og"))).toBe(
-      versionId,
-    );
-    expect(versionIdFromScreenshotKey(canvasId, screenshotKey(canvasId, versionId, "card"))).toBe(
-      versionId,
-    );
+  it("every rendition key sits directly under the canvas prefix", () => {
+    for (const r of SCREENSHOT_RENDITIONS) {
+      const key = screenshotKey(canvasId, r);
+      expect(key.startsWith(screenshotPrefix(canvasId))).toBe(true);
+      // exactly one segment (the rendition file) after the prefix
+      expect(key.slice(screenshotPrefix(canvasId).length).includes("/")).toBe(false);
+    }
   });
 
   it("is disjoint from the content blob prefix (GC must never overlap)", () => {
     expect(screenshotPrefix(canvasId).startsWith(canvasBlobPrefix(canvasId))).toBe(false);
     expect(canvasBlobPrefix(canvasId).startsWith(screenshotPrefix(canvasId))).toBe(false);
-    expect(screenshotKey(canvasId, versionId, "og").startsWith(canvasBlobPrefix(canvasId))).toBe(
-      false,
-    );
+    expect(screenshotKey(canvasId, "og").startsWith(canvasBlobPrefix(canvasId))).toBe(false);
   });
 });
