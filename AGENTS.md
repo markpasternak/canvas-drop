@@ -88,6 +88,7 @@ Learnings live in **git**, not in any agent's private memory:
 - **Auth is invariant-critical** (§12.0, §12.5). Identity always comes from the server-side auth context, never the client. In `proxy` mode, only the trusted proxy may assert identity (verify JWT, or trust headers solely from `CANVAS_DROP_TRUSTED_PROXY_IPS`). Test the spoofing-rejection paths first.
 - **No secrets in the browser, ever.** AI provider keys and canvas API keys are server-side only.
 - **Static-first.** Canvases are static files; no build step server-side. Backend capability only via the five primitives (KV, files, AI, identity, realtime).
+- **Agent-native parity.** Anything a user can do in the dashboard UI, an agent must be able to do over the **MCP**. A new owner-facing capability is not "done" until its MCP tool ships alongside the UI. MCP tools **wrap the same service layer** the HTTP/management routes use — never a parallel implementation — and carry the same `requireOwned` owner check (a non-owned id reads as *not found*, §12.0) and the same audit events. (Admin-only cross-owner actions are the exception: they live on the dedicated admin routes, not the per-account MCP surface.)
 - **Org-agnostic.** No organization-specific naming, branding, or telemetry/phone-home. MIT, 12-factor.
 
 ---
