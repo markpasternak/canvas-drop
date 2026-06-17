@@ -2,7 +2,7 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
-import { fullTime, relativeTime } from "../lib/format.js";
+import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
@@ -104,6 +104,41 @@ function lastActivity(canvas: CanvasListItem): number {
   return Math.max(canvas.updatedAt, canvas.lastDeploy?.createdAt ?? 0);
 }
 
+/** Quiet, dot-separated identity line — who can see it and when it last changed.
+ *  Shared by the list row and the grid card so the two views never drift. */
+function metaLine(canvas: CanvasListItem): string {
+  return [visibility(canvas).primary, `Edited ${relativeTime(lastActivity(canvas))}`].join(" · ");
+}
+
+/** The deployed footprint, e.g. "12 kB · 4 files", or null when never deployed. */
+function deployFootprint(canvas: CanvasListItem): string | null {
+  const d = canvas.lastDeploy;
+  if (!d) return null;
+  return `${formatBytes(d.totalBytes)} · ${d.fileCount} ${d.fileCount === 1 ? "file" : "files"}`;
+}
+
+/** A right-aligned secondary stat (Published / Created) that fills the list row's
+ *  wide-screen gutter without re-introducing the old dense column grid. */
+function StatCol({
+  label,
+  primary,
+  secondary,
+  title,
+}: {
+  label: string;
+  primary: string;
+  secondary?: string | null;
+  title?: string;
+}) {
+  return (
+    <div className="w-32 text-right" title={title}>
+      <div className="text-[0.6875rem] font-medium text-subtle">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-medium text-fg">{primary}</div>
+      {secondary && <div className="truncate text-[0.6875rem] text-subtle">{secondary}</div>}
+    </div>
+  );
+}
+
 export function CanvasListHeader({
   selectable = false,
   allSelected = false,
@@ -190,19 +225,11 @@ export function CanvasRow({
 }) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
-  const access = visibility(canvas);
   const deploy = canvas.lastDeploy;
+  const summary = canvas.gallerySummary?.trim();
+  const footprint = deployFootprint(canvas);
   const navigate = useNavigate();
   const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
-
-  // The four old data columns distilled to one quiet, dot-separated line — who can
-  // see it, which version is live, and when it last changed. Lifecycle that isn't
-  // the happy "published" path rides as a badge beside the title (RowBadges) instead.
-  const meta = [
-    access.primary,
-    deploy && canvas.publicationState === "published" ? `v${deploy.version}` : null,
-    `Edited ${relativeTime(lastActivity(canvas))}`,
-  ].filter((part): part is string => Boolean(part));
 
   return (
     // Keyboard access to the canvas is the focusable title <Link> below (and the
@@ -266,13 +293,29 @@ export function CanvasRow({
             className="mt-0.5 truncate text-xs text-subtle"
             title={fullTime(lastActivity(canvas))}
           >
-            {meta.join(" · ")}
+            {metaLine(canvas)}
           </div>
+          {summary && <div className="mt-1 truncate text-xs text-muted">{summary}</div>}
           {tags.length > 0 && (
             <div className="mt-1.5">
               <RowTags tags={tags} />
             </div>
           )}
+        </div>
+
+        {/* Wide-screen gutter: the publish footprint + age that the dense column grid
+            used to carry, now as two airy right-aligned stats instead of five columns. */}
+        <div className="hidden shrink-0 items-center gap-8 lg:flex">
+          <StatCol
+            label={deploy ? "Published" : "Status"}
+            primary={deploy ? `v${deploy.version}` : "Not deployed"}
+            secondary={footprint}
+          />
+          <StatCol
+            label="Created"
+            primary={relativeTime(canvas.createdAt)}
+            title={fullTime(canvas.createdAt)}
+          />
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -298,6 +341,113 @@ export function ListSkeleton() {
             <Skeleton className="h-3 w-40" />
           </div>
           <Skeleton className="h-8 w-24 shrink-0" />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Grid card — the cover-forward presentation behind the list/grid toggle. Same data
+ *  and same `actions` as {@link CanvasRow}, just composed as a card: cover on top with
+ *  the publication pill overlaid, title + badges + meta below, actions in a footer. */
+export function CanvasCard({
+  canvas,
+  actions,
+  selectable = false,
+  selected = false,
+  onSelectChange,
+}: {
+  canvas: CanvasListItem;
+  actions?: ReactNode;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectChange?: (next: boolean) => void;
+}) {
+  const title = canvasTitle(canvas);
+  const navigate = useNavigate();
+  const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
+
+  return (
+    <li
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong${
+        selected ? " border-accent ring-1 ring-accent" : ""
+      }`}
+      onClick={(event) => {
+        if (isInteractiveTarget(event.target)) return;
+        openDetails();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        if (isInteractiveTarget(event.target)) return;
+        event.preventDefault();
+        openDetails();
+      }}
+    >
+      <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">
+        <CanvasCover
+          seed={canvas.id}
+          previewUrl={
+            canvas.hasPreview
+              ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`
+              : undefined
+          }
+        />
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(event) => onSelectChange?.(event.target.checked)}
+            aria-label={`Select ${title}`}
+            className="absolute top-2 left-2 size-4 cursor-pointer rounded accent-accent shadow-[var(--shadow-sm)]"
+          />
+        )}
+        <span className="absolute bottom-2 left-2">
+          <PublicationBadge state={canvas.publicationState} />
+        </span>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <Link
+            to="/canvases/$id"
+            params={{ id: canvas.id }}
+            className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+            aria-label={`View details for ${title}`}
+          >
+            {title}
+          </Link>
+          <span className="flex shrink-0 flex-wrap items-center gap-1">
+            {canvas.access === "public_link" && <AccessBadge access="public_link" />}
+            {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
+            {canvas.hasPassword && (
+              <Badge tone="neutral">
+                <LockSimple size={12} weight="bold" aria-hidden />
+                Protected
+              </Badge>
+            )}
+          </span>
+        </div>
+        <div className="truncate text-xs text-subtle" title={fullTime(lastActivity(canvas))}>
+          {metaLine(canvas)}
+        </div>
+        <div className="mt-auto flex items-center justify-end gap-1 pt-2">
+          {actions ?? <DefaultRowActions canvas={canvas} />}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+export function GridSkeleton() {
+  return (
+    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-hidden>
+      {[0, 1, 2, 3].map((i) => (
+        <li key={i} className="overflow-hidden rounded-xl border border-border bg-surface">
+          <Skeleton className="aspect-[3/2] w-full rounded-none" />
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-8 w-full" />
+          </div>
         </li>
       ))}
     </ul>

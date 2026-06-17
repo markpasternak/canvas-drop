@@ -49,6 +49,8 @@ export interface CanvasesSearch {
   /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
    *  archived view (replaces the standalone /archived route). */
   scope?: "archived";
+  /** Display mode: absent = list (default); `grid` = the cover-forward card gallery. */
+  view?: "grid";
   /** 1-based page for server-side pagination (plan 005). */
   page?: number;
 }
