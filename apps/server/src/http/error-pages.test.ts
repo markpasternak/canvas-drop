@@ -66,8 +66,8 @@ describe("errorPageMiddleware", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     const html = await res.text();
     expect(html).toContain("canvas-drop");
-    expect(html).toContain('viewBox="0 0 48 48"');
-    expect(html).toContain("M14 37h-4a5 5 0 0 1-5-5V11");
+    expect(html).toContain('viewBox="158 209 372 432"');
+    expect(html).toContain("M245 335H218");
     expect(html).toContain("Page not found");
     expect(html).toContain("No &lt;page&gt; &amp; no stack");
     expect(html).toContain("/missing");

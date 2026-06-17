@@ -6,10 +6,13 @@ import sharp from "sharp";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(root, "public");
 const svgSource = await readFile(path.join(publicDir, "brand/canvasdrop-mark.svg"), "utf8");
+// Bake the brand colours in: ink frame + teal drop (the Editorial Creator OS
+// accent). Kept in sync with BRAND_TOKENS / tokens.css by hand for the static
+// raster assets (favicon, PWA icons).
 const svg = Buffer.from(
   svgSource
-    .replaceAll('stroke="var(--frame)"', 'stroke="#111418"')
-    .replaceAll('stroke="var(--drop)"', 'stroke="#2563eb"'),
+    .replaceAll('stroke="var(--frame)"', 'stroke="#20303c"')
+    .replaceAll('stroke="var(--drop)"', 'stroke="#0c7b88"'),
 );
 
 async function tileIcon(size, outputPath) {
@@ -23,7 +26,7 @@ async function tileIcon(size, outputPath) {
       width: size,
       height: size,
       channels: 4,
-      background: "#f5f5f2",
+      background: "#f7f4ed",
     },
   })
     .composite([{ input: mark, gravity: "center" }])

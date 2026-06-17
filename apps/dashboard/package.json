@@ -23,6 +23,7 @@
     "@codemirror/view": "^6.36.1",
     "@fontsource-variable/geist": "^5.2.5",
     "@fontsource-variable/geist-mono": "^5.2.5",
+    "@fontsource-variable/newsreader": "^5.2.5",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.66.0",
     "@tanstack/react-router": "^1.97.0",

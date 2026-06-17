@@ -243,11 +243,11 @@ const STYLES = `
   --muted: oklch(0.475 0.013 266);
   --subtle: oklch(0.555 0.012 266);
   --border: oklch(0.905 0.005 264);
-  --accent: oklch(0.515 0.214 274);
-  --accent-hover: oklch(0.455 0.205 274);
-  --accent-fg: oklch(0.99 0.012 274);
+  --accent: oklch(0.515 0.214 200);
+  --accent-hover: oklch(0.455 0.205 200);
+  --accent-fg: oklch(0.99 0.012 200);
   --logo-frame: oklch(0.24 0.014 266);
-  --logo-drop: oklch(0.515 0.214 274);
+  --logo-drop: oklch(0.515 0.214 200);
   --shadow-color: 265 24% 16%;
   --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 4px 12px hsl(var(--shadow-color)/0.07);
   --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 6px 16px hsl(var(--shadow-color)/0.1);
@@ -268,11 +268,11 @@ const STYLES = `
     --muted: oklch(0.705 0.013 266);
     --subtle: oklch(0.585 0.013 266);
     --border: oklch(0.272 0.008 266);
-    --accent: oklch(0.685 0.18 274);
-    --accent-hover: oklch(0.75 0.16 274);
-    --accent-fg: oklch(0.16 0.045 274);
+    --accent: oklch(0.685 0.18 200);
+    --accent-hover: oklch(0.75 0.16 200);
+    --accent-fg: oklch(0.16 0.045 200);
     --logo-frame: oklch(0.965 0.003 266);
-    --logo-drop: oklch(0.685 0.18 274);
+    --logo-drop: oklch(0.685 0.18 200);
     --shadow-color: 265 50% 1%;
     --ink: oklch(0.115 0.006 266);
     --ink-2: oklch(0.16 0.008 266);
@@ -302,7 +302,7 @@ header {
 .nav { display: flex; align-items: center; gap: 1rem; height: 4rem; }
 .brand { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.012em; color: var(--on-ink); }
 .brand .mark { width: 1.65rem; height: 1.65rem; }
-.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.7 0.17 274); }
+.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.7 0.17 200); }
 .nav .spacer { flex: 1; }
 .nav-links { display: flex; align-items: center; gap: .35rem; }
 .nav a.link { color: var(--on-ink-muted); padding: .45rem .7rem; border-radius: .5rem; font-size: .92rem; transition: color .15s var(--ease), background .15s var(--ease); }
@@ -351,12 +351,12 @@ header {
   border: 1px solid var(--on-ink-border); border-radius: 100px; padding: .3rem .7rem;
   background: oklch(1 0 0 / 0.03);
 }
-.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: oklch(0.7 0.17 274); box-shadow: 0 0 0 4px oklch(0.7 0.17 274 / 0.22); }
+.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: oklch(0.7 0.17 200); box-shadow: 0 0 0 4px oklch(0.7 0.17 274 / 0.22); }
 h1 {
   margin: 1.1rem 0 0; max-width: 16ch;
   font-size: clamp(2.6rem, 7vw, 4.6rem); line-height: 1.02; letter-spacing: -.035em; font-weight: 660;
 }
-h1 .accent { color: oklch(0.78 0.15 274); }
+h1 .accent { color: oklch(0.78 0.15 200); }
 .lede { margin: 1.4rem 0 0; max-width: 46ch; font-size: clamp(1.02rem, 2.2vw, 1.22rem); color: var(--on-ink-muted); }
 .cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
 .cue { margin-top: 1rem; font-size: .85rem; color: var(--on-ink-muted); }
@@ -458,12 +458,12 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 /* dark band (Private by design) — reuse the hero ink + on-ink tokens */
 .band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
 .band-dark .s-sub { color: var(--on-ink-muted); }
-.band-dark .kicker { color: oklch(0.78 0.15 274); }
+.band-dark .kicker { color: oklch(0.78 0.15 200); }
 .band-dark .feat { border-top-color: var(--on-ink-border); }
 .band-dark .feat h3 { color: var(--on-ink); }
-.band-dark .feat h3 svg { color: oklch(0.8 0.13 274); }
+.band-dark .feat h3 svg { color: oklch(0.8 0.13 200); }
 .band-dark .feat p { color: var(--on-ink-muted); }
-.band-dark a { color: oklch(0.8 0.13 274); }
+.band-dark a { color: oklch(0.8 0.13 200); }
 
 /* --- entrance + scroll reveal --- */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
@@ -649,7 +649,7 @@ ${PRIVACY.map(featItem).join("\n")}
 
   <section class="oss">
     <div class="wrap">
-      <p class="kicker reveal" style="color:oklch(0.78 0.15 274)">Open source</p>
+      <p class="kicker reveal" style="color:oklch(0.78 0.15 200)">Open source</p>
       <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
       <p class="s-sub reveal">canvas-drop is open source and self-contained: your database, your storage, your sign-in. SQLite or Postgres, local disk or S3, all a config change away. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">

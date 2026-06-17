@@ -1,5 +1,7 @@
+import { rampCssVars } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { BRAND_MARK } from "./brand.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
 
@@ -88,41 +90,15 @@ export function errorResponse(
  * theme override (the docs site, via a `data-theme` attribute matching the
  * dashboard) can re-assert either palette without duplicating the values.
  */
-export const LIGHT_TOKENS = `    --canvas: #f5f5f2;
-    --surface: #fbfbf8;
-    --surface-raised: #fefefb;
-    --surface-sunken: #ededeb;
-    --fg: #18181b;
-    --muted: #5b5b63;
-    --subtle: #898991;
-    --border: #dfdfdc;
-    --border-strong: #c8c8c3;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --accent-fg: #f8fbff;
-    --accent-subtle: #eaf1ff;
-    --logo-frame: #111418;
-    --logo-drop: #2563eb;
-    --shadow-color: 240 12% 12%;
-    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.08);`;
+// Derived from the canonical BRAND_TOKENS (single source — no drift, no parallel
+// ramp). Shadows are the only system-page-specific addition.
+export const LIGHT_TOKENS = `${rampCssVars("light", "    ")}
+    --shadow-color: 40 30% 38%;
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.09);`;
 
-export const DARK_TOKENS = `    --canvas: #0b0b0d;
-    --surface: #141416;
-    --surface-raised: #1c1c20;
-    --surface-sunken: #09090b;
-    --fg: #f4f4f5;
-    --muted: #a1a1aa;
-    --subtle: #6e6e78;
-    --border: #27272b;
-    --border-strong: #3a3a40;
-    --accent: #60a5fa;
-    --accent-hover: #93c5fd;
-    --accent-fg: #07111f;
-    --accent-subtle: #0d2a4d;
-    --logo-frame: #f4f4f5;
-    --logo-drop: #60a5fa;
-    --shadow-color: 0 0% 0%;
-    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);`;
+export const DARK_TOKENS = `${rampCssVars("dark", "    ")}
+    --shadow-color: 265 60% 2%;
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.5);`;
 
 /**
  * Shared visual chrome for self-contained system pages (the branded 4xx/5xx
@@ -193,11 +169,7 @@ ${DARK_TOKENS}
 
 /** The canvas-drop logo + wordmark header, shared by every system page. */
 export const SYSTEM_PAGE_BRAND = `    <div class="brand">
-      <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--logo-frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
-      </svg>
+      ${BRAND_MARK}
       <span>canvas-drop</span>
     </div>`;
 

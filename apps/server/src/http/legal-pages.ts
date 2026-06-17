@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, rampCssVars } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
@@ -75,15 +75,7 @@ ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 ${FAVICON_LINKS}
 <style>
   :root {
-    --canvas: #f5f5f2;
-    --surface: #fbfbf8;
-    --fg: #18181b;
-    --muted: #5b5b63;
-    --subtle: #898991;
-    --border: #dfdfdc;
-    --accent: #2563eb;
-    --logo-frame: #111418;
-    --logo-drop: #2563eb;
+${rampCssVars("light", "    ")}
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }

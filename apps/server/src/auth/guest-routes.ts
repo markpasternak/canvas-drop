@@ -42,7 +42,7 @@ function landingPage(token: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Open shared canvas</title>
 <style>body{font-family:system-ui,sans-serif;background:#0b0b0c;color:#e7e7e9;display:grid;place-items:center;min-height:100vh;margin:0}
-.card{max-width:24rem;padding:2rem;text-align:center}button{font:inherit;padding:.7rem 1.4rem;border:0;border-radius:.6rem;background:#5b8cff;color:#fff;cursor:pointer}
+.card{max-width:24rem;padding:2rem;text-align:center}button{font:inherit;padding:.7rem 1.4rem;border:0;border-radius:.6rem;background:#0c7b88;color:#fff;cursor:pointer}
 h1{font-size:1.2rem}p{color:#a0a0a8}</style></head>
 <body><div class="card"><h1>You've been invited to a canvas</h1>
 <p>Click below to open it. This link is just for you.</p>
