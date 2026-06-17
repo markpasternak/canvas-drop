@@ -1,4 +1,24 @@
 import type { Manifest } from "@canvas-drop/shared/db";
+import type { VersionsRepository } from "../db/repositories/versions.js";
+
+/**
+ * The live (current + ready) version's number and manifest for a canvas, or null
+ * when nothing is live (never deployed, or the pointer is at a non-ready version).
+ *
+ * The single read path behind both the MCP `get_canvas_file` tool and the keyed
+ * Deploy API `GET …/files` read-back, so the two verification surfaces resolve the
+ * same bytes a browser would get. (The asset-serving middleware keeps its own copy
+ * because it also needs the version row for ETag/cache handling.)
+ */
+export async function liveManifest(
+  versions: VersionsRepository,
+  currentVersionId: string | null,
+): Promise<{ number: number; manifest: Manifest } | null> {
+  if (!currentVersionId) return null;
+  const version = await versions.findById(currentVersionId);
+  if (version?.status !== "ready" || !version.manifest) return null;
+  return { number: version.number, manifest: version.manifest as Manifest };
+}
 
 /**
  * The single HTML file in a manifest, or null when there are zero or several.

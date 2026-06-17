@@ -17,6 +17,19 @@ describe("loadConfig", () => {
     expect(config.log.format).toBe("pretty"); // non-production default
   });
 
+  it("apiBaseUrl defaults to baseUrl, and is overridable for a dedicated API host", () => {
+    const def = loadConfig(devEnv({ CANVAS_DROP_BASE_URL: "https://canvas.example.com" }));
+    expect(def.apiBaseUrl).toBe("https://canvas.example.com");
+
+    const split = loadConfig(
+      devEnv({
+        CANVAS_DROP_BASE_URL: "https://canvas.example.com",
+        CANVAS_DROP_API_BASE_URL: "https://api.example.com",
+      }),
+    );
+    expect(split.apiBaseUrl).toBe("https://api.example.com");
+  });
+
   it("defaults the rate-limit config to the §12.3 values, enabled", () => {
     const config = loadConfig({});
     expect(config.rateLimit.enabled).toBe(true);

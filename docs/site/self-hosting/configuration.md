@@ -39,6 +39,7 @@ change, never a code change.
 | `NODE_ENV` | `development` | `development` \| `production` \| `test`. |
 | `CANVAS_DROP_URL_MODE` | `path` | `path` serves `…/c/{slug}/*`; `subdomain` serves `{slug}.{baseHost}`. |
 | `CANVAS_DROP_BASE_URL` | `http://localhost:3000` | Public base URL. In `subdomain` mode must be non-localhost or boot fails. |
+| `CANVAS_DROP_API_BASE_URL` | (= `CANVAS_DROP_BASE_URL`) | Where the Deploy API (`/v1/canvases/*`) is reachable. Set only when the API is fronted on a different host than canvases — e.g. `subdomain` mode where canvases are `{slug}.canvases.example.com` but the API is routed at `https://api.canvases.example.com`. The MCP tools advertise curl endpoints built from this so agents don't probe for the host. (`api`/`v1`/`sdk`/`auth`/`mcp` are reserved slugs, so a canvas can't collide with it.) |
 | `CANVAS_DROP_PORT` | `3000` | Listen port. |
 | `CANVAS_DROP_SESSION_SECRET` | (dev fallback only) | **Required, ≥32 chars, outside dev and always in production.** Signs session cookies (oidc/dev). |
 | `CANVAS_DROP_ADMIN_EMAILS` | (empty) | CSV; lowercased. Grants the admin surface. |

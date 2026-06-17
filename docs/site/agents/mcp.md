@@ -32,18 +32,25 @@ there is no cross-owner access and no existence leak.
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). |
 | `list_canvases` | The canvases you own. |
-| `create_canvas` | Create a canvas; returns its id, URL, and a one-time deploy key. |
+| `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). |
 | `get_canvas` | Current state of a canvas you own. |
 | `list_versions` | Published version history of a canvas you own. |
 | `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
 | `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
 | `add_files` | Stage files into an open upload (text as UTF-8, binary as base64); call repeatedly to chunk a large set. |
 | `finalize_deploy` | Publish a new version from a staged upload. Single-use. |
+| `get_canvas_file` | Read back what's **live**: list the current version's files, or fetch one file's content. Use it to **verify a deploy** (the live URL is sign-in gated — see below). |
 | `rollback_canvas` | Point a canvas back at an earlier version number. |
 | `unpublish_canvas` | Take a published canvas back to draft. |
 
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
+
+**Every deploy publishes immediately.** There is no draft step over MCP: `deploy_canvas`
+and `finalize_deploy` make the uploaded files the new **live** version at once (kept as
+an immutable version you can roll back to). The canvas's URL is **access-controlled** —
+it serves content only to viewers allowed by the canvas's share rung (default: org
+sign-in required). So a freshly deployed canvas is live, but not an anonymous public URL.
 
 ### Which deploy tool to use
 
@@ -65,10 +72,41 @@ The staged flow's win:
    finalize that's missing a blob fails cleanly and can be retried after staging it.
 
 Over MCP, `add_files` content still travels in the tool call — the token win
-comes from **not resending unchanged files** and from chunking. For bytes that
-never touch the model at all, an agent that can `curl` uses the same staged flow
-over plain HTTP on the keyed [Deploy API](/docs/api/deploy-api), PUTting each
-blob's raw bytes directly to the server.
+comes from **not resending unchanged files** and from chunking.
+
+**Strongly prefer `curl` over the keyed Deploy API for the file transfer.** Every
+MCP deploy tool inlines file contents into the tool call (they pass through the
+model). Whenever you can run shell commands, deploy with `curl` instead — and
+**request command/network permission if you don't have it** rather than inlining
+bytes. The same staged flow runs over plain HTTP on the keyed
+[Deploy API](/docs/api/deploy-api): `POST …/uploads` with the manifest, then
+`PUT …/uploads/{id}/blobs/{hash}` with each blob's **raw bytes**, then
+`POST …/uploads/{id}/finalize`. The bytes go straight from disk to the server and
+never enter the model context — far cheaper, with no payload-size ceiling.
+`create_canvas` returns the per-canvas key you need. Reserve the MCP deploy tools
+for a small first publish when shell access truly isn't available.
+
+### Verify a deploy
+
+The live URL is access-controlled, so **don't confirm a deploy by fetching it** — an
+unauthenticated `GET` returns a login page, not your files. Verify through the server
+instead:
+
+- The deploy/finalize result already returns `{version, fileCount, totalBytes}`.
+- `list_versions` shows the new version as `current`.
+- **`get_canvas_file`** reads back what's actually live: call it with no `path` to list
+  the live files (`path`, `size`, `mime`, `hash`), or with a `path` (e.g. `index.html`)
+  to get that file's content (text as UTF-8, binary as base64; files over 256 KiB
+  return their hash only — compare it to what you deployed).
+- Over curl, the same read-back is `GET {apiBase}/files` (and `?path=` for raw bytes,
+  no size cap) — `apiBase` comes from the `deploy` block `create_canvas` returned, so
+  there's nothing to probe.
+
+`create_canvas` (and `get_canvas`) return a `deploy` block with the **exact curl
+endpoints** for the canvas — `apiBase`, `zipUpload`, the staged URLs, `readback`, and a
+copy-paste `curl` command. In subdomain mode the API host (`CANVAS_DROP_API_BASE_URL`,
+e.g. `api.example.com`) differs from the canvas host, so use these advertised endpoints
+rather than guessing.
 
 Tool calls are rate-limited per account and recorded in the audit log alongside every
 other deploy and lifecycle event.

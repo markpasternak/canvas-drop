@@ -1,12 +1,15 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
+import { type CanvasStatus, type Manifest, publicationState } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { liveManifest } from "../canvas/manifest.js";
+import { isTextContentType } from "../canvas/mime.js";
 import { generateUniqueSlug } from "../canvas/slug.js";
-import { canvasUrl } from "../canvas/url.js";
+import { blobKey } from "../canvas/storage-keys.js";
+import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -14,6 +17,7 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 
 export interface McpToolDeps {
@@ -23,9 +27,15 @@ export interface McpToolDeps {
   versions: VersionsRepository;
   engine: DeployEngine;
   upload: UploadService;
+  /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
+  storage: StorageDriver;
   audit: AuditLog;
   hub?: RealtimeHub;
 }
+
+/** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
+ *  Bigger files report metadata only — verify those by hash, or fetch over HTTP. */
+const READBACK_MAX_BYTES = 256 * 1024;
 
 /** The acting MCP caller — `userId` comes only from the verified access token (U3). */
 export interface McpCaller {
@@ -116,7 +126,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "create_canvas",
     {
       description:
-        "Create a new canvas you own. Returns its id, URL, and a one-time deploy API key.",
+        "Create a new canvas you own. Returns its id, URL, and a one-time deploy API key. The " +
+        "canvas starts empty (no live version) and private; its URL only serves content after a " +
+        "deploy, and only to viewers allowed by its access rung (default: sign-in required).",
       inputSchema: {
         title: z.string().optional(),
         description: z.string().optional(),
@@ -138,7 +150,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       });
       deps.audit.recordAudit({ action: "canvas_create", actorId: caller.userId, targetId: cv.id });
       // The key is returned once and never again — same contract as the dashboard.
-      return ok({ ...canvasView(deps.config, cv), apiKey });
+      // Hand back ready-to-run curl endpoints (with the real key embedded) so an
+      // agent that prefers curl never has to probe for the API host.
+      return ok({
+        ...canvasView(deps.config, cv),
+        apiKey,
+        deploy: deployEndpoints(deps.config, cv.id, apiKey),
+      });
     },
   );
 
@@ -151,7 +169,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
-      return ok(canvasView(deps.config, cv));
+      // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
+      // once, at create. The agent substitutes the key it saved from create_canvas.
+      return ok({ ...canvasView(deps.config, cv), deploy: deployEndpoints(deps.config, cv.id) });
     },
   );
 
@@ -183,7 +203,18 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "deploy_canvas",
     {
       description:
-        "Deploy a canvas you own in ONE call — best for a FIRST publish of a small canvas. " +
+        "Deploy a canvas you own in ONE call. NOTE: if you can run shell commands, PREFER curl " +
+        "over the keyed HTTP Deploy API instead of this tool — request that permission if you " +
+        "don't have it. curl streams file bytes straight from disk to the server so they never " +
+        "enter your context (far cheaper, no size ceiling); every MCP deploy tool inlines the " +
+        "bytes into the model. Use this MCP tool only when you genuinely cannot run commands, " +
+        "and then only for a FIRST publish of a small canvas. " +
+        "This PUBLISHES IMMEDIATELY: the uploaded files become the new live version at once " +
+        "(there is no draft step — every deploy goes live and is kept as an immutable version). " +
+        "The live URL is ACCESS-CONTROLLED (org sign-in / share rung), so do NOT verify by " +
+        "fetching it — an unauthenticated GET returns a login page, not your files. Verify " +
+        "through this server instead: the returned {version, fileCount} or get_canvas / " +
+        "list_versions / get_canvas_file. " +
         "Provide EITHER a base64 ZIP (zipBase64) OR a files array (text as UTF-8, binary as " +
         "base64) — not both. The entire payload travels in this call, so prefer " +
         "begin_deploy/add_files/finalize_deploy for ANY re-deploy of a canvas that already has " +
@@ -290,7 +321,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Stage files into an open upload (from begin_deploy). Text as utf8 (default), binary as " +
-        "base64. Call repeatedly to chunk a large set; only send the hashes begin_deploy reported missing.",
+        "base64. Call repeatedly to chunk a large set; only send the hashes begin_deploy reported " +
+        "missing. NOTE: this inlines file bytes into the model — if you can run shell commands, " +
+        "PREFER curl: PUT each missing blob's raw bytes to the keyed HTTP Deploy API " +
+        "(…/uploads/{uploadId}/blobs/{hash}) so the bytes never enter your context. Request " +
+        "command permission if needed rather than streaming large/binary files through here.",
       inputSchema: {
         id: z.string().describe("The canvas id (must own it)."),
         uploadId: z.string().describe("The uploadId from begin_deploy."),
@@ -321,8 +356,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "finalize_deploy",
     {
       description:
-        "Publish a new live version from a staged upload (from begin_deploy). Single-use; fails " +
-        "if any manifest blob is still missing.",
+        "Publish a new live version from a staged upload (from begin_deploy). PUBLISHES " +
+        "IMMEDIATELY (the version goes live at once; no draft step). Single-use; fails if any " +
+        "manifest blob is still missing. Don't verify by fetching the live URL — it's access-" +
+        "controlled and returns a login page to an unauthenticated GET; confirm with the " +
+        "returned {version, fileCount} or get_canvas / list_versions / get_canvas_file instead.",
       inputSchema: {
         id: z.string().describe("The canvas id (must own it)."),
         uploadId: z.string().describe("The uploadId from begin_deploy."),
@@ -343,6 +381,75 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       } catch (e) {
         return failDeploy(e);
       }
+    },
+  );
+
+  server.registerTool(
+    "get_canvas_file",
+    {
+      description:
+        "Read back what is LIVE on a canvas you own — the way to verify a deploy. The live URL " +
+        "is access-controlled (an unauthenticated GET returns a login page, not your files), so " +
+        "confirm a deploy through here, never by fetching the URL. Omit `path` to list the live " +
+        "version's files (path, size, mime, hash); pass `path` (e.g. 'index.html') to get that " +
+        "file's content — text as UTF-8, binary as base64. Files over 256 KiB return metadata " +
+        "(size + hash) only; verify those by comparing the hash to what you deployed.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        path: z
+          .string()
+          .optional()
+          .describe("File path within the live version (e.g. 'index.html'). Omit to list files."),
+      },
+    },
+    async ({ id, path }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const live = await liveManifest(deps.versions, cv.currentVersionId);
+      if (!live) return fail("this canvas has no live version yet");
+      const { number: version, manifest } = live;
+      const paths = Object.keys(manifest).sort();
+
+      // No path → the live file listing: a cheap "what's actually live" check that
+      // never pulls blob bytes into context.
+      if (path == null) {
+        return ok({
+          version,
+          fileCount: paths.length,
+          files: paths.map((p) => {
+            const e = manifest[p] as Manifest[string];
+            return { path: p, size: e.size, mime: e.mime, hash: e.hash };
+          }),
+        });
+      }
+
+      const entry = manifest[path];
+      if (!entry) return fail(`no file at "${path}" in the live version`);
+      // Don't inline a large blob — return metadata so the agent can verify by hash
+      // (or fetch the raw bytes over HTTP via the readback endpoint, which has no cap).
+      if (entry.size > READBACK_MAX_BYTES) {
+        return ok({
+          version,
+          path,
+          size: entry.size,
+          mime: entry.mime,
+          hash: entry.hash,
+          truncated: true,
+          note: `file is ${entry.size} bytes (> ${READBACK_MAX_BYTES}); content omitted — verify by hash, or GET ${deployEndpoints(deps.config, cv.id).apiBase}/files?path=${encodeURIComponent(path)}`,
+        });
+      }
+      const bytes = await deps.storage.get(blobKey(cv.id, entry.hash));
+      if (!bytes) return fail("file blob missing from storage");
+      const text = isTextContentType(entry.mime);
+      return ok({
+        version,
+        path,
+        size: entry.size,
+        mime: entry.mime,
+        hash: entry.hash,
+        encoding: text ? "utf8" : "base64",
+        content: Buffer.from(bytes).toString(text ? "utf8" : "base64"),
+      });
     },
   );
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mimeFor } from "./mime.js";
+import { isTextContentType, mimeFor } from "./mime.js";
 
 describe("mimeFor", () => {
   it("maps known extensions to their MIME type", () => {
@@ -22,5 +22,35 @@ describe("mimeFor", () => {
     const r = mimeFor("mystery.zzz");
     expect(r.contentType).toMatch(/text\/plain/);
     expect(r.downgraded).toBe(true);
+  });
+});
+
+describe("isTextContentType", () => {
+  it("classifies text-shaped types as text (UTF-8 read-back)", () => {
+    for (const ct of [
+      "text/html; charset=utf-8",
+      "text/css; charset=utf-8",
+      "text/javascript; charset=utf-8",
+      "application/json; charset=utf-8",
+      "application/xml; charset=utf-8",
+      "image/svg+xml", // SVG is XML text
+      "text/csv; charset=utf-8",
+    ]) {
+      expect(isTextContentType(ct), ct).toBe(true);
+    }
+  });
+
+  it("classifies binary types as non-text (base64 read-back)", () => {
+    for (const ct of [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "font/woff2",
+      "application/wasm",
+      "application/pdf",
+      "video/mp4",
+    ]) {
+      expect(isTextContentType(ct), ct).toBe(false);
+    }
   });
 });

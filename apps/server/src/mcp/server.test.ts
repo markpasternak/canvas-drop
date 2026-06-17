@@ -54,6 +54,7 @@ async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
         storage,
         engine,
       }),
+      storage,
       audit: createAuditLog(auditRepository(client), silent),
     },
     caller,
@@ -107,6 +108,11 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     expect(created.id).toBeTruthy();
     expect(created.apiKey).toBeTruthy(); // returned once
+    // Ready-to-run curl endpoints so the agent never probes for the API host, with
+    // the real key embedded in the example (this is the one place the key is handed out).
+    expect(created.deploy.apiBase).toContain(`/v1/canvases/${created.id}`);
+    expect(created.deploy.curl).toContain(created.apiKey);
+    expect(created.deploy.readback).toContain(`/v1/canvases/${created.id}/files`);
 
     const deployed = payload(
       await mcp.callTool({
@@ -122,6 +128,89 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(got.publicationState).toBe("published");
   });
 
+  it("get_canvas_file reads back the live version — listing and content — for verification", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    // No live version yet → a clear failure, not an empty success.
+    const beforeDeploy = await mcp.callTool({
+      name: "get_canvas_file",
+      arguments: { id: created.id },
+    });
+    expect(isError(beforeDeploy)).toBe(true);
+
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: {
+        id: created.id,
+        zipBase64: zip({ "index.html": "<h1>hello</h1>", "app.js": "console.log(1)" }),
+      },
+    });
+
+    // No path → the live file listing (no blob bytes pulled into context).
+    const listing = payload(
+      await mcp.callTool({ name: "get_canvas_file", arguments: { id: created.id } }),
+    );
+    expect(listing.version).toBe(1);
+    expect(listing.fileCount).toBe(2);
+    expect(listing.files.map((f: { path: string }) => f.path).sort()).toEqual([
+      "app.js",
+      "index.html",
+    ]);
+
+    // With a path → the actual served bytes, so a deploy can be verified end-to-end.
+    const file = payload(
+      await mcp.callTool({
+        name: "get_canvas_file",
+        arguments: { id: created.id, path: "index.html" },
+      }),
+    );
+    expect(file.encoding).toBe("utf8");
+    expect(file.content).toBe("<h1>hello</h1>");
+    expect(file.hash).toBe(sha("<h1>hello</h1>"));
+
+    // A path not in the live version fails cleanly.
+    const missing = await mcp.callTool({
+      name: "get_canvas_file",
+      arguments: { id: created.id, path: "nope.txt" },
+    });
+    expect(isError(missing)).toBe(true);
+  });
+
+  it("get_canvas_file returns binary files as base64 that round-trips to the bytes", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    // A minimal PNG signature — image/png → binary → base64 encoding branch.
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const pngB64 = Buffer.from(pngBytes).toString("base64");
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: {
+        id: created.id,
+        files: [
+          { path: "index.html", content: "<h1>x</h1>" },
+          { path: "icon.png", content: pngB64, encoding: "base64" },
+        ],
+      },
+    });
+
+    const file = payload(
+      await mcp.callTool({
+        name: "get_canvas_file",
+        arguments: { id: created.id, path: "icon.png" },
+      }),
+    );
+    expect(file.encoding).toBe("base64");
+    expect(file.mime).toContain("image/png");
+    expect(Array.from(Buffer.from(file.content, "base64"))).toEqual(Array.from(pngBytes));
+  });
+
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {
     client = await makeTestDb(dialect);
     const ownerA = await seedUser(client, "a@example.com");
@@ -132,7 +221,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
 
     // B tries to act on A's canvas — every canvas-scoped tool must refuse.
     const bClient = await connect(client, { userId: ownerB });
-    for (const name of ["get_canvas", "list_versions", "unpublish_canvas"]) {
+    for (const name of ["get_canvas", "list_versions", "unpublish_canvas", "get_canvas_file"]) {
       const res = await bClient.callTool({ name, arguments: { id: made.id } });
       expect(isError(res), `${name} should refuse`).toBe(true);
     }

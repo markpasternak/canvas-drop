@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
-import { manifestsEqual } from "../canvas/manifest.js";
+import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import { requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { blobKey } from "../canvas/storage-keys.js";
@@ -76,14 +76,9 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   // since the editor/draft/preview surface exposes canvas content.
   const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
 
-  async function liveManifest(cv: Canvas): Promise<Manifest | null> {
-    if (!cv.currentVersionId) return null;
-    const v = await deps.versions.findById(cv.currentVersionId);
-    return v?.status === "ready" && v.manifest ? (v.manifest as Manifest) : null;
-  }
-
   async function viewOf(c: Context<AppEnv>, cv: Canvas, draft: Draft): Promise<Response> {
-    return c.json(draftView(draft, await liveManifest(cv)));
+    const live = await liveManifest(deps.versions, cv.currentVersionId);
+    return c.json(draftView(draft, live?.manifest ?? null));
   }
 
   // Draft state + file list (creates the draft from the live version on first open, R10).

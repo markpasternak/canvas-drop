@@ -12,6 +12,13 @@ can repair and retry without a human.
 
 Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id (not the slug).
 
+> **What is `{base}`?** The host serving this API — `CANVAS_DROP_API_BASE_URL`, which
+> defaults to the instance base URL. In `subdomain` mode the API is usually fronted on
+> its own host (e.g. `https://api.example.com`), separate from the canvas hosts
+> (`{slug}.example.com`) — so don't assume it equals the dashboard host. You don't have
+> to guess it: `create_canvas` (over [MCP](/docs/agents/mcp)) returns the exact,
+> ready-to-run curl endpoints for the canvas, and the create flow shows them too.
+
 | Method | Path | Purpose |
 |---|---|---|
 | `PUT` | `/v1/canvases/{id}/deploy` | Publish a live version from an archive body |
@@ -20,6 +27,7 @@ Base path: `{base}/v1/canvases/{id}`. `{id}` is the canvas id (not the slug).
 | `POST` | `/v1/canvases/{id}/uploads/{uploadId}/finalize` | Publish from the staged upload |
 | `GET` | `/v1/canvases/{id}` | Canvas metadata |
 | `GET` | `/v1/canvases/{id}/versions` | List versions |
+| `GET` | `/v1/canvases/{id}/files` | Read back the live version (verify a deploy) |
 | `POST` | `/v1/canvases/{id}/rollback` | Restore a prior ready version |
 | `POST` | `/v1/canvases/{id}/unpublish` | Take the canvas back to Draft |
 
@@ -143,6 +151,39 @@ Authorization: Bearer cd_...
 
 Returns the canvas's versions, newest first.
 
+## Verify a deploy (read back the live version)
+
+The canvas's public URL is **access-controlled** — a keyed/curl agent can't fetch it to
+check what shipped (an unauthenticated request gets a login page). Use this instead. The
+key only works on its own canvas, so it's an owner-scoped read.
+
+```
+GET {base}/v1/canvases/{id}/files
+Authorization: Bearer cd_...
+```
+
+With no query, returns the live version's manifest:
+
+```json
+{ "version": 7, "fileCount": 3, "files": [
+  { "path": "index.html", "size": 1280, "mime": "text/html; charset=utf-8", "hash": "9f86d0…" }
+] }
+```
+
+Add `?path=` to get one file's **raw bytes** (the body is the file itself, with its
+`Content-Type` and an `ETag` of the content hash) — pipe it straight to a checksum to
+confirm the bytes match what you deployed:
+
+```bash
+curl -fsS "{base}/v1/canvases/{id}/files?path=index.html" \
+  -H "Authorization: Bearer $CANVAS_KEY" | sha256sum
+```
+
+`404 NOT_PUBLISHED` if the canvas has no live version; `404 NOT_FOUND` if the path isn't
+in the live manifest. (The MCP [`get_canvas_file`](/docs/agents/mcp) tool is the
+identity-scoped equivalent; it inlines content up to 256 KiB and returns hash-only
+metadata above that — this HTTP read-back has no size cap since you stream the body.)
+
 ## Roll back
 
 ```
@@ -198,6 +239,10 @@ Rollback reuses some of these codes at non-`400` statuses: `INVALID_PATH` at `40
 when there's no ready version of that number, and `VERSION_UNAVAILABLE` at `409`
 when the target was pruned during the swap. Unpublish returns `CANNOT_UNPUBLISH`
 at `409` when the canvas isn't currently published.
+
+The read-back (`GET …/files`) returns `NOT_PUBLISHED` at `404` when the canvas has
+no live version, and `NOT_FOUND` at `404` when `?path=` names a file that isn't in
+the live manifest.
 
 Auth, size, and rate-limit failures use their own shapes:
 
