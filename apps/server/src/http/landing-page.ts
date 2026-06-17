@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
@@ -482,10 +486,33 @@ const ghIcon = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 const arrow = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const arrowLeft = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+// The screenshot assets are served with a 1-day cache under a STABLE filename, so a
+// refreshed shot (e.g. `pnpm landing:screenshots`) would otherwise stay stale in
+// browser/CDN caches for up to a day. Append a short content hash so a changed image
+// busts caches immediately while an unchanged one keeps caching. Resolved from the same
+// committed dir the docs route serves (apps/server/src|dist/http → ../../../.. = repo root).
+const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../..", "docs/site/assets");
+const assetVerCache = new Map<string, string>();
+function assetSrc(img: string): string {
+  let ver = assetVerCache.get(img);
+  if (ver === undefined) {
+    try {
+      ver = createHash("sha256")
+        .update(readFileSync(join(ASSETS_DIR, `${img}.webp`)))
+        .digest("hex")
+        .slice(0, 8);
+    } catch {
+      ver = ""; // asset unreadable (shouldn't happen in a real deploy) → no cache-bust
+    }
+    assetVerCache.set(img, ver);
+  }
+  return ver ? `/docs/assets/${img}.webp?v=${ver}` : `/docs/assets/${img}.webp`;
+}
+
 /** One carousel slide: a framed dark screenshot + a caption. */
 function tourSlide(t: (typeof TOUR)[number]): string {
   return `<figure class="slide">
-  <div class="shot"><img src="/docs/assets/${t.img}.webp" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
+  <div class="shot"><img src="${assetSrc(t.img)}" width="1440" height="900" alt="${escapeHtml(`${t.label}. ${t.caption}`)}" loading="lazy" decoding="async"></div>
   <figcaption><strong>${escapeHtml(t.label)}.</strong> ${escapeHtml(t.caption)}</figcaption>
 </figure>`;
 }

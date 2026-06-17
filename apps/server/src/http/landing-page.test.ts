@@ -76,14 +76,15 @@ describe("landing page — rendered content", () => {
       expect(html).toContain(`>${tag}</span>`);
     }
     // Dark, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
-    expect(html).toContain('src="/docs/assets/landing-dashboard.webp"');
-    expect(html).toContain('src="/docs/assets/landing-gallery.webp"');
+    // Each carries a `?v=<hash>` cache-bust, so match the path without the closing quote.
+    expect(html).toContain('src="/docs/assets/landing-dashboard.webp');
+    expect(html).toContain('src="/docs/assets/landing-gallery.webp');
   });
 
   it("includes the product-tour carousel and the team + privacy sections", () => {
     const html = renderLandingPage();
     expect(html).toContain("data-carousel");
-    expect(html).toContain('src="/docs/assets/tour-editor.webp"');
+    expect(html).toContain('src="/docs/assets/tour-editor.webp');
     expect(html).toContain("Built for teams");
     expect(html).toContain("Private by design");
     expect(html).toContain("No telemetry, ever");
