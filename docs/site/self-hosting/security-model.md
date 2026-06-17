@@ -1,13 +1,16 @@
 # Security model
 
-canvas-drop hosts arbitrary, sometimes AI-generated, web artifacts for a trusted
-organization — everyone has already passed SSO and the email-domain allowlist.
-It is not built to defend against the hostile internet. Inside that trust
-boundary it holds five hard invariants; beyond them it stays simple and
-permissive. This page tells you, as an operator, where the boundary is and how
-your config decisions keep it intact.
+Two config choices carry most of the security weight of a canvas-drop instance.
+Set them deliberately, then read on for why.
 
-Two config choices carry most of the weight. Set them deliberately:
+canvas-drop hosts arbitrary, sometimes AI-generated, web artifacts for a trusted
+organization — everyone who reaches a canvas has already passed SSO and the
+email-domain allowlist. It is not built to defend against the hostile internet.
+Inside that trust boundary it holds five hard invariants; beyond them it stays
+simple and permissive. This page tells you, as an operator, where the boundary
+is and how your config decisions keep it intact.
+
+The two settings that matter most:
 
 | Env var | Production choice | Why it matters |
 | --- | --- | --- |

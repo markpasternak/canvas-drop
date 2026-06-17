@@ -43,8 +43,8 @@ that communicates better as a working artifact than as a screenshot or a slide.
   `specific_people` (named org members and email-invited guests), `whole_org`
   (any signed-in member with the link), or `public_link` (anyone with the link,
   admin-gated per owner, and static-only). Layer on a per-canvas password or a
-  share expiry, and opt into the gallery to let colleagues browse it. A canvas
-  must be published before any shared rung takes effect.
+  share expiry, and list a shared canvas in the gallery for colleagues to
+  browse. A canvas must be published before any shared rung takes effect.
 
 ## Where to go next
 

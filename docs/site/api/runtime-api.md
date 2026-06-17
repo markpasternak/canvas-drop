@@ -46,15 +46,15 @@ authorize + isolation + capability checks. These can return before your handler:
 | `CROSS_SITE_FORBIDDEN` | 403 | `path` mode with `Sec-Fetch-Site` not `same-origin`/`none`. |
 | `CAPABILITY_DISABLED` | 403 | The route's capability is off. Body: `{ code, capability }`. |
 
-Preflight `OPTIONS /v1/c/{slug}/*` is answered before the auth gateway. In
+Preflight `OPTIONS /v1/c/{slug}/*` is answered before the auth gateway with `204`,
+advertising methods `GET,POST,PUT,DELETE,OPTIONS` and header `Content-Type`. In
 `subdomain` mode the runtime API emits credentialed CORS for the canvas's exact
 subdomain origin; in `path` mode the canvas is same-origin and no cross-origin CORS
 header is sent. The path itself is identical in both modes.
 
-A request that reaches a handler unauthenticated is stopped by the auth gateway before
-the pipeline runs — a `401` in `proxy`/`dev` mode, or a `302` redirect to `/auth/login`
-in `oidc` mode. All `code` values are stable — see
-[Error codes](/docs/api/errors).
+Unauthenticated requests are stopped by the auth gateway before any route runs — a
+`401` in `proxy`/`dev` mode, or a `302` redirect to `/auth/login` in `oidc` mode. All
+`code` values are stable — see [Error codes](/docs/api/errors).
 
 ## Identity
 

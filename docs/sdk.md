@@ -83,8 +83,10 @@ await canvasdrop.files.delete(f.id);
 ```
 
 `upload(file)` takes a `File` and returns `{ id, name, size, url }`, where `url`
-is the absolute `/v1/c/{slug}/files/{id}/content` path. `url(id)` returns the same
-string synchronously. Content is served with `X-Content-Type-Options: nosniff`;
+is the fully-qualified content URL (`{base}/v1/c/{slug}/files/{id}/content`).
+`url(id)` returns the same string synchronously. Note `upload`'s result omits
+`mime`/`createdAt`; `list()`'s `FileMeta` includes them. Content is served with
+`X-Content-Type-Options: nosniff`;
 uploaded HTML/SVG is served as an attachment, never rendered inline (so it can't
 run as another viewer).
 
@@ -151,6 +153,14 @@ subscription itself), `publish(event, data)` broadcasts to the channel,
 `onPresence` register the corresponding listeners. `from` on each message is the
 sender's server-resolved identity. Realtime is available only when the instance
 has WebSocket support wired and the `realtime` capability is on.
+
+If the socket closes with a terminal error, that error becomes "sticky": later
+`publish()` calls throw it and `presence()` rejects with it. The terminal cases
+are `CapabilityDisabledError` (`realtime` turned off), `NotAuthenticatedError`
+(viewer lost access), and `QuotaExceededError` (`.code === "CONNECTION_LIMIT"`,
+429 — more than 30 concurrent connections for the canvas). Transient drops
+reconnect automatically with capped backoff; the outbound buffer holds up to 256
+messages, dropping the oldest under backpressure.
 
 ## Errors
 

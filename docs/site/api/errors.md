@@ -82,8 +82,9 @@ Classes such as `CrossCanvasForbiddenError`, `ModelNotAllowedError`, and
 `ai.chat` / `ai.stream` consume a server-sent stream. Failures surface two ways:
 
 - **Before the stream starts** (an HTTP error) — thrown as a typed error per the
-  tables above, e.g. `MODEL_NOT_ALLOWED` (403), `QUOTA_EXCEEDED` (429), or
-  `CAPABILITY_DISABLED` (403).
+  tables above, e.g. `INVALID_BODY` (400), `MODEL_NOT_ALLOWED` (403),
+  `CAPABILITY_DISABLED` (403), `GUEST_AI_DISABLED` (403), `GUEST_AI_CAP` (429), or
+  `QUOTA_EXCEEDED` (429).
 - **Mid-stream** — an `error` frame maps to `CAPABILITY_DISABLED` →
   `CapabilityDisabledError`, `QUOTA_EXCEEDED` → `QuotaExceededError`, otherwise a
   base `CanvasdropError` with the frame's `code` and status `502`. The server's

@@ -1,14 +1,15 @@
 # Realtime
 
-Add live cursors, reactions, or a shared room to a canvas with
-`canvasdrop.realtime`: ephemeral pub/sub plus presence. Messages are not
-persisted; they fan out to whoever is connected to a channel right now.
-Identity on every message and in the presence list comes from the server-side
-session, never the client, so `from.name` and the presence list are always
-trustworthy.
+Add live cursors, reactions, or a shared room with `canvasdrop.realtime`:
+ephemeral pub/sub plus presence over a channel. Messages are not persisted; they
+fan out to whoever is connected to that channel right now. Identity on every
+message and in the presence list comes from the server-side session, never the
+client, so `from.name` and the presence list are always trustworthy.
 
 No keys, no setup: `canvasdrop` is already on `window` in any canvas, and it
-connects to the right canvas automatically.
+connects to the right canvas automatically. `realtime` is one of the five
+primitives, and the owner can turn it off per canvas (see
+[Limits and errors](#limits-and-errors)).
 
 ```js
 const channel = canvasdrop.realtime.channel("room-1");
@@ -60,16 +61,22 @@ type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser };
 - All channels on a canvas share **one** WebSocket, at
   `wss://{base}/v1/c/{slug}/realtime` (`ws://` over plain HTTP). The SDK derives
   the host and slug from the page, so you never construct the URL yourself.
+- The socket connects lazily on your first `publish`, `subscribe`, or
+  `presence` call, so calling those before the socket is open is fine — the SDK
+  buffers outbound frames and flushes them once connected. The buffer holds the
+  last **256** frames (oldest dropped beyond that).
 - The socket auto-reconnects with capped exponential backoff (default base
-  `500` ms, capped at `10000` ms).
+  `500` ms, capped at `10000` ms). On a transient drop, any in-flight
+  `presence()` promise rejects with a `CanvasdropError` (`code: "DISCONNECTED"`)
+  before the SDK reconnects; subscriptions are re-sent automatically on reconnect.
 - `close()` on the last open channel tears the socket down.
 
 ## Limits and errors
 
 Per-canvas limits enforced by the server: **30** concurrent connections, **100**
-messages per minute, **16 KB** per frame. For these and other recoverable
+messages per minute, **16 KiB** per frame. For these and other recoverable
 problems the server replies with an `{ type: "error", code }` frame and keeps
-the socket open: `RATE_LIMITED` (over 100/min), `MESSAGE_TOO_LARGE` (over 16 KB),
+the socket open: `RATE_LIMITED` (over 100/min), `MESSAGE_TOO_LARGE` (over 16 KiB),
 `INVALID_FRAME` (unparseable JSON), `UNKNOWN_FRAME` (unrecognized type). The
 terminal failures below close the socket instead:
 

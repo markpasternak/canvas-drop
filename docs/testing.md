@@ -15,7 +15,7 @@ canvas-drop runs on **SQLite or Postgres** from one schema (BUILD_BRIEF.md §10,
 - **SQLite** — `better-sqlite3`, in-memory.
 - **Postgres** — `pglite`, the real PostgreSQL engine compiled to WASM, in-process. It runs the **actual generated `drizzle/pg` migrations** and real Postgres SQL, so dialect drift fails the build immediately. No server needed.
 
-Dialect-parameterized suites use `describe.each(DIALECTS)` (`apps/server/src/db/testing.ts`). The schema-parity test (`packages/shared/src/db/schema.test.ts`) additionally diffs the two dialect schemas column-by-column.
+Dialect-parameterized suites use `describe.each(DIALECTS)` (`apps/server/src/db/testing.ts`). The schema-parity test (`packages/shared/src/db/schema.test.ts`) additionally diffs the two dialect schemas column-by-column — column names, `notNull`, primary keys, indexes, and foreign keys — so a `schema.pg.ts` / `schema.sqlite.ts` divergence fails the build.
 
 ## Commands
 

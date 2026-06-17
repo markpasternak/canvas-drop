@@ -1,18 +1,20 @@
 # Create & publish
 
 You have files (or HTML, or a build directory) and want a live, shareable URL.
-This page covers the four ways to get there and how publishing works.
+This page covers the ways to get there and how publishing works.
 
 A canvas serves an **immutable, versioned set of static files** at its canvas URL.
-Three deploy paths publish a version directly — drag a folder/files, upload a ZIP,
-or paste HTML — plus a programmatic **Deploy API** for CI and agents. The fourth
-source, the in-browser [editor](/docs/authoring/editor), saves a draft first and
-lets you publish when you're ready.
+The create flow at `/new` mints the canvas and offers four sources: drag a
+folder/files, upload a ZIP, paste HTML, or **API** (mint an empty canvas plus a
+key for the programmatic [Deploy API](/docs/api/deploy-api)). The first three
+publish a version directly; each is also available on an existing canvas to
+publish its next version. The in-browser [editor](/docs/authoring/editor) is the
+one source that saves a **draft** first and lets you publish when you're ready.
 
-The three deploy paths start from the create flow at `/new` (which also mints the
-canvas), and are also available on an existing canvas to publish its next version.
-The in-browser [editor](/docs/authoring/editor) opens on an existing canvas and
-uses the draft/publish loop.
+The create flow also has an **Enable backend** toggle (off by default; turns on
+the five primitives — KV, files, AI, identity, realtime) and an optional
+**custom slug** field. If a folder or ZIP deploy fails right after the canvas is
+created, the empty canvas is cleaned up for you.
 
 ## Drag-and-drop files or a folder
 
@@ -42,11 +44,13 @@ directly. See [The editor](/docs/authoring/editor).
 
 ## Custom slug
 
-The canvas URL ends in a **slug**. By default a new canvas gets a readable random
+The slug identifies the canvas in its URL (`{base}/c/{slug}/` in path mode,
+`{slug}.{base}` in subdomain mode). By default a new canvas gets a readable random
 slug; you can choose your own at create time (the slug field in `/new`) or change
-it later from the canvas **Settings** tab → URL & routing. Slugs are DNS-safe and
-reserved words are rejected; if the one you want is taken you'll get
-`409 slug_taken`. Changing a slug takes effect on the next request and the old
+it later from the canvas **Settings** tab → URL & routing. The grammar is one DNS
+label: lowercase `a–z`, digits, and hyphen, 1–63 characters, no leading or
+trailing hyphen. Reserved words are rejected, and if the one you want is taken you
+get `409 slug_taken`. Changing a slug takes effect on the next request and the old
 URL stops resolving.
 
 A custom slug is guessable, so for any link-reachable canvas rely on the access
@@ -86,10 +90,11 @@ repair and retry:
 ```
 
 A single-shot `PUT .../deploy` returns `400` with the failure's `code` for
-validation errors (e.g. `EMPTY_DEPLOY`, `INVALID_PATH`); a request body over the
-size cap is rejected with `413 CANVAS_TOO_LARGE` before it is parsed. Limits:
-100 MB/canvas, 25 MB/file, 2000 files. The endpoint is rate-limited to
-10 deploys/min/canvas (`429` with `Retry-After`) once the Bearer key is verified.
+validation errors (e.g. `EMPTY_DEPLOY`, `INVALID_PATH`, `ZIP_SLIP_REJECTED`); a
+request body over the size cap is rejected with `413 CANVAS_TOO_LARGE` before it
+is parsed. Limits: 100 MB/canvas, 25 MB/file, 2000 files. Once the Bearer key is
+verified the endpoint is rate-limited per canvas (default 10 deploys/min, admin-
+tunable; `429 {"error":"rate_limited"}` with a `Retry-After` header).
 `warnings[]` carries non-fatal notices — e.g. a file that may contain a canvas API
 key you should remove before publishing, or a path that will be served as
 `text/plain`.

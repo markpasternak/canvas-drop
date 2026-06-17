@@ -30,8 +30,9 @@ instance:
 
 - **Connect over MCP.** Add `{base}/mcp`, sign in once through the instance's own
   login, then call identity-scoped tools (`whoami`, `list_canvases`,
-  `create_canvas`, `deploy_canvas`, `get_canvas_file`, `rollback_canvas`, and more —
-  18 tools in all) with no key to paste. See the [MCP server](/docs/agents/mcp).
+  `create_canvas`, `deploy_canvas`, `get_canvas_file`, `rollback_canvas`, the
+  draft-editor loop, and more — 32 tools in all) with no key to paste. See the
+  [MCP server](/docs/agents/mcp).
 - **Deploy over HTTP** with a per-canvas API key:
   `PUT {base}/v1/canvases/{id}/deploy` (Bearer auth, ZIP body) publishes
   immediately. Companion read-back and recovery routes (`GET {base}/v1/canvases/{id}`,

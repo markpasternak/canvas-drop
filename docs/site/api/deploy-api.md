@@ -84,9 +84,11 @@ buffering at 110 MB (canvas cap + 10 MB); an over-limit body returns
 `413 { "code": "CANVAS_TOO_LARGE" }`. An empty body returns
 `400 { "code": "EMPTY_DEPLOY" }`.
 
-**Rate limit:** deploy and rollback are throttled at 10/min per canvas (keyed after
-the key is verified). Over-limit returns `429 { "error": "rate_limited" }` with a
-`Retry-After` header.
+**Rate limit:** when rate limiting is enabled, the deploy-class endpoints —
+`PUT .../deploy`, `POST .../uploads` (begin), `POST .../uploads/{uploadId}/finalize`,
+and `POST .../rollback` — are throttled per canvas (keyed after the key is verified).
+The default is 10/min (`CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN`). Over-limit returns
+`429 { "error": "rate_limited" }` with a `Retry-After` header.
 
 ## Staged upload (large or incremental)
 
@@ -205,8 +207,9 @@ Content-Type: application/json
 { "version": 5 }
 ```
 
-Restores a prior ready version and points the canvas back at it. Rollback shares the
-10/min-per-canvas rate limit with deploy. A target version that doesn't exist or
+Restores a prior ready version and points the canvas back at it; returns
+`200 { "url": "<canvas URL>", "version": 5 }`. Rollback shares the deploy-class
+rate limit. A target version that doesn't exist or
 isn't ready returns `404 { "code": "INVALID_PATH" }`; a missing or non-numeric
 `version` field returns `400 { "code": "INVALID_PATH" }`; and if the target was
 pruned between selection and the swap you get `409 { "code": "VERSION_UNAVAILABLE" }`
@@ -222,6 +225,8 @@ Authorization: Bearer cd_...
 Takes the canvas back to **Draft**: the public URL goes offline and any live
 realtime sockets are dropped, while the draft and version history are kept.
 Re-publish later with `PUT .../deploy` or by rolling back to a kept version.
+
+**Success — `200`:** `{ "url": "<canvas URL>", "publicationState": "draft", "currentVersionId": null }`.
 
 Unpublishing a canvas that isn't currently published returns
 `409 { "code": "CANNOT_UNPUBLISH" }`.
@@ -240,11 +245,13 @@ Codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
 `PATH_EXISTS`, `VERSION_UNAVAILABLE`, `CANNOT_UNPUBLISH`. See
 [Error codes](/docs/api/errors) for the full table.
 
-Staged-upload codes: `INVALID_MANIFEST` (`400`), `UPLOAD_HANDLE_INVALID` (`404` —
-unknown / wrong-owner / wrong-canvas handle, no existence leak), `UPLOAD_EXPIRED`
-(`400`), `UPLOAD_ALREADY_FINALIZED` / `UPLOAD_IN_PROGRESS` (`409`),
-`UPLOAD_MISSING_BLOB` (`400`), `BLOB_HASH_MISMATCH` (`400`), `INVALID_ENCODING`
-(`400`).
+The staged-upload routes use a richer status mapping than the blanket `400`:
+`INVALID_MANIFEST` (`400`), `UPLOAD_HANDLE_INVALID` (`404` — unknown / wrong-owner /
+wrong-canvas handle, no existence leak), `UPLOAD_EXPIRED` (`400`),
+`UPLOAD_ALREADY_FINALIZED` / `UPLOAD_IN_PROGRESS` (`409`), `UPLOAD_MISSING_BLOB`
+(`400`), `BLOB_HASH_MISMATCH` (`400`), `INVALID_ENCODING` (`400`). On these routes
+the size caps surface as `413`, not `400`: `CANVAS_TOO_LARGE`, `TOO_MANY_FILES`,
+`FILE_TOO_LARGE`.
 
 Rollback reuses some of these codes at non-`400` statuses: `INVALID_PATH` at `404`
 when there's no ready version of that number, and `VERSION_UNAVAILABLE` at `409`

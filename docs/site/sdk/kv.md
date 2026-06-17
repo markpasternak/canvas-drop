@@ -2,7 +2,16 @@
 
 Persist JSON values from your canvas with `canvasdrop.kv` — counters, settings,
 small documents, anything you'd otherwise lose on reload. The global
-`canvasdrop` client is available on any served canvas; no setup, no API keys.
+`canvasdrop` client is on every served canvas; no setup, no API keys.
+
+```js
+await canvasdrop.kv.set("votes", 0);                       // any JSON-serializable value
+const n = await canvasdrop.kv.get("votes");                // value, or null if absent
+const total = await canvasdrop.kv.increment("votes");      // atomic, +1 by default
+const stepped = await canvasdrop.kv.increment("votes", 5); // atomic, +5
+await canvasdrop.kv.delete("votes");
+const { entries, nextCursor } = await canvasdrop.kv.list({ prefix: "p:", limit: 100 });
+```
 
 Two namespaces share the same five methods (`get`, `set`, `delete`, `list`,
 `increment`):
@@ -14,25 +23,21 @@ Two namespaces share the same five methods (`get`, `set`, `delete`, `list`,
 Identity comes from the session, never from your code, so there are no
 credentials to handle.
 
-## Shared
+## Methods
 
-```js
-await canvasdrop.kv.set("votes", 0);            // value is any JSON-serializable
-const n = await canvasdrop.kv.get("votes");     // value, or null if absent
-const total = await canvasdrop.kv.increment("votes");      // atomic, +1 by default
-const stepped = await canvasdrop.kv.increment("votes", 5); // atomic, +5
-await canvasdrop.kv.delete("votes");
-const { entries, nextCursor } = await canvasdrop.kv.list({ prefix: "p:", limit: 100 });
-```
+`get<T>(key)` returns the stored value (typed as `T`, default `unknown`) or
+`null` when the key is absent.
+
+`set(key, value)` and `delete(key)` return nothing. `delete` is idempotent.
 
 `increment(key, by = 1)` is atomic and returns the new number — safe for
 concurrent polls, counters, and votes. It throws `NOT_NUMERIC` (409) if the
-stored value isn't a number. `set(key, value)` and `delete(key)` return nothing.
+stored value isn't a number, and (like `set`) can throw the size and key-count
+limits below.
 
-`get<T>(key)` returns the stored value (typed as `T`, default `unknown`) or
-`null` when the key is absent. `list(opts?)` takes `{ prefix?, cursor?, limit? }`
-and returns `{ entries: [{ key, value }], nextCursor }`; pass `nextCursor` back
-as `cursor` to page.
+`list(opts?)` takes `{ prefix?, cursor?, limit? }` and returns
+`{ entries: [{ key, value }], nextCursor }`. `nextCursor` is `null` on the last
+page; otherwise pass it back as `cursor` to fetch the next page.
 
 ## Per-viewer
 

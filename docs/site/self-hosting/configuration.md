@@ -124,6 +124,25 @@ its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.
 | `CANVAS_DROP_S3_SECRET_KEY` | (unset) | **Required when `s3`.** |
 | `CANVAS_DROP_S3_FORCE_PATH_STYLE` | `true` | Keep `true` for MinIO. |
 
+## Screenshots (optional)
+
+Generates canvas thumbnails via headless Chromium. The pipeline is **off by
+default** and needs two things: Chromium in the image (build with
+`--build-arg SCREENSHOTS=1`) and `CANVAS_DROP_SCREENSHOTS=on`. The env var only
+sets availability; an admin still toggles capture on. Each tuning var is a
+positive integer ≥ 1.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_SCREENSHOTS` | `off` | `on` \| `off`. Availability switch. |
+| `CANVAS_DROP_SCREENSHOTS_CONCURRENCY` | `1` | Concurrent render workers. |
+| `CANVAS_DROP_SCREENSHOTS_TIMEOUT_MS` | `20000` | Per-render timeout. |
+| `CANVAS_DROP_SCREENSHOTS_RECYCLE_EVERY` | `50` | Renders before recycling a worker. |
+| `CANVAS_DROP_SCREENSHOTS_LEASE_MS` | `120000` | Job lease duration. |
+| `CANVAS_DROP_SCREENSHOTS_MAX_ATTEMPTS` | `3` | Retries before a job is marked failed. |
+| `CANVAS_DROP_SCREENSHOTS_FAILED_TTL_MS` | `86400000` | How long a failed job is retained (24h). |
+| `CANVAS_DROP_SCREENSHOTS_TOKEN_TTL_MS` | `60000` | Render-token lifetime. |
+
 ## Rate limiting
 
 Per-minute request budgets. Each limit is a positive integer ≥ 1 (boot fails on

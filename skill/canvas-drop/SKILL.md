@@ -94,9 +94,10 @@ account and the canvases you own:
   `rename_draft_file` / `publish_draft` / `restore_draft` — the in-browser editor's draft
   loop: edit a mutable draft, then publish it as a version (or restore an old version into it).
 
-The MCP surface is at **full parity with the dashboard** — anything an owner can do in the
-UI, these tools can do. A tool only ever acts on canvases you own; a canvas you don't own
-reads as not found.
+These tools cover what an owner does in the dashboard — create, deploy, version, settings,
+sharing, gallery, capabilities, clone, usage, and the full draft/publish editor loop. Every
+tool acts only on canvases you own (`clone_canvas` also reaches a shared gallery template);
+a canvas you don't own reads as **canvas not found** (no existence leak).
 Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
 
 **Every deploy publishes immediately** — there is no draft step over MCP; the files go
@@ -207,10 +208,11 @@ const n = await canvasdrop.kv.increment("votes");     // atomic; returns new num
 const page = await canvasdrop.kv.list({ prefix: "c", limit: 50 });
 await canvasdrop.kv.user.set("pref", "dark");         // scoped to the viewer
 
-// Files — upload returns { id, name, size, url }
+// Files — upload(file: File) returns { id, name, size, url }
 const f = await canvasdrop.files.upload(fileObject);
-const files = await canvasdrop.files.list();
+const files = await canvasdrop.files.list();          // [{ id, name, size, mime?, createdAt? }]
 const src = canvasdrop.files.url(f.id);               // synchronous absolute URL
+await canvasdrop.files.delete(f.id);
 
 // AI — model is required; returns { text, usage, cost }
 const { text } = await canvasdrop.ai.chat(

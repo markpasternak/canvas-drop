@@ -9,7 +9,7 @@ const me = await canvasdrop.me();
 // { id, email, name, avatarUrl, kind }
 //
 // {
-//   id: "u_abc123",
+//   id: "0190a3f2-7c4e-7a1b-9d2f-3c5e6a7b8c9d",
 //   email: "alex@example.com",
 //   name: "Alex Rivera",
 //   avatarUrl: null,

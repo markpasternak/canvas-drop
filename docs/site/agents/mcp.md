@@ -15,13 +15,18 @@ Add the instance's MCP endpoint to your client:
 ```
 
 On first use the client runs an OAuth 2.1 sign-in: it discovers the authorization
-server, registers itself automatically (Dynamic Client Registration), and opens a
-browser to **this instance's normal login** (the same org sign-in you use for the
-dashboard) followed by a consent screen. No second account, no secret to copy. The
-client stores the resulting token and refreshes it automatically.
+server (RFC 8414/9728 `.well-known` metadata), registers itself automatically
+(Dynamic Client Registration), and opens a browser to **this instance's normal login**
+(the same org sign-in you use for the dashboard). No second account, no secret to copy.
+canvas-drop is its own authorization server — it does not proxy your IdP. In `oidc`
+mode an unauthenticated agent is bounced through the usual login; in `proxy`/`dev`
+mode identity is already resolved. The client stores the resulting access token (1h
+TTL) and refreshes it automatically (refresh tokens rotate on use).
 
-Identity always comes from that sign-in, server-side — never from anything the client
-asserts. Only members whose email is allowed to sign in can connect.
+Identity always comes from that server-side sign-in — never from anything the client
+asserts. The email-domain allowlist is enforced before any token is issued, and every
+tool call re-checks that your account is still active, so a block or de-allowlist kills
+a live token on the next request.
 
 ## Tools
 

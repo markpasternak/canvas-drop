@@ -19,9 +19,12 @@ credentials.
    Content-Type: application/zip
    ```
 
-   This publishes a new live version directly — no draft loop. Companion routes:
-   `GET /v1/canvases/{id}`, `GET /v1/canvases/{id}/versions`,
-   `POST /v1/canvases/{id}/unpublish`, `POST /v1/canvases/{id}/rollback`. See the
+   This publishes a new live version directly — no draft loop. Read-back and
+   companion routes: `GET /v1/canvases/{id}`, `GET /v1/canvases/{id}/versions`,
+   `GET /v1/canvases/{id}/files`, `POST /v1/canvases/{id}/rollback`,
+   `POST /v1/canvases/{id}/unpublish`. For large or repeat deploys, the staged
+   content-addressed flow (`POST /uploads` → `PUT /uploads/{uploadId}/blobs/{hash}`
+   → `POST /uploads/{uploadId}/finalize`) sends only changed blobs. See the
    [Deploy API](/docs/api/deploy-api).
 
 `{base}` is the instance origin. The key is verified per-canvas; it only

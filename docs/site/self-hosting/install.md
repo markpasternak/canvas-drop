@@ -20,11 +20,41 @@ docker compose up --build
 
 This boots the whole production shape with zero external setup: canvas-drop in real
 `proxy` mode behind Caddy + oauth2-proxy + a bundled **Dex** demo IdP, with Postgres
-and an optional MinIO (S3) profile (`docker compose --profile minio up`). The app
-verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you
-would run in production. Only Caddy publishes a host port (`8080`); the app, IdP, and
-database stay on the internal network. Pause the stack with `docker compose stop`, or
-tear it down and wipe data with `docker compose down -v`.
+for the database and local file storage. The app verifies a Dex-signed JWT against
+Dex's JWKS — the same cryptographic trust path you would run in production. Only Caddy
+publishes a host port (`8080`); the app, IdP, and database stay on the internal
+network. Pause the stack with `docker compose stop`, or tear it down and wipe data with
+`docker compose down -v`.
+
+To use S3-compatible storage instead of the local volume, start the bundled MinIO with
+its profile and point the app at it:
+
+```bash
+docker compose --profile minio up --build
+```
+
+The `--profile minio` flag only starts the MinIO container; the `app` service still uses
+local storage until you point it at S3. Because the `app` service sets its config in an
+inline `environment:` block (no `env_file`), you enable S3 by editing `docker-compose.yml`
+directly — replace `CANVAS_DROP_STORAGE: local` with the S3 vars the bundled MinIO expects:
+
+```yaml
+    environment:
+      # …
+      CANVAS_DROP_STORAGE: s3
+      CANVAS_DROP_S3_ENDPOINT: http://minio:9000
+      CANVAS_DROP_S3_FORCE_PATH_STYLE: "true"
+      CANVAS_DROP_S3_BUCKET: canvas-drop
+      CANVAS_DROP_S3_REGION: us-east-1
+      CANVAS_DROP_S3_ACCESS_KEY: minioadmin
+      CANVAS_DROP_S3_SECRET_KEY: minioadmin
+```
+
+`CANVAS_DROP_S3_ENDPOINT` (the in-network MinIO address) and the
+`minioadmin`/`minioadmin` credentials are the bundled MinIO container's defaults from
+the compose file; `CANVAS_DROP_S3_FORCE_PATH_STYLE` already defaults to `true` but is
+shown here for clarity. See
+[Configuration](/docs/self-hosting/configuration) for the full var reference.
 
 To confirm the launch invariants hold (app healthy, no app port exposed, unauthenticated
 requests redirected, forged identity headers rejected, a real Dex login resolves, data
@@ -32,6 +62,17 @@ survives a restart), run the smoke test:
 
 ```bash
 ./scripts/compose-smoke.sh        # KEEP_UP=0 tears the stack down at the end
+```
+
+### Optional: canvas screenshots
+
+The thumbnail/screenshot pipeline is **off by default** and needs Chromium baked into
+the image. Build with the `SCREENSHOTS` build arg (adds ~300MB via
+`playwright install --with-deps chromium`), then enable it at runtime with
+`CANVAS_DROP_SCREENSHOTS=on` plus the admin toggle:
+
+```bash
+docker build --build-arg SCREENSHOTS=1 -t canvas-drop:screenshots .
 ```
 
 > The bundled Dex/oauth2-proxy secrets and the `demo@example.com` login are public,

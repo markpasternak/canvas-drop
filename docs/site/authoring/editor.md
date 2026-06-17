@@ -8,9 +8,11 @@ tab.
 
 Every canvas has one **draft**: a working copy separate from what viewers see.
 When you open a new canvas's draft it starts empty; otherwise it's seeded from the
-current published version. Your edits autosave to the draft as you go (debounced,
-with a final flush when you leave the editor); the canvas keeps serving its published
-version until you explicitly **publish**.
+current published version. Your edits autosave to the draft as you type (debounced
+~700ms, with a final flush when you leave the editor); the canvas keeps serving its
+published version until you explicitly **publish**. If the draft changed in another
+tab or session since you loaded it, a flush is rejected rather than overwriting that
+newer state, so you don't silently clobber edits made elsewhere.
 
 The loop:
 
@@ -24,9 +26,9 @@ disabled by an admin, both are blocked (`409 NOT_ACTIVE`). You can still edit th
 
 ## Files
 
-Use the file tree to add, rename, replace, delete, and upload files (drag-and-drop
-works too). Relative paths are preserved, so a `css/site.css` reference resolves
-the way you'd expect.
+Use the file tree to add, rename, delete, upload, replace, and download files
+(drag-and-drop works too). Relative paths are preserved, so a `css/site.css`
+reference resolves the way you'd expect.
 
 Name your home page `index.html` at the canvas root. The root URL serves `index.html`
 if it exists; if the draft has exactly one HTML file it's served as the entry even
@@ -37,7 +39,10 @@ returns 404. Drafts in that state get a repair notice pointing you toward a vali
 Text files open in the CodeMirror editor with syntax highlighting. Binary assets
 (images, fonts, spreadsheets) aren't text-editable: images show a preview, and any
 non-editable file offers **Download** and **Replace** instead of an edit surface.
-You can publish any non-empty draft.
+
+**Publish** is enabled only when the draft has unpublished changes (or is otherwise
+out of sync with the current version); with nothing to ship, the button stays
+disabled.
 
 Limits per canvas: **25 MB per file**, **100 MB total**, **2000 files**. Edits that
 would exceed a limit are rejected.

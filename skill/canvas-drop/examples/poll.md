@@ -6,7 +6,8 @@ a running total, with no keys and no build step.
 Two steps to live:
 
 1. Deploy the file below as a canvas (folder/ZIP/paste/deploy API — see the deploy docs).
-2. Enable the `kv` capability for the canvas (capabilities are off by default).
+2. Enable backend access for the canvas. Backend is off by default; turning it on enables
+   the `kv` capability (and the other primitives), so this poll can read and write the store.
 
 The browser SDK is served at `/sdk/v1.js` and auto-detects the canvas slug from the URL.
 The single global it exposes is `canvasdrop` (no `cd` alias). No keys, no config: requests
@@ -43,7 +44,7 @@ you can catch (see the `CAPABILITY_DISABLED` handler below).
           } catch (err) {
             // CapabilityDisabledError.code === "CAPABILITY_DISABLED" (HTTP 403)
             if (err.code === "CAPABILITY_DISABLED") {
-              out.textContent = "Enable the kv capability for this canvas.";
+              out.textContent = "Enable backend access (kv) for this canvas.";
             } else {
               throw err;
             }

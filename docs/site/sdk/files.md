@@ -44,7 +44,8 @@ Every method rejects with a `CanvasdropError` subclass — catch the one you car
 about, or read `err.code` / `err.status`.
 
 - Oversized upload throws `QuotaExceededError` (`status: 413`, `code: "FILE_TOO_LARGE"`).
-- Quota reached throws `QuotaExceededError` (`status: 409`).
+- Canvas quota reached throws `QuotaExceededError` (`status: 409`, `code: "QUOTA_EXCEEDED"`).
+- A malformed upload (missing `file` field) throws a `CanvasdropError` (`status: 400`, `code: "INVALID_BODY"`).
 - A disabled `files` capability throws `CapabilityDisabledError` (`status: 403`,
   `code: "CAPABILITY_DISABLED"`).
 - `delete(id)` on a missing file throws `NotFoundError` (`status: 404`,

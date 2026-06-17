@@ -36,19 +36,19 @@ const SITE = {
   name: "canvas-drop",
   domain: "canvas-drop.com",
   /** Hero promise — one line, product-true. */
-  tagline: "Your organization's place to drop and share the tools you build with AI.",
+  tagline: "Deploy and share the small web tools your org builds, behind your sign-in.",
   /** Short eyebrow above the headline. */
   eyebrow: "Internal canvases for your org",
   /** Big headline. Two short clauses read well at display scale. */
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "Your team builds working web tools with AI in minutes, then has nowhere safe to put them. canvas-drop is where they land: deploy a static canvas in seconds, share it behind your org sign-in, and skip the screenshots and slide decks.",
+    "Your team builds working web tools, then has nowhere safe to put them. canvas-drop is where they land: deploy a static canvas in seconds, share it behind your org sign-in, and skip the screenshots and slide decks.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
   metaDescription:
-    "Deploy and share the small web tools your org builds with AI. Static canvases, live in seconds, behind your organization's sign-in.",
+    "Deploy and share the small web tools your org builds. Static canvases, live in seconds, behind your organization's sign-in. Open source, self-hosted.",
 } as const;
 
 /** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
@@ -73,14 +73,14 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
   },
   {
     name: "Identity",
-    tag: "me",
-    blurb: "Know who's viewing. `me()` returns the signed-in org member.",
+    tag: "identity",
+    blurb: "Know who is viewing. `me()` returns the signed-in org member, resolved server-side.",
     glyph: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M5 20a7 7 0 0 1 14 0",
   },
   {
     name: "Realtime",
-    tag: "live",
-    blurb: "Broadcast and subscribe over a managed socket for live canvases.",
+    tag: "realtime",
+    blurb: "Broadcast and subscribe over a managed socket. No server to operate.",
     glyph: "M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0M12 12h.01",
   },
 ];
@@ -93,11 +93,11 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Shared with your org",
-    body: "Every canvas lives behind your organization's sign-in. Keep it private, invite specific people, open it to the whole org, or list it in the gallery. Revoke access and it's gone instantly.",
+    body: "Every canvas lives behind your organization's sign-in. Keep it private, invite specific people, open it to the whole org, or publish an admin-gated public link. Add a password or an expiry, and revoke access whenever you want.",
   },
   {
-    title: "Safe by default",
-    body: "Org-only access, isolated runtimes, and server-side keys. Backend power comes only through five audited primitives.",
+    title: "Versions you can roll back",
+    body: "Each publish snapshots an immutable version. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click.",
   },
 ];
 
@@ -177,8 +177,8 @@ const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
     body: "AI and provider keys live on the server and are never shipped to the browser.",
   },
   {
-    title: "Isolated runtimes",
-    body: "Canvases are sandboxed, so they can't reach each other or the platform's internals.",
+    title: "Backend off by default",
+    body: "A canvas reaches no backend until you switch it on, one primitive at a time. Public visitors get static files only.",
   },
   {
     title: "Your infrastructure",

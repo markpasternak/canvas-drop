@@ -36,15 +36,19 @@ The security-critical surface is the five hard invariants (see the
    session, canvas API key, or canvas content; keys and tokens are hashed at
    rest and shown once.
 3. **No unauthorized access** — a canvas is reachable only by principals its
-   access rung allows; revoke/expiry/password are honored, including **live** on
-   open realtime sockets.
+   access rung allows (owner; any allowed org member at `whole_org`; a listed
+   principal — org member or invited guest — at `specific_people`; anyone at
+   `public_link`); revoke/expiry/password are honored, including **live** on
+   open realtime sockets. An admin gets **no** special access to canvases it
+   doesn't own.
 4. **No cross-canvas reach in subdomain mode** — one canvas (or its code, SDK,
    or socket) cannot read, write, or act on another canvas's data, files, AI
    quota, or realtime channels. Path mode has reduced browser isolation and is
    for local/trusted own-hosting unless the operator opts into the tradeoff.
 5. **Lifecycle is honored instantly** — revoke, expiry, disable, delete, slug
-   regen, key regen, rung lowering, and unpublish take effect on the next
-   request and drop live realtime sockets.
+   regen, key regen, rung lowering, allowlist removal, guest-invite revocation,
+   and unpublish take effect on the next request and drop live realtime sockets
+   (including guest sockets).
 
 The deploy pipeline's upload safety (rejecting zip-slip and serving server-side
 executables as inert text) is a §12.1 input-hardening control that is also in

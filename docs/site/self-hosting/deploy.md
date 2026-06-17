@@ -73,10 +73,15 @@ set `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (≥1 domain; CSV, lowercased) — it is
 on every request. `dev` mode auto-logs-in a fixed local user with zero verification
 and is rejected at boot when `NODE_ENV=production`.
 
+Running real auth (`proxy`/`oidc`) in `path` URL mode also requires
+`CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true` — the app refuses to boot otherwise,
+because path mode has reduced per-canvas browser isolation. Set it only when you
+accept that tradeoff (the demo compose stack does, since `subdomain` can't run on
+localhost). `subdomain` mode needs no such opt-in.
+
 In `proxy` mode the app is sessionless: the IAP owns the session and identity is
-verified per request. In `oidc` mode the app issues its own session cookie
-(`__canvasdrop_session`, HttpOnly always, Secure in production, SameSite=Lax,
-14-day rolling).
+verified per request from the forwarded JWT (or trusted header). In `oidc` mode the
+app owns login and issues its own HttpOnly session cookie.
 
 ## Without a proxy
 

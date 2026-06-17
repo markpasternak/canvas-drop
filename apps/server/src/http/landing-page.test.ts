@@ -72,7 +72,7 @@ describe("landing page — rendered content", () => {
 
   it("shows the five primitives and references the regenerable screenshots", () => {
     const html = renderLandingPage();
-    for (const tag of ["kv", "files", "ai", "me", "live"]) {
+    for (const tag of ["kv", "files", "ai", "identity", "realtime"]) {
       expect(html).toContain(`>${tag}</span>`);
     }
     // Dark, populated marketing shots served at /docs/assets (pnpm landing:screenshots).

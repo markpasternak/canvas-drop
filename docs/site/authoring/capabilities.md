@@ -1,7 +1,7 @@
 # Capabilities
 
-A canvas is static by default. To give it backend behaviour, you turn on
-capabilities per canvas on its **Backend** tab. The master switch and every
+Give a canvas backend behavior by turning on capabilities per canvas, on its
+**Backend** tab. A canvas is static by default: the master switch and every
 feature are off until you enable them, and any SDK call to a feature that is off
 throws a `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
 
@@ -10,13 +10,14 @@ throws a `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
 1. Open the canvas and go to the **Backend** tab.
 2. Switch **Enable backend** on. This is the master switch, off by default.
 3. With the backend on, toggle the features you need: **KV**, **Files**, **AI**,
-   **Realtime**. Each is independent.
+   **Realtime**. Each is independent. (The feature toggles stay disabled while
+   the backend is off.)
 
 Then call them from the page through `window.canvasdrop`. No keys, no setup:
 
 ```js
 await canvasdrop.kv.set("count", 1);   // KV must be on
-const me = await canvasdrop.me();       // available whenever the backend is on
+const me = await canvasdrop.me();      // available whenever the backend is on
 ```
 
 **Identity has no toggle.** `me()` is available exactly when the backend is on;
@@ -51,7 +52,7 @@ needs the operator to have turned realtime on for the instance
 (`CANVAS_DROP_REALTIME`). Each condition is resolved per request, so an admin
 flipping the instance setting takes effect immediately. A feature you've turned
 on can still report as off if the instance isn't set up for it: the toggle stays
-on, but the tab labels it as **disabled by your administrator** so you can see
+on, but the tab labels it **Disabled by your administrator** so you can see
 *why* it isn't running.
 
 ## Public links are static-only
