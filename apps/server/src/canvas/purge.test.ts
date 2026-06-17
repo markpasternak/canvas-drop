@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
@@ -10,7 +11,7 @@ import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { purgeDeletedCanvases } from "./purge.js";
-import { blobKey, canvasBlobPrefix } from "./storage-keys.js";
+import { blobKey, canvasBlobPrefix, screenshotKey, screenshotPrefix } from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const log = { info() {}, error() {} } as unknown as Logger;
@@ -25,6 +26,7 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     canvases: canvasesRepository(client),
     versions: versionsRepository(client),
     drafts: draftsRepository(client),
+    screenshots: screenshotsRepository(client),
     storage,
     log,
   });
@@ -205,5 +207,26 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     expect(await versionsRepository(client).listByCanvas(badId)).toHaveLength(1);
     expect(await canvases.findById(okId)).not.toBeNull();
     expect(await versionsRepository(client).listByCanvas(okId)).toEqual([]);
+  });
+
+  it("reclaims the canvas's preview prefix + screenshot job row (plan 004 / U10)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const storage = memStorage();
+    const canvases = canvasesRepository(client);
+    const screenshots = screenshotsRepository(client);
+    const id = await seedCanvas(client, storage, ownerId, "shot");
+    // A captured preview + its job row.
+    await storage.put(screenshotKey(id, "og"), new Uint8Array([1]), { contentType: "image/webp" });
+    await storage.put(screenshotKey(id, "card"), new Uint8Array([2]), {
+      contentType: "image/webp",
+    });
+    await screenshots.enqueue(id, "v-1");
+    await canvases.setStatus(id, "deleted");
+
+    await purgeDeletedCanvases(deps(storage));
+
+    expect(await storage.list(screenshotPrefix(id))).toHaveLength(0);
+    expect(await screenshots.findByCanvas(id)).toBeNull();
   });
 });

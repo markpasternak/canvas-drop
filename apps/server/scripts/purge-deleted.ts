@@ -28,6 +28,8 @@ import { makeDb } from "../src/db/factory.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { aiUsageRepository } from "../src/db/repositories/ai-usage.js";
 import { canvasesRepository } from "../src/db/repositories/canvases.js";
+import { draftsRepository } from "../src/db/repositories/drafts.js";
+import { screenshotsRepository } from "../src/db/repositories/screenshots.js";
 import { usageEventsRepository } from "../src/db/repositories/usage-events.js";
 import { versionsRepository } from "../src/db/repositories/versions.js";
 import { createLogger } from "../src/log/logger.js";
@@ -63,6 +65,8 @@ async function main() {
       {
         canvases: canvasesRepository(db),
         versions: versionsRepository(db),
+        drafts: draftsRepository(db),
+        screenshots: screenshotsRepository(db),
         storage: makeStorage(config),
         log,
       },

@@ -1,9 +1,10 @@
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { canvasBlobPrefix } from "./storage-keys.js";
+import { canvasBlobPrefix, screenshotPrefix } from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -13,6 +14,9 @@ export interface PurgeDeps {
   drafts: DraftsRepository;
   storage: StorageDriver;
   log: Logger;
+  /** Screenshot jobs (plan 004 / U10) — the canvas's preview prefix + job row are
+   *  reclaimed alongside its blobs. Optional (absent when the pipeline isn't wired). */
+  screenshots?: Pick<ScreenshotsRepository, "deleteByCanvas">;
 }
 
 export interface PurgeOptions {
@@ -82,18 +86,24 @@ export async function purgeDeletedCanvases(
       // canvas dies whole — no refcounting needed, KTD-1). Includes draft-only
       // blobs (a canvas drafted but never published).
       const keys = await deps.storage.list(canvasBlobPrefix(canvas.id));
+      // The canvas's one preview set (plan 004 / U10) lives under its own prefix —
+      // reclaim it in the same pass.
+      const shotKeys = await deps.storage.list(screenshotPrefix(canvas.id));
 
       // Nothing reclaimable — leave the tombstone untouched and don't count it
       // (keeps re-runs idempotent: a second pass reports zero).
-      if (versions.length === 0 && draft === null && keys.length === 0) continue;
+      if (versions.length === 0 && draft === null && keys.length === 0 && shotKeys.length === 0) {
+        continue;
+      }
 
       if (!dryRun) {
-        await deps.storage.deleteMany(keys);
+        await deps.storage.deleteMany([...keys, ...shotKeys]);
         await deps.versions.deleteByCanvas(canvas.id);
         await deps.drafts.deleteByCanvas(canvas.id);
+        await deps.screenshots?.deleteByCanvas(canvas.id);
         await deps.canvases.clearCurrentVersion(canvas.id);
       }
-      const objects = keys.length;
+      const objects = keys.length + shotKeys.length;
       summary.canvasesPurged++;
       summary.versionsPurged += versions.length;
       summary.objectsDeleted += objects;
