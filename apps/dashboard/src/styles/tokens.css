@@ -18,6 +18,10 @@
 
 /* --- Semantic palette: light (default) --- */
 :root {
+  /* Drives native form controls (checkboxes, radios, scrollbars) to match the
+     theme. Without it the browser renders them light even in dark mode. */
+  color-scheme: light;
+
   --canvas: oklch(0.968 0.0025 264);
   --surface: oklch(0.995 0.0015 264);
   --surface-raised: oklch(1 0 0);
@@ -65,6 +69,8 @@
 /* --- Semantic palette: dark (system, unless overridden to light) --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
     --canvas: oklch(0.155 0.006 266);
     --surface: oklch(0.192 0.007 266);
     --surface-raised: oklch(0.227 0.008 266);
@@ -110,6 +116,8 @@
 
 /* --- Manual override: forced dark (mirror of the media block above) --- */
 [data-theme="dark"] {
+  color-scheme: dark;
+
   --canvas: oklch(0.155 0.006 266);
   --surface: oklch(0.192 0.007 266);
   --surface-raised: oklch(0.227 0.008 266);
