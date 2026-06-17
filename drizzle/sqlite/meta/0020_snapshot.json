@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "062be7bc-083d-4807-a255-e3973f59b829",
-  "prevId": "53f3ba9c-3d9d-46a4-bc54-f0e9abfad348",
+  "id": "9048565c-02a5-4b99-ae74-c31bd1035173",
+  "prevId": "062be7bc-083d-4807-a255-e3973f59b829",
   "tables": {
     "ai_usage": {
       "name": "ai_usage",
@@ -1239,6 +1239,112 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "screenshot_jobs": {
+      "name": "screenshot_jobs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "leased_at": {
+          "name": "leased_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "screenshot_jobs_canvas_uq": {
+          "name": "screenshot_jobs_canvas_uq",
+          "columns": ["canvas_id"],
+          "isUnique": true
+        },
+        "screenshot_jobs_status_leased_idx": {
+          "name": "screenshot_jobs_status_leased_idx",
+          "columns": ["status", "leased_at"],
+          "isUnique": false
+        },
+        "screenshot_jobs_status_updated_idx": {
+          "name": "screenshot_jobs_status_updated_idx",
+          "columns": ["status", "updated_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "screenshot_jobs_canvas_id_canvases_id_fk": {
+          "name": "screenshot_jobs_canvas_id_canvases_id_fk",
+          "tableFrom": "screenshot_jobs",
+          "tableTo": "canvases",
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "screenshot_jobs_status_chk": {
+          "name": "screenshot_jobs_status_chk",
+          "value": "\"screenshot_jobs\".\"status\" in ('pending', 'running', 'done', 'failed')"
+        }
+      }
     },
     "sessions": {
       "name": "sessions",

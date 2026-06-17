@@ -89,7 +89,7 @@ describe("settings route", () => {
     expect(share).toHaveAttribute("href", "/canvases/c1/share");
   });
 
-  it("regenerate-slug confirms, then POSTs", async () => {
+  it("change-slug with an empty field regenerates a random slug (no slug in body)", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
       "POST /api/canvases/c1/regenerate-slug": () => json({ ...CANVAS, slug: "brave-lynx" }),
@@ -97,15 +97,43 @@ describe("settings route", () => {
     const user = userEvent.setup();
     renderSettings();
 
-    await user.click(await screen.findByRole("button", { name: /regenerate slug/i }));
+    await user.click(await screen.findByRole("button", { name: /change slug/i }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Regenerate" }));
+    await user.click(within(dialog).getByRole("button", { name: /change slug/i }));
 
-    await vi.waitFor(() =>
-      expect(
-        calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug"),
-      ).toBe(true),
-    );
+    await vi.waitFor(() => {
+      const post = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug",
+      );
+      expect(post).toBeTruthy();
+      // Empty field → random path → no slug in the request body.
+      expect(post?.body ?? "{}").not.toContain("slug");
+    });
+  });
+
+  it("change-slug to a custom value checks availability then POSTs the slug", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/slug-available": () => json({ available: true }),
+      "POST /api/canvases/c1/regenerate-slug": () => json({ ...CANVAS, slug: "team-hub" }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: /change slug/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Slug"), "team-hub");
+    // Submit enables once the debounced availability check reports available.
+    const submit = within(dialog).getByRole("button", { name: /change slug/i });
+    await vi.waitFor(() => expect(submit).not.toBeDisabled());
+    await user.click(submit);
+
+    await vi.waitFor(() => {
+      const post = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/regenerate-slug",
+      );
+      expect(post?.body).toContain("team-hub");
+    });
   });
 
   it("toggles single-page app mode via PATCH", async () => {

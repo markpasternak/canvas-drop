@@ -29,6 +29,10 @@ export interface Me {
   /** Whether this account may publish public links (U10). */
   canPublishPublic: boolean;
   authMode: AuthMode;
+  /** Instance URL shape (plan 004) — for previewing a custom slug's final URL. UX-only. */
+  urlMode: "path" | "subdomain";
+  /** Instance base URL (plan 004) — host/scheme for the slug URL preview. UX-only. */
+  baseUrl: string;
 }
 
 /** The four toggleable backend features (plan 006). Identity is implicit (no flag). */
@@ -62,6 +66,8 @@ export type AccessRung = "private" | "specific_people" | "whole_org" | "public_l
 export interface Canvas {
   id: string;
   slug: string;
+  /** True when the owner chose the slug (vs random). Drives the public+custom heads-up. */
+  slugCustom: boolean;
   url: string;
   title: string;
   description: string | null;
@@ -317,6 +323,12 @@ const HINTS: Record<string, string> = {
   PATH_EXISTS: "A file already exists at that path — pick a different name.",
   VERSION_UNAVAILABLE: "That version was just removed — refresh and pick another.",
   invalid_body: "Some fields were invalid — check and try again.",
+  // Custom-slug validation/collision (plan 004). The slug field surfaces these inline
+  // pre-submit; these hints cover the submit-time race-loser path where the slug was
+  // taken between the availability check and submit.
+  slug_taken: "That slug is already taken — pick another.",
+  invalid_slug:
+    "That slug isn't allowed — use lowercase letters, numbers, and hyphens, and avoid reserved words.",
   NOT_ARCHIVED: "This canvas isn't archived — refresh and try again.",
   NOT_SHARED: "Share this canvas before listing it in the gallery.",
   NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
@@ -685,15 +697,26 @@ export const api = {
 
   getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),
 
-  createCanvas: (body: { title?: string; description?: string; backendEnabled?: boolean }) =>
-    request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
+  createCanvas: (body: {
+    title?: string;
+    description?: string;
+    backendEnabled?: boolean;
+    slug?: string;
+  }) => request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
+
+  /** Check whether a custom slug is usable (plan 004). Read-only; advisory — the
+   *  server re-validates on create/rename and the unique index is the authority. */
+  slugAvailable: (slug: string) =>
+    request<{ available: boolean; reason?: "invalid" | "reserved" | "taken" }>(
+      `/api/canvases/slug-available?slug=${encodeURIComponent(slug)}`,
+    ),
 
   /** Clone a canvas into a new one owned by the caller (plan 002). The clone gets its
    *  own fresh deploy key, revealed on demand via Settings → Regenerate key — so it is
    *  NOT returned here (no unused secret over the wire). */
   cloneCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
-  pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean }) =>
+  pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean; slug?: string }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(
       "/api/canvases/paste",
       jsonBody(body),
@@ -727,8 +750,9 @@ export const api = {
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),
 
-  regenerateSlug: (id: string) =>
-    request<Canvas>(`/api/canvases/${id}/regenerate-slug`, { method: "POST" }),
+  /** Regenerate the slug (plan 004): pass a custom slug, or omit for a new random one. */
+  regenerateSlug: (id: string, slug?: string) =>
+    request<Canvas>(`/api/canvases/${id}/regenerate-slug`, jsonBody(slug ? { slug } : {})),
 
   regenerateKey: (id: string) =>
     request<{ apiKey: string }>(`/api/canvases/${id}/regenerate-key`, { method: "POST" }),

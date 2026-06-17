@@ -46,6 +46,13 @@ afterEach(() => {
 });
 
 describe("api error handling", () => {
+  it("maps the custom-slug error codes to actionable hints (not raw statusText)", () => {
+    // Server returns { error: "slug_taken" } / { error: "invalid_slug" } with no message,
+    // so without a HINTS entry the race-loser would see "Conflict"/"Bad Request" (plan 004).
+    expect(new ApiError("slug_taken", "Conflict").hint).toMatch(/already taken/i);
+    expect(new ApiError("invalid_slug", "Bad Request").hint).toMatch(/lowercase letters/i);
+  });
+
   it("deploy upload (XHR) maps a stable error code to a typed ApiError with a hint", async () => {
     FakeXHR.status = 400;
     FakeXHR.body = JSON.stringify({ code: "ZIP_SLIP_REJECTED", message: "bad path" });

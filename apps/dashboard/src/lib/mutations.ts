@@ -263,11 +263,11 @@ export function useRestoreToDraft(id: string) {
   });
 }
 
-/** Regenerate slug — await; the old URL dies. */
+/** Regenerate slug — await; the old URL dies. Pass a slug for a custom one, omit for random. */
 export function useRegenerateSlug(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.regenerateSlug(id),
+    mutationFn: (slug?: string) => api.regenerateSlug(id, slug),
     onSuccess: (canvas) => {
       qc.setQueryData(keys.canvas(id), canvas);
       qc.invalidateQueries({ queryKey: keys.canvases });

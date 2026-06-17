@@ -134,6 +134,9 @@ export const canvases = sqliteTable(
   {
     id: c.text("id").primaryKey(),
     slug: c.text("slug").notNull(),
+    // True when the owner chose the slug (vs the readable-random generator). Drives
+    // the "public + custom slug is human-guessable" heads-up; never an authz input.
+    slugCustom: c.bool("slug_custom").notNull().default(false),
     title: c.text("title").notNull().default(""),
     description: c.text("description"),
     ownerId: c

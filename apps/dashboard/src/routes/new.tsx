@@ -14,11 +14,14 @@ import { Button } from "../components/Button.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
+import { SlugField } from "../components/SlugField.js";
 import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { deployCurl } from "../lib/deploy-curl.js";
+import { useMe } from "../lib/queries.js";
+import type { SlugStatus } from "../lib/use-slug-availability.js";
 
 type Method = "paste" | "folder" | "zip" | "api";
 type MethodConfig = {
@@ -73,6 +76,14 @@ export default function CreateCanvas() {
   const initial = (METHODS.find((m) => m.id === search.method)?.id ?? "paste") as Method;
   const [method, setMethod] = useState<Method>(initial);
   const [title, setTitle] = useState("");
+  // Optional custom slug (plan 004). `slug` is the cosmetic-normalized value; `status`
+  // gates submit — blocked when a slug is entered but not confirmed available.
+  const me = useMe().data;
+  const [slug, setSlug] = useState<{ slug: string; status: SlugStatus }>({
+    slug: "",
+    status: "idle",
+  });
+  const slugBlocked = slug.slug !== "" && slug.status !== "available";
   // Backend-group master switch chosen at create time (plan 006). Off by default;
   // changeable later in the canvas Backend tab.
   const [backendEnabled, setBackendEnabled] = useState(false);
@@ -100,10 +111,19 @@ export default function CreateCanvas() {
   }
 
   async function createPaste() {
+    if (slugBlocked) {
+      setError("Pick an available slug, or clear it for a random one.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const res = await api.pasteHtml({ html, title: title || undefined, backendEnabled });
+      const res = await api.pasteHtml({
+        html,
+        title: title || undefined,
+        backendEnabled,
+        slug: slug.slug || undefined,
+      });
       setRevealed({ apiKey: res.apiKey, id: res.id, deployed: true });
     } catch (err) {
       fail(err);
@@ -112,12 +132,20 @@ export default function CreateCanvas() {
 
   async function createWithUpload(kind: "folder" | "zip", files: File[]) {
     if (files.length === 0) return;
+    if (slugBlocked) {
+      setError("Pick an available slug, or clear it for a random one.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setProgress(0);
     const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
-      const canvas = await api.createCanvas({ title: title || undefined, backendEnabled });
+      const canvas = await api.createCanvas({
+        title: title || undefined,
+        backendEnabled,
+        slug: slug.slug || undefined,
+      });
       try {
         if (kind === "folder") {
           await api.deployFolder(canvas.id, folderFormFromFiles(files), onProgress);
@@ -140,10 +168,18 @@ export default function CreateCanvas() {
   }
 
   async function createApiOnly() {
+    if (slugBlocked) {
+      setError("Pick an available slug, or clear it for a random one.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const canvas = await api.createCanvas({ title: title || undefined, backendEnabled });
+      const canvas = await api.createCanvas({
+        title: title || undefined,
+        backendEnabled,
+        slug: slug.slug || undefined,
+      });
       setApiResult({ id: canvas.id, apiKey: canvas.apiKey, url: canvas.url });
       setBusy(false);
     } catch (err) {
@@ -247,6 +283,11 @@ export default function CreateCanvas() {
               maxLength={200}
             />
 
+            <SlugField
+              instance={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
+              onResolved={setSlug}
+            />
+
             {method === "paste" && (
               <div className="space-y-4">
                 <TextareaField
@@ -257,7 +298,7 @@ export default function CreateCanvas() {
                   onChange={(e) => setHtml(e.target.value)}
                   placeholder={"<!doctype html>\n<h1>Hello</h1>"}
                 />
-                <Button onClick={createPaste} loading={busy} disabled={!html.trim()}>
+                <Button onClick={createPaste} loading={busy} disabled={!html.trim() || slugBlocked}>
                   Create and publish
                   <ArrowRight size={16} weight="bold" aria-hidden />
                 </Button>
@@ -294,7 +335,7 @@ export default function CreateCanvas() {
                     <code className="font-mono text-xs">PUT /v1/canvases/:id/deploy</code> or an AI
                     agent.
                   </p>
-                  <Button onClick={createApiOnly} loading={busy}>
+                  <Button onClick={createApiOnly} loading={busy} disabled={slugBlocked}>
                     <Key size={16} weight="bold" aria-hidden />
                     Create key
                   </Button>

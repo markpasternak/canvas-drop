@@ -39,7 +39,10 @@ From the dashboard, click **Create canvas**. Four ways to publish:
 - **Upload ZIP** — upload an archive; it's extracted server-side.
 - **Use the API** — get a slug and a per-canvas key for programmatic deploys.
 
-Each canvas gets a slug and a URL. In `path` mode that's `{base}/c/{slug}/` (e.g.
+Each canvas gets a slug and a URL. The slug is a random, unguessable name by default
+(`quiet-otter-x7k2…`); you can type your own in the **Slug** field when creating a
+canvas, or change it later under **Settings → Change slug** (leave it empty for a fresh
+random one). In `path` mode the URL is `{base}/c/{slug}/` (e.g.
 `http://localhost:3000/c/{slug}/`); in `subdomain` mode it's `{slug}.{base}` (e.g.
 `{slug}.canvases.example.com`).
 

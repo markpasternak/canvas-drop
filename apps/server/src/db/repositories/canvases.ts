@@ -46,6 +46,8 @@ export const CLEARED_PUBLICATION_FIELDS = {
 export interface CreateCanvasInput {
   ownerId: string;
   slug: string;
+  /** True when the slug was owner-chosen rather than randomly generated. Defaults false. */
+  slugCustom?: boolean;
   apiKeyHash: string;
   title?: string;
   description?: string | null;
@@ -229,6 +231,7 @@ export function canvasesRepository(client: DbClient) {
         .values({
           id: uuidv7(),
           slug: input.slug,
+          slugCustom: input.slugCustom ?? false,
           title: input.title ?? "",
           description: input.description ?? null,
           ownerId: input.ownerId,
@@ -260,6 +263,17 @@ export function canvasesRepository(client: DbClient) {
         .where(and(eq(t.slug, slug), ne(t.status, "deleted")))
         .limit(1);
       return (rows[0] as Canvas | undefined) ?? null;
+    },
+
+    /**
+     * Is this slug present at all — INCLUDING soft-deleted rows (plan 004, KTD8)?
+     * `canvases_slug_uq` is unconditional, so a slug held by a `deleted` tombstone
+     * still blocks an insert. The availability check must agree with the index
+     * (status-unaware), unlike `findBySlug` which hides deleted rows.
+     */
+    async slugTaken(slug: string): Promise<boolean> {
+      const rows = await db.select({ id: t.id }).from(t).where(eq(t.slug, slug)).limit(1);
+      return rows.length > 0;
     },
 
     async findById(id: string): Promise<Canvas | null> {
@@ -548,10 +562,10 @@ export function canvasesRepository(client: DbClient) {
       return rows[0] as Canvas;
     },
 
-    async regenerateSlug(id: string, newSlug: string): Promise<Canvas> {
+    async regenerateSlug(id: string, newSlug: string, custom = false): Promise<Canvas> {
       const rows = await db
         .update(t)
-        .set({ slug: newSlug, updatedAt: Date.now() })
+        .set({ slug: newSlug, slugCustom: custom, updatedAt: Date.now() })
         .where(eq(t.id, id))
         .returning();
       return rows[0] as Canvas;

@@ -1,5 +1,5 @@
 {
-  "id": "c4802046-e533-4331-858c-d9b981b78bda",
+  "id": "feafa1d5-85a5-4e21-b450-9baec8e1b36d",
   "prevId": "e8dd3abf-d85a-4713-93ab-f9670dd91ae4",
   "version": "7",
   "dialect": "postgresql",
@@ -400,6 +400,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "slug_custom": {
+          "name": "slug_custom",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "title": {
           "name": "title",
@@ -1414,148 +1421,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.screenshot_jobs": {
-      "name": "screenshot_jobs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "canvas_id": {
-          "name": "canvas_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version_id": {
-          "name": "version_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "leased_at": {
-          "name": "leased_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "screenshot_jobs_canvas_uq": {
-          "name": "screenshot_jobs_canvas_uq",
-          "columns": [
-            {
-              "expression": "canvas_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "screenshot_jobs_status_leased_idx": {
-          "name": "screenshot_jobs_status_leased_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "leased_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "screenshot_jobs_status_updated_idx": {
-          "name": "screenshot_jobs_status_updated_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "updated_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "screenshot_jobs_canvas_id_canvases_id_fk": {
-          "name": "screenshot_jobs_canvas_id_canvases_id_fk",
-          "tableFrom": "screenshot_jobs",
-          "tableTo": "canvases",
-          "columnsFrom": ["canvas_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "screenshot_jobs_status_chk": {
-          "name": "screenshot_jobs_status_chk",
-          "value": "\"screenshot_jobs\".\"status\" in ('pending', 'running', 'done', 'failed')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.sessions": {
