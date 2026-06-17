@@ -75,6 +75,68 @@ export interface CaptureInput {
 
 export type CaptureResult = Record<ScreenshotRendition, Uint8Array>;
 
+/** Minimal browser globals `settleForCapture` touches — typed locally so this file
+ *  compiles under the server tsconfig (no DOM lib); the real values exist at runtime. */
+type CaptureImg = {
+  complete: boolean;
+  getBoundingClientRect: () => { top: number; bottom: number };
+  addEventListener: (type: string, cb: () => void, opts: { once: boolean }) => void;
+};
+type CaptureWindow = {
+  innerHeight?: number;
+  scrollTo?: (x: number, y: number) => void;
+  document?: {
+    body?: { scrollHeight?: number };
+    fonts?: { ready?: Promise<unknown> };
+    images?: ArrayLike<CaptureImg>;
+  };
+};
+
+/**
+ * Runs IN THE BROWSER (serialized by page.evaluate): scroll the page in viewport-sized
+ * steps to trigger lazy media + scroll-revealed content, return to the top for the shot,
+ * then wait (within a ~3s budget) for web fonts and above-the-fold images to load. Pure
+ * and dependency-free so it serializes cleanly; reads globals via a typed `globalThis`.
+ */
+async function settleForCapture(): Promise<void> {
+  const w = globalThis as unknown as CaptureWindow;
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const budget = 3000;
+  const start = Date.now();
+  const vh = w.innerHeight ?? 900;
+  const max = w.document?.body?.scrollHeight ?? vh;
+  if (typeof w.scrollTo === "function") {
+    for (let y = vh; y < max && Date.now() - start < budget; y += vh) {
+      w.scrollTo(0, y);
+      await sleep(100);
+    }
+    w.scrollTo(0, 0);
+  }
+  const fonts = w.document?.fonts?.ready ?? Promise.resolve();
+  const images = w.document?.images;
+  const imgWait = images
+    ? Promise.all(
+        Array.from(images)
+          .filter((i) => {
+            const b = i.getBoundingClientRect();
+            return b.top < vh && b.bottom > 0;
+          })
+          .map((i) =>
+            i.complete
+              ? undefined
+              : new Promise<void>((res) => {
+                  i.addEventListener("load", () => res(), { once: true });
+                  i.addEventListener("error", () => res(), { once: true });
+                }),
+          ),
+      )
+    : Promise.resolve([]);
+  await Promise.race([
+    Promise.all([fonts, imgWait]),
+    sleep(Math.max(0, budget - (Date.now() - start))),
+  ]);
+}
+
 /** Render `url` and return the encoded WebP renditions. Throws on timeout/failure;
  *  always closes the page it opened (the browser/context belong to the caller). */
 export async function captureCanvas(input: CaptureInput): Promise<CaptureResult> {
@@ -111,20 +173,15 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
     });
     await page.setViewportSize({ ...CAPTURE_VIEWPORT });
     await page.goto(input.url, { waitUntil: "networkidle", timeout: input.timeoutMs });
-    // Wait for web fonts so text renders in the real face (not a fallback) — otherwise
-    // a webfont-heavy page screenshots with the wrong/invisible type. Best-effort: a
-    // page with no `document.fonts` or a hung promise must not fail the capture.
-    await page
-      .evaluate(() => {
-        // Runs in the browser; reference the global via globalThis so the server
-        // tsconfig (no DOM lib) still type-checks this callback.
-        const f = (globalThis as { document?: { fonts?: { ready?: Promise<unknown> } } }).document
-          ?.fonts;
-        return f?.ready ? f.ready.then(() => undefined) : undefined;
-      })
-      .catch(() => {});
-    // A short settle for any post-load layout/paint (lazy images, JS-driven content).
-    await page.waitForTimeout(250).catch(() => {});
+    // Smart settle (runs in the browser, ~3s self-budget, best-effort): scroll the page
+    // top→bottom to trigger lazy-loaded media and scroll-revealed/IntersectionObserver
+    // content, scroll back to the TOP for the capture, then wait for web fonts and the
+    // above-the-fold images to finish — so the hero isn't shot with a fallback font or
+    // blank/half-loaded media. Any failure (no DOM in a unit test, a hung asset) is
+    // swallowed by the outer .catch; the Promise.race caps the total wait.
+    await page.evaluate(settleForCapture).catch(() => {});
+    // A short paint settle after returning to the top.
+    await page.waitForTimeout(150).catch(() => {});
     // `animations: "disabled"` fast-forwards finite animations to completion, so
     // entrance/stagger effects render in their final state instead of mid-fade. The
     // timeout bounds a canvas that reaches networkidle then wedges the renderer.
