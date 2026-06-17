@@ -145,6 +145,32 @@ describe("galleryRoutes", () => {
     expect(on.items.find((i) => i.id === id)?.hasPreview).toBe(true);
   });
 
+  it("a failing preview lookup degrades to hasPreview=false, never errors the browse", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await seedListed(client, owner.id);
+    // Pipeline ON but the (cosmetic) screenshot lookup throws — the browse must still
+    // answer 200 with hasPreview=false, not propagate the error.
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: "viewer", isAdmin: false } as never);
+      await next();
+    });
+    app.route(
+      "/api/gallery",
+      galleryRoutes({
+        config,
+        canvases: canvasesRepository(client),
+        screenshotsEnabled: () => Promise.resolve(true),
+        screenshots: { doneCanvasIds: () => Promise.reject(new Error("screenshot db down")) },
+      }),
+    );
+    const res = await app.request("/api/gallery");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as GalleryPageDto;
+    expect(body.items.find((i) => i.id === id)?.hasPreview).toBe(false);
+  });
+
   it("paginates with a stable total and echoes limit/offset", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

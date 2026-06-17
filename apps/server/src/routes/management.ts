@@ -27,7 +27,6 @@ import {
   CLEARED_PUBLICATION_FIELDS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
-import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -39,9 +38,10 @@ import { type Mailer, renderGuestInvite } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
 import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
-export interface ManagementDeps {
+export interface ManagementDeps extends PreviewHintDeps {
   config: Config;
   canvases: CanvasesRepository;
   users: UsersRepository;
@@ -70,11 +70,8 @@ export interface ManagementDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
-  /** Screenshot preview support (plan 004). `screenshotsEnabled` is the effective gate
-   *  (env-available AND admin-enabled); `screenshots.doneCanvasIds` is the batched
-   *  captured-preview lookup. Both optional — omitted in unit tests → `hasPreview` false. */
-  screenshotsEnabled?: () => Promise<boolean>;
-  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
+  // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
+  // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
 
 const createSchema = z.object({
@@ -246,22 +243,9 @@ export function managementRoutes(deps: ManagementDeps) {
       aiEnabled: deps.aiEnabled ? await deps.aiEnabled() : !!deps.config.ai.apiKey,
     };
   }
-  /** Of the given canvas ids, those with a captured preview — empty when the screenshot
-   *  pipeline is off (so `hasPreview` is false and the dashboard behaves like today).
-   *  Optional deps (omitted in unit tests) → no previews. */
-  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
-    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
-    // The preview hint is cosmetic — a DB hiccup in the screenshot subsystem (the
-    // settings read or the doneCanvasIds lookup) must never 500 the primary canvas
-    // management API. Any failure degrades to "no preview" (GenerativeCover), exactly
-    // like the pipeline-off path.
-    try {
-      if (!(await deps.screenshotsEnabled())) return new Set();
-      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
-    } catch {
-      return new Set();
-    }
-  }
+  /** Shared cosmetic preview-existence hint — gate + degrade live in one place
+   *  ({@link resolvePreviewIds}); optional deps (omitted in unit tests) → no previews. */
+  const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
 
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {

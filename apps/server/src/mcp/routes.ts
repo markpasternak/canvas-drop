@@ -8,19 +8,19 @@ import { bearerToken } from "../canvas/api-key.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
-import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import type { PreviewHintDeps } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
 import { buildMcpServer } from "./server.js";
 
-export interface McpRoutesDeps {
+export interface McpRoutesDeps extends PreviewHintDeps {
   config: Config;
   strategy: AuthStrategy;
   users: UsersRepository;
@@ -39,10 +39,8 @@ export interface McpRoutesDeps {
   /** Shared rate-limit store (U6) — throttles tool calls per authenticated caller. */
   rateLimitStore?: RateLimitStore;
   hub?: RealtimeHub;
-  /** Screenshot preview support (plan 004) — agent-native parity with the dashboard.
-   *  Both optional; omitted → tools report `hasPreview` false / no `previewUrl`. */
-  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
-  screenshotsEnabled?: () => Promise<boolean>;
+  // Screenshot preview hint (plan 004) comes from PreviewHintDeps — both optional;
+  // omitted → tools report `hasPreview` false / no `previewUrl`.
 }
 
 /**

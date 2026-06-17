@@ -3,18 +3,14 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository, GalleryRow } from "../db/repositories/canvases.js";
-import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { AppEnv } from "../http/types.js";
+import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
 
-export interface GalleryDeps {
+/** Preview hint (plan 004) is optional: omitted → `hasPreview` false everywhere, so the
+ *  gallery behaves exactly like today (GenerativeCover, no probe). */
+export interface GalleryDeps extends PreviewHintDeps {
   config: Config;
   canvases: CanvasesRepository;
-  /** Screenshot preview support (plan 004). `screenshotsEnabled` is the effective gate
-   *  (env-available AND admin-enabled); `screenshots.doneCanvasIds` is the batched
-   *  captured-preview lookup. Both optional — omitted in unit tests → `hasPreview` false,
-   *  so the gallery behaves exactly like today (GenerativeCover everywhere). */
-  screenshotsEnabled?: () => Promise<boolean>;
-  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
 }
 
 const MAX_LIMIT = 60;
@@ -112,19 +108,6 @@ function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): Gall
 export function galleryRoutes(deps: GalleryDeps) {
   const app = new Hono<AppEnv>();
 
-  /** Of the given canvas ids, those with a captured preview — empty when the pipeline is
-   *  off (so `hasPreview` is false and the gallery behaves like today). The hint is
-   *  cosmetic, so any failure degrades to "no preview" rather than erroring the browse. */
-  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
-    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
-    try {
-      if (!(await deps.screenshotsEnabled())) return new Set();
-      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
-    } catch {
-      return new Set();
-    }
-  }
-
   app.get("/", async (c) => {
     const parsed = querySchema.safeParse(c.req.query());
     // safeParse only fails on a non-coercible shape; fall back to all-defaults so a
@@ -154,7 +137,10 @@ export function galleryRoutes(deps: GalleryDeps) {
       offset,
     });
 
-    const previews = await previewIds(items.map((row) => row.canvas.id));
+    const previews = await resolvePreviewIds(
+      deps,
+      items.map((row) => row.canvas.id),
+    );
     return c.json({
       items: items.map((row) => galleryItem(deps.config, row, previews.has(row.canvas.id))),
       total,

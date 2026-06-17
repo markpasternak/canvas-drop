@@ -282,7 +282,9 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(gotOn.previewUrl).toContain("__canvasdrop_preview?rendition=card");
 
     const list = payload(await on.callTool({ name: "list_canvases", arguments: {} }));
-    expect(list.canvases.find((c: { id: string }) => c.id === created.id)?.hasPreview).toBe(true);
+    const listed = list.canvases.find((c: { id: string }) => c.id === created.id);
+    expect(listed?.hasPreview).toBe(true);
+    expect(listed?.previewUrl).toContain("__canvasdrop_preview?rendition=card");
   });
 
   it("rollback then re-points the live version; unpublish returns it to draft", async () => {

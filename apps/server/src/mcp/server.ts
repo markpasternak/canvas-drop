@@ -11,18 +11,20 @@ import { generateUniqueSlug } from "../canvas/slug.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
-import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
 import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 
-export interface McpToolDeps {
+/** Preview hint (plan 004) — agent-native parity with the dashboard. Optional via
+ *  PreviewHintDeps; omitted → `hasPreview` false / no `previewUrl`, like pipeline-off. */
+export interface McpToolDeps extends PreviewHintDeps {
   config: Config;
   users: UsersRepository;
   canvases: CanvasesRepository;
@@ -33,12 +35,6 @@ export interface McpToolDeps {
   storage: StorageDriver;
   audit: AuditLog;
   hub?: RealtimeHub;
-  /** Screenshot preview support (plan 004) — agent-native parity with the dashboard.
-   *  `screenshotsEnabled` is the effective gate (env-available AND admin-enabled);
-   *  `screenshots.doneCanvasIds` is the batched captured-preview lookup. Both optional —
-   *  omitted → `hasPreview` false / no `previewUrl`, exactly like the pipeline-off path. */
-  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
-  screenshotsEnabled?: () => Promise<boolean>;
 }
 
 /** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
@@ -109,18 +105,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     return cv;
   }
 
-  /** Of the given canvas ids, those with a captured preview — empty when the screenshot
-   *  pipeline is off. The preview hint is cosmetic, so a DB hiccup degrades to "no
-   *  preview" rather than failing the tool call. */
-  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
-    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
-    try {
-      if (!(await deps.screenshotsEnabled())) return new Set();
-      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
-    } catch {
-      return new Set();
-    }
-  }
+  /** Captured-preview hint for the owned canvases in hand — see {@link resolvePreviewIds}
+   *  (shared gate + degrade with the management and gallery surfaces). */
+  const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
 
   server.registerTool(
     "whoami",
