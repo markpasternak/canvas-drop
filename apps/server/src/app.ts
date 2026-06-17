@@ -321,6 +321,25 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         upload,
         storage: deps.storage,
         guests: deps.guests,
+        mailer: deps.mailer,
+        clone: cloneService({
+          canvases: deps.canvases,
+          versions: deps.versions,
+          drafts: deps.drafts,
+          storage: deps.storage,
+        }),
+        drafts: draftService({
+          config: deps.config,
+          canvases: deps.canvases,
+          versions: deps.versions,
+          drafts: deps.drafts,
+          storage: deps.storage,
+          audit: deps.audit,
+          log: deps.rootLogger,
+        }),
+        usage: usageEventsRepository(deps.db),
+        files: filesRepository(deps.db),
+        aiUsage: aiUsageRepository(deps.db),
         audit: deps.audit,
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {

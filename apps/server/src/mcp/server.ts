@@ -1,28 +1,39 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import { type CanvasStatus, type Manifest, publicationState } from "@canvas-drop/shared/db";
+import type { Manifest } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
+import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import type { CloneService } from "../canvas/clone-service.js";
+import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
+import { hashPassword } from "../canvas/password.js";
+import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
+import { fetchCanvasUsage } from "../canvas/usage-stats.js";
+import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { FilesRepository } from "../db/repositories/files.js";
+import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
-import { DeployError } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
+import type { DraftService } from "../draft/service.js";
+import type { Mailer } from "../email/mailer.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
-import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
+import { registerDraftTools } from "./draft-tools.js";
+import { canvasView, fail, failDeploy, ok } from "./tool-kit.js";
 
 /** Preview hint (plan 004) — agent-native parity with the dashboard. Optional via
  *  PreviewHintDeps; omitted → `hasPreview` false / no `previewUrl`, like pipeline-off. */
@@ -41,6 +52,16 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  invites are refused — the IAP owns that boundary). Backs the guest-access tools
    *  and the guest-grant revocation on archive/unpublish/delete. */
   guests?: GuestService;
+  /** Mailer for guest invites (absent → invites refused with EMAIL_NOT_CONFIGURED). */
+  mailer?: Mailer;
+  /** Clone-as-template service — backs `clone_canvas`. */
+  clone: CloneService;
+  /** Draft/editor service — backs the draft tools (get/read/write/publish/discard). */
+  drafts: DraftService;
+  /** Usage stats sources — back `get_canvas_usage`. */
+  usage: UsageEventsRepository;
+  files: FilesRepository;
+  aiUsage: AiUsageRepository;
 }
 
 /** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
@@ -50,48 +71,6 @@ const READBACK_MAX_BYTES = 256 * 1024;
 /** The acting MCP caller — `userId` comes only from the verified access token (U3). */
 export interface McpCaller {
   userId: string;
-}
-
-type ToolResult = {
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-};
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-function fail(message: string): ToolResult {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-
-function canvasView(
-  config: Config,
-  cv: {
-    id: string;
-    slug: string;
-    title: string;
-    status: string;
-    currentVersionId: string | null;
-  },
-  // A captured screenshot preview exists (plan 004). When true, `previewUrl` points at
-  // the access-gated cover (`card` rendition) so an agent can surface it the same way
-  // the dashboard does. Defaults false → no preview (pipeline off / not yet captured).
-  hasPreview = false,
-) {
-  const url = canvasUrl(config, cv.slug);
-  return {
-    id: cv.id,
-    slug: cv.slug,
-    url,
-    title: cv.title,
-    status: cv.status,
-    publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
-    currentVersionId: cv.currentVersionId,
-    hasPreview,
-    ...(hasPreview
-      ? { previewUrl: `${url.replace(/\/$/, "")}/${PREVIEW_ASSET_PATH}?rendition=card` }
-      : {}),
-  };
 }
 
 /**
@@ -329,12 +308,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       }
     },
   );
-
-  /** Surface an upload-service DeployError as a stable `CODE: message` fail. */
-  function failDeploy(e: unknown): ToolResult {
-    if (e instanceof DeployError) return fail(`${e.code}: ${e.message}`);
-    throw e;
-  }
 
   server.registerTool(
     "begin_deploy",
@@ -712,6 +685,260 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       return ok({ ok: true });
     },
   );
+
+  // ---- Settings (U7) ---------------------------------------------------------
+
+  server.registerTool(
+    "update_canvas",
+    {
+      description:
+        "Update a canvas you own (mirrors the dashboard Settings + Share tabs). All fields optional; " +
+        "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
+        "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
+        "preconditions (sharing/listing need a published canvas; public_link needs an admin grant; a " +
+        "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
+        "grant_access / revoke_access.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        title: z.string().max(200).optional(),
+        description: z.string().max(2000).nullable().optional(),
+        access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
+        password: z
+          .string()
+          .min(1)
+          .nullable()
+          .optional()
+          .describe("Set a password gate, or null to clear it."),
+        sharedExpiresAt: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .optional()
+          .describe("Unix ms when the share expires, or null for no expiry."),
+        spaFallback: z.boolean().optional(),
+        guestAiEnabled: z.boolean().optional(),
+        guestAiCap: z.number().min(0).optional(),
+        galleryListed: z.boolean().optional(),
+        galleryTemplatable: z.boolean().optional(),
+        gallerySummary: z.string().max(500).nullable().optional(),
+        galleryTags: z.array(z.string()).optional(),
+      },
+    },
+    async ({ id, ...input }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const user = await deps.users.findById(caller.userId);
+      const resolution = resolveSettingsUpdate(cv, input, {
+        canPublishPublic: user?.canPublishPublic ?? false,
+      });
+      if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
+      const { patch, password, targetAccess } = resolution;
+
+      let updated = cv;
+      if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
+      if (password !== undefined) {
+        updated = await deps.canvases.setPassword(
+          cv.id,
+          password === null ? null : await hashPassword(password),
+        );
+        deps.audit.recordAudit({
+          action: "password_change",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { cleared: password === null },
+        });
+      }
+      if (targetAccess !== undefined) {
+        deps.audit.recordAudit({
+          action: "share_change",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { access: targetAccess },
+        });
+      }
+      if (deps.hub) {
+        await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+        if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
+      }
+      return ok(canvasView(deps.config, updated));
+    },
+  );
+
+  // ---- Sharing & access (U4) -------------------------------------------------
+
+  server.registerTool(
+    "list_access",
+    {
+      description:
+        "List who can access a canvas you own beyond the rung default — the named allowlist " +
+        "(org members) and email-invited guests (same as the Share tab's people list). Each entry " +
+        "has an `id` (use it with revoke_access), `kind` ('member'|'guest'), `email`, and `name`.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const entries = await resolveAllowlistEntries(
+        await deps.canvases.listAllowlist(cv.id),
+        deps.users,
+      );
+      return ok({ entries });
+    },
+  );
+
+  server.registerTool(
+    "grant_access",
+    {
+      description:
+        "Grant a person access to a canvas you own by email (mirrors the Share tab's add-person). " +
+        "If the email is an org member, they're added to the allowlist directly; otherwise an " +
+        "email guest invite is sent (oidc/dev mode + configured email only — else fails " +
+        "GUESTS_UNAVAILABLE / EMAIL_NOT_CONFIGURED). Note: the allowlist only takes effect on the " +
+        "`specific_people` access rung — set that with update_canvas.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        email: z.string().email().describe("The person's email."),
+      },
+    },
+    async ({ id, email: rawEmail }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const email = rawEmail.trim().toLowerCase();
+      const user = await deps.users.findByEmail(email);
+      if (user) {
+        await deps.canvases.addAllowlistEntry({
+          canvasId: cv.id,
+          principalKind: "member",
+          userId: user.id,
+        });
+        deps.audit.recordAudit({
+          action: "allowlist_add",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { kind: "member", userId: user.id },
+        });
+        return ok({ ok: true, kind: "member" });
+      }
+      const inviter = await deps.users.findById(caller.userId);
+      const r = await inviteGuestToCanvas(deps, {
+        canvas: cv,
+        inviterName: inviter?.name ?? "A teammate",
+        actorId: caller.userId,
+        email,
+      });
+      return r.ok ? ok({ ok: true, kind: "guest" }) : fail(`${r.code}: ${r.message}`);
+    },
+  );
+
+  server.registerTool(
+    "resend_guest_invite",
+    {
+      description:
+        "Re-send a pending guest invite (fresh magic link). Pass the allowlist entry `id` from " +
+        "list_access; only valid for a 'guest' entry.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        entryId: z.string().describe("The allowlist entry id (from list_access)."),
+      },
+    },
+    async ({ id, entryId }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
+      if (entry?.principalKind !== "guest" || !entry.email) return fail("guest invite not found");
+      const inviter = await deps.users.findById(caller.userId);
+      const r = await inviteGuestToCanvas(deps, {
+        canvas: cv,
+        inviterName: inviter?.name ?? "A teammate",
+        actorId: caller.userId,
+        email: entry.email,
+      });
+      return r.ok ? ok({ ok: true }) : fail(`${r.code}: ${r.message}`);
+    },
+  );
+
+  server.registerTool(
+    "revoke_access",
+    {
+      description:
+        "Remove an allowlist entry from a canvas you own (member or guest). Pass the entry `id` " +
+        "from list_access. Revokes a guest's invite + sessions and drops any live sockets it no " +
+        "longer permits.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        entryId: z.string().describe("The allowlist entry id (from list_access)."),
+      },
+    },
+    async ({ id, entryId }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
+      if (entry?.principalKind === "guest" && entry.email && deps.guests) {
+        await deps.guests.revokeInvite(cv.id, entry.email);
+      }
+      await deps.canvases.removeAllowlistEntry(cv.id, entryId);
+      deps.audit.recordAudit({
+        action: "allowlist_remove",
+        actorId: caller.userId,
+        targetId: cv.id,
+        meta: { entryId, kind: entry?.principalKind ?? null },
+      });
+      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      return ok({ ok: true });
+    },
+  );
+
+  // ---- Clone + usage (U5) ----------------------------------------------------
+
+  server.registerTool(
+    "clone_canvas",
+    {
+      description:
+        "Clone a canvas into a NEW canvas you own, seeded from the source (mirrors gallery/Settings " +
+        "Clone). You may clone any ACTIVE canvas you own, or a gallery-listed + templatable canvas " +
+        "someone else shared. The clone starts as an unpublished draft with a fresh slug + key, " +
+        "backend off. Returns the new canvas. A non-eligible/unknown source reads as not found.",
+      inputSchema: { id: z.string().describe("The source canvas id.") },
+    },
+    async ({ id }) => {
+      const source = await deps.canvases.findById(id);
+      if (!source || source.status === "deleted") return fail("canvas not found");
+      const eligible =
+        source.ownerId === caller.userId
+          ? source.status === "active"
+          : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+      if (!eligible) return fail("canvas not found");
+      const { canvas } = await deps.clone.clone(source, caller.userId);
+      deps.audit.recordAudit({
+        action: "canvas_clone",
+        actorId: caller.userId,
+        targetId: canvas.id,
+        meta: { from: source.id },
+      });
+      return ok(canvasView(deps.config, canvas));
+    },
+  );
+
+  server.registerTool(
+    "get_canvas_usage",
+    {
+      description:
+        "Usage stats for a canvas you own (same as the dashboard usage panel): view stats + a " +
+        "30-day sparkline, and — for backend-on canvases — KV/file/AI/realtime op counts, file " +
+        "storage, and AI tokens/cost.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      return ok(await fetchCanvasUsage(deps, cv.id));
+    },
+  );
+
+  // Draft / editor-loop tools (get/read/write/delete/rename/publish/restore) — split
+  // into their own module to keep this registry under the file-size bar.
+  registerDraftTools(server, deps, caller, requireOwned);
 
   return server;
 }

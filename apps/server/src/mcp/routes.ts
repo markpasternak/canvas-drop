@@ -6,12 +6,18 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
+import type { CloneService } from "../canvas/clone-service.js";
+import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { FilesRepository } from "../db/repositories/files.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
+import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
+import type { DraftService } from "../draft/service.js";
+import type { Mailer } from "../email/mailer.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
@@ -36,6 +42,16 @@ export interface McpRoutesDeps extends PreviewHintDeps {
   storage: StorageDriver;
   /** Guest magic-link service (oidc/dev only) — backs the guest-access MCP tools. */
   guests?: GuestService;
+  /** Mailer for guest invites (absent → invites refused). */
+  mailer?: Mailer;
+  /** Clone-as-template service — backs `clone_canvas`. */
+  clone: CloneService;
+  /** Draft/editor service — backs the draft MCP tools. */
+  drafts: DraftService;
+  /** Usage stats sources — back `get_canvas_usage`. */
+  usage: UsageEventsRepository;
+  files: FilesRepository;
+  aiUsage: AiUsageRepository;
   audit: AuditLog;
   /** Optional OAuth-lifecycle audit sink (U6); the tool layer uses `audit` directly. */
   oauthAudit?: McpAuditSink;
@@ -139,6 +155,12 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
           upload: deps.upload,
           storage: deps.storage,
           guests: deps.guests,
+          mailer: deps.mailer,
+          clone: deps.clone,
+          drafts: deps.drafts,
+          usage: deps.usage,
+          files: deps.files,
+          aiUsage: deps.aiUsage,
           audit: deps.audit,
           hub: deps.hub,
           screenshots: deps.screenshots,

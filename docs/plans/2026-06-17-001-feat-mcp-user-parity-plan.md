@@ -1,7 +1,7 @@
 ---
 title: "feat: MCP ↔ user parity — every dashboard action available as an MCP tool"
 type: feat
-status: in-progress
+status: completed
 date: 2026-06-17
 depth: deep
 origin: agent-native principle (AGENTS.md)
@@ -67,7 +67,7 @@ oidc/dev only), `usage` (UsageEventsRepository), `aiUsage`/`files` repos for usa
 | 8 | `clone_canvas` | `POST /:id/clone` | `cloneCanvas` (template pick + blob copy); returns the new canvas + its one-time key + `deploy` block |
 | 9 | `get_canvas_usage` | `GET /:id/usage` | `usage.countByType` / `viewStats` / `viewsByDay`, files + ai_usage |
 | 10 | `list_access` | `GET /:id/allowlist` | `canvases.listAllowlist` (members + invited guests) |
-| 11 | `invite_guest` | `POST /:id/allowlist` | guest-invite flow (`canvases.addAllowlistEntry` + `guests.createInvite` + email); refused in proxy mode / when email unconfigured, same as the UI |
+| 11 | `grant_access` | `POST /:id/allowlist` | guest-invite flow (`canvases.addAllowlistEntry` + `guests.createInvite` + email); refused in proxy mode / when email unconfigured, same as the UI |
 | 12 | `resend_guest_invite` | `POST /:id/allowlist/:entryId/resend` | re-mint + re-send |
 | 13 | `revoke_access` | `DELETE /:id/allowlist/:entryId` | `canvases.removeAllowlistEntry` |
 | 14 | `get_draft` | `GET /:id/draft` | `drafts.get` (state + file list; creates from live on first open) |
@@ -76,7 +76,7 @@ oidc/dev only), `usage` (UsageEventsRepository), `aiUsage`/`files` repos for usa
 | 17 | `delete_draft_file` | `DELETE /:id/draft/file` | `drafts.deleteFile` |
 | 18 | `rename_draft_file` | `POST /:id/draft/rename` | `drafts.rename` |
 | 19 | `publish_draft` | `POST /:id/publish` | publish the draft as a new live version |
-| 20 | `discard_draft` | `POST /:id/restore` | reset the draft to the live version |
+| 20 | `restore_draft` | `POST /:id/restore` | reset the draft to the live version |
 
 Existing 12 tools stay. Net surface: 12 → 32.
 
@@ -90,9 +90,9 @@ Existing 12 tools stay. Net surface: 12 → 32.
   preconditions — publish-before-share, no-password-before-gallery — must be enforced the
   same way, so factor the precondition check or call the same service path).
 - **U3 — backend capabilities.** Tool 2.
-- **U4 — sharing & guests.** Tools 10–13. `invite_guest` honors the proxy-mode /
-  email-unconfigured refusals exactly like the UI; guest tools are absent (not erroring)
-  when `guests` is unwired, mirroring the route.
+- **U4 — sharing & guests.** Tools 10–13. `grant_access` (adds a member, or email-invites
+  a guest) honors the proxy-mode / email-unconfigured refusals exactly like the UI; guest
+  tools are absent (not erroring) when `guests` is unwired, mirroring the route.
 - **U5 — clone + usage.** Tools 8, 9.
 - **U6 — draft / editor loop.** Tools 14–20.
 - **U7 — docs + AGENTS.md.** The parity principle in AGENTS.md (done up front in this

@@ -34,9 +34,14 @@ keys. You sign in once through the instance's normal org login (OAuth, with auto
 client registration) and then get identity-scoped tools across every canvas you own:
 `whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
 `deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
-`rollback_canvas`, `unpublish_canvas`, plus the management tools
-(`set_capabilities`, `set_canvas_slug`, `regenerate_deploy_key`,
-`archive_canvas`/`unarchive_canvas`, `delete_canvas`) — the full table is in the
+`rollback_canvas`, `unpublish_canvas`, plus the full management surface
+(`update_canvas` settings/sharing, `set_capabilities`, `set_canvas_slug`,
+`regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
+`clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
+`resend_guest_invite`/`revoke_access`, and the editor draft loop `get_draft`/
+`read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
+`publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
+anything an owner can do in the UI, an agent can do here. The full table is in the
 [MCP server](/docs/agents/mcp) reference. A tool only touches canvases you own. Typical
 flow: `create_canvas` then `deploy_canvas`. Every deploy **publishes immediately** (no
 draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
