@@ -70,11 +70,11 @@
     font-family: inherit;
   }
 
-  /* Always-visible, accent focus ring — never removed (§14.3, a11y). */
+  /* Always-visible, accent focus ring — never removed (§14.3, a11y). The outline
+     follows each control's own border-radius (no forced 2px square). */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
-    border-radius: 2px;
   }
 
   ::selection {
