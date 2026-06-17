@@ -3,11 +3,11 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
-import { GenerativeCover } from "../components/GenerativeCover.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
@@ -24,7 +24,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           Decorative (not a link) so the title below stays the single open
           affordance — no duplicate link for screen readers. */}
       <div className="aspect-[16/9] w-full overflow-hidden">
-        <GenerativeCover seed={item.id} />
+        <CanvasCover seed={item.id} previewUrl={previewCoverUrl(item.url)} />
       </div>
       <div className="flex flex-1 flex-col gap-2.5 p-3.5">
         <div className="flex items-start justify-between gap-2">
