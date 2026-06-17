@@ -38,7 +38,8 @@ client registration) and then get identity-scoped tools across every canvas you 
 `whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
 `deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
 `rollback_canvas`, `unpublish_canvas`, plus the full management surface
-(`update_canvas` settings/sharing, `set_capabilities`, `set_canvas_slug`,
+(`update_canvas` settings/sharing/`previewMode`, `set_canvas_preview` custom cover,
+`set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
 `clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
 `resend_guest_invite`/`revoke_access`, and the editor draft loop `get_draft`/
