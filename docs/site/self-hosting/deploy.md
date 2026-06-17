@@ -11,6 +11,17 @@ the proxy must do correctly is assert who the user is. Everything else is a conf
 swap — see [Configuration](/docs/self-hosting/configuration) for the full env
 surface (config is the single `process.env` reader).
 
+**Fastest path to a working production-shaped stack** (Docker, zero external setup —
+canvas-drop in real `proxy` mode behind Caddy + oauth2-proxy + a bundled demo IdP):
+
+```
+docker compose up --build
+# open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+```
+
+The rest of this page covers the recommended profile, the auth-at-the-edge contract,
+graduating off the demo IdP, and running the bare Node process.
+
 ## Recommended production profile
 
 - **URL mode:** `subdomain` (`{slug}.{base}`) — per-canvas origin isolation. Requires a
@@ -70,9 +81,12 @@ verified per request. In `oidc` mode the app issues its own session cookie
 ## Without a proxy
 
 If you don't run an identity-aware proxy, use the built-in `oidc` mode — point it at
-your OpenID provider:
+your OpenID provider. Run it in `subdomain` mode so you keep per-canvas origin
+isolation without standing up a proxy:
 
 ```
+CANVAS_DROP_URL_MODE=subdomain
+CANVAS_DROP_BASE_URL=https://canvases.example.com
 CANVAS_DROP_AUTH_MODE=oidc
 CANVAS_DROP_OIDC_ISSUER=https://accounts.example.com
 CANVAS_DROP_OIDC_CLIENT_ID=...
@@ -106,6 +120,22 @@ resolves the demo identity, and data survives a restart).
 
 The bundled Dex/oauth2-proxy secrets in `docker/` are **clearly-labeled demo-only
 placeholders** — see "Graduating" below before exposing the stack to anyone.
+
+### The image itself
+
+The `Dockerfile` is multi-stage on `node:24-slim`: a `builder` stage compiles the
+workspace, the `runtime` stage carries no compilers and runs as a dedicated non-root
+`canvasdrop` user (uid/gid 1001). Operational contract:
+
+- **`EXPOSE 3000`**, `NODE_ENV=production`, entry
+  `node --conditions=node-dist apps/server/dist/index.js`.
+- **`VOLUME /data`** — the writable state directory, pre-chowned to the non-root user.
+  Defaults inside the image: `CANVAS_DROP_STORAGE_PATH=/data/storage`,
+  `CANVAS_DROP_SQLITE_PATH=/data/canvasdrop.db`. Mount a volume here on the SQLite +
+  local-storage profile so data survives container replacement.
+- **`HEALTHCHECK`** polls `GET /healthz`, which pings the DB and returns 503 until the
+  database is reachable and migrations have run (60s start period covers Postgres
+  startup + migrations). Wire this into your orchestrator's readiness probe.
 
 ### Graduating to a real IdP (config, not code)
 

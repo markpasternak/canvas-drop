@@ -1,8 +1,10 @@
 # Install
 
-Stand up a canvas-drop instance. Two easy starting points: a one-command **Docker**
-stack that boots the real production shape, or the **Node dev profile** for hacking on
-the code. Everything you swap for production is a config change, never a code change.
+Stand up a canvas-drop instance. Pick one of two starting points: a one-command
+**Docker** stack that boots the real production shape (Caddy + an identity-aware proxy
++ Postgres), or the **Node dev profile** for hacking on the code. Everything you later
+swap for production — database, storage, URL mode, auth — is a config change, never a
+code change.
 
 ## With Docker (one command)
 
@@ -10,6 +12,8 @@ Requires **Docker** and **Docker Compose v2** (`docker compose`, not the legacy
 `docker-compose`). From a clone of the repo:
 
 ```bash
+git clone <your-fork-or-the-repo>
+cd canvas-drop
 docker compose up --build
 # then open http://localhost:8080  and log in as  demo@example.com / canvasdrop
 ```

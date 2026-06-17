@@ -43,7 +43,7 @@ const SITE = {
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "People build working web tools with AI in minutes, but they have nowhere safe to put them. canvas-drop is the creation-and-sharing layer: deploy a static canvas in seconds, share it with your team, and skip the screenshots and slide decks.",
+    "Your team builds working web tools with AI in minutes, then has nowhere safe to put them. canvas-drop is where they land: deploy a static canvas in seconds, share it behind your org sign-in, and skip the screenshots and slide decks.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
@@ -89,11 +89,11 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Deploy in seconds",
-    body: "Drag a folder, push from a script, or connect your AI agent over MCP — sign in once and it can create and deploy canvases for you. A canvas is just static files: no build to wait on, nothing to provision.",
+    body: "Drag a folder, paste HTML, push from a script, or connect your AI agent over MCP so it can create and deploy canvases for you. A canvas is just static files: no build to wait on, nothing to provision.",
   },
   {
     title: "Shared with your org",
-    body: "Every canvas lives behind your organization's sign-in. Invite a teammate, open a guest link, or publish to the gallery.",
+    body: "Every canvas lives behind your organization's sign-in. Keep it private, invite specific people, open it to the whole org, or list it in the gallery. Revoke access and it's gone instantly.",
   },
   {
     title: "Safe by default",
@@ -548,7 +548,7 @@ ${head(origin)}
         <a class="btn btn-primary" href="${cta.href}">${cta.label} ${arrow}</a>
         <a class="btn btn-ghost" href="/docs">Read the docs</a>
       </div>
-      <p class="cue" data-stagger="4">Or connect your agent over <span class="mono">MCP</span> — or <span class="mono">curl -F</span> a folder — and it's live.</p>
+      <p class="cue" data-stagger="4">Connect your agent over <span class="mono">MCP</span>, or <span class="mono">curl</span> a folder straight to a live URL.</p>
     </div>
   </section>
 
@@ -618,7 +618,7 @@ ${PRIVACY.map(featItem).join("\n")}
     <div class="wrap">
       <p class="kicker reveal" style="color:oklch(0.78 0.15 274)">Open source</p>
       <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
-      <p class="s-sub reveal">canvas-drop is open source and self-contained: one binary, your database, your storage, your sign-in. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
+      <p class="s-sub reveal">canvas-drop is open source and self-contained: your database, your storage, your sign-in. SQLite or Postgres, local disk or S3, all a config change away. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">
         <a class="btn btn-ghost" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a>
         <a class="btn btn-ghost" href="/docs">Self-host guide ${arrow}</a>

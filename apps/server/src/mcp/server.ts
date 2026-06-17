@@ -4,15 +4,17 @@ import { type CanvasStatus, type Manifest, publicationState } from "@canvas-drop
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { GuestService } from "../auth/guest.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
-import { generateUniqueSlug } from "../canvas/slug.js";
+import { resolveCreateSlug } from "../canvas/slug.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
@@ -35,6 +37,10 @@ export interface McpToolDeps extends PreviewHintDeps {
   storage: StorageDriver;
   audit: AuditLog;
   hub?: RealtimeHub;
+  /** Guest magic-link service (oidc/dev only; absent in proxy mode, where guest
+   *  invites are refused — the IAP owns that boundary). Backs the guest-access tools
+   *  and the guest-grant revocation on archive/unpublish/delete. */
+  guests?: GuestService;
 }
 
 /** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
@@ -147,28 +153,45 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "create_canvas",
     {
       description:
-        "Create a new canvas you own. Returns its id, URL, and a one-time deploy API key. The " +
+        "Create a new canvas you own. Returns its id, URL, a one-time deploy API key, AND a " +
+        "`deploy` block with the EXACT, ready-to-run curl endpoints for this canvas (apiBase, " +
+        "zipUpload, the staged upload URLs, readback, and a copy-paste `curl` command with the " +
+        "key already filled in). If you can run shell commands, deploy with that curl — you do " +
+        "NOT need to know or probe for the API host; it's in the block. The " +
         "canvas starts empty (no live version) and private; its URL only serves content after a " +
         "deploy, and only to viewers allowed by its access rung (default: sign-in required).",
       inputSchema: {
         title: z.string().optional(),
         description: z.string().optional(),
         backendEnabled: z.boolean().optional().describe("Enable the backend capability."),
+        slug: z
+          .string()
+          .max(63)
+          .optional()
+          .describe("Custom URL slug; omit for a readable-random one. Must be unused and valid."),
       },
     },
-    async ({ title, description, backendEnabled }) => {
-      const slug = await generateUniqueSlug(
-        async (s) => (await deps.canvases.findBySlug(s)) !== null,
-      );
+    async ({ title, description, backendEnabled, slug: requestedSlug }) => {
+      const resolved = await resolveCreateSlug(requestedSlug, (s) => deps.canvases.slugTaken(s));
+      if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
       const apiKey = generateApiKey();
-      const cv = await deps.canvases.create({
-        ownerId: caller.userId,
-        slug,
-        apiKeyHash: hashApiKey(apiKey),
-        title,
-        description,
-        backendEnabled,
-      });
+      let cv: Awaited<ReturnType<typeof deps.canvases.create>>;
+      try {
+        cv = await deps.canvases.create({
+          ownerId: caller.userId,
+          slug: resolved.slug,
+          slugCustom: resolved.custom,
+          apiKeyHash: hashApiKey(apiKey),
+          title,
+          description,
+          backendEnabled,
+        });
+      } catch (err) {
+        if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+          return fail("SLUG_TAKEN: that slug is already in use");
+        }
+        throw err;
+      }
       deps.audit.recordAudit({ action: "canvas_create", actorId: caller.userId, targetId: cv.id });
       // The key is returned once and never again — same contract as the dashboard.
       // Hand back ready-to-run curl endpoints (with the real key embedded) so an
@@ -184,7 +207,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "get_canvas",
     {
-      description: "Get the current state of a canvas you own.",
+      description:
+        "Get the current state of a canvas you own. Also returns a `deploy` block with the exact " +
+        "curl endpoints for this canvas (apiBase, zipUpload, staged URLs, readback, and a " +
+        "copy-paste `curl` with a $CANVAS_KEY placeholder — substitute the key from create_canvas). " +
+        "Use this to get the runnable deploy command for an existing canvas without probing.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -230,10 +257,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       description:
         "Deploy a canvas you own in ONE call. NOTE: if you can run shell commands, PREFER curl " +
         "over the keyed HTTP Deploy API instead of this tool — request that permission if you " +
-        "don't have it. curl streams file bytes straight from disk to the server so they never " +
-        "enter your context (far cheaper, no size ceiling); every MCP deploy tool inlines the " +
-        "bytes into the model. Use this MCP tool only when you genuinely cannot run commands, " +
-        "and then only for a FIRST publish of a small canvas. " +
+        "don't have it. The exact, ready-to-run curl command + endpoints are in the `deploy` " +
+        "block that create_canvas (with the key filled in) and get_canvas return — use those " +
+        "verbatim, do NOT probe for the API host. curl streams file bytes straight from disk to " +
+        "the server so they never enter your context (far cheaper, no size ceiling); every MCP " +
+        "deploy tool inlines the bytes into the model. Use this MCP tool only when you genuinely " +
+        "cannot run commands, and then only for a FIRST publish of a small canvas. " +
         "This PUBLISHES IMMEDIATELY: the uploaded files become the new live version at once " +
         "(there is no draft step — every deploy goes live and is kept as an immutable version). " +
         "The live URL is ACCESS-CONTROLLED (org sign-in / share rung), so do NOT verify by " +
@@ -348,8 +377,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Stage files into an open upload (from begin_deploy). Text as utf8 (default), binary as " +
         "base64. Call repeatedly to chunk a large set; only send the hashes begin_deploy reported " +
         "missing. NOTE: this inlines file bytes into the model — if you can run shell commands, " +
-        "PREFER curl: PUT each missing blob's raw bytes to the keyed HTTP Deploy API " +
-        "(…/uploads/{uploadId}/blobs/{hash}) so the bytes never enter your context. Request " +
+        "PREFER curl: PUT each missing blob's raw bytes to the keyed HTTP Deploy API so the bytes " +
+        "never enter your context. The exact staged URLs (begin/stageBlob/finalize) are in the " +
+        "`deploy` block from create_canvas/get_canvas — no need to probe for the host. Request " +
         "command permission if needed rather than streaming large/binary files through here.",
       inputSchema: {
         id: z.string().describe("The canvas id (must own it)."),
@@ -521,12 +551,165 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         actorId: caller.userId,
         targetId: cv.id,
       });
+      // Offline for everyone now → drop live sockets and revoke guest grants so
+      // re-publishing later doesn't silently resurrect them (mirrors the route).
       if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
       return ok({
         url: canvasUrl(deps.config, cv.slug),
         publicationState: "draft",
         currentVersionId: null,
       });
+    },
+  );
+
+  server.registerTool(
+    "set_capabilities",
+    {
+      description:
+        "Toggle a canvas's backend capabilities (same as the dashboard Backend tab). `backendEnabled` " +
+        "is the master switch; kv/files/ai/realtime are individual features (effective only when " +
+        "backend is on). Omitted fields are unchanged. Turning a capability (or the master) off drops " +
+        "live sockets that lost access.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        backendEnabled: z.boolean().optional(),
+        kv: z.boolean().optional(),
+        files: z.boolean().optional(),
+        ai: z.boolean().optional(),
+        realtime: z.boolean().optional(),
+      },
+    },
+    async ({ id, ...patch }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+      if (Object.keys(fields).length === 0) return ok(canvasView(deps.config, cv));
+      const updated = await deps.canvases.updateCapabilities(cv.id, fields);
+      deps.audit.recordAudit({
+        action: "capabilities_update",
+        actorId: caller.userId,
+        targetId: cv.id,
+        meta: { changed: Object.keys(fields) },
+      });
+      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      return ok(canvasView(deps.config, updated));
+    },
+  );
+
+  server.registerTool(
+    "set_canvas_slug",
+    {
+      description:
+        "Change a canvas's URL slug (same as Settings → Change slug). Pass `slug` for a custom one, " +
+        "or omit it for a fresh readable-random slug. The OLD URL stops working immediately. Returns " +
+        "the updated canvas (with its new url + deploy endpoints).",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        slug: z.string().max(63).optional().describe("New custom slug; omit for a random one."),
+      },
+    },
+    async ({ id, slug }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const resolved = await resolveCreateSlug(slug, (s) => deps.canvases.slugTaken(s));
+      if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
+      let updated: typeof cv;
+      try {
+        updated = await deps.canvases.regenerateSlug(cv.id, resolved.slug, resolved.custom);
+      } catch (err) {
+        if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+          return fail("SLUG_TAKEN: that slug is already in use");
+        }
+        throw err;
+      }
+      deps.audit.recordAudit({ action: "slug_regen", actorId: caller.userId, targetId: cv.id });
+      deps.hub?.dropCanvas(cv.id);
+      return ok({
+        ...canvasView(deps.config, updated),
+        deploy: deployEndpoints(deps.config, cv.id),
+      });
+    },
+  );
+
+  server.registerTool(
+    "regenerate_deploy_key",
+    {
+      description:
+        "Mint a NEW deploy API key for a canvas you own and invalidate the old one (same as Settings → " +
+        "Regenerate key). Returns the new `cd_…` key ONCE, plus a refreshed `deploy` block with the " +
+        "key embedded in the curl command. Use this if the key leaked or you lost it.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      const apiKey = generateApiKey();
+      await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
+      deps.audit.recordAudit({ action: "key_regen", actorId: caller.userId, targetId: cv.id });
+      return ok({ apiKey, deploy: deployEndpoints(deps.config, cv.id, apiKey) });
+    },
+  );
+
+  server.registerTool(
+    "archive_canvas",
+    {
+      description:
+        "Archive a canvas you own (reversible) — takes its public URL offline and moves it to the " +
+        "Archive view. Revokes guest grants. Use unarchive_canvas to restore it.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      if (!(await deps.canvases.archive(cv.id))) return fail("canvas not found");
+      deps.audit.recordAudit({ action: "canvas_archive", actorId: caller.userId, targetId: cv.id });
+      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+      return ok(canvasView(deps.config, { ...cv, status: "archived", currentVersionId: null }));
+    },
+  );
+
+  server.registerTool(
+    "unarchive_canvas",
+    {
+      description: "Restore an archived canvas you own back to active. Fails if it isn't archived.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      if (!(await deps.canvases.unarchive(cv.id)))
+        return fail("NOT_ARCHIVED: canvas is not archived");
+      deps.audit.recordAudit({
+        action: "canvas_unarchive",
+        actorId: caller.userId,
+        targetId: cv.id,
+      });
+      return ok(canvasView(deps.config, { ...cv, status: "active" }));
+    },
+  );
+
+  server.registerTool(
+    "delete_canvas",
+    {
+      description:
+        "Soft-delete a canvas you own (same as the dashboard Delete) — it loses its URL for everyone " +
+        "and is purged after the retention window. A canvas an admin has DISABLED cannot be deleted " +
+        "(it must be re-enabled first). This is not reversible from the MCP.",
+      inputSchema: { id: z.string().describe("The canvas id.") },
+    },
+    async ({ id }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      if (cv.status === "disabled") {
+        return fail("DISABLED: this canvas was disabled by an administrator");
+      }
+      await deps.canvases.setStatus(cv.id, "deleted");
+      deps.audit.recordAudit({ action: "canvas_delete", actorId: caller.userId, targetId: cv.id });
+      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+      return ok({ ok: true });
     },
   );
 

@@ -1,9 +1,21 @@
 # Canvas SDK (`canvasdrop`)
 
-The browser SDK gives a canvas backend capability — key–value storage, file
-storage, AI chat, realtime channels, and the signed-in viewer's identity — with
-**no build step and no secrets in the canvas**. Identity comes from the signed-in
-session; the canvas is identified by its own URL.
+You're building a canvas and want a backend without a build step or any secrets
+in your client code. Drop in one `<script>` tag and call `canvasdrop` — it gives
+your canvas the five primitives: key–value storage (`kv`), file storage
+(`files`), AI chat (`ai`), the signed-in viewer's identity (`me`), and realtime
+channels (`realtime`). Identity comes from the signed-in session; the canvas is
+identified by its own URL.
+
+```html
+<script src="/sdk/v1.js"></script>
+<script>
+  const me = await canvasdrop.me();              // who's viewing
+  await canvasdrop.kv.increment("visits");       // shared counter
+  const room = canvasdrop.realtime.channel("lobby");
+  room.subscribe((msg) => console.log(msg.from.name, msg.event, msg.data));
+</script>
+```
 
 > The canvas owner must turn on **Backend** (and the specific feature) in the
 > canvas's **Backend** tab. A method whose capability is off throws a
@@ -15,11 +27,11 @@ session; the canvas is identified by its own URL.
 <script src="/sdk/v1.js"></script>
 ```
 
-That defines the global `window.canvasdrop`. The SDK auto-detects the canvas slug
-and the API base from the page's location (path mode `/c/{slug}/…` or subdomain
-`{slug}.{host}`), and sends every request with the session cookie
-(`credentials: "include"`). All requests hit `/v1/c/{slug}/…` under the detected
-API base.
+That defines the single global `window.canvasdrop` (there is no `cd` alias). The
+SDK auto-detects the canvas slug and the API base from the page's location (path
+mode `/c/{slug}/…` or subdomain `{slug}.{host}`), and sends every request with the
+session cookie (`credentials: "include"`). All requests hit
+`{base}/v1/c/{slug}/…` under the detected API base.
 
 The stable `/sdk/v1.js` path is **additive and backward-compatible within v1**, so
 pointing your `<script>` at it means you receive fixes (including security
@@ -103,8 +115,9 @@ the canvas.
 
 Both throw a base `CanvasdropError` with `.code === "MODEL_NOT_ALLOWED"` (status
 403) if the model isn't in the instance allow-list, `QuotaExceededError` (429) on
-a spend cap, and
-`AI_STREAM_TRUNCATED` (502) if the stream ends before completion.
+a spend cap, and a `CanvasdropError` with `.code === "AI_STREAM_TRUNCATED"` (502)
+if the stream ends before completion. A mid-stream provider failure surfaces as
+`.code === "AI_UPSTREAM_ERROR"` (502).
 
 ## Realtime
 

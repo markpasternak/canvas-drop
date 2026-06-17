@@ -5,6 +5,13 @@ session**. Authenticate with the canvas's **secret key** as a Bearer token. A ke
 operates only on its own canvas, and every response is machine-readable so an agent
 can repair and retry without a human.
 
+```bash
+# Deploy a ZIP and confirm it's live, end to end.
+curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
+  -H "Authorization: Bearer $CANVAS_KEY" \
+  --data-binary @site.zip
+```
+
 > **Auth:** `Authorization: Bearer cd_...` — the canvas secret key, not a session
 > cookie. It is shown once at creation and stored hashed (SHA-256). This path takes
 > no cookies and no CORS, and is distinct from the session-cookie auth the

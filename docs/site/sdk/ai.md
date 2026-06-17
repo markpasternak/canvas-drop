@@ -1,13 +1,23 @@
 # AI
 
-Call a language model from your canvas without ever holding a provider key.
-`canvasdrop.ai` sends the request to the server, which runs the model call
-server-side and streams the result back. The provider key stays on the server —
-never put one in canvas code.
+Call a language model from your canvas without ever holding a provider key. The
+`canvasdrop.ai` primitive sends the request to the server, which runs the model
+call server-side and streams the result back. The provider key stays on the
+server: never put one in canvas code.
+
+```js
+const { text, usage, cost } = await canvasdrop.ai.chat(
+  [{ role: "user", content: "Summarise this poll result in one line." }],
+  { model: "claude-haiku-4-5" },
+);
+// text:  the model's reply
+// usage: { inputTokens, outputTokens }
+// cost:  number (USD)
+```
 
 Two entry points, both backed by `POST /v1/c/<slug>/ai/chat`:
 
-- `chat(messages, options)` — accumulate the full response.
+- `chat(messages, options)` — await the full response.
 - `stream(messages, options)` — iterate text as it arrives.
 
 `messages` must hold at least one message. `options.model` is **required** and
@@ -15,7 +25,8 @@ must be on the instance's model allowlist.
 
 ## Chat
 
-Accumulate a full response:
+`chat(messages, options)` accumulates every text delta and resolves once with
+`{ text, usage, cost }`:
 
 ```js
 const { text, usage, cost } = await canvasdrop.ai.chat(

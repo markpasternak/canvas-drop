@@ -223,7 +223,7 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 
 ## Status
 
-**v1 is feature-complete** and being hardened toward a public release. Built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md), every milestone on `main` with CI green on both dialects:
+**v1 is feature-complete** and being hardened toward a public release. Built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md), with CI green on both dialects at every merge. M1–M9 plus a wave of post-v1 features have shipped; **ops/packaging (M10) is the only milestone still in progress.**
 
 > **Maturity, honestly:** canvas-drop is **not yet running in production anywhere serious.** It is built and verified — boots, passes a dual-dialect test suite, and self-hosts via Docker — but it hasn't been battle-tested under a real org's load and usage yet. That's exactly what's next, and I'd love to see it: real usage, and the hardening that comes from contact with reality. Self-host reports, issues, and PRs are very welcome.
 
@@ -237,13 +237,13 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 - ✅ **Beyond v1** — clone-as-template, usage stats, server-side list filters, in-app docs (`/docs`, `/llms.txt`)
 - ✅ **Sharing access ladder** — per-canvas Private/Specific-people/Whole-org/Public-link, email-invited guest identities (SMTP or Mailgun), admin-gated public links, guest primitive policy (KV/files/realtime yes, AI opt-in, public static-only)
 
-- ✅ **OSS packaging** — multi-stage Docker image + one-command compose demo (real proxy/JWKS auth via a bundled Dex IdP), pedagogical prod config, `SECURITY.md`/`CODE_OF_CONDUCT.md`/`NOTICE`, blocking secret-scan in CI, starter examples
-
 - ✅ **Agent MCP server** — connect-once remote MCP at `/mcp` (OAuth 2.1 via the instance's own login, PKCE + dynamic client registration), identity-scoped create/deploy/manage tools, on by default and config-disablable
+- ✅ **More post-v1 features** — custom slugs, clone-as-template, the primitives showcase, staged content-addressed upload
+- 🚧 **Ops / packaging (M10, in progress)** — the packaging slice has shipped: multi-stage Docker image, one-command compose demo (real proxy/JWKS auth via a bundled Dex IdP), `.env.production.example`, `SECURITY.md`/`CODE_OF_CONDUCT.md`/`NOTICE`, blocking secret-scan in CI, and starter examples. **Still open:** the backup/restore round-trip drill, a single-VPS load test, and a colleague IAP pilot.
 
 - ✅ **Canvas screenshots** *(optional, off by default)* — async preview capture on publish via a single in-process headless Chromium; access-gated private storage, real gallery covers + public-link OG images; two-layer enablement (env availability **and** an admin toggle), no per-user opt-out. Chromium is opt-in at image build (`--build-arg SCREENSHOTS=1`); off behaves exactly like before. See [`docs/site/self-hosting/screenshots.md`](docs/site/self-hosting/screenshots.md)
 
-Remaining toward 1.0: a backup/restore drill and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
+M10 is the only open milestone — everything above it is merged to `main` with CI green on both dialects. The one in-flight plan is MCP↔dashboard tool parity (planned, not yet built). See [`docs/plans/`](docs/plans/) and [`BUILD_BRIEF.md` §16](BUILD_BRIEF.md).
 
 ---
 

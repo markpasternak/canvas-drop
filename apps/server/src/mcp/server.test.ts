@@ -219,6 +219,113 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(Array.from(Buffer.from(file.content, "base64"))).toEqual(Array.from(pngBytes));
   });
 
+  it("create_canvas honors a custom slug, and rejects an invalid or taken one", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+
+    const made = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { slug: "my-cool-canvas" } }),
+    );
+    expect(made.slug).toBe("my-cool-canvas");
+
+    // A reserved word is rejected.
+    expect(isError(await mcp.callTool({ name: "create_canvas", arguments: { slug: "api" } }))).toBe(
+      true,
+    );
+    // A taken slug is rejected.
+    expect(
+      isError(await mcp.callTool({ name: "create_canvas", arguments: { slug: "my-cool-canvas" } })),
+    ).toBe(true);
+  });
+
+  it("set_capabilities toggles backend + features (mirrors the Backend tab)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "set_capabilities",
+        arguments: { id: cv.id, backendEnabled: true, kv: true, ai: false },
+      }),
+    );
+    expect(updated.id).toBe(cv.id);
+    // No-op call (no fields) returns the canvas without error.
+    expect(
+      isError(await mcp.callTool({ name: "set_capabilities", arguments: { id: cv.id } })),
+    ).toBe(false);
+  });
+
+  it("set_canvas_slug changes the URL; the old slug frees up, a taken slug is rejected", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { slug: "first" } }));
+
+    const renamed = payload(
+      await mcp.callTool({ name: "set_canvas_slug", arguments: { id: cv.id, slug: "second" } }),
+    );
+    expect(renamed.slug).toBe("second");
+    expect(renamed.deploy.apiBase).toContain(cv.id);
+
+    // A second canvas can now take the freed-up "first" slug.
+    const other = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { slug: "first" } }),
+    );
+    // …and the first canvas can't rename onto the now-taken "first".
+    expect(
+      isError(
+        await mcp.callTool({ name: "set_canvas_slug", arguments: { id: cv.id, slug: "first" } }),
+      ),
+    ).toBe(true);
+    expect(other.slug).toBe("first");
+  });
+
+  it("regenerate_deploy_key mints a new key + refreshed deploy block", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const out = payload(
+      await mcp.callTool({ name: "regenerate_deploy_key", arguments: { id: cv.id } }),
+    );
+    expect(out.apiKey).toMatch(/^cd_/);
+    expect(out.apiKey).not.toBe(cv.apiKey);
+    expect(out.deploy.curl).toContain(out.apiKey);
+  });
+
+  it("archive → unarchive → delete lifecycle (mirrors the dashboard buttons)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const archived = payload(
+      await mcp.callTool({ name: "archive_canvas", arguments: { id: cv.id } }),
+    );
+    expect(archived.status).toBe("archived");
+    // Unarchiving a non-archived canvas would fail; this one is archived → ok.
+    const active = payload(
+      await mcp.callTool({ name: "unarchive_canvas", arguments: { id: cv.id } }),
+    );
+    expect(active.status).toBe("active");
+    // Unarchive again → NOT_ARCHIVED failure.
+    expect(
+      isError(await mcp.callTool({ name: "unarchive_canvas", arguments: { id: cv.id } })),
+    ).toBe(true);
+
+    // Delete → the canvas reads as not found afterwards (soft-deleted, owner loses it).
+    expect(isError(await mcp.callTool({ name: "delete_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      true,
+    );
+  });
+
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {
     client = await makeTestDb(dialect);
     const ownerA = await seedUser(client, "a@example.com");
@@ -229,7 +336,18 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
 
     // B tries to act on A's canvas — every canvas-scoped tool must refuse.
     const bClient = await connect(client, { userId: ownerB });
-    for (const name of ["get_canvas", "list_versions", "unpublish_canvas", "get_canvas_file"]) {
+    for (const name of [
+      "get_canvas",
+      "list_versions",
+      "unpublish_canvas",
+      "get_canvas_file",
+      "set_capabilities",
+      "set_canvas_slug",
+      "regenerate_deploy_key",
+      "archive_canvas",
+      "unarchive_canvas",
+      "delete_canvas",
+    ]) {
       const res = await bClient.callTool({ name, arguments: { id: made.id } });
       expect(isError(res), `${name} should refuse`).toBe(true);
     }

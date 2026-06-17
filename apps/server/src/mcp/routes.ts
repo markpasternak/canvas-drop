@@ -3,6 +3,7 @@ import { mcpAuthRouter, StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { GuestService } from "../auth/guest.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
@@ -33,6 +34,8 @@ export interface McpRoutesDeps extends PreviewHintDeps {
   upload: UploadService;
   /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
   storage: StorageDriver;
+  /** Guest magic-link service (oidc/dev only) — backs the guest-access MCP tools. */
+  guests?: GuestService;
   audit: AuditLog;
   /** Optional OAuth-lifecycle audit sink (U6); the tool layer uses `audit` directly. */
   oauthAudit?: McpAuditSink;
@@ -135,6 +138,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
           engine: deps.engine,
           upload: deps.upload,
           storage: deps.storage,
+          guests: deps.guests,
           audit: deps.audit,
           hub: deps.hub,
           screenshots: deps.screenshots,

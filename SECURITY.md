@@ -9,8 +9,8 @@ seriously and appreciate responsible disclosure.
 **Please do not open a public issue for security problems.**
 
 Report privately via GitHub's **[Report a vulnerability](https://github.com/markpasternak/canvas-drop/security/advisories/new)**
-(Security → Advisories → Report a vulnerability). If you cannot use that, email the
-maintainer listed in `package.json` / the repository owner.
+(Security → Advisories → Report a vulnerability). If you cannot use that, contact
+the repository owner.
 
 Include, where you can:
 
@@ -34,8 +34,9 @@ The security-critical surface is the five hard invariants (see the
 2. **Authorization** — a canvas is reachable only by principals its access rung
    allows; revoke/expiry/password are honored, including **live** on open
    realtime sockets.
-3. **Canvas isolation** — no cross-canvas access, in either URL mode, over HTTP
-   **and** WebSocket.
+3. **Canvas isolation** — in `subdomain` mode, no cross-canvas access over HTTP
+   **and** WebSocket. Path mode has reduced browser isolation and is for
+   local/trusted own-hosting unless the operator opts into the tradeoff.
 4. **Secret handling** — AI provider keys and canvas API keys are server-side
    only and never reach the browser; keys are stored hashed.
 5. **Upload safety** — the deploy pipeline rejects zip-slip and serves

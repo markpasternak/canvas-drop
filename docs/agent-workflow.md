@@ -8,18 +8,23 @@ The concrete loop both Claude and Codex follow. `AGENTS.md` is the summary; this
 deploy, dashboard, canvas-management depth, editor + draft/publish on content-addressed
 storage, the five primitives (KV, files, AI, identity, realtime) + browser SDK, admin +
 hardening, gallery, and the AI proxy + realtime. Several post-v1 features are merged too
-(usage stats, server-side list filters, the documentation system, clone-as-template, the
-primitives showcase). `BUILD_BRIEF.md` §16 and the README Status section are the authoritative
-status; defer to them.
+(the sharing access ladder, usage stats, server-side list filters, the documentation system,
+clone-as-template, the primitives showcase, owner-chosen custom slugs, the MCP server, and
+the staged/optimized upload path). `BUILD_BRIEF.md` §16 and the README Status section are the
+authoritative status; defer to them.
 
 The only open milestone is **M10 — ops/packaging** (Docker image + compose, backup/restore
-drill, single-VPS load test, IAP pilot), which has no code yet — no `Dockerfile` or compose
-file exists in the repo. The full sharing access ladder (private / specific-people / whole-org /
-public-link, guest magic-link invites, admin-gated public links) is also shipped and merged.
+drill, single-VPS load test, IAP pilot), which is **partial**: the `Dockerfile`, `docker-compose.yml`,
+`scripts/compose-smoke.sh`, and `.env.production.example` are shipped, but the backup/restore
+round-trip drill, the single-VPS load test, and the IAP colleague pilot are still deferred. The
+full sharing access ladder (private / specific-people / whole-org / public-link, guest magic-link
+invites, admin-gated public links) is also shipped and merged.
 
 Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
-though their scope is merged — the header pointers are stale. The working tree is clean and no
-fix plan is in flight; defer to `BUILD_BRIEF.md` §16 and the README Status section.
+though their scope is merged — the header pointers are stale. One plan is in flight — MCP ↔ user
+parity (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`, plan committed, code not yet
+started); it is claimable. For overall status defer to `BUILD_BRIEF.md` §16 and the README Status
+section.
 
 Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md
 "Read first"), and pick up a unit from a plan in `docs/plans/`.

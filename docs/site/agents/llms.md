@@ -34,7 +34,10 @@ keys. You sign in once through the instance's normal org login (OAuth, with auto
 client registration) and then get identity-scoped tools across every canvas you own:
 `whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
 `deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
-`rollback_canvas`, `unpublish_canvas`. A tool only touches canvases you own. Typical
+`rollback_canvas`, `unpublish_canvas`, plus the management tools
+(`set_capabilities`, `set_canvas_slug`, `regenerate_deploy_key`,
+`archive_canvas`/`unarchive_canvas`, `delete_canvas`) — the full table is in the
+[MCP server](/docs/agents/mcp) reference. A tool only touches canvases you own. Typical
 flow: `create_canvas` then `deploy_canvas`. Every deploy **publishes immediately** (no
 draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
 deploy by fetching it — an unauthenticated GET returns a login page. Verify through the
@@ -60,14 +63,14 @@ the session cookie:
 
 It exposes one global, **`canvasdrop`** (there is no `cd` alias). Mode and slug
 are auto-detected from the canvas URL; every call hits
-`{apiBase}/v1/c/{slug}/...` with `credentials: "include"`.
+`{apiBase}/v1/c/{slug}/...` with the session cookie.
 
 - `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` where `kind` is
   `"member"` (an org user) or `"guest"` (an email-invited viewer).
-- `canvasdrop.kv` and `canvasdrop.kv.user` — `get(key)`, `set(key, value)`,
-  `delete(key)`, `list({ prefix?, cursor?, limit? })`, `increment(key, by = 1)`.
-  `get` returns `null` on a missing key; `kv.user` is per-viewer, the root scope
-  is shared.
+- `canvasdrop.kv` and `canvasdrop.kv.user` — `get(key)` → value or `null`,
+  `set(key, value)`, `delete(key)`, `list({ prefix?, cursor?, limit? })` →
+  `{ entries, nextCursor }`, `increment(key, by = 1)` → number. `kv.user` is
+  per-viewer, the root scope is shared.
 - `canvasdrop.files` — `upload(file)` → `{ id, name, size, url }`, `list()`,
   `delete(id)`, `url(id)` (synchronous; returns the content URL).
 - `canvasdrop.ai` — `chat(messages, { model })` → `{ text, usage, cost }`, and

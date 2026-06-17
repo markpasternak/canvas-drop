@@ -18,7 +18,7 @@ import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
-import { generateUniqueSlug } from "../canvas/slug.js";
+import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
@@ -91,19 +91,6 @@ const createSchema = z.object({
  * value. Uniqueness is NOT checked here — the `canvases_slug_uq` index is the authority and
  * the caller maps its violation to 409 (KTD4/KTD7).
  */
-async function resolveCreateSlug(
-  raw: string | undefined,
-  exists: (slug: string) => Promise<boolean>,
-): Promise<{ slug: string; custom: boolean } | { error: "invalid_slug" }> {
-  const trimmed = raw?.trim();
-  if (trimmed) {
-    const check = validateSlug(trimmed);
-    if (!check.ok) return { error: "invalid_slug" };
-    return { slug: trimmed, custom: true };
-  }
-  return { slug: await generateUniqueSlug(exists), custom: false };
-}
-
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
 const capabilitiesSchema = z.object({
   backendEnabled: z.boolean().optional(),

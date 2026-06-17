@@ -1,11 +1,17 @@
 # Create & publish
 
-Get a canvas live from static files. Every published version is the same thing:
-an immutable, versioned set of files served at the canvas URL. Three deploy paths
-publish a version directly — drag a folder/files, upload a ZIP, or paste HTML
-(all from the create flow at `/new` or an existing canvas), plus the programmatic
-Deploy API. A fourth source, the in-browser editor, saves a draft first and lets
-you publish when ready.
+You have files (or HTML, or a build directory) and want a live, shareable URL.
+This page covers the four ways to get there and how publishing works.
+
+A canvas serves an **immutable, versioned set of static files** at its canvas URL.
+Three deploy paths publish a version directly — drag a folder/files, upload a ZIP,
+or paste HTML — plus a programmatic **Deploy API** for CI and agents. The fourth
+source, the in-browser [editor](/docs/authoring/editor), saves a draft first and
+lets you publish when you're ready.
+
+All four start from the create flow at `/new` (which also mints the canvas), and
+the first three are also available on an existing canvas to publish its next
+version.
 
 ## Drag-and-drop files or a folder
 
@@ -17,15 +23,14 @@ version is created, and the canvas is published in one step.
 ## Upload a ZIP
 
 Upload a `.zip` and the server extracts it. Extraction is path-safe (zip-slip and
-zip-bomb rejected). As with a folder, an `index.html` at the archive root is the
-entry point.
+zip-bomb archives are rejected). As with a folder, an `index.html` at the archive
+root is the entry point.
 
 ## Paste HTML
 
 For a one-file canvas, paste HTML directly. canvas-drop wraps it into a single
 `index.html` and publishes it. From the create flow this both creates the canvas
-and publishes it in one step; on an existing canvas, pasting publishes the next
-version.
+and publishes it; on an existing canvas, pasting publishes the next version.
 
 ## In-browser editor
 
@@ -34,10 +39,22 @@ as a **draft** as you type; you choose when to **publish** a version. This is th
 only source that uses the draft/publish loop — the other three publish a version
 directly. See [The editor](/docs/authoring/editor).
 
+## Custom slug
+
+The canvas URL ends in a **slug**. By default a new canvas gets a readable random
+slug; you can choose your own at create time (the slug field in `/new`) or change
+it later from the canvas **Settings** tab → URL & routing. Slugs are DNS-safe and
+reserved words are rejected; if the one you want is taken you'll get
+`409 slug_taken`. Changing a slug takes effect on the next request and the old
+URL stops resolving.
+
+A custom slug is guessable, so for any link-reachable canvas rely on the access
+rung, not on the URL being secret. See [Sharing & access](/docs/authoring/sharing).
+
 ## Deploy API
 
 Ship from CI or an agent with a per-canvas secret key over HTTP — no human and no
-dashboard session required. The body is a ZIP/tar archive; the response is
+dashboard session required. The body is a ZIP archive; the response is
 machine-readable. This path publishes a version **directly to live** (no draft
 loop). "Deploy" is the API term for this publish-from-files contract:
 
@@ -60,29 +77,34 @@ On success you get the new version's details:
 { "url": "...", "version": 7, "fileCount": 12, "totalBytes": 48213, "warnings": [] }
 ```
 
-On a validation failure you get a stable error code (HTTP `400`), so an agent can
-repair and retry:
+On a validation failure you get a stable error code, so an agent can repair and
+retry:
 
 ```json
 { "code": "ZIP_SLIP_REJECTED", "message": "...", "path": "../evil" }
 ```
 
-Codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
-`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`,
-`PATH_EXISTS`, `VERSION_UNAVAILABLE`. Limits: 100 MB/canvas, 25 MB/file, 2000
-files. The endpoint is rate-limited to 10 deploys/min/canvas (`429
-rate_limited` with `Retry-After` over the limit). `warnings[]` carries non-fatal
-notices — e.g. a file that may contain a canvas API key you should remove before
-publishing.
+A single-shot `PUT .../deploy` returns `400` for every validation error. Codes you
+may see: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
+`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`. Limits:
+100 MB/canvas, 25 MB/file, 2000 files (a body over the limit is rejected with
+`413` before parsing). The endpoint is rate-limited to 10 deploys/min/canvas
+(`429 rate_limited` with `Retry-After`). `warnings[]` carries non-fatal notices —
+e.g. a file that may contain a canvas API key you should remove before publishing,
+or a path that will be served as `text/plain`.
 
-The Deploy API also exposes `GET /v1/canvases/:id` (metadata), `GET
-.../versions`, `POST .../unpublish`, and `POST .../rollback` (body `{ version }`).
-See the [Deploy API reference](/docs/api/deploy-api).
+For large or repeat deploys, the **staged upload** flow sends only changed files:
+`POST .../uploads` with a manifest of `{path, hash, size}` returns the hashes not
+yet stored, you `PUT` each missing blob, then `POST .../uploads/:uploadId/finalize`
+publishes the version. The Deploy API also exposes `GET /v1/canvases/:id`
+(metadata), `GET .../versions`, `GET .../files` (read-back, `?path=` returns raw
+bytes), `POST .../unpublish`, and `POST .../rollback` (body `{ version }`). See the
+[Deploy API reference](/docs/api/deploy-api).
 
 ## Versions and rollback
 
 Every publish creates a new immutable version; the canvas always serves its
 **current** version. Roll back to an earlier version from the dashboard (the
-**Versions** tab → the **Make current** button) or the API (`POST
-/v1/canvases/:id/rollback`). Files are content-addressed — only changed files are
-stored and re-publishing identical files is cheap. The last 10 versions are kept.
+**Versions** tab → **Make current**) or the API (`POST /v1/canvases/:id/rollback`).
+Files are content-addressed — only changed files are stored and re-publishing
+identical files is cheap. The last 10 versions are kept.

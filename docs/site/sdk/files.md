@@ -32,19 +32,23 @@ carries only `{ id, name, size, url }` — use `list()` when you need `mime` or
 
 ## Safety
 
-The content endpoint is served with `X-Content-Type-Options: nosniff`, SVG
-uploads are served as attachments rather than rendered inline, and filenames are
-sanitized — so an uploaded file can't run as another viewer.
+The content endpoint is served with `X-Content-Type-Options: nosniff`. Only safe
+raster image types render inline; SVG is forced to a download (attachment) rather
+than rendered, and the served filename is sanitized. An uploaded file can't run
+as script against another viewer.
 
 ## Errors
 
 Files enforce a per-file size limit and a per-canvas quota, both admin-tunable.
+Every method rejects with a `CanvasdropError` subclass — catch the one you care
+about, or read `err.code` / `err.status`.
 
-- Oversized upload throws `QuotaExceededError` (HTTP `413`, code `FILE_TOO_LARGE`).
+- Oversized upload throws `QuotaExceededError` (HTTP `413`, `code: "FILE_TOO_LARGE"`).
 - Quota reached throws `QuotaExceededError` (HTTP `409`).
 - A disabled `files` capability throws `CapabilityDisabledError` (HTTP `403`,
-  code `CAPABILITY_DISABLED`).
-- A missing or deleted file throws `NotFoundError` (HTTP `404`).
+  `code: "CAPABILITY_DISABLED"`).
+- `delete(id)` on a missing file throws `NotFoundError` (HTTP `404`,
+  `code: "NOT_FOUND"`).
 
 See [error codes](/docs/api/errors).
 

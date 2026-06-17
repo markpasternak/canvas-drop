@@ -320,6 +320,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         engine: deps.engine,
         upload,
         storage: deps.storage,
+        guests: deps.guests,
         audit: deps.audit,
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {
