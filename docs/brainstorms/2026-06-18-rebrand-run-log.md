@@ -64,3 +64,40 @@ Ran a focused multi-agent review (correctness + project-standards + maintainabil
 - **P3 (noted, not changed):** theme-color value varies across index/manifest/landing vs BRAND.themeColor — cosmetic, left for later.
 
 **DECISION:** Did landing's *colour* consolidation now (it was both a review finding and P7's colour scope) since Mark only deferred the marketing *images*. P7 remaining = the bold "Committed" treatment (drenched hero/amber), images skipped.
+
+---
+
+## ☀️ MORNING SUMMARY — state of the run
+
+**Branch `feat/rebrand-readiness` — 8 commits, every commit green (typecheck + lint + dual-dialect test + build), nothing pushed, no PR. Verified live in the running dev app (light + dark).**
+
+```
+b80b968 P6 polish — focus ring follows control radius
+71a8f23 fix(review) — landing single-source ramp + stronger parity guard
+0f5dcf0 P6 motion — entrance animation (overlays/menus/toasts)
+9aa28d6 P3 a11y — segmented-control semantics
+41b49c9 P2 — Newsreader serif
+50cbd69 P1 — brand/token foundation, teal reskin, single-source logo
+60f87a0 docs — Editorial Creator OS spec/brand/plan
+```
+
+### DONE (the visual rebrand is live)
+- **P1 fully:** brand layer in `packages/shared/src/brand` (BRAND, BRAND_TOKENS, logo, rampCssVars); dashboard `tokens.css` flipped to warm-paper-light / deep-navy-dark + teal `#0c7b88`; type/shadow/control scales registered; single-source ramp across dashboard + ALL server surfaces (error/legal/landing/password-gate via rampCssVars); parity test (now guards 3 dashboard theme blocks + scans server surfaces for indigo); your working logo baked in everywhere (Brand.tsx, server, favicon/PWA, regenerated PNGs, manifest name fixed); FOUC bootstrap. **No violet anywhere.**
+- **P2 fully:** Newsreader serif on headings/titles/card-titles (self-hosted).
+- **P3 a11y slice:** segmented-control + scope-toggle ARIA fixes; `--subtle` AA fix.
+- **P6 slice:** entrance motion (overlays/menus/toasts, reduced-motion-safe) + focus-ring radius fix.
+- **Code review** ran (correctness + project-standards + maintainability); all real findings fixed (the landing fork was the main one).
+
+### REMAINING (for the next sessions — none started)
+1. **P4 — three-panel AppShell + DetailPanel + gallery-first CanvasCard.** The big one. **Wants your sign-off on the interaction model first** (per the plan's risk note + our chat) — I deliberately did NOT start it unattended. This is the highest-impact remaining piece.
+2. **P3 consolidation** — SegmentedControl/TabNav/SearchInput/DataTable/Tag/CodeBox primitives + shared Variant/Size vocab (maintainability refactor).
+3. **P5 — copy centralization** (`copy/*.ts`, PRIMITIVES map, voice fixes).
+4. **P6 remainder** — exit animations, mobile-menu focus-trap, reduced-motion spinner label, hover-model unification.
+5. **P7 — marketing "Committed" bold treatment** (drenched teal hero + amber). Colour consolidation already done; **images skipped per your instruction.**
+6. **P8 — flow/efficiency** (⌘K command palette, slug-aware lookup, etc.) — fast-follow.
+
+### Why I stopped here
+Reached a clean, fully-green, coherent checkpoint with the entire visual rebrand done and reviewed. The remaining phases are large/architectural; **P4 specifically needs your design sign-off before I refactor every route around the three-panel shell** — doing that unattended would produce a hard-to-review change. Resume by approving the P4 interaction model (or pick any of P3-consolidation / P5 / P6-remainder / P7-bold, which don't need sign-off).
+
+### To view
+Dev server is running: **http://localhost:5173/?theme=light** (and `?theme=dark`). Stop it with `pnpm dev:stop`. Static design previews still at `http://localhost:8771/`.
