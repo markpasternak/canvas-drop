@@ -17,6 +17,7 @@ const CANVAS: Canvas = {
   slug: "quiet-otter",
   slugCustom: false,
   url: "http://x/c/quiet-otter",
+  hasPreview: false,
   title: "Demo",
   description: null,
   access: "private",

@@ -5,6 +5,7 @@ import type { CanvasListItem, PublicationState } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
+import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
 
@@ -237,26 +238,36 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
       }}
     >
       <div className={`grid gap-3 lg:items-center ${DESKTOP_GRID}`}>
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <Link
-              to="/canvases/$id"
-              params={{ id: canvas.id }}
-              className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
-              aria-label={`View details for ${title}`}
-            >
-              {title}
-            </Link>
-            <span className="flex shrink-0 flex-wrap items-center gap-1">
-              <RowBadges canvas={canvas} />
-            </span>
+        <div className="flex min-w-0 items-start gap-3">
+          {/* Compact cover thumbnail (plan 004): real preview when captured, else the
+              deterministic generative art — decorative, the title is the affordance. */}
+          <div className="aspect-[16/9] w-16 shrink-0 overflow-hidden rounded-md border border-border/60">
+            <CanvasCover
+              seed={canvas.id}
+              previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "thumb") : undefined}
+            />
           </div>
-          <div className="mt-1 truncate font-mono text-xs text-subtle">{canvas.slug}</div>
-          <div
-            className="mt-0.5 truncate text-xs text-subtle"
-            title={fullTime(lastActivity(canvas))}
-          >
-            Last active {relativeTime(lastActivity(canvas))}
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <Link
+                to="/canvases/$id"
+                params={{ id: canvas.id }}
+                className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+                aria-label={`View details for ${title}`}
+              >
+                {title}
+              </Link>
+              <span className="flex shrink-0 flex-wrap items-center gap-1">
+                <RowBadges canvas={canvas} />
+              </span>
+            </div>
+            <div className="mt-1 truncate font-mono text-xs text-subtle">{canvas.slug}</div>
+            <div
+              className="mt-0.5 truncate text-xs text-subtle"
+              title={fullTime(lastActivity(canvas))}
+            >
+              Last active {relativeTime(lastActivity(canvas))}
+            </div>
           </div>
         </div>
 

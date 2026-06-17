@@ -1,5 +1,5 @@
 import { pgSchema, type ScreenshotJob, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, asc, eq, lte, or } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -149,6 +149,19 @@ export function screenshotsRepository(client: DbClient) {
      *  canvas that keeps failing; the next publish re-enqueues a fresh attempt). */
     async sweepFailed(cutoff: number): Promise<void> {
       await db.delete(t).where(and(eq(t.status, "failed"), lte(t.updatedAt, cutoff)));
+    },
+
+    /** Of the given canvas ids, those with a captured (`done`) preview — one batched
+     *  query for the dashboard `hasPreview` hint (no N+1). Empty in → empty out. */
+    async doneCanvasIds(canvasIds: string[]): Promise<string[]> {
+      if (canvasIds.length === 0) return [];
+      const rows = (await db
+        .select({ canvasId: t.canvasId })
+        .from(t)
+        .where(and(eq(t.status, "done"), inArray(t.canvasId, canvasIds)))) as Array<{
+        canvasId: string;
+      }>;
+      return rows.map((r) => r.canvasId);
     },
 
     /** The job row for a canvas, or null (one row per canvas). */

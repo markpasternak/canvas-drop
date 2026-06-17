@@ -165,6 +165,32 @@ describe.each(DIALECTS)("screenshotsRepository (%s)", (dialect) => {
     expect(await jobs.findByCanvas(canvasId)).toBeNull();
   });
 
+  it("doneCanvasIds returns only canvases with a captured (done) preview", async () => {
+    // canvasId has a done preview; a second canvas only has a pending job.
+    await jobs.enqueue(canvasId, V1);
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    await jobs.markDone(idOf(claimed), leaseOf(claimed));
+
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const u = await users.upsert({
+      providerSub: "p|2",
+      email: "p@e.com",
+      name: "P",
+      isAdmin: false,
+    });
+    const pendingCanvas = await canvases.create({
+      slug: "pending-one",
+      ownerId: u.id,
+      apiKeyHash: "k2",
+    });
+    await jobs.enqueue(pendingCanvas.id, V1); // pending, not done
+
+    const done = await jobs.doneCanvasIds([canvasId, pendingCanvas.id, "no-such-canvas"]);
+    expect(done).toEqual([canvasId]); // only the done one
+    expect(await jobs.doneCanvasIds([])).toEqual([]); // empty in → empty out
+  });
+
   // Review #2 regression: a completion for a row that was coalesced (republished) since
   // it was claimed must be a no-op, so the superseding version stays pending + captured.
   it("markDone is a lease-guarded no-op when the row was re-enqueued since claim", async () => {

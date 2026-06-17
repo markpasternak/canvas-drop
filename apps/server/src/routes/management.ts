@@ -27,6 +27,7 @@ import {
   CLEARED_PUBLICATION_FIELDS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -69,6 +70,11 @@ export interface ManagementDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  /** Screenshot preview support (plan 004). `screenshotsEnabled` is the effective gate
+   *  (env-available AND admin-enabled); `screenshots.doneCanvasIds` is the batched
+   *  captured-preview lookup. Both optional — omitted in unit tests → `hasPreview` false. */
+  screenshotsEnabled?: () => Promise<boolean>;
+  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
 }
 
 const createSchema = z.object({
@@ -138,10 +144,14 @@ const settingsSchema = z.object({
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
  * and other owner-only fields. Misnamed "public" for historical reasons.
  */
-function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals) {
+function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals, hasPreview = false) {
   return {
     id: cv.id,
     slug: cv.slug,
+    // A captured screenshot preview exists for this canvas (plan 004). Drives the
+    // dashboard cover (real shot vs GenerativeCover) without a probe request. False
+    // whenever the pipeline is off, so the dashboard behaves exactly like today.
+    hasPreview,
     // Owner-chosen vs readable-random — drives the public+custom heads-up (plan 004).
     slugCustom: cv.slugCustom,
     url: canvasUrl(config, cv.slug),
@@ -236,9 +246,20 @@ export function managementRoutes(deps: ManagementDeps) {
       aiEnabled: deps.aiEnabled ? await deps.aiEnabled() : !!deps.config.ai.apiKey,
     };
   }
+  /** Of the given canvas ids, those with a captured preview — empty when the screenshot
+   *  pipeline is off (so `hasPreview` is false and the dashboard behaves like today).
+   *  Optional deps (omitted in unit tests) → no previews. */
+  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
+    if (!deps.screenshots || !deps.screenshotsEnabled || !(await deps.screenshotsEnabled())) {
+      return new Set();
+    }
+    return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
+  }
+
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {
-    return publicCanvas(deps.config, cv, await resolveGlobals());
+    const hasPreview = (await previewIds([cv.id])).has(cv.id);
+    return publicCanvas(deps.config, cv, await resolveGlobals(), hasPreview);
   }
 
   /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
@@ -325,10 +346,12 @@ export function managementRoutes(deps: ManagementDeps) {
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
     // Globals are request-global (not per-canvas) — resolve once, reuse for the row.
     const globals = await resolveGlobals();
+    // Batched `hasPreview` lookup for the whole list (no N+1).
+    const previews = await previewIds(list.map((cv) => cv.id));
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
-        ...publicCanvas(deps.config, cv, globals),
+        ...publicCanvas(deps.config, cv, globals, previews.has(cv.id)),
         lastDeploy: v
           ? {
               version: v.number,

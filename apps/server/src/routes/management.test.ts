@@ -13,6 +13,7 @@ import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -41,6 +42,9 @@ function buildApp(
   hub?: any,
   // When false, simulate proxy mode (no guest service / mailer wired).
   withGuests = true,
+  // Screenshot preview pipeline effective-enabled (plan 004); off by default so
+  // existing tests see hasPreview=false (today's behavior).
+  screenshotsEnabled = false,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -80,6 +84,8 @@ function buildApp(
       hub,
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       mailer: withGuests ? logMailer(silent) : undefined,
+      screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
+      screenshots: screenshotsRepository(client),
     }),
   );
   return app;
@@ -142,6 +148,44 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}`,
     );
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
+  });
+
+  it("hasPreview reflects a captured preview only when the pipeline is enabled (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    // Capture a preview for the canvas (a done screenshot job).
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(created.id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+
+    // Pipeline OFF (default) → hasPreview false even though a preview exists.
+    const off = await jsonOf<{ hasPreview: boolean }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        `/api/canvases/${created.id}`,
+      ),
+    );
+    expect(off.hasPreview).toBe(false);
+
+    // Pipeline ON → hasPreview true.
+    const on = await jsonOf<{ hasPreview: boolean }>(
+      await buildApp(
+        client,
+        { id: owner.id, isAdmin: false },
+        undefined,
+        undefined,
+        true,
+        true,
+      ).request(`/api/canvases/${created.id}`),
+    );
+    expect(on.hasPreview).toBe(true);
   });
 
   it("GET /:id derives publicationState across draft/published/archived/disabled (R6)", async () => {

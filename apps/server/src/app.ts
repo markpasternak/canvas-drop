@@ -490,6 +490,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
+      // Screenshot preview support (plan 004) for the dashboard `hasPreview` cover hint.
+      screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+      screenshots: screenshotsRepository(deps.db),
     }),
   );
 

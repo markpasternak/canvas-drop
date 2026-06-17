@@ -2,6 +2,7 @@ import { ArrowSquareOut, CheckCircle, Info, WarningCircle } from "@phosphor-icon
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
+import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -262,6 +263,15 @@ export default function Overview() {
             : "Fix the root page before sharing."}
         </InlineNotice>
       )}
+
+      {/* Cover hero (plan 004): the real screenshot when captured, else the canvas's
+          deterministic generative art — a stable visual identity for the canvas. */}
+      <div className="aspect-[16/9] max-h-64 w-full overflow-hidden rounded-xl border border-border">
+        <CanvasCover
+          seed={canvas.id}
+          previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "card") : undefined}
+        />
+      </div>
 
       <Panel>
         <div className="mb-5 space-y-1">

@@ -69,6 +69,9 @@ export interface Canvas {
   /** True when the owner chose the slug (vs random). Drives the public+custom heads-up. */
   slugCustom: boolean;
   url: string;
+  /** A captured screenshot preview exists (plan 004). Drives the cover: real shot vs
+   *  GenerativeCover. False whenever the screenshot pipeline is off. */
+  hasPreview: boolean;
   title: string;
   description: string | null;
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
