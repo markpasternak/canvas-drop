@@ -1,6 +1,7 @@
 # Quickstart
 
-Stand up a local instance, then publish your first canvas.
+Stand up a local instance and publish your first canvas. The commands below get
+you a logged-in instance on `localhost` with no external services.
 
 ## Run an instance locally
 
@@ -84,10 +85,12 @@ whenever Backend is on. See the [SDK overview](/docs/sdk/overview).
 Open the canvas, edit in the **Editor** tab, then **Publish** to snapshot an
 immutable version and point the canvas URL at it. Roll back or switch the current
 version from the **Versions** tab. Set who can open it in the **Share** tab: the
-access ladder runs `private` (owner only, the default) → `specific_people` →
-`whole_org` → `public_link` (anyone with the link, admin-gated per owner). You can
-also add a password gate or share expiry, invite email guests, and list the
-canvas in the gallery once a version is published.
+access ladder runs **Private** (owner + admins only, the default) → **Specific
+people** (an email allowlist, including email-invited guests) → **Whole org** (any
+signed-in member with the link) → **Public link** (anyone with the link;
+admin-gated, static files only — primitives are refused for public visitors). On
+top of any rung you can add a password gate or a share expiry. Once a version is
+published you can also list the canvas in the gallery.
 
 ## Deploying as an agent
 

@@ -67,10 +67,11 @@ A canvas with a password cannot be listed in the gallery.
 
 **Public link** lets anyone with the URL view a canvas with no sign-in — but it's
 **static-only**: the page and its files serve, while every backend primitive (KV,
-files, AI, realtime) is refused, so the open internet can never touch your org's
-spend or stored data. It's a guarded capability: an **admin grants it per
-account**, and the rung only appears in your Share tab once you've been granted
-it. For everyone except the owner, a public-link canvas is always static-only.
+files, AI, realtime) is refused for public visitors, so the open internet can
+never touch your org's spend or stored data. It's a guarded capability: an
+**admin grants the publish-public capability per account**, and the **Public link**
+rung only appears in your Share tab once you hold it. For everyone except the
+owner, a public-link canvas is always static-only.
 
 ## Listing in the gallery
 

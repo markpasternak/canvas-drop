@@ -78,8 +78,10 @@ compose, so an attacker can't omit the JWT to downgrade to the weaker path:
   is ignored and logged.
 
 Proxy mode refuses to start without either a JWKS URL or a trusted-proxy IP set,
-and the app must never be directly reachable — only through the proxy, which
-overwrites (not appends) the identity headers.
+so an unguarded "trust any header" config is impossible by construction. The app
+must never be directly reachable — only through the proxy. On the trusted-header
+path, configure the proxy to overwrite (not append) the identity headers so a
+client can't smuggle a second value.
 
 In `oidc` mode the app mints its own session: the `__canvasdrop_session` cookie
 carries a high-entropy token whose SHA-256 hash is what the server stores and

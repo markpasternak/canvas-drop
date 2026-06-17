@@ -1,8 +1,17 @@
 # Example: a live poll canvas
 
-A complete single-file canvas that records votes in the shared KV store and shows a
-running total. Deploy it, then enable the `kv` capability for the canvas. The browser
-SDK is served at `/sdk/v1.js` and auto-detects the canvas slug — no keys, no config.
+Goal: ship a single static HTML file that records votes in the shared KV store and shows
+a running total, with no keys and no build step.
+
+Two steps to live:
+
+1. Deploy the file below as a canvas (folder/ZIP/paste/deploy API — see the deploy docs).
+2. Enable the `kv` capability for the canvas (capabilities are off by default).
+
+The browser SDK is served at `/sdk/v1.js` and auto-detects the canvas slug from the URL.
+The single global it exposes is `canvasdrop`. No keys, no config: requests carry the
+signed-in session cookie. If a primitive is off, the call throws a typed error you can
+catch (see the `CAPABILITY_DISABLED` handler below).
 
 ```html
 <!doctype html>
@@ -14,6 +23,7 @@ SDK is served at `/sdk/v1.js` and auto-detects the canvas slug — no keys, no c
     <pre id="out"></pre>
 
     <script src="/sdk/v1.js"></script>
+
     <script>
       const out = document.getElementById("out");
 

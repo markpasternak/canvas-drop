@@ -39,11 +39,12 @@ change, never a code change.
 | `NODE_ENV` | `development` | `development` \| `production` \| `test`. |
 | `CANVAS_DROP_URL_MODE` | `path` | `path` serves `…/c/{slug}/*`; `subdomain` serves `{slug}.{baseHost}`. |
 | `CANVAS_DROP_BASE_URL` | `http://localhost:3000` | Public base URL. In `subdomain` mode must be non-localhost or boot fails. |
-| `CANVAS_DROP_API_BASE_URL` | (= `CANVAS_DROP_BASE_URL`) | Where the Deploy API (`/v1/canvases/*`) is reachable. Set only when the API is fronted on a different host than canvases — e.g. `subdomain` mode where canvases are `{slug}.canvases.example.com` but the API is routed at `https://api.canvases.example.com`. The MCP tools advertise curl endpoints built from this so agents don't probe for the host. (`api`/`v1`/`sdk`/`auth`/`mcp` are reserved slugs, so a canvas can't collide with it.) |
+| `CANVAS_DROP_API_BASE_URL` | (= `CANVAS_DROP_BASE_URL`) | Where the Deploy API (`/v1/canvases/*`) is reachable. Set only when the API is fronted on a different host than canvases — e.g. `subdomain` mode where canvases are `{slug}.canvases.example.com` but the API is routed at `https://api.canvases.example.com`. The MCP tools advertise curl endpoints built from this so agents don't probe for the host. |
 | `CANVAS_DROP_PORT` | `3000` | Listen port. |
 | `CANVAS_DROP_SESSION_SECRET` | (dev fallback only) | **Required, ≥32 chars, outside dev and always in production.** Signs session cookies (oidc/dev). |
 | `CANVAS_DROP_ADMIN_EMAILS` | (empty) | CSV; lowercased. Grants the admin surface. |
-| `CANVAS_DROP_REALTIME` | `on` | `on` \| `off`. |
+| `CANVAS_DROP_REALTIME` | `on` | `on` \| `off`. Toggles the realtime primitive. |
+| `CANVAS_DROP_MCP` | `on` | `on` \| `off`. When `off`, the `/mcp` control-plane routes are not mounted. |
 | `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE` | `false` | Must be `true` to boot `path` mode with `proxy`/`oidc` auth (path mode has reduced browser isolation). |
 | `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the built dashboard SPA path; defaults to a location resolved from the server module. |
 
@@ -125,8 +126,8 @@ its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.
 
 ## Rate limiting
 
-In-process counters with a fixed 60-second window; they reset on restart. Each
-limit is an integer ≥ 1 (boot fails on `0` or negative).
+Per-minute request budgets. Each limit is a positive integer ≥ 1 (boot fails on
+`0` or negative).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
@@ -181,7 +182,7 @@ Structured logs go to stdout via pino — no app-side files, rotation, or shippi
 |----------|---------|-------|
 | `LOG_LEVEL` | `info` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace`. |
 | `LOG_FORMAT` | `pretty` in dev, `json` in production | `json` \| `pretty`. |
-| `CANVAS_DROP_SENTRY_DSN` | (unset) | Reserved: the DSN is read into config and shown in the admin Configuration view, but no error-tracking integration consumes it yet — setting it does not enable error reporting. |
+| `CANVAS_DROP_SENTRY_DSN` | (unset) | Error tracking is off unless this is set. |
 
 > All examples use placeholder values. Never commit real secrets — set them in
 > your deployment environment (systemd, container env, secrets manager).

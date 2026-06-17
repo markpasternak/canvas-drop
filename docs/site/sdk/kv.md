@@ -1,10 +1,18 @@
 # Key–value storage
 
-Store and read JSON values from a canvas with `canvasdrop.kv`. Two namespaces
-share the same five methods (`get`, `set`, `delete`, `list`, `increment`):
-**shared** (canvas-global) and **user** (`canvasdrop.kv.user`, auto-scoped to the
-signed-in viewer). Identity comes from the session — your code never handles keys
-or credentials.
+Persist JSON values from your canvas with `canvasdrop.kv` — counters, settings,
+small documents, anything you'd otherwise lose on reload. The global
+`canvasdrop` client is available on any served canvas; no setup, no API keys.
+
+Two namespaces share the same five methods (`get`, `set`, `delete`, `list`,
+`increment`):
+
+- **shared** — `canvasdrop.kv` — one set of keys for the whole canvas.
+- **per-viewer** — `canvasdrop.kv.user` — auto-scoped to the signed-in viewer
+  server-side, so each person reads and writes their own values.
+
+Identity comes from the session, never from your code, so there are no
+credentials to handle.
 
 ## Shared
 
@@ -33,16 +41,20 @@ await canvasdrop.kv.user.set("pref", "dark");
 const pref = await canvasdrop.kv.user.get("pref");
 ```
 
-`canvasdrop.kv.user` is keyed by the signed-in viewer, so each person reads and
-writes their own values. Same five methods (`get`, `set`, `delete`, `list`,
-`increment`) — only the scope differs.
+`canvasdrop.kv.user` is keyed by the signed-in viewer (the scope is forced to
+their user ID on the server), so each person reads and writes their own values.
+Same five methods (`get`, `set`, `delete`, `list`, `increment`) — only the scope
+differs.
 
 ## Limits
 
-- Values up to **64 KiB** (JSON) — exceeding throws `VALUE_TOO_LARGE` (413).
-- Keys up to **512 bytes** — exceeding throws `KEY_TOO_LARGE` (413).
-- **10,000** keys per shared canvas, **1,000** per user namespace — exceeding
-  `set`/`increment` throws `KEY_LIMIT` (409). (Admin-tunable.)
+- Values up to **64 KiB** (JSON) — `set` throws `VALUE_TOO_LARGE` (413) above it.
+- Keys up to **512 bytes** — `set`/`increment` throw `KEY_TOO_LARGE` (413) above it.
+- **10,000** keys per shared canvas, **1,000** per per-viewer namespace — a `set`
+  or `increment` that would add a new key past the cap throws `KEY_LIMIT` (409).
+
+The per-canvas key-count caps (shared and per-viewer) are admin-tunable per
+instance; the 64 KiB value and 512-byte key limits are fixed.
 
 These error codes surface as a `QuotaExceededError` carrying the wire `.code`. A
 disabled capability throws `CapabilityDisabledError`. See

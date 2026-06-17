@@ -42,15 +42,22 @@ there is no cross-owner access and no existence leak.
 | `get_canvas_file` | Read back what's **live**: list the current version's files, or fetch one file's content. Use it to **verify a deploy** (the live URL is sign-in gated — see below). |
 | `rollback_canvas` | Point a canvas back at an earlier version number. |
 | `unpublish_canvas` | Take a published canvas back to draft. |
+| `set_capabilities` | Toggle a canvas's backend capabilities — `backendEnabled` is the master switch; `kv`/`files`/`ai`/`realtime` are individual features (effective only when backend is on). Omitted fields are unchanged. |
+| `set_canvas_slug` | Change a canvas's URL slug (pass a custom one, or omit for a fresh random slug). The old URL stops working immediately. |
+| `regenerate_deploy_key` | Mint a new `cd_…` deploy key and invalidate the old one; the new key is returned **once**. |
+| `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes guest grants. |
+| `unarchive_canvas` | Restore an archived canvas back to active. |
+| `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
 
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
 
 **Every deploy publishes immediately.** There is no draft step over MCP: `deploy_canvas`
 and `finalize_deploy` make the uploaded files the new **live** version at once (kept as
-an immutable version you can roll back to). The canvas's URL is **access-controlled** —
-it serves content only to viewers allowed by the canvas's share rung (default: org
-sign-in required). So a freshly deployed canvas is live, but not an anonymous public URL.
+an immutable version you can roll back to). A new canvas starts **private** (owner-only);
+its URL is **access-controlled** and serves content only to viewers allowed by the
+canvas's share rung. So a freshly deployed canvas is live, but not an anonymous public URL
+until you widen its access.
 
 ### Which deploy tool to use
 
@@ -104,8 +111,11 @@ instead:
 
 `create_canvas` (and `get_canvas`) return a `deploy` block with the **exact curl
 endpoints** for the canvas — `apiBase`, `zipUpload`, the staged URLs, `readback`, and a
-copy-paste `curl` command. In subdomain mode the API host (`CANVAS_DROP_API_BASE_URL`,
-e.g. `api.example.com`) differs from the canvas host, so use these advertised endpoints
+copy-paste `curl` command. `create_canvas` embeds the real key in that block (returned
+**once**); `get_canvas` uses a `$CANVAS_KEY` placeholder instead — the key is never
+re-handed-out, so set it from your own copy. In subdomain mode the API host
+(`CANVAS_DROP_API_BASE_URL`, e.g. `api.example.com`) differs from the canvas host (it
+falls back to `CANVAS_DROP_BASE_URL` when unset), so use these advertised endpoints
 rather than guessing.
 
 Tool calls are rate-limited per account and recorded in the audit log alongside every

@@ -1,9 +1,9 @@
 # Error codes
 
-Every failure from the runtime API carries a stable, machine-readable `code` and
-an HTTP `status`. The browser SDK throws typed errors extending `CanvasdropError`
-(each with a readonly `.code` and `.status`). Branch on `err.code`, never on
-message text.
+When a primitive call fails, branch on the error's `code` — never on message
+text. Every failure from the runtime API carries a stable, machine-readable
+`code` and an HTTP `status`, and the browser SDK throws typed errors extending
+`CanvasdropError` (each with a readonly `.code` and `.status`).
 
 The global is `window.canvasdrop` (loaded from `/sdk/v1.js`); the error classes
 are also named exports of `@canvas-drop/sdk`. There is no `cd` alias.

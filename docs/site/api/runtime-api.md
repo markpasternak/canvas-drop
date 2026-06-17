@@ -9,6 +9,16 @@ All routes live under `{base}/v1/c/{slug}`. The path is identical in both URL mo
 (`path` and `subdomain`) — only the host the SDK targets changes. The SDK derives
 `{base}` from the canvas location, so you never hard-code it.
 
+In a canvas, the SDK is on the page as the global `canvasdrop`:
+
+```js
+// served at {base}/sdk/v1.js, exposed as window.canvasdrop
+const me = await canvasdrop.me();          // → { id, email, name, avatarUrl, kind }
+await canvasdrop.kv.set("greeting", "hi"); // shared KV
+```
+
+There is no `cd` alias — the single global is `canvasdrop`.
+
 > **Auth:** every request is credentialed with the **session cookie**, sent
 > automatically by the browser. Identity is resolved server-side from that session —
 > the canvas never asserts who the viewer is. Unauthenticated requests are stopped
@@ -163,15 +173,15 @@ the socket by hand; it handles framing, reconnection, and presence for you. See 
 These are part of the client surface but not under `/v1/c/{slug}`:
 
 ```
-GET {base}/api/me      dashboard SPA identity → { id, email, name, avatarUrl, isAdmin, canPublishPublic, authMode }
+GET {base}/api/me      dashboard SPA identity → { id, email, name, avatarUrl, isAdmin, canPublishPublic, authMode, urlMode, baseUrl }
 GET {base}/sdk/v1.js   the served browser SDK bundle (503 if not built)
 ```
 
 `/api/me` sits behind the session gateway but is **not** capability-gated, and unlike
-the runtime `me()` it adds `isAdmin`, `canPublishPublic`, and the instance `authMode`
-(`proxy` | `oidc` | `dev` — config, not user data). `/sdk/v1.js` is served behind the
-auth gateway as `application/javascript; charset=utf-8` with `cache-control: public,
-max-age=3600`.
+the runtime `me()` it adds `isAdmin`, `canPublishPublic`, and the instance config
+`authMode` (`proxy` | `oidc` | `dev`), `urlMode` (`path` | `subdomain`), and `baseUrl`
+— config, not user data. `/sdk/v1.js` is served behind the auth gateway as
+`application/javascript; charset=utf-8` with `cache-control: public, max-age=3600`.
 
 ## Errors
 

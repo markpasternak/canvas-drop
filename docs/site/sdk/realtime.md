@@ -1,9 +1,14 @@
 # Realtime
 
-`canvasdrop.realtime` is ephemeral pub/sub with presence — for live cursors,
-reactions, and collaborative demos. Messages are not persisted; they fan out to
-whoever is connected to a channel right now. Identity on every message and in
-the presence list comes from the server-side session, never the client.
+Add live cursors, reactions, or a shared room to a canvas with
+`canvasdrop.realtime`: ephemeral pub/sub plus presence. Messages are not
+persisted; they fan out to whoever is connected to a channel right now.
+Identity on every message and in the presence list comes from the server-side
+session, never the client, so `from.name` and the presence list are always
+trustworthy.
+
+No keys, no setup: `canvasdrop` is already on `window` in any canvas, and it
+connects to the right canvas automatically.
 
 ```js
 const channel = canvasdrop.realtime.channel("room-1");
@@ -53,24 +58,30 @@ type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser };
 ## How the connection works
 
 - All channels on a canvas share **one** WebSocket, at
-  `wss://<canvas-host>/v1/c/<slug>/realtime` (`ws://` over plain HTTP). The SDK
-  derives the host from the page, so you never construct the URL yourself.
+  `wss://{base}/v1/c/{slug}/realtime` (`ws://` over plain HTTP). The SDK derives
+  the host and slug from the page, so you never construct the URL yourself.
 - The socket auto-reconnects with capped exponential backoff (default base
   `500` ms, capped at `10000` ms).
 - `close()` on the last open channel tears the socket down.
 
 ## Limits and errors
 
+Per-canvas limits enforced by the server: **30** concurrent connections, **100**
+messages per minute, **16 KB** per frame. Over the rate or size limit, the
+server replies with an `{ type: "error", code }` frame (`RATE_LIMITED`,
+`MESSAGE_TOO_LARGE`) and keeps the socket open. The terminal failures below
+close the socket instead:
+
 - **Capability off:** if `realtime` is disabled for the canvas or instance, the
-  server closes the socket and `presence()` / `publish()` reject or throw a
-  `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`).
-- **Connection limit:** too many concurrent connections to the canvas surface as
-  a `QuotaExceededError` (`code: "CONNECTION_LIMIT"`).
+  server closes the socket. After that, `publish()` throws and `presence()`
+  rejects with a `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`).
+- **Connection limit:** exceeding 30 concurrent connections surfaces as a
+  `QuotaExceededError` (`code: "CONNECTION_LIMIT"`).
 - **Not signed in:** an expired or missing session surfaces as a
   `NotAuthenticatedError` (`code: "NOT_AUTHENTICATED"`).
 
 These map to WebSocket close codes `4403` (capability), `4429` (connection
-limit), and `4401` (auth); those closes are terminal — the SDK does not
+limit), and `4401` (auth); those closes are terminal, so the SDK does not
 reconnect after them.
 
 See [error codes](/docs/api/errors) and the

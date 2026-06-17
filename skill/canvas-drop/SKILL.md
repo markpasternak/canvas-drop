@@ -123,14 +123,16 @@ bytes stream straight from disk and the server only asks for blobs it doesn't al
 have:
 
 ```bash
-# 1) Open a session with the manifest; response lists missingHashes.
+# 1) Open a session with the manifest of {path, hash (sha256 hex), size}.
+#    Response: { uploadId, missingHashes } — only the blobs not already stored.
 curl -X POST "{base}/v1/canvases/{id}/uploads" \
   -H "Authorization: Bearer $CANVAS_KEY" -H "Content-Type: application/json" \
   -d '{"manifest":[{"path":"index.html","hash":"<sha256>","size":123}]}'
 # 2) PUT each missing blob's raw bytes (never buffered into an agent's context).
+#    Each returns 204. Callable repeatedly to chunk large uploads.
 curl -X PUT "{base}/v1/canvases/{id}/uploads/{uploadId}/blobs/<sha256>" \
   -H "Authorization: Bearer $CANVAS_KEY" --data-binary @index.html
-# 3) Finalize → publishes a new live version.
+# 3) Finalize → publishes a new live version (fails if any manifest blob is missing).
 curl -X POST "{base}/v1/canvases/{id}/uploads/{uploadId}/finalize" \
   -H "Authorization: Bearer $CANVAS_KEY"
 ```
@@ -153,6 +155,9 @@ The key is verified per-canvas. Companion deploy-API operations (same Bearer aut
   has a `number`). A missing/non-number `version` returns `400 INVALID_PATH`; an
   unknown or non-ready version returns `404 INVALID_PATH`; a version removed by a
   concurrent prune returns `409 VERSION_UNAVAILABLE` (retry).
+- `POST {base}/v1/canvases/{id}/unpublish` (no body) — takes a published canvas back
+  to Draft (clears the live pointer, drops sockets). `409 CANNOT_UNPUBLISH` if it
+  isn't currently published.
 
 A deploy-API key only works while the canvas is active; if the canvas is archived or
 disabled, the key is not recognized and the request returns 401 unauthorized. (The 409

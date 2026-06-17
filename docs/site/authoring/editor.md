@@ -8,8 +8,9 @@ tab.
 
 Every canvas has one **draft**: a working copy separate from what viewers see.
 When you open a new canvas's draft it starts empty; otherwise it's seeded from the
-current published version. Your edits autosave to the draft as you go — the canvas
-keeps serving its published version until you explicitly **publish**.
+current published version. Your edits autosave to the draft as you go (debounced,
+with a final flush when you leave the editor); the canvas keeps serving its published
+version until you explicitly **publish**.
 
 The loop:
 
@@ -20,23 +21,37 @@ The loop:
 
 ## Files
 
-Use the file tree to add, rename, replace, and delete files. You can publish any
-non-empty draft. `index.html` at the canvas root is the entry point; if the draft
-has exactly one HTML file it's served as the entry even under another name, but
-with multiple HTML files and no `index.html` the canvas root returns 404 — so name
-your home page `index.html`. Text files open in the editor (CodeMirror) with syntax
-highlighting; binary assets (images, fonts) are supported alongside them.
+Use the file tree to add, rename, replace, delete, and upload files (drag-and-drop
+works too). Relative paths are preserved, so a `css/site.css` reference resolves
+the way you'd expect.
+
+Name your home page `index.html` at the canvas root. The root URL serves `index.html`
+if it exists; if the draft has exactly one HTML file it's served as the entry even
+under another name; but with multiple HTML files and no `index.html`, the canvas root
+returns 404. Drafts in that state get a repair notice pointing you toward a valid
+`index.html`.
+
+Text files open in the CodeMirror editor with syntax highlighting. Binary assets
+(images, fonts, spreadsheets) aren't text-editable: images show a preview, and any
+non-editable file offers **Download** and **Replace** instead of an edit surface.
+You can publish any non-empty draft.
 
 ## Preview and on-page editing
 
-Preview renders the current draft (not the published version), so you see exactly
-what publishing would ship.
+The live preview pane (owner-only, collapsible and expandable to fullscreen) renders
+the current draft, not the published version, so you see exactly what publishing would
+ship. For JavaScript-driven drafts the inline pane can't run ES modules or make
+authenticated SDK calls, so it swaps to an **Open full preview** link that opens the
+draft in its own context.
 
-When the draft is a single HTML page with no JavaScript, the editor also offers a
-**Page text** mode: edit the copy directly in the rendered page and it saves back
-to that HTML file. Anything else — multiple HTML files, or a page that runs
-JavaScript — edits in **Code** mode. The editor falls back to Code automatically if
-on-page editing stops being available.
+Two editing surfaces:
+
+- **Code** (CodeMirror) — the default, available for any draft.
+- **Page text** — edit the copy directly in the rendered page; it saves back to that
+  HTML file. Available only when the draft is a single HTML page with no JavaScript.
+  Anything else (multiple HTML files, or a page that runs JavaScript) uses Code mode,
+  and the editor falls back to Code automatically if on-page editing stops being
+  available.
 
 ## Versions, rollback, and restore
 
@@ -45,8 +60,8 @@ older ones are pruned.
 
 From the **Versions** tab you can:
 
-- See version history with the source (editor, folder, ZIP, paste, or the deploy
-  API), when it was published, file count, and total size.
+- See version history with the source (editor, folder, ZIP, paste, the deploy
+  API, or a staged upload), when it was published, file count, and total size.
 - Make any version the served one with the **Make current** button (confirm in the
   dialog). It re-points the canvas to that version — forward or back — as a guarded
   pointer swap, so visitors get it immediately.

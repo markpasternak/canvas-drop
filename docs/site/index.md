@@ -11,8 +11,10 @@ secrets in the page, and they gain backend capability only through five
 primitives exposed by a zero-config browser SDK.
 
 **Status:** v1 is feature-complete and hardening toward a public release. The
-remaining work is ops/packaging (a Docker image + compose file, a backup/restore
-drill, and a single-VPS load test) — see [Self-hosting → Install](/docs/self-hosting/install).
+Docker image, one-command compose, MCP server, and examples have all shipped. The
+remaining ops/packaging work (M10) is proving the backup/restore round-trip, a
+single-VPS load test, and a colleague IAP pilot. See
+[Self-hosting → Install](/docs/self-hosting/install).
 
 ## What you can build
 
@@ -23,8 +25,9 @@ that communicates better as a working artifact than as a screenshot or a slide.
 
 - **Publish** a canvas four ways: paste a single `index.html`, drag a folder of
   files, upload a `.zip`, or call the [deploy API](/docs/api/deploy-api) with a
-  per-canvas key (agents can ship without a human in the loop). You can also edit
-  in the browser and **Publish** from the draft.
+  per-canvas key. Agents can ship without a human in the loop, either over that
+  HTTP API or through the built-in [MCP server](/docs/agents/mcp) at `{base}/mcp`.
+  You can also edit in the browser and **Publish** from the draft.
 - **Add backend capability** with the [browser SDK](/docs/sdk/overview) at
   `{base}/sdk/v1.js`: key–value storage, file storage, the signed-in viewer's
   identity (`me()`), AI, and realtime. The owner opts a canvas into **backend**

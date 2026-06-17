@@ -1,19 +1,28 @@
 # Browser SDK
 
-The browser SDK gives a canvas backend capability — key–value storage, file
-storage, the signed-in viewer's identity, AI, and realtime — with **no build step
-and no secrets in the canvas**. Identity comes from the signed-in session; the
-canvas is identified by its own URL.
+You wrote a static canvas and now you want it to remember things, store files,
+greet the signed-in viewer, call a model, or sync between tabs. The browser SDK
+gives your canvas those five backend capabilities — KV (key-value storage),
+files, AI, identity (`me()`), and realtime — with **no build step and no secrets
+in the canvas**. Identity comes from the signed-in session; the canvas is
+identified by its own URL.
 
 ## Add it to a canvas
 
+Drop in one script tag, then call the global:
+
 ```html
 <script src="/sdk/v1.js"></script>
+<script>
+  const me = await canvasdrop.me();
+  await canvasdrop.kv.set("last-viewer", me.name);
+  const total = await canvasdrop.kv.increment("views");
+</script>
 ```
 
-That defines the global `window.canvasdrop` (the only global name — there is no
-`cd` alias). The SDK auto-detects the canvas slug and the API base from the page's
-location:
+The script tag defines the single global `window.canvasdrop` (that is the only
+global name — there is no `cd` alias). The SDK auto-detects the canvas slug and
+the API base from the page's location:
 
 - **Path mode** — a path like `/c/{slug}/…` is matched; the slug is the segment
   after `/c/`, and the API base is the page's own origin.

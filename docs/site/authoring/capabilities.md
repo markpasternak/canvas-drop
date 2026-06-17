@@ -1,18 +1,20 @@
 # Capabilities
 
 A canvas is static by default. To give it backend behaviour, the owner turns on
-capabilities in the canvas's **Backend** tab. They are off until you enable
+capabilities on the canvas's **Backend** tab. They are off until you enable
 them, and any SDK call to a feature that is off throws a
 `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
 
 ## Turn on the backend
 
 1. Open the canvas, go to the **Backend** tab.
-2. Switch **Backend** on. This is the master switch — off by default.
-3. With Backend on, toggle the features you need: **KV**, **Files**, **AI**,
+2. Under **Backend**, switch **Enable backend** on. This is the master switch,
+   off by default.
+3. With the backend on, toggle the features you need: **KV**, **Files**, **AI**,
    **Realtime**. Each is independent.
 
-**Identity has no toggle.** `me()` is available exactly when Backend is on.
+**Identity has no toggle.** `me()` is available exactly when the backend is on;
+the tab shows it as "Always on" once you enable the backend.
 
 ## The five primitives
 
@@ -37,21 +39,21 @@ condition is true:
 | AI | Backend on **and** AI toggle on **and** the operator has configured an AI provider key |
 | Realtime | Backend on **and** Realtime toggle on **and** the operator has enabled realtime for the instance |
 
-KV and Files have no operator-level switch — your two toggles are the whole
+KV and Files have no operator-level switch: your two toggles are the whole
 story. AI and Realtime each carry an extra operator gate, so a feature you've
-turned on can still report as off if the instance isn't set up for it. The
-Backend tab shows the **Backend** master switch and your feature toggles, and
-surfaces a hint on a feature that's gated by the operator — so you can see *why*
-a feature you've enabled is still off.
+turned on can still report as off if the instance isn't set up for it. When that
+happens, the toggle stays on but the tab labels it **"Disabled by your
+administrator for this instance"** — so you can see *why* a feature you've
+enabled is still off.
 
 ## Public links are static-only
 
 If a canvas is shared as a **public link** (the `public_link` access rung,
-anyone with the link), every primitive is inert for non-owner viewers — the
-Backend tab shows a warning that the canvas serves static files only, and the
-server refuses backend calls with `STATIC_ONLY` (status 403). Public-link
-canvases are static files only; use a more restricted access rung if the canvas
-needs a backend.
+anyone with the link), every primitive is inert for public visitors. The
+Backend tab shows a warning that the canvas serves static files only, and
+the server refuses backend calls from those visitors with `STATIC_ONLY`
+(status 403). The backend still works for you and for signed-in org members; use
+a more restricted access rung if the canvas needs a backend for everyone.
 
 ## What happens when a feature is off
 
