@@ -280,6 +280,68 @@ describe("managementRoutes", () => {
     }
   });
 
+  it("DELETE /:id/preview is a no-op on a non-custom canvas — never deletes an auto screenshot", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }, storage).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    // Simulate an auto-captured screenshot already on disk (previewMode stays "auto").
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      await storage.put(screenshotKey(created.id, rendition), new Uint8Array([1]), {
+        contentType: "image/webp",
+      });
+    }
+
+    const del = await buildApp(client, { id: owner.id, isAdmin: false }, storage).request(
+      `/api/canvases/${created.id}/preview`,
+      { method: "DELETE", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(del.status).toBe(200);
+    expect((await jsonOf<{ previewMode: string }>(del)).previewMode).toBe("auto");
+    // The auto-captured renditions must survive — DELETE only clears a custom upload.
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      expect(await storage.exists(screenshotKey(created.id, rendition))).toBe(true);
+    }
+  });
+
+  it("PATCH /:id/settings previewMode:auto from custom drops the orphaned custom renditions", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const app = () => buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const created = await jsonOf<{ id: string }>(
+      await app().request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await app().request(`/api/canvases/${created.id}/preview`, {
+      method: "PUT",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "image/png" },
+      body: await pngBytes(),
+    });
+
+    // Switching back to auto through the settings API (not the dedicated DELETE) must
+    // still clean up the custom renditions so they aren't served stale under "auto".
+    const patch = await app().request(`/api/canvases/${created.id}/settings`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ previewMode: "auto" }),
+    });
+    expect(patch.status).toBe(200);
+    expect((await jsonOf<{ previewMode: string }>(patch)).previewMode).toBe("auto");
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      expect(await storage.exists(screenshotKey(created.id, rendition))).toBe(false);
+    }
+  });
+
   it("PUT /:id/preview rejects a non-image body (400) and a non-owner (404, no leak)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

@@ -30,6 +30,7 @@ import type { DraftService } from "../draft/service.js";
 import type { Mailer } from "../email/mailer.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
+import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
 import {
   type PreviewHintDeps,
   previewVisible,
@@ -748,6 +749,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
 
       let updated = cv;
       if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
+      // Leaving `custom` for auto/off drops the owner-uploaded renditions (mirrors the
+      // dashboard's DELETE /:id/preview), else they orphan and serve.ts would hand the
+      // stale custom image back under `auto`. Agent-native parity with the HTTP path.
+      if (
+        cv.previewMode === "custom" &&
+        (patch.previewMode === "auto" || patch.previewMode === "off")
+      ) {
+        await deletePreviewRenditions(deps.storage, cv.id);
+      }
       if (password !== undefined) {
         updated = await deps.canvases.setPassword(
           cv.id,
@@ -796,9 +806,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
       if (image === undefined) {
-        for (const r of SCREENSHOT_RENDITIONS) {
-          await deps.storage.delete(screenshotKey(cv.id, r)).catch(() => {});
-        }
+        // Clear is custom-only — never delete a legitimately auto-captured screenshot.
+        if (cv.previewMode !== "custom") return ok(canvasView(deps.config, cv));
+        await deletePreviewRenditions(deps.storage, cv.id);
         const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
         deps.audit.recordAudit({
           action: "settings_update",

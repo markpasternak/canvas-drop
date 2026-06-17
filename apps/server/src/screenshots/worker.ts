@@ -127,6 +127,15 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
         );
         return true;
       }
+      // The canvas opted out of auto-capture AFTER this job was enqueued — the owner
+      // uploaded a custom cover (previewMode `custom`) or turned previews off. Capturing
+      // now would overwrite a pinned custom image with a screenshot, so retire the job
+      // without capturing (markDone — it's correctly obsolete, not a failure). The trigger
+      // guard only blocks NEW enqueues; an already-queued job needs this check too.
+      if (canvas.previewMode !== "auto") {
+        await deps.jobs.markDone(job.id, job.leasedAt as number);
+        return true;
+      }
       const b = await ensureBrowser();
       const context = await b.newContext();
       try {

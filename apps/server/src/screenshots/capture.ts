@@ -196,12 +196,18 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
   }
 }
 
+/** Max input pixels sharp will decode (~40 MP). Our own capture master is ~1.4 MP, so
+ *  this only bites the custom-preview upload path, where the bytes are owner-supplied:
+ *  it caps decode-time memory (a decompression-bomb image throws instead of allocating
+ *  hundreds of MB of raw bitmap on a small VPS). The caller turns the throw into a 400. */
+const MAX_INPUT_PIXELS = 40_000_000;
+
 /** sharp: PNG master → one WebP per rendition (`cover` crop to each target size). */
 export async function encodeRenditions(masterPng: Uint8Array): Promise<CaptureResult> {
   const out = {} as CaptureResult;
   for (const rendition of Object.keys(RENDITION_SIZES) as ScreenshotRendition[]) {
     const { width, height } = RENDITION_SIZES[rendition];
-    const buf = await sharp(masterPng)
+    const buf = await sharp(masterPng, { limitInputPixels: MAX_INPUT_PIXELS })
       .resize(width, height, { fit: "cover" })
       .webp({ quality: WEBP_QUALITY })
       .toBuffer();

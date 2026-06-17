@@ -43,13 +43,14 @@ import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
+import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
 import {
   type PreviewHintDeps,
   previewVisible,
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { deployBodyLimit, deployResponse } from "./deploy-common.js";
+import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
   config: Config;
@@ -452,6 +453,17 @@ export function managementRoutes(deps: ManagementDeps) {
     if (Object.keys(patch).length > 0) {
       updated = await deps.canvases.updateSettings(cv.id, patch);
     }
+    // Leaving `custom` for auto/off through the settings API (or MCP update_canvas) must
+    // drop the owner-uploaded renditions, exactly as DELETE /:id/preview does — otherwise
+    // they orphan in storage and serve.ts would hand the stale custom image back under
+    // `auto`. The dedicated DELETE endpoint owns the custom→auto UI path; this covers the
+    // API/agent path that sets previewMode directly.
+    if (
+      cv.previewMode === "custom" &&
+      (patch.previewMode === "auto" || patch.previewMode === "off")
+    ) {
+      await deletePreviewRenditions(deps.storage, cv.id);
+    }
     if (password !== undefined) {
       const hash = password === null ? null : await hashPassword(password);
       updated = await deps.canvases.setPassword(cv.id, hash);
@@ -634,8 +646,10 @@ export function managementRoutes(deps: ManagementDeps) {
   // --- Custom preview (plan 004 follow-up) -------------------------------------
   // Upload an owner-chosen cover image. The raw image body is encoded into the same
   // og/card/thumb WebP renditions an auto-capture produces, then `previewMode=custom`
-  // pins it so a publish never overwrites it. Body cap mirrors a single deploy blob.
-  app.put("/:id/preview", sameOrigin, deployBodyLimit, async (c) => {
+  // pins it so a publish never overwrites it. Body cap is the single-blob limit (25 MB,
+  // matching the dashboard's own client cap) — not the whole-archive deploy limit — so a
+  // non-browser caller can't feed an arbitrarily large bitmap into the sharp decode.
+  app.put("/:id/preview", sameOrigin, blobBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const body = new Uint8Array(await c.req.arrayBuffer());
@@ -662,13 +676,14 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   // Remove the custom preview → revert to `auto` (next publish re-captures) and delete
-  // the stored renditions so nothing stale is served in the meantime.
+  // the stored renditions so nothing stale is served in the meantime. Guarded to
+  // `custom` only: on a non-custom canvas this is a no-op, so it can never delete a
+  // legitimately auto-captured screenshot (idempotent "ensure no custom cover").
   app.delete("/:id/preview", sameOrigin, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    for (const rendition of SCREENSHOT_RENDITIONS) {
-      await deps.storage.delete(screenshotKey(cv.id, rendition)).catch(() => {});
-    }
+    if (cv.previewMode !== "custom") return c.json(await canvasView(cv));
+    await deletePreviewRenditions(deps.storage, cv.id);
     const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
     deps.audit.recordAudit({
       action: "settings_update",

@@ -107,6 +107,20 @@ describe("screenshotWorker (plan 004 / U5)", () => {
     expect(browser.state.contextClosed).toBe(1);
   });
 
+  it("retires (markDone, no capture) a job whose canvas left auto since enqueue — protects a custom cover", async () => {
+    const { jobs, canvases, canvasId, puts, browser, worker } = await setup(cfg());
+    await jobs.enqueue(canvasId, VERSION);
+    // Owner uploaded a custom cover after the auto-publish enqueued this job.
+    await canvases.updateSettings(canvasId, { previewMode: "custom" });
+    await worker.tick();
+
+    // No capture ran (no renditions written, no browser launched) so the custom cover
+    // bytes are untouched, and the now-obsolete job is retired rather than left to loop.
+    expect(puts).toEqual([]);
+    expect(browser.state.launches).toBe(0);
+    expect((await jobs.findByCanvas(canvasId))?.status).toBe("done");
+  });
+
   it("when the admin toggle is OFF: runs bookkeeping but launches no browser and claims nothing", async () => {
     const { jobs, canvasId, browser, worker, setEnabled } = await setup(cfg());
     await jobs.enqueue(canvasId, VERSION);

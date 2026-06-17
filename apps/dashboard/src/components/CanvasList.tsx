@@ -244,7 +244,11 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
           <div className="aspect-[3/2] w-16 shrink-0 overflow-hidden rounded-md border border-border/60">
             <CanvasCover
               seed={canvas.id}
-              previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "thumb") : undefined}
+              previewUrl={
+                canvas.hasPreview
+                  ? `${previewCoverUrl(canvas.url, "thumb")}&v=${canvas.updatedAt}`
+                  : undefined
+              }
             />
           </div>
           <div className="min-w-0 flex-1">
