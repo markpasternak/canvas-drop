@@ -180,16 +180,25 @@ async function main() {
     jobs: screenshotsRepository(db),
     canvases,
     storage,
-    // The worker renders against the loopback server. Path mode → the `/c/{slug}/`
-    // route. Subdomain mode → the public per-canvas host (capture origin across URL
-    // modes is the plan's open question — finalized in the M10 image smoke test).
+    // The worker always renders against the LOOPBACK server (no external DNS/TLS/proxy
+    // hop). Path mode → the `/c/{slug}/` route on loopback. Subdomain mode → the
+    // canvas's real subdomain URL (over http), which the browser's host-resolver rules
+    // (set at launch below) map to the loopback server — so the request carries the
+    // correct Host (and `resolveRequest` picks the right canvas) without leaving the box.
     captureUrlFor: (canvas) =>
       config.urlMode === "subdomain"
-        ? canvasUrl(config, canvas.slug)
+        ? `http://${new URL(canvasUrl(config, canvas.slug)).host}/`
         : `http://127.0.0.1:${config.port}/c/${canvas.slug}/`,
     launchBrowser: async () => {
       const { chromium } = await import("playwright");
-      const browser = await chromium.launch();
+      // Subdomain mode: map every `*.{baseHost}` to the loopback server so the worker
+      // can hit a canvas's real subdomain URL internally (correct Host, no external hop).
+      const args: string[] = [];
+      if (config.urlMode === "subdomain") {
+        const baseHost = new URL(config.baseUrl).hostname;
+        args.push(`--host-resolver-rules=MAP *.${baseHost} 127.0.0.1:${config.port}`);
+      }
+      const browser = await chromium.launch({ args });
       return {
         newContext: async () =>
           (await browser.newContext()) as unknown as CaptureContext & { close(): Promise<void> },

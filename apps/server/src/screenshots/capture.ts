@@ -22,11 +22,13 @@ import { CAPTURE_TOKEN_HEADER } from "./capture-token.js";
 /** Encoded viewport (the OG master is taken at this size). */
 export const CAPTURE_VIEWPORT = { width: 1200, height: 630 } as const;
 
-/** Target pixel size per rendition (sharp `cover` crop from the master). */
+/** Target pixel size per rendition (sharp `cover` crop from the master). `card`/`thumb`
+ *  are 16:9 to match the dashboard/gallery cover regions (no off-aspect cropping);
+ *  `og` stays the 1200x630 link-unfurl standard. */
 export const RENDITION_SIZES: Record<ScreenshotRendition, { width: number; height: number }> = {
   og: { width: 1200, height: 630 },
-  card: { width: 800, height: 500 },
-  thumb: { width: 320, height: 200 },
+  card: { width: 1200, height: 675 },
+  thumb: { width: 400, height: 225 },
 };
 
 const WEBP_QUALITY = 80;

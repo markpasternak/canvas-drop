@@ -20,8 +20,11 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
   // biome-ignore lint/suspicious/noExplicitAny: Playwright Browser, loaded dynamically when opted in.
   let browser: any;
 
+  const seenHosts: string[] = [];
+
   beforeAll(async () => {
-    server = createServer((_req, res) => {
+    server = createServer((req, res) => {
+      if (req.headers.host) seenHosts.push(req.headers.host);
       res.writeHead(200, { "content-type": "text/html" });
       res.end("<!doctype html><html><body style='background:#123'><h1>hi</h1></body></html>");
     });
@@ -49,5 +52,33 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     expect(og.width).toBe(RENDITION_SIZES.og.width);
     // biome-ignore lint/suspicious/noExplicitAny: real Playwright context close
     await (context as any).close();
+  });
+
+  // R3: subdomain-mode capture hits the canvas's real subdomain URL, which the
+  // browser's host-resolver rules map to the loopback server. This proves the
+  // mechanism end-to-end: a browser launched with `--host-resolver-rules=MAP <host>
+  // 127.0.0.1:<port>` reaches our loopback server AND the request carries the real
+  // subdomain Host (so resolveRequest would pick the right canvas).
+  it("reaches the loopback server with the right Host via host-resolver-rules", async () => {
+    seenHosts.length = 0;
+    const port = (server.address() as AddressInfo).port;
+    const fakeHost = "quiet-otter.canvases.example.com";
+    const { chromium } = await import("playwright");
+    const mapped = await chromium.launch({
+      args: [`--host-resolver-rules=MAP ${fakeHost} 127.0.0.1:${port}`],
+    });
+    try {
+      const context = (await mapped.newContext()) as unknown as CaptureContext;
+      const out = await captureCanvas({
+        context,
+        url: `http://${fakeHost}/`, // resolves to the loopback server
+        token: "tok",
+        timeoutMs: 15_000,
+      });
+      expect((await sharp(out.og).metadata()).format).toBe("webp");
+      expect(seenHosts).toContain(fakeHost); // server saw the real subdomain Host
+    } finally {
+      await mapped.close();
+    }
   });
 });

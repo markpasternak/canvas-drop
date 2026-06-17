@@ -41,7 +41,9 @@ export interface ScreenshotWorkerDeps {
   >;
   canvases: { findById(id: string): Promise<Canvas | null> };
   storage: Pick<StorageDriver, "put">;
-  /** Resolve the internal URL to render for a canvas (URL-mode aware; injected). */
+  /** Resolve the internal URL to render for a canvas (URL-mode aware; injected). In
+   *  subdomain mode this is the canvas's subdomain URL, resolved to the loopback server
+   *  by the browser's host-resolver rules (set at launch in index.ts). */
   captureUrlFor: (canvas: Canvas) => string;
   /** Launch the persistent browser (injectable; default Playwright chromium). */
   launchBrowser: () => Promise<CaptureBrowser>;
