@@ -305,7 +305,7 @@ export function CanvasRow({
               <Link
                 to="/canvases/$id"
                 params={{ id: canvas.id }}
-                className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+                className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
                 aria-label={`View details for ${title}`}
               >
                 {title}

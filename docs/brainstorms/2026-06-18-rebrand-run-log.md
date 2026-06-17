@@ -33,3 +33,10 @@ Every judgment call is logged here for morning review. Newest entries appended a
 - biome: ignore `design/` (preview/exploration artifacts, not shipped).
 
 **BLOCKER resolved:** `@fontsource-variable/newsreader` has no `italic.css` export → used `standard-italic.css`.
+
+### P2 — Typography (Newsreader serif)  ✅ (typecheck + lint + test green)
+- base.css: `h1–h4` now Newsreader serif, weight 500, tighter tracking (the content voice). Controls/labels/meta stay sans.
+- `PageHeader` h1 → `font-serif text-h1` (1.9rem editorial scale).
+- Card titles (CanvasList + gallery) → serif (editorial-throughout). Verified live: "Your canvases" / "Ship your first canvas" render in Newsreader, light + dark.
+
+**DECISION (from Mark, mid-run):** Skip regenerating the marketing site's preview/tour/og IMAGES in P7 — do the code/colour/serif changes only, leave the committed screenshots as-is. Updated the P7 scope accordingly.

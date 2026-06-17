@@ -41,7 +41,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
             href={item.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate text-sm font-semibold text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
+            className="min-w-0 truncate font-serif text-[0.95rem] font-medium text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
           >
             {item.title || "Untitled canvas"}
           </a>
