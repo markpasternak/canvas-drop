@@ -33,6 +33,9 @@ export interface GuestPublicResolverDeps {
  */
 export function guestPublicResolver(deps: GuestPublicResolverDeps) {
   return createMiddleware<AppEnv>(async (c, next) => {
+    // A principal already set upstream (e.g. the internal capture carve-out, plan 004)
+    // wins — never override it with a guest/anonymous resolution.
+    if (c.get("principal")) return next();
     const { role, canvasSlug } = resolveRequest(
       { host: c.req.header("host") ?? "", pathname: c.req.path },
       deps.config,

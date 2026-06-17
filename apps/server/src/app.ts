@@ -71,6 +71,7 @@ import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
+import { captureResolver } from "./screenshots/capture-resolver.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import type { StorageDriver } from "./storage/driver.js";
 import { uploadService } from "./upload/service.js";
@@ -345,6 +346,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // those requests skip the org gateway. Mounted only in app-gated modes
   // (oidc/dev) — in proxy mode the IAP authenticates first, so it isn't mounted
   // and a forged guest cookie still hits the gateway (KTD7).
+  // Internal capture carve-out (plan 004 / U5): establishes the `capture` principal for
+  // the screenshot worker's HMAC-token'd requests, in EVERY mode (the token is
+  // unforgeable, so it's safe; in proxy mode it's how the loopback worker gets past the
+  // IAP gateway). Mounted before the guest carve-out + gateway; decideCanvasAccess gates.
+  app.use("*", captureResolver({ config: deps.config, secret: deps.config.sessionSecret }));
+
   if (deps.config.auth.mode !== "proxy" && deps.guests) {
     app.use(
       "*",

@@ -1,22 +1,28 @@
 import { ConfigError, loadConfig, presentEnvVars } from "@canvas-drop/shared";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
+import { adminSettingsService } from "./admin/settings-service.js";
 import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
 import { setupAuth } from "./auth/factory.js";
 import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
+import { canvasUrl } from "./canvas/url.js";
 import { makeDb } from "./db/factory.js";
 import { runMigrations } from "./db/migrate.js";
 import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
+import { screenshotsRepository } from "./db/repositories/screenshots.js";
+import { settingsRepository } from "./db/repositories/settings.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
 import { createHub } from "./realtime/hub.js";
+import type { CaptureContext } from "./screenshots/capture.js";
+import { startScreenshotWorker } from "./screenshots/worker.js";
 import { makeStorage } from "./storage/factory.js";
 
 /** Periodic realtime re-authorization (D-RT-6 backstop, §9.7 default 60s). */
@@ -144,6 +150,41 @@ async function main() {
   // primitive). MUST run after serve() returns the server.
   injectWebSocket?.(server);
 
+  // Screenshot worker (plan 004). Only starts when the env makes capture AVAILABLE
+  // (Chromium present); even then it stays idle until an admin enables the runtime
+  // toggle (effectiveScreenshotsEnabled). When unavailable it's fully inert — the
+  // product behaves exactly like today. Started AFTER serve() so the worker's loopback
+  // capture requests reach a listening server.
+  const screenshotSettings = adminSettingsService({
+    settings: settingsRepository(db),
+    config,
+    envPresent: presentEnvVars(),
+  });
+  const screenshotWorkerCtl = startScreenshotWorker({
+    config,
+    enabled: () => screenshotSettings.effectiveScreenshotsEnabled(),
+    jobs: screenshotsRepository(db),
+    canvases,
+    storage,
+    // The worker renders against the loopback server. Path mode → the `/c/{slug}/`
+    // route. Subdomain mode → the public per-canvas host (capture origin across URL
+    // modes is the plan's open question — finalized in the M10 image smoke test).
+    captureUrlFor: (canvas) =>
+      config.urlMode === "subdomain"
+        ? canvasUrl(config, canvas.slug)
+        : `http://127.0.0.1:${config.port}/c/${canvas.slug}/`,
+    launchBrowser: async () => {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.launch();
+      return {
+        newContext: async () =>
+          (await browser.newContext()) as unknown as CaptureContext & { close(): Promise<void> },
+        close: () => browser.close(),
+      };
+    },
+    log: rootLogger,
+  });
+
   // Realtime heartbeat backstop: re-authorize live sockets so time-based expiry
   // and admin block/delete (which fire no mutation hook) drop within one tick.
   const heartbeat = setInterval(() => {
@@ -194,6 +235,7 @@ async function main() {
     force.unref?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     clearTimeout(force);
+    await screenshotWorkerCtl.stop(); // close the persistent browser, if any
     await audit.flush();
     await db.close();
     process.exit(0);
