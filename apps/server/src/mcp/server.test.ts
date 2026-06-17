@@ -376,6 +376,16 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     expect(shared.id).toBe(cv.id);
 
+    // public_link is admin-gated per account; a seeded non-admin owner is refused.
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "update_canvas",
+          arguments: { id: cv.id, access: "public_link" },
+        }),
+      ),
+    ).toBe(true);
+
     // Listing in the gallery while password-protected is refused.
     expect(
       isError(
@@ -408,13 +418,52 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     expect(df.content).toBe("<h1>draft</h1>");
 
-    // Publish → a live version exists, and get_canvas_file serves it.
+    // create=true refuses to overwrite an existing path.
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "write_draft_file",
+          arguments: { id: cv.id, path: "index.html", content: "x", create: true },
+        }),
+      ),
+    ).toBe(true);
+
+    // rename then delete reshape the draft file list.
+    await mcp.callTool({
+      name: "rename_draft_file",
+      arguments: { id: cv.id, from: "index.html", to: "main.html" },
+    });
+    let view = payload(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }));
+    expect(view.files.map((f: { path: string }) => f.path)).toEqual(["main.html"]);
+    await mcp.callTool({ name: "delete_draft_file", arguments: { id: cv.id, path: "main.html" } });
+    view = payload(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }));
+    expect(view.files).toHaveLength(0);
+
+    // Put index.html back and publish → a live version exists, and get_canvas_file serves it.
+    await mcp.callTool({
+      name: "write_draft_file",
+      arguments: { id: cv.id, path: "index.html", content: "<h1>draft</h1>" },
+    });
     const pub = payload(await mcp.callTool({ name: "publish_draft", arguments: { id: cv.id } }));
     expect(pub.version).toBe(1);
     const live = payload(
       await mcp.callTool({ name: "get_canvas_file", arguments: { id: cv.id, path: "index.html" } }),
     );
     expect(live.content).toBe("<h1>draft</h1>");
+
+    // Edit the draft, then restore_draft to v1 → the draft reverts to the published files.
+    await mcp.callTool({
+      name: "write_draft_file",
+      arguments: { id: cv.id, path: "extra.html", content: "<p>extra</p>" },
+    });
+    const restored = payload(
+      await mcp.callTool({ name: "restore_draft", arguments: { id: cv.id, version: 1 } }),
+    );
+    expect(restored.files.map((f: { path: string }) => f.path)).toEqual(["index.html"]);
+    // Restoring a non-existent version fails cleanly.
+    expect(
+      isError(await mcp.callTool({ name: "restore_draft", arguments: { id: cv.id, version: 99 } })),
+    ).toBe(true);
   });
 
   it("get_canvas_usage returns view + op stats for a canvas you own", async () => {
@@ -475,6 +524,14 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(ok.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
     expect(after.entries).toHaveLength(0);
+
+    // A non-member email routes to the guest-invite path, which is unavailable in the
+    // test harness (no GuestService/mailer wired) → GUESTS_UNAVAILABLE, mirroring proxy mode.
+    const guest = await mcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, email: "outsider@example.com" },
+    });
+    expect(isError(guest)).toBe(true);
   });
 
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {

@@ -23,7 +23,7 @@ export interface InviteGuestDeps {
 /**
  * Mint + email a guest invite and add the guest allowlist grant. The single
  * implementation behind the management `POST /:id/allowlist` route and the MCP
- * `invite_guest` / `resend_guest_invite` tools, so the two can't diverge on the
+ * `grant_access` / `resend_guest_invite` tools, so the two can't diverge on the
  * proxy-mode / email-config refusals or the persist-before-send ordering.
  *
  * Persists the allowlist grant + invite BEFORE sending, so the email send is the last

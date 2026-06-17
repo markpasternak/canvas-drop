@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
+import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
@@ -22,6 +23,7 @@ import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
+import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -399,33 +401,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id/usage", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    // View stats (D24) exist for EVERY canvas regardless of backend capability;
-    // primitive op counts only for backend-on canvases. The 30-day sparkline window
-    // sits well inside the 90-day usage_events retention, so the series never truncates.
-    const now = Date.now();
-    const sparklineSince = now - 30 * 24 * 60 * 60 * 1000;
-    const [counts, fileBytes, fileCount, ai, views, viewsByDay] = await Promise.all([
-      deps.usage.countByType(cv.id, null),
-      deps.files.totalBytes(cv.id),
-      deps.files.countFiles(cv.id),
-      deps.aiUsage.canvasTotals(cv.id),
-      deps.usage.viewStats(cv.id),
-      deps.usage.viewsByDay(cv.id, sparklineSince, now),
-    ]);
-    return c.json({
-      totalViews: views.totalViews,
-      uniqueViewers: views.uniqueViewers,
-      lastViewedAt: views.lastViewedAt,
-      viewsByDay,
-      kvOps: counts.kv_op ?? 0,
-      fileOps: counts.file_op ?? 0,
-      fileCount,
-      fileBytes,
-      aiCalls: ai.calls,
-      aiTokens: ai.inputTokens + ai.outputTokens,
-      aiCostUsd: ai.costUsd,
-      realtimeConnects: counts.rt_connect ?? 0,
-    });
+    return c.json(await fetchCanvasUsage(deps, cv.id));
   });
 
   app.patch("/:id/settings", sameOrigin, async (c) => {
@@ -481,24 +457,11 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id/allowlist", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const entries = await deps.canvases.listAllowlist(cv.id);
-    const memberIds = entries
-      .filter((e) => e.principalKind === "member" && e.userId)
-      .map((e) => e.userId as string);
-    const byId = new Map((await deps.users.findByIds(memberIds)).map((u) => [u.id, u]));
-    return c.json({
-      entries: entries.map((e) => {
-        const u = e.userId ? byId.get(e.userId) : undefined;
-        return {
-          id: e.id,
-          kind: e.principalKind,
-          // Members carry their org identity; guests carry the invited email.
-          email: e.principalKind === "member" ? (u?.email ?? null) : e.email,
-          name: u?.name ?? null,
-          createdAt: e.createdAt,
-        };
-      }),
-    });
+    const entries = await resolveAllowlistEntries(
+      await deps.canvases.listAllowlist(cv.id),
+      deps.users,
+    );
+    return c.json({ entries });
   });
 
   // Normalize at the boundary (trim + lowercase) so allowlist/invite dedup on the
