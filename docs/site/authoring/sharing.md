@@ -21,8 +21,12 @@ One rung per canvas, stored as the `access` field (default `private`):
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
-Password and expiry are modifiers you can add on top of any rung. The unguessable
-random slug in each canvas URL is defense-in-depth, not a substitute for a rung.
+Password and expiry are modifiers you can add on top of any rung. The slug in each
+canvas URL is defense-in-depth, not a substitute for a rung — and only when it's the
+default **random** slug (`quiet-otter-x7k2…`). If you give a canvas a **custom slug**
+(e.g. `team-dashboard`), the URL is human-guessable, so the rung is doing all the work:
+the dashboard shows a reminder when a canvas is both link-reachable (Whole org / Public
+link) and using a custom slug.
 
 ## Inviting specific people
 
