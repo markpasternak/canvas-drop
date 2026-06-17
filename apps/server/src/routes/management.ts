@@ -250,10 +250,17 @@ export function managementRoutes(deps: ManagementDeps) {
    *  pipeline is off (so `hasPreview` is false and the dashboard behaves like today).
    *  Optional deps (omitted in unit tests) → no previews. */
   async function previewIds(canvasIds: string[]): Promise<Set<string>> {
-    if (!deps.screenshots || !deps.screenshotsEnabled || !(await deps.screenshotsEnabled())) {
+    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
+    // The preview hint is cosmetic — a DB hiccup in the screenshot subsystem (the
+    // settings read or the doneCanvasIds lookup) must never 500 the primary canvas
+    // management API. Any failure degrades to "no preview" (GenerativeCover), exactly
+    // like the pipeline-off path.
+    try {
+      if (!(await deps.screenshotsEnabled())) return new Set();
+      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
+    } catch {
       return new Set();
     }
-    return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
   }
 
   /** Serialize one canvas with the per-request effective globals. */

@@ -83,12 +83,19 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
     // SDK (`/sdk/...`) stay allowed.
     await page.route("**/*", (route) => {
       const req = route.request();
+      // Compare PARSED origins, not a string prefix: `startsWith(origin)` would let a
+      // sibling host like `<slug>.<base>.attacker.com` pass the gate (it has `origin`
+      // as a prefix), and since the host-resolver wildcard only maps `*.<base>` that
+      // request would resolve via real DNS and leave the box — carrying the capture
+      // token to an attacker host. Origin equality closes that egress hole.
+      let sameOrigin = false;
       let pathname = "";
       try {
-        pathname = new URL(req.url()).pathname;
+        const u = new URL(req.url());
+        sameOrigin = u.origin === origin;
+        pathname = u.pathname;
       } catch {}
-      const allowed =
-        req.method() === "GET" && req.url().startsWith(origin) && !pathname.startsWith("/v1/");
+      const allowed = req.method() === "GET" && sameOrigin && !pathname.startsWith("/v1/");
       void (allowed ? route.continue() : route.abort());
     });
     await page.setViewportSize({ ...CAPTURE_VIEWPORT });

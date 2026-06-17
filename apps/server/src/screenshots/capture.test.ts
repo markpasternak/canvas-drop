@@ -71,6 +71,17 @@ const route = (
   };
 };
 
+describe("RENDITION_SIZES (R2 contract)", () => {
+  // Pin the literal 16:9 dimensions so a regression to the old 800×500 / 320×200 shapes
+  // trips here — the encodeRenditions test reads the same constant, so it can't catch a
+  // wrong constant on its own.
+  it("og is 1200×630, card and thumb are exactly 16:9", () => {
+    expect(RENDITION_SIZES.og).toEqual({ width: 1200, height: 630 });
+    expect(RENDITION_SIZES.card).toEqual({ width: 1200, height: 675 });
+    expect(RENDITION_SIZES.thumb).toEqual({ width: 400, height: 225 });
+  });
+});
+
 describe("encodeRenditions (U4)", () => {
   it("produces a valid WebP at each rendition's target size", async () => {
     const out = await encodeRenditions(new Uint8Array(await masterPng()));
@@ -112,15 +123,21 @@ describe("captureCanvas (U4)", () => {
     const samePost = route("https://cv.example.test/v1/c/s/ai", "POST"); // AI primitive (write)
     const crossGet = route("https://evil.example/x", "GET"); // external fetch / SSRF
     const sameV1Get = route("https://cv.example.test/v1/c/s/kv/x", "GET"); // primitive READ
+    // Prefix-superset host: shares `https://cv.example.test` as a string prefix but is a
+    // DIFFERENT origin. A startsWith() gate would wrongly allow it (and leak the capture
+    // token off-box); origin equality must abort it.
+    const prefixHost = route("https://cv.example.test.attacker.com/leak", "GET");
     handler(sameGet.r);
     handler(samePost.r);
     handler(crossGet.r);
     handler(sameV1Get.r);
+    handler(prefixHost.r);
     expect(sameGet.cont()).toBe(true);
     expect(sameGet.abr()).toBe(false);
     expect(samePost.abr()).toBe(true); // no AI spend
     expect(crossGet.abr()).toBe(true); // no outbound network
     expect(sameV1Get.abr()).toBe(true); // primitives neutered — even same-origin GET reads (review #5)
+    expect(prefixHost.abr()).toBe(true); // prefix-superset host is a different origin → aborted
   });
 
   it("auto-dismisses dialogs (a dialog must not wedge the worker)", async () => {

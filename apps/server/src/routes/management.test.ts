@@ -45,6 +45,11 @@ function buildApp(
   // Screenshot preview pipeline effective-enabled (plan 004); off by default so
   // existing tests see hasPreview=false (today's behavior).
   screenshotsEnabled = false,
+  // Override the screenshots repo (e.g. a throwing stub for the degradation test).
+  screenshots: Pick<
+    ReturnType<typeof screenshotsRepository>,
+    "doneCanvasIds"
+  > = screenshotsRepository(client),
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -85,7 +90,7 @@ function buildApp(
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       mailer: withGuests ? logMailer(silent) : undefined,
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
-      screenshots: screenshotsRepository(client),
+      screenshots,
     }),
   );
   return app;
@@ -174,18 +179,47 @@ describe("managementRoutes", () => {
     );
     expect(off.hasPreview).toBe(false);
 
-    // Pipeline ON → hasPreview true.
+    // Pipeline ON → hasPreview true, on BOTH the single-canvas (canvasView) and the
+    // list (withLastDeploy → batched previewIds) paths.
+    const appOn = () =>
+      buildApp(client, { id: owner.id, isAdmin: false }, undefined, undefined, true, true);
     const on = await jsonOf<{ hasPreview: boolean }>(
-      await buildApp(
-        client,
-        { id: owner.id, isAdmin: false },
-        undefined,
-        undefined,
-        true,
-        true,
-      ).request(`/api/canvases/${created.id}`),
+      await appOn().request(`/api/canvases/${created.id}`),
     );
     expect(on.hasPreview).toBe(true);
+
+    const list = await jsonOf<{ canvases: { id: string; hasPreview: boolean }[] }>(
+      await appOn().request("/api/canvases"),
+    );
+    expect(list.canvases.find((c) => c.id === created.id)?.hasPreview).toBe(true);
+  });
+
+  it("a failing preview lookup degrades to hasPreview=false, never 500s the canvas API", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    // Pipeline ON but the (cosmetic) screenshot lookup throws — the primary canvas
+    // management API must still answer 200 with hasPreview=false, not propagate a 500.
+    const throwing = {
+      doneCanvasIds: () => Promise.reject(new Error("screenshot db down")),
+    };
+    const res = await buildApp(
+      client,
+      { id: owner.id, isAdmin: false },
+      undefined,
+      undefined,
+      true,
+      true,
+      throwing,
+    ).request(`/api/canvases/${created.id}`);
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ hasPreview: boolean }>(res)).hasPreview).toBe(false);
   });
 
   it("GET /:id derives publicationState across draft/published/archived/disabled (R6)", async () => {
