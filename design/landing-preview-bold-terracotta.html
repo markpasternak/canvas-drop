@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>canvas-drop — landing (BOLD / Committed colour)</title>
+<!--
+  Bolder "Committed" colour variant of the Editorial Creator OS landing.
+  Adds: a drenched indigo-violet hero band, a SECOND accent (warm amber) for
+  editorial pop, expressive per-primitive colour tints, and a colour CTA band.
+  Body stays warm paper + Newsreader serif so it reads premium, not loud.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=Geist:wght@300..600&family=Geist+Mono:wght@400..500&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --canvas: oklch(0.969 0.008 85);
+  --surface: oklch(0.987 0.006 85);
+  --surface-raised: oklch(0.998 0.004 85);
+  --fg: oklch(0.255 0.012 75);
+  --muted: oklch(0.475 0.012 75);
+  --subtle: oklch(0.500 0.012 75);
+  --border: oklch(0.895 0.010 85);
+  --border-strong: oklch(0.820 0.012 75);
+
+  --accent: oklch(0.50 0.135 40);
+  --accent-hover: oklch(0.44 0.13 38);
+  --accent-fg: oklch(0.99 0.02 45);
+  --accent-subtle: oklch(0.94 0.045 48);
+
+  /* SECOND accent — warm amber, the editorial pop */
+  --amber: oklch(0.78 0.15 72);
+  --amber-ink: oklch(0.52 0.13 60);     /* amber text that clears AA on paper */
+
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --r-md: 0.75rem; --r-lg: 1rem; --r-xl: 1.25rem; --r-2xl: 1.5rem;
+  --shadow-card: 0 1px 2px hsl(40 30% 38% / 0.06), 0 10px 26px hsl(40 24% 34% / 0.10);
+  --shadow-pop: 0 24px 60px hsl(28 45% 18% / 0.30), 0 6px 16px hsl(28 45% 18% / 0.18);
+  --shadow-ctrl: 0 1px 2px hsl(40 28% 38% / 0.08);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--fg); font-family: var(--font-sans); font-size: 1rem; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
+.mono { font-family: var(--font-mono); }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 2rem; }
+.btn { font: inherit; font-weight: 600; font-size: 0.9rem; border-radius: var(--r-md); padding: 0.62rem 1.1rem; cursor: pointer; border: 1px solid transparent; text-decoration: none; display: inline-flex; gap: 0.45rem; align-items: center; }
+
+/* ===== DRENCHED HERO BAND ===== */
+.hero-band {
+  position: relative; overflow: hidden; color: oklch(0.97 0.02 50);
+  background:
+    radial-gradient(90% 120% at 78% -10%, oklch(0.74 0.15 78 / 0.5) 0%, transparent 45%),
+    radial-gradient(80% 120% at 12% 8%, oklch(0.55 0.14 35 / 0.6) 0%, transparent 50%),
+    linear-gradient(160deg, oklch(0.40 0.12 38) 0%, oklch(0.27 0.085 34) 55%, oklch(0.19 0.06 32) 100%);
+}
+.hero-band::after { /* fine grain / vignette */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 80% at 50% 120%, oklch(0.12 0.05 32 / 0.5), transparent 60%);
+}
+nav { display: flex; align-items: center; gap: 1.5rem; padding: 1.4rem 0; position: relative; z-index: 2; }
+.brand { display: flex; align-items: center; gap: 0.6rem; }
+.brand .mark { width: 32px; height: 32px; border-radius: 9px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22); display: grid; place-items: center; backdrop-filter: blur(6px); }
+.brand .word { font-weight: 600; font-size: 1.02rem; letter-spacing: -0.02em; color: #fff; }
+nav .links { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; }
+nav .links a { color: oklch(0.91 0.03 55); text-decoration: none; font-size: 0.9rem; font-weight: 500; }
+nav .links a.btn { background: #fff; color: oklch(0.32 0.10 38); }
+
+.hero { position: relative; z-index: 2; text-align: center; padding: 3.2rem 0 3.4rem; }
+.eyebrow { font-size: 0.8rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--amber); font-weight: 600; }
+.hero h1 { font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 400; font-size: clamp(2.9rem, 6.2vw, 4.8rem); line-height: 1.0; letter-spacing: -0.02em; margin: 1.1rem auto 0; max-width: 14ch; color: #fff; }
+.hero h1 em { font-style: italic; color: var(--amber); }
+.hero .sub { font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.05rem, 1.6vw, 1.3rem); line-height: 1.5; color: oklch(0.90 0.03 55); max-width: 60ch; margin: 1.4rem auto 0; }
+.hero .ctas { display: flex; gap: 0.7rem; justify-content: center; margin-top: 2rem; }
+.btn.solid { background: #fff; color: oklch(0.32 0.10 38); box-shadow: 0 8px 24px oklch(0.12 0.05 32 / 0.35); }
+.btn.amber { background: var(--amber); color: oklch(0.25 0.08 60); }
+.btn.outline { background: rgba(255,255,255,0.06); color: #fff; border-color: rgba(255,255,255,0.3); }
+.hero .micro { margin-top: 1rem; font-size: 0.82rem; color: oklch(0.85 0.03 55); }
+
+/* hero glimpse floating on the colour */
+.shot { position: relative; z-index: 2; margin: 2.6rem auto -5rem; max-width: 1000px; border: 1px solid rgba(255,255,255,0.16); border-radius: var(--r-2xl); background: var(--surface); box-shadow: var(--shadow-pop); overflow: hidden; }
+.shot .bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--surface-raised); }
+.shot .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: inline-block; }
+.shot .bar .t { margin-left: 0.6rem; font-size: 0.78rem; color: var(--subtle); }
+.shot .body { padding: 1.4rem; display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; background: var(--canvas); }
+.mini-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-card); }
+.mini-cover { height: 92px; }
+.mc1 { background: radial-gradient(120% 120% at 20% 15%, oklch(0.78 0.17 300), oklch(0.6 0.2 274) 55%, oklch(0.58 0.15 220)); }
+.mc2 { background: radial-gradient(120% 120% at 80% 10%, oklch(0.82 0.17 65), oklch(0.62 0.21 32) 55%, oklch(0.52 0.18 350)); }
+.mc3 { background: radial-gradient(120% 120% at 50% 20%, oklch(0.82 0.14 150), oklch(0.62 0.16 168) 60%, oklch(0.55 0.13 210)); }
+.mini-card .b { padding: 0.6rem 0.7rem 0.8rem; }
+.mini-card h4 { font-family: var(--font-serif); font-weight: 500; font-size: 0.92rem; margin: 0; }
+.mini-card p { margin: 0.2rem 0 0; font-size: 0.7rem; color: var(--subtle); }
+
+/* ===== PAPER BODY ===== */
+.sec { padding: 7rem 0 0; }
+.sec.first { padding-top: 8.5rem; }
+.lead { text-align: center; max-width: 56ch; margin: 0 auto 2.5rem; }
+.lead .k { font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber-ink); font-weight: 600; }
+.lead h2 { font-family: var(--font-serif); font-weight: 400; font-size: clamp(1.9rem, 3.4vw, 2.7rem); letter-spacing: -0.015em; margin: 0.7rem 0 0; }
+
+.values { display: grid; grid-template-columns: repeat(3,1fr); gap: 1.5rem; }
+.value { position: relative; padding: 1.7rem 1.6rem 1.6rem; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); overflow: hidden; }
+.value::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+.value:nth-child(1)::before { background: var(--accent); }
+.value:nth-child(2)::before { background: var(--amber); }
+.value:nth-child(3)::before { background: oklch(0.6 0.16 168); }
+.value .n { font-family: var(--font-serif); font-size: 2.4rem; font-weight: 500; line-height: 1; }
+.value:nth-child(1) .n { color: var(--accent); }
+.value:nth-child(2) .n { color: var(--amber-ink); }
+.value:nth-child(3) .n { color: oklch(0.5 0.14 168); }
+.value h3 { font-family: var(--font-serif); font-weight: 500; font-size: 1.4rem; margin: 0.5rem 0 0.5rem; letter-spacing: -0.01em; }
+.value p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+.prims { display: grid; grid-template-columns: repeat(5,1fr); gap: 0.85rem; }
+.prim { padding: 1.2rem 1.1rem; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-raised); box-shadow: var(--shadow-card); }
+.prim .tag { font-family: var(--font-mono); font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 6px; font-weight: 500; }
+.prim h4 { font-family: var(--font-serif); font-weight: 500; font-size: 1.05rem; margin: 0.75rem 0 0.35rem; }
+.prim p { margin: 0; font-size: 0.78rem; color: var(--subtle); line-height: 1.45; }
+.p-kv .tag       { color: oklch(0.48 0.13 40); background: oklch(0.93 0.05 45); }
+.p-files .tag    { color: oklch(0.48 0.15 65);  background: oklch(0.95 0.06 75); }
+.p-ai .tag       { color: oklch(0.45 0.15 168); background: oklch(0.94 0.05 168); }
+.p-identity .tag { color: oklch(0.48 0.17 350); background: oklch(0.95 0.05 350); }
+.p-realtime .tag { color: oklch(0.46 0.16 240); background: oklch(0.94 0.05 240); }
+
+/* ===== DRENCHED CTA BAND ===== */
+.band { margin: 7rem 0 0; padding: 4.5rem 2rem; text-align: center; color: #fff; position: relative; overflow: hidden;
+  background:
+    radial-gradient(80% 140% at 85% 10%, oklch(0.74 0.15 78 / 0.45), transparent 50%),
+    linear-gradient(150deg, oklch(0.40 0.12 38), oklch(0.20 0.06 32)); }
+.band h2 { font-family: var(--font-serif); font-weight: 400; font-size: clamp(2rem,3.6vw,3rem); margin: 0; letter-spacing: -0.015em; }
+.band h2 em { font-style: italic; color: var(--amber); }
+.band p { color: oklch(0.90 0.03 55); margin: 0.9rem auto 1.9rem; max-width: 52ch; }
+
+footer { padding: 2.5rem 0 3.5rem; color: var(--subtle); font-size: 0.84rem; display: flex; align-items: center; gap: 1.2rem; }
+footer .links { margin-left: auto; display: flex; gap: 1.3rem; }
+footer a { color: var(--muted); text-decoration: none; }
+</style>
+</head>
+<body>
+<section class="hero-band">
+  <div class="wrap">
+    <nav>
+      <div class="brand">
+        <!-- LOGO SLOT -->
+        <span class="mark"><svg width="19" height="19" viewBox="0 0 48 48" fill="none"><path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 14v16.5m-7-7 7 7 7-7" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 40h12" stroke="#fff" stroke-width="4.75" stroke-linecap="round"/></svg></span>
+        <span class="word">canvas-drop</span>
+      </div>
+      <div class="links">
+        <a href="#">Docs</a><a href="#">Gallery</a><a href="#">GitHub</a>
+        <a class="btn" href="#">Sign in</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="eyebrow">Internal canvases for your org</div>
+      <h1 class="serif">Drop it in. <em>Share it out.</em></h1>
+      <p class="sub">Your team builds working web tools, then has nowhere safe to put them. canvas-drop is where they land: deploy a static canvas in seconds, share it behind your org sign-in, and skip the screenshots and slide decks.</p>
+      <div class="ctas">
+        <a class="btn solid" href="#">Sign in to get started →</a>
+        <a class="btn outline" href="#">View on GitHub</a>
+      </div>
+      <div class="micro">Open source · self-hosted · <span class="mono">MIT</span></div>
+    </header>
+
+    <div class="shot">
+      <div class="bar"><i></i><i></i><i></i><span class="t mono">canvas-drop.com/canvases</span></div>
+      <div class="body">
+        <div class="mini-card"><div class="mini-cover mc1"></div><div class="b"><h4 class="serif">Three.js demo</h4><p>Whole org · Edited 4h ago</p></div></div>
+        <div class="mini-card"><div class="mini-cover mc2"></div><div class="b"><h4 class="serif">Board CPTO</h4><p>Whole org · protected</p></div></div>
+        <div class="mini-card"><div class="mini-cover mc3"></div><div class="b"><h4 class="serif">Studio roadmap</h4><p>Whole org · Edited 6h ago</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<main class="wrap">
+  <section class="sec first">
+    <div class="lead">
+      <div class="k">Why canvas-drop</div>
+      <h2 class="serif">A calm home for the tools your team makes.</h2>
+    </div>
+    <div class="values">
+      <div class="value"><div class="n serif">01</div><h3 class="serif">Deploy in seconds</h3><p>Drag a folder, paste HTML, push from a script, or let your AI agent create and deploy over MCP. A canvas is just static files — no build to wait on, nothing to provision.</p></div>
+      <div class="value"><div class="n serif">02</div><h3 class="serif">Shared with your org</h3><p>Every canvas lives behind your sign-in. Keep it private, invite specific people, open it to the whole org, or publish an admin-gated public link — with a password or expiry, revocable anytime.</p></div>
+      <div class="value"><div class="n serif">03</div><h3 class="serif">Versions you can roll back</h3><p>Each publish snapshots an immutable version. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current in one click.</p></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="lead">
+      <div class="k">Five primitives</div>
+      <h2 class="serif">Static by default. Backend when you need it.</h2>
+    </div>
+    <div class="prims">
+      <div class="prim p-kv"><span class="tag mono">kv</span><h4 class="serif">Key–value</h4><p>Persist state with a tiny get/set store. No database to run.</p></div>
+      <div class="prim p-files"><span class="tag mono">files</span><h4 class="serif">Files</h4><p>Upload, store, and serve assets straight from a canvas.</p></div>
+      <div class="prim p-ai"><span class="tag mono">ai</span><h4 class="serif">AI</h4><p>Call the model through a server-side proxy — no keys in the browser.</p></div>
+      <div class="prim p-identity"><span class="tag mono">identity</span><h4 class="serif">Identity</h4><p><span class="mono">me()</span> returns the signed-in org member, resolved server-side.</p></div>
+      <div class="prim p-realtime"><span class="tag mono">realtime</span><h4 class="serif">Realtime</h4><p>Broadcast and subscribe over a managed socket. No server to operate.</p></div>
+    </div>
+  </section>
+</main>
+
+<section class="band">
+  <div class="wrap">
+    <h2 class="serif">Drop your first canvas in. <em>Share it out.</em></h2>
+    <p>Sign in with your organization account and deploy something in the next five minutes.</p>
+    <a class="btn amber" href="#">Sign in to get started →</a>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <span>© canvas-drop — open source, MIT.</span>
+    <span class="links"><a href="#">Docs</a><a href="#">Gallery</a><a href="#">GitHub</a><a href="#">Privacy</a><a href="#">Terms</a></span>
+  </footer>
+</div>
+</body>
+</html>

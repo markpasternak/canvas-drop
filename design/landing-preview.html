@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>canvas-drop — landing (Editorial Creator OS, light)</title>
+<!--
+  Front-page (signed-out landing) preview in the Editorial Creator OS direction.
+  LIGHT is the default. Serif = Newsreader (locked). Copy is the real SITE/VALUES/
+  PRIMITIVES content from apps/server landing-page. Logo "cd" mark is a placeholder
+  until the new mock-logo lands (see LOGO SLOT).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=Geist:wght@300..600&family=Geist+Mono:wght@400..500&display=swap" rel="stylesheet" />
+<style>
+:root {
+  /* LIGHT — warm paper (default) */
+  --canvas: oklch(0.969 0.008 85);
+  --surface: oklch(0.987 0.006 85);
+  --surface-raised: oklch(0.998 0.004 85);
+  --surface-sunken: oklch(0.945 0.010 85);
+  --surface-hover: oklch(0.955 0.010 85);
+  --fg: oklch(0.255 0.012 75);
+  --muted: oklch(0.475 0.012 75);
+  --subtle: oklch(0.500 0.012 75);
+  --border: oklch(0.895 0.010 85);
+  --border-strong: oklch(0.820 0.012 85);
+  --accent: oklch(0.515 0.214 274);
+  --accent-hover: oklch(0.455 0.205 274);
+  --accent-fg: oklch(0.99 0.012 274);
+  --accent-subtle: oklch(0.955 0.028 274);
+  --success: oklch(0.52 0.13 152);
+  --success-subtle: oklch(0.95 0.04 152);
+
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --r-md: 0.75rem; --r-lg: 1rem; --r-xl: 1.25rem; --r-2xl: 1.5rem;
+  --shadow-card: 0 1px 2px hsl(40 30% 38% / 0.06), 0 10px 26px hsl(40 24% 34% / 0.10);
+  --shadow-pop: 0 18px 44px hsl(40 24% 30% / 0.14), 0 4px 10px hsl(40 24% 30% / 0.08);
+  --shadow-ctrl: 0 1px 2px hsl(40 28% 38% / 0.08);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--canvas); color: var(--fg);
+  font-family: var(--font-sans); font-size: 1rem; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  /* faint warm wash behind the hero */
+  background-image: radial-gradient(120% 70% at 50% -10%, oklch(0.955 0.03 274 / 0.55) 0%, transparent 60%);
+  background-repeat: no-repeat;
+}
+.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
+.mono { font-family: var(--font-mono); }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 2rem; }
+
+/* nav */
+nav { display: flex; align-items: center; gap: 1.5rem; padding: 1.4rem 0; }
+.brand { display: flex; align-items: center; gap: 0.6rem; }
+.brand .mark { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; box-shadow: var(--shadow-ctrl); }
+.brand .word { font-weight: 600; font-size: 1.02rem; letter-spacing: -0.02em; }
+nav .links { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; }
+nav .links a { color: var(--muted); text-decoration: none; font-size: 0.9rem; font-weight: 500; }
+nav .links a:hover { color: var(--fg); }
+.btn { font: inherit; font-weight: 600; font-size: 0.9rem; border-radius: var(--r-md); padding: 0.6rem 1.05rem; cursor: pointer; border: 1px solid transparent; text-decoration: none; display: inline-flex; gap: 0.45rem; align-items: center; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); box-shadow: var(--shadow-ctrl); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.ghost { background: var(--surface-raised); color: var(--fg); border-color: var(--border-strong); box-shadow: var(--shadow-ctrl); }
+
+/* hero */
+.hero { text-align: center; padding: 3.5rem 0 2.5rem; }
+.eyebrow { font-size: 0.8rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.hero h1 { font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 400; font-size: clamp(2.8rem, 6vw, 4.6rem); line-height: 1.02; letter-spacing: -0.02em; margin: 1.1rem auto 0; max-width: 14ch; }
+.hero h1 em { font-style: italic; color: var(--accent); }
+.hero .sub { font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.05rem, 1.6vw, 1.3rem); line-height: 1.5; color: var(--muted); max-width: 60ch; margin: 1.4rem auto 0; }
+.hero .ctas { display: flex; gap: 0.7rem; justify-content: center; margin-top: 2rem; }
+.hero .micro { margin-top: 1rem; font-size: 0.82rem; color: var(--subtle); }
+.hero .micro .mono { color: var(--muted); }
+
+/* hero visual — framed dashboard glimpse */
+.shot { margin: 3rem auto 0; max-width: 1000px; border: 1px solid var(--border); border-radius: var(--r-2xl); background: var(--surface); box-shadow: var(--shadow-pop); overflow: hidden; }
+.shot .bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--surface-raised); }
+.shot .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: inline-block; }
+.shot .bar .t { margin-left: 0.6rem; font-size: 0.78rem; color: var(--subtle); }
+.shot .body { padding: 1.4rem; display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; background: var(--canvas); }
+.mini-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-card); }
+.mini-cover { height: 92px; }
+.mc1 { background: radial-gradient(120% 120% at 20% 15%, oklch(0.78 0.17 300), oklch(0.6 0.2 274) 55%, oklch(0.58 0.15 220)); }
+.mc2 { background: radial-gradient(120% 120% at 80% 10%, oklch(0.8 0.16 60), oklch(0.6 0.21 30) 55%, oklch(0.5 0.18 350)); }
+.mc3 { background: radial-gradient(120% 120% at 50% 20%, oklch(0.8 0.13 150), oklch(0.62 0.16 168) 60%, oklch(0.55 0.13 210)); }
+.mini-card .b { padding: 0.6rem 0.7rem 0.8rem; }
+.mini-card h4 { font-family: var(--font-serif); font-weight: 500; font-size: 0.92rem; margin: 0; }
+.mini-card p { margin: 0.2rem 0 0; font-size: 0.7rem; color: var(--subtle); }
+.tag-pub { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.66rem; font-weight: 600; color: var(--success); background: var(--success-subtle); padding: 0.14rem 0.45rem; border-radius: 999px; margin-top: 0.5rem; }
+.tag-pub .d { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+/* section heading */
+.sec { padding: 4.5rem 0 0; }
+.sec .lead { text-align: center; max-width: 56ch; margin: 0 auto 2.5rem; }
+.sec .lead . k { font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--subtle); font-weight: 600; }
+.sec .lead h2 { font-family: var(--font-serif); font-weight: 400; font-size: clamp(1.9rem, 3.4vw, 2.7rem); letter-spacing: -0.015em; margin: 0.7rem 0 0; }
+
+/* values */
+.values { display: grid; grid-template-columns: repeat(3,1fr); gap: 1.5rem; }
+.value { padding: 1.6rem; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); }
+.value .n { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); }
+.value h3 { font-family: var(--font-serif); font-weight: 500; font-size: 1.4rem; margin: 0.6rem 0 0.5rem; letter-spacing: -0.01em; }
+.value p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+/* primitives */
+.prims { display: grid; grid-template-columns: repeat(5,1fr); gap: 0.85rem; }
+.prim { padding: 1.1rem; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-raised); box-shadow: var(--shadow-card); }
+.prim .tag { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); background: var(--accent-subtle); padding: 0.1rem 0.4rem; border-radius: 6px; }
+.prim h4 { font-family: var(--font-serif); font-weight: 500; font-size: 1.05rem; margin: 0.7rem 0 0.35rem; }
+.prim p { margin: 0; font-size: 0.78rem; color: var(--subtle); line-height: 1.45; }
+
+/* cta band */
+.band { margin: 5rem 0 0; padding: 3.5rem 2rem; text-align: center; border-radius: var(--r-2xl); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); }
+.band h2 { font-family: var(--font-serif); font-weight: 400; font-size: clamp(1.9rem,3.4vw,2.7rem); margin: 0; letter-spacing: -0.015em; }
+.band h2 em { font-style: italic; color: var(--accent); }
+.band p { color: var(--muted); margin: 0.8rem auto 1.8rem; max-width: 52ch; }
+
+footer { margin-top: 4rem; padding: 2.5rem 0 3.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: 0.84rem; display: flex; align-items: center; gap: 1.2rem; }
+footer .links { margin-left: auto; display: flex; gap: 1.3rem; }
+footer a { color: var(--muted); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="brand">
+      <!-- LOGO SLOT: swap with the new mock-logo -->
+      <span class="mark"><svg width="19" height="19" viewBox="0 0 48 48" fill="none"><path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 14v16.5m-7-7 7 7 7-7" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 40h12" stroke="#fff" stroke-width="4.75" stroke-linecap="round"/></svg></span>
+      <span class="word">canvas-drop</span>
+    </div>
+    <div class="links">
+      <a href="#">Docs</a>
+      <a href="#">Gallery</a>
+      <a href="#">GitHub</a>
+      <a class="btn primary" href="#">Sign in</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="eyebrow">Internal canvases for your org</div>
+    <h1 class="serif">Drop it in. <em>Share it out.</em></h1>
+    <p class="sub">Your team builds working web tools, then has nowhere safe to put them. canvas-drop is where they land: deploy a static canvas in seconds, share it behind your org sign-in, and skip the screenshots and slide decks.</p>
+    <div class="ctas">
+      <a class="btn primary" href="#">Sign in to get started →</a>
+      <a class="btn ghost" href="#">View on GitHub</a>
+    </div>
+    <div class="micro">Open source · self-hosted · <span class="mono">MIT</span></div>
+
+    <div class="shot">
+      <div class="bar"><i></i><i></i><i></i><span class="t mono">canvas-drop.com/canvases</span></div>
+      <div class="body">
+        <div class="mini-card"><div class="mini-cover mc1"></div><div class="b"><h4 class="serif">Three.js demo</h4><p>Whole org · Edited 4h ago</p><span class="tag-pub"><span class="d"></span>Published</span></div></div>
+        <div class="mini-card"><div class="mini-cover mc2"></div><div class="b"><h4 class="serif">Board CPTO</h4><p>Whole org · protected</p><span class="tag-pub"><span class="d"></span>Published</span></div></div>
+        <div class="mini-card"><div class="mini-cover mc3"></div><div class="b"><h4 class="serif">Studio roadmap</h4><p>Whole org · Edited 6h ago</p><span class="tag-pub"><span class="d"></span>Published</span></div></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="sec">
+    <div class="lead">
+      <div class="k">Why canvas-drop</div>
+      <h2 class="serif">A calm home for the tools your team makes.</h2>
+    </div>
+    <div class="values">
+      <div class="value"><div class="n">01</div><h3 class="serif">Deploy in seconds</h3><p>Drag a folder, paste HTML, push from a script, or let your AI agent create and deploy over MCP. A canvas is just static files — no build to wait on, nothing to provision.</p></div>
+      <div class="value"><div class="n">02</div><h3 class="serif">Shared with your org</h3><p>Every canvas lives behind your sign-in. Keep it private, invite specific people, open it to the whole org, or publish an admin-gated public link — with a password or expiry, revocable anytime.</p></div>
+      <div class="value"><div class="n">03</div><h3 class="serif">Versions you can roll back</h3><p>Each publish snapshots an immutable version. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current in one click.</p></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="lead">
+      <div class="k">Five primitives</div>
+      <h2 class="serif">Static by default. Backend when you need it.</h2>
+    </div>
+    <div class="prims">
+      <div class="prim"><span class="tag mono">kv</span><h4 class="serif">Key–value</h4><p>Persist state with a tiny get/set store. No database to run.</p></div>
+      <div class="prim"><span class="tag mono">files</span><h4 class="serif">Files</h4><p>Upload, store, and serve assets straight from a canvas.</p></div>
+      <div class="prim"><span class="tag mono">ai</span><h4 class="serif">AI</h4><p>Call the model through a server-side proxy — no keys in the browser.</p></div>
+      <div class="prim"><span class="tag mono">identity</span><h4 class="serif">Identity</h4><p><span class="mono">me()</span> returns the signed-in org member, resolved server-side.</p></div>
+      <div class="prim"><span class="tag mono">realtime</span><h4 class="serif">Realtime</h4><p>Broadcast and subscribe over a managed socket. No server to operate.</p></div>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="serif">Drop your first canvas in. <em>Share it out.</em></h2>
+    <p>Sign in with your organization account and deploy something in the next five minutes.</p>
+    <a class="btn primary" href="#">Sign in to get started →</a>
+  </section>
+
+  <footer>
+    <span>© canvas-drop — open source, MIT.</span>
+    <span class="links">
+      <a href="#">Docs</a><a href="#">Gallery</a><a href="#">GitHub</a><a href="#">Privacy</a><a href="#">Terms</a>
+    </span>
+  </footer>
+</div>
+</body>
+</html>
