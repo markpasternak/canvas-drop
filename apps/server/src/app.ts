@@ -72,6 +72,7 @@ import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
+import { servePreview } from "./screenshots/serve.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import type { StorageDriver } from "./storage/driver.js";
 import { uploadService } from "./upload/service.js";
@@ -529,6 +530,20 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.use(
     "*",
     onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit, rateLimitStore: rlStore })),
+  );
+  // Access-gated preview serving (plan 004 / U7): a reserved path on the canvas surface,
+  // AFTER access + password gate, so a private canvas's cover is only served to a
+  // requester decideCanvasAccess already allowed. 404s (→ GenerativeCover) when off or
+  // not yet captured. Falls through to serveCanvas for all real content paths.
+  app.use(
+    "*",
+    onlyCanvas(
+      servePreview({
+        config: deps.config,
+        storage: deps.storage,
+        enabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+      }),
+    ),
   );
   app.use(
     "*",
