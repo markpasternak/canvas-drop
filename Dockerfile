@@ -62,7 +62,7 @@ ARG SCREENSHOTS=0
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN if [ "$SCREENSHOTS" = "1" ]; then \
       mkdir -p /ms-playwright \
-      && node /app/node_modules/playwright-core/cli.js install --with-deps chromium \
+      && node /app/node_modules/playwright/cli.js install --with-deps chromium \
       && chown -R canvasdrop:canvasdrop /ms-playwright \
       && rm -rf /var/lib/apt/lists/*; \
     else \
