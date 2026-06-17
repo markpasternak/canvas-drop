@@ -15,15 +15,16 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
+import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
+import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
-  type CanvasSettingsPatch,
   CLEARED_PUBLICATION_FIELDS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
@@ -34,7 +35,7 @@ import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
-import { type Mailer, renderGuestInvite } from "../email/mailer.js";
+import type { Mailer } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
@@ -81,13 +82,6 @@ const createSchema = z.object({
   backendEnabled: z.boolean().optional(),
 });
 
-/**
- * Resolve the slug for a create/paste request (plan 004): a non-empty custom slug is
- * validated and marked custom; absent/empty falls back to the readable-random generator.
- * Returns the chosen slug + whether it is custom, or a 400 reason for an invalid/reserved
- * value. Uniqueness is NOT checked here — the `canvases_slug_uq` index is the authority and
- * the caller maps its violation to 409 (KTD4/KTD7).
- */
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
 const capabilitiesSchema = z.object({
   backendEnabled: z.boolean().optional(),
@@ -439,109 +433,15 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const p = body.data;
-    const { password, shared, access, ...rest } = p;
-    // The target rung: the first-class `access` field wins; else the deprecated
-    // `shared` boolean maps to whole_org/private; else unchanged (undefined).
-    const targetAccess =
-      access ?? (shared === undefined ? undefined : shared ? "whole_org" : "private");
-
-    // Listability rules (plan 002 R9/R10/R11). A canvas is listable only when it is
-    // shared AND published AND will be unprotected after this patch; a password set
-    // (or un-share) always un-lists. "Templatable" can only be on when the canvas
-    // ends up listed. These mirror the galleryVisibilityFilters read predicate, so
-    // the at-rest row can't reach a listed-but-invisible state (templatable ⊆ listed
-    // ⊆ shared/published/unprotected).
-    const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
-    const effectiveAccess = targetAccess ?? cv.access;
-    const willBeShared = effectiveAccess !== "private";
-    // "Published" for the share/gallery preconditions means the full lifecycle
-    // state, not just "has a version": an archived canvas keeps its currentVersionId,
-    // so guarding on currentVersionId alone would let an admin re-share an archived
-    // canvas (publicationState=archived). Require active + a current version.
-    const isPublished = cv.status === "active" && cv.currentVersionId !== null;
-    // Sharing requires a published canvas (invariant: shared ⟹ published) — you
-    // can't expose a URL that serves no live page. Leaving Published reverts share
-    // (see the unpublish/archive transitions), so this also keeps the at-rest row
-    // from holding shared=true without a current version.
-    if (targetAccess !== undefined && targetAccess !== "private" && !isPublished) {
-      return c.json(
-        { code: "SHARE_REQUIRES_PUBLISH", message: "Publish this canvas before sharing it." },
-        409,
-      );
+    // The share/gallery preconditions + persisted-patch shaping live in the shared
+    // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
+    const resolution = resolveSettingsUpdate(cv, body.data, {
+      canPublishPublic: c.get("user").canPublishPublic,
+    });
+    if (!resolution.ok) {
+      return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
     }
-    // public_link is admin-gated per account (U10/R19): only an owner the admin has
-    // granted the capability may publish openly.
-    if (targetAccess === "public_link" && !c.get("user").canPublishPublic) {
-      return c.json(
-        {
-          code: "PUBLIC_NOT_ALLOWED",
-          message: "An administrator must grant your account permission to publish public links.",
-        },
-        403,
-      );
-    }
-    if (rest.galleryListed === true) {
-      if (!willBeShared) {
-        return c.json(
-          { code: "NOT_SHARED", message: "Share this canvas before listing it in the gallery." },
-          409,
-        );
-      }
-      if (!isPublished) {
-        return c.json(
-          {
-            code: "NOT_PUBLISHED",
-            message: "Publish this canvas before listing it in the gallery.",
-          },
-          409,
-        );
-      }
-      if (willBeProtected) {
-        return c.json(
-          {
-            code: "PASSWORD_PROTECTED",
-            message: "Remove the password before listing this canvas in the gallery.",
-          },
-          409,
-        );
-      }
-    }
-    // Setting a password OR un-sharing forces the canvas un-listed, so it can never
-    // end up listed-but-invisible.
-    const finalListed =
-      typeof password === "string" || !willBeShared
-        ? false
-        : (rest.galleryListed ?? cv.galleryListed);
-    if (rest.galleryTemplatable === true && !finalListed) {
-      return c.json(
-        {
-          code: "NOT_LISTED",
-          message: "List this canvas in the gallery before allowing templates.",
-        },
-        409,
-      );
-    }
-
-    // Build the persisted patch — the server enforces the listability invariant
-    // regardless of what the client sent. (updateSettings also clears templatable
-    // whenever galleryListed is set false, keeping templatable ⊆ listed.)
-    const patch: CanvasSettingsPatch = { ...rest };
-    if (targetAccess !== undefined) patch.access = targetAccess;
-    // Dropping to private un-lists, but KEEPS the gallery summary/tags so re-sharing
-    // later restores them without the owner re-typing (R11).
-    if (targetAccess === "private") {
-      patch.galleryListed = false;
-      patch.galleryTemplatable = false;
-    }
-    // A newly-set password un-lists AND clears the gallery metadata — a password is a
-    // deliberate "make private" signal, not a temporary toggle (R10).
-    if (typeof password === "string") {
-      patch.galleryListed = false;
-      patch.galleryTemplatable = false;
-      patch.gallerySummary = null;
-      patch.galleryTags = null;
-    }
+    const { patch, password, targetAccess } = resolution;
 
     let updated = cv;
     if (Object.keys(patch).length > 0) {
@@ -611,52 +511,16 @@ export function managementRoutes(deps: ManagementDeps) {
       .transform((e) => e.trim().toLowerCase()),
   });
 
-  /** Mint + email a guest invite for `email` on `cv`, and add the guest allowlist
-   *  entry. Returns a 409 JSON response on a guard failure, or null on success. */
+  /** Mint + email a guest invite for `email` on `cv` via the shared helper, mapping a
+   *  guard failure to a JSON response (or null on success). */
   async function inviteGuest(c: Context<AppEnv>, cv: Canvas, email: string) {
-    // Guest invites are an app-gated-mode capability (R22): in proxy mode the IAP
-    // owns the boundary and `guests` is absent.
-    if (deps.config.auth.mode === "proxy" || !deps.guests) {
-      return c.json(
-        {
-          code: "GUESTS_UNAVAILABLE",
-          message: "Guest invites need the app to manage sign-in (oidc/dev mode).",
-        },
-        409,
-      );
-    }
-    if (!deps.mailer?.canSend) {
-      return c.json(
-        { code: "EMAIL_NOT_CONFIGURED", message: "Email isn't configured, so invites can't send." },
-        409,
-      );
-    }
-    // Persist the allowlist grant + invite BEFORE sending, so the email send is the
-    // last fallible step: a send failure leaves a consistent, resend-able state
-    // (pending invite + grant) — never a delivered magic link with no allowlist grant
-    // behind it (both writes are idempotent upserts, so a resend is safe).
-    await deps.canvases.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email });
-    const { token } = await deps.guests.createInvite(cv.id, email);
-    const inviteUrl = new URL(
-      `/guest/${encodeURIComponent(token)}`,
-      deps.config.baseUrl,
-    ).toString();
-    const msg = renderGuestInvite({
-      canvasTitle: cv.title,
+    const r = await inviteGuestToCanvas(deps, {
+      canvas: cv,
       inviterName: c.get("user").name,
-      inviteUrl,
-    });
-    const sent = await deps.mailer.send({ ...msg, to: email });
-    if (!sent.ok) {
-      return c.json({ code: "EMAIL_SEND_FAILED", message: "Couldn't send the invite email." }, 502);
-    }
-    deps.audit.recordAudit({
-      action: "guest_invite",
       actorId: c.get("user").id,
-      targetId: cv.id,
-      meta: { email },
+      email,
     });
-    return null;
+    return r.ok ? null : c.json({ code: r.code, message: r.message }, r.status);
   }
 
   /** Add an org member to the allowlist by email; an outside email becomes an

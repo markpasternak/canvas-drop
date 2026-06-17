@@ -6,15 +6,20 @@ import { zipSync } from "fflate";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
+import { cloneService } from "../canvas/clone-service.js";
 import type { DbClient } from "../db/factory.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { filesRepository } from "../db/repositories/files.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import { draftService } from "../draft/service.js";
 import { memStorage } from "../storage/mem.js";
 import { uploadService } from "../upload/service.js";
 import { buildMcpServer, type McpCaller } from "./server.js";
@@ -36,9 +41,17 @@ async function seedUser(client: DbClient, email: string): Promise<string> {
 async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
-  const drafts = draftsRepository(client);
+  const draftsRepo = draftsRepository(client);
   const storage = memStorage();
-  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+  const audit = createAuditLog(auditRepository(client), silent);
+  const engine = deployEngine({
+    config,
+    canvases,
+    versions,
+    drafts: draftsRepo,
+    storage,
+    log: silent,
+  });
   const server = buildMcpServer(
     {
       config,
@@ -55,7 +68,20 @@ async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
         engine,
       }),
       storage,
-      audit: createAuditLog(auditRepository(client), silent),
+      clone: cloneService({ canvases, versions, drafts: draftsRepo, storage }),
+      drafts: draftService({
+        config,
+        canvases,
+        versions,
+        drafts: draftsRepo,
+        storage,
+        audit,
+        log: silent,
+      }),
+      usage: usageEventsRepository(client),
+      files: filesRepository(client),
+      aiUsage: aiUsageRepository(client),
+      audit,
     },
     caller,
   );
@@ -318,6 +344,139 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
   });
 
+  it("update_canvas renames + enforces share/gallery preconditions", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    // Rename works on an unpublished canvas.
+    const renamed = payload(
+      await mcp.callTool({ name: "update_canvas", arguments: { id: cv.id, title: "Renamed" } }),
+    );
+    expect(renamed.title).toBe("Renamed");
+
+    // Sharing an unpublished canvas is refused (SHARE_REQUIRES_PUBLISH).
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "update_canvas",
+          arguments: { id: cv.id, access: "whole_org" },
+        }),
+      ),
+    ).toBe(true);
+
+    // Publish, then sharing succeeds.
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: cv.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+    });
+    const shared = payload(
+      await mcp.callTool({ name: "update_canvas", arguments: { id: cv.id, access: "whole_org" } }),
+    );
+    expect(shared.id).toBe(cv.id);
+
+    // Listing in the gallery while password-protected is refused.
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "update_canvas",
+          arguments: { id: cv.id, password: "secret", galleryListed: true },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("draft loop: write → get_draft (dirty) → publish → read back live (editor parity)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    // Write a draft file, then the draft is dirty and lists it.
+    await mcp.callTool({
+      name: "write_draft_file",
+      arguments: { id: cv.id, path: "index.html", content: "<h1>draft</h1>" },
+    });
+    const draft = payload(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }));
+    expect(draft.dirty).toBe(true);
+    expect(draft.files.map((f: { path: string }) => f.path)).toContain("index.html");
+
+    // Read the draft file back.
+    const df = payload(
+      await mcp.callTool({ name: "read_draft_file", arguments: { id: cv.id, path: "index.html" } }),
+    );
+    expect(df.content).toBe("<h1>draft</h1>");
+
+    // Publish → a live version exists, and get_canvas_file serves it.
+    const pub = payload(await mcp.callTool({ name: "publish_draft", arguments: { id: cv.id } }));
+    expect(pub.version).toBe(1);
+    const live = payload(
+      await mcp.callTool({ name: "get_canvas_file", arguments: { id: cv.id, path: "index.html" } }),
+    );
+    expect(live.content).toBe("<h1>draft</h1>");
+  });
+
+  it("get_canvas_usage returns view + op stats for a canvas you own", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const usage = payload(
+      await mcp.callTool({ name: "get_canvas_usage", arguments: { id: cv.id } }),
+    );
+    expect(usage).toMatchObject({ totalViews: 0, kvOps: 0, fileCount: 0, aiCalls: 0 });
+    expect(Array.isArray(usage.viewsByDay)).toBe(true);
+  });
+
+  it("clone_canvas copies an owned canvas into a fresh unpublished canvas", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const src = payload(await mcp.callTool({ name: "create_canvas", arguments: { title: "Src" } }));
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: src.id, zipBase64: zip({ "index.html": "<h1>src</h1>" }) },
+    });
+
+    const clone = payload(await mcp.callTool({ name: "clone_canvas", arguments: { id: src.id } }));
+    expect(clone.id).not.toBe(src.id);
+    expect(clone.slug).not.toBe(src.slug);
+    // The clone is owned by the caller and starts unpublished (draft).
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: clone.id } }));
+    expect(got.publicationState).not.toBe("published");
+  });
+
+  it("grant_access adds an org member to the allowlist; list/revoke reflect it", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    await seedUser(client, "teammate@example.com"); // an org member
+    const mcp = await connect(client, { userId: owner });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const granted = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "teammate@example.com" },
+      }),
+    );
+    expect(granted).toMatchObject({ ok: true, kind: "member" });
+
+    const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(access.entries).toHaveLength(1);
+    expect(access.entries[0]).toMatchObject({ kind: "member", email: "teammate@example.com" });
+
+    const ok = payload(
+      await mcp.callTool({
+        name: "revoke_access",
+        arguments: { id: cv.id, entryId: access.entries[0].id },
+      }),
+    );
+    expect(ok.ok).toBe(true);
+    const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(after.entries).toHaveLength(0);
+  });
+
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {
     client = await makeTestDb(dialect);
     const ownerA = await seedUser(client, "a@example.com");
@@ -333,16 +492,41 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       "list_versions",
       "unpublish_canvas",
       "get_canvas_file",
+      "update_canvas",
       "set_capabilities",
       "set_canvas_slug",
       "regenerate_deploy_key",
       "archive_canvas",
       "unarchive_canvas",
       "delete_canvas",
+      "list_access",
+      "resend_guest_invite",
+      "revoke_access",
+      "get_canvas_usage",
+      "get_draft",
+      "read_draft_file",
+      "write_draft_file",
+      "delete_draft_file",
+      "rename_draft_file",
+      "publish_draft",
+      "restore_draft",
     ]) {
       const res = await bClient.callTool({ name, arguments: { id: made.id } });
       expect(isError(res), `${name} should refuse`).toBe(true);
     }
+    // grant_access / clone_canvas are owner-scoped too (clone of a non-owned, non-template
+    // source reads as not found).
+    expect(
+      isError(
+        await bClient.callTool({
+          name: "grant_access",
+          arguments: { id: made.id, email: "x@example.com" },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isError(await bClient.callTool({ name: "clone_canvas", arguments: { id: made.id } })),
+    ).toBe(true);
     const deployRes = await bClient.callTool({
       name: "deploy_canvas",
       arguments: { id: made.id, zipBase64: zip({ "index.html": "x" }) },
