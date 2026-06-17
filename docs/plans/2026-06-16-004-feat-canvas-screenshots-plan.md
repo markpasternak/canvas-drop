@@ -38,7 +38,15 @@ added.
 - **Worker model simplified** to ONE persistent browser + context-per-job (was: browser-per-job). Drops the browser-per-job hedge entirely. → revises **U4/U5**.
 - **Enablement is now two-layer**: env *availability* AND an *admin runtime toggle* (default off), no per-user opt-out, off == today. The env flag's meaning shifts from "feature on" to "feature available". → new **U12**; revises **U6**'s direct config read.
 - **Capture on EVERY publish path**, not just the editor publish. → new **U13**.
+- **ONE preview per canvas, overwritten in place** (disk + the one-per-canvas job row) — no per-version history. Simplifies the storage key (drop the versionId path segment) and the GC (overwrite replaces the per-version sweep; only delete-cleanup remains). → revises landed **U1**, and **U4/U7/U10**.
 - Capture-all-canvases (incl. private) for private thumbnails — unchanged from the original plan; the capture principal (U3) is what makes it safe.
+
+**Non-negotiable baseline (the cherry-on-top principle):** thumbnails are a *nice
+extra*, not load-bearing. **Standard mode — the feature off or env-unavailable — must
+be rock-solid and behave EXACTLY like today**, with zero dependency on capture: covers
+render `GenerativeCover`, OG uses static `/og.png`, the preview route 404s cleanly, the
+worker never starts and never touches Chromium, and publish/deploy are completely
+unaffected. This path is tested first and on every surface (R10).
 
 ---
 
@@ -59,15 +67,15 @@ exactly today's behavior.
 
 - **R1** Preview captured async on **every** publish, for every canvas; coalesced to latest. (U4, U5, U13)
 - **R2** DB job row + in-process worker; screenshot-specific table. *(landed: U2)*
-- **R3** Keyed to version identity (`versions.id`); auto-invalidates on republish. *(landed: U1/U2)*
+- **R3** ONE preview per canvas, **overwritten in place** on each publish (a canvas-stable storage key + the one-per-canvas job row); no per-version history. The job row's `versionId` records which version the current preview reflects (used to cache-bust the cover URL). (U1 revision, U4, U7, U10)
 - **R4** Capture ALL canvases incl. private/gated; render gated content via the capture principal. *(landed: U3; consumed by U5)*
 - **R5** Preview stored as a **private, access-gated asset** — never publicly fetchable by default. (U7)
 - **R6** Reuse the one asset for: personal/dashboard thumbnails, gallery covers, and OG for **public canvases only**. (U8, U9)
 - **R7** Primitives neutered during capture (no AI spend, no outbound network). (U4)
 - **R8** ONE persistent browser in-process; context-per-job; recycle every N; concurrency configurable (default 1); the DB table is the queue. (U4, U5)
 - **R9** Internal capture credential: server-minted, scoped, never client-supplied. *(landed: U3)*
-- **R10** Two-layer enablement: **env-available AND admin-enabled**; admin runtime toggle default **off**; **no per-user opt-out**; OFF == today (no capture, no serving, GenerativeCover + static og). (U12; consumed everywhere)
-- **R11** Sweep-style storage reclaim + canvas-delete cleanup. (U10)
+- **R10** Two-layer enablement: **env-available AND admin-enabled**; admin runtime toggle default **off**; **no per-user opt-out**; OFF == today. **Standard mode (off/unavailable) is first-class and bulletproof** — exactly today's behavior with zero dependency on capture (covers → GenerativeCover, OG → static `/og.png`, preview route → clean 404, worker never starts, publish unaffected); tested first and on every surface. (U12; consumed everywhere)
+- **R11** Overwrite-in-place reclaim (no per-version sweep) + canvas-delete cleanup. (U10)
 - **R12** Capture tooling is a runtime dependency; Chromium in the image; off by default. (U14)
 - **R13** Dual-dialect tests green on both dialects; CI matrix green. *(landed for U2; applies to all)*
 - **R14** OG for private/shared canvases (unfurls of gated content) is **deferred**. (Scope Boundaries)
@@ -97,7 +105,16 @@ that hedge. *Separate worker process remains a far-future escape hatch only — 
 
 **KTD-5 — Primitives neutered during capture; capture grants canvas-read only.** *(carried)*
 
-**KTD-6 — sharp produces an OG-size master (1200×630) + derived card/thumbnail crops; WebP.** *(carried)*
+**KTD-6 (REVISED) — ONE preview per canvas, overwritten in place; WebP renditions.**
+sharp produces an OG-size master (1200×630) + derived card/thumbnail crops. They are
+stored at **canvas-stable keys** (`screenshots/<canvasId>/<rendition>.webp` — no
+versionId path segment) and **overwritten** on each publish, so a canvas has exactly
+one current preview set. The single `screenshot_jobs` row per canvas is the DB record:
+`status='done'` ⇒ a preview exists; its `versionId` says which version it reflects and
+cache-busts the cover URL (`?v=<versionId>`) so browsers refetch after a republish even
+though the storage key is stable. No per-version history means no per-version GC — an
+overwrite reclaims the old bytes, and only canvas-delete needs explicit cleanup. *(This
+revises the landed U1 key helpers, which currently include versionId in the path.)*
 
 **KTD-7 (NEW) — Two-layer enablement: env availability AND admin runtime toggle.**
 Mirrors the existing settings pattern (`adminSettingsService.effectiveRealtimeEnabled`
@@ -134,8 +151,8 @@ flowchart TD
   CTX -->|header-borne capture token| SRV["canvas serve\ncapture principal -> decideCanvasAccess"]
   SRV --> CTX
   CTX --> SHARP["sharp: WebP master 1200x630 + crops"]
-  SHARP --> ST[["storage.put(screenshots/<canvasId>/<versionId>/*)"]]
-  ST --> DONE["mark job done; close context"]
+  SHARP --> ST[["storage.put(screenshots/<canvasId>/<rendition>.webp)\nOVERWRITE — one preview per canvas"]]
+  ST --> DONE["mark job done (row records versionId); close context"]
   subgraph reads ["reads (only when effective-enabled)"]
     COV["dashboard/gallery cover route\n(access-gated re-check)"] --> ST
     OG["ogMeta() — public_link ONLY"] --> ST
@@ -160,8 +177,12 @@ Landed units are summarized (do not re-implement); revised/new units carry full 
 
 ### Phase A — Foundations *(landed)*
 
-### U1. Storage-key helpers — **LANDED**
-Screenshot prefix/key helpers keyed by version identity, disjoint from the blob prefix.
+### U1. Storage-key helpers — **LANDED (needs a small revision)**
+Screenshot prefix/key helpers, disjoint from the blob prefix. **Revision (KTD-6):** drop
+the versionId path segment so the key is canvas-stable and overwrites —
+`screenshotKey(canvasId, rendition)` → `screenshots/<canvasId>/<rendition>.webp`. Remove
+the now-unused `screenshotVersionPrefix` / `versionIdFromScreenshotKey`; update the U1
+tests accordingly. `screenshotPrefix(canvasId)` stays (used by delete-cleanup).
 
 ### U2. `screenshot_jobs` table + repository (dual-dialect) — **LANDED**
 One row per canvas (coalesce upsert), lease/claim/reclaim/sweep; migrations + parity test.
@@ -188,6 +209,8 @@ One row per canvas (coalesce upsert), lease/claim/reclaim/sweep; migrations + pa
   internal origin, blocks JS dialogs, waits for load with a hard wall-clock timeout,
   screenshots at 1200×630, then sharp → WebP master + crops. Returns bytes per rendition.
   The function does NOT launch/close the browser — that's the worker's lifecycle (KTD-4).
+  The worker writes the returned bytes to the **canvas-stable** keys (KTD-6),
+  **overwriting** the prior preview — no versionId in the storage path.
 - **Patterns to follow:** `scripts/screenshots.mjs` (Playwright+sharp capture/encode/timeout).
 - **Test scenarios:**
   - Given a locally served canvas + a real/stub context, produces non-empty WebP bytes at the expected dimensions per rendition.
@@ -289,10 +312,12 @@ One row per canvas (coalesce upsert), lease/claim/reclaim/sweep; migrations + pa
 - **Approach:** `GET /canvases/:id/preview?rendition=card|thumb|og` resolves the
   requester's normal principal (member/guest/anonymous — NOT the capture principal),
   runs `resolveAccessContext` + `decideCanvasAccess`, and on allow streams the stored
-  WebP for the canvas's `currentVersionId` (immutable, long cache). Deny → 404
-  (opaque). Not-yet-captured OR effective-disabled → 404 so the client shows
-  `GenerativeCover`. The storage key is never exposed directly. **A private canvas's
-  preview is unreachable without authorization** (R5).
+  WebP at the **canvas-stable key** (KTD-6 — one preview per canvas, overwritten). Because
+  the key is stable, the cover URL is cache-busted with `?v=<job.versionId>` and served
+  with a revalidating cache header (not long-immutable). Deny → 404 (opaque).
+  Effective-disabled, no `done` job row, or no stored object → **clean 404** so the client
+  shows `GenerativeCover`. The storage key is never exposed directly. **A private
+  canvas's preview is unreachable without authorization** (R5).
 - **Patterns to follow:** `canvasAccess` + `decideCanvasAccess`; `file-serving.ts` streaming + cache headers.
 - **Test scenarios:**
   - Owner / allowed member / invited guest → 200 WebP for a captured private canvas.
@@ -342,19 +367,20 @@ One row per canvas (coalesce upsert), lease/claim/reclaim/sweep; migrations + pa
 
 ### Phase E — Lifecycle + ops
 
-### U10. Storage lifecycle sweep + delete cleanup
+### U10. Storage cleanup on canvas delete (simplified — no per-version sweep)
 
-- **Goal:** Reclaim previews whose version is no longer live; drop on canvas delete.
+- **Goal:** Drop a canvas's single preview + job row on delete. (Republish needs no sweep — the stable key is overwritten in place, KTD-6.)
 - **Requirements:** R11
 - **Dependencies:** U1, U2
-- **Files:** `apps/server/src/screenshots/gc.ts` + test; `apps/server/src/canvas/purge.ts` hook.
-- **Approach:** `collectScreenshots(canvasId)` lists the screenshot prefix and deletes any
-  rendition whose `versionId` ≠ the canvas's current live version — best-effort mark-sweep
-  matching `blob-gc.ts`. Run opportunistically (piggyback the post-publish dispatch); on
-  canvas delete/purge remove the whole `screenshotPrefix(canvasId)` and the job row.
-- **Patterns to follow:** `collectGarbage` in `blob-gc.ts`; the purge path; `screenshots.deleteByCanvas` (U2).
-- **Test scenarios:** after republish the previous version's renditions are swept, current kept; delete removes all renditions + job row; a failed storage delete is logged, not thrown.
-- **Verification:** no orphaned previews across republish/delete.
+- **Files:** `apps/server/src/canvas/purge.ts` (hook), and a small helper near the screenshots module + test.
+- **Approach:** Because previews overwrite at a canvas-stable key, republish reclaims old
+  bytes automatically — **no per-version mark-sweep is needed** (this removes the bulk of
+  the original U10). The only cleanup is on canvas delete/purge: remove
+  `screenshotPrefix(canvasId)` from storage (best-effort, logged-not-thrown, matching
+  `blob-gc`) and `screenshots.deleteByCanvas` for the job row.
+- **Patterns to follow:** the purge path; `screenshots.deleteByCanvas` (U2); `blob-gc.ts` best-effort error handling.
+- **Test scenarios:** republish overwrites in place (old bytes not orphaned — no extra objects accumulate); canvas delete removes the preview prefix + job row; a failed storage delete is logged, not thrown.
+- **Verification:** no orphaned previews; delete is clean.
 
 ### U14. Ops/packaging — Chromium in the runtime image
 
@@ -389,6 +415,8 @@ One row per canvas (coalesce upsert), lease/claim/reclaim/sweep; migrations + pa
 
 ### Simplified away this revision
 - **Browser-per-job** model — replaced by ONE persistent browser + context-per-job (KTD-4).
+- **Per-version preview history + the version-keyed GC sweep** — replaced by one
+  overwrite-in-place preview per canvas (KTD-6); only canvas-delete cleanup remains (U10).
 - Separate worker process — far-future escape hatch only; not built.
 
 ### Outside this product's identity (from origin)
