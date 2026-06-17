@@ -63,6 +63,9 @@ services:
       # switch to subdomain + real wildcard DNS/TLS for multi-user production.
       CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: "true"
       CANVAS_DROP_BASE_URL: http://localhost:8080
+      # CANVAS_DROP_API_BASE_URL defaults to BASE_URL — only set it when the Deploy
+      # API is fronted on a dedicated host (e.g. api.example.com in subdomain mode).
+      # This single-origin path-mode demo doesn't need it.
       CANVAS_DROP_PORT: "3000"
       # --- auth: proxy mode, JWKS (cryptographic) trust path (§12.5) ---
       CANVAS_DROP_AUTH_MODE: proxy

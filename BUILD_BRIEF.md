@@ -358,6 +358,7 @@ Chosen for: TypeScript end-to-end, excellent AI-agent ergonomics, minimal moving
 # Core
 CANVAS_DROP_URL_MODE=path|subdomain          # path = localhost default; subdomain = recommended prod
 CANVAS_DROP_BASE_URL=http://localhost:3000   # subdomain mode: https://canvases.example.com (canvases at *.canvases.example.com)
+CANVAS_DROP_API_BASE_URL=                     # optional; defaults to BASE_URL. Set when the Deploy API is fronted on a dedicated host (e.g. api.example.com) — MCP tools advertise curl endpoints from this
 CANVAS_DROP_SESSION_SECRET=...               # 256-bit
 CANVAS_DROP_ADMIN_EMAILS=mark@example.com    # bootstrap admins
 CANVAS_DROP_REALTIME=on|off                  # ephemeral pub/sub + presence; default on (single-process, in-memory)
