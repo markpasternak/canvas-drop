@@ -10,6 +10,7 @@ import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -32,8 +33,13 @@ async function seedUser(client: DbClient, email: string): Promise<string> {
   return u.id;
 }
 
-/** Connect a real MCP client to a tool server bound to `caller`. */
-async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
+/** Connect a real MCP client to a tool server bound to `caller`. `screenshotsEnabled`
+ *  toggles the effective preview pipeline (plan 004); the real repo always backs it. */
+async function connect(
+  client: DbClient,
+  caller: McpCaller,
+  screenshotsEnabled = false,
+): Promise<Client> {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
@@ -56,6 +62,8 @@ async function connect(client: DbClient, caller: McpCaller): Promise<Client> {
       }),
       storage,
       audit: createAuditLog(auditRepository(client), silent),
+      screenshots: screenshotsRepository(client),
+      screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
     },
     caller,
   );
@@ -245,6 +253,36 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const list = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
     expect(list.total).toBe(2);
     expect(list.canvases).toHaveLength(2);
+  });
+
+  it("get_canvas / list_canvases expose hasPreview + previewUrl only when the pipeline is on (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const off = await connect(client, { userId }); // pipeline off (default)
+    const created = payload(await off.callTool({ name: "create_canvas", arguments: {} }));
+
+    // Capture a preview for the canvas (a done screenshot job).
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(created.id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+
+    // Pipeline OFF → agent sees hasPreview false and no previewUrl (parity with the
+    // dashboard's pipeline-off behavior).
+    const gotOff = payload(
+      await off.callTool({ name: "get_canvas", arguments: { id: created.id } }),
+    );
+    expect(gotOff.hasPreview).toBe(false);
+    expect(gotOff.previewUrl).toBeUndefined();
+
+    // Pipeline ON → hasPreview true + a card previewUrl on both get_canvas and the list.
+    const on = await connect(client, { userId }, true);
+    const gotOn = payload(await on.callTool({ name: "get_canvas", arguments: { id: created.id } }));
+    expect(gotOn.hasPreview).toBe(true);
+    expect(gotOn.previewUrl).toContain("__canvasdrop_preview?rendition=card");
+
+    const list = payload(await on.callTool({ name: "list_canvases", arguments: {} }));
+    expect(list.canvases.find((c: { id: string }) => c.id === created.id)?.hasPreview).toBe(true);
   });
 
   it("rollback then re-points the live version; unpublish returns it to draft", async () => {

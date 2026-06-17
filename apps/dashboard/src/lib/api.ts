@@ -240,6 +240,9 @@ export interface GalleryItem {
   /** Whether a non-owner may clone this canvas as a template (plan 002). */
   templatable: boolean;
   publishedAt: number | null;
+  /** A captured preview exists (plan 004) — gates the gallery cover so a card with no
+   *  preview shows GenerativeCover without firing a wasted probe. */
+  hasPreview: boolean;
   /** `owner.id` is the opaque user uuid (plan 004) — the stable owner-filter key. */
   owner: { id: string; name: string; avatarUrl: string | null };
 }

@@ -9,6 +9,7 @@ import {
   seedUndeployedCanvas,
   seedUser,
 } from "../db/repositories/gallery-test-helpers.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import type { GalleryPageDto } from "./gallery.js";
@@ -27,17 +28,32 @@ const ITEM_KEYS = [
   "tags",
   "templatable",
   "publishedAt",
+  "hasPreview",
   "owner",
 ].sort();
 
-/** Build a gallery app authenticated as some member (the gateway is stubbed). */
-function buildApp(client: DbClient, actor = { id: "viewer", isAdmin: false }) {
+/** Build a gallery app authenticated as some member (the gateway is stubbed). When
+ *  `screenshotsEnabled` is true the real screenshots repo backs the hasPreview hint
+ *  (otherwise the pipeline-off default → hasPreview false everywhere). */
+function buildApp(
+  client: DbClient,
+  actor = { id: "viewer", isAdmin: false },
+  screenshotsEnabled = false,
+) {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("user", { id: actor.id, isAdmin: actor.isAdmin } as never);
     await next();
   });
-  app.route("/api/gallery", galleryRoutes({ config, canvases: canvasesRepository(client) }));
+  app.route(
+    "/api/gallery",
+    galleryRoutes({
+      config,
+      canvases: canvasesRepository(client),
+      screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
+      screenshots: screenshotsRepository(client),
+    }),
+  );
   return app;
 }
 
@@ -106,6 +122,27 @@ describe("galleryRoutes", () => {
     expect(Object.keys(item.owner).sort()).toEqual(["avatarUrl", "id", "name"]);
     expect(typeof item.owner.id).toBe("string");
     expect(JSON.stringify(item)).not.toContain("@example.com");
+  });
+
+  it("hasPreview reflects a captured preview only when the pipeline is enabled (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await seedListed(client, owner.id);
+    // Capture a preview for the listed canvas (a done screenshot job).
+    const jobs = screenshotsRepository(client);
+    await jobs.enqueue(id, "v-1");
+    const claimed = await jobs.claimNext(Date.now(), Date.now() - 30_000);
+    if (claimed) await jobs.markDone(claimed.id, claimed.leasedAt as number);
+
+    // Pipeline OFF (default) → hasPreview false even though a preview exists.
+    const off = (await (await buildApp(client).request("/api/gallery")).json()) as GalleryPageDto;
+    expect(off.items.find((i) => i.id === id)?.hasPreview).toBe(false);
+
+    // Pipeline ON → hasPreview true.
+    const on = (await (
+      await buildApp(client, { id: "viewer", isAdmin: false }, true).request("/api/gallery")
+    ).json()) as GalleryPageDto;
+    expect(on.items.find((i) => i.id === id)?.hasPreview).toBe(true);
   });
 
   it("paginates with a stable total and echoes limit/offset", async () => {

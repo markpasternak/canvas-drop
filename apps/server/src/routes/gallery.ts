@@ -3,11 +3,18 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository, GalleryRow } from "../db/repositories/canvases.js";
+import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { AppEnv } from "../http/types.js";
 
 export interface GalleryDeps {
   config: Config;
   canvases: CanvasesRepository;
+  /** Screenshot preview support (plan 004). `screenshotsEnabled` is the effective gate
+   *  (env-available AND admin-enabled); `screenshots.doneCanvasIds` is the batched
+   *  captured-preview lookup. Both optional — omitted in unit tests → `hasPreview` false,
+   *  so the gallery behaves exactly like today (GenerativeCover everywhere). */
+  screenshotsEnabled?: () => Promise<boolean>;
+  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
 }
 
 const MAX_LIMIT = 60;
@@ -47,6 +54,10 @@ export interface GalleryItemDto {
    *  canvases are always unprotected now, so `hasPassword` is gone from this DTO. */
   templatable: boolean;
   publishedAt: number | null;
+  /** A captured screenshot preview exists for this canvas (plan 004) — drives the gallery
+   *  cover the same way the owner dashboard does. False whenever the pipeline is off, so
+   *  the gallery shows GenerativeCover and fires no wasted preview probe. */
+  hasPreview: boolean;
   /** `owner.id` is the opaque user uuid (plan 004) — the stable owner-filter key.
    *  Never the owner's email or any internal flag. */
   owner: { id: string; name: string; avatarUrl: string | null };
@@ -69,7 +80,7 @@ export interface GalleryFacetsDto {
 /** Display-only projection of a gallery row — explicit field list, never a spread
  *  of the canvas/user row, so api_key_hash / password_hash / owner email / internal
  *  flags can never leak (§12.0 #1). */
-function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
+function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): GalleryItemDto {
   const cv = row.canvas;
   // gallery_tags is a JSON column; it is only ever written via the settings route
   // (validated as string[]), but project defensively so the string[] contract holds
@@ -86,6 +97,7 @@ function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
     tags,
     templatable: cv.galleryTemplatable,
     publishedAt: cv.galleryPublishedAt,
+    hasPreview,
     owner: { id: row.ownerId, name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
   };
 }
@@ -99,6 +111,19 @@ function galleryItem(config: Config, row: GalleryRow): GalleryItemDto {
  */
 export function galleryRoutes(deps: GalleryDeps) {
   const app = new Hono<AppEnv>();
+
+  /** Of the given canvas ids, those with a captured preview — empty when the pipeline is
+   *  off (so `hasPreview` is false and the gallery behaves like today). The hint is
+   *  cosmetic, so any failure degrades to "no preview" rather than erroring the browse. */
+  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
+    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
+    try {
+      if (!(await deps.screenshotsEnabled())) return new Set();
+      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
+    } catch {
+      return new Set();
+    }
+  }
 
   app.get("/", async (c) => {
     const parsed = querySchema.safeParse(c.req.query());
@@ -129,8 +154,9 @@ export function galleryRoutes(deps: GalleryDeps) {
       offset,
     });
 
+    const previews = await previewIds(items.map((row) => row.canvas.id));
     return c.json({
-      items: items.map((row) => galleryItem(deps.config, row)),
+      items: items.map((row) => galleryItem(deps.config, row, previews.has(row.canvas.id))),
       total,
       limit,
       offset,

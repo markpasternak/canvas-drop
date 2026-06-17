@@ -24,7 +24,10 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           Decorative (not a link) so the title below stays the single open
           affordance — no duplicate link for screen readers. */}
       <div className="aspect-[16/9] w-full overflow-hidden">
-        <CanvasCover seed={item.id} previewUrl={previewCoverUrl(item.url)} />
+        <CanvasCover
+          seed={item.id}
+          previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
+        />
       </div>
       <div className="flex flex-1 flex-col gap-2.5 p-3.5">
         <div className="flex items-start justify-between gap-2">

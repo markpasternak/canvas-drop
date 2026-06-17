@@ -333,6 +333,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         },
         rateLimitStore: rlStore,
         hub: deps.hub,
+        screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+        screenshots: screenshotsRepository(deps.db),
       }),
     );
   }
@@ -465,7 +467,15 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Opt-in gallery browse (M8) — its own router (NOT under /api/canvases, whose
   // /:id would shadow a literal `gallery` segment). Behind the gateway; the §12
   // visibility predicate runs per request inside the repo.
-  app.route("/api/gallery", galleryRoutes({ config: deps.config, canvases: deps.canvases }));
+  app.route(
+    "/api/gallery",
+    galleryRoutes({
+      config: deps.config,
+      canvases: deps.canvases,
+      screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+      screenshots: screenshotsRepository(deps.db),
+    }),
+  );
 
   // Session-authenticated management API.
   app.route(

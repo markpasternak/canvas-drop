@@ -11,12 +11,14 @@ import { generateUniqueSlug } from "../canvas/slug.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import { PREVIEW_ASSET_PATH } from "../screenshots/serve.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 
@@ -31,6 +33,12 @@ export interface McpToolDeps {
   storage: StorageDriver;
   audit: AuditLog;
   hub?: RealtimeHub;
+  /** Screenshot preview support (plan 004) — agent-native parity with the dashboard.
+   *  `screenshotsEnabled` is the effective gate (env-available AND admin-enabled);
+   *  `screenshots.doneCanvasIds` is the batched captured-preview lookup. Both optional —
+   *  omitted → `hasPreview` false / no `previewUrl`, exactly like the pipeline-off path. */
+  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
+  screenshotsEnabled?: () => Promise<boolean>;
 }
 
 /** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
@@ -63,15 +71,24 @@ function canvasView(
     status: string;
     currentVersionId: string | null;
   },
+  // A captured screenshot preview exists (plan 004). When true, `previewUrl` points at
+  // the access-gated cover (`card` rendition) so an agent can surface it the same way
+  // the dashboard does. Defaults false → no preview (pipeline off / not yet captured).
+  hasPreview = false,
 ) {
+  const url = canvasUrl(config, cv.slug);
   return {
     id: cv.id,
     slug: cv.slug,
-    url: canvasUrl(config, cv.slug),
+    url,
     title: cv.title,
     status: cv.status,
     publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
     currentVersionId: cv.currentVersionId,
+    hasPreview,
+    ...(hasPreview
+      ? { previewUrl: `${url.replace(/\/$/, "")}/${PREVIEW_ASSET_PATH}?rendition=card` }
+      : {}),
   };
 }
 
@@ -90,6 +107,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     const cv = await deps.canvases.findById(id);
     if (!cv || cv.status === "deleted" || cv.ownerId !== caller.userId) return null;
     return cv;
+  }
+
+  /** Of the given canvas ids, those with a captured preview — empty when the screenshot
+   *  pipeline is off. The preview hint is cosmetic, so a DB hiccup degrades to "no
+   *  preview" rather than failing the tool call. */
+  async function previewIds(canvasIds: string[]): Promise<Set<string>> {
+    if (!deps.screenshots || !deps.screenshotsEnabled) return new Set();
+    try {
+      if (!(await deps.screenshotsEnabled())) return new Set();
+      return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
+    } catch {
+      return new Set();
+    }
   }
 
   server.registerTool(
@@ -118,7 +148,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: limit ?? 50,
         offset: 0,
       });
-      return ok({ total, canvases: items.map((cv) => canvasView(deps.config, cv)) });
+      const previews = await previewIds(items.map((cv) => cv.id));
+      return ok({
+        total,
+        canvases: items.map((cv) => canvasView(deps.config, cv, previews.has(cv.id))),
+      });
     },
   );
 
@@ -169,9 +203,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
+      const hasPreview = (await previewIds([cv.id])).has(cv.id);
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
-      return ok({ ...canvasView(deps.config, cv), deploy: deployEndpoints(deps.config, cv.id) });
+      return ok({
+        ...canvasView(deps.config, cv, hasPreview),
+        deploy: deployEndpoints(deps.config, cv.id),
+      });
     },
   );
 

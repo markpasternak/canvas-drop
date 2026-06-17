@@ -8,6 +8,7 @@ import { bearerToken } from "../canvas/api-key.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
+import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
@@ -38,6 +39,10 @@ export interface McpRoutesDeps {
   /** Shared rate-limit store (U6) — throttles tool calls per authenticated caller. */
   rateLimitStore?: RateLimitStore;
   hub?: RealtimeHub;
+  /** Screenshot preview support (plan 004) — agent-native parity with the dashboard.
+   *  Both optional; omitted → tools report `hasPreview` false / no `previewUrl`. */
+  screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
+  screenshotsEnabled?: () => Promise<boolean>;
 }
 
 /**
@@ -134,6 +139,8 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
           storage: deps.storage,
           audit: deps.audit,
           hub: deps.hub,
+          screenshots: deps.screenshots,
+          screenshotsEnabled: deps.screenshotsEnabled,
         },
         { userId: auth.userId },
       );
