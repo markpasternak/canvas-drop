@@ -23,7 +23,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           screenshot will later render into this same box with no layout change.
           Decorative (not a link) so the title below stays the single open
           affordance — no duplicate link for screen readers. */}
-      <div className="aspect-[16/9] w-full overflow-hidden">
+      <div className="aspect-[3/2] w-full overflow-hidden">
         <CanvasCover
           seed={item.id}
           previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
@@ -115,7 +115,7 @@ function CardSkeletonGrid() {
           key={i}
           className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface"
         >
-          <Skeleton className="aspect-[16/9] w-full rounded-none" />
+          <Skeleton className="aspect-[3/2] w-full rounded-none" />
           <div className="flex flex-col gap-2.5 p-3.5">
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-3 w-full" />

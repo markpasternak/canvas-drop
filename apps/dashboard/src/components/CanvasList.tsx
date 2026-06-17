@@ -241,7 +241,7 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
         <div className="flex min-w-0 items-start gap-3">
           {/* Compact cover thumbnail (plan 004): real preview when captured, else the
               deterministic generative art — decorative, the title is the affordance. */}
-          <div className="aspect-[16/9] w-16 shrink-0 overflow-hidden rounded-md border border-border/60">
+          <div className="aspect-[3/2] w-16 shrink-0 overflow-hidden rounded-md border border-border/60">
             <CanvasCover
               seed={canvas.id}
               previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "thumb") : undefined}

@@ -76,13 +76,14 @@ const route = (
 };
 
 describe("RENDITION_SIZES (R2 contract)", () => {
-  // Pin the literal 16:9 dimensions so a regression to the old 800×500 / 320×200 shapes
-  // trips here — the encodeRenditions test reads the same constant, so it can't catch a
-  // wrong constant on its own.
-  it("og is 1200×630, card and thumb are exactly 16:9", () => {
+  // Pin the literal dimensions so a regression trips here — the encodeRenditions test
+  // reads the same constant, so it can't catch a wrong constant on its own. card/thumb
+  // are 3:2 (must match the dashboard's aspect-[3/2] cover slots); og is the 1.91:1
+  // link-unfurl standard.
+  it("og is 1200×630; card and thumb are exactly 3:2", () => {
     expect(RENDITION_SIZES.og).toEqual({ width: 1200, height: 630 });
-    expect(RENDITION_SIZES.card).toEqual({ width: 1200, height: 675 });
-    expect(RENDITION_SIZES.thumb).toEqual({ width: 400, height: 225 });
+    expect(RENDITION_SIZES.card).toEqual({ width: 1200, height: 800 });
+    expect(RENDITION_SIZES.thumb).toEqual({ width: 600, height: 400 });
   });
 });
 

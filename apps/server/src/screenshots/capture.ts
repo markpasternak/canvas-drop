@@ -19,19 +19,19 @@ import { CAPTURE_TOKEN_HEADER } from "./capture-token.js";
  * Dialogs are auto-dismissed; a hard wall-clock timeout bounds a slow/looping canvas.
  */
 
-/** Render viewport for the master screenshot — a full 16:9 desktop view (not just the
- *  1200×630 OG strip) so the preview shows MORE of the page: a real desktop layout and
- *  ~43% more vertical content. 16:9 also downscales cleanly into the card/thumb
- *  renditions (also 16:9); the `og` rendition cover-crops to its 1.91:1 unfurl shape. */
-export const CAPTURE_VIEWPORT = { width: 1600, height: 900 } as const;
+/** Render viewport for the master screenshot — a full 3:2 desktop view. 3:2 (taller than
+ *  a 16:9 strip) frames the hero fuller, the way good app galleries show site previews,
+ *  and downscales cleanly into the 3:2 card/thumb renditions; the `og` rendition
+ *  cover-crops to its 1.91:1 link-unfurl shape. */
+export const CAPTURE_VIEWPORT = { width: 1440, height: 960 } as const;
 
 /** Target pixel size per rendition (sharp `cover` crop from the master). `card`/`thumb`
- *  are 16:9 to match the dashboard/gallery cover regions (no off-aspect cropping);
- *  `og` stays the 1200x630 link-unfurl standard. */
+ *  are 3:2 to match the dashboard/gallery cover regions (no off-aspect cropping); `og`
+ *  stays the 1200x630 link-unfurl standard. */
 export const RENDITION_SIZES: Record<ScreenshotRendition, { width: number; height: number }> = {
   og: { width: 1200, height: 630 },
-  card: { width: 1200, height: 675 },
-  thumb: { width: 400, height: 225 },
+  card: { width: 1200, height: 800 },
+  thumb: { width: 600, height: 400 },
 };
 
 const WEBP_QUALITY = 80;
