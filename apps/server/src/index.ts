@@ -21,7 +21,7 @@ import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
 import { createHub } from "./realtime/hub.js";
-import type { CaptureContext } from "./screenshots/capture.js";
+import { CAPTURE_VIEWPORT, type CaptureContext } from "./screenshots/capture.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import { startScreenshotWorker } from "./screenshots/worker.js";
 import { makeStorage } from "./storage/factory.js";
@@ -200,8 +200,13 @@ async function main() {
       }
       const browser = await chromium.launch({ args });
       return {
+        // deviceScaleFactor: 2 → retina-resolution master (2× pixel density), so the
+        // downscaled WebP renditions have crisp text/edges instead of looking soft.
         newContext: async () =>
-          (await browser.newContext()) as unknown as CaptureContext & { close(): Promise<void> },
+          (await browser.newContext({
+            viewport: { width: CAPTURE_VIEWPORT.width, height: CAPTURE_VIEWPORT.height },
+            deviceScaleFactor: 2,
+          })) as unknown as CaptureContext & { close(): Promise<void> },
         close: () => browser.close(),
       };
     },

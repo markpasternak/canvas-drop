@@ -48,7 +48,15 @@ export interface CapturePage {
   on(event: "dialog", handler: (d: { dismiss(): Promise<void> }) => unknown): void;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
-  screenshot(opts?: { type?: "png"; timeout?: number }): Promise<Uint8Array>;
+  evaluate<T>(fn: () => T | Promise<T>): Promise<T>;
+  waitForTimeout(ms: number): Promise<void>;
+  // `animations: "disabled"` fast-forwards finite animations to their END state, so a
+  // page with entrance/stagger/fade-in effects renders fully (not caught mid-fade).
+  screenshot(opts?: {
+    type?: "png";
+    timeout?: number;
+    animations?: "disabled" | "allow";
+  }): Promise<Uint8Array>;
   close(): Promise<void>;
 }
 export interface CaptureContext {
@@ -103,9 +111,28 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
     });
     await page.setViewportSize({ ...CAPTURE_VIEWPORT });
     await page.goto(input.url, { waitUntil: "networkidle", timeout: input.timeoutMs });
-    // Bound the screenshot too — a canvas that reaches networkidle then wedges the
-    // renderer (rAF loop, deferred paint) must not hang the worker tick (review #3).
-    const master = await page.screenshot({ type: "png", timeout: input.timeoutMs });
+    // Wait for web fonts so text renders in the real face (not a fallback) — otherwise
+    // a webfont-heavy page screenshots with the wrong/invisible type. Best-effort: a
+    // page with no `document.fonts` or a hung promise must not fail the capture.
+    await page
+      .evaluate(() => {
+        // Runs in the browser; reference the global via globalThis so the server
+        // tsconfig (no DOM lib) still type-checks this callback.
+        const f = (globalThis as { document?: { fonts?: { ready?: Promise<unknown> } } }).document
+          ?.fonts;
+        return f?.ready ? f.ready.then(() => undefined) : undefined;
+      })
+      .catch(() => {});
+    // A short settle for any post-load layout/paint (lazy images, JS-driven content).
+    await page.waitForTimeout(250).catch(() => {});
+    // `animations: "disabled"` fast-forwards finite animations to completion, so
+    // entrance/stagger effects render in their final state instead of mid-fade. The
+    // timeout bounds a canvas that reaches networkidle then wedges the renderer.
+    const master = await page.screenshot({
+      type: "png",
+      timeout: input.timeoutMs,
+      animations: "disabled",
+    });
     return await encodeRenditions(master);
   } finally {
     await page.close().catch(() => {});

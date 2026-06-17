@@ -37,6 +37,10 @@ function fakePage(over: Partial<CapturePage> = {}): {
     async goto() {
       return null;
     },
+    async evaluate<T>(fn: () => T | Promise<T>) {
+      return fn();
+    },
+    async waitForTimeout() {},
     async screenshot() {
       return new Uint8Array(await masterPng());
     },
