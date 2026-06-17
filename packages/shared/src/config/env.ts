@@ -409,7 +409,10 @@ const rawSchema = z
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
       mcp: { enabled: r.CANVAS_DROP_MCP === "on" },
       screenshots: {
-        enabled: r.CANVAS_DROP_SCREENSHOTS === "on",
+        // ENV layer = AVAILABILITY only (Chromium present / master enable). Whether the
+        // feature actually runs is `available AND adminEnabled` — see
+        // adminSettingsService.effectiveScreenshotsEnabled (plan 004 / U12). Default off.
+        available: r.CANVAS_DROP_SCREENSHOTS === "on",
         concurrency: r.CANVAS_DROP_SCREENSHOTS_CONCURRENCY,
         timeoutMs: r.CANVAS_DROP_SCREENSHOTS_TIMEOUT_MS,
         recycleEvery: r.CANVAS_DROP_SCREENSHOTS_RECYCLE_EVERY,

@@ -300,7 +300,10 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
     return { svc, canvas: live, owner };
   }
 
-  it("publishing enqueues a capture for the new version when enabled", async () => {
+  it("publishing calls the screenshot trigger with the new version", async () => {
+    // The effective-enabled GATE lives in the trigger (U12), not here — see
+    // trigger.test.ts. draftService always calls the injected trigger; the trigger
+    // decides whether to actually enqueue.
     const calls: Array<[string, string]> = [];
     const { svc, canvas, owner } = await setup(enabledConfig, async (c, v) => {
       calls.push([c, v]);
@@ -309,16 +312,7 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
     expect(calls).toEqual([[canvas.id, result.versionId]]);
   });
 
-  it("does not enqueue when the pipeline is disabled (default config)", async () => {
-    const calls: Array<[string, string]> = [];
-    const { svc, canvas, owner } = await setup(config, async (c, v) => {
-      calls.push([c, v]);
-    });
-    await svc.publish(canvas, owner.id);
-    expect(calls).toEqual([]);
-  });
-
-  it("a failing enqueue never fails the publish (best-effort)", async () => {
+  it("a failing enqueue never fails the publish (defensive best-effort)", async () => {
     const { svc, canvas, owner } = await setup(enabledConfig, async () => {
       throw new Error("enqueue boom");
     });

@@ -71,6 +71,7 @@ import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
+import { screenshotTrigger } from "./screenshots/trigger.js";
 import type { StorageDriver } from "./storage/driver.js";
 import { uploadService } from "./upload/service.js";
 
@@ -502,7 +503,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         log: deps.rootLogger,
         // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
         // them. Only wired when the pipeline is enabled.
-        screenshots: deps.config.screenshots.enabled ? screenshotsRepository(deps.db) : undefined,
+        // Effective-gated, best-effort capture trigger (plan 004 / U12). Always wired —
+        // it self-gates on env-available AND admin-enabled, so when off it's a no-op.
+        screenshots: screenshotTrigger({
+          enabled: () => settingsSvc.effectiveScreenshotsEnabled(),
+          repo: screenshotsRepository(deps.db),
+          log: deps.rootLogger,
+        }),
       }),
     }),
   );

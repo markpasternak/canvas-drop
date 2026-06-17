@@ -13,6 +13,8 @@ import {
 const AI_API_KEY = "config.ai.apiKey";
 /** Realtime master-switch override key (read-only in the registry today). */
 const REALTIME_KEY = "config.realtime.enabled";
+/** Screenshot pipeline admin runtime toggle (editable; default off — plan 004 / U12). */
+const SCREENSHOTS_KEY = "config.screenshots.enabled";
 
 const last4 = (s: string) => (s.length <= 4 ? s : s.slice(-4));
 
@@ -181,6 +183,19 @@ export function adminSettingsService(deps: {
      */
     async effectiveRealtimeEnabled(): Promise<boolean> {
       return (await boolOverride(REALTIME_KEY)) ?? config.realtimeEnabled;
+    },
+
+    /**
+     * Effective screenshot-pipeline state (plan 004 / U12). TWO layers AND'd:
+     *   - env **availability** (`config.screenshots.available`, Chromium present / master enable), AND
+     *   - the **admin runtime toggle** (DB override, default OFF).
+     * There is NO per-user/per-canvas opt-out — this is the single org-wide gate every
+     * consumer (enqueue trigger, worker, serving, surfaces) reads. When false, the
+     * product behaves exactly like today (no capture, no preview serving).
+     */
+    async effectiveScreenshotsEnabled(): Promise<boolean> {
+      if (!config.screenshots.available) return false;
+      return (await boolOverride(SCREENSHOTS_KEY)) ?? false;
     },
 
     // ── Unified Configuration view (all settings; one resolution rule) ───────

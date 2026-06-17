@@ -129,6 +129,35 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: (c) => c.realtimeEnabled,
   },
 
+  // ── Screenshots (preview pipeline, plan 004 / U12) ───────────────────────
+  // Two layers: env AVAILABILITY (read-only) AND the admin runtime toggle (editable,
+  // default off). Effective = available AND enabled (effectiveScreenshotsEnabled).
+  // The editable toggle is the first editable boolean — it exercises the boolean
+  // branch in setConfigOverride.
+  {
+    key: "screenshots.available",
+    env: "CANVAS_DROP_SCREENSHOTS",
+    group: "Core",
+    label: "Screenshots available (env)",
+    help: "Whether the environment provides screenshot capture (Chromium present / master enable). Set via env; the admin toggle below only takes effect when this is on.",
+    type: "boolean",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.screenshots.available,
+  },
+  {
+    key: "screenshots.enabled",
+    env: "—",
+    group: "Core",
+    label: "Screenshots enabled",
+    help: "Generate preview screenshots on publish (dashboard/gallery thumbnails + public OG). Off by default; only effective when 'Screenshots available (env)' is on. No per-user opt-out.",
+    type: "boolean",
+    secret: false,
+    editable: true,
+    settingKey: "config.screenshots.enabled",
+    fromConfig: () => false,
+  },
+
   // ── AI ──────────────────────────────────────────────────────────────────
   {
     key: "ai.apiKey",

@@ -209,3 +209,40 @@ describe("adminSettingsService — setConfigOverride validation", () => {
     expect(await s.effectiveApiKey()).toBe("sk-ant-env-key-WXYZ");
   });
 });
+
+describe("adminSettingsService — screenshots enablement (plan 004 / U12)", () => {
+  const cfg = (available: boolean) => ({ screenshots: { available } }) as Config;
+
+  it("effective state = env-available AND admin-enabled (truth table)", async () => {
+    // env OFF → always false, even if the admin toggle is set on
+    const envOff = adminSettingsService({ settings: fakeSettings(), config: cfg(false) });
+    expect(await envOff.effectiveScreenshotsEnabled()).toBe(false);
+    await envOff.setConfigOverride("screenshots.enabled", true);
+    expect(await envOff.effectiveScreenshotsEnabled()).toBe(false); // env availability wins
+
+    // env ON + admin unset → false (default off)
+    const envOn = adminSettingsService({ settings: fakeSettings(), config: cfg(true) });
+    expect(await envOn.effectiveScreenshotsEnabled()).toBe(false);
+
+    // env ON + admin true → true (first editable boolean — exercises setConfigOverride's boolean branch)
+    await envOn.setConfigOverride("screenshots.enabled", true);
+    expect(await envOn.effectiveScreenshotsEnabled()).toBe(true);
+
+    // env ON + admin explicitly false → false
+    await envOn.setConfigOverride("screenshots.enabled", false);
+    expect(await envOn.effectiveScreenshotsEnabled()).toBe(false);
+
+    // clearing the override reverts to default off
+    await envOn.setConfigOverride("screenshots.enabled", true);
+    await envOn.clearConfigOverride("screenshots.enabled");
+    expect(await envOn.effectiveScreenshotsEnabled()).toBe(false);
+  });
+
+  it("exposes the admin toggle as editable and the env availability as read-only", async () => {
+    const rows = await configSvc().describeConfig();
+    const toggle = rows.find((r) => r.key === "screenshots.enabled");
+    const avail = rows.find((r) => r.key === "screenshots.available");
+    expect(toggle).toMatchObject({ editable: true, type: "boolean" });
+    expect(avail).toMatchObject({ editable: false, type: "boolean" });
+  });
+});

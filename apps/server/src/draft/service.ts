@@ -23,10 +23,10 @@ export interface DraftServiceDeps {
   audit: AuditLog;
   log: Logger;
   /**
-   * Screenshot capture enqueue (plan 004 / U6). Optional — present only when the
-   * screenshot pipeline is enabled. Publishing schedules a (coalesced) capture of the
-   * new version; the in-process worker picks it up. Best-effort: a failure here must
-   * never fail the publish.
+   * Screenshot capture trigger (plan 004 / U6+U12). The effective-gated, best-effort
+   * `screenshotTrigger` — it checks env-available AND admin-enabled internally and never
+   * throws, so publishing just calls `enqueue` unconditionally. Optional (absent in tests
+   * that don't exercise capture).
    */
   screenshots?: { enqueue(canvasId: string, versionId: string): Promise<void> };
 }
@@ -201,13 +201,12 @@ export function draftService(deps: DraftServiceDeps) {
         );
 
       // Schedule a screenshot capture of the freshly published version (plan 004 / U6).
-      // Coalesced (one job per canvas, latest version wins) and best-effort — a failed
-      // enqueue must never fail a publish that already succeeded. Only when enabled.
-      if (deps.config.screenshots.enabled && deps.screenshots) {
-        await deps.screenshots
-          .enqueue(canvas.id, version.id)
-          .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"));
-      }
+      // The trigger owns the effective-enabled gate (env-available AND admin-enabled) and
+      // is best-effort by contract (U12); the extra `.catch` is a defensive belt — a
+      // skipped/failed enqueue must never fail a publish that already succeeded.
+      await deps.screenshots
+        ?.enqueue(canvas.id, version.id)
+        .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"));
 
       // Prune old rows + reclaim unreferenced blobs, async + best-effort.
       service.pruneAndCollect(canvas.id);
