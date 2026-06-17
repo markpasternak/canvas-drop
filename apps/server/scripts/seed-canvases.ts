@@ -268,7 +268,10 @@ async function main() {
     }
 
     await canvases.updateSettings(canvas.id, {
-      shared: p.shared,
+      // The repo patch keys on `access` (the `shared` boolean→access translation lives in
+      // the route's resolveSettingsUpdate, which the seed bypasses). Set access directly,
+      // else listed canvases stay `private` and the gallery renders empty.
+      access: p.shared ? "whole_org" : "private",
       galleryListed: p.listed,
       galleryTemplatable: p.templatable,
       gallerySummary: summary,

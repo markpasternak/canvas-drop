@@ -73,6 +73,9 @@ async function resolveShots(page) {
       { path: `/canvases/${id}/share`, name: "tour-sharing.webp" },
       { path: `/canvases/${id}/capabilities`, name: "tour-capabilities.webp" },
       { path: `/canvases/${id}/usage`, name: "tour-usage.webp" },
+      // The per-canvas preview control (auto/off + custom cover) — scroll the Preview
+      // section into view so the framed shot shows the control, not the page top.
+      { path: `/canvases/${id}/settings`, name: "tour-preview.webp", scrollTo: "#preview" },
     );
   } else {
     console.warn(
@@ -110,6 +113,14 @@ async function main() {
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
       if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
+      // Optionally scroll a specific section into view (e.g. the Preview control, which
+      // sits below the fold on the settings page) before framing the shot.
+      if (shot.scrollTo) {
+        await page.evaluate((sel) => {
+          document.querySelector(sel)?.scrollIntoView({ block: "start" });
+        }, shot.scrollTo);
+        await page.waitForTimeout(500);
+      }
       const png = await page.screenshot({ fullPage: false });
       const out = join(OUT_DIR, shot.name);
       await sharp(png)

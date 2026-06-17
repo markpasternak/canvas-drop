@@ -118,7 +118,13 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "landing-gallery",
     label: "Shared gallery",
     caption:
-      "Browse, search, and clone what the team has made, instead of screenshots buried in a DM.",
+      "Browse, search, and clone what the team has made — each canvas with a real preview cover, not screenshots buried in a DM.",
+  },
+  {
+    img: "tour-preview",
+    label: "Preview covers",
+    caption:
+      "Every canvas gets an auto screenshot as its cover on publish — or turn it off, or upload your own image that sticks.",
   },
   {
     img: "tour-sharing",
