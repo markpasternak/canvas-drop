@@ -48,6 +48,20 @@ there is no cross-owner access and no existence leak.
 | `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes guest grants. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
 | `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, gallery listing/metadata, guest-AI. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
+| `list_access` | List the canvas's allowlist — named org members + email-invited guests (each with an `id` for `revoke_access`). |
+| `grant_access` | Give a person access by email: an org member is added to the allowlist directly; an outside email gets a guest magic-link invite (oidc/dev + configured email only). Takes effect on the `specific_people` rung. |
+| `resend_guest_invite` | Re-send a pending guest invite (fresh link), by allowlist entry `id`. |
+| `revoke_access` | Remove an allowlist entry (member or guest); revokes a guest's invite + sessions. |
+| `clone_canvas` | Clone a canvas into a new one you own — any active canvas you own, or a gallery template someone shared. Starts as an unpublished draft with a fresh slug + key. |
+| `get_canvas_usage` | Usage stats: views + 30-day sparkline, and (backend-on) KV/file/AI/realtime op counts, storage, AI tokens/cost. |
+| `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
+| `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |
+| `write_draft_file` | Write/replace a draft file (`create: true` refuses to overwrite). |
+| `delete_draft_file` | Delete a draft file. |
+| `rename_draft_file` | Rename/move a draft file. |
+| `publish_draft` | Publish the draft as a new live version (the editor's Publish). |
+| `restore_draft` | Reset the draft to a published `version`'s files (the editor's Restore). |
 
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.

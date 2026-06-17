@@ -1,7 +1,7 @@
 ---
 title: "feat: MCP ↔ user parity — every dashboard action available as an MCP tool"
 type: feat
-status: in-progress
+status: completed
 date: 2026-06-17
 depth: deep
 origin: agent-native principle (AGENTS.md)

@@ -83,8 +83,20 @@ account and the canvases you own:
 - `archive_canvas` / `unarchive_canvas` — take a canvas offline (reversible); restore it.
 - `delete_canvas` — soft-delete a canvas (not reversible from MCP; a canvas an admin has
   DISABLED can't be deleted).
+- `update_canvas` — settings + sharing (Settings/Share tabs): title, description, access
+  rung, password (or clear), share expiry, SPA fallback, gallery listing/metadata.
+- `list_access` / `grant_access` / `resend_guest_invite` / `revoke_access` — the
+  per-canvas allowlist for the `specific_people` rung: list members + guests, add a member
+  or email-invite a guest, re-send, or remove.
+- `clone_canvas` — clone an owned canvas (or a shared gallery template) into a new draft.
+- `get_canvas_usage` — view + op/storage/AI usage stats.
+- `get_draft` / `read_draft_file` / `write_draft_file` / `delete_draft_file` /
+  `rename_draft_file` / `publish_draft` / `restore_draft` — the in-browser editor's draft
+  loop: edit a mutable draft, then publish it as a version (or restore an old version into it).
 
-A tool only ever acts on canvases you own; a canvas you don't own reads as not found.
+The MCP surface is at **full parity with the dashboard** — anything an owner can do in the
+UI, these tools can do. A tool only ever acts on canvases you own; a canvas you don't own
+reads as not found.
 Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
 
 **Every deploy publishes immediately** — there is no draft step over MCP; the files go
