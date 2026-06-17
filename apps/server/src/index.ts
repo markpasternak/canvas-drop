@@ -22,6 +22,7 @@ import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
 import { createHub } from "./realtime/hub.js";
 import type { CaptureContext } from "./screenshots/capture.js";
+import { screenshotTrigger } from "./screenshots/trigger.js";
 import { startScreenshotWorker } from "./screenshots/worker.js";
 import { makeStorage } from "./storage/factory.js";
 
@@ -54,6 +55,22 @@ async function main() {
   const drafts = draftsRepository(db);
   const uploadSessions = uploadSessionsRepository(db);
   const audit = createAuditLog(auditRepository(db), rootLogger);
+
+  // Screenshot enablement (plan 004): one settings resolver + one capture trigger,
+  // shared by the deploy engine (deploy publishes) and the worker. The trigger
+  // self-gates on effectiveScreenshotsEnabled (env-available AND admin-enabled) and is
+  // best-effort, so wiring it everywhere is safe — when off it's a no-op.
+  const screenshotSettings = adminSettingsService({
+    settings: settingsRepository(db),
+    config,
+    envPresent: presentEnvVars(),
+  });
+  const screenshots = screenshotTrigger({
+    enabled: () => screenshotSettings.effectiveScreenshotsEnabled(),
+    repo: screenshotsRepository(db),
+    log: rootLogger,
+  });
+
   const engine = deployEngine({
     config,
     canvases,
@@ -62,6 +79,7 @@ async function main() {
     storage,
     log: rootLogger,
     uploadSessions,
+    screenshots,
   });
   const { strategy, sessionSvc } = setupAuth(config, {
     users,
@@ -154,12 +172,8 @@ async function main() {
   // (Chromium present); even then it stays idle until an admin enables the runtime
   // toggle (effectiveScreenshotsEnabled). When unavailable it's fully inert — the
   // product behaves exactly like today. Started AFTER serve() so the worker's loopback
-  // capture requests reach a listening server.
-  const screenshotSettings = adminSettingsService({
-    settings: settingsRepository(db),
-    config,
-    envPresent: presentEnvVars(),
-  });
+  // capture requests reach a listening server. Reuses the `screenshotSettings` resolver
+  // built above (shared with the deploy-path trigger).
   const screenshotWorkerCtl = startScreenshotWorker({
     config,
     enabled: () => screenshotSettings.effectiveScreenshotsEnabled(),

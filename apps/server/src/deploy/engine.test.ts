@@ -331,4 +331,32 @@ describe("deployEngine", () => {
     expect(history.length).toBe(10);
     expect(history[0]?.number).toBe(11); // newest kept and current
   });
+
+  it("a deploy schedules a screenshot capture of the new version (plan 004 / U13)", async () => {
+    client = await makeTestDb("sqlite");
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const calls: Array<[string, string]> = [];
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage: memStorage(),
+      log: silent,
+      screenshots: { enqueue: async (c, v) => void calls.push([c, v]) },
+    });
+    await engine.deploy(cv, "api", folder({ "index.html": "v1" }), owner.id);
+    const live = await canvases.findById(cv.id);
+    expect(calls).toEqual([[cv.id, live?.currentVersionId]]);
+  });
 });
