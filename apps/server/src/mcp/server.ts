@@ -126,7 +126,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "create_canvas",
     {
       description:
-        "Create a new canvas you own. Returns its id, URL, and a one-time deploy API key. The " +
+        "Create a new canvas you own. Returns its id, URL, a one-time deploy API key, AND a " +
+        "`deploy` block with the EXACT, ready-to-run curl endpoints for this canvas (apiBase, " +
+        "zipUpload, the staged upload URLs, readback, and a copy-paste `curl` command with the " +
+        "key already filled in). If you can run shell commands, deploy with that curl — you do " +
+        "NOT need to know or probe for the API host; it's in the block. The " +
         "canvas starts empty (no live version) and private; its URL only serves content after a " +
         "deploy, and only to viewers allowed by its access rung (default: sign-in required).",
       inputSchema: {
@@ -163,7 +167,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "get_canvas",
     {
-      description: "Get the current state of a canvas you own.",
+      description:
+        "Get the current state of a canvas you own. Also returns a `deploy` block with the exact " +
+        "curl endpoints for this canvas (apiBase, zipUpload, staged URLs, readback, and a " +
+        "copy-paste `curl` with a $CANVAS_KEY placeholder — substitute the key from create_canvas). " +
+        "Use this to get the runnable deploy command for an existing canvas without probing.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -205,10 +213,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       description:
         "Deploy a canvas you own in ONE call. NOTE: if you can run shell commands, PREFER curl " +
         "over the keyed HTTP Deploy API instead of this tool — request that permission if you " +
-        "don't have it. curl streams file bytes straight from disk to the server so they never " +
-        "enter your context (far cheaper, no size ceiling); every MCP deploy tool inlines the " +
-        "bytes into the model. Use this MCP tool only when you genuinely cannot run commands, " +
-        "and then only for a FIRST publish of a small canvas. " +
+        "don't have it. The exact, ready-to-run curl command + endpoints are in the `deploy` " +
+        "block that create_canvas (with the key filled in) and get_canvas return — use those " +
+        "verbatim, do NOT probe for the API host. curl streams file bytes straight from disk to " +
+        "the server so they never enter your context (far cheaper, no size ceiling); every MCP " +
+        "deploy tool inlines the bytes into the model. Use this MCP tool only when you genuinely " +
+        "cannot run commands, and then only for a FIRST publish of a small canvas. " +
         "This PUBLISHES IMMEDIATELY: the uploaded files become the new live version at once " +
         "(there is no draft step — every deploy goes live and is kept as an immutable version). " +
         "The live URL is ACCESS-CONTROLLED (org sign-in / share rung), so do NOT verify by " +
@@ -323,8 +333,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Stage files into an open upload (from begin_deploy). Text as utf8 (default), binary as " +
         "base64. Call repeatedly to chunk a large set; only send the hashes begin_deploy reported " +
         "missing. NOTE: this inlines file bytes into the model — if you can run shell commands, " +
-        "PREFER curl: PUT each missing blob's raw bytes to the keyed HTTP Deploy API " +
-        "(…/uploads/{uploadId}/blobs/{hash}) so the bytes never enter your context. Request " +
+        "PREFER curl: PUT each missing blob's raw bytes to the keyed HTTP Deploy API so the bytes " +
+        "never enter your context. The exact staged URLs (begin/stageBlob/finalize) are in the " +
+        "`deploy` block from create_canvas/get_canvas — no need to probe for the host. Request " +
         "command permission if needed rather than streaming large/binary files through here.",
       inputSchema: {
         id: z.string().describe("The canvas id (must own it)."),
