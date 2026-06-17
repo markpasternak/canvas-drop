@@ -1,5 +1,7 @@
+import { PencilSimple } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
@@ -122,20 +124,21 @@ export default function Versions() {
                 </div>
               </div>
               {v.status === "ready" && isActive && (
-                <div className="flex flex-wrap justify-end gap-1.5">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => requestRestore(v.number)}
-                    title="Load this version's files into the editable draft"
-                  >
-                    Edit this version
-                  </Button>
+                <div className="flex items-center justify-end gap-1.5">
                   {!v.current && (
                     <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
                       Make current
                     </Button>
                   )}
+                  <ActionMenu label={`More actions for version ${v.number}`}>
+                    <ActionMenuItem
+                      icon={<PencilSimple size={15} aria-hidden />}
+                      onSelect={() => requestRestore(v.number)}
+                      title="Load this version's files into the editable draft"
+                    >
+                      Edit this version
+                    </ActionMenuItem>
+                  </ActionMenu>
                 </div>
               )}
             </Panel>

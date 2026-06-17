@@ -1,7 +1,16 @@
-import { ArrowSquareOut, CaretDown, MagnifyingGlass } from "@phosphor-icons/react";
+import {
+  Archive,
+  ArrowSquareOut,
+  Copy,
+  CopySimple,
+  MagnifyingGlass,
+  Trash,
+} from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
+import { BulkActionBar } from "../components/BulkActionBar.js";
 import { Button } from "../components/Button.js";
 import {
   CanvasListHeader,
@@ -10,7 +19,7 @@ import {
   ListSkeleton,
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
-import { CopyButton } from "../components/CopyButton.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { PageHeader } from "../components/Surface.js";
@@ -22,10 +31,11 @@ import {
   type CanvasListItem,
   type CanvasOwnerSummary,
 } from "../lib/api.js";
+import { useClipboardCopy } from "../lib/clipboard.js";
 import { cn } from "../lib/cn.js";
-import { useArchiveCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
+import { useArchiveCanvas, useDeleteCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
 import { useCanvases } from "../lib/queries.js";
-import { rowMenuItemClass, rowPrimaryActionClass } from "../lib/row-styles.js";
+import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
@@ -58,70 +68,55 @@ const CANVASES_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
 ];
 
-function RowOverflowMenu({
-  label,
-  children,
-}: {
-  label: string;
-  children: (close: () => void) => ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const close = () => setOpen(false);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: PointerEvent) {
-      if (rootRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        className="grid size-8 cursor-pointer list-none place-items-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 [&::-webkit-details-marker]:hidden"
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <CaretDown size={14} weight="bold" aria-hidden />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-[calc(100%+0.25rem)] z-20 w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
-        >
-          {children(close)}
-        </div>
-      )}
-    </div>
-  );
+interface RowSelectionProps {
+  selected: boolean;
+  onSelectChange: (next: boolean) => void;
 }
 
+const MENU_ICON_SIZE = 15;
+
 /** Active-list row: keep the primary work visible and tuck secondary/destructive
- * actions into a compact menu. Never-deployed canvases route to setup instead of
- * pretending there is a useful public link to copy. */
-function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
+ * actions into the shared overflow menu. Never-deployed canvases route to setup
+ * instead of pretending there is a useful public link to copy. */
+function ActiveRow({
+  canvas,
+  selected,
+  onSelectChange,
+}: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
+  const copy = useClipboardCopy();
   const archive = useArchiveCanvas(canvas.id);
+  const del = useDeleteCanvas(canvas.id);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const title = canvasTitle(canvas);
   const deployed = canvas.lastDeploy !== null;
+
+  async function doArchive() {
+    try {
+      await archive.mutateAsync();
+      toast("Canvas archived");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't archive", "error");
+    }
+  }
+
+  async function doDelete() {
+    try {
+      await del.mutateAsync();
+      setDeleteOpen(false);
+      toast("Canvas deleted");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't delete", "error");
+    }
+  }
+
   return (
     <CanvasRow
       canvas={canvas}
+      selectable
+      selected={selected}
+      onSelectChange={onSelectChange}
       actions={
         <>
           {deployed ? (
@@ -145,50 +140,35 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
               Continue setup
             </Link>
           )}
-          <RowOverflowMenu label={`More actions for ${title}`}>
-            {(close) => (
-              <>
-                {deployed && (
-                  <CopyButton
-                    value={canvas.url}
-                    label="Copy link"
-                    ariaLabel={`Copy link for ${title}`}
-                    toastMessage="Link copied"
-                    className={rowMenuItemClass}
-                    onCopyFinished={close}
-                  />
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={rowMenuItemClass}
-                  onClick={() => {
-                    close();
-                    setCloneOpen(true);
-                  }}
-                >
-                  Duplicate
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={`${rowMenuItemClass} hover:text-danger`}
-                  loading={archive.isPending}
-                  onClick={async () => {
-                    close();
-                    try {
-                      await archive.mutateAsync();
-                      toast("Canvas archived");
-                    } catch (err) {
-                      toast(err instanceof ApiError ? err.hint : "Couldn't archive", "error");
-                    }
-                  }}
-                >
-                  Archive
-                </Button>
-              </>
+          <ActionMenu label={`More actions for ${title}`}>
+            {deployed && (
+              <ActionMenuItem
+                icon={<Copy size={MENU_ICON_SIZE} aria-hidden />}
+                onSelect={() => copy(canvas.url, "Link copied")}
+              >
+                Copy link
+              </ActionMenuItem>
             )}
-          </RowOverflowMenu>
+            <ActionMenuItem
+              icon={<CopySimple size={MENU_ICON_SIZE} aria-hidden />}
+              onSelect={() => setCloneOpen(true)}
+            >
+              Duplicate
+            </ActionMenuItem>
+            <ActionMenuItem
+              icon={<Archive size={MENU_ICON_SIZE} aria-hidden />}
+              onSelect={doArchive}
+            >
+              Archive
+            </ActionMenuItem>
+            <ActionMenuItem
+              danger
+              icon={<Trash size={MENU_ICON_SIZE} aria-hidden />}
+              onSelect={() => setDeleteOpen(true)}
+            >
+              Delete
+            </ActionMenuItem>
+          </ActionMenu>
           <CloneDialog
             open={cloneOpen}
             onClose={() => setCloneOpen(false)}
@@ -196,6 +176,19 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
             sourceTitle={canvas.title}
             keepsPassword={canvas.hasPassword}
           />
+          <ConfirmDialog
+            open={deleteOpen}
+            onClose={() => setDeleteOpen(false)}
+            onConfirm={doDelete}
+            title={`Delete “${title}”?`}
+            actionLabel="Delete canvas"
+            destructive
+            holdToConfirm
+            loading={del.isPending}
+          >
+            It goes offline and leaves your list. Recoverable for 30 days, then purged. Hold the
+            button to confirm.
+          </ConfirmDialog>
         </>
       }
     />
@@ -203,14 +196,35 @@ function ActiveRow({ canvas }: { canvas: CanvasListItem }) {
 }
 
 /** Archived-list row: the live URL 404s while archived, so the trailing actions are
- * Unarchive (restore it) + Copy (the slug stays reserved), not Open/Archive. */
-function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
+ * Unarchive (restore it) + Copy (the slug stays reserved) / Delete, not Open/Archive. */
+function ArchivedRow({
+  canvas,
+  selected,
+  onSelectChange,
+}: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
+  const copy = useClipboardCopy();
   const unarchive = useUnarchiveCanvas(canvas.id);
+  const del = useDeleteCanvas(canvas.id);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const title = canvasTitle(canvas);
+
+  async function doDelete() {
+    try {
+      await del.mutateAsync();
+      setDeleteOpen(false);
+      toast("Canvas deleted");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't delete", "error");
+    }
+  }
+
   return (
     <CanvasRow
       canvas={canvas}
+      selectable
+      selected={selected}
+      onSelectChange={onSelectChange}
       actions={
         <>
           <Button
@@ -228,18 +242,34 @@ function ArchivedRow({ canvas }: { canvas: CanvasListItem }) {
           >
             Restore
           </Button>
-          <RowOverflowMenu label={`More actions for ${title}`}>
-            {(close) => (
-              <CopyButton
-                value={canvas.url}
-                label="Copy reserved URL"
-                ariaLabel={`Copy reserved URL for ${title}`}
-                toastMessage="Link copied"
-                className={rowMenuItemClass}
-                onCopyFinished={close}
-              />
-            )}
-          </RowOverflowMenu>
+          <ActionMenu label={`More actions for ${title}`}>
+            <ActionMenuItem
+              icon={<Copy size={MENU_ICON_SIZE} aria-hidden />}
+              onSelect={() => copy(canvas.url, "Link copied")}
+            >
+              Copy reserved URL
+            </ActionMenuItem>
+            <ActionMenuItem
+              danger
+              icon={<Trash size={MENU_ICON_SIZE} aria-hidden />}
+              onSelect={() => setDeleteOpen(true)}
+            >
+              Delete
+            </ActionMenuItem>
+          </ActionMenu>
+          <ConfirmDialog
+            open={deleteOpen}
+            onClose={() => setDeleteOpen(false)}
+            onConfirm={doDelete}
+            title={`Delete “${title}”?`}
+            actionLabel="Delete canvas"
+            destructive
+            holdToConfirm
+            loading={del.isPending}
+          >
+            It leaves your list for good after 30 days. Recoverable until then. Hold the button to
+            confirm.
+          </ConfirmDialog>
         </>
       }
     />
@@ -403,6 +433,36 @@ export default function CanvasList() {
     }
   }, [data, isPlaceholderData, offset, navigate]);
 
+  // Bulk selection (Your-canvases multi-edit). Selection is per-view: any change of
+  // page, scope, search, or filter clears it, since selecting then navigating to a
+  // different result set would act on ids the user can no longer see. Keyed on the
+  // scalar filter inputs so it resets exactly when the visible set can change.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on any filter/scope/page change, not on `selected` identity.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [
+    archivedView,
+    page,
+    q,
+    access,
+    sort,
+    search.shared,
+    search.protected,
+    search.listed,
+    search.template,
+    search.undeployed,
+  ]);
+
+  function toggleSelected(id: string, next: boolean) {
+    setSelected((prev) => {
+      const copy = new Set(prev);
+      if (next) copy.add(id);
+      else copy.delete(id);
+      return copy;
+    });
+  }
+
   function toggle(key: keyof CanvasesSearch) {
     const nextOn = !search[key];
     navigate({
@@ -473,6 +533,13 @@ export default function CanvasList() {
   const to = Math.min(offset + items.length, total);
   const hasPrev = page > 1;
   const hasNext = offset + items.length < total;
+  // Select-all operates on the visible page only (selection is per-view).
+  const selectedOnPage = items.filter((c) => selected.has(c.id));
+  const allSelected = items.length > 0 && selectedOnPage.length === items.length;
+  const someSelected = selectedOnPage.length > 0 && !allSelected;
+  function toggleSelectAll(next: boolean) {
+    setSelected(next ? new Set(items.map((c) => c.id)) : new Set());
+  }
   const resultLabel =
     total === 0
       ? archivedView
@@ -617,17 +684,41 @@ export default function CanvasList() {
           {items.length > 0 && (
             <>
               <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
-                <CanvasListHeader />
+                <CanvasListHeader
+                  selectable
+                  allSelected={allSelected}
+                  someSelected={someSelected}
+                  onSelectAll={toggleSelectAll}
+                />
                 <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
                   {items.map((c) =>
                     archivedView ? (
-                      <ArchivedRow key={c.id} canvas={c} />
+                      <ArchivedRow
+                        key={c.id}
+                        canvas={c}
+                        selected={selected.has(c.id)}
+                        onSelectChange={(next) => toggleSelected(c.id, next)}
+                      />
                     ) : (
-                      <ActiveRow key={c.id} canvas={c} />
+                      <ActiveRow
+                        key={c.id}
+                        canvas={c}
+                        selected={selected.has(c.id)}
+                        onSelectChange={(next) => toggleSelected(c.id, next)}
+                      />
                     ),
                   )}
                 </ul>
               </div>
+
+              {selected.size > 0 && (
+                <BulkActionBar
+                  selectedIds={[...selected]}
+                  scope={archivedView ? "archived" : "active"}
+                  onClear={() => setSelected(new Set())}
+                  onResult={(result) => setSelected(new Set(result.failed))}
+                />
+              )}
 
               <div className="flex items-center justify-between gap-3 pt-1">
                 <p className="text-xs text-subtle">{resultLabel}</p>

@@ -238,7 +238,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     await screen.findByText("Copyable one");
     const menu = screen.getByRole("button", { name: "More actions for Copyable one" });
     await userEvent.click(menu);
-    const copy = await screen.findByRole("button", { name: "Copy link for Copyable one" });
+    const copy = await screen.findByRole("menuitem", { name: "Copy link" });
     expect(menu).toHaveAttribute("aria-expanded", "true");
 
     await userEvent.click(copy);
@@ -255,12 +255,12 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     const menu = screen.getByRole("button", { name: "More actions for Outside one" });
     await userEvent.click(menu);
     expect(menu).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Copy link for Outside one" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("heading", { name: "Your canvases" }));
 
     await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
-    expect(screen.queryByRole("button", { name: "Copy link for Outside one" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
   });
 
   it("searches by title (debounced into a server request)", async () => {

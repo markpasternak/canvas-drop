@@ -1,21 +1,23 @@
-import { MagnifyingGlass, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, MagnifyingGlass, X } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { CloneDialog } from "../components/CloneDialog.js";
-import { CopyButton } from "../components/CopyButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
+import { useClipboardCopy } from "../lib/clipboard.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
 import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
+  const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
   return (
     <li className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
@@ -84,14 +86,30 @@ function GalleryCard({ item }: { item: GalleryItem }) {
             <span className="truncate text-xs text-subtle">{item.owner.name}</span>
           </div>
           {/* Raised above the title's stretched ::after so these stay clickable
-              while the rest of the card opens the canvas. */}
+              while the rest of the card opens the canvas. Templatable cards keep a
+              visible "Make a copy" primary; the kebab carries the rest. */}
           <div className="relative z-10 flex shrink-0 items-center gap-1">
             {item.templatable && (
               <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
                 Make a copy
               </Button>
             )}
-            <CopyButton value={item.url} label="Copy link" toastMessage="Link copied" />
+            <ActionMenu label={`More actions for ${item.title || "this canvas"}`}>
+              <ActionMenuItem
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                icon={<ArrowSquareOut size={15} aria-hidden />}
+              >
+                Open in new tab
+              </ActionMenuItem>
+              <ActionMenuItem
+                icon={<Copy size={15} aria-hidden />}
+                onSelect={() => copy(item.url, "Link copied")}
+              >
+                Copy link
+              </ActionMenuItem>
+            </ActionMenu>
           </div>
         </div>
         {item.templatable && (
