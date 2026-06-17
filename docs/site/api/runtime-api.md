@@ -37,9 +37,13 @@ authorize + isolation + capability checks. These can return before your handler:
 
 | Code | HTTP | When |
 |---|---|---|
-| `NOT_FOUND` | 404 | Missing slug param, or the resolver denies (canvas not found / not authorized). |
-| `PASSWORD_REQUIRED` | 403 | Password-gated shared canvas, gate cookie not satisfied. |
-| `STATIC_ONLY` | 403 | A `public_link` canvas accessed by a non-owner or anonymous viewer — the runtime API is fully closed. |
+| `NOT_FOUND` | 404 | Missing slug param, or the resolver denies as not-found (canvas absent, deleted). |
+| `ARCHIVED` / `NOT_INVITED` / `OWNER_ONLY` / `SHARE_EXPIRED` | 404 | Other resolver denials, each returned as its own uppercased `code`. |
+| `DISABLED` | 403 | The canvas is disabled. |
+| `PASSWORD_REQUIRED` | 403 | Password-gated shared canvas, non-owner, gate cookie not satisfied. |
+| `STATIC_ONLY` | 403 | A `public_link` canvas accessed by a non-owner or anonymous viewer — the runtime API is fully closed. Body: `{ code, message }`. |
+| `CROSS_CANVAS_FORBIDDEN` | 403 | Cross-canvas request: `subdomain` mode with an `Origin` that doesn't match this canvas's origin (a request with no `Origin` is treated as a non-browser caller and passes), or `path` mode with a `Referer` not on this canvas. |
+| `CROSS_SITE_FORBIDDEN` | 403 | `path` mode with `Sec-Fetch-Site` not `same-origin`/`none`. |
 | `CAPABILITY_DISABLED` | 403 | The route's capability is off. Body: `{ code, capability }`. |
 
 Preflight `OPTIONS /v1/c/{slug}/*` is answered before the auth gateway. In
@@ -160,12 +164,21 @@ Auth, authorization, password-gate, and Origin are all enforced **before** the
 upgrade — a failure refuses the `101` (no socket). The capability check is the one
 post-upgrade gate: if `realtime` is off, the server accepts then sends
 `{ type: "error", code: "CAPABILITY_DISABLED", capability: "realtime" }` and closes
-with code `4403`. A socket that hits the connection limit is closed with `4429`.
+with code `4403`.
 
-The frame protocol — `publish`, `subscribe`, `unsubscribe`, `presence`, and the
-`message` / `presence` / `join` / `leave` frames the server sends back — is managed
-by the realtime hub. Use the SDK's `realtime.channel(name)` API rather than driving
-the socket by hand; it handles framing, reconnection, and presence for you. See the
+Limits: 30 connections per canvas, 100 messages per minute per user, 16 KiB max
+frame. Close codes after the socket is open: `4401` (the session lost access on
+revalidation — canvas gone, access revoked, became static-only, password gate, or
+user deactivated), `4403` (`realtime` capability disabled), `4429` (connection limit
+reached).
+
+The frame protocol — client frames `publish`, `subscribe`, `unsubscribe`,
+`presence`, and the `subscribed` / `message` / `presence` / `join` / `leave` frames
+the server sends back — is managed by the realtime hub. The server resolves sender
+identity (`from`) itself; the client cannot spoof it. In-band error frames carry a
+`code`: `RATE_LIMITED`, `MESSAGE_TOO_LARGE`, `INVALID_FRAME`, `UNKNOWN_FRAME`. Use
+the SDK's `realtime.channel(name)` API rather than driving the socket by hand; it
+handles framing, reconnection, and presence for you. See the
 [SDK reference](/docs/sdk/overview).
 
 ## Adjacent endpoints
@@ -181,7 +194,8 @@ GET {base}/sdk/v1.js   the served browser SDK bundle (503 if not built)
 the runtime `me()` it adds `isAdmin`, `canPublishPublic`, and the instance config
 `authMode` (`proxy` | `oidc` | `dev`), `urlMode` (`path` | `subdomain`), and `baseUrl`
 — config, not user data. `/sdk/v1.js` is served behind the auth gateway as
-`application/javascript; charset=utf-8` with `cache-control: public, max-age=3600`.
+`application/javascript` with `cache-control: public, max-age=3600` (`503` plain text
+when no built bundle is available).
 
 ## Errors
 

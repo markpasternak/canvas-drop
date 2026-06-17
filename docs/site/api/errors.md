@@ -86,8 +86,9 @@ Classes such as `CrossCanvasForbiddenError`, `ModelNotAllowedError`, and
   `CAPABILITY_DISABLED` (403).
 - **Mid-stream** — an `error` frame maps to `CAPABILITY_DISABLED` →
   `CapabilityDisabledError`, `QUOTA_EXCEEDED` → `QuotaExceededError`, otherwise a
-  base `CanvasdropError` with the frame's `code` and status `502` (typically
-  `AI_UPSTREAM_ERROR`).
+  base `CanvasdropError` with the frame's `code` and status `502`. The server's
+  mid-stream upstream failure sends `AI_UPSTREAM_ERROR`; an unlabeled frame
+  defaults to `AI_ERROR`.
 
 If the stream ends without a terminal `done` or `error` frame, the SDK throws
 `AI_STREAM_TRUNCATED` (502).
@@ -101,3 +102,7 @@ A terminal WebSocket close maps to a typed error (no reconnect):
 | `4403` | `CapabilityDisabledError` (`realtime` off) |
 | `4401` | `NotAuthenticatedError` |
 | `4429` | `QuotaExceededError` (`CONNECTION_LIMIT`, status 429) |
+
+A transient (non-terminal) close reconnects automatically with capped
+exponential backoff. Any in-flight `channel.presence()` call is rejected with a
+base `CanvasdropError` (`code: "DISCONNECTED"`, status `0`) before the reconnect.

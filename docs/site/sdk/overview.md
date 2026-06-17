@@ -13,12 +13,15 @@ Drop in one script tag, then call the global:
 
 ```html
 <script src="/sdk/v1.js"></script>
-<script>
+<script type="module">
   const me = await canvasdrop.me();
   await canvasdrop.kv.set("last-viewer", me.name);
-  const total = await canvasdrop.kv.increment("views");
+  const views = await canvasdrop.kv.increment("views");
 </script>
 ```
+
+(`type="module"` lets you use top-level `await`; the SDK script tag itself is a
+plain `<script>` and runs first.)
 
 The script tag defines the single global `window.canvasdrop` (that is the only
 global name — there is no `cd` alias). The SDK auto-detects the canvas slug and
@@ -27,7 +30,8 @@ the API base from the page's location:
 - **Path mode** — a path like `/c/{slug}/…` is matched; the slug is the segment
   after `/c/`, and the API base is the page's own origin.
 - **Subdomain mode** — otherwise, the slug is the first label of the hostname
-  (`{slug}.{base}`), and the API base is the rest of the host.
+  (`{slug}.{base}`), and the API base is the page's protocol plus the remaining
+  host labels (and port, if any).
 
 Every request goes to `{apiBase}/v1/c/{slug}/…` with `credentials: "include"`, so
 identity rides the existing session cookie. You never pass the slug or any key

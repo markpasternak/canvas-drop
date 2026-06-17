@@ -1,16 +1,16 @@
 # AI
 
-Call a language model from your canvas without ever holding a provider key. The
-`canvasdrop.ai` primitive sends the request to the server, which runs the model
-call server-side and streams the result back. The provider key stays on the
-server: never put one in canvas code.
+Call a language model from your canvas without holding a provider key. The
+`canvasdrop.ai` primitive posts your messages to the server, which runs the
+model call server-side and streams the result back. The provider key stays on
+the server: never put one in canvas code.
 
 ```js
 const { text, usage, cost } = await canvasdrop.ai.chat(
   [{ role: "user", content: "Summarise this poll result in one line." }],
   { model: "claude-haiku-4-5" },
 );
-// text:  the model's reply
+// text:  the model's reply (string)
 // usage: { inputTokens, outputTokens }
 // cost:  number (USD)
 ```
@@ -21,22 +21,14 @@ Two entry points, both backed by `POST /v1/c/<slug>/ai/chat`:
 - `stream(messages, options)` — iterate text as it arrives.
 
 `messages` must hold at least one message. `options.model` is **required** and
-must be on the instance's model allowlist.
+must be on the instance's [model allowlist](#models).
 
 ## Chat
 
 `chat(messages, options)` accumulates every text delta and resolves once with
-`{ text, usage, cost }`:
-
-```js
-const { text, usage, cost } = await canvasdrop.ai.chat(
-  [{ role: "user", content: "Summarise this poll result in one line." }],
-  { model: "claude-haiku-4-5" },
-);
-// text:  the model's reply
-// usage: { inputTokens, outputTokens }
-// cost:  number (USD)
-```
+`{ text, usage, cost }` (the snippet above). It throws if the model is not
+allowlisted, a quota is exceeded, or the stream ends early — see
+[Limits and errors](#limits-and-errors).
 
 ## Stream
 

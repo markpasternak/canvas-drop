@@ -22,8 +22,11 @@ invites, admin-gated public links) is also shipped and merged.
 
 Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
 though their scope is merged — the header pointers are stale. One plan is in flight — MCP ↔ user
-parity (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`, plan committed, code not yet
-started); it is claimable. For overall status defer to `BUILD_BRIEF.md` §16 and the README Status
+parity (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`, `status: in-progress`): of its
+20 planned tools, tools 2–7 (`set_capabilities`, `set_canvas_slug`, `regenerate_deploy_key`,
+`delete_canvas`, `archive_canvas`, `unarchive_canvas`) are merged; the rest (`update_canvas`,
+`clone_canvas`, `get_canvas_usage`, the sharing/guest tools, and the draft-editor loop) are not
+yet built and are claimable. For overall status defer to `BUILD_BRIEF.md` §16 and the README Status
 section.
 
 Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md

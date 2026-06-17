@@ -76,16 +76,20 @@ Add the SDK for storage, identity, and more, with no keys in the page:
 </script>
 ```
 
-The owner enables **Backend** (and the specific primitive — kv, files, ai,
-realtime) in the canvas's **Backend** tab first. Identity (`me()`) is on
-whenever Backend is on. See the [SDK overview](/docs/sdk/overview).
+The owner enables **Backend** (off by default) and the specific primitive (kv,
+files, ai, realtime) in the canvas's **Backend** tab first. Identity (`me()`) is
+on whenever Backend is on. A primitive is live only when Backend is on, its flag
+is on, and the operator has it available (ai needs a configured provider key;
+realtime needs `CANVAS_DROP_REALTIME=on`, the default). See the
+[SDK overview](/docs/sdk/overview).
 
 ## Publish & share
 
 Open the canvas, edit in the **Editor** tab, then **Publish** to snapshot an
 immutable version and point the canvas URL at it. Roll back or switch the current
 version from the **Versions** tab. Set who can open it in the **Share** tab: the
-access ladder runs **Private** (owner + admins only, the default) → **Specific
+access ladder runs **Private** (owner only, the default — a non-owner admin is
+treated like any member and the canvas 404s for them) → **Specific
 people** (an email allowlist, including email-invited guests) → **Whole org** (any
 signed-in member with the link) → **Public link** (anyone with the link;
 admin-gated, static files only — primitives are refused for public visitors). On
@@ -95,5 +99,8 @@ published you can also list the canvas in the gallery.
 ## Deploying as an agent
 
 Agents deploy over HTTP with a per-canvas API key — no dashboard session needed.
-A `deploy` is live: it publishes a version directly with no draft loop. See the
+A `deploy` is live: it publishes a version directly with no draft loop. Agents
+can also connect to the instance's remote [MCP server](/docs/agents/mcp) at
+`{base}/mcp` (on by default; OAuth 2.1/PKCE through your own login), or install
+the [agent skill](/docs/agents/skill). See the
 [Deploy API](/docs/api/deploy-api) and [`/llms.txt`](/llms.txt).

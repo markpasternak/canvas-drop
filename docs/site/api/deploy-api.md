@@ -133,10 +133,14 @@ Authorization: Bearer cd_...
 ```
 
 Returns the same `DeployResult` shape as `PUT .../deploy`. The handle is
-**single-use** and short-lived (15 min). A finalize before every blob is staged
-returns `400 UPLOAD_MISSING_BLOB` and can be retried after staging the rest — the
-handle is consumed only on a successful publish. Attributed to the owner, audited
-as `source: "upload"`.
+**single-use** and short-lived (15 min, then `400 UPLOAD_EXPIRED`). A finalize
+before every blob is staged returns `400 UPLOAD_MISSING_BLOB` and can be retried
+after staging the rest — the handle is consumed only on a successful publish.
+Attributed to the owner, audited as `source: "upload"`.
+
+> **Availability:** the staged-upload routes exist only when the instance has the
+> upload service wired. Where it isn't, the three `…/uploads…` endpoints return
+> `404` — fall back to `PUT .../deploy` with the whole archive.
 
 ## Get a canvas
 

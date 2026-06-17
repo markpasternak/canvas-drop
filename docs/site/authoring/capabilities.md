@@ -1,26 +1,32 @@
 # Capabilities
 
-A canvas is static by default. To give it backend behaviour, the owner turns on
-capabilities on the canvas's **Backend** tab. They are off until you enable
-them, and any SDK call to a feature that is off throws a
-`CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
+A canvas is static by default. To give it backend behaviour, you turn on
+capabilities per canvas on its **Backend** tab. The master switch and every
+feature are off until you enable them, and any SDK call to a feature that is off
+throws a `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
 
 ## Turn on the backend
 
-1. Open the canvas, go to the **Backend** tab.
-2. Under **Backend**, switch **Enable backend** on. This is the master switch,
-   off by default.
+1. Open the canvas and go to the **Backend** tab.
+2. Switch **Enable backend** on. This is the master switch, off by default.
 3. With the backend on, toggle the features you need: **KV**, **Files**, **AI**,
    **Realtime**. Each is independent.
+
+Then call them from the page through `window.canvasdrop`. No keys, no setup:
+
+```js
+await canvasdrop.kv.set("count", 1);   // KV must be on
+const me = await canvasdrop.me();       // available whenever the backend is on
+```
 
 **Identity has no toggle.** `me()` is available exactly when the backend is on;
 the tab shows it as "Always on" once you enable the backend.
 
 ## The five primitives
 
-| Capability | What it gives the canvas | SDK |
+| Primitive | What it gives the canvas | SDK |
 |-----------|--------------------------|-----|
-| Key–value | Shared and per-viewer JSON storage, atomic increment | [kv](/docs/sdk/kv) |
+| KV | Shared and per-viewer JSON storage, atomic increment | [kv](/docs/sdk/kv) |
 | Files | Upload, list, serve files | [files](/docs/sdk/files) |
 | Identity | The signed-in viewer's id, email, name, avatar | [identity](/docs/sdk/identity) |
 | AI | Server-side model calls, no provider key in the page | [ai](/docs/sdk/ai) |
@@ -40,11 +46,13 @@ condition is true:
 | Realtime | Backend on **and** Realtime toggle on **and** the operator has enabled realtime for the instance |
 
 KV and Files have no operator-level switch: your two toggles are the whole
-story. AI and Realtime each carry an extra operator gate, so a feature you've
-turned on can still report as off if the instance isn't set up for it. When that
-happens, the toggle stays on but the tab labels it **"Disabled by your
-administrator for this instance"** — so you can see *why* a feature you've
-enabled is still off.
+story. AI needs the operator to have configured an AI provider key; Realtime
+needs the operator to have turned realtime on for the instance
+(`CANVAS_DROP_REALTIME`). Each condition is resolved per request, so an admin
+flipping the instance setting takes effect immediately. A feature you've turned
+on can still report as off if the instance isn't set up for it: the toggle stays
+on, but the tab labels it as **disabled by your administrator** so you can see
+*why* it isn't running.
 
 ## Public links are static-only
 

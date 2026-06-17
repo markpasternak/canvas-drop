@@ -9,9 +9,9 @@ Two steps to live:
 2. Enable the `kv` capability for the canvas (capabilities are off by default).
 
 The browser SDK is served at `/sdk/v1.js` and auto-detects the canvas slug from the URL.
-The single global it exposes is `canvasdrop`. No keys, no config: requests carry the
-signed-in session cookie. If a primitive is off, the call throws a typed error you can
-catch (see the `CAPABILITY_DISABLED` handler below).
+The single global it exposes is `canvasdrop` (no `cd` alias). No keys, no config: requests
+carry the signed-in session cookie. If a primitive is off, the call throws a typed error
+you can catch (see the `CAPABILITY_DISABLED` handler below).
 
 ```html
 <!doctype html>
@@ -63,4 +63,4 @@ Notes:
   For per-viewer state, use `canvasdrop.kv.user.*` (same five methods — `get`, `set`,
   `delete`, `list`, `increment` — scoped to the caller server-side).
 - No keys in the page; identity and storage ride the signed-in session cookie
-  (requests go to `/v1/c/<slug>/kv/...` with `credentials: "include"`).
+  (requests go to `/v1/c/{slug}/kv/...` with `credentials: "include"`).

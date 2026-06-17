@@ -1,6 +1,12 @@
 # Testing
 
-Run `pnpm test` before you push — it runs the full suite on **both** database dialects in one go, then the dashboard suite. CI re-runs the same matrix and that green is what authorizes a merge; the pre-merge gate is `pnpm lint && pnpm typecheck && pnpm test`. There is no local pre-push hook, so gate yourself.
+Before you push, gate yourself — there is no local pre-push hook:
+
+```
+pnpm lint && pnpm typecheck && pnpm test
+```
+
+`pnpm test` runs the full suite on **both** database dialects in one go, then the dashboard suite. CI re-runs the same matrix in a clean environment, and that green is what authorizes a merge.
 
 ## Dual-dialect is the point
 
@@ -79,7 +85,7 @@ overlapping agent runs from sharing tables or object keys.
 | Job | What it proves |
 |-----|----------------|
 | `lint` (Lint & typecheck) | `pnpm lint` (Biome) + `pnpm typecheck`, and asserts `apps/server/src/docs/generated-content.ts` is regenerated (`pnpm docs:build` then `git diff --exit-code`) |
-| `test-sqlite` | root suite on SQLite (still runs both dialects in-process via PGlite) |
+| `test-sqlite` | root suite on the SQLite dialect only (`CANVAS_DROP_DB=sqlite`) — Postgres-dialect coverage comes from `test-postgres` |
 | `test-dashboard` | dashboard/jsdom suite |
 | `test-postgres` | root suite on PGlite/Postgres **plus** real `postgres:16` + MinIO smoke tests |
 | `build` | every workspace package builds (`pnpm build` → `pnpm -r build`: shared, sdk, dashboard, server) |

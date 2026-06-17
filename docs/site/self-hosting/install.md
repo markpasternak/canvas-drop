@@ -22,8 +22,17 @@ This boots the whole production shape with zero external setup: canvas-drop in r
 `proxy` mode behind Caddy + oauth2-proxy + a bundled **Dex** demo IdP, with Postgres
 and an optional MinIO (S3) profile (`docker compose --profile minio up`). The app
 verifies a Dex-signed JWT against Dex's JWKS — the same cryptographic trust path you
-would run in production. Only the proxy is exposed on the host; pause the stack with
-`docker compose stop`, or tear it down and wipe data with `docker compose down -v`.
+would run in production. Only Caddy publishes a host port (`8080`); the app, IdP, and
+database stay on the internal network. Pause the stack with `docker compose stop`, or
+tear it down and wipe data with `docker compose down -v`.
+
+To confirm the launch invariants hold (app healthy, no app port exposed, unauthenticated
+requests redirected, forged identity headers rejected, a real Dex login resolves, data
+survives a restart), run the smoke test:
+
+```bash
+./scripts/compose-smoke.sh        # KEEP_UP=0 tears the stack down at the end
+```
 
 > The bundled Dex/oauth2-proxy secrets and the `demo@example.com` login are public,
 > demo-only placeholders, and the stack runs on plain HTTP in path mode — **do not
@@ -64,10 +73,14 @@ change:
   `api.example.com`) rather than the canvas host, set `CANVAS_DROP_API_BASE_URL` to
   it so the MCP tools advertise the right curl endpoints to agents (defaults to
   `CANVAS_DROP_BASE_URL`).
-- **Auth** — `dev` (local only), `proxy` (an identity-aware proxy in front), or
-  `oidc` (built-in OpenID Connect login). `proxy` and `oidc` require
-  `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`; running real auth in path mode also
-  requires `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`.
+- **Auth** — `dev` (local only, rejected when `NODE_ENV=production`), `proxy` (an
+  identity-aware proxy in front), or `oidc` (built-in OpenID Connect login). `proxy`
+  and `oidc` require `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`; running real auth in path
+  mode also requires `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`.
+
+The blessed production profile is subdomain URLs + `proxy` auth (JWT/JWKS) + Postgres +
+S3. SQLite, local storage, and path mode stay first-class for dev and trusted
+self-hosting.
 
 See [Configuration](/docs/self-hosting/configuration) for the env vars, the
 [Security model](/docs/self-hosting/security-model) for the trade-offs, and

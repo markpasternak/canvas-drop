@@ -41,10 +41,10 @@ await canvasdrop.kv.user.set("pref", "dark");
 const pref = await canvasdrop.kv.user.get("pref");
 ```
 
-`canvasdrop.kv.user` is keyed by the signed-in viewer (the scope is forced to
-their user ID on the server), so each person reads and writes their own values.
-Same five methods (`get`, `set`, `delete`, `list`, `increment`) — only the scope
-differs.
+`canvasdrop.kv.user` is keyed by the signed-in viewer. The scope is forced to
+their user ID on the server and is never client-supplied, so each person reads
+and writes their own values and can't reach anyone else's. Same five methods
+(`get`, `set`, `delete`, `list`, `increment`) — only the scope differs.
 
 ## Limits
 
