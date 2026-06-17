@@ -100,7 +100,7 @@ describe("Gallery view", () => {
     stubGallery(() => page([item({ id: "t1", templatable: true })]));
     renderGallery();
     expect(await screen.findByText("Template")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Make a copy" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
   });
 
   it("hides the clone action for non-templatable items", async () => {
@@ -108,7 +108,7 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByText("Budget chart");
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Make a copy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Duplicate" })).not.toBeInTheDocument();
   });
 
   it("shows the no-canvases-yet empty state (no filters) with a link back", async () => {

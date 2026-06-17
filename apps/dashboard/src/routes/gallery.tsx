@@ -91,7 +91,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           <div className="relative z-10 flex shrink-0 items-center gap-1">
             {item.templatable && (
               <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
-                Make a copy
+                Duplicate
               </Button>
             )}
             <ActionMenu label={`More actions for ${item.title || "this canvas"}`}>
@@ -350,7 +350,7 @@ export default function Gallery() {
       {isError && (
         <EmptyState
           title="Couldn't load the gallery"
-          description="Something went wrong fetching listed canvases."
+          description="We couldn't reach the gallery just now. Try again."
           action={
             <Button variant="secondary" size="sm" onClick={() => refetch()}>
               Try again

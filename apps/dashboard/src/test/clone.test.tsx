@@ -70,11 +70,11 @@ describe("Clone from the gallery (plan 002 U7)", () => {
     renderGallery();
 
     // Card action opens the confirm dialog.
-    await userEvent.click(await screen.findByRole("button", { name: "Make a copy" }));
-    // The dialog's own "Make a copy" button fires the clone (scope to the dialog to
-    // disambiguate from the card's button).
+    await userEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+    // The dialog's own "Duplicate canvas" button fires the clone (scope to the dialog
+    // to disambiguate from the card's button).
     const dialog = await screen.findByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Make a copy" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Duplicate canvas" }));
 
     await waitFor(() => expect(cloneCalls).toEqual(["/api/canvases/src-1/clone"]));
   });

@@ -208,7 +208,7 @@ export default function CreateCanvas() {
       <Panel className="p-5">
         <Toggle
           label="Enable backend"
-          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in Capabilities."
+          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in the Backend tab."
           checked={backendEnabled}
           onChange={setBackendEnabled}
         />

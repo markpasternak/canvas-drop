@@ -377,6 +377,6 @@ describe("dashboard app", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("route_error")).toBeInTheDocument();
     expect(screen.getByText("render exploded")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

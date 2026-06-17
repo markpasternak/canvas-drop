@@ -651,7 +651,7 @@ export default function CanvasList() {
           {isError && (
             <EmptyState
               title="Couldn't load your canvases"
-              description="Something went wrong fetching the list."
+              description="We couldn't reach your canvases just now. Try again."
               action={
                 <Button variant="secondary" size="sm" onClick={() => refetch()}>
                   Try again

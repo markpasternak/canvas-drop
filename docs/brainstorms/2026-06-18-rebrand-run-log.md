@@ -101,3 +101,14 @@ Reached a clean, fully-green, coherent checkpoint with the entire visual rebrand
 
 ### To view
 Dev server is running: **http://localhost:5173/?theme=light** (and `?theme=dark`). Stop it with `pnpm dev:stop`. Static design previews still at `http://localhost:8771/`.
+
+### P5 — copy/voice consistency (slice)  ✅ (gates green, 1533+256)
+Fixed the concrete voice contradictions the findings named (no full literal migration yet):
+- 4.2 Backend/Capabilities: new.tsx toggle helper said "change in Capabilities" but the tab is "Backend" → "in the Backend tab".
+- 4.3 one verb for clone: CloneDialog + gallery card + tests standardized on "Duplicate" / "Duplicate canvas" (was "Make a copy"/"Duplicate"/"Copy").
+- 4.5 version label: DeployButton toast "Published v3" → "Published version 3" (matches the editor toast; compact list badges keep "vN").
+- 4.6 generic errors: gallery + index "Something went wrong…" → the app's "Couldn't … Try again." voice.
+- 4.7 retry verb: ErrorState "Retry" → "Try again" (one verb).
+Updated app/clone/gallery tests for the new labels.
+
+**Note:** a full `copy/*.ts` module + PRIMITIVES map (centralizing all inline literals) is still open — this slice fixed the contradictions, not the centralization.

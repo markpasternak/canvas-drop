@@ -20,8 +20,8 @@ export function CloneDialog({
   sourceId,
   sourceTitle,
   keepsPassword = false,
-  title = "Make a copy",
-  actionLabel = "Make a copy",
+  title = "Duplicate canvas",
+  actionLabel = "Duplicate canvas",
 }: {
   open: boolean;
   onClose: () => void;
@@ -42,7 +42,7 @@ export function CloneDialog({
       toast("Copy created — customize it, then publish when you're ready.");
       navigate({ to: "/canvases/$id/editor", params: { id: created.id } });
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't make a copy", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't duplicate the canvas", "error");
     }
   }
 
