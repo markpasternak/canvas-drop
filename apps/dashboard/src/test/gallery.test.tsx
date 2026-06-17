@@ -318,14 +318,17 @@ describe("Gallery view", () => {
   });
 
   it("the card copy affordance carries the canvas url", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     stubGallery(() => page([item({ url: "http://x/c/copyme" })]));
     renderGallery();
     const card = (await screen.findByRole("link", { name: "Budget chart" })).closest("li");
     expect(card).not.toBeNull();
-    // The copy button lives in the same card; clicking would hit the clipboard,
-    // which is mocked-out in jsdom — assert its presence instead.
-    expect(
-      within(card as HTMLElement).getByRole("button", { name: "Copy link" }),
-    ).toBeInTheDocument();
+    // The actions now live behind the card's overflow menu (portaled to body).
+    await userEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: /More actions/ }),
+    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledWith("http://x/c/copyme");
   });
 });

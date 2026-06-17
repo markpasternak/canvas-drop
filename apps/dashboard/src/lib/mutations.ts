@@ -369,6 +369,53 @@ export function useUnarchiveCanvas(id: string) {
   });
 }
 
+/** Outcome of a bulk lifecycle op: the ids that settled each way, so the caller
+ *  can report "Archived 4 · 1 failed" and keep any failures selected. */
+export interface BulkResult {
+  succeeded: string[];
+  failed: string[];
+}
+
+/** Run one per-canvas lifecycle call across many ids. The page only ever shows a
+ *  single page of canvases, so the fan-out is small and bounded; allSettled lets a
+ *  single failure (e.g. a canvas changed state in another tab) not sink the batch.
+ *  Reuses the same endpoints as the single-row actions — no batch API or new MCP
+ *  tool, so agent-native parity holds (an agent loops the existing per-id tool). */
+function useBulkLifecycle(op: (id: string) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<BulkResult> => {
+      const settled = await Promise.allSettled(ids.map((id) => op(id)));
+      const succeeded: string[] = [];
+      const failed: string[] = [];
+      settled.forEach((result, index) => {
+        const id = ids[index];
+        if (id === undefined) return;
+        (result.status === "fulfilled" ? succeeded : failed).push(id);
+      });
+      return { succeeded, failed };
+    },
+    // A bulk op can move every selected canvas between lifecycle views — invalidate
+    // the whole list prefix (covers the active + archived parameterized keys).
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.canvases }),
+  });
+}
+
+/** Bulk archive selected canvases (Your-canvases active view). */
+export function useBulkArchive() {
+  return useBulkLifecycle((id) => api.archiveCanvas(id));
+}
+
+/** Bulk unarchive selected canvases (Your-canvases archived view). */
+export function useBulkUnarchive() {
+  return useBulkLifecycle((id) => api.unarchiveCanvas(id));
+}
+
+/** Bulk delete selected canvases (recoverable for 30 days, then purged). */
+export function useBulkDelete() {
+  return useBulkLifecycle((id) => api.deleteCanvas(id));
+}
+
 // --- Admin (§6.10, M7). Confirm-and-await (not optimistic) — takedown/restore
 //     are consequential. Each invalidates the admin list + overview. ---
 

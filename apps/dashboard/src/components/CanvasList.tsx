@@ -157,13 +157,38 @@ function DataCell({
   );
 }
 
-export function CanvasListHeader() {
+export function CanvasListHeader({
+  selectable = false,
+  allSelected = false,
+  someSelected = false,
+  onSelectAll,
+}: {
+  selectable?: boolean;
+  allSelected?: boolean;
+  someSelected?: boolean;
+  onSelectAll?: (next: boolean) => void;
+} = {}) {
   return (
     <div
       className={`hidden gap-3 rounded-t-lg border-border border-b bg-surface-sunken px-4 py-2 text-xs font-medium text-muted lg:grid ${DESKTOP_GRID}`}
-      aria-hidden
+      // Not aria-hidden when it carries the interactive select-all control.
+      aria-hidden={selectable ? undefined : true}
     >
-      <span>Canvas</span>
+      <span className="flex items-center gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => {
+              if (el) el.indeterminate = someSelected;
+            }}
+            onChange={(event) => onSelectAll?.(event.target.checked)}
+            aria-label="Select all canvases on this page"
+            className="size-4 shrink-0 cursor-pointer accent-accent"
+          />
+        )}
+        Canvas
+      </span>
       <span>Visibility</span>
       <span>Gallery</span>
       <span>Publication</span>
@@ -209,7 +234,20 @@ export function DefaultRowActions({ canvas }: { canvas: CanvasListItem }) {
   );
 }
 
-export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions?: ReactNode }) {
+export function CanvasRow({
+  canvas,
+  actions,
+  selectable = false,
+  selected = false,
+  onSelectChange,
+}: {
+  canvas: CanvasListItem;
+  actions?: ReactNode;
+  /** Opt-in bulk-selection mode: renders a leading checkbox (Your-canvases). */
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectChange?: (next: boolean) => void;
+}) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
   const access = visibility(canvas);
@@ -225,7 +263,9 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
     // disallow an interactive role on <li> and a tab stop here would only duplicate
     // the title link. onKeyDown is retained to satisfy useKeyWithClickEvents.
     <li
-      className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-3 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised"
+      className={`cursor-pointer rounded-xl border border-border bg-surface px-4 py-3 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised${
+        selected ? " bg-accent-subtle lg:bg-accent-subtle" : ""
+      }`}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
         openDetails();
@@ -239,6 +279,15 @@ export function CanvasRow({ canvas, actions }: { canvas: CanvasListItem; actions
     >
       <div className={`grid gap-3 lg:items-center ${DESKTOP_GRID}`}>
         <div className="flex min-w-0 items-start gap-3">
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(event) => onSelectChange?.(event.target.checked)}
+              aria-label={`Select ${title}`}
+              className="mt-1 size-4 shrink-0 cursor-pointer accent-accent"
+            />
+          )}
           {/* Compact cover thumbnail (plan 004): real preview when captured, else the
               deterministic generative art — decorative, the title is the affordance. */}
           <div className="aspect-[3/2] w-16 shrink-0 overflow-hidden rounded-md border border-border/60">

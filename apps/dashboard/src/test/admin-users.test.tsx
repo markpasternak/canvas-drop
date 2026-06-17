@@ -106,11 +106,9 @@ describe("admin users", () => {
     renderAt("/admin/users");
     const user = userEvent.setup();
     await screen.findByText("Bob");
-    // Two "Block" buttons (me + bob); me's is disabled, so click the enabled one.
-    const blockButtons = screen.getAllByRole("button", { name: "Block" });
-    const enabled = blockButtons.find((b) => !(b as HTMLButtonElement).disabled);
-    expect(enabled).toBeTruthy();
-    await user.click(enabled as HTMLElement);
+    // Open Bob's row overflow menu (me's own row blocks itself), then Block.
+    await user.click(screen.getByRole("button", { name: "Actions for Bob" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Block user" }));
     await waitFor(() =>
       expect(
         calls.some((c) => c.method === "POST" && c.path === "/api/admin/users/u-bob/block"),
@@ -125,8 +123,17 @@ describe("admin users", () => {
         usersPage([userRow({ id: "u-me", email: "me@x", name: "Me", isAdmin: true })]),
     });
     renderAt("/admin/users");
+    const user = userEvent.setup();
     await screen.findByText("Me");
-    expect(screen.getByRole("button", { name: "Block" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Demote" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Actions for Me" }));
+    // Your own row's block + demote items are disabled (aria-disabled menuitems).
+    expect(await screen.findByRole("menuitem", { name: "Block user" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitem", { name: "Remove admin access" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 });

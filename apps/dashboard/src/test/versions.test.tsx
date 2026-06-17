@@ -119,8 +119,8 @@ describe("Versions route — restore to draft", () => {
     });
     renderVersions();
 
-    const restore = await screen.findByRole("button", { name: /edit this version/i });
-    await userEvent.click(restore);
+    await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
 
     // No destructive confirm dialog is shown for a clean draft.
     expect(
@@ -141,8 +141,8 @@ describe("Versions route — restore to draft", () => {
     });
     const router = renderVersions();
 
-    const restore = await screen.findByRole("button", { name: /edit this version/i });
-    await userEvent.click(restore);
+    await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
 
     // Dirty draft → destructive confirm dialog, no restore call yet.
     const confirm = await screen.findByRole("button", { name: /load and discard changes/i });

@@ -486,7 +486,8 @@ describe("admin dashboard", () => {
     });
     renderAt("/admin/canvases");
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Disable" }));
+    await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disable" }));
     const reason = await screen.findByLabelText("Reason");
     await user.type(reason, "abusive");
     await user.click(screen.getByRole("button", { name: "Disable canvas" }));
@@ -507,7 +508,8 @@ describe("admin dashboard", () => {
     });
     renderAt("/admin/canvases");
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Disable" }));
+    await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disable" }));
     const reason = (await screen.findByLabelText("Reason")) as HTMLTextAreaElement;
     await user.click(reason);
     await user.paste("x".repeat(600));

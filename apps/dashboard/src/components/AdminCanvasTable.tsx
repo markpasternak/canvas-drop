@@ -1,18 +1,29 @@
+import {
+  ArrowCounterClockwise,
+  ArrowSquareOut,
+  Check,
+  Copy,
+  Prohibit,
+} from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AdminCanvasRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
+import { useClipboardCopy } from "../lib/clipboard.js";
 import { daysSince, formatBytes, relativeTime } from "../lib/format.js";
 import {
   useAdminDisableCanvas,
   useAdminEnableCanvas,
   useAdminRestoreCanvas,
 } from "../lib/mutations.js";
+import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { AccessBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 import { TextareaField } from "./Field.js";
 import { useToast } from "./Toast.js";
+
+const MENU_ICON = 15;
 
 /** Server cap on the takedown reason (routes/admin.ts disableBody.max). */
 const REASON_MAX = 500;
@@ -73,65 +84,78 @@ function TakedownDialog({
   );
 }
 
+/** All row actions in one overflow menu — the dense-table best practice (every
+ *  per-row action behind a kebab). The status action (Disable/Enable/Restore)
+ *  joins the navigation/copy actions in the same menu; archived canvases are
+ *  owner-controlled, so they get only the navigation actions. */
 function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   const [takedownOpen, setTakedownOpen] = useState(false);
   const enable = useAdminEnableCanvas();
   const restore = useAdminRestoreCanvas();
+  const copy = useClipboardCopy();
   const toast = useToast();
 
-  if (canvas.status === "active") {
-    return (
-      <>
-        <Button size="sm" variant="secondary" onClick={() => setTakedownOpen(true)}>
-          Disable
-        </Button>
-        <TakedownDialog
-          canvas={canvas}
-          open={takedownOpen}
-          onClose={() => setTakedownOpen(false)}
-        />
-      </>
-    );
+  async function doEnable() {
+    try {
+      await enable.mutateAsync(canvas.id);
+      toast("Canvas re-enabled");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't enable", "error");
+    }
   }
-  if (canvas.status === "disabled") {
-    return (
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={enable.isPending}
-        onClick={async () => {
-          try {
-            await enable.mutateAsync(canvas.id);
-            toast("Canvas re-enabled");
-          } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't enable", "error");
-          }
-        }}
-      >
-        Enable
-      </Button>
-    );
+
+  async function doRestore() {
+    try {
+      await restore.mutateAsync(canvas.id);
+      toast("Canvas restored");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't restore", "error");
+    }
   }
-  if (canvas.status === "deleted") {
-    return (
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={restore.isPending}
-        onClick={async () => {
-          try {
-            await restore.mutateAsync(canvas.id);
-            toast("Canvas restored");
-          } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't restore", "error");
-          }
-        }}
-      >
-        Restore
-      </Button>
-    );
-  }
-  return null; // archived: owner-controlled, no admin action here
+
+  return (
+    <>
+      <ActionMenu label={`Actions for ${canvas.title || canvas.slug}`}>
+        <ActionMenuItem
+          href={canvas.url}
+          target="_blank"
+          rel="noreferrer"
+          icon={<ArrowSquareOut size={MENU_ICON} aria-hidden />}
+        >
+          Open in new tab
+        </ActionMenuItem>
+        <ActionMenuItem
+          icon={<Copy size={MENU_ICON} aria-hidden />}
+          onSelect={() => copy(canvas.url, "Link copied")}
+        >
+          Copy link
+        </ActionMenuItem>
+        {canvas.status === "active" && (
+          <ActionMenuItem
+            danger
+            icon={<Prohibit size={MENU_ICON} aria-hidden />}
+            onSelect={() => setTakedownOpen(true)}
+          >
+            Disable
+          </ActionMenuItem>
+        )}
+        {canvas.status === "disabled" && (
+          <ActionMenuItem icon={<Check size={MENU_ICON} aria-hidden />} onSelect={doEnable}>
+            Enable
+          </ActionMenuItem>
+        )}
+        {canvas.status === "deleted" && (
+          <ActionMenuItem
+            icon={<ArrowCounterClockwise size={MENU_ICON} aria-hidden />}
+            onSelect={doRestore}
+          >
+            Restore
+          </ActionMenuItem>
+        )}
+      </ActionMenu>
+      <TakedownDialog canvas={canvas} open={takedownOpen} onClose={() => setTakedownOpen(false)} />
+    </>
+  );
 }
 
 /** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity. */

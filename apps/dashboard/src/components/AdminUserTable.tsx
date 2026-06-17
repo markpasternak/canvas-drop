@@ -1,15 +1,19 @@
+import { Check, Globe, Prohibit, ShieldChevron } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import type { AdminUserRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
 import { relativeTime } from "../lib/format.js";
 import { useAdminBlockUser, useAdminPromoteUser, useAdminPublishPublic } from "../lib/mutations.js";
+import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { Badge } from "./Badge.js";
-import { Button } from "./Button.js";
 import { useToast } from "./Toast.js";
 
-/** Per-row governance actions: block/unblock + promote/demote. Self-protection is
- *  surfaced here (buttons disabled for your own row) AND enforced server-side; the
- *  last-admin guard can only fail server-side, so it arrives as a toast. */
+const MENU_ICON = 15;
+
+/** Per-row governance actions in one overflow menu: grant/revoke public, promote/
+ *  demote, block/unblock. Self-protection is surfaced here (items disabled for your
+ *  own row) AND enforced server-side; the last-admin guard can only fail
+ *  server-side, so it arrives as a toast. */
 function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefined }) {
   const block = useAdminBlockUser();
   const promote = useAdminPromoteUser();
@@ -17,62 +21,67 @@ function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefin
   const toast = useToast();
   const isSelf = user.id === meId;
 
+  async function togglePublic() {
+    try {
+      await publishPublic.mutateAsync({ id: user.id, allowed: !user.canPublishPublic });
+      toast(user.canPublishPublic ? "Public publishing revoked" : "Public publishing granted");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update", "error");
+    }
+  }
+
+  async function togglePromote() {
+    try {
+      await promote.mutateAsync({ id: user.id, admin: !user.isAdmin });
+      toast(user.isAdmin ? "Admin access removed" : "Promoted to admin");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update admin access", "error");
+    }
+  }
+
+  async function toggleBlock() {
+    try {
+      await block.mutateAsync({ id: user.id, blocked: !user.isBlocked });
+      toast(user.isBlocked ? "User unblocked" : "User blocked");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update block status", "error");
+    }
+  }
+
   return (
-    <div className="flex items-center justify-end gap-2">
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={publishPublic.isPending}
+    <ActionMenu label={`Actions for ${user.name || user.email}`}>
+      <ActionMenuItem
+        icon={<Globe size={MENU_ICON} aria-hidden />}
         title="Allow this account to publish canvases as static public links"
-        onClick={async () => {
-          try {
-            await publishPublic.mutateAsync({ id: user.id, allowed: !user.canPublishPublic });
-            toast(
-              user.canPublishPublic ? "Public publishing revoked" : "Public publishing granted",
-            );
-          } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't update", "error");
-          }
-        }}
+        onSelect={togglePublic}
       >
-        {user.canPublishPublic ? "Revoke public" : "Grant public"}
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={promote.isPending}
+        {user.canPublishPublic ? "Revoke public publishing" : "Grant public publishing"}
+      </ActionMenuItem>
+      <ActionMenuItem
+        icon={<ShieldChevron size={MENU_ICON} aria-hidden />}
         // You can't demote yourself; promoting yourself is a no-op but harmless.
         disabled={isSelf && user.isAdmin}
         title={isSelf && user.isAdmin ? "You can't remove your own admin access" : undefined}
-        onClick={async () => {
-          try {
-            await promote.mutateAsync({ id: user.id, admin: !user.isAdmin });
-            toast(user.isAdmin ? "Admin access removed" : "Promoted to admin");
-          } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't update admin access", "error");
-          }
-        }}
+        onSelect={togglePromote}
       >
-        {user.isAdmin ? "Demote" : "Promote"}
-      </Button>
-      <Button
-        size="sm"
-        variant={user.isBlocked ? "secondary" : "danger"}
-        loading={block.isPending}
+        {user.isAdmin ? "Remove admin access" : "Promote to admin"}
+      </ActionMenuItem>
+      <ActionMenuItem
+        danger={!user.isBlocked}
+        icon={
+          user.isBlocked ? (
+            <Check size={MENU_ICON} aria-hidden />
+          ) : (
+            <Prohibit size={MENU_ICON} aria-hidden />
+          )
+        }
         disabled={isSelf}
         title={isSelf ? "You can't block yourself" : undefined}
-        onClick={async () => {
-          try {
-            await block.mutateAsync({ id: user.id, blocked: !user.isBlocked });
-            toast(user.isBlocked ? "User unblocked" : "User blocked");
-          } catch (err) {
-            toast(err instanceof ApiError ? err.hint : "Couldn't update block status", "error");
-          }
-        }}
+        onSelect={toggleBlock}
       >
-        {user.isBlocked ? "Unblock" : "Block"}
-      </Button>
-    </div>
+        {user.isBlocked ? "Unblock user" : "Block user"}
+      </ActionMenuItem>
+    </ActionMenu>
   );
 }
 
