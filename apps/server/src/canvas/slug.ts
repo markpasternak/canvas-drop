@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { validateSlug } from "@canvas-drop/shared";
 
 /**
  * Readable-random slug generator (D3). The readable prefix is cosmetic; the
@@ -125,4 +126,23 @@ export async function generateUniqueSlug(
     if (!(await exists(slug))) return slug;
   }
   throw new Error("could not generate a unique slug after retries");
+}
+
+/**
+ * Resolve a create/rename slug: a trimmed non-empty `raw` is validated as a CUSTOM
+ * slug (grammar + reserved-word check; uniqueness is the caller's DB concern), an
+ * empty/absent `raw` mints a fresh random one. Shared by the management create/rename
+ * routes and the MCP tools so the two can't diverge on slug policy.
+ */
+export async function resolveCreateSlug(
+  raw: string | undefined,
+  exists: (slug: string) => Promise<boolean>,
+): Promise<{ slug: string; custom: boolean } | { error: "invalid_slug" }> {
+  const trimmed = raw?.trim();
+  if (trimmed) {
+    const check = validateSlug(trimmed);
+    if (!check.ok) return { error: "invalid_slug" };
+    return { slug: trimmed, custom: true };
+  }
+  return { slug: await generateUniqueSlug(exists), custom: false };
 }
