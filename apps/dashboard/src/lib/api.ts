@@ -63,6 +63,10 @@ export type PublicationState = "draft" | "published" | "archived" | "disabled" |
 /** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere). */
 export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
 
+/** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
+ *  cover, "custom" is an owner-uploaded image that survives publishes. */
+export type PreviewMode = "auto" | "off" | "custom";
+
 export interface Canvas {
   id: string;
   slug: string;
@@ -84,6 +88,9 @@ export interface Canvas {
   sharedExpiresAt: number | null;
   hasPassword: boolean;
   spaFallback: boolean;
+  /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
+   *  cover, "custom" is an owner-uploaded image that survives publishes. */
+  previewMode: PreviewMode;
   galleryListed: boolean;
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
@@ -213,6 +220,9 @@ export interface CanvasSettings {
   sharedExpiresAt?: number | null;
   password?: string | null;
   spaFallback?: boolean;
+  /** Preview policy (plan 004). Only "auto"/"off" are settable here; "custom" is set
+   *  by uploading an image via `uploadPreview`, never through settings. */
+  previewMode?: "auto" | "off";
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
@@ -739,6 +749,18 @@ export const api = {
 
   updateSettings: (id: string, patch: CanvasSettings) =>
     request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),
+
+  // Custom preview image (plan 004). Uploading sets previewMode="custom" — the image is
+  // used as the cover and is NOT overwritten by screenshots on publish. Clearing reverts
+  // to "auto" and removes the stored renditions.
+  uploadPreview: (id: string, image: ArrayBuffer, contentType: string) =>
+    request<Canvas>(`/api/canvases/${id}/preview`, {
+      method: "PUT",
+      headers: { "content-type": contentType },
+      body: image,
+    }),
+  clearPreview: (id: string) =>
+    request<Canvas>(`/api/canvases/${id}/preview`, { method: "DELETE" }),
 
   // Access allowlist (D4 `specific_people`, U4).
   listAllowlist: (id: string) =>

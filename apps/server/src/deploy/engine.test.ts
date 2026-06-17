@@ -353,7 +353,7 @@ describe("deployEngine", () => {
       drafts,
       storage: memStorage(),
       log: silent,
-      screenshots: { enqueue: async (c, v) => void calls.push([c, v]) },
+      screenshots: { enqueue: async (canvas, v) => void calls.push([canvas.id, v]) },
     });
     await engine.deploy(cv, "api", folder({ "index.html": "v1" }), owner.id);
     const live = await canvases.findById(cv.id);

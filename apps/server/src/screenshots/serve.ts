@@ -57,9 +57,13 @@ export function servePreview(deps: ServePreviewDeps) {
     // Only the reserved preview path; everything else is real canvas content.
     if (assetPathFor(deps.config, canvas.slug, c.req.path) !== PREVIEW_ASSET_PATH) return next();
 
-    // Off (admin-disabled or env-unavailable) → behave exactly like today: 404 so the
-    // client shows GenerativeCover. Checked before touching storage.
-    if (!(await deps.enabled())) return c.notFound();
+    // Per-canvas preview policy:
+    //  - `off`    → no preview; 404 so the client shows GenerativeCover.
+    //  - `custom` → owner-uploaded; serve it regardless of the global pipeline switch
+    //               (a custom upload doesn't depend on the auto-capture pipeline).
+    //  - `auto`   → only when the pipeline is effective-enabled (env-available + admin).
+    if (canvas.previewMode === "off") return c.notFound();
+    if (canvas.previewMode !== "custom" && !(await deps.enabled())) return c.notFound();
 
     const rendition = parseRendition(c.req.query("rendition"));
     const bytes = await deps.storage.get(screenshotKey(canvas.id, rendition));

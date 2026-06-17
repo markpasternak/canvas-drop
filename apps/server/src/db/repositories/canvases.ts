@@ -5,6 +5,7 @@ import {
   type Canvas,
   type CanvasStatus,
   type Json,
+  type PreviewMode,
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
@@ -86,6 +87,7 @@ export interface CanvasSettingsPatch {
   guestAiCap?: number;
   sharedExpiresAt?: number | null;
   spaFallback?: boolean;
+  previewMode?: PreviewMode;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
@@ -402,6 +404,7 @@ export function canvasesRepository(client: DbClient) {
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.description !== undefined) set.description = patch.description;
       if (patch.spaFallback !== undefined) set.spaFallback = patch.spaFallback;
+      if (patch.previewMode !== undefined) set.previewMode = patch.previewMode;
       if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
       if (patch.galleryListed !== undefined) {
         set.galleryListed = patch.galleryListed;

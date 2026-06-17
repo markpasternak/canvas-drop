@@ -35,3 +35,19 @@ export async function resolvePreviewIds(
     return new Set();
   }
 }
+
+/**
+ * Whether a canvas shows a preview cover, per its preview policy:
+ *  - `custom` → always (owner-uploaded image; independent of the auto pipeline);
+ *  - `off`    → never (generative cover);
+ *  - `auto`   → only when it has a captured (`done`) preview (`doneIds`).
+ * The single combiner used by every surface so the rule can't drift.
+ */
+export function previewVisible(
+  cv: { id: string; previewMode: string },
+  doneIds: Set<string>,
+): boolean {
+  if (cv.previewMode === "custom") return true;
+  if (cv.previewMode === "off") return false;
+  return doneIds.has(cv.id);
+}

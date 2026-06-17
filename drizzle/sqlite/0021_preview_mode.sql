@@ -1,0 +1,1 @@
+ALTER TABLE `canvases` ADD `preview_mode` text DEFAULT 'auto' NOT NULL;

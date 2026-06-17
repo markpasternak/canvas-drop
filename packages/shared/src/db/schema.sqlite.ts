@@ -159,6 +159,10 @@ export const canvases = sqliteTable(
     // bumped on every password set/clear so outstanding gate cookies invalidate (U16)
     passwordVersion: c.int("password_version").notNull().default(0),
     spaFallback: c.bool("spa_fallback").notNull().default(false),
+    // Preview policy (plan 004 follow-up): `auto` = screenshot on publish (default);
+    // `off` = no capture, show the generative cover; `custom` = owner-uploaded image,
+    // never overwritten by a publish capture.
+    previewMode: c.text("preview_mode").notNull().default("auto"),
     // Capability foundation (plan 006). `backendEnabled` is the Backend-group master
     // switch (off by default — static-first); the cap_* flags default ON so flipping
     // backend on yields all-features-live with no extra writes. Per-feature flags

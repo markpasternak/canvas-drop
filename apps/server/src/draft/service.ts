@@ -28,7 +28,7 @@ export interface DraftServiceDeps {
    * throws, so publishing just calls `enqueue` unconditionally. Optional (absent in tests
    * that don't exercise capture).
    */
-  screenshots?: { enqueue(canvasId: string, versionId: string): Promise<void> };
+  screenshots?: import("../screenshots/trigger.js").ScreenshotTrigger;
 }
 
 export interface PublishResult {
@@ -205,7 +205,7 @@ export function draftService(deps: DraftServiceDeps) {
       // is best-effort by contract (U12); the extra `.catch` is a defensive belt — a
       // skipped/failed enqueue must never fail a publish that already succeeded.
       await deps.screenshots
-        ?.enqueue(canvas.id, version.id)
+        ?.enqueue(canvas, version.id)
         .catch((err) => deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed"));
 
       // Prune old rows + reclaim unreferenced blobs, async + best-effort.

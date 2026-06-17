@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { screenshotTrigger } from "./trigger.js";
 
 const silent = pino({ level: "silent" });
-const CANVAS = "0190a000-0000-7000-8000-000000000001";
+const CANVAS_ID = "0190a000-0000-7000-8000-000000000001";
 const VERSION = "0190b000-0000-7000-8000-0000000000a1";
+const CANVAS = { id: CANVAS_ID, previewMode: "auto" };
 
 describe("screenshotTrigger (plan 004 / U12)", () => {
   it("enqueues when effective-enabled", async () => {
@@ -15,7 +16,19 @@ describe("screenshotTrigger (plan 004 / U12)", () => {
       log: silent,
     });
     await t.enqueue(CANVAS, VERSION);
-    expect(calls).toEqual([[CANVAS, VERSION]]);
+    expect(calls).toEqual([[CANVAS_ID, VERSION]]);
+  });
+
+  it("skips canvases whose previewMode is not 'auto' (custom/off opt-out)", async () => {
+    const calls: Array<[string, string]> = [];
+    const t = screenshotTrigger({
+      enabled: async () => true,
+      repo: { enqueue: async (c, v) => void calls.push([c, v]) },
+      log: silent,
+    });
+    await t.enqueue({ id: CANVAS_ID, previewMode: "custom" }, VERSION);
+    await t.enqueue({ id: CANVAS_ID, previewMode: "off" }, VERSION);
+    expect(calls).toEqual([]);
   });
 
   it("is a no-op when disabled (the gate that protects the admin off switch)", async () => {

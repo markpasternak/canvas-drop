@@ -4,7 +4,11 @@ import { z } from "zod";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository, GalleryRow } from "../db/repositories/canvases.js";
 import type { AppEnv } from "../http/types.js";
-import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
+import {
+  type PreviewHintDeps,
+  previewVisible,
+  resolvePreviewIds,
+} from "../screenshots/preview-ids.js";
 
 /** Preview hint (plan 004) is optional: omitted → `hasPreview` false everywhere, so the
  *  gallery behaves exactly like today (GenerativeCover, no probe). */
@@ -142,7 +146,9 @@ export function galleryRoutes(deps: GalleryDeps) {
       items.map((row) => row.canvas.id),
     );
     return c.json({
-      items: items.map((row) => galleryItem(deps.config, row, previews.has(row.canvas.id))),
+      items: items.map((row) =>
+        galleryItem(deps.config, row, previewVisible(row.canvas, previews)),
+      ),
       total,
       limit,
       offset,

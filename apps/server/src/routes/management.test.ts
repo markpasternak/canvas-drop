@@ -1,11 +1,13 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { pino } from "pino";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { guestService } from "../auth/guest.js";
 import { cloneService } from "../canvas/clone-service.js";
 import { verifyPassword } from "../canvas/password.js";
+import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
@@ -25,6 +27,16 @@ import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
 import { meRoutes } from "./me.js";
+
+/** A small valid PNG for the custom-preview upload tests. */
+async function pngBytes(): Promise<Uint8Array> {
+  const buf = await sharp({
+    create: { width: 64, height: 48, channels: 3, background: { r: 10, g: 120, b: 200 } },
+  })
+    .png()
+    .toBuffer();
+  return new Uint8Array(buf);
+}
 
 const silent = pino({ level: "silent" });
 const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
@@ -83,6 +95,7 @@ function buildApp(
       clone,
       audit,
       engine,
+      storage,
       usage: usageEventsRepository(client),
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
@@ -220,6 +233,84 @@ describe("managementRoutes", () => {
     ).request(`/api/canvases/${created.id}`);
     expect(res.status).toBe(200);
     expect((await jsonOf<{ hasPreview: boolean }>(res)).hasPreview).toBe(false);
+  });
+
+  it("PUT/DELETE /:id/preview sets a custom cover (survives publish-off pipeline) and clears it", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const storage = memStorage();
+    const app = () => buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const created = await jsonOf<{ id: string }>(
+      await app().request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+
+    // Upload a custom image → previewMode=custom, renditions written to storage.
+    const put = await app().request(`/api/canvases/${created.id}/preview`, {
+      method: "PUT",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "image/png" },
+      body: await pngBytes(),
+    });
+    expect(put.status).toBe(200);
+    expect((await jsonOf<{ previewMode: string }>(put)).previewMode).toBe("custom");
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      expect(await storage.exists(screenshotKey(created.id, rendition))).toBe(true);
+    }
+
+    // hasPreview is true even with the screenshot pipeline OFF — a custom cover does
+    // not depend on the capture pipeline (previewVisible short-circuits on "custom").
+    const view = await jsonOf<{ hasPreview: boolean; previewMode: string }>(
+      await app().request(`/api/canvases/${created.id}`),
+    );
+    expect(view.hasPreview).toBe(true);
+    expect(view.previewMode).toBe("custom");
+
+    // Clearing reverts to auto and removes the stored renditions.
+    const del = await app().request(`/api/canvases/${created.id}/preview`, {
+      method: "DELETE",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(del.status).toBe(200);
+    expect((await jsonOf<{ previewMode: string }>(del)).previewMode).toBe("auto");
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      expect(await storage.exists(screenshotKey(created.id, rendition))).toBe(false);
+    }
+  });
+
+  it("PUT /:id/preview rejects a non-image body (400) and a non-owner (404, no leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const stranger = await seedUser(client, "stranger");
+    const created = await jsonOf<{ id: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+
+    const notImage = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/preview`,
+      {
+        method: "PUT",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "image/png" },
+        body: new Uint8Array([1, 2, 3, 4]),
+      },
+    );
+    expect(notImage.status).toBe(400);
+
+    const asStranger = await buildApp(client, { id: stranger.id, isAdmin: false }).request(
+      `/api/canvases/${created.id}/preview`,
+      {
+        method: "PUT",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "image/png" },
+        body: await pngBytes(),
+      },
+    );
+    expect(asStranger.status).toBe(404);
   });
 
   it("GET /:id derives publicationState across draft/published/archived/disabled (R6)", async () => {

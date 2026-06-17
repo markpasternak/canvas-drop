@@ -92,6 +92,14 @@ export const ACCESS_RUNGS: readonly AccessRung[] = [
   "public_link",
 ];
 
+/**
+ * Per-canvas preview policy (plan 004 follow-up):
+ *  - `auto`   — capture a screenshot on every publish (the default)
+ *  - `off`    — never capture; show the deterministic generative cover
+ *  - `custom` — the owner uploaded a preview image; a publish never overwrites it
+ */
+export type PreviewMode = "auto" | "off" | "custom";
+
 /** A canvas-allowlist principal kind (members reference a user row; guests an email). */
 export type AllowlistPrincipalKind = "member" | "guest";
 /**

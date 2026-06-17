@@ -25,6 +25,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     passwordHash: null,
     passwordVersion: 0,
     spaFallback: false,
+    previewMode: "auto",
     backendEnabled: true,
     capKv: true,
     capFiles: true,

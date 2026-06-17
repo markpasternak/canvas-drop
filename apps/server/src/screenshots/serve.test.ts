@@ -18,12 +18,17 @@ const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46]); // "RIFF" — stand-in by
 
 describe("servePreview — handler logic (U7)", () => {
   /** Mount servePreview with the canvas pre-set (as canvasAccess would) + a terminal. */
-  function app(opts: { enabled: boolean; storeKey?: string }) {
+  function app(opts: { enabled: boolean; storeKey?: string; previewMode?: string }) {
     const storage = memStorage();
     if (opts.storeKey) storage.put(opts.storeKey, webp, { contentType: "image/webp" });
     const a = new Hono<AppEnv>();
     a.use("*", async (c, next) => {
-      c.set("canvas", { id: "cv1", slug: "s", status: "active" } as Canvas);
+      c.set("canvas", {
+        id: "cv1",
+        slug: "s",
+        status: "active",
+        previewMode: opts.previewMode ?? "auto",
+      } as Canvas);
       await next();
     });
     a.use("*", servePreview({ config, storage, enabled: async () => opts.enabled }));
@@ -50,6 +55,25 @@ describe("servePreview — handler logic (U7)", () => {
   it("404s when no preview has been captured yet", async () => {
     const res = await app({ enabled: true }).request(PREVIEW_URL);
     expect(res.status).toBe(404);
+  });
+
+  it("404s when previewMode is 'off' even with a stored preview and pipeline on", async () => {
+    const res = await app({
+      enabled: true,
+      previewMode: "off",
+      storeKey: screenshotKey("cv1", "card"),
+    }).request(PREVIEW_URL);
+    expect(res.status).toBe(404);
+  });
+
+  it("serves a 'custom' preview even when the capture pipeline is disabled", async () => {
+    const res = await app({
+      enabled: false,
+      previewMode: "custom",
+      storeKey: screenshotKey("cv1", "card"),
+    }).request(PREVIEW_URL);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
   });
 
   it("falls through to content for non-preview paths", async () => {

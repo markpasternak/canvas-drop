@@ -36,7 +36,7 @@ export interface DeployEngineDeps {
   uploadSessions?: UploadSessionsRepository;
   /** Screenshot capture trigger (plan 004 / U13) — effective-gated + best-effort; a
    *  deploy schedules a preview of the new version. Optional (absent in tests/when off). */
-  screenshots?: { enqueue(canvasId: string, versionId: string): Promise<void> };
+  screenshots?: import("../screenshots/trigger.js").ScreenshotTrigger;
 }
 
 /** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
@@ -198,7 +198,7 @@ export function deployEngine(deps: DeployEngineDeps) {
 
       // Schedule a preview capture of the freshly deployed version (plan 004 / U13).
       // Effective-gated + best-effort inside the trigger — never fails the deploy.
-      await deps.screenshots?.enqueue(canvas.id, version.id);
+      await deps.screenshots?.enqueue(canvas, version.id);
 
       // Reconcile the in-browser draft with this direct publish (deploy API / folder
       // / ZIP / paste / upload). The editor must end up showing what was just deployed

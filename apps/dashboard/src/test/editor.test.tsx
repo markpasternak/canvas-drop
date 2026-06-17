@@ -34,6 +34,7 @@ const CANVAS = {
   sharedExpiresAt: null,
   hasPassword: false,
   spaFallback: false,
+  previewMode: "auto",
   galleryListed: false,
   gallerySummary: null,
   galleryTags: null,

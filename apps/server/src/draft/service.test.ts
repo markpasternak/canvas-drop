@@ -268,7 +268,10 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
   });
 
   /** Build a draftService with a spy enqueue and a non-empty draft ready to publish. */
-  async function setup(cfg: Config, enqueue?: (c: string, v: string) => Promise<void>) {
+  async function setup(
+    cfg: Config,
+    enqueue?: (canvas: { id: string; previewMode: string }, v: string) => Promise<void>,
+  ) {
     client = await makeTestDb(dialect);
     const storage = memStorage();
     const users = usersRepository(client);
@@ -306,7 +309,7 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
     // decides whether to actually enqueue.
     const calls: Array<[string, string]> = [];
     const { svc, canvas, owner } = await setup(enabledConfig, async (c, v) => {
-      calls.push([c, v]);
+      calls.push([c.id, v]);
     });
     const result = await svc.publish(canvas, owner.id);
     expect(calls).toEqual([[canvas.id, result.versionId]]);

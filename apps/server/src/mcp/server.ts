@@ -14,7 +14,7 @@ import { isTextContentType } from "../canvas/mime.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
-import { blobKey } from "../canvas/storage-keys.js";
+import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -29,7 +29,12 @@ import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { DraftService } from "../draft/service.js";
 import type { Mailer } from "../email/mailer.js";
 import type { RealtimeHub } from "../realtime/hub.js";
-import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
+import { encodeRenditions } from "../screenshots/capture.js";
+import {
+  type PreviewHintDeps,
+  previewVisible,
+  resolvePreviewIds,
+} from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
@@ -123,7 +128,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const previews = await previewIds(items.map((cv) => cv.id));
       return ok({
         total,
-        canvases: items.map((cv) => canvasView(deps.config, cv, previews.has(cv.id))),
+        canvases: items.map((cv) => canvasView(deps.config, cv, previewVisible(cv, previews))),
       });
     },
   );
@@ -196,7 +201,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
-      const hasPreview = (await previewIds([cv.id])).has(cv.id);
+      const hasPreview = previewVisible(cv, await previewIds([cv.id]));
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
@@ -717,6 +722,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .optional()
           .describe("Unix ms when the share expires, or null for no expiry."),
         spaFallback: z.boolean().optional(),
+        previewMode: z
+          .enum(["auto", "off"])
+          .optional()
+          .describe(
+            "Preview policy: 'auto' screenshots on publish, 'off' shows the generated cover. Upload a custom image with set_canvas_preview.",
+          ),
         guestAiEnabled: z.boolean().optional(),
         guestAiCap: z.number().min(0).optional(),
         galleryListed: z.boolean().optional(),
@@ -761,6 +772,62 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub.revalidateCanvas(cv.id).catch(() => {});
         if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
       }
+      return ok(canvasView(deps.config, updated));
+    },
+  );
+
+  server.registerTool(
+    "set_canvas_preview",
+    {
+      description:
+        "Set or clear a canvas's custom preview cover (same as the dashboard preview upload). With " +
+        "`image` (base64), it becomes the cover and `previewMode` is pinned to 'custom' so a publish " +
+        "never overwrites it. Omit `image` to clear it — reverts to 'auto' (next publish re-captures). " +
+        "Use update_canvas previewMode for the auto/off toggle.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        image: z
+          .string()
+          .optional()
+          .describe("Base64-encoded image (png/jpeg/webp). Omit to clear the custom preview."),
+      },
+    },
+    async ({ id, image }) => {
+      const cv = await requireOwned(id);
+      if (!cv) return fail("canvas not found");
+      if (image === undefined) {
+        for (const r of SCREENSHOT_RENDITIONS) {
+          await deps.storage.delete(screenshotKey(cv.id, r)).catch(() => {});
+        }
+        const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
+        deps.audit.recordAudit({
+          action: "settings_update",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { previewMode: "auto" },
+        });
+        return ok(canvasView(deps.config, updated));
+      }
+      const bytes = new Uint8Array(Buffer.from(image, "base64"));
+      if (bytes.byteLength === 0) return fail("INVALID_IMAGE: empty image");
+      let renditions: Awaited<ReturnType<typeof encodeRenditions>>;
+      try {
+        renditions = await encodeRenditions(bytes);
+      } catch {
+        return fail("INVALID_IMAGE: could not read that image");
+      }
+      for (const r of SCREENSHOT_RENDITIONS) {
+        await deps.storage.put(screenshotKey(cv.id, r), renditions[r], {
+          contentType: "image/webp",
+        });
+      }
+      const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "custom" });
+      deps.audit.recordAudit({
+        action: "settings_update",
+        actorId: caller.userId,
+        targetId: cv.id,
+        meta: { previewMode: "custom" },
+      });
       return ok(canvasView(deps.config, updated));
     },
   );

@@ -30,7 +30,14 @@ export function failDeploy(e: unknown): ToolResult {
 /** The owner-facing canvas projection returned by most tools (never a secret). */
 export function canvasView(
   config: Config,
-  cv: { id: string; slug: string; title: string; status: string; currentVersionId: string | null },
+  cv: {
+    id: string;
+    slug: string;
+    title: string;
+    status: string;
+    currentVersionId: string | null;
+    previewMode: string;
+  },
   // A captured screenshot preview exists (plan 004). When true, `previewUrl` points at
   // the access-gated cover (`card` rendition) so an agent can surface it the way the
   // dashboard does. Defaults false → no preview (pipeline off / not yet captured).
@@ -45,6 +52,9 @@ export function canvasView(
     status: cv.status,
     publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
     currentVersionId: cv.currentVersionId,
+    // Preview policy (plan 004): auto/off/custom — so an agent can read the current
+    // setting before changing it (parity with the dashboard Preview control).
+    previewMode: cv.previewMode,
     hasPreview,
     ...(hasPreview
       ? { previewUrl: `${url.replace(/\/$/, "")}/${PREVIEW_ASSET_PATH}?rendition=card` }

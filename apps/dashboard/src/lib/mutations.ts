@@ -33,6 +33,7 @@ export function useUpdateSettings(id: string) {
         if (patch.shared !== undefined) optimistic.shared = patch.shared;
         if (patch.sharedExpiresAt !== undefined) optimistic.sharedExpiresAt = patch.sharedExpiresAt;
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
+        if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
         qc.setQueryData(keys.canvas(id), optimistic);
@@ -43,6 +44,37 @@ export function useUpdateSettings(id: string) {
       if (ctx?.prev) qc.setQueryData(keys.canvas(id), ctx.prev);
     },
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+/**
+ * Custom preview image (plan 004). Uploading pins an owner-chosen cover
+ * (previewMode="custom") that publishes never overwrite; clearing reverts to
+ * "auto". Both return the updated canvas, so we seed the cache and invalidate the
+ * preview-backed surfaces (the cover URL is cache-busted by `updatedAt`).
+ */
+export function useUploadPreview(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ image, contentType }: { image: ArrayBuffer; contentType: string }) =>
+      api.uploadPreview(id, image, contentType),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
+      qc.invalidateQueries({ queryKey: keys.canvas(id) });
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
+export function useClearPreview(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.clearPreview(id),
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
       qc.invalidateQueries({ queryKey: keys.canvas(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
     },

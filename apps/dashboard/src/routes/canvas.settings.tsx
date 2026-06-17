@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
+import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -18,22 +19,28 @@ import { ApiError } from "../lib/api.js";
 import { deployCurl } from "../lib/deploy-curl.js";
 import {
   useArchiveCanvas,
+  useClearPreview,
   useDeleteCanvas,
   useRegenerateKey,
   useRegenerateSlug,
   useUnarchiveCanvas,
   useUnpublishCanvas,
   useUpdateSettings,
+  useUploadPreview,
 } from "../lib/mutations.js";
 import { useCanvas, useMe } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const SECTIONS = [
   { id: "url-routing", label: "URL & routing" },
+  { id: "preview", label: "Preview" },
   { id: "deploy-api", label: "Deploy API" },
   { id: "lifecycle", label: "Lifecycle" },
   { id: "danger", label: "Danger zone" },
 ] as const;
+
+/** Max custom-preview upload (matches a single deploy blob server-side). */
+const MAX_PREVIEW_BYTES = 25 * 1024 * 1024;
 const SECTION_IDS = SECTIONS.map((s) => s.id);
 
 /** Canvas settings for durable configuration and owner-only lifecycle actions.
@@ -46,6 +53,8 @@ export default function Settings() {
   const me = useMe().data;
 
   const update = useUpdateSettings(id);
+  const uploadPreview = useUploadPreview(id);
+  const clearPreview = useClearPreview(id);
   const regenSlug = useRegenerateSlug(id);
   const regenKey = useRegenerateKey(id);
   const archive = useArchiveCanvas(id);
@@ -59,6 +68,7 @@ export default function Settings() {
     null | "slug" | "key" | "archive" | "unpublish" | "delete"
   >(null);
   const urlCopyRef = useRef<HTMLButtonElement>(null);
+  const previewFileRef = useRef<HTMLInputElement>(null);
 
   const { active: activeSection, select: selectSection } = useSectionNav(SECTION_IDS, !!canvas);
 
@@ -67,6 +77,28 @@ export default function Settings() {
   }
 
   const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+
+  const onPreviewFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("Choose an image file", "error");
+      return;
+    }
+    if (file.size > MAX_PREVIEW_BYTES) {
+      toast("Image is larger than 25 MB", "error");
+      return;
+    }
+    try {
+      await uploadPreview.mutateAsync({ image: await file.arrayBuffer(), contentType: file.type });
+      toast("Custom preview set");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't upload that image", "error");
+    }
+  };
+
+  const previewBusy = uploadPreview.isPending || clearPreview.isPending;
 
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
@@ -100,6 +132,90 @@ export default function Settings() {
             description="Serve your home page for any unknown URL, so a JavaScript app's own routing works on reload and deep links. Leave off for multi-page sites, otherwise mistyped links show the home page instead of not found."
             checked={canvas.spaFallback}
             onChange={(spaFallback) => save({ spaFallback })}
+          />
+        </Section>
+
+        <Section
+          id="preview"
+          title="Preview"
+          description="The cover image shown for this canvas in your dashboard and the gallery."
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <div className="aspect-[3/2] w-full max-w-[14rem] shrink-0 overflow-hidden rounded-xl border border-border">
+              <CanvasCover
+                seed={canvas.id}
+                previewUrl={
+                  canvas.hasPreview
+                    ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`
+                    : undefined
+                }
+              />
+            </div>
+            <div className="min-w-0 flex-1 space-y-3">
+              {canvas.previewMode === "custom" ? (
+                <>
+                  <p className="text-sm text-fg">Using a custom image you uploaded.</p>
+                  <p className="text-xs text-muted">
+                    It stays put — publishing new versions won't overwrite it.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={uploadPreview.isPending}
+                      disabled={previewBusy}
+                      onClick={() => previewFileRef.current?.click()}
+                    >
+                      Replace image
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={clearPreview.isPending}
+                      disabled={previewBusy}
+                      onClick={async () => {
+                        try {
+                          await clearPreview.mutateAsync();
+                          toast("Reverted to automatic preview");
+                        } catch (err) {
+                          toast(
+                            err instanceof ApiError ? err.hint : "Couldn't remove the image",
+                            "error",
+                          );
+                        }
+                      }}
+                    >
+                      Remove custom image
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Toggle
+                    label="Generate a preview automatically"
+                    description="Capture a screenshot of your canvas each time you publish, and use it as the cover. Turn off to show a generated placeholder instead."
+                    checked={canvas.previewMode === "auto"}
+                    onChange={(on) => save({ previewMode: on ? "auto" : "off" })}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={uploadPreview.isPending}
+                    disabled={previewBusy}
+                    onClick={() => previewFileRef.current?.click()}
+                  >
+                    Upload custom image
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+          <input
+            ref={previewFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onPreviewFile}
           />
         </Section>
 

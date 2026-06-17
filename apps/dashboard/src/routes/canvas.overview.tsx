@@ -269,7 +269,11 @@ export default function Overview() {
       <div className="aspect-[3/2] w-full max-w-sm overflow-hidden rounded-xl border border-border">
         <CanvasCover
           seed={canvas.id}
-          previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "card") : undefined}
+          previewUrl={
+            canvas.hasPreview
+              ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`
+              : undefined
+          }
         />
       </div>
 

@@ -20,6 +20,7 @@ const CANVAS = {
   sharedExpiresAt: null,
   hasPassword: false,
   spaFallback: false,
+  previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
   gallerySummary: null,

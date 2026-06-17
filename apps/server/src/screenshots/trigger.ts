@@ -20,18 +20,21 @@ export interface ScreenshotTriggerDeps {
 }
 
 export interface ScreenshotTrigger {
-  /** Schedule a capture of `versionId` for `canvasId` — gated + best-effort. */
-  enqueue(canvasId: string, versionId: string): Promise<void>;
+  /** Schedule a capture of `versionId` for the canvas — gated + best-effort. Skipped
+   *  unless the canvas's `previewMode` is `auto`: an `off` canvas opts out, and a
+   *  `custom` (owner-uploaded) preview must never be overwritten by a publish capture. */
+  enqueue(canvas: { id: string; previewMode: string }, versionId: string): Promise<void>;
 }
 
 export function screenshotTrigger(deps: ScreenshotTriggerDeps): ScreenshotTrigger {
   return {
-    async enqueue(canvasId, versionId) {
+    async enqueue(canvas, versionId) {
       try {
+        if (canvas.previewMode !== "auto") return; // off / custom → never auto-capture
         if (!(await deps.enabled())) return; // off (env-unavailable or admin-disabled) → no-op
-        await deps.repo.enqueue(canvasId, versionId);
+        await deps.repo.enqueue(canvas.id, versionId);
       } catch (err) {
-        deps.log.warn({ err, canvasId }, "screenshot enqueue failed (best-effort)");
+        deps.log.warn({ err, canvasId: canvas.id }, "screenshot enqueue failed (best-effort)");
       }
     },
   };

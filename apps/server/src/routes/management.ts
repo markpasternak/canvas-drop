@@ -22,6 +22,7 @@ import { requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
+import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -41,7 +42,13 @@ import type { Mailer } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
-import { type PreviewHintDeps, resolvePreviewIds } from "../screenshots/preview-ids.js";
+import { encodeRenditions } from "../screenshots/capture.js";
+import {
+  type PreviewHintDeps,
+  previewVisible,
+  resolvePreviewIds,
+} from "../screenshots/preview-ids.js";
+import type { StorageDriver } from "../storage/driver.js";
 import { deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
@@ -52,6 +59,8 @@ export interface ManagementDeps extends PreviewHintDeps {
   clone: CloneService;
   audit: AuditLog;
   engine: DeployEngine;
+  /** Blob store — backs the custom-preview upload (PUT/DELETE /:id/preview). */
+  storage: StorageDriver;
   usage: UsageEventsRepository;
   files: FilesRepository;
   aiUsage: AiUsageRepository;
@@ -110,6 +119,9 @@ const settingsSchema = z.object({
   sharedExpiresAt: z.number().int().positive().nullable().optional(),
   password: z.string().min(1).nullable().optional(), // set, or null to clear
   spaFallback: z.boolean().optional(),
+  // Preview policy: auto (screenshot on publish) or off (generative cover). `custom`
+  // is set only by uploading an image via PUT /:id/preview, never through settings.
+  previewMode: z.enum(["auto", "off"]).optional(),
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
   gallerySummary: z.string().max(500).nullable().optional(),
@@ -145,6 +157,9 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals, ha
     sharedExpiresAt: cv.sharedExpiresAt,
     hasPassword: cv.passwordHash !== null,
     spaFallback: cv.spaFallback,
+    // Preview policy (plan 004): auto = screenshot on publish, off = generative cover,
+    // custom = owner-uploaded image (survives publishes). Drives the settings control.
+    previewMode: cv.previewMode,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
     gallerySummary: cv.gallerySummary,
@@ -232,7 +247,7 @@ export function managementRoutes(deps: ManagementDeps) {
 
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {
-    const hasPreview = (await previewIds([cv.id])).has(cv.id);
+    const hasPreview = previewVisible(cv, await previewIds([cv.id]));
     return publicCanvas(deps.config, cv, await resolveGlobals(), hasPreview);
   }
 
@@ -325,7 +340,7 @@ export function managementRoutes(deps: ManagementDeps) {
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
-        ...publicCanvas(deps.config, cv, globals, previews.has(cv.id)),
+        ...publicCanvas(deps.config, cv, globals, previewVisible(cv, previews)),
         lastDeploy: v
           ? {
               version: v.number,
@@ -614,6 +629,54 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
     deps.audit.recordAudit({ action: "key_regen", actorId: c.get("user").id, targetId: cv.id });
     return c.json({ apiKey }); // shown once
+  });
+
+  // --- Custom preview (plan 004 follow-up) -------------------------------------
+  // Upload an owner-chosen cover image. The raw image body is encoded into the same
+  // og/card/thumb WebP renditions an auto-capture produces, then `previewMode=custom`
+  // pins it so a publish never overwrites it. Body cap mirrors a single deploy blob.
+  app.put("/:id/preview", sameOrigin, deployBodyLimit, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = new Uint8Array(await c.req.arrayBuffer());
+    if (body.byteLength === 0) return c.json({ code: "EMPTY_IMAGE", message: "empty body" }, 400);
+    let renditions: Awaited<ReturnType<typeof encodeRenditions>>;
+    try {
+      renditions = await encodeRenditions(body); // sharp reads png/jpeg/webp/… ; cover-crops
+    } catch {
+      return c.json({ code: "INVALID_IMAGE", message: "could not read that image" }, 400);
+    }
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      await deps.storage.put(screenshotKey(cv.id, rendition), renditions[rendition], {
+        contentType: "image/webp",
+      });
+    }
+    const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "custom" });
+    deps.audit.recordAudit({
+      action: "settings_update",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { previewMode: "custom" },
+    });
+    return c.json(await canvasView(updated));
+  });
+
+  // Remove the custom preview → revert to `auto` (next publish re-captures) and delete
+  // the stored renditions so nothing stale is served in the meantime.
+  app.delete("/:id/preview", sameOrigin, async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    for (const rendition of SCREENSHOT_RENDITIONS) {
+      await deps.storage.delete(screenshotKey(cv.id, rendition)).catch(() => {});
+    }
+    const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
+    deps.audit.recordAudit({
+      action: "settings_update",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { previewMode: "auto" },
+    });
+    return c.json(await canvasView(updated));
   });
 
   app.delete("/:id", sameOrigin, async (c) => {

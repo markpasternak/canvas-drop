@@ -13,6 +13,8 @@ export interface CanvasSettingsInput {
   sharedExpiresAt?: number | null;
   password?: string | null;
   spaFallback?: boolean;
+  /** Preview policy via settings — only `auto`/`off` here; `custom` is set by uploading. */
+  previewMode?: "auto" | "off";
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;

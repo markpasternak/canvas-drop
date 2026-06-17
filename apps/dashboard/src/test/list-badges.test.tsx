@@ -12,6 +12,7 @@ const base = {
   description: null,
   sharedExpiresAt: null,
   spaFallback: false,
+  previewMode: "auto",
   galleryListed: false,
   gallerySummary: null,
   galleryTags: null,
