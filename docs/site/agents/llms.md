@@ -47,9 +47,9 @@ the MCP deploy tools inline bytes into the model, so when you can run shell comm
 `curl` the staged Deploy API and PUT each blob's raw bytes instead (ask for command
 permission if needed). Reserve MCP deploys for a small first publish without shell
 access. `create_canvas` returns a `deploy` block with the exact curl endpoints (incl. a
-`readback` URL) so you never probe for the API host — in subdomain mode it's a dedicated
-host (`CANVAS_DROP_API_BASE_URL`, e.g. `api.example.com`), not the canvas host. Verify a
-curl deploy with `GET {apiBase}/files` (`?path=` for raw bytes). Full reference:
+`readback` URL) so you never probe for the API host. Use the `readback` URL from
+that block to confirm the live files, or call `get_canvas_file` (no `path` lists the
+manifest; a `path` reads back content, capped at 256 KiB). Full reference:
 [MCP server](/docs/agents/mcp).
 
 ## Backend capability: the browser SDK

@@ -24,11 +24,11 @@ await canvasdrop.files.delete(f.id);
 | `delete(id)` | `Promise<void>` |
 | `url(id)` | content URL string (synchronous; no request) |
 
-`upload` posts a `multipart/form-data` request with the field name `file`. The
-server responds with `{ id, name, size, url }` (the `url` is root-relative); the
-SDK rewrites `url` to an absolute, mode-correct content URL. The returned object
-carries only `{ id, name, size, url }` — use `list()` when you need `mime` or
-`createdAt`.
+`upload` posts a `multipart/form-data` request with the field name `file` (and
+`credentials: "include"`). The server responds `201` with `{ id, name, size }`
+plus a root-relative `url`; the SDK rewrites `url` to an absolute, mode-correct
+content URL. The returned object carries only `{ id, name, size, url }` — call
+`list()` when you need `mime` or `createdAt`.
 
 ## Safety
 
@@ -43,11 +43,11 @@ Files enforce a per-file size limit and a per-canvas quota, both admin-tunable.
 Every method rejects with a `CanvasdropError` subclass — catch the one you care
 about, or read `err.code` / `err.status`.
 
-- Oversized upload throws `QuotaExceededError` (HTTP `413`, `code: "FILE_TOO_LARGE"`).
-- Quota reached throws `QuotaExceededError` (HTTP `409`).
-- A disabled `files` capability throws `CapabilityDisabledError` (HTTP `403`,
+- Oversized upload throws `QuotaExceededError` (`status: 413`, `code: "FILE_TOO_LARGE"`).
+- Quota reached throws `QuotaExceededError` (`status: 409`).
+- A disabled `files` capability throws `CapabilityDisabledError` (`status: 403`,
   `code: "CAPABILITY_DISABLED"`).
-- `delete(id)` on a missing file throws `NotFoundError` (HTTP `404`,
+- `delete(id)` on a missing file throws `NotFoundError` (`status: 404`,
   `code: "NOT_FOUND"`).
 
 See [error codes](/docs/api/errors).

@@ -73,6 +73,16 @@ account and the canvases you own:
   content). This is how you **verify a deploy** — see below.
 - `rollback_canvas` — point the canvas back at an earlier version number.
 - `unpublish_canvas` — take a published canvas back to draft.
+- `set_capabilities` — toggle the Backend master switch and the kv/files/ai/realtime
+  features (same as the dashboard Backend tab). Use this to clear a `CAPABILITY_DISABLED`
+  error.
+- `set_canvas_slug` — change the URL slug (pass one, or omit for a fresh random slug);
+  the old URL stops working immediately.
+- `regenerate_deploy_key` — mint a new `cd_…` deploy key and invalidate the old one
+  (key leaked or lost). Returns the key once, with a refreshed `deploy` block.
+- `archive_canvas` / `unarchive_canvas` — take a canvas offline (reversible); restore it.
+- `delete_canvas` — soft-delete a canvas (not reversible from MCP; a canvas an admin has
+  DISABLED can't be deleted).
 
 A tool only ever acts on canvases you own; a canvas you don't own reads as not found.
 Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
@@ -137,10 +147,10 @@ curl -X POST "{base}/v1/canvases/{id}/uploads/{uploadId}/finalize" \
   -H "Authorization: Bearer $CANVAS_KEY"
 ```
 
-`{base}` is the **API host** (`CANVAS_DROP_API_BASE_URL`), which in subdomain mode is
-usually a dedicated host like `https://api.example.com` — NOT the canvas host. Don't
-probe for it: `create_canvas` hands you the exact endpoints in its `deploy` block (and
-the dashboard create flow shows them), so use those verbatim.
+`{base}` is the instance's **API host**, which in subdomain mode is usually a dedicated
+host (e.g. `https://api.example.com`), NOT the per-canvas host. Don't probe for it:
+`create_canvas` hands you the exact endpoints in its `deploy` block (and the dashboard
+create flow shows them), so use those verbatim.
 
 The key is verified per-canvas. Companion deploy-API operations (same Bearer auth):
 

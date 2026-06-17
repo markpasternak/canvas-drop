@@ -7,6 +7,16 @@ boundary it holds five hard invariants; beyond them it stays simple and
 permissive. This page tells you, as an operator, where the boundary is and how
 your config decisions keep it intact.
 
+Two config choices carry most of the weight. Set them deliberately:
+
+| Env var | Production choice | Why it matters |
+| --- | --- | --- |
+| `CANVAS_DROP_AUTH_MODE` | `proxy` (or `oidc` if you don't front it with a proxy) | Decides how identity is established (invariant #1). |
+| `CANVAS_DROP_URL_MODE` | `subdomain` | Gives each canvas its own origin so the browser isolates them (invariant #4). |
+
+Both are config swaps, not code changes. See
+[Configuration](/docs/self-hosting/configuration) for the full setup of each.
+
 ## The trust boundary
 
 A request only becomes a *user* after the auth gateway resolves a server-side
@@ -22,9 +32,6 @@ Pick the strategy with `CANVAS_DROP_AUTH_MODE`:
 - `oidc` — the app runs the OIDC Authorization-Code + PKCE flow itself and owns
   the session. The built-in fallback when you don't front it with a proxy, so
   you're never forced to stand up a proxy just to try it.
-
-Mode is a config swap, not a code change. See
-[Configuration](/docs/self-hosting/configuration) for the full setup of each.
 
 ## The five hard invariants
 

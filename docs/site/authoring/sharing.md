@@ -4,6 +4,11 @@ Control who can open a canvas from its **Share** tab. Every canvas is
 **private by default** — only you, its owner, can open it. To let others in, pick
 one **access rung**, then optionally layer a password or an expiry on top.
 
+**Publish first.** A canvas must have a published version before you can raise it
+above Private. If you try to share an unpublished canvas the server refuses with
+`SHARE_REQUIRES_PUBLISH` (409). Publish from the Editor or Versions tab, then set
+the rung.
+
 > Admins don't get a back door into your content. For a canvas they don't own, an
 > admin is treated like any other org member: a private canvas returns a 404, a
 > password prompts them too, and they can't open the editor or change its
@@ -49,9 +54,12 @@ A guest is never prompted for the canvas password; their magic link is the gate.
 Owners are never prompted either. Other non-owners are prompted when a password
 is set.
 
-> Email-invited guests work when the app manages sign-in (`oidc` / `dev` modes).
-> Behind an identity-aware proxy (`proxy` mode), the proxy owns the sign-in
-> boundary, so guest invites depend on your operator's setup.
+> Email-invited guests work only when the app manages sign-in (`oidc` / `dev`
+> modes) **and** the operator has configured outbound email. Behind an
+> identity-aware proxy (`proxy` mode) the proxy owns the sign-in boundary, so
+> guest invites are refused (`GUESTS_UNAVAILABLE`); without configured email they
+> fail with `EMAIL_NOT_CONFIGURED`. You can still allowlist existing org members
+> by email in any mode.
 
 ## Password & expiry
 

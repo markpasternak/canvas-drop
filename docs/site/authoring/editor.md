@@ -19,6 +19,9 @@ The loop:
 - **Publish** when ready. This snapshots the draft into a new immutable version and
   points the canvas at it.
 
+Publishing and rollback require the canvas to be **active**: while it's archived or
+disabled by an admin, both are blocked (`409 NOT_ACTIVE`). You can still edit the draft.
+
 ## Files
 
 Use the file tree to add, rename, replace, delete, and upload files (drag-and-drop
@@ -35,6 +38,9 @@ Text files open in the CodeMirror editor with syntax highlighting. Binary assets
 (images, fonts, spreadsheets) aren't text-editable: images show a preview, and any
 non-editable file offers **Download** and **Replace** instead of an edit surface.
 You can publish any non-empty draft.
+
+Limits per canvas: **25 MB per file**, **100 MB total**, **2000 files**. Edits that
+would exceed a limit are rejected.
 
 ## Preview and on-page editing
 

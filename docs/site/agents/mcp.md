@@ -31,16 +31,16 @@ there is no cross-owner access and no existence leak.
 | Tool | What it does |
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). |
-| `list_canvases` | The canvases you own. |
+| `list_canvases` | The canvases you own (most-recently-updated first). Optional `query` filter and `limit` (1–100, default 50). |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). |
 | `get_canvas` | Current state of a canvas you own. |
-| `list_versions` | Published version history of a canvas you own. |
+| `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`). |
 | `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
 | `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
 | `add_files` | Stage files into an open upload (text as UTF-8, binary as base64); call repeatedly to chunk a large set. |
 | `finalize_deploy` | Publish a new version from a staged upload. Single-use. |
 | `get_canvas_file` | Read back what's **live**: list the current version's files, or fetch one file's content. Use it to **verify a deploy** (the live URL is sign-in gated — see below). |
-| `rollback_canvas` | Point a canvas back at an earlier version number. |
+| `rollback_canvas` | Point a canvas back at an earlier `version` number (must be a ready version). |
 | `unpublish_canvas` | Take a published canvas back to draft. |
 | `set_capabilities` | Toggle a canvas's backend capabilities — `backendEnabled` is the master switch; `kv`/`files`/`ai`/`realtime` are individual features (effective only when backend is on). Omitted fields are unchanged. |
 | `set_canvas_slug` | Change a canvas's URL slug (pass a custom one, or omit for a fresh random slug). The old URL stops working immediately. |
@@ -118,8 +118,9 @@ re-handed-out, so set it from your own copy. In subdomain mode the API host
 falls back to `CANVAS_DROP_BASE_URL` when unset), so use these advertised endpoints
 rather than guessing.
 
-Tool calls are rate-limited per account and recorded in the audit log alongside every
-other deploy and lifecycle event.
+Tool calls are rate-limited per account (over the limit returns a `429` with
+`Retry-After`) and recorded in the audit log alongside every other deploy and lifecycle
+event.
 
 ## Enabling and disabling
 

@@ -67,14 +67,16 @@ type RealtimeMessage = { event: string; data: unknown; from: RealtimeUser };
 ## Limits and errors
 
 Per-canvas limits enforced by the server: **30** concurrent connections, **100**
-messages per minute, **16 KB** per frame. Over the rate or size limit, the
-server replies with an `{ type: "error", code }` frame (`RATE_LIMITED`,
-`MESSAGE_TOO_LARGE`) and keeps the socket open. The terminal failures below
-close the socket instead:
+messages per minute, **16 KB** per frame. For these and other recoverable
+problems the server replies with an `{ type: "error", code }` frame and keeps
+the socket open: `RATE_LIMITED` (over 100/min), `MESSAGE_TOO_LARGE` (over 16 KB),
+`INVALID_FRAME` (unparseable JSON), `UNKNOWN_FRAME` (unrecognized type). The
+terminal failures below close the socket instead:
 
-- **Capability off:** if `realtime` is disabled for the canvas or instance, the
-  server closes the socket. After that, `publish()` throws and `presence()`
-  rejects with a `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`).
+- **Capability off:** if `realtime` is disabled for the canvas, the server sends
+  an in-band `{ type: "error", code: "CAPABILITY_DISABLED" }` frame and closes the
+  socket. After that, `publish()` throws and `presence()` rejects with a
+  `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`).
 - **Connection limit:** exceeding 30 concurrent connections surfaces as a
   `QuotaExceededError` (`code: "CONNECTION_LIMIT"`).
 - **Not signed in:** an expired or missing session surfaces as a

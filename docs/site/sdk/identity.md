@@ -25,31 +25,32 @@ const me = await canvasdrop.me();
 | `email` | `string` | The viewer's email. |
 | `name` | `string` | Display name. |
 | `avatarUrl` | `string \| null` | Avatar URL, or `null` when the provider gives none. |
-| `kind` | `"member" \| "guest"` | `"member"` for org members, `"guest"` for invited guests. |
+| `kind` | `"member" \| "guest"` | `"member"` for org members, `"guest"` for invited guests. For guests, `email`/`name` reflect the invite. |
 
 Under the hood, `me()` calls `GET {base}/v1/c/{slug}/me` with the session cookie.
 No token is ever passed in the page.
 
-## When it's available
+## Errors
 
-Identity has no separate toggle: `me()` is available exactly when **Backend** is
-on for the canvas (the Backend tab labels it "Always on"). With Backend off, the
-call throws `CapabilityDisabledError` (code `CAPABILITY_DISABLED`, 403).
+`me()` is gated by the `identity` capability. When `identity` is off for the
+canvas, the call throws `CapabilityDisabledError` (code `CAPABILITY_DISABLED`,
+403).
 
 If the viewer is not signed in, it throws `NotAuthenticatedError` (code
 `NOT_AUTHENTICATED`, 401), though in normal use a viewer who reached the canvas
 has already been authenticated by the platform.
 
-```js
-import { CapabilityDisabledError, NotAuthenticatedError } from "@canvas-drop/sdk";
+The bundle exposes the SDK as `window.canvasdrop`. Catch by `err.code` (no import
+needed), or import the error classes from `@canvas-drop/sdk` for `instanceof`:
 
+```js
 try {
   const me = await canvasdrop.me();
   greet(me.name);
 } catch (err) {
-  if (err instanceof CapabilityDisabledError) {
-    // Backend is turned off for this canvas
-  } else if (err instanceof NotAuthenticatedError) {
+  if (err.code === "CAPABILITY_DISABLED") {
+    // identity is turned off for this canvas
+  } else if (err.code === "NOT_AUTHENTICATED") {
     // viewer isn't signed in
   }
 }

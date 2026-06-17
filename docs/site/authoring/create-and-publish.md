@@ -9,9 +9,10 @@ or paste HTML — plus a programmatic **Deploy API** for CI and agents. The four
 source, the in-browser [editor](/docs/authoring/editor), saves a draft first and
 lets you publish when you're ready.
 
-All four start from the create flow at `/new` (which also mints the canvas), and
-the first three are also available on an existing canvas to publish its next
-version.
+The three deploy paths start from the create flow at `/new` (which also mints the
+canvas), and are also available on an existing canvas to publish its next version.
+The in-browser [editor](/docs/authoring/editor) opens on an existing canvas and
+uses the draft/publish loop.
 
 ## Drag-and-drop files or a folder
 
@@ -22,9 +23,9 @@ version is created, and the canvas is published in one step.
 
 ## Upload a ZIP
 
-Upload a `.zip` and the server extracts it. Extraction is path-safe (zip-slip and
-zip-bomb archives are rejected). As with a folder, an `index.html` at the archive
-root is the entry point.
+Upload a `.zip` and the server extracts it. Extraction is path-safe (zip-slip
+archives are rejected). As with a folder, an `index.html` at the archive root is
+the entry point.
 
 ## Paste HTML
 
@@ -77,28 +78,30 @@ On success you get the new version's details:
 { "url": "...", "version": 7, "fileCount": 12, "totalBytes": 48213, "warnings": [] }
 ```
 
-On a validation failure you get a stable error code, so an agent can repair and
-retry:
+On a failure you get a stable `{ code, message, path? }` body, so an agent can
+repair and retry:
 
 ```json
-{ "code": "ZIP_SLIP_REJECTED", "message": "...", "path": "../evil" }
+{ "code": "CANVAS_TOO_LARGE", "message": "..." }
 ```
 
-A single-shot `PUT .../deploy` returns `400` for every validation error. Codes you
-may see: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`,
-`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`, `INVALID_ZIP`, `INVALID_PATH`. Limits:
-100 MB/canvas, 25 MB/file, 2000 files (a body over the limit is rejected with
-`413` before parsing). The endpoint is rate-limited to 10 deploys/min/canvas
-(`429 rate_limited` with `Retry-After`). `warnings[]` carries non-fatal notices —
-e.g. a file that may contain a canvas API key you should remove before publishing,
-or a path that will be served as `text/plain`.
+A single-shot `PUT .../deploy` returns `400` with the failure's `code` for
+validation errors (e.g. `EMPTY_DEPLOY`, `INVALID_PATH`); a request body over the
+size cap is rejected with `413 CANVAS_TOO_LARGE` before it is parsed. Limits:
+100 MB/canvas, 25 MB/file, 2000 files. The endpoint is rate-limited to
+10 deploys/min/canvas (`429` with `Retry-After`) once the Bearer key is verified.
+`warnings[]` carries non-fatal notices — e.g. a file that may contain a canvas API
+key you should remove before publishing, or a path that will be served as
+`text/plain`.
 
 For large or repeat deploys, the **staged upload** flow sends only changed files:
-`POST .../uploads` with a manifest of `{path, hash, size}` returns the hashes not
-yet stored, you `PUT` each missing blob, then `POST .../uploads/:uploadId/finalize`
-publishes the version. The Deploy API also exposes `GET /v1/canvases/:id`
-(metadata), `GET .../versions`, `GET .../files` (read-back, `?path=` returns raw
-bytes), `POST .../unpublish`, and `POST .../rollback` (body `{ version }`). See the
+`POST .../uploads` with a manifest of `{ path, hash, size }` entries returns an
+`uploadId` plus the subset of hashes not already stored, you
+`PUT .../uploads/:uploadId/blobs/:hash` each missing blob (`204` per blob), then
+`POST .../uploads/:uploadId/finalize` publishes the version. The Deploy API also
+exposes `GET /v1/canvases/:id` (status JSON), `GET .../versions`, `GET .../files`
+(read-back; `?path=foo.js` returns raw bytes), `POST .../unpublish`, and
+`POST .../rollback` (body `{ version }`). See the
 [Deploy API reference](/docs/api/deploy-api).
 
 ## Versions and rollback

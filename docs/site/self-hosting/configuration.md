@@ -98,7 +98,7 @@ cryptographic) **or** the trusted-header path. Boot fails if neither is set.
 | `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` | (unset) | Enables the JWT path. When set, identity headers are never honored. |
 | `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER` | (unset) | **Required when JWKS is set.** |
 | `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE` | (unset) | **Required when JWKS is set.** |
-| `CANVAS_DROP_TRUSTED_PROXY_IPS` | (empty) | CSV of IPv4/CIDR. The only peers whose identity headers are trusted. Gates on the socket peer IP; `/0` is rejected. Also keys the login rate limit in oidc. |
+| `CANVAS_DROP_TRUSTED_PROXY_IPS` | (empty) | CSV of IPv4 addresses or CIDRs. The only peers whose identity headers are trusted. Gates on the socket peer IP (never `X-Forwarded-For`). Each entry is validated at boot: `/0`, malformed IPv4, and IPv6 are rejected. |
 
 In `proxy` mode you must set either `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` (with
 its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.

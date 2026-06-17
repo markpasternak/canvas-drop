@@ -113,11 +113,16 @@ The system prompt is passed via `options.system`, **not** as a message role.
 is an async iterable of text deltas. Provider keys are server-side only — never in
 the canvas.
 
-Both throw a base `CanvasdropError` with `.code === "MODEL_NOT_ALLOWED"` (status
-403) if the model isn't in the instance allow-list, `QuotaExceededError` (429) on
-a spend cap, and a `CanvasdropError` with `.code === "AI_STREAM_TRUNCATED"` (502)
-if the stream ends before completion. A mid-stream provider failure surfaces as
-`.code === "AI_UPSTREAM_ERROR"` (502).
+Before the stream opens, both throw a base `CanvasdropError` with
+`.code === "MODEL_NOT_ALLOWED"` (403) if the model isn't in the instance
+allow-list, `.code === "GUEST_AI_DISABLED"` (403) if the viewer is a guest the
+owner didn't opt into AI for, and `QuotaExceededError` on a per-user or
+per-canvas spend cap (`.code === "QUOTA_EXCEEDED"`, or `"GUEST_AI_CAP"` for the
+guest cap; both 429). Mid-stream errors are mapped the same way: a disabled
+capability surfaces as `CapabilityDisabledError`, a quota hit as
+`QuotaExceededError`, and a provider failure as a base `CanvasdropError` with
+`.code === "AI_UPSTREAM_ERROR"` (502). If the stream ends without a terminal
+frame you get `.code === "AI_STREAM_TRUNCATED"` (502).
 
 ## Realtime
 
