@@ -66,6 +66,19 @@ export interface MimeResult {
   downgraded: boolean;
 }
 
+/**
+ * Whether a Content-Type is text-shaped (return as UTF-8) vs. binary (base64),
+ * used by the read-back surfaces that inline content into an agent's context.
+ * Covers `text/*` plus the text-shaped application subtypes the MIME map produces
+ * (json, javascript, xml, svg, csv, …).
+ */
+export function isTextContentType(contentType: string): boolean {
+  return (
+    contentType.startsWith("text/") ||
+    /(?:json|javascript|ecmascript|xml|svg|x-sh|yaml|csv|\+text)/i.test(contentType)
+  );
+}
+
 export function mimeFor(path: string): MimeResult {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   if (BLOCKED_EXECUTABLE.has(ext)) {

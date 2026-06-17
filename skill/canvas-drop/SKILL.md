@@ -32,10 +32,17 @@ Replace `{base}` below with the instance's base URL (ask the user if unknown).
 
 ## Two ways to act on canvases
 
-- **Connect over MCP (recommended when your client supports it).** One connect, no
-  key to paste — you get identity-scoped tools across all the canvases you own.
-- **Deploy over HTTP with a per-canvas key (below).** No session needed; best for a
-  keyed, sessionless agent or a CI step that was handed one canvas's key.
+- **Deploy over HTTP with `curl` (strongly preferred for shipping files).** This is the
+  default path whenever you can run shell commands — **request command/network
+  permission if you don't have it rather than falling back.** `curl` streams file bytes
+  straight from disk to the server, so they never pass through your context: far cheaper,
+  no payload-size ceiling, and the same content-addressed staging the MCP uses. See
+  *Deploy a canvas (HTTP)* below.
+- **Connect over MCP (control plane + when you truly can't run commands).** One connect,
+  no key to paste — identity-scoped tools across all your canvases. Great for create /
+  list / rollback / **verify** (`get_canvas_file`), and acceptable for a *small first
+  deploy* when shell access isn't available — but note every MCP deploy tool inlines file
+  bytes into the model, so prefer `curl` for the actual file transfer.
 
 ## Connect over MCP
 
@@ -50,23 +57,53 @@ The client walks an OAuth sign-in once (your normal org login + a consent screen
 account and the canvases you own:
 
 - `whoami` — the connected account.
-- `create_canvas` — make a canvas; returns its id, URL, and a one-time deploy key.
+- `create_canvas` — make a canvas; returns its id, URL, a one-time deploy key, AND a
+  `deploy` block with the **exact, ready-to-run curl endpoints** (`apiBase`, `zipUpload`,
+  staged URLs, `readback`, and a copy-paste `curl` command with the key embedded). Use
+  these verbatim — do not probe for the API host. `get_canvas` returns the same endpoints
+  (with a `$CANVAS_KEY` placeholder) for an existing canvas.
 - `list_canvases` — the canvases you own.
 - `get_canvas` / `list_versions` — current state and version history.
-- `deploy_canvas` — publish static files (a base64 ZIP) directly to live.
+- `deploy_canvas` — publish static files (a base64 ZIP, or a `files` array) directly to
+  live in one call. Best for a **first publish of a small canvas**.
+- `begin_deploy` / `add_files` / `finalize_deploy` — staged upload: send a manifest,
+  get back only the hashes you still need to send, stage those, then publish. Prefer
+  this for **any re-deploy** or a canvas with **many / large / binary files**.
+- `get_canvas_file` — read back what's **live** (list files, or fetch one file's
+  content). This is how you **verify a deploy** — see below.
 - `rollback_canvas` — point the canvas back at an earlier version number.
 - `unpublish_canvas` — take a published canvas back to draft.
 
 A tool only ever acts on canvases you own; a canvas you don't own reads as not found.
 Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
 
+**Every deploy publishes immediately** — there is no draft step over MCP; the files go
+**live** at once (kept as an immutable version). The live URL is **access-controlled**
+(default: org sign-in), so it is not an anonymous public link.
+
+**Verify through the server, not by fetching the URL.** An unauthenticated `GET` of the
+live URL returns a login page, not your files. Confirm a deploy with the returned
+`{version, fileCount}`, `list_versions` (the new version shows as `current`), or
+`get_canvas_file` (reads back the live files/content; pass a `path` like `index.html`).
+
+**Prefer `curl` for the file transfer.** The MCP deploy tools (`deploy_canvas`,
+`add_files`) inline file bytes into the tool call — they pass through the model. If you
+can run shell commands, deploy over the HTTP Deploy API with `curl` instead (below), and
+**ask for command permission if you need it** rather than inlining bytes. Reserve the MCP
+deploy tools for a small first publish when shell access truly isn't available.
+
 See [`{base}/docs/agents/mcp`]({base}/docs/agents/mcp) for the full reference.
 
-## Deploy a canvas (HTTP)
+## Deploy a canvas (HTTP) — the preferred path
+
+This is the path to use whenever you can run shell commands: bytes stream from disk and
+never enter your context. If `curl` or outbound requests aren't permitted yet, **ask for
+that permission** before falling back to an MCP deploy tool.
 
 The deploy API publishes a version directly to live (no draft loop). You need the
 canvas `id` and its per-canvas secret key, both from the dashboard create flow (the
-key is shown once at creation; an owner can regenerate it).
+key is shown once at creation; an owner can regenerate it). Over MCP, `create_canvas`
+returns the same key.
 
 Send a ZIP archive (with `index.html` at the root) as the request body:
 
@@ -76,10 +113,41 @@ curl -X PUT "{base}/v1/canvases/{id}/deploy" \
   --data-binary @site.zip
 ```
 
+This `deploy` publishes **immediately** to live (no draft loop). The canvas URL is
+access-controlled, so **don't verify by fetching it** — an unauthenticated `GET` returns
+a login page. Confirm with `GET {base}/v1/canvases/{id}` (current state + version) or
+`GET {base}/v1/canvases/{id}/versions`.
+
+For many / large / binary files, use the **staged upload** instead of one big ZIP — the
+bytes stream straight from disk and the server only asks for blobs it doesn't already
+have:
+
+```bash
+# 1) Open a session with the manifest; response lists missingHashes.
+curl -X POST "{base}/v1/canvases/{id}/uploads" \
+  -H "Authorization: Bearer $CANVAS_KEY" -H "Content-Type: application/json" \
+  -d '{"manifest":[{"path":"index.html","hash":"<sha256>","size":123}]}'
+# 2) PUT each missing blob's raw bytes (never buffered into an agent's context).
+curl -X PUT "{base}/v1/canvases/{id}/uploads/{uploadId}/blobs/<sha256>" \
+  -H "Authorization: Bearer $CANVAS_KEY" --data-binary @index.html
+# 3) Finalize → publishes a new live version.
+curl -X POST "{base}/v1/canvases/{id}/uploads/{uploadId}/finalize" \
+  -H "Authorization: Bearer $CANVAS_KEY"
+```
+
+`{base}` is the **API host** (`CANVAS_DROP_API_BASE_URL`), which in subdomain mode is
+usually a dedicated host like `https://api.example.com` — NOT the canvas host. Don't
+probe for it: `create_canvas` hands you the exact endpoints in its `deploy` block (and
+the dashboard create flow shows them), so use those verbatim.
+
 The key is verified per-canvas. Companion deploy-API operations (same Bearer auth):
 
 - `GET {base}/v1/canvases/{id}` — current state
 - `GET {base}/v1/canvases/{id}/versions` — version history (last 10 kept)
+- `GET {base}/v1/canvases/{id}/files` — **verify a deploy**: read back the live version.
+  No query → JSON manifest (`{version, fileCount, files:[{path,size,mime,hash}]}`);
+  `?path=index.html` → that file's raw bytes (pipe to `sha256sum` to confirm). The live
+  canvas URL is sign-in gated, so this is how a curl agent checks what actually shipped.
 - `POST {base}/v1/canvases/{id}/rollback` with JSON body `{"version": N}` — sets the
   live pointer to ready version N (find N via the `/versions` list, where each entry
   has a `number`). A missing/non-number `version` returns `400 INVALID_PATH`; an

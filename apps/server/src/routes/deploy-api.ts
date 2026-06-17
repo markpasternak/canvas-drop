@@ -6,6 +6,8 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AuditLog } from "../audit/audit-log.js";
 import { bearerToken, hashApiKey } from "../canvas/api-key.js";
+import { liveManifest } from "../canvas/manifest.js";
+import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -15,6 +17,7 @@ import { fromZip } from "../deploy/ingest.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import {
   blobBodyLimit,
@@ -29,6 +32,8 @@ export interface DeployApiDeps {
   versions: VersionsRepository;
   engine: DeployEngine;
   audit: AuditLog;
+  /** Blob store — read-only here, backs the `GET …/files` deploy read-back. */
+  storage: StorageDriver;
   /** Shared rate-limit store (M7). The broad post-gateway middleware never sees
    *  this pre-gateway mount, so the deploy class (§12.3 10/min/canvas) is applied
    *  here, keyed by canvasId resolved after the Bearer key is verified. */
@@ -214,6 +219,44 @@ export function deployApiRoutes(deps: DeployApiDeps) {
         totalBytes: v.totalBytes,
         current: v.id === auth.currentVersionId,
       })),
+    });
+  });
+
+  // Read back what is LIVE — the curl path's deploy-verification surface, mirroring
+  // the MCP `get_canvas_file` tool. The served canvas URL is access-controlled (a
+  // keyed agent can't fetch it), so this is how a curl agent confirms what shipped.
+  //   GET …/files              → JSON listing { version, fileCount, files[] }
+  //   GET …/files?path=foo.js  → that file's RAW bytes (curl | sha256sum to verify)
+  // No size cap: the caller streams the body and decides what to do with it.
+  app.get("/:id/files", async (c) => {
+    const auth = await authCanvas(c);
+    if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
+    const live = await liveManifest(deps.versions, auth.currentVersionId);
+    if (!live) return c.json({ code: "NOT_PUBLISHED", message: "no live version" }, 404);
+    const path = c.req.query("path");
+    if (path == null) {
+      const paths = Object.keys(live.manifest).sort();
+      return c.json({
+        version: live.number,
+        fileCount: paths.length,
+        files: paths.map((p) => {
+          const e = live.manifest[p] as (typeof live.manifest)[string];
+          return { path: p, size: e.size, mime: e.mime, hash: e.hash };
+        }),
+      });
+    }
+    const entry = live.manifest[path];
+    if (!entry) return c.json({ code: "NOT_FOUND", message: `no file at "${path}"` }, 404);
+    const bytes = await deps.storage.get(blobKey(auth.id, entry.hash));
+    if (!bytes) return c.json({ code: "NOT_FOUND", message: "file blob missing" }, 404);
+    return new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        "Content-Type": entry.mime,
+        ETag: `"${entry.hash}"`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+      },
     });
   });
 

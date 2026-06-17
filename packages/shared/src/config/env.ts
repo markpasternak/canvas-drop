@@ -121,6 +121,12 @@ const rawSchema = z
     // Core
     CANVAS_DROP_URL_MODE: z.enum(["path", "subdomain"]).optional().default("path"),
     CANVAS_DROP_BASE_URL: z.url().optional().default("http://localhost:3000"),
+    // Where the programmatic Deploy API (`/v1/canvases/*`) is reachable by agents.
+    // Defaults to BASE_URL — set it only when the API is fronted on a different
+    // host than the dashboard/canvases (e.g. subdomain mode where canvases live at
+    // `{slug}.example.com` but the API is routed at `api.example.com`). The MCP tools
+    // advertise endpoints built from this so agents never have to guess the host.
+    CANVAS_DROP_API_BASE_URL: z.url().optional(),
     CANVAS_DROP_PORT: num(3000),
     CANVAS_DROP_SESSION_SECRET: z.string().optional(),
     CANVAS_DROP_ADMIN_EMAILS: csv(),
@@ -403,6 +409,8 @@ const rawSchema = z
       isProduction: r.NODE_ENV === "production",
       urlMode: r.CANVAS_DROP_URL_MODE,
       baseUrl: r.CANVAS_DROP_BASE_URL,
+      // Falls back to baseUrl when no dedicated API host is configured.
+      apiBaseUrl: r.CANVAS_DROP_API_BASE_URL ?? r.CANVAS_DROP_BASE_URL,
       port: r.CANVAS_DROP_PORT,
       sessionSecret: r.CANVAS_DROP_SESSION_SECRET ?? "dev-insecure-session-secret",
       adminEmails,

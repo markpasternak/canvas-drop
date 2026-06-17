@@ -296,6 +296,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       versions: deps.versions,
       engine: deps.engine,
       audit: deps.audit,
+      storage: deps.storage,
       rateLimitStore: rlStore,
       hub: deps.hub,
       upload,
@@ -318,6 +319,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         versions: deps.versions,
         engine: deps.engine,
         upload,
+        storage: deps.storage,
         audit: deps.audit,
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {

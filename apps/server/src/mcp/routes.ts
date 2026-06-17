@@ -14,6 +14,7 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
+import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
 import { buildMcpServer } from "./server.js";
@@ -29,6 +30,8 @@ export interface McpRoutesDeps {
   engine: DeployEngine;
   /** Two-channel staging upload service (plan 003) — backs the MCP upload tools. */
   upload: UploadService;
+  /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
+  storage: StorageDriver;
   audit: AuditLog;
   /** Optional OAuth-lifecycle audit sink (U6); the tool layer uses `audit` directly. */
   oauthAudit?: McpAuditSink;
@@ -128,6 +131,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
           versions: deps.versions,
           engine: deps.engine,
           upload: deps.upload,
+          storage: deps.storage,
           audit: deps.audit,
           hub: deps.hub,
         },

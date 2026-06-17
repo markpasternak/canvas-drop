@@ -33,8 +33,20 @@ If your host speaks the Model Context Protocol, add `{base}/mcp` instead of hand
 keys. You sign in once through the instance's normal org login (OAuth, with automatic
 client registration) and then get identity-scoped tools across every canvas you own:
 `whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
-`deploy_canvas`, `rollback_canvas`, `unpublish_canvas`. A tool only touches canvases
-you own. Typical flow: `create_canvas` then `deploy_canvas`. Full reference:
+`deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
+`rollback_canvas`, `unpublish_canvas`. A tool only touches canvases you own. Typical
+flow: `create_canvas` then `deploy_canvas`. Every deploy **publishes immediately** (no
+draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
+deploy by fetching it — an unauthenticated GET returns a login page. Verify through the
+server: the returned `{version, fileCount}`, `list_versions`, or `get_canvas_file`
+(reads back the live files/content). **Strongly prefer `curl` for the file transfer** —
+the MCP deploy tools inline bytes into the model, so when you can run shell commands,
+`curl` the staged Deploy API and PUT each blob's raw bytes instead (ask for command
+permission if needed). Reserve MCP deploys for a small first publish without shell
+access. `create_canvas` returns a `deploy` block with the exact curl endpoints (incl. a
+`readback` URL) so you never probe for the API host — in subdomain mode it's a dedicated
+host (`CANVAS_DROP_API_BASE_URL`, e.g. `api.example.com`), not the canvas host. Verify a
+curl deploy with `GET {apiBase}/files` (`?path=` for raw bytes). Full reference:
 [MCP server](/docs/agents/mcp).
 
 ## Backend capability: the browser SDK

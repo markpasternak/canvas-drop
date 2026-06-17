@@ -74,6 +74,16 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: (c) => c.baseUrl,
   },
   {
+    key: "core.apiBaseUrl",
+    env: "CANVAS_DROP_API_BASE_URL",
+    group: "Core",
+    label: "API base URL",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.apiBaseUrl,
+  },
+  {
     key: "core.port",
     env: "CANVAS_DROP_PORT",
     group: "Core",

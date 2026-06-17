@@ -7,6 +7,7 @@ import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { blobKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
@@ -79,9 +80,9 @@ describe("deployApiRoutes (Bearer key)", () => {
     const app = new Hono<AppEnv>();
     app.route(
       "/v1/canvases",
-      deployApiRoutes({ config, canvases, versions, engine, audit, upload }),
+      deployApiRoutes({ config, canvases, versions, engine, audit, storage, upload }),
     );
-    return { app, canvases, versions, mkCanvas, ownerId: owner.id };
+    return { app, canvases, versions, storage, mkCanvas, ownerId: owner.id };
   }
 
   const zip = () => Buffer.from(zipSync({ "index.html": enc("<h1>x</h1>") }));
@@ -291,6 +292,86 @@ describe("deployApiRoutes (Bearer key)", () => {
     });
     expect(bad.status).toBe(404);
   });
+
+  it("GET /files reads back the live version — listing, raw content, and 404s", async () => {
+    const { app, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    const indexHtml = "<h1>live</h1>";
+
+    // No live version yet → 404 NOT_PUBLISHED.
+    const empty = await app.request(`/v1/canvases/${a.id}/files`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(empty.status).toBe(404);
+    expect((await jsonOf<{ code: string }>(empty)).code).toBe("NOT_PUBLISHED");
+
+    await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: Buffer.from(zipSync({ "index.html": enc(indexHtml), "app.js": enc("var x=1") })),
+    });
+
+    // Listing (no path) → JSON manifest of the live version.
+    const list = await app.request(`/v1/canvases/${a.id}/files`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(list.status).toBe(200);
+    const listing = await jsonOf<{
+      version: number;
+      fileCount: number;
+      files: { path: string; hash: string }[];
+    }>(list);
+    expect(listing.version).toBe(1);
+    expect(listing.files.map((f) => f.path).sort()).toEqual(["app.js", "index.html"]);
+
+    // ?path → raw bytes, with a content hash that matches what was deployed.
+    const file = await app.request(`/v1/canvases/${a.id}/files?path=index.html`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-type")).toContain("text/html");
+    expect(file.headers.get("etag")).toBe(
+      `"${createHash("sha256").update(enc(indexHtml)).digest("hex")}"`,
+    );
+    expect(await file.text()).toBe(indexHtml);
+
+    // Unknown path → 404 NOT_FOUND.
+    const miss = await app.request(`/v1/canvases/${a.id}/files?path=nope.txt`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(miss.status).toBe(404);
+
+    // A key for a different canvas can't read these files → 403.
+    const b = await mkCanvas();
+    const cross = await app.request(`/v1/canvases/${a.id}/files`, {
+      headers: { Authorization: `Bearer ${b.key}` },
+    });
+    expect(cross.status).toBe(403);
+  });
+
+  it("GET /files?path= returns 404 when the blob is missing from storage", async () => {
+    const { app, storage, mkCanvas } = await setup();
+    const a = await mkCanvas();
+    const indexHtml = "<h1>gone</h1>";
+    await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: Buffer.from(zipSync({ "index.html": enc(indexHtml) })),
+    });
+    // Simulate storage corruption: drop the blob but keep the manifest entry.
+    const hash = createHash("sha256").update(enc(indexHtml)).digest("hex");
+    await storage.delete(blobKey(a.id, hash));
+
+    const res = await app.request(`/v1/canvases/${a.id}/files?path=index.html`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(res.status).toBe(404);
+    // The listing still works — only the byte fetch fails.
+    const list = await app.request(`/v1/canvases/${a.id}/files`, {
+      headers: { Authorization: `Bearer ${a.key}` },
+    });
+    expect(list.status).toBe(200);
+  });
 });
 
 describe("deployApiRoutes — staging upload (plan 003)", () => {
@@ -328,7 +409,7 @@ describe("deployApiRoutes — staging upload (plan 003)", () => {
     const app = new Hono<AppEnv>();
     app.route(
       "/v1/canvases",
-      deployApiRoutes({ config, canvases, versions, engine, audit, upload }),
+      deployApiRoutes({ config, canvases, versions, engine, audit, storage, upload }),
     );
 
     async function mkCanvas() {
