@@ -16,8 +16,9 @@ same image can back additional surfaces (e.g. dashboard thumbnails) without re-c
 - **Captured on publish.** Publishing a canvas (editor publish or any deploy) schedules
   a capture. Capture is asynchronous — it never slows down or blocks a publish.
 - **One preview per canvas.** A canvas has exactly one current preview, stored as WebP
-  renditions (`og`, `card`, `thumb`) and **overwritten** on each republish. The image
-  always reflects the latest published version.
+  renditions (`og`, `card`, `thumb`). On the default `auto` preview mode it is
+  **overwritten** on each republish, so the image always reflects the latest published
+  version. The owner can override this per canvas (see *Per-canvas control* below).
 - **One browser, a small queue.** A single headless Chromium runs in the server process
   and is reused across captures (a fresh, isolated browser context per job, recycled
   periodically). Jobs are drained from a small database queue one at a time by default
@@ -30,10 +31,10 @@ same image can back additional surfaces (e.g. dashboard thumbnails) without re-c
   (AI, realtime, network) are neutered — a capture makes no AI spend and no outbound
   network calls. Dialogs are dismissed and a hard timeout bounds a slow/looping canvas.
 
-## Enablement — two layers, no per-user opt-out
+## Enablement — two org-wide layers
 
-The feature only runs when **both** layers say yes; there is no per-user or per-canvas
-opt-out (it's an org-wide capability):
+Auto-capture only runs when **both** org-wide layers say yes (each canvas owner can then
+further opt out or override per canvas — see *Per-canvas control* below):
 
 1. **Environment availability** — `CANVAS_DROP_SCREENSHOTS` must be `on`, **and** the
    runtime image must actually contain Chromium (see below). This is the operator's
@@ -41,8 +42,21 @@ opt-out (it's an org-wide capability):
 2. **Admin runtime toggle** — even when available, an admin must turn it **on** in the
    dashboard (Admin → Configuration → *Screenshots enabled*). Default: **off**.
 
-When either layer is off, **no browser is launched** and previews are not served — the
-gallery and link unfurls behave exactly as they do today.
+When either layer is off, **no browser is launched** and auto previews are not served —
+the gallery and link unfurls behave exactly as they do today. (An owner-uploaded custom
+cover is independent of this gate: it's served even when auto-capture is off.)
+
+## Per-canvas control
+
+Each canvas owner controls its cover from **Settings → Preview** (and over MCP via
+`update_canvas` `previewMode` / `set_canvas_preview`):
+
+- **Automatic** (`auto`, the default) — screenshot on publish, as described above; subject
+  to the two org-wide layers.
+- **Off** (`off`) — never screenshot this canvas; it shows the generative cover.
+- **Custom** (`custom`) — the owner uploads a cover image. It's encoded into the same
+  `og`/`card`/`thumb` renditions, **pinned so a publish never overwrites it**, and served
+  even when the org-wide auto-capture pipeline is off. Removing it reverts to `auto`.
 
 ## Turning it on
 

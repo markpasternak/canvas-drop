@@ -23,8 +23,8 @@ invites, admin-gated public links) is also shipped and merged.
 Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
 though their scope is merged — the header pointers are stale. The MCP ↔ user parity plan
 (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`) is `status: completed` and merged: the
-MCP server now ships a **32-tool surface** with full dashboard parity, including `update_canvas`,
-`clone_canvas`, `get_canvas_usage`, the sharing/guest tools (`grant_access`/`revoke_access`/
+MCP server now ships a **33-tool surface** with full dashboard parity, including `update_canvas`,
+`set_canvas_preview`, `clone_canvas`, `get_canvas_usage`, the sharing/guest tools (`grant_access`/`revoke_access`/
 `list_access`/`resend_guest_invite`), and the draft-editor loop (`get_draft`, `read_draft_file`,
 `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft`).
 For overall status defer to `BUILD_BRIEF.md` §16 and the README Status section.
