@@ -266,7 +266,7 @@ export default function Overview() {
 
       {/* Cover hero (plan 004): the real screenshot when captured, else the canvas's
           deterministic generative art — a stable visual identity for the canvas. */}
-      <div className="aspect-[3/2] max-h-64 w-full overflow-hidden rounded-xl border border-border">
+      <div className="aspect-[3/2] w-full max-w-sm overflow-hidden rounded-xl border border-border">
         <CanvasCover
           seed={canvas.id}
           previewUrl={canvas.hasPreview ? previewCoverUrl(canvas.url, "card") : undefined}
