@@ -380,7 +380,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
       const job = await screenshotsRepository(deps.db).findByCanvas(canvas.id);
       if (job?.status !== "done") return null;
-      return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${job.versionId}`;
+      return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
     }),
   );
 

@@ -49,6 +49,13 @@ describe("captureResolver (plan 004 / U5, §12.0)", () => {
     expect(await principalFor("/api/canvases", { [CAPTURE_TOKEN_HEADER]: token })).toBeNull();
   });
 
+  it("sets NO principal on the runtime/primitive API surface (platform-api), even with a valid token (review #5)", async () => {
+    const token = mintCaptureToken(SECRET, CANVAS, VERSION, 60_000);
+    // `/v1/c/:slug/*` is platform-api, not canvas content — a captured canvas's JS must
+    // never get an owner-equivalent capture principal on the primitive surface.
+    expect(await principalFor("/v1/c/s/kv/x", { [CAPTURE_TOKEN_HEADER]: token })).toBeNull();
+  });
+
   // Happy path.
   it("sets the capture principal (scoped to the token's canvas+version) on a valid token", async () => {
     const token = mintCaptureToken(SECRET, CANVAS, VERSION, 60_000);

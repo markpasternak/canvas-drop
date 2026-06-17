@@ -163,6 +163,53 @@ describe("screenshotWorker (plan 004 / U5)", () => {
     expect(browser.state.launches).toBe(2);
   });
 
+  it("recovers after a browser launch failure — it does not poison the worker (review #1)", async () => {
+    client = await makeTestDb("sqlite");
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const jobs = screenshotsRepository(client);
+    const user = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const canvas = await canvases.create({ ownerId: user.id, slug: "s", apiKeyHash: "k" });
+    let launchAttempts = 0;
+    const worker = screenshotWorker({
+      config: cfg(),
+      enabled: async () => true,
+      jobs,
+      canvases,
+      storage: { put: async () => {} },
+      captureUrlFor: () => "http://127.0.0.1:9999/c/s/",
+      launchBrowser: async () => {
+        launchAttempts += 1;
+        if (launchAttempts === 1) throw new Error("no chromium"); // first launch fails
+        return {
+          newContext: async () => ({
+            newPage: async () => {
+              throw new Error("unused");
+            },
+            async close() {},
+          }),
+          async close() {},
+        };
+      },
+      capture: async () => fakeRenditions(),
+      log: silent,
+    });
+    await jobs.enqueue(canvas.id, VERSION);
+
+    await worker.tick(); // launch rejects → job left for retry, worker NOT poisoned
+    expect(launchAttempts).toBe(1);
+    expect((await jobs.findByCanvas(canvas.id))?.status).not.toBe("done");
+
+    await worker.tick(); // second tick retries the launch (succeeds) and captures
+    expect(launchAttempts).toBe(2);
+    expect((await jobs.findByCanvas(canvas.id))?.status).toBe("done");
+  });
+
   it("marks a job failed when its canvas isn't capturable (deleted/missing) — no capture", async () => {
     const { jobs, canvases, canvasId, puts, browser, worker } = await setup(
       cfg({ CANVAS_DROP_SCREENSHOTS_MAX_ATTEMPTS: "1" }),

@@ -30,7 +30,12 @@ import type { StorageDriver } from "../storage/driver.js";
  */
 export const PREVIEW_ASSET_PATH = "__canvasdrop_preview";
 
-const CACHE_CONTROL = "private, max-age=300, must-revalidate";
+// `card`/`thumb` are served to authenticated sessions on possibly-private canvases →
+// `private`. The `og` rendition is only ever served for public_link canvases (the
+// access gate already decided that), and the URL is version-cache-busted, so it may be
+// shared-cached (CDN) — `public` (review #8).
+const cacheControl = (rendition: ScreenshotRendition): string =>
+  `${rendition === "og" ? "public" : "private"}, max-age=300, must-revalidate`;
 
 function parseRendition(raw: string | undefined): ScreenshotRendition {
   return (SCREENSHOT_RENDITIONS as readonly string[]).includes(raw ?? "")
@@ -64,7 +69,7 @@ export function servePreview(deps: ServePreviewDeps) {
     // serveCanvas).
     return new Response(new Uint8Array(bytes), {
       status: 200,
-      headers: { "Content-Type": "image/webp", "Cache-Control": CACHE_CONTROL },
+      headers: { "Content-Type": "image/webp", "Cache-Control": cacheControl(rendition) },
     });
   });
 }

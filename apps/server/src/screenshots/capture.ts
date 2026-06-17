@@ -43,7 +43,7 @@ export interface CapturePage {
   on(event: "dialog", handler: (d: { dismiss(): Promise<void> }) => unknown): void;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
-  screenshot(opts?: { type?: "png" }): Promise<Uint8Array>;
+  screenshot(opts?: { type?: "png"; timeout?: number }): Promise<Uint8Array>;
   close(): Promise<void>;
 }
 export interface CaptureContext {
@@ -73,15 +73,27 @@ export async function captureCanvas(input: CaptureInput): Promise<CaptureResult>
       void d.dismiss();
     });
     await page.setExtraHTTPHeaders({ [CAPTURE_TOKEN_HEADER]: input.token });
-    // Neuter: allow only the canvas's own static GETs; abort everything else.
+    // Neuter (R7): allow only the canvas's own static GETs. Abort cross-origin and
+    // non-GET (AI/KV writes), AND same-origin GETs to the runtime/primitive API
+    // (`/v1/...`) so a captured canvas's JS can't read KV/files/me() as the
+    // owner-equivalent capture principal during render — the "primitives are neutered"
+    // invariant covers reads too, not just writes (review #4/#5). Static assets and the
+    // SDK (`/sdk/...`) stay allowed.
     await page.route("**/*", (route) => {
       const req = route.request();
-      const allowed = req.method() === "GET" && req.url().startsWith(origin);
+      let pathname = "";
+      try {
+        pathname = new URL(req.url()).pathname;
+      } catch {}
+      const allowed =
+        req.method() === "GET" && req.url().startsWith(origin) && !pathname.startsWith("/v1/");
       void (allowed ? route.continue() : route.abort());
     });
     await page.setViewportSize({ ...CAPTURE_VIEWPORT });
     await page.goto(input.url, { waitUntil: "networkidle", timeout: input.timeoutMs });
-    const master = await page.screenshot({ type: "png" });
+    // Bound the screenshot too — a canvas that reaches networkidle then wedges the
+    // renderer (rAF loop, deferred paint) must not hang the worker tick (review #3).
+    const master = await page.screenshot({ type: "png", timeout: input.timeoutMs });
     return await encodeRenditions(master);
   } finally {
     await page.close().catch(() => {});

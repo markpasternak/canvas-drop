@@ -188,4 +188,24 @@ describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => 
     const body = await (await appWithPreview(null).request("/", { headers: crawler })).text();
     expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
   });
+
+  it("falls back to /og.png (never 500s) when the preview resolver throws (review #6)", async () => {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("principal", ANON);
+      await next();
+    });
+    a.use(
+      "*",
+      socialPreview(oidc, canvasRepo("Planner"), async () => {
+        throw new Error("settings/job lookup DB blip");
+      }),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    const res = await a.request("/", { headers: crawler });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(
+      'property="og:image" content="https://planner.canvas-drop.com/og.png"',
+    );
+  });
 });

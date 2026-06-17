@@ -37,7 +37,11 @@ export function captureResolver(deps: CaptureResolverDeps) {
       { host: c.req.header("host") ?? "", pathname: c.req.path },
       deps.config,
     );
-    if ((role !== "canvas" && role !== "platform-api") || !canvasSlug) return next();
+    // ONLY the canvas content surface — never `platform-api` (the runtime primitive
+    // API). The worker captures static canvas content; a captured canvas's JS hitting
+    // `/v1/...` must not be granted an owner-equivalent capture principal (review #4/#5).
+    // The capture engine also blocks `/v1/` during render; this is the matching gate.
+    if (role !== "canvas" || !canvasSlug) return next();
 
     const claims = verifyCaptureToken(deps.secret, token);
     if (claims) {

@@ -79,7 +79,14 @@ export function socialPreview(
           const origin = publicOrigin(config, c.req.header("host"));
           const title = canvas.title?.trim() || PREVIEW_TITLE;
           // Per-canvas preview image when the pipeline is on + captured; else /og.png.
-          const image = (await previewImage?.(canvas)) ?? undefined;
+          // Best-effort: a resolver error (e.g. a DB blip on the settings/job lookup)
+          // must fall back to the branded card, never 500 the unfurl (review #6).
+          let image: string | undefined;
+          try {
+            image = (await previewImage?.(canvas)) ?? undefined;
+          } catch {
+            image = undefined;
+          }
           return htmlResponse(
             renderPreviewShell(origin, c.req.path, {
               title,

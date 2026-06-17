@@ -6,6 +6,11 @@ It's an optional, off-by-default extra: when it's off, the product behaves exact
 it always has (gallery shows generative-art covers, links unfurl with the branded
 `/og.png`).
 
+**Where previews appear today:** the **gallery** cover and the **public-link OG** image.
+The capture itself is stored once per canvas as a private, access-gated asset, so the
+same image can back additional surfaces (e.g. dashboard thumbnails) without re-capturing
+— those are wired in as the product decides to surface them.
+
 ## How it works
 
 - **Captured on publish.** Publishing a canvas (editor publish or any deploy) schedules

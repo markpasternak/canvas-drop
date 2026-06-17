@@ -23,6 +23,9 @@ import { mintCaptureToken } from "./capture-token.js";
  * tick still does cheap reclaim/sweep bookkeeping but launches no browser and claims
  * no work. The whole worker is only *started* when the env makes capture available.
  */
+/** Max time to wait for a browser `close()` before dropping the handle (review #3). */
+const CLOSE_TIMEOUT_MS = 10_000;
+
 export interface CaptureBrowser {
   newContext(): Promise<CaptureContext & { close(): Promise<void> }>;
   close(): Promise<void>;
@@ -69,23 +72,41 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
   async function ensureBrowser(): Promise<CaptureBrowser> {
     if (browser) return browser;
     if (!launching) {
-      launching = deps.launchBrowser().then((b) => {
-        browser = b;
-        launching = null;
-        jobsSinceLaunch = 0;
-        return b;
-      });
+      launching = deps
+        .launchBrowser()
+        .then((b) => {
+          browser = b;
+          launching = null;
+          jobsSinceLaunch = 0;
+          return b;
+        })
+        .catch((err) => {
+          // Reset the shared launch pointer so a failed launch (e.g. env-on but no
+          // Chromium, or a transient OOM) is retried on the next job, instead of
+          // memoizing a rejected promise that poisons the worker forever (review #1).
+          launching = null;
+          throw err;
+        });
     }
     return launching;
   }
 
-  /** Close the browser (between ticks only, never mid-job) so the next job relaunches. */
+  /** Close the browser (between ticks only, never mid-job) so the next job relaunches.
+   *  Bounded by a timeout so a wedged Chromium whose close() hangs can't stall the tick
+   *  loop or the SIGTERM drain (review #3) — we drop the handle and move on regardless. */
   async function recycle(): Promise<void> {
     const b = browser;
     browser = null;
     needsRecycle = false;
     jobsSinceLaunch = 0;
-    await b?.close().catch(() => {});
+    if (!b) return;
+    await Promise.race([
+      b.close().catch(() => {}),
+      new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+        (t as { unref?: () => void }).unref?.();
+      }),
+    ]);
   }
 
   /** Claim and process one job; returns false when the queue is empty. */
@@ -100,6 +121,7 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
           job.id,
           `canvas not capturable: ${job.canvasId}`,
           s.maxAttempts,
+          job.leasedAt as number,
         );
         return true;
       }
@@ -123,19 +145,27 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
             contentType: "image/webp",
           });
         }
-        await deps.jobs.markDone(job.id);
+        await deps.jobs.markDone(job.id, job.leasedAt as number);
         jobsSinceLaunch += 1;
       } finally {
         await context.close().catch(() => {});
       }
     } catch (err) {
+      // Mark for recycle BEFORE the DB write — if markFailedOrRetry itself throws
+      // (DB down), the flag is still set so the (possibly wedged) browser is recycled;
+      // the job stays `running` and self-heals via reclaimStuck on a later tick (#4).
+      needsRecycle = true;
       deps.log.warn({ err, canvasId: job.canvasId }, "screenshot capture failed");
-      await deps.jobs.markFailedOrRetry(
-        job.id,
-        String((err as Error)?.message ?? err),
-        s.maxAttempts,
-      );
-      needsRecycle = true; // a failed job may have wedged the browser
+      await deps.jobs
+        .markFailedOrRetry(
+          job.id,
+          String((err as Error)?.message ?? err),
+          s.maxAttempts,
+          job.leasedAt as number,
+        )
+        .catch((dbErr) =>
+          deps.log.warn({ err: dbErr, canvasId: job.canvasId }, "markFailed failed"),
+        );
     }
     return true;
   }
@@ -154,7 +184,12 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
     // Admin toggle off → do no work and launch no browser (U12).
     if (!(await deps.enabled())) return;
 
-    // Drain up to `concurrency` jobs against the single browser (default 1).
+    // Drain up to `concurrency` jobs against the single browser (default 1). NOTE: at
+    // concurrency > 1 the per-slot claim (select-oldest then conditional update) can
+    // race so slots contend for the same row and some no-op — effective parallelism is
+    // bounded by that contention, not a hard N. Acceptable at the default of 1 on a
+    // single-process VPS; a true N-way claim (e.g. UPDATE … RETURNING with a subselect /
+    // SKIP LOCKED) is the upgrade path if higher throughput is ever needed (review P3).
     const slots = Math.max(1, s.concurrency);
     const results = await Promise.all(Array.from({ length: slots }, () => processOne()));
 

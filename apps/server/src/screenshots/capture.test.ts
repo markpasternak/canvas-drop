@@ -109,15 +109,18 @@ describe("captureCanvas (U4)", () => {
     const handler = f.routeHandler();
 
     const sameGet = route("https://cv.example.test/app.js", "GET"); // static asset
-    const samePost = route("https://cv.example.test/_canvas/ai", "POST"); // AI primitive
+    const samePost = route("https://cv.example.test/v1/c/s/ai", "POST"); // AI primitive (write)
     const crossGet = route("https://evil.example/x", "GET"); // external fetch / SSRF
+    const sameV1Get = route("https://cv.example.test/v1/c/s/kv/x", "GET"); // primitive READ
     handler(sameGet.r);
     handler(samePost.r);
     handler(crossGet.r);
+    handler(sameV1Get.r);
     expect(sameGet.cont()).toBe(true);
     expect(sameGet.abr()).toBe(false);
     expect(samePost.abr()).toBe(true); // no AI spend
     expect(crossGet.abr()).toBe(true); // no outbound network
+    expect(sameV1Get.abr()).toBe(true); // primitives neutered — even same-origin GET reads (review #5)
   });
 
   it("auto-dismisses dialogs (a dialog must not wedge the worker)", async () => {

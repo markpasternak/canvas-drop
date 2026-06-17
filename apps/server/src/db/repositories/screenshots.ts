@@ -87,20 +87,34 @@ export function screenshotsRepository(client: DbClient) {
       return (rows[0] as ScreenshotJob | undefined) ?? null;
     },
 
-    /** Terminal success — the renditions are stored. */
-    async markDone(id: string): Promise<void> {
+    /**
+     * Terminal success — the renditions are stored. **Lease-guarded** (`leasedAt`): if
+     * a concurrent republish coalesced this one-per-canvas row since it was claimed
+     * (enqueue resets `leasedAt` to null) or another tick reclaimed it, the guard fails
+     * and this is a no-op — the superseding version stays `pending` and is re-captured,
+     * rather than this stale completion clobbering it (review #2).
+     */
+    async markDone(id: string, leasedAt: number): Promise<void> {
       await db
         .update(t)
         .set({ status: "done", leasedAt: null, lastError: null, updatedAt: Date.now() })
-        .where(eq(t.id, id));
+        .where(and(eq(t.id, id), eq(t.status, "running"), eq(t.leasedAt, leasedAt)));
     },
 
     /**
      * Record a failed attempt: back to `pending` (cleared lease) while
      * `attempts < maxAttempts`, else terminal `failed` with the error recorded.
      * `attempts` was already bumped at claim time, so it reflects this attempt.
+     * **Lease-guarded** like {@link markDone}: a completion for a row coalesced/
+     * reclaimed since claim is dropped, so a republish's fresh `pending` survives and
+     * the retry cap can't be reset by an unrelated publish (review #2).
      */
-    async markFailedOrRetry(id: string, error: string, maxAttempts: number): Promise<void> {
+    async markFailedOrRetry(
+      id: string,
+      error: string,
+      maxAttempts: number,
+      leasedAt: number,
+    ): Promise<void> {
       const rows = (await db
         .select({ attempts: t.attempts })
         .from(t)
@@ -116,7 +130,7 @@ export function screenshotsRepository(client: DbClient) {
           lastError: error.slice(0, 2000),
           updatedAt: Date.now(),
         })
-        .where(eq(t.id, id));
+        .where(and(eq(t.id, id), eq(t.status, "running"), eq(t.leasedAt, leasedAt)));
     },
 
     /**
