@@ -165,6 +165,7 @@ function ModeButton({
   return (
     <button
       type="button"
+      aria-pressed={active}
       className={cn(
         "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
         active
@@ -188,6 +189,7 @@ function PaneButton({
   return (
     <button
       type="button"
+      aria-pressed={active}
       className={cn(
         "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
         active

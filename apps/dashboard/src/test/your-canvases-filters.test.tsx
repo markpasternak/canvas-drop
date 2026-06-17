@@ -317,7 +317,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     // The archived canvas is not in the default (active) scope.
     expect(screen.queryByText("Archived one")).toBeNull();
 
-    await userEvent.click(screen.getByRole("tab", { name: /archived/i }));
+    await userEvent.click(screen.getByRole("button", { name: /archived/i }));
 
     // Archived scope: the archived row appears, the active one drops out, and the
     // row exposes Restore (not Open) — the ArchivedRow branch.

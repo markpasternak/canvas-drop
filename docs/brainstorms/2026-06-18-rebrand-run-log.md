@@ -40,3 +40,11 @@ Every judgment call is logged here for morning review. Newest entries appended a
 - Card titles (CanvasList + gallery) → serif (editorial-throughout). Verified live: "Your canvases" / "Ship your first canvas" render in Newsreader, light + dark.
 
 **DECISION (from Mark, mid-run):** Skip regenerating the marketing site's preview/tour/og IMAGES in P7 — do the code/colour/serif changes only, leave the committed screenshots as-is. Updated the P7 scope accordingly.
+
+### P3 — a11y baseline (slice 1)  ✅ (gates green)
+- `--subtle` AA fix was already baked into P1's BRAND_TOKENS (light 0.500, dark 0.620).
+- Scope toggle (index.tsx): dropped bogus `role=tablist/tab` + `aria-selected` (no keyboard tab model) → `role=group` + `aria-pressed` (it's a filter, not tabs). Finding 6.3.
+- PublishBar ModeButton + PaneButton: added `aria-pressed` so the active state isn't colour-only — incl. the mobile pane switcher. Finding 6.2.
+- Updated your-canvases-filters test (queried the toggle by the old `tab` role → `button`).
+
+**DEFERRED within P3 (note for morning):** the primitive *consolidation* refactor (SegmentedControl/TabNav/SearchInput/DataTable/Tag/CodeBox + shared Variant/Size vocab) is a large maintainability refactor across many call sites. Prioritised the user-facing a11y wins + the visible reskin first. Remaining P3 consolidation + reduced-motion spinner label + mobile-menu focus-trap to follow.

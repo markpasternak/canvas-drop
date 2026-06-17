@@ -290,7 +290,7 @@ function ScopeToggle({
 }) {
   return (
     <div
-      role="tablist"
+      role="group"
       aria-label="Canvas scope"
       className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
     >
@@ -298,8 +298,7 @@ function ScopeToggle({
         <button
           key={s}
           type="button"
-          role="tab"
-          aria-selected={value === s}
+          aria-pressed={value === s}
           onClick={() => onChange(s)}
           className={cn(
             "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium transition-colors",
