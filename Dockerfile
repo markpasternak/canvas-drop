@@ -47,6 +47,28 @@ COPY --from=builder --chown=canvasdrop:canvasdrop /app /app
 # server at its built SPA explicitly rather than relying on relative walk-up.
 ENV CANVAS_DROP_DASHBOARD_DIST=/app/apps/dashboard/dist
 
+# ── Screenshots / Chromium (OPTIONAL — OFF by default, plan 004 / M10) ──────────
+# The canvas screenshot pipeline (dashboard/gallery covers + public OG) needs a
+# headless Chromium at runtime. It is deliberately NOT in the default image:
+#   • Chromium + its system libs add ~300MB to an otherwise-slim image; and
+#   • the feature ships DISABLED (env CANVAS_DROP_SCREENSHOTS defaults to `off`, and
+#     even when env-available an admin must turn it on). With it off the product
+#     behaves exactly as before — no browser is ever launched.
+# To build an image WITH capture, pass `--build-arg SCREENSHOTS=1`. That installs
+# Chromium + libs into a shared, non-root-readable path; then run the container with
+# CANVAS_DROP_SCREENSHOTS=on and flip the admin toggle in the dashboard. The default
+# build (SCREENSHOTS=0) skips this entirely. See docs/site/self-hosting/screenshots.md.
+ARG SCREENSHOTS=0
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN if [ "$SCREENSHOTS" = "1" ]; then \
+      mkdir -p /ms-playwright \
+      && node /app/node_modules/playwright-core/cli.js install --with-deps chromium \
+      && chown -R canvasdrop:canvasdrop /ms-playwright \
+      && rm -rf /var/lib/apt/lists/*; \
+    else \
+      echo "screenshots: Chromium NOT installed (build with --build-arg SCREENSHOTS=1 to enable)"; \
+    fi
+
 # Writable data dir owned by the non-root user. A fresh named volume mounted here
 # inherits this ownership (Docker seeds an empty volume from the image mountpoint),
 # so local storage / SQLite work without a root container or an init chown.

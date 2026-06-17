@@ -60,7 +60,12 @@
         "file": "self-hosting/security-model.md",
         "title": "Security model"
       },
-      { "path": "self-hosting/deploy", "file": "self-hosting/deploy.md", "title": "Deploy" }
+      { "path": "self-hosting/deploy", "file": "self-hosting/deploy.md", "title": "Deploy" },
+      {
+        "path": "self-hosting/screenshots",
+        "file": "self-hosting/screenshots.md",
+        "title": "Screenshots"
+      }
     ]
   },
   {

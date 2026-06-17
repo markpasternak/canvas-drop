@@ -241,6 +241,8 @@ docs/              BUILD_BRIEF, plans, compounding learnings, SDK + testing note
 
 - ✅ **Agent MCP server** — connect-once remote MCP at `/mcp` (OAuth 2.1 via the instance's own login, PKCE + dynamic client registration), identity-scoped create/deploy/manage tools, on by default and config-disablable
 
+- ✅ **Canvas screenshots** *(optional, off by default)* — async preview capture on publish via a single in-process headless Chromium; access-gated private storage, real gallery covers + public-link OG images; two-layer enablement (env availability **and** an admin toggle), no per-user opt-out. Chromium is opt-in at image build (`--build-arg SCREENSHOTS=1`); off behaves exactly like before. See [`docs/site/self-hosting/screenshots.md`](docs/site/self-hosting/screenshots.md)
+
 Remaining toward 1.0: a backup/restore drill and a single-VPS load test, then a colleague pilot behind an IAP. See [`docs/plans/`](docs/plans/).
 
 ---
