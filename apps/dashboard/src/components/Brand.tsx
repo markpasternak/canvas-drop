@@ -12,6 +12,9 @@ export function BrandMark({
   decorative = true,
   ...props
 }: BrandMarkProps) {
+  // Mark geometry mirrors @canvas-drop/shared `LOGO_PATHS` (brand/logo.ts), which
+  // the server renders via brandMarkSvg(). The dashboard inlines it (it doesn't
+  // bundle @canvas-drop/shared) — keep these paths in sync when the mark changes.
   return (
     <svg
       viewBox="158 209 372 432"

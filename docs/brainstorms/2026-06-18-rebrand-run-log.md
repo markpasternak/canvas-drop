@@ -55,3 +55,12 @@ Every judgment call is logged here for morning review. Newest entries appended a
 - **Folded-in fix:** the P3 `role="group"` tripped biome `useSemanticElements` (wants <fieldset>); suppressed with a biome-ignore (a button-group filter is not a form fieldset). The P3 commit (9aa28d6) had this lint error; branch tip is now green.
 
 **Run state for the morning:** P1 (brand/token foundation + teal reskin + single-source logo) ✅, P2 (Newsreader serif) ✅, P3 a11y slice ✅, P6 motion slice ✅ — all committed, all gates green, verified live in the running app (light + dark). Remaining: P3 primitive *consolidation* (SegmentedControl/SearchInput/DataTable refactors), P4 three-panel app shell, P5 copy centralization, rest of P6 (focus-ring radius, exit motion, mobile-menu trap, reduced-motion spinner label), P7 marketing colour-only (images skipped per Mark), P8 flow/command-palette. `/ce-code-review` pass still to run over the branch.
+
+### ce-code-review pass (P1–P3,P6) + fixes  ✅ (gates green)
+Ran a focused multi-agent review (correctness + project-standards + maintainability) over the branch diff. Net: **no P0; the real cluster was all on the landing page** from my P1 `sed 274→200`:
+- **P1/P2 (fixed):** the sed missed alpha-bearing violet (`oklch(… 274 / 0.42)`) so violet halos/gradients survived; and the values it did flip kept violet's 0.214 chroma — **out of sRGB gamut at hue 200** → over-saturated teal that didn't match canonical. **Fix:** migrated landing-page.ts off its hand-forked ramp onto `rampCssVars()` (now single-source like error/legal), and corrected every decorative teal to in-gamut canonical values. `grep 274` on landing = 0.
+- **P3 + testing gap (fixed):** parity test only guarded one dashboard block + missed alpha-form indigo. **Fix:** now guards all THREE dashboard theme blocks (incl. the OS-dark @media block — closes the OS-vs-toggle drift hole), the anti-indigo regex is alpha-aware (`\b27[0-9]\b`), and it scans the server surfaces (landing/social/guest) for indigo too. Tests 1504→1533.
+- **P2 (fixed):** Brand.tsx logo-path duplication now carries a source-of-truth pointer comment to shared logo.ts.
+- **P3 (noted, not changed):** theme-color value varies across index/manifest/landing vs BRAND.themeColor — cosmetic, left for later.
+
+**DECISION:** Did landing's *colour* consolidation now (it was both a review finding and P7's colour scope) since Mark only deferred the marketing *images*. P7 remaining = the bold "Committed" treatment (drenched hero/amber), images skipped.

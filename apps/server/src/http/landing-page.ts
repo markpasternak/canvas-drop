@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Config } from "@canvas-drop/shared";
+import { type Config, rampCssVars } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -228,29 +228,18 @@ ${FAVICON_LINKS}
 }
 
 /**
- * All page CSS. The `:root` OKLCH ramp below is a HAND-MAINTAINED FORK of the
- * dashboard's design tokens (`apps/dashboard/src/styles/tokens.css`, the
- * `--canvas … --accent` semantic vars): this page is served pre-gateway and
- * cannot import the SPA's CSS bundle. If the token ramp changes there, sync the
- * values here — nothing fails a build or test if they drift.
+ * All page CSS. The semantic colour ramp comes from the canonical `BRAND_TOKENS`
+ * (`@canvas-drop/shared`, via `rampCssVars()`) — the SAME source the dashboard and
+ * every other server surface use, so the landing can't drift (the old hand-forked
+ * ramp is gone). Landing-only chrome vars (--ink/--on-ink hero band, shadows,
+ * easing, max width) are layered on top.
  */
 const STYLES = `
 :root {
-  --canvas: oklch(0.968 0.0025 264);
-  --surface: oklch(0.995 0.0015 264);
-  --surface-sunken: oklch(0.945 0.004 264);
-  --fg: oklch(0.235 0.013 266);
-  --muted: oklch(0.475 0.013 266);
-  --subtle: oklch(0.555 0.012 266);
-  --border: oklch(0.905 0.005 264);
-  --accent: oklch(0.515 0.214 200);
-  --accent-hover: oklch(0.455 0.205 200);
-  --accent-fg: oklch(0.99 0.012 200);
-  --logo-frame: oklch(0.24 0.014 266);
-  --logo-drop: oklch(0.515 0.214 200);
-  --shadow-color: 265 24% 16%;
-  --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 4px 12px hsl(var(--shadow-color)/0.07);
-  --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 6px 16px hsl(var(--shadow-color)/0.1);
+${rampCssVars("light", "  ")}
+  --shadow-color: 40 30% 38%;
+  --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 8px 22px hsl(var(--shadow-color)/0.09);
+  --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 8px 18px hsl(var(--shadow-color)/0.12);
   --ink: oklch(0.16 0.008 266);
   --ink-2: oklch(0.205 0.011 266);
   --on-ink: oklch(0.97 0.003 266);
@@ -261,18 +250,7 @@ const STYLES = `
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: oklch(0.155 0.006 266);
-    --surface: oklch(0.192 0.007 266);
-    --surface-sunken: oklch(0.128 0.005 266);
-    --fg: oklch(0.965 0.003 266);
-    --muted: oklch(0.705 0.013 266);
-    --subtle: oklch(0.585 0.013 266);
-    --border: oklch(0.272 0.008 266);
-    --accent: oklch(0.685 0.18 200);
-    --accent-hover: oklch(0.75 0.16 200);
-    --accent-fg: oklch(0.16 0.045 200);
-    --logo-frame: oklch(0.965 0.003 266);
-    --logo-drop: oklch(0.685 0.18 200);
+${rampCssVars("dark", "    ")}
     --shadow-color: 265 50% 1%;
     --ink: oklch(0.115 0.006 266);
     --ink-2: oklch(0.16 0.008 266);
@@ -302,7 +280,7 @@ header {
 .nav { display: flex; align-items: center; gap: 1rem; height: 4rem; }
 .brand { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.012em; color: var(--on-ink); }
 .brand .mark { width: 1.65rem; height: 1.65rem; }
-.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.7 0.17 200); }
+.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.78 0.11 195); }
 .nav .spacer { flex: 1; }
 .nav-links { display: flex; align-items: center; gap: .35rem; }
 .nav a.link { color: var(--on-ink-muted); padding: .45rem .7rem; border-radius: .5rem; font-size: .92rem; transition: color .15s var(--ease), background .15s var(--ease); }
@@ -330,7 +308,7 @@ header {
 .hero {
   position: relative; overflow: hidden;
   background:
-    radial-gradient(120% 90% at 84% -10%, oklch(0.515 0.214 274 / 0.42), transparent 60%),
+    radial-gradient(120% 90% at 84% -10%, oklch(0.6 0.12 200 / 0.4), transparent 60%),
     radial-gradient(90% 70% at 8% 6%, oklch(0.6 0.16 286 / 0.18), transparent 55%),
     linear-gradient(180deg, var(--ink-2), var(--ink));
   color: var(--on-ink);
@@ -351,12 +329,12 @@ header {
   border: 1px solid var(--on-ink-border); border-radius: 100px; padding: .3rem .7rem;
   background: oklch(1 0 0 / 0.03);
 }
-.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: oklch(0.7 0.17 200); box-shadow: 0 0 0 4px oklch(0.7 0.17 274 / 0.22); }
+.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: oklch(0.72 0.12 195); box-shadow: 0 0 0 4px oklch(0.72 0.12 195 / 0.22); }
 h1 {
   margin: 1.1rem 0 0; max-width: 16ch;
   font-size: clamp(2.6rem, 7vw, 4.6rem); line-height: 1.02; letter-spacing: -.035em; font-weight: 660;
 }
-h1 .accent { color: oklch(0.78 0.15 200); }
+h1 .accent { color: oklch(0.8 0.11 195); }
 .lede { margin: 1.4rem 0 0; max-width: 46ch; font-size: clamp(1.02rem, 2.2vw, 1.22rem); color: var(--on-ink-muted); }
 .cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
 .cue { margin-top: 1rem; font-size: .85rem; color: var(--on-ink-muted); }
@@ -458,12 +436,12 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 /* dark band (Private by design) — reuse the hero ink + on-ink tokens */
 .band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
 .band-dark .s-sub { color: var(--on-ink-muted); }
-.band-dark .kicker { color: oklch(0.78 0.15 200); }
+.band-dark .kicker { color: oklch(0.8 0.11 195); }
 .band-dark .feat { border-top-color: var(--on-ink-border); }
 .band-dark .feat h3 { color: var(--on-ink); }
-.band-dark .feat h3 svg { color: oklch(0.8 0.13 200); }
+.band-dark .feat h3 svg { color: oklch(0.8 0.11 195); }
 .band-dark .feat p { color: var(--on-ink-muted); }
-.band-dark a { color: oklch(0.8 0.13 200); }
+.band-dark a { color: oklch(0.8 0.11 195); }
 
 /* --- entrance + scroll reveal --- */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
@@ -649,7 +627,7 @@ ${PRIVACY.map(featItem).join("\n")}
 
   <section class="oss">
     <div class="wrap">
-      <p class="kicker reveal" style="color:oklch(0.78 0.15 200)">Open source</p>
+      <p class="kicker reveal" style="color:oklch(0.8 0.11 195)">Open source</p>
       <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
       <p class="s-sub reveal">canvas-drop is open source and self-contained: your database, your storage, your sign-in. SQLite or Postgres, local disk or S3, all a config change away. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">
