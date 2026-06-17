@@ -191,7 +191,7 @@ export function ActionMenu({
               // Hide until positioned so it never paints at the wrong spot.
               visibility: pos ? "visible" : "hidden",
             }}
-            className="z-50 min-w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
+            className="cd-anim-pop z-50 min-w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
           >
             <ActionMenuCtx.Provider value={{ close }}>{children}</ActionMenuCtx.Provider>
           </div>,

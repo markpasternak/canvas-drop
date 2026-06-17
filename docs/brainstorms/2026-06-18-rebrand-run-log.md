@@ -48,3 +48,10 @@ Every judgment call is logged here for morning review. Newest entries appended a
 - Updated your-canvases-filters test (queried the toggle by the old `tab` role → `button`).
 
 **DEFERRED within P3 (note for morning):** the primitive *consolidation* refactor (SegmentedControl/TabNav/SearchInput/DataTable/Tag/CodeBox + shared Variant/Size vocab) is a large maintainability refactor across many call sites. Prioritised the user-facing a11y wins + the visible reskin first. Remaining P3 consolidation + reduced-motion spinner label + mobile-menu focus-trap to follow.
+
+### P6 — Polish & motion (slice: the expensive-feel win)  ✅ (gates green)
+- Added the entrance keyframe set to base.css (`cd-fade`/`cd-pop`/`cd-toast`), transform+opacity only, ≤180ms, --ease-out; auto reduced-motion-safe (the existing reduce block collapses them).
+- Applied: Dialog scrim (fade) + panel (pop), ActionMenu dropdown (pop), Toast (slide-up). The app had ZERO @keyframes before — this is the textbook clean→expensive move (finding 5.1). Entrance-only (exit stays instant — low-risk; full exit-anim deferred).
+- **Folded-in fix:** the P3 `role="group"` tripped biome `useSemanticElements` (wants <fieldset>); suppressed with a biome-ignore (a button-group filter is not a form fieldset). The P3 commit (9aa28d6) had this lint error; branch tip is now green.
+
+**Run state for the morning:** P1 (brand/token foundation + teal reskin + single-source logo) ✅, P2 (Newsreader serif) ✅, P3 a11y slice ✅, P6 motion slice ✅ — all committed, all gates green, verified live in the running app (light + dark). Remaining: P3 primitive *consolidation* (SegmentedControl/SearchInput/DataTable refactors), P4 three-panel app shell, P5 copy centralization, rest of P6 (focus-ring radius, exit motion, mobile-menu trap, reduced-motion spinner label), P7 marketing colour-only (images skipped per Mark), P8 flow/command-palette. `/ce-code-review` pass still to run over the branch.

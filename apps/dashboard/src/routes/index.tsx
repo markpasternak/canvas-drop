@@ -289,6 +289,7 @@ function ScopeToggle({
   summary: CanvasOwnerSummary;
 }) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a button-group filter (role=group + aria-label), not a form fieldset
     <div
       role="group"
       aria-label="Canvas scope"
