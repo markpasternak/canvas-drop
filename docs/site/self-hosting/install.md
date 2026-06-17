@@ -56,6 +56,10 @@ change:
 - **Storage** — local filesystem (default) or S3-compatible.
 - **URL mode** — path (`{base}/c/{slug}/*`) or subdomain (`{slug}.{base}`).
   Subdomain mode needs a non-localhost `CANVAS_DROP_BASE_URL` and a wildcard cert.
+  If you front the programmatic Deploy API on a dedicated host (e.g.
+  `api.example.com`) rather than the canvas host, set `CANVAS_DROP_API_BASE_URL` to
+  it so the MCP tools advertise the right curl endpoints to agents (defaults to
+  `CANVAS_DROP_BASE_URL`).
 - **Auth** — `dev` (local only), `proxy` (an identity-aware proxy in front), or
   `oidc` (built-in OpenID Connect login). `proxy` and `oidc` require
   `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`; running real auth in path mode also
