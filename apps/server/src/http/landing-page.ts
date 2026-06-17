@@ -717,7 +717,10 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
     if (prev) prev.addEventListener('click', function () { goTo(index() - 1); restart(); });
     if (next) next.addEventListener('click', function () { goTo(index() + 1); restart(); });
     dots.forEach(function (d, k) { d.addEventListener('click', function () { goTo(k); restart(); }); });
-    vp.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(syncDots, 80); }, { passive: true });
+    // Any scroll settle — a manual swipe as much as a programmatic goTo — re-syncs the
+    // dots AND re-arms autoplay, so the slide you just landed on gets a full interval
+    // instead of inheriting the previous slide's leftover countdown.
+    vp.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(function () { syncDots(); restart(); }, 120); }, { passive: true });
     function stop() { if (timer) { clearInterval(timer); timer = null; } }
     function start() { stop(); if (!REDUCE) timer = setInterval(function () { goTo(index() + 1); }, 5200); }
     function restart() { start(); }
@@ -725,6 +728,9 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
     car.addEventListener('mouseleave', start);
     car.addEventListener('focusin', stop);
     car.addEventListener('focusout', start);
+    // Pause while a finger is down so the timer can't advance mid-swipe; the scroll
+    // settle above re-arms it once the gesture ends.
+    car.addEventListener('touchstart', stop, { passive: true });
     syncDots(); start();
   });
 })();
