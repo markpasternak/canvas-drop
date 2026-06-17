@@ -1,4 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
+import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { loginUrl, publicOrigin, requestReturnTo } from "../auth/return-to.js";
@@ -49,7 +50,15 @@ function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua:
   return CRAWLER_UA.test(ua);
 }
 
-export function socialPreview(config: Config, canvases?: CanvasesRepository) {
+export function socialPreview(
+  config: Config,
+  canvases?: CanvasesRepository,
+  /** Per-canvas OG image resolver (plan 004 / U9). Returns the canvas's preview OG
+   *  URL when the pipeline is enabled AND a preview exists, else null → branded
+   *  `/og.png`. Only consulted for the public_link card, so a gated canvas never
+   *  emits a per-canvas image (R5). */
+  previewImage?: (canvas: Canvas) => Promise<string | null>,
+) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const principal = c.get("principal");
     const method = c.req.method;
@@ -69,11 +78,14 @@ export function socialPreview(config: Config, canvases?: CanvasesRepository) {
         if (canvas) {
           const origin = publicOrigin(config, c.req.header("host"));
           const title = canvas.title?.trim() || PREVIEW_TITLE;
+          // Per-canvas preview image when the pipeline is on + captured; else /og.png.
+          const image = (await previewImage?.(canvas)) ?? undefined;
           return htmlResponse(
             renderPreviewShell(origin, c.req.path, {
               title,
               description: `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`,
               redirect: false,
+              image,
             }),
           );
         }
@@ -128,10 +140,16 @@ function htmlResponse(html: string): Response {
 export function renderPreviewShell(
   origin: string,
   path: string,
-  opts: { title?: string; description?: string; redirect?: boolean; loginHref?: string } = {},
+  opts: {
+    title?: string;
+    description?: string;
+    redirect?: boolean;
+    loginHref?: string;
+    image?: string;
+  } = {},
 ): string {
   const base = origin.replace(/\/$/, "");
-  const image = escapeHtml(`${base}/og.png`);
+  const image = escapeHtml(opts.image ?? `${base}/og.png`);
   const url = escapeHtml(`${base}${path}`);
   const title = escapeHtml(opts.title ?? PREVIEW_TITLE);
   const desc = escapeHtml(opts.description ?? PREVIEW_DESC);

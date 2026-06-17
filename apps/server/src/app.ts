@@ -19,6 +19,7 @@ import { cloneService } from "./canvas/clone-service.js";
 import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
+import { canvasUrl } from "./canvas/url.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
@@ -72,7 +73,7 @@ import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
-import { servePreview } from "./screenshots/serve.js";
+import { PREVIEW_ASSET_PATH, servePreview } from "./screenshots/serve.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import type { StorageDriver } from "./storage/driver.js";
 import { uploadService } from "./upload/service.js";
@@ -370,7 +371,18 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // card. Signed-in visitors and every non-root path fall straight through.
   app.use("*", landingGate({ config: deps.config }));
 
-  app.use("*", socialPreview(deps.config, deps.canvases));
+  app.use(
+    "*",
+    socialPreview(deps.config, deps.canvases, async (canvas) => {
+      // Per-canvas OG image (plan 004 / U9), public_link only (this resolver is only
+      // consulted on the anonymous card). Only when enabled AND a preview is captured;
+      // cache-bust by the captured version. Else null → branded /og.png.
+      if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
+      const job = await screenshotsRepository(deps.db).findByCanvas(canvas.id);
+      if (job?.status !== "done") return null;
+      return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${job.versionId}`;
+    }),
+  );
 
   // Everything below requires an org session/identity (login on every request) —
   // UNLESS the carve-out above already set a guest/anonymous principal, in which

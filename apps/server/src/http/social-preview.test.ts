@@ -156,3 +156,36 @@ describe("socialPreview — public_link per-canvas card", () => {
     expect(res.status).toBe(418);
   });
 });
+
+describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => {
+  const crawler = { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" };
+
+  function appWithPreview(previewUrl: string | null) {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("principal", ANON);
+      await next();
+    });
+    a.use(
+      "*",
+      socialPreview(oidc, canvasRepo("Planner"), async () => previewUrl),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    return a;
+  }
+
+  it("uses the per-canvas preview as og:image when the resolver provides one", async () => {
+    const url = "https://planner.canvas-drop.com/c/p/__canvasdrop_preview?rendition=og&v=1";
+    const body = await (await appWithPreview(url).request("/", { headers: crawler })).text();
+    // og:image is the per-canvas preview (& escaped to &amp; in the attribute).
+    expect(body).toContain(
+      'property="og:image" content="https://planner.canvas-drop.com/c/p/__canvasdrop_preview?rendition=og&amp;v=1"',
+    );
+    expect(body).not.toContain("/og.png");
+  });
+
+  it("falls back to /og.png when the resolver returns null (disabled or not yet captured)", async () => {
+    const body = await (await appWithPreview(null).request("/", { headers: crawler })).text();
+    expect(body).toContain('property="og:image" content="https://planner.canvas-drop.com/og.png"');
+  });
+});
