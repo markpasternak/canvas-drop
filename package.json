@@ -2,6 +2,17 @@
   "name": "canvas-drop",
   "version": "0.0.0",
   "private": true,
+  "description": "Self-hostable platform where org members deploy and share small static web artifacts (\"canvases\"), with five built-in backend primitives: KV, files, AI, identity, realtime.",
+  "license": "MIT",
+  "author": "Mark Pasternak",
+  "homepage": "https://github.com/markpasternak/canvas-drop#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markpasternak/canvas-drop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/markpasternak/canvas-drop/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@11.0.9",
   "engines": {

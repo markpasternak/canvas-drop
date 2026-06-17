@@ -49,9 +49,10 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community maintainers responsible for enforcement via the
-repository owner's contact in `package.json`, or through GitHub's private
-reporting. All complaints will be reviewed and investigated promptly and fairly.
+reported privately to the maintainers — open a
+[private report](https://github.com/markpasternak/canvas-drop/security/advisories/new)
+or contact the repository owner directly. All complaints will be reviewed and
+investigated promptly and fairly.
 
 ## Attribution
 
