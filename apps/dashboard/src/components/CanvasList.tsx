@@ -226,7 +226,9 @@ export function CanvasRow({
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
   const deploy = canvas.lastDeploy;
-  const summary = canvas.gallerySummary?.trim();
+  // The owner's Basics description (the field the overview edits) — not the separate
+  // gallery summary — so the line on the row matches what populates when you open it.
+  const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const navigate = useNavigate();
   const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
@@ -295,7 +297,7 @@ export function CanvasRow({
           >
             {metaLine(canvas)}
           </div>
-          {summary && <div className="mt-1 truncate text-xs text-muted">{summary}</div>}
+          {description && <div className="mt-1 truncate text-xs text-muted">{description}</div>}
           {tags.length > 0 && (
             <div className="mt-1.5">
               <RowTags tags={tags} />
