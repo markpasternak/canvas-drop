@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -111,6 +111,42 @@ describe("canvas Overview tab", () => {
     expect(screen.getByRole("link", { name: "Backend" })).toHaveAttribute(
       "href",
       "/canvases/c1/capabilities",
+    );
+  });
+
+  it("renders a flat editorial shell header (serif title, no boxed card, live-URL affordances)", async () => {
+    mockStatus();
+    renderStatus();
+
+    // Title is the serif page heading, not a sans card title.
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    expect(title.className).toContain("font-serif");
+
+    // The shell header is flat — no rounded-xl/shadow card wrapper around it.
+    const header = title.closest("header");
+    expect(header).not.toBeNull();
+    expect(header?.className ?? "").not.toMatch(/rounded-xl|shadow-/);
+
+    // All seven tabs present in the underline tab bar (Share/Usage/Settings included).
+    // The active-tab aria-current marking is covered at the unit level in tab-nav.test.tsx.
+    for (const label of [
+      "Overview",
+      "Editor",
+      "Share",
+      "Versions",
+      "Backend",
+      "Usage",
+      "Settings",
+    ]) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    }
+
+    // Live-URL copy + open affordances are present and labelled in the header.
+    const headerEl = header as HTMLElement;
+    expect(within(headerEl).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(within(headerEl).getByRole("link", { name: "Open live canvas" })).toHaveAttribute(
+      "href",
+      CANVAS.url,
     );
   });
 

@@ -34,48 +34,53 @@ export function CanvasDetailChrome({
   badge?: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
-      <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+    <header>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-2">
           {isLoading ? (
-            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-9 w-56" />
           ) : (
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h1 className="truncate font-serif text-h1 font-medium leading-tight tracking-[-0.02em] text-fg">
+                {title}
+              </h1>
               {badge && <span className="shrink-0">{badge}</span>}
+            </div>
+          )}
+
+          {isLoading || !url ? (
+            <Skeleton className="h-5 w-72" />
+          ) : (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 truncate rounded-md font-mono text-xs text-accent hover:underline"
+              >
+                {url}
+              </a>
+              <CopyButton
+                value={url}
+                label="Copy"
+                toastMessage="Link copied"
+                className="h-7 px-1.5"
+              />
+              <IconLink href={url} target="_blank" rel="noreferrer" label="Open live canvas">
+                <ArrowSquareOut size={15} weight="bold" aria-hidden />
+              </IconLink>
             </div>
           )}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
 
-      <div className="px-4 pb-4">
-        {isLoading || !url ? (
-          <Skeleton className="h-10 w-full" />
-        ) : (
-          <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-2 py-1.5">
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="min-w-0 flex-1 truncate rounded-md font-mono text-xs text-accent hover:underline"
-            >
-              {url}
-            </a>
-            <CopyButton value={url} label="Copy" toastMessage="Link copied" className="h-8 px-2" />
-            <IconLink href={url} target="_blank" rel="noreferrer" label="Open live canvas">
-              <ArrowSquareOut size={15} weight="bold" aria-hidden />
-            </IconLink>
-          </div>
-        )}
-      </div>
-
       <TabNav
         items={TABS.map((tab) => ({ ...tab, params: { id } }))}
         aria-label="Canvas sections"
-        className="border-t border-border px-3"
+        className="mt-4 border-b border-border"
       />
-    </section>
+    </header>
   );
 }
 
