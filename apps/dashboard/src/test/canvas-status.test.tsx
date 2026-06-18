@@ -166,6 +166,13 @@ describe("canvas Overview tab", () => {
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
+
+    // Flat redesign (U3): the Basics group is a serif-headed flat band, not a boxed
+    // Panel card — its section carries no rounded-xl/shadow wrapper.
+    const basics = screen.getByRole("heading", { level: 2, name: "Basics" });
+    expect(basics.className).toContain("font-serif");
+    const basicsSection = basics.closest("section");
+    expect(basicsSection?.className ?? "").not.toMatch(/rounded-xl|shadow-/);
   });
 
   it("edits the canvas title and description from Overview", async () => {

@@ -7,8 +7,9 @@ import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
+import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
-import { InlineNotice, Panel } from "../components/Surface.js";
+import { InlineNotice } from "../components/Surface.js";
 import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
@@ -263,37 +264,35 @@ export default function Overview() {
         </InlineNotice>
       )}
 
-      <Panel>
-        <div className="mb-5 space-y-1">
-          <h2 className="text-sm font-semibold text-fg">Basics</h2>
-          <p className="text-xs text-muted">Name this canvas so it is easy to scan and share.</p>
-        </div>
-        <div className="space-y-4">
-          <Field
-            label="Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => title !== canvas.title && save({ title })}
-            maxLength={200}
-          />
-          <TextareaField
-            label="Description"
-            value={description}
-            rows={3}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={() =>
-              (description || null) !== canvas.description &&
-              save({ description: description || null })
-            }
-            maxLength={2000}
-          />
-        </div>
-      </Panel>
+      <Section
+        id="basics"
+        title="Basics"
+        description="Name this canvas so it is easy to scan and share."
+      >
+        <Field
+          label="Title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => title !== canvas.title && save({ title })}
+          maxLength={200}
+        />
+        <TextareaField
+          label="Description"
+          value={description}
+          rows={3}
+          onChange={(e) => setDescription(e.target.value)}
+          onBlur={() =>
+            (description || null) !== canvas.description &&
+            save({ description: description || null })
+          }
+          maxLength={2000}
+        />
+      </Section>
 
       <HealthCard canvas={canvas} current={current} />
 
-      <Panel className="p-0 sm:p-0">
-        <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
+      <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
+        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Publication">
             <PublicationBadge state={canvas.publicationState} />
           </Fact>
@@ -327,10 +326,10 @@ export default function Overview() {
             <span title={fullTime(canvas.updatedAt)}>{relativeTime(canvas.updatedAt)}</span>
           </Fact>
         </dl>
-      </Panel>
+      </section>
 
-      <Panel className="p-0 sm:p-0">
-        <dl className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
+      <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
+        <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Public URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
             <div className="flex min-w-0 items-center gap-2">
               <a
@@ -389,7 +388,7 @@ export default function Overview() {
             </Fact>
           )}
         </dl>
-      </Panel>
+      </section>
     </TabContentFrame>
   );
 }

@@ -1,8 +1,9 @@
 import { useParams } from "@tanstack/react-router";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { Sparkline } from "../components/Sparkline.js";
-import { MetaGrid, MetaItem, Panel } from "../components/Surface.js";
+import { MetaGrid, MetaItem } from "../components/Surface.js";
 import { formatBytes, formatUsd, relativeTime } from "../lib/format.js";
 import { useCanvas, useUsage } from "../lib/queries.js";
 
@@ -38,7 +39,7 @@ export default function Usage() {
 
   return (
     <TabContentFrame>
-      <Panel>
+      <Section id="views" title="Views">
         <MetaGrid>
           <MetaItem label="Total views">
             <Metric
@@ -50,7 +51,7 @@ export default function Usage() {
             <Metric value={usage.lastViewedAt ? relativeTime(usage.lastViewedAt) : "Never"} />
           </MetaItem>
         </MetaGrid>
-        <div className="mt-4 space-y-1.5">
+        <div className="space-y-1.5">
           <p className="text-[0.6875rem] font-medium text-subtle">Last 30 days</p>
           {usage.totalViews === 0 ? (
             <p className="text-xs text-muted">No views yet.</p>
@@ -58,10 +59,10 @@ export default function Usage() {
             <Sparkline data={usage.viewsByDay} className="h-10 w-full text-accent" />
           )}
         </div>
-      </Panel>
+      </Section>
 
-      {backendOn ? (
-        <Panel>
+      <Section id="backend-usage" title="Backend usage">
+        {backendOn ? (
           <MetaGrid>
             <MetaItem label="KV operations">
               <Metric value={usage.kvOps.toLocaleString()} />
@@ -82,13 +83,13 @@ export default function Usage() {
               <Metric value={usage.realtimeConnects.toLocaleString()} sub="total connects" />
             </MetaItem>
           </MetaGrid>
-        </Panel>
-      ) : (
-        <p className="text-sm text-muted">
-          Turn on <strong className="font-medium text-fg">Backend</strong> to use KV, files, AI, and
-          realtime. Those usage figures will appear here once it does.
-        </p>
-      )}
+        ) : (
+          <p className="text-sm text-muted">
+            Turn on <strong className="font-medium text-fg">Backend</strong> to use KV, files, AI,
+            and realtime. Those usage figures will appear here once it does.
+          </p>
+        )}
+      </Section>
     </TabContentFrame>
   );
 }

@@ -54,7 +54,7 @@ function renderUsage() {
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/canvases/c1/usage"] }),
   });
-  render(
+  return render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -98,7 +98,7 @@ describe("usage tab", () => {
           realtimeConnects: 9,
         }),
     });
-    renderUsage();
+    const { container } = renderUsage();
     expect(await screen.findByText("42")).toBeInTheDocument(); // total views
     expect(screen.getByText(/7 unique/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Views over the last/i })).toBeInTheDocument();
@@ -106,6 +106,10 @@ describe("usage tab", () => {
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // file storage
     expect(screen.getByText("$0.0034")).toBeInTheDocument(); // AI cost (sub-cent precision)
     expect(screen.getByText("9")).toBeInTheDocument(); // realtime connects
+    // Stats keep tabular-nums for column alignment.
+    expect(container.querySelector("dd.tabular-nums")).not.toBeNull();
+    // Flat redesign (U3): the tab reads as hairline-divided bands, not boxed Panel cards.
+    expect(container.querySelector(".rounded-xl")).toBeNull();
   });
 
   it("shows views (and a backend hint, not primitives) when backend is off", async () => {

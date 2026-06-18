@@ -93,7 +93,7 @@ function renderVersions() {
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/canvases/c1/versions"] }),
   });
-  render(
+  const utils = render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -103,7 +103,7 @@ function renderVersions() {
       </QueryClientProvider>
     </ThemeProvider>,
   );
-  return router;
+  return { router, ...utils };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -117,7 +117,12 @@ describe("Versions route — restore to draft", () => {
       "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
       "POST /api/canvases/c1/restore": () => json(draftView()),
     });
-    renderVersions();
+    const { container } = renderVersions();
+
+    // Wait for the version rows, then assert the flat redesign (U3): version rows live
+    // in a hairline-divided list, not boxed Panel cards.
+    expect(await screen.findByText("v1")).toBeInTheDocument();
+    expect(container.querySelector(".rounded-xl")).toBeNull();
 
     await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
@@ -139,7 +144,7 @@ describe("Versions route — restore to draft", () => {
       "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
       "POST /api/canvases/c1/restore": () => json(draftView()),
     });
-    const router = renderVersions();
+    const { router } = renderVersions();
 
     await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
     await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
