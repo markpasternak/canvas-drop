@@ -207,7 +207,7 @@ Inspired by [Quick: An internal hosting platform for the AI era](https://shopify
 
 ## Contributing
 
-canvas-drop is built by humans and AI coding agents working from the same contract. Work flows from plans in [`docs/plans/`](docs/plans/), one unit at a time, with tests, CI green on both dialects before merge. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md); institutional learnings compound in [`docs/solutions/`](docs/solutions/).
+canvas-drop is built by humans and AI coding agents working from the same contract, following the [compound engineering](https://every.to/guides/compound-engineering) practice from Every: plan the work, build one unit at a time with its tests, and capture every non-obvious learning so each pass (human or agent) compounds on the last. Work flows from plans in [`docs/plans/`](docs/plans/), CI green on both dialects before merge. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md); institutional learnings compound in [`docs/solutions/`](docs/solutions/).
 
 ## License
 
