@@ -1,7 +1,18 @@
-import { CaretDown, Info, Keyboard, ShieldCheck, SignOut } from "@phosphor-icons/react";
+import {
+  CaretDown,
+  Info,
+  Keyboard,
+  Monitor,
+  MoonStars,
+  ShieldCheck,
+  SignOut,
+  Sun,
+} from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { Me } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import { useTheme } from "../lib/theme.js";
+import { SegmentedControl } from "./SegmentedControl.js";
 import { openShortcuts } from "./Shortcuts.js";
 
 /** First letter of the display name, falling back to the email — a calm avatar
@@ -18,7 +29,8 @@ function label(me: Me): string {
 }
 
 /** Account control in the top bar: an avatar button that opens a popover with the
- * signed-in identity and (when the instance owns a revocable session) Sign out.
+ * signed-in identity, the theme switch, keyboard-shortcuts + about links, and
+ * (when the instance owns a revocable session) Sign out.
  *
  * In `proxy` mode the trusted proxy owns identity and there is no app session to
  * revoke, so the menu omits Sign out and only surfaces who you are. Sign out is a
@@ -44,12 +56,16 @@ export function UserMenu({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const { choice, setChoice } = useTheme();
   const canSignOut = me.authMode !== "proxy";
   const openUp = placement === "up";
 
   // Close on outside pointerdown and on Escape; restore focus to the trigger so
-  // keyboard users aren't dumped at the top of the document.
+  // keyboard users aren't dumped at the top of the document. While open, trap Tab
+  // within the menu (and the trailing theme buttons) so keyboard nav can't strand
+  // focus behind the popover.
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
@@ -59,6 +75,23 @@ export function UserMenu({
       if (e.key === "Escape") {
         setOpen(false);
         buttonRef.current?.focus();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const menu = menuRef.current;
+      if (!menu) return;
+      const focusables = menu.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -67,6 +100,19 @@ export function UserMenu({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
+  }, [open]);
+
+  // On open, move focus into the menu (its first focusable control) so keyboard
+  // users land inside the popover; the Escape handler above restores focus to the
+  // trigger on close.
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    (
+      menu?.querySelector<HTMLElement>(
+        'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      ) ?? menu
+    )?.focus();
   }, [open]);
 
   return (
@@ -108,6 +154,7 @@ export function UserMenu({
 
       {open && (
         <div
+          ref={menuRef}
           id={menuId}
           role="menu"
           aria-label="Account"
@@ -139,6 +186,32 @@ export function UserMenu({
                 <div className="truncate text-subtle text-xs">{me.email}</div>
               )}
             </div>
+          </div>
+
+          {/* Theme switch — a labeled row near the top, under the identity header.
+              The SegmentedControl renders real aria-pressed toggle buttons, so the
+              active theme is conveyed to assistive tech and each option is keyboard
+              operable (Enter/Space). It lives here (not the rail footer) so the
+              account menu is the single home for account-scoped preferences. */}
+          <div className="flex items-center justify-between gap-2 border-border border-b px-3.5 py-2.5">
+            <span className="text-fg text-sm">Theme</span>
+            <SegmentedControl
+              aria-label="Theme"
+              size="sm"
+              iconOnly
+              value={choice}
+              onChange={setChoice}
+              items={[
+                {
+                  value: "system",
+                  label: "Use system theme",
+                  title: "Theme: System",
+                  icon: Monitor,
+                },
+                { value: "light", label: "Use light theme", title: "Theme: Light", icon: Sun },
+                { value: "dark", label: "Use dark theme", title: "Theme: Dark", icon: MoonStars },
+              ]}
+            />
           </div>
 
           <button

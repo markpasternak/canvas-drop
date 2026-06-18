@@ -238,6 +238,10 @@ describe("dashboard app", () => {
     const create = screen.getAllByRole("link", { name: "Create canvas" });
     expect(create.length).toBeGreaterThanOrEqual(1);
     expect(create[0]?.getAttribute("href")).toBe("/new");
+    // The theme switch no longer lives in the rail footer — it folded into the
+    // account menu. With the (closed) account menu and the (closed) mobile menu,
+    // no standalone Theme control is mounted in the shell.
+    expect(screen.queryByRole("group", { name: "Theme" })).not.toBeInTheDocument();
   });
 
   it("left rail: the active route is marked aria-current and a section link navigates", async () => {

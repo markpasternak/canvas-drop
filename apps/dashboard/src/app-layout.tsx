@@ -277,7 +277,8 @@ export function AppLayout() {
 
       {/* ── Left navigation rail (lg+): fixed ~240px expanded, ~4rem collapsed.
           Brand tile + collapse toggle + create at the top, the vertical section
-          nav in the middle, the account + docs + theme pinned at the bottom.
+          nav in the middle, Docs + the account row pinned at the bottom. The theme
+          switch lives inside the account menu.
           When collapsed every item is icon-only but keeps its accessible name. ── */}
       <aside
         className={cn(
@@ -306,11 +307,11 @@ export function AppLayout() {
         <nav className="flex flex-col gap-0.5" aria-label="Sections">
           {links.map((l) => renderLink(l, undefined, collapsed))}
         </nav>
-        {/* Footer, pinned to the bottom of the rail: Docs + theme tidily stacked
-            above a full-width account row. When collapsed every control is
-            icon-only and centered. The account menu opens UPWARD here — its
-            trigger sits at the bottom of the viewport, so a downward popover would
-            fall below the fold. */}
+        {/* Footer, pinned to the bottom of the rail: a Docs row above a full-width
+            account row. The theme switch now lives INSIDE the account menu, so the
+            footer stays lean. When collapsed every control is icon-only and
+            centered. The account menu opens UPWARD here — its trigger sits at the
+            bottom of the viewport, so a downward popover would fall below the fold. */}
         <div
           className={cn(
             "mt-auto flex flex-col border-border/70 border-t pt-3",
@@ -318,13 +319,6 @@ export function AppLayout() {
           )}
         >
           <DocsLink collapsed={collapsed} block />
-          {collapsed ? (
-            <ThemeSwitch vertical />
-          ) : (
-            <div className="flex justify-center">
-              <ThemeSwitch />
-            </div>
-          )}
           {me.data && (
             <div className={cn(!collapsed && "mt-1 border-border/70 border-t pt-2")}>
               <UserMenu me={me.data} placement="up" expanded={!collapsed} />
