@@ -27,6 +27,7 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 - **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so re-deploys write only what changed.
 - **A deliberate sharing ladder.** Private, Specific people (org members or email-invited guests), Whole org, or an admin-gated Public link. Revocable and optionally time-boxed.
 - **Run anywhere.** Database, storage, URL mode, and auth all sit behind interfaces, so the same image runs on a laptop, a $5 VPS, or a corporate cloud. Swapping a driver is a config change, never a code change.
+- **Rich admin and configuration, sensible defaults.** It runs the moment you clone it, with a sane default for every choice, so there is nothing to configure to start. When you want control it is all there: an admin panel (all-canvases governance, takedown and restore, the AI model allowlist, global quota defaults) plus typed env config for drivers, limits, and per-capability gates, validated at boot so a bad combination fails loud instead of silently.
 
 > Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that simplicity and adds the rich API, the versioned storage model, the five primitives, and the sharing ladder, so the same "drop a folder" gesture also covers the parts an org actually needs.
 
@@ -128,6 +129,8 @@ Everything is set by environment variables, validated at boot, with a precise me
 | Email (guest invites) | `log`, `smtp`, `mailgun`, `noop` | `CANVAS_DROP_EMAIL_DRIVER` |
 
 The blessed production profile is **subdomain mode plus an identity-aware proxy** (e.g. Cloudflare Access) verifying a signed JWT, with Postgres and S3.
+
+Day-to-day operation lives in the in-app **admin panel**: the all-canvases list with usage, disable/takedown/restore, the AI model allowlist, and global quota defaults. Operator-tunable settings are editable there or via env; the auth and rate-limit hot path stays read-only.
 
 ---
 
