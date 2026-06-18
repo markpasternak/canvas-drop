@@ -55,6 +55,14 @@ export function createAuditLog(repo: AuditRepository, log: Logger): AuditLog {
       }
     },
     record(event: AuthEvent) {
+      // `auth_ok` fires on EVERY authenticated request, so persisting it turns
+      // audit_log into an unbounded access log (it was ~91% of all rows). Keep it
+      // as an observability log line only — never a DB row. `auth_denied` is a
+      // low-volume security signal and stays persisted.
+      if (event.action === "auth_ok") {
+        log.debug({ actorId: event.actorId, ip: event.ip }, "auth_ok");
+        return;
+      }
       write({
         action: event.action,
         actorId: event.actorId,
