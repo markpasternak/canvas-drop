@@ -691,7 +691,7 @@ export default function CanvasList() {
   // control (links/buttons/menus keep their behavior). Escape always clears. Gated on
   // the inline rail being the one on screen (`isXl`) so it never fights the drawer's
   // own Escape/scrim handling below xl.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: setFocused is stable for this purpose; re-bind only when the inline rail toggles.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setFocused only delegates to the identity-stable router navigate, so the listener closure stays correct across focus changes; re-bind only when the inline rail toggles.
   useEffect(() => {
     if (!showRail || !isXl) return;
     function onPointerDown(e: PointerEvent) {
@@ -702,8 +702,11 @@ export default function CanvasList() {
       if (
         target.closest("[data-detail-rail]") ||
         target.closest("[data-canvas-item]") ||
+        // Also skip an overlay's own dismiss backdrop (a dialog/drawer opened FROM
+        // the rail, e.g. Duplicate): its scrim is role="presentation", so clicking
+        // it to close the dialog must not also clear the rail focus underneath.
         target.closest(
-          "a, button, input, select, textarea, summary, [role='button'], [role='dialog']",
+          "a, button, input, select, textarea, summary, [role='button'], [role='dialog'], [role='presentation']",
         )
       ) {
         return;
@@ -711,7 +714,10 @@ export default function CanvasList() {
       setFocused(undefined);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setFocused(undefined);
+      // Yield to any higher-level overlay that already handled Escape (e.g. the
+      // account menu calls preventDefault on its own Escape) so closing a popover
+      // doesn't also clear the rail selection underneath.
+      if (e.key === "Escape" && !e.defaultPrevented) setFocused(undefined);
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);

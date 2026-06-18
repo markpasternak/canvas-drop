@@ -78,17 +78,13 @@ export function DetailDrawer({
   if (!mounted) return null;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim click-to-dismiss; keyboard users dismiss via Escape (handled in the keydown effect)
-    <div
-      className="fixed inset-0 z-50 flex justify-end xl:hidden"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      {/* The scrim sits above the presentation container in the stacking order, so an
-          outside click lands on it (not the container). Close from the scrim's own
-          mousedown so clicking the backdrop dismisses the drawer + clears selection. */}
+    <div className="fixed inset-0 z-50 flex justify-end xl:hidden" role="presentation">
+      {/* The scrim is the sole dismissal layer: it sits above this container in the
+          stacking order and covers it, so an outside click always lands on the scrim
+          (not here). Close from the scrim's own mousedown so clicking the backdrop
+          dismisses the drawer + clears selection. (Don't add an onMouseDown to this
+          container — it would be dead today and double-fire onClose if a gap ever
+          appeared.) */}
       <div
         className="cd-anim-scrim absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
         data-state={state}

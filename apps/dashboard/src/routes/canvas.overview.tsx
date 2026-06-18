@@ -7,7 +7,7 @@ import { CopyButton } from "../components/CopyButton.js";
 import { DeployButton } from "../components/DeployButton.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
-import { Section } from "../components/SettingsSection.js";
+import { flatBandClass, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
@@ -291,7 +291,7 @@ export default function Overview() {
 
       <HealthCard canvas={canvas} current={current} />
 
-      <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
+      <section className={flatBandClass}>
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Publication">
             <PublicationBadge state={canvas.publicationState} />
@@ -328,7 +328,7 @@ export default function Overview() {
         </dl>
       </section>
 
-      <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
+      <section className={flatBandClass}>
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
           <Fact label="Public URL" className={hasHomePageFact ? "lg:col-span-2" : "lg:col-span-3"}>
             <div className="flex min-w-0 items-center gap-2">

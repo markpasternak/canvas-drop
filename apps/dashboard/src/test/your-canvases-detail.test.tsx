@@ -77,7 +77,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         if (archivedScope) return c.status === "archived";
         return c.status !== "archived" && c.status !== "deleted";
       });
-      const limit = Number(sp.get("limit") ?? 24);
+      const limit = Number(sp.get("limit") ?? 48);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
         canvases: matched.slice(offset, offset + limit),

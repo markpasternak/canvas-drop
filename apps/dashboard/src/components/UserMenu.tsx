@@ -13,6 +13,11 @@ import { cn } from "../lib/cn.js";
 import { useTheme } from "../lib/theme.js";
 import { SegmentedControl } from "./SegmentedControl.js";
 
+/** One focusable-element selector shared by the focus-trap and the focus-on-open
+ * move, so the two can never disagree on what the menu's first/last focusable is. */
+const FOCUSABLE_SELECTOR =
+  'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
 /** First letter of the display name, falling back to the email — a calm avatar
  * fallback when the identity provider gives no `avatarUrl`. Tolerates a null/absent
  * name or email (some providers omit one). */
@@ -72,6 +77,9 @@ export function UserMenu({
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Mark the key handled so document-level Escape listeners below this popover
+        // (e.g. the canvas list's inline detail rail) don't also react to it.
+        e.preventDefault();
         setOpen(false);
         buttonRef.current?.focus();
         return;
@@ -79,9 +87,7 @@ export function UserMenu({
       if (e.key !== "Tab") return;
       const menu = menuRef.current;
       if (!menu) return;
-      const focusables = menu.querySelectorAll<HTMLElement>(
-        'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
-      );
+      const focusables = menu.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       if (focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -107,11 +113,7 @@ export function UserMenu({
   useEffect(() => {
     if (!open) return;
     const menu = menuRef.current;
-    (
-      menu?.querySelector<HTMLElement>(
-        'a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])',
-      ) ?? menu
-    )?.focus();
+    (menu?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? menu)?.focus();
   }, [open]);
 
   return (

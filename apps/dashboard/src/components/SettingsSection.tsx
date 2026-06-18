@@ -2,6 +2,11 @@ import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
 import { ActionRow } from "./Surface.js";
 
+/** The flat-band rhythm shared by every stacked section: first one flush, the rest
+ *  separated by a top hairline + vertical space. Exported so titleless bands (e.g. the
+ *  Overview fact grids) read identically without re-hardcoding the rhythm. */
+export const flatBandClass = "border-t border-border pt-6 first:border-t-0 first:pt-0";
+
 /** A titled, flat section grouping related controls. Renders as a hairline-divided
  *  band (serif heading + content) — not a boxed card — so stacked sections read as
  *  editorial bands (DESIGN §Typography/§"Patterns to avoid"). `tone="danger"` colors
@@ -22,9 +27,9 @@ export function Section({
   return (
     <section
       id={id}
-      // Flat band: first section is flush; the rest are separated by a top hairline
-      // + vertical rhythm. `scroll-mt-20` clears the sticky top bar when section-nav jumps here.
-      className="scroll-mt-20 border-t border-border pt-6 first:border-t-0 first:pt-0"
+      // Flat band rhythm (shared via flatBandClass); `scroll-mt-20` clears the sticky
+      // top bar when section-nav jumps here.
+      className={cn("scroll-mt-20", flatBandClass)}
     >
       <div className="mb-5 space-y-1">
         <h2
