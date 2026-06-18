@@ -121,3 +121,9 @@ Updated app/clone/gallery tests for the new labels.
 Seeded dev sample canvases + wired auto-seed into the dev launcher (`--if-empty`, `dev:fresh`). Then ran ce-plan (wrote the remaining-work plan) → ce-work (serial subagents, one unit each; I gate + commit + Chrome-verify).
 - **P4 DETAIL RAIL — DONE + verified live (U1–U4):** ?selected focus state; DetailPanel component; two-pane sticky rail at xl + focus-trapped drawer below xl; Duplicate wired to CloneDialog. Confirmed in-browser: clicking a card opens the living-object rail (cover, serif title, badges, actions, details, recent activity); additive (multi-select/bulk/pagination/views/filters untouched). Gates green every unit (server 1533, dashboard 276).
 - **Remaining (not started):** P3 primitive consolidation (U5–U9), P6 remainder (U10–U12), P7 marketing bold landing (U13–U14, images skipped), P8 flow/palette (U15–U18). All committed work is on the branch; nothing pushed/merged (awaiting Mark's yes).
+
+### Remaining plan COMPLETE (P4–P8, U1–U18) ✅ via ce-work loop — all green
+P4 detail rail (U1–4) · P3 primitives SegmentedControl/SearchInput/TabNav/DataTable/Tag/CodeBox + shared variants (U5–9) · P6 polish focus-trap/reduced-motion/exit-motion/hover (U10–12) · P7 self-host Newsreader + bold Committed landing (U13–14) · P8 command palette + ⌘↵ + cheatsheet + slug-aware lookup + JS-canvas preview (U15–18). Each unit: subagent → gate (typecheck/lint/dual-dialect test/build) → commit. Server ~1541 / dashboard 333 tests green. Nothing pushed/merged.
+
+### NEXT (per Mark): preview parity — left-rail app shell + colourful elements → then mega code review + fix
+Plan: docs/plans/2026-06-18-002-feat-preview-parity-plan.md
