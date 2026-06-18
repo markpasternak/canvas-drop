@@ -36,9 +36,9 @@ there is no cross-owner access and no existence leak.
 | Tool | What it does |
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). |
-| `list_canvases` | The canvases you own (most-recently-updated first). Optional `query` filter and `limit` (1–100, default 50). |
+| `list_canvases` | The canvases you own. Optional `query` filter, `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). |
-| `get_canvas` | Current state of a canvas you own. |
+| `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
 | `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`). |
 | `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
 | `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
