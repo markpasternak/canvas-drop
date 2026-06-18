@@ -40,6 +40,18 @@ describe.each(DIALECTS)("auditLog [%s]", (dialect) => {
     expect(rows[0]?.meta).toMatchObject({ reason: "domain_not_allowed", email: "x@evil.org" });
   });
 
+  it("does NOT persist auth_ok via record() (per-request; would be an unbounded access log)", async () => {
+    client = await makeTestDb(dialect);
+    const audit = createAuditLog(auditRepository(client), silent);
+    audit.record({ action: "auth_ok", actorId: "u1", ip: "127.0.0.1" });
+    audit.record({ action: "auth_denied", reason: "blocked", actorId: "u2", ip: "127.0.0.1" });
+    await audit.flush();
+
+    const rows = await auditRepository(client).recent();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.action).toBe("auth_denied");
+  });
+
   it("folds the correlation id into meta", async () => {
     client = await makeTestDb(dialect);
     const audit = createAuditLog(auditRepository(client), silent);
