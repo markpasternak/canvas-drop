@@ -35,7 +35,7 @@ const rootRoute = createRootRoute({
  *  purpose: typing a fourth search route tips TanStack's un-anchored `navigate`
  *  inference into whole-router union mode (which breaks the gallery's updaters), so
  *  the view reads `useSearch` loosely and coerces these params itself. */
-export type CanvasesSortParam = "updated" | "created" | "title";
+export type CanvasesSortParam = "updated" | "created" | "title" | "popular";
 export interface CanvasesSearch {
   q?: string;
   sort?: CanvasesSortParam;
