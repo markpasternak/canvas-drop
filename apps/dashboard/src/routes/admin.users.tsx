@@ -1,4 +1,3 @@
-import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
@@ -7,6 +6,7 @@ import { AllowedEmailsPanel } from "../components/AllowedEmailsPanel.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterSelect } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { ADMIN_PAGE_SIZE, type AdminUserSort } from "../lib/api.js";
 import { useAdminUsers, useMe } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
@@ -87,21 +87,12 @@ export default function AdminUsers() {
       <AllowedEmailsPanel />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[14rem] flex-1">
-          <MagnifyingGlass
-            size={16}
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Search by name or email"
-            aria-label="Search users"
-            className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-          />
-        </div>
+        <SearchInput
+          value={text}
+          onChange={setText}
+          placeholder="Search by name or email"
+          aria-label="Search users"
+        />
         <FilterSelect
           label="Sort users"
           options={USER_SORT_OPTIONS}

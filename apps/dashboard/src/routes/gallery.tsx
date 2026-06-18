@@ -1,4 +1,4 @@
-import { ArrowSquareOut, Copy, MagnifyingGlass, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, X } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
@@ -8,6 +8,7 @@ import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
@@ -285,21 +286,12 @@ export default function Gallery() {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[14rem]">
-          <MagnifyingGlass
-            size={16}
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Search the gallery"
-            aria-label="Search the gallery"
-            className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-          />
-        </div>
+        <SearchInput
+          value={text}
+          onChange={setText}
+          placeholder="Search the gallery"
+          aria-label="Search the gallery"
+        />
         <FilterSelect
           label="Sort canvases"
           options={sortOptions}

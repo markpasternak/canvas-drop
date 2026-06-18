@@ -3,7 +3,6 @@ import {
   ArrowSquareOut,
   Copy,
   CopySimple,
-  MagnifyingGlass,
   Rows,
   SquaresFour,
   Trash,
@@ -28,6 +27,7 @@ import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { SegmentedControl } from "../components/SegmentedControl.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
@@ -655,21 +655,12 @@ export default function CanvasList() {
               <SummaryStrip summary={summary} archivedView={archivedView} />
 
               <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-[14rem] flex-1">
-                  <MagnifyingGlass
-                    size={16}
-                    className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-                    aria-hidden
-                  />
-                  <input
-                    type="search"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Search your canvases"
-                    aria-label="Search your canvases"
-                    className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-                  />
-                </div>
+                <SearchInput
+                  value={text}
+                  onChange={setText}
+                  placeholder="Search your canvases"
+                  aria-label="Search your canvases"
+                />
                 <ScopeToggle
                   value={archivedView ? "archived" : "active"}
                   onChange={setScope}

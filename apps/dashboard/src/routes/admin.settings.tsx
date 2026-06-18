@@ -1,10 +1,10 @@
-import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useState } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { type AdminConfigField, ApiError } from "../lib/api.js";
@@ -245,21 +245,12 @@ function Configuration() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[14rem] flex-1">
-            <MagnifyingGlass
-              size={16}
-              className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search settings, env vars, values"
-              aria-label="Search configuration settings"
-              className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-            />
-          </div>
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search settings, env vars, values"
+            aria-label="Search configuration settings"
+          />
           {activeFiltering ? (
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               Clear all

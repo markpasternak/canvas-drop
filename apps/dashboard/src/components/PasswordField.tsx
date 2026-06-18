@@ -2,6 +2,7 @@ import { Check, CopySimple, Eye, EyeSlash } from "@phosphor-icons/react";
 import type { InputHTMLAttributes, ReactNode } from "react";
 import { useId, useState } from "react";
 import { cn } from "../lib/cn.js";
+import { inputControlBase } from "../lib/input-styles.js";
 import { useToast } from "./Toast.js";
 
 /** Trailing icon button living inside the input's right edge. */
@@ -94,13 +95,10 @@ export function PasswordField({
           // revealed value as a login field.
           type={revealed ? "text" : "password"}
           value={value}
-          className={cn(
-            "w-full rounded-md border border-border-strong bg-surface-raised py-2 pl-3 pr-[4.5rem] text-sm text-fg",
-            "placeholder:text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-            "focus:border-accent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-50",
-            revealed && "font-mono",
-            className,
-          )}
+          // Shared input appearance, but with extra right padding for the trailing
+          // copy/reveal adornments (base carries no horizontal padding so this won't
+          // collide — `cn` is a plain join, not tailwind-merge).
+          className={cn(inputControlBase, "pl-3 pr-[4.5rem]", revealed && "font-mono", className)}
           {...rest}
         />
         <div className="absolute inset-y-0 right-1.5 flex items-center gap-0.5">
