@@ -1,6 +1,6 @@
 import { type McpToken, type OauthCode, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 import { hashToken } from "./sessions.js";
@@ -48,21 +48,13 @@ export function oauthRepository(client: DbClient) {
     clients: {
       /** Persist a DCR registration, round-tripping the full client info blob. */
       async upsert(info: OAuthClientInformationFull): Promise<OAuthClientInformationFull> {
-        const existing = await db
-          .select()
-          .from(clientsT)
-          .where(eq(clientsT.id, info.client_id))
-          .limit(1);
-        if (existing[0]) {
-          await db
-            .update(clientsT)
-            .set({ clientInfo: info })
-            .where(eq(clientsT.id, info.client_id));
-        } else {
-          await db
-            .insert(clientsT)
-            .values({ id: info.client_id, clientInfo: info, createdAt: Date.now() });
-        }
+        // Single-statement atomic upsert — the DCR path is hit on every new MCP
+        // client connection, and a client retrying registration must not race two
+        // INSERTs into a unique-constraint 500. Matches the kv/guest pattern.
+        await db
+          .insert(clientsT)
+          .values({ id: info.client_id, clientInfo: info, createdAt: Date.now() })
+          .onConflictDoUpdate({ target: clientsT.id, set: { clientInfo: info } });
         return info;
       },
 
@@ -124,6 +116,26 @@ export function oauthRepository(client: DbClient) {
           )
           .returning();
         return (updated[0] as OauthCode | undefined) ?? null;
+      },
+
+      /**
+       * Retention prune (KTD-7): delete spent authorization codes whose terminal
+       * timestamp predates `cutoffMs` — consumed before the cutoff, or expired
+       * before it. These rows associate a user account with a client and are dead
+       * once consumed or lapsed. A still-live code (unconsumed and unexpired) is
+       * never touched. Returns the number of rows removed.
+       */
+      async pruneConsumedOrExpiredBefore(cutoffMs: number): Promise<number> {
+        const rows = (await db
+          .delete(codesT)
+          .where(
+            or(
+              and(isNotNull(codesT.consumedAt), lt(codesT.consumedAt, cutoffMs)),
+              lt(codesT.expiresAt, cutoffMs),
+            ),
+          )
+          .returning({ id: codesT.id })) as Array<{ id: string }>;
+        return rows.length;
       },
     },
 
@@ -201,6 +213,27 @@ export function oauthRepository(client: DbClient) {
           .update(tokensT)
           .set({ revokedAt: Date.now() })
           .where(and(eq(tokensT.userId, userId), isNull(tokensT.revokedAt)));
+      },
+
+      /**
+       * Retention prune (KTD-7): delete dead access/refresh tokens whose terminal
+       * timestamp predates `cutoffMs` — revoked before the cutoff, or (access
+       * tokens) expired before it. These rows associate a user account with a
+       * client and are useless once revoked or lapsed. A live token (unrevoked
+       * and, where applicable, unexpired) is never touched; refresh tokens have a
+       * null `expiresAt` so they're only pruned once revoked. Returns rows removed.
+       */
+      async pruneRevokedOrExpiredBefore(cutoffMs: number): Promise<number> {
+        const rows = (await db
+          .delete(tokensT)
+          .where(
+            or(
+              and(isNotNull(tokensT.revokedAt), lt(tokensT.revokedAt, cutoffMs)),
+              and(isNotNull(tokensT.expiresAt), lt(tokensT.expiresAt, cutoffMs)),
+            ),
+          )
+          .returning({ id: tokensT.id })) as Array<{ id: string }>;
+        return rows.length;
       },
     },
   };

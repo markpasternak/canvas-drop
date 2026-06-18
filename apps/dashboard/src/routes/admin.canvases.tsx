@@ -15,6 +15,7 @@ import {
 } from "../lib/api.js";
 import { useAdminCanvases } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
+import { usePagination } from "../lib/use-pagination.js";
 import type { AdminCanvasesSearch } from "../router.js";
 
 const STATUS_CHIPS: Array<{ value: AdminCanvasStatus | undefined; label: string }> = [
@@ -110,10 +111,12 @@ export default function AdminCanvases() {
 
   const rows = data?.canvases ?? [];
   const total = data?.total ?? 0;
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + rows.length, total);
-  const hasPrev = page > 1;
-  const hasNext = offset + rows.length < total;
+  const { from, to, hasPrev, hasNext } = usePagination({
+    total,
+    offset,
+    itemCount: rows.length,
+    page,
+  });
   // Owner drill-down label, derived from the rows (all share one owner).
   const ownerLabel = owner ? (rows[0]?.owner?.email ?? "this owner") : null;
 

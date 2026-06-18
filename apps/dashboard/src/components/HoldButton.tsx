@@ -120,8 +120,8 @@ export function HoldButton({
           reduced-motion (cd-hold-cue) while holding, keeping the gesture legible;
           the JS timer is unaffected. */}
       {holding && (
-        <span className="cd-hold-cue sr-only" aria-hidden>
-          Holding…
+        <span className="cd-hold-cue sr-only" role="status">
+          Holding… keep holding to confirm
         </span>
       )}
       <span className="label relative inline-flex items-center gap-2 transition-transform duration-150">

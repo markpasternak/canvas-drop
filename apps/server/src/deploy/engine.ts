@@ -4,7 +4,7 @@ import type { Canvas, DeploySource, Draft, Manifest, Version } from "@canvas-dro
 import { looksLikeApiKey } from "../canvas/api-key.js";
 import { collectGarbage } from "../canvas/blob-gc.js";
 import { manifestsEqual, soleHtmlEntry } from "../canvas/manifest.js";
-import { mimeFor } from "../canvas/mime.js";
+import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -13,6 +13,7 @@ import type { UploadSessionsRepository } from "../db/repositories/upload-session
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { createPendingVersionWithRetry, KEEP_VERSIONS } from "./constants.js";
 import { DeployError, LIMITS } from "./errors.js";
 import type { DeployEntry } from "./ingest.js";
 import { normalizeEntryPath } from "./validate.js";
@@ -39,8 +40,9 @@ export interface DeployEngineDeps {
   screenshots?: import("../screenshots/trigger.js").ScreenshotTrigger;
 }
 
-/** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
-export const KEEP_VERSIONS = 10;
+// KEEP_VERSIONS now lives in ./constants.js (neutral home shared with the draft
+// service); re-exported here for the existing import surface.
+export { KEEP_VERSIONS };
 
 /**
  * How many file uploads run concurrently within one deploy. Each storage `put`
@@ -124,7 +126,7 @@ export function deployEngine(deps: DeployEngineDeps) {
           if (mime.downgraded) warnings.push(`${path} will be served as text/plain`);
           // Warn (don't block) if a text file appears to embed a canvas API key
           // (§12.1.2 — keys are server-side only, never in canvas files).
-          if (mime.contentType.startsWith("text/") && looksLikeApiKey(decodeText(entry.bytes))) {
+          if (isTextContentType(mime.contentType) && looksLikeApiKey(decodeText(entry.bytes))) {
             warnings.push(`${path} may contain a canvas API key — remove it before deploying`);
           }
 
@@ -234,26 +236,14 @@ export function deployEngine(deps: DeployEngineDeps) {
     },
 
     /** Create the pending version, retrying on a (canvas_id, number) collision. */
-    async createVersionWithRetry(
+    createVersionWithRetry(
       canvasId: string,
       actorId: string,
       source: DeploySource,
     ): Promise<Version> {
-      let lastErr: unknown;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const number = await deps.versions.nextNumber(canvasId);
-        try {
-          return await deps.versions.createPending({
-            canvasId,
-            number,
-            createdBy: actorId,
-            source,
-          });
-        } catch (err) {
-          lastErr = err; // unique-constraint collision from a concurrent deploy — retry
-        }
-      }
-      throw lastErr;
+      // Delegates to the shared helper (review server-canvas-10) so the draft
+      // service's publish path runs the exact same collision-retry policy.
+      return createPendingVersionWithRetry(deps.versions, canvasId, actorId, source);
     },
 
     /**
@@ -311,10 +301,6 @@ export function deployEngine(deps: DeployEngineDeps) {
       );
     },
   };
-}
-
-function decodeText(bytes: Uint8Array): string {
-  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
 export type DeployEngine = ReturnType<typeof deployEngine>;

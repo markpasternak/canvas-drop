@@ -4,10 +4,45 @@ import {
   isHtmlFile,
   isImage,
   nonEditableReason,
+  normalizeDraftPath,
   singleHtmlFile,
 } from "../lib/file-kind.js";
 
 const f = (path: string, mime: string, size = 100) => ({ path, mime, size });
+
+describe("normalizeDraftPath (client mirror of the server's normalizeEntryPath)", () => {
+  it("trims and strips a leading ./ or / so it maps to the manifest key", () => {
+    expect(normalizeDraftPath("  index.html  ")).toBe("index.html");
+    expect(normalizeDraftPath("/assets/app.js")).toBe("assets/app.js");
+    expect(normalizeDraftPath("./assets/app.js")).toBe("assets/app.js");
+  });
+
+  it("normalizes backslashes to forward slashes", () => {
+    expect(normalizeDraftPath("assets\\img\\logo.png")).toBe("assets/img/logo.png");
+  });
+
+  it("returns null for a path with a .. traversal segment", () => {
+    expect(normalizeDraftPath("../secret.txt")).toBeNull();
+    expect(normalizeDraftPath("assets/../../secret.txt")).toBeNull();
+  });
+
+  it("returns null for an absolute path", () => {
+    // Only ONE leading "./" or "/" is stripped, so "//etc" still starts with "/"
+    // after normalization and is rejected.
+    expect(normalizeDraftPath("//etc/passwd")).toBeNull();
+  });
+
+  it("returns null for a trailing-slash (directory) path and for empty input", () => {
+    expect(normalizeDraftPath("assets/")).toBeNull();
+    expect(normalizeDraftPath("")).toBeNull();
+    expect(normalizeDraftPath("   ")).toBeNull();
+  });
+
+  it("returns null for dotfiles (any segment starting with a dot)", () => {
+    expect(normalizeDraftPath(".env")).toBeNull();
+    expect(normalizeDraftPath("config/.secret")).toBeNull();
+  });
+});
 
 describe("isEditableFile (allowlist + size cap)", () => {
   it("opens recognized text/code files in the editor", () => {

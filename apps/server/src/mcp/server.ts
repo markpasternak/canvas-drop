@@ -25,9 +25,11 @@ import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
+import { LIMITS } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { DraftService } from "../draft/service.js";
 import type { Mailer } from "../email/mailer.js";
+import type { Logger } from "../log/logger.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
 import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
@@ -53,6 +55,9 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
   storage: StorageDriver;
   audit: AuditLog;
+  /** Structured logger — used to surface non-client faults (e.g. an image-encode
+   *  failure in `set_canvas_preview`) that are otherwise hidden behind a user-facing fail. */
+  log: Logger;
   hub?: RealtimeHub;
   /** Guest magic-link service (oidc/dev only; absent in proxy mode, where guest
    *  invites are refused — the IAP owns that boundary). Backs the guest-access tools
@@ -280,6 +285,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, zipBase64, files }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
+      // Mirror publish_draft + the HTTP deploy routes: a deploy on an archived/disabled
+      // canvas would silently pre-position content that goes live the moment it's
+      // restored, defeating the admin freeze. Refuse it up front.
+      if (cv.status !== "active") {
+        return fail(
+          "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
+        );
+      }
       // Exactly one payload form — an ambiguous both / empty neither is a client error.
       if (zipBase64 != null && files != null) {
         return fail("INVALID_REQUEST: provide either zipBase64 or files, not both");
@@ -307,10 +320,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         });
         return ok(result);
       } catch (e) {
-        // DeployError carries a stable .code; surface it rather than a 500-shaped throw.
-        const code = (e as { code?: string }).code;
-        const message = (e as { message?: string }).message ?? "deploy failed";
-        return fail(code ? `${code}: ${message}` : message);
+        // A DeployError carries a stable .code → surface it; anything else is a real
+        // bug/infra fault and must propagate (not be flattened into a vague user error).
+        return failDeploy(e);
       }
     },
   );
@@ -341,6 +353,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, manifest }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
+      if (cv.status !== "active") {
+        return fail(
+          "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
+        );
+      }
       try {
         return ok(await deps.upload.begin(cv, caller.userId, manifest));
       } catch (e) {
@@ -403,6 +420,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, uploadId }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
+      if (cv.status !== "active") {
+        return fail(
+          "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
+        );
+      }
       try {
         const result = await deps.upload.finalize(uploadId, caller.userId, cv.id);
         deps.audit.recordAudit({
@@ -499,6 +521,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, version }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
+      if (cv.status !== "active") {
+        return fail(
+          "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
+        );
+      }
       const target = await deps.versions.findReadyByNumber(cv.id, version);
       if (!target) return fail(`no ready version ${version}`);
       if (!(await deps.canvases.setCurrentVersionIfReady(cv.id, target.id))) {
@@ -510,7 +537,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         targetId: cv.id,
         meta: { version },
       });
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
       return ok({ ...canvasView(deps.config, { ...cv, currentVersionId: target.id }), version });
     },
   );
@@ -524,7 +554,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
-      if (!(await deps.canvases.unpublish(cv.id))) return fail("this canvas isn't published");
+      if (!(await deps.canvases.unpublish(cv.id)))
+        return fail("CANNOT_UNPUBLISH: this canvas isn't published");
       deps.audit.recordAudit({
         action: "canvas_unpublish",
         actorId: caller.userId,
@@ -532,8 +563,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       });
       // Offline for everyone now → drop live sockets and revoke guest grants so
       // re-publishing later doesn't silently resurrect them (mirrors the route).
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
+      if (deps.guests)
+        await deps.guests
+          .revokeAllForCanvas(cv.id)
+          .catch((err) =>
+            deps.log.error({ err, canvasId: cv.id }, "guests: revokeAllForCanvas failed"),
+          );
       return ok({
         url: canvasUrl(deps.config, cv.slug),
         publicationState: "draft",
@@ -571,7 +610,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         targetId: cv.id,
         meta: { changed: Object.keys(fields) },
       });
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
       return ok(canvasView(deps.config, updated));
     },
   );
@@ -643,8 +685,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!cv) return fail("canvas not found");
       if (!(await deps.canvases.archive(cv.id))) return fail("canvas not found");
       deps.audit.recordAudit({ action: "canvas_archive", actorId: caller.userId, targetId: cv.id });
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
+      if (deps.guests)
+        await deps.guests
+          .revokeAllForCanvas(cv.id)
+          .catch((err) =>
+            deps.log.error({ err, canvasId: cv.id }, "guests: revokeAllForCanvas failed"),
+          );
       return ok(canvasView(deps.config, { ...cv, status: "archived", currentVersionId: null }));
     },
   );
@@ -686,8 +736,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       }
       await deps.canvases.setStatus(cv.id, "deleted");
       deps.audit.recordAudit({ action: "canvas_delete", actorId: caller.userId, targetId: cv.id });
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-      if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
+      if (deps.guests)
+        await deps.guests
+          .revokeAllForCanvas(cv.id)
+          .catch((err) =>
+            deps.log.error({ err, canvasId: cv.id }, "guests: revokeAllForCanvas failed"),
+          );
       return ok({ ok: true });
     },
   );
@@ -727,14 +785,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .enum(["auto", "off"])
           .optional()
           .describe(
-            "Preview policy: 'auto' screenshots on publish, 'off' shows the generated cover. Upload a custom image with set_canvas_preview.",
+            "Preview policy: 'auto' screenshots on publish; 'off' disables the screenshot preview " +
+              "(the preview URL returns 404 and the dashboard falls back to a procedurally generated " +
+              "cover). Upload a custom image with set_canvas_preview.",
           ),
         guestAiEnabled: z.boolean().optional(),
         guestAiCap: z.number().min(0).optional(),
         galleryListed: z.boolean().optional(),
         galleryTemplatable: z.boolean().optional(),
         gallerySummary: z.string().max(500).nullable().optional(),
-        galleryTags: z.array(z.string()).optional(),
+        galleryTags: z.array(z.string().max(50)).max(20).optional(),
       },
     },
     async ({ id, ...input }) => {
@@ -798,6 +858,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         id: z.string().describe("The canvas id."),
         image: z
           .string()
+          // A base64 string is ~4/3 the decoded size; cap it generously above the
+          // per-file byte limit so the post-decode check is the precise gate, but a
+          // grossly oversized payload is rejected before it's even decoded.
+          .max(40 * 1024 * 1024)
           .optional()
           .describe("Base64-encoded image (png/jpeg/webp). Omit to clear the custom preview."),
       },
@@ -820,10 +884,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       }
       const bytes = new Uint8Array(Buffer.from(image, "base64"));
       if (bytes.byteLength === 0) return fail("INVALID_IMAGE: empty image");
+      // Cap the decoded bytes BEFORE handing them to sharp — sharp bounds the decoded
+      // pixel count, not the compressed input size, so a large valid encode would
+      // otherwise allocate freely. Mirrors the HTTP PUT /:id/preview body limit.
+      if (bytes.byteLength > LIMITS.maxFileBytes) {
+        return fail("IMAGE_TOO_LARGE: image exceeds the per-file limit");
+      }
       let renditions: Awaited<ReturnType<typeof encodeRenditions>>;
       try {
         renditions = await encodeRenditions(bytes);
-      } catch {
+      } catch (err) {
+        // A codec crash / OOM / unexpected format is invisible without this — the
+        // user-facing fail stays generic, but operators get a server-side trace.
+        deps.log.warn({ err, canvasId: cv.id }, "set_canvas_preview encodeRenditions failed");
         return fail("INVALID_IMAGE: could not read that image");
       }
       for (const r of SCREENSHOT_RENDITIONS) {
@@ -961,7 +1034,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         targetId: cv.id,
         meta: { entryId, kind: entry?.principalKind ?? null },
       });
-      if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+      if (deps.hub)
+        await deps.hub
+          .revalidateCanvas(cv.id)
+          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
       return ok({ ok: true });
     },
   );

@@ -97,7 +97,9 @@ export function passwordGate(deps: PasswordGateDeps) {
       }
       const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
       const password = typeof form.password === "string" ? form.password : "";
-      const ok = canvas.passwordHash ? await verifyPassword(canvas.passwordHash, password) : false;
+      const ok = canvas.passwordHash
+        ? await verifyPassword(canvas.passwordHash, password, c.get("log"))
+        : false;
       deps.audit.recordAudit({
         action: "password_attempt",
         actorId: principalAttributionId(c),

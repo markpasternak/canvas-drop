@@ -124,6 +124,12 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
         return c.json({ code: "KEY_TOO_LARGE" }, 413);
       }
       const body = (await c.req.json().catch(() => ({}))) as { by?: unknown };
+      // `typeof NaN/Infinity === "number"` — both would forward into the SQL
+      // `value + by` and corrupt the counter (NULL on sqlite, range error on pg).
+      // An absent `by` defaults to 1; an explicit non-finite `by` is a 400.
+      if (body.by !== undefined && (typeof body.by !== "number" || !Number.isFinite(body.by))) {
+        return c.json({ code: "INVALID_BODY", message: "by must be a finite number" }, 400);
+      }
       const by = typeof body.by === "number" ? body.by : 1;
       const scope = scopeOf(c);
       if (await overKeyLimit(canvasId(c), scope, key)) return c.json({ code: "KEY_LIMIT" }, 409);

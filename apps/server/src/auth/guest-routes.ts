@@ -82,13 +82,23 @@ export function guestRoutes(deps: GuestRoutesDeps) {
     if (!isSameOrigin(c, deps.config)) {
       return c.json({ error: "cross_origin_forbidden" }, 403);
     }
-    const principal = await deps.guests.consumeMagicLink(c, c.req.param("token"));
-    if (principal?.kind !== "guest") return invalidLink(c);
-    const canvas = await deps.canvases.findById(principal.canvasId);
+    const token = c.req.param("token");
+    // Check the canvas is still servable BEFORE consuming the token: peek the
+    // invite read-only, then verify the target canvas is active. Consuming first
+    // would atomically burn the single-use token even when the canvas is archived/
+    // deleted — the guest would get a dead-end 410 with no way to re-use the link.
+    const peeked = await deps.guests.peekInvite(token);
+    if (!peeked) return invalidLink(c);
+    const canvas = await deps.canvases.findById(peeked.canvasId);
     if (canvas?.status !== "active") return invalidLink(c);
+
+    const principal = await deps.guests.consumeMagicLink(c, token);
+    if (principal?.kind !== "guest") return invalidLink(c);
     deps.audit?.recordAudit({
       action: "guest_login",
+      actorId: principal.id,
       targetId: canvas.id,
+      ip: c.get("clientIp") ?? undefined,
       meta: { email: principal.email },
     });
     return c.redirect(canvasUrl(deps.config, canvas.slug));

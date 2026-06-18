@@ -46,6 +46,7 @@ import { useCanvases } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { useMediaQuery } from "../lib/use-media-query.js";
+import { usePagination } from "../lib/use-pagination.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
 
@@ -651,12 +652,12 @@ export default function CanvasList() {
   useEffect(() => {
     setCloneOpen(false);
   }, [focusedId]);
-  const from = total === 0 ? 0 : offset + 1;
-  // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
-  // "Showing 49–49 of 5" before the page snaps back.
-  const to = Math.min(offset + items.length, total);
-  const hasPrev = page > 1;
-  const hasNext = offset + items.length < total;
+  const { from, to, hasPrev, hasNext } = usePagination({
+    total,
+    offset,
+    itemCount: items.length,
+    page,
+  });
   // Select-all operates on the visible page only (selection is per-view).
   const selectedOnPage = items.filter((c) => selected.has(c.id));
   const allSelected = items.length > 0 && selectedOnPage.length === items.length;

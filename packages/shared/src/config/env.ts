@@ -152,8 +152,9 @@ const rawSchema = z
     // resolved from the server module; override for non-standard layouts.
     CANVAS_DROP_DASHBOARD_DIST: z.string().optional(),
 
-    // Rate limiting (§12.3, M7). Per-class req/min defaults; admin-tunable rate
-    // limits are a follow-up (these are enforcement constants on the hot path).
+    // Rate limiting (§12.3, M7). Per-class req/min enforcement constants on the
+    // hot path; read at boot from env only (not yet runtime-editable via the admin
+    // UI — a deliberate follow-up; the admin config marks these fields read-only).
     CANVAS_DROP_RATELIMIT_ENABLED: bool(true),
     CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN: posInt(120),
     CANVAS_DROP_RATELIMIT_AI_PER_MIN: posInt(10),

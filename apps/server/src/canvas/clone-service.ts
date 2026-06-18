@@ -2,6 +2,7 @@ import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { generateApiKey, hashApiKey } from "./api-key.js";
 import { generateUniqueSlug } from "./slug.js";
@@ -12,6 +13,9 @@ export interface CloneServiceDeps {
   versions: VersionsRepository;
   drafts: DraftsRepository;
   storage: StorageDriver;
+  /** Optional logger so a failed mid-clone rollback (which can leave a half-cloned
+   *  canvas active) is observable rather than fully silent (review server-canvas-17). */
+  log?: Logger;
 }
 
 /**
@@ -115,10 +119,23 @@ export function cloneService(deps: CloneServiceDeps) {
         // write consistency gap. Both cleanup steps are guarded so the ORIGINAL error
         // always rethrows; a leaked blob under the now-soft-deleted canvas is reclaimed
         // by the purge sweep.
-        await deps.canvases.setStatus(canvas.id, "deleted").catch(() => {});
+        await deps.canvases.setStatus(canvas.id, "deleted").catch((rollbackErr) =>
+          // A failed soft-delete is the dangerous one: the canvas row stays `active`
+          // with an incomplete draft and purge only sweeps `deleted` rows. Log so it
+          // doesn't silently leave a half-cloned canvas alive (review server-canvas-17).
+          deps.log?.warn(
+            { err: rollbackErr, canvasId: canvas.id },
+            "clone rollback: soft-delete failed — canvas may remain active half-cloned",
+          ),
+        );
         await deps.storage
           .deleteMany(hashes.map((hash) => blobKey(canvas.id, hash)))
-          .catch(() => {});
+          .catch((cleanupErr) =>
+            deps.log?.warn(
+              { err: cleanupErr, canvasId: canvas.id },
+              "clone rollback: blob cleanup failed — leaked blobs reclaimed by purge",
+            ),
+          );
         throw err;
       }
 

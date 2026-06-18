@@ -29,7 +29,8 @@ describe("serveCanvas (integration)", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function setup(opts: { spaFallback?: boolean } = {}) {
+  async function setup(opts: { spaFallback?: boolean; config?: Config } = {}) {
+    const cfg = opts.config ?? config;
     client = await makeTestDb("sqlite");
     dir = await mkdtemp(join(tmpdir(), "cd-serve-"));
     storage = new LocalDriver(dir);
@@ -51,6 +52,7 @@ describe("serveCanvas (integration)", () => {
       "app.js": "console.log(1)",
       "assets/app.abcdef12.js": "hashed",
       "danger.php": "<?php echo 1; ?>",
+      "logo.svg": '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
     };
     const enc = new TextEncoder();
     const manifest: Manifest = {};
@@ -67,7 +69,11 @@ describe("serveCanvas (integration)", () => {
       await storage.put(blobKey(cv.id, hash), bytes);
       manifest[path] = { size: bytes.length, hash, mime: "x" };
     }
-    await versions.markReady(v.id, { fileCount: 4, totalBytes: 0, manifest });
+    await versions.markReady(v.id, {
+      fileCount: Object.keys(manifest).length,
+      totalBytes: 0,
+      manifest,
+    });
     await canvases.setCurrentVersion(cv.id, v.id);
     const updated = (await canvases.findById(cv.id)) as Canvas;
     const usage = usageEventsRepository(client);
@@ -78,7 +84,7 @@ describe("serveCanvas (integration)", () => {
       c.set("user", owner);
       await next();
     });
-    app.all("*", serveCanvas({ config, versions, storage, usage }));
+    app.all("*", serveCanvas({ config: cfg, versions, storage, usage }));
     return { app, canvas: updated, owner, usage, versions };
   }
 
@@ -130,6 +136,30 @@ describe("serveCanvas (integration)", () => {
     const res = await app.request("/c/s/danger.php");
     expect(res.headers.get("Content-Type")).toMatch(/text\/plain/);
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("path mode: an SVG is forced to download (Content-Disposition: attachment) — cross-canvas XSS guard (server-canvas-5)", async () => {
+    // Default config is path mode; all canvases share one origin, so an inline SVG
+    // with embedded <script> would execute in the shared origin.
+    const { app } = await setup();
+    const res = await app.request("/c/s/logo.svg");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toMatch(/image\/svg\+xml/);
+    expect(res.headers.get("Content-Disposition")).toBe("attachment");
+  });
+
+  it("subdomain mode: an SVG is served inline (no attachment) — each canvas is its own origin (server-canvas-5)", async () => {
+    const subdomainConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+    });
+    const { app } = await setup({ config: subdomainConfig });
+    // In subdomain mode the slug comes from the host; the asset path is the bare path.
+    const res = await app.request("/logo.svg");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toMatch(/image\/svg\+xml/);
+    expect(res.headers.get("Content-Disposition")).toBeNull();
   });
 
   it("sets ETag + no-cache for stable names, immutable for content-hashed names", async () => {

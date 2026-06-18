@@ -13,7 +13,7 @@ import { filesRepository } from "../db/repositories/files.js";
 import { kvRepository } from "../db/repositories/kv.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
 import { canvasApiRoutes } from "./canvas-api.js";
@@ -192,6 +192,35 @@ describe("canvas KV routes", () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("NOT_NUMERIC");
   });
+
+  // `typeof Infinity === "number"` would otherwise slip past the guard and corrupt
+  // the counter (NULL on sqlite, range error on pg). `JSON.parse("1e9999")` yields
+  // ±Infinity — exactly the value a forged/overflowing body produces. Reject with
+  // 400 and leave the existing counter untouched. Dual-dialect (corruption differs).
+  for (const dialect of DIALECTS) {
+    it(`increment with a non-finite \`by\` → 400, no corruption (${dialect})`, async () => {
+      client = await makeTestDb(dialect);
+      const { ownerId } = await setup(client);
+      const app = buildApi(client, ownerId);
+      // Seed a valid counter at 5.
+      await app.request("/v1/c/app/kv/n/increment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ by: 5 }),
+      });
+      for (const raw of ["1e9999", "-1e9999"]) {
+        const res = await app.request("/v1/c/app/kv/n/increment", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"by":${raw}}`,
+        });
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { code: string }).code).toBe("INVALID_BODY");
+      }
+      // The counter is still exactly 5 — no NULL/poison write happened.
+      expect(await (await app.request("/v1/c/app/kv/n")).json()).toEqual({ value: 5 });
+    });
+  }
 
   it("a new key past the per-scope limit → 409 KEY_LIMIT", async () => {
     client = await makeTestDb("sqlite");

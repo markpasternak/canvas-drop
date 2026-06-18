@@ -1,4 +1,5 @@
 import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
+import type { Logger } from "../log/logger.js";
 
 /**
  * Shared deps for the cosmetic preview-existence hint (plan 004). Both fields are
@@ -10,6 +11,10 @@ import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 export interface PreviewHintDeps {
   screenshotsEnabled?: () => Promise<boolean>;
   screenshots?: Pick<ScreenshotsRepository, "doneCanvasIds">;
+  /** Optional — when present, a swallowed (degraded-to-empty) failure is logged (warn)
+   *  so a persistent screenshot-subsystem break is visible to operators rather than
+   *  indistinguishable from a healthy-but-empty pipeline (review server-canvas-6). */
+  log?: Logger;
 }
 
 /**
@@ -31,7 +36,10 @@ export async function resolvePreviewIds(
   try {
     if (!(await deps.screenshotsEnabled())) return new Set();
     return new Set(await deps.screenshots.doneCanvasIds(canvasIds));
-  } catch {
+  } catch (err) {
+    // Cosmetic-degrade to "no previews" is correct, but a persistent failure here
+    // would otherwise be invisible — log it so all-covers-vanished has a trail.
+    deps.log?.warn({ err }, "preview-existence hint failed; degrading to no previews");
     return new Set();
   }
 }

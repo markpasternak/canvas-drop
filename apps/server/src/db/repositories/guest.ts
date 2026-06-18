@@ -4,7 +4,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -167,6 +167,34 @@ export function guestRepository(client: DbClient) {
         .update(sessions)
         .set({ revokedAt: Date.now() })
         .where(and(eq(sessions.inviteId, inviteId), isNull(sessions.revokedAt)));
+    },
+
+    /**
+     * Retention prune (KTD-7): hard-delete dead guest invites (and their sessions)
+     * older than `cutoffMs`. Guest invites store an email address (PII), so a
+     * revoked or long-expired invite is dead weight to discard per the privacy
+     * policy. "Dead" = revoked, or expired before the cutoff; a still-active or
+     * still-pending-and-unexpired invite is never touched. Sessions reference
+     * invites via FK with no cascade, so the invites' sessions are deleted first.
+     * Returns the number of invite rows removed.
+     */
+    async pruneDeadBefore(cutoffMs: number): Promise<number> {
+      // Revoked invites carry no revoked-at clock, so gate them by createdAt;
+      // expired invites by their own expiry. Pending-or-active live invites stay.
+      const deadCond = or(
+        and(eq(invites.state, "revoked"), lt(invites.createdAt, cutoffMs)),
+        and(isNotNull(invites.expiresAt), lt(invites.expiresAt, cutoffMs)),
+      );
+      const dead = (await db.select({ id: invites.id }).from(invites).where(deadCond)) as Array<{
+        id: string;
+      }>;
+      if (dead.length === 0) return 0;
+      const deadIds = dead.map((r) => r.id);
+      // Drop the dependent sessions first (FK on invite_id, no cascade), then the
+      // invite rows themselves.
+      await db.delete(sessions).where(inArray(sessions.inviteId, deadIds));
+      await db.delete(invites).where(inArray(invites.id, deadIds));
+      return dead.length;
     },
   };
 }

@@ -1,5 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { AdminSettingsService } from "../admin/settings-service.js";
@@ -20,6 +21,9 @@ export type AiSettings = Pick<
 /** AI output limits (§6.6). Default modest; hard cap so one call can't run away. */
 export const AI_DEFAULT_MAX_TOKENS = 1024;
 export const AI_MAX_TOKENS = 8192;
+/** Max request body for the AI chat route. Caps the input that is buffered into
+ *  memory and forwarded upstream before the spend-based quota heuristic runs. */
+export const AI_MAX_BODY_BYTES = 256 * 1024;
 /** Max wait for the provider's usage promise before recording with 0 tokens. */
 export const USAGE_SETTLE_TIMEOUT_MS = 5_000;
 
@@ -87,7 +91,12 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     ),
   );
 
-  app.post("/chat", async (c) => {
+  const chatBodyLimit = bodyLimit({
+    maxSize: AI_MAX_BODY_BYTES,
+    onError: (c) => c.json({ code: "BODY_TOO_LARGE", message: "request body too large" }, 413),
+  });
+
+  app.post("/chat", chatBodyLimit, async (c) => {
     const parsed = chatSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ code: "INVALID_BODY" }, 400);
     const { model, messages, system } = parsed.data;

@@ -35,6 +35,17 @@ export function useUpdateSettings(id: string) {
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
+        if (patch.galleryTemplatable !== undefined)
+          optimistic.galleryTemplatable = patch.galleryTemplatable;
+        if (patch.guestAiEnabled !== undefined) optimistic.guestAiEnabled = patch.guestAiEnabled;
+        if (patch.guestAiCap !== undefined) optimistic.guestAiCap = patch.guestAiCap;
+        if (patch.access !== undefined) {
+          optimistic.access = patch.access;
+          // `shared` is the derived "anyone but the owner can open it" boolean
+          // (access !== "private"); keep it in lockstep so the rung and the legacy
+          // chip don't flicker apart while the write is in flight.
+          optimistic.shared = patch.access !== "private";
+        }
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
         qc.setQueryData(keys.canvas(id), optimistic);
       }
@@ -291,7 +302,12 @@ export function useRestoreToDraft(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (version: number) => api.restoreToDraft(id, version),
-    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+    onSuccess: (draft: DraftView) => {
+      qc.setQueryData(keys.draft(id), draft);
+      // A restore changes which version the draft mirrors — refresh the Versions
+      // tab (count / current pointer / dirty-state guard), mirroring useUnpublishCanvas.
+      qc.invalidateQueries({ queryKey: keys.versions(id) });
+    },
   });
 }
 

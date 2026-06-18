@@ -1,66 +1,36 @@
-import type { Config } from "@canvas-drop/shared";
 import { mcpAuthRouter, StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
-import type { AuditLog } from "../audit/audit-log.js";
-import type { GuestService } from "../auth/guest.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
-import type { CloneService } from "../canvas/clone-service.js";
-import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
-import type { CanvasesRepository } from "../db/repositories/canvases.js";
-import type { FilesRepository } from "../db/repositories/files.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
-import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
-import type { UsersRepository } from "../db/repositories/users.js";
-import type { VersionsRepository } from "../db/repositories/versions.js";
-import type { DeployEngine } from "../deploy/engine.js";
-import type { DraftService } from "../draft/service.js";
-import type { Mailer } from "../email/mailer.js";
+import { LIMITS } from "../deploy/errors.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
-import type { RealtimeHub } from "../realtime/hub.js";
-import type { PreviewHintDeps } from "../screenshots/preview-ids.js";
-import type { StorageDriver } from "../storage/driver.js";
-import type { UploadService } from "../upload/service.js";
 import { type McpAuditSink, McpOAuthProvider } from "./provider.js";
-import { buildMcpServer } from "./server.js";
+import { buildMcpServer, type McpToolDeps } from "./server.js";
 
-export interface McpRoutesDeps extends PreviewHintDeps {
-  config: Config;
+/**
+ * The OAuth-layer deps for the remote MCP routes. Everything the tool server needs
+ * comes from {@link McpToolDeps} (extended below) so the two interfaces can't drift —
+ * a new tool dependency is added in one place and flows straight through to
+ * `buildMcpServer`. This interface adds only the OAuth / transport-layer extras.
+ */
+export interface McpRoutesDeps extends McpToolDeps {
   strategy: AuthStrategy;
-  users: UsersRepository;
   allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">;
   oauth: OauthRepository;
-  canvases: CanvasesRepository;
-  versions: VersionsRepository;
-  engine: DeployEngine;
-  /** Two-channel staging upload service (plan 003) — backs the MCP upload tools. */
-  upload: UploadService;
-  /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
-  storage: StorageDriver;
-  /** Guest magic-link service (oidc/dev only) — backs the guest-access MCP tools. */
-  guests?: GuestService;
-  /** Mailer for guest invites (absent → invites refused). */
-  mailer?: Mailer;
-  /** Clone-as-template service — backs `clone_canvas`. */
-  clone: CloneService;
-  /** Draft/editor service — backs the draft MCP tools. */
-  drafts: DraftService;
-  /** Usage stats sources — back `get_canvas_usage`. */
-  usage: UsageEventsRepository;
-  files: FilesRepository;
-  aiUsage: AiUsageRepository;
-  audit: AuditLog;
   /** Optional OAuth-lifecycle audit sink (U6); the tool layer uses `audit` directly. */
   oauthAudit?: McpAuditSink;
   /** Shared rate-limit store (U6) — throttles tool calls per authenticated caller. */
   rateLimitStore?: RateLimitStore;
-  hub?: RealtimeHub;
-  // Screenshot preview hint (plan 004) comes from PreviewHintDeps — both optional;
-  // omitted → tools report `hasPreview` false / no `previewUrl`.
 }
+
+/** Headroom above the 100 MB canvas cap for the JSON-RPC + base64 framing overhead of
+ *  the largest in-band MCP payload (a single-call deploy or a custom-preview image). */
+const MCP_BODY_LIMIT = LIMITS.maxCanvasBytes + 10 * 1024 * 1024;
 
 /**
  * The remote MCP surface (U4 + U5), mounted as a native Hono sub-app BEFORE the
@@ -108,6 +78,14 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   // hint so clients can discover the authorization server.
   app.all(
     "/mcp",
+    // Reject an oversized JSON-RPC body BEFORE it is buffered — the per-tool service
+    // checks only fire after the whole body is in memory. Mirrors the HTTP deploy
+    // routes' deployBodyLimit. Mounted ahead of the bearer check so a giant body is
+    // dropped even from an unauthenticated caller.
+    bodyLimit({
+      maxSize: MCP_BODY_LIMIT,
+      onError: (c) => c.json({ error: "payload_too_large" }, 413),
+    }),
     async (c, next) => {
       const challenge = `Bearer error="Unauthorized", resource_metadata="${resourceMetadataUrl}"`;
       const deny = () => {
@@ -144,30 +122,10 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
       const auth = c.get("mcpAuth");
       if (!auth) return c.json({ error: "unauthorized" }, 401);
       // Fresh transport + server per request (stateless), bound to the verified caller.
+      // `McpRoutesDeps extends McpToolDeps`, so structural subtyping lets us pass the
+      // deps straight through — no field-by-field reconstruction to drift out of sync.
       const transport = new StreamableHTTPTransport();
-      const server = buildMcpServer(
-        {
-          config: deps.config,
-          users: deps.users,
-          canvases: deps.canvases,
-          versions: deps.versions,
-          engine: deps.engine,
-          upload: deps.upload,
-          storage: deps.storage,
-          guests: deps.guests,
-          mailer: deps.mailer,
-          clone: deps.clone,
-          drafts: deps.drafts,
-          usage: deps.usage,
-          files: deps.files,
-          aiUsage: deps.aiUsage,
-          audit: deps.audit,
-          hub: deps.hub,
-          screenshots: deps.screenshots,
-          screenshotsEnabled: deps.screenshotsEnabled,
-        },
-        { userId: auth.userId },
-      );
+      const server = buildMcpServer(deps, { userId: auth.userId });
       await server.connect(transport);
       try {
         return await transport.handleRequest(c);

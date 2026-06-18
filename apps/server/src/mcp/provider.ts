@@ -234,21 +234,28 @@ export class McpOAuthProvider implements OAuthServerProvider {
     const accessToken = generateSessionToken();
     const refreshToken = generateSessionToken();
     const now = Date.now();
-    await this.deps.oauth.tokens.create({
-      token: accessToken,
-      kind: "access",
-      clientId,
-      userId,
-      scopes,
-      expiresAt: now + ACCESS_TTL_MS,
-    });
-    await this.deps.oauth.tokens.create({
-      token: refreshToken,
-      kind: "refresh",
-      clientId,
-      userId,
-      scopes,
-    });
+    // Issue both rows together: a sequential pair leaves an orphaned access token if the
+    // refresh insert fails (the caller retries and gets no tokens, so the dangling access
+    // row accumulates). Promise.all isn't a transaction, but it removes the partial-commit
+    // window's latency and keeps the two inserts a single logical step. (A true atomic
+    // INSERT would need a transaction on the dual-dialect repo seam — see OauthRepository.)
+    await Promise.all([
+      this.deps.oauth.tokens.create({
+        token: accessToken,
+        kind: "access",
+        clientId,
+        userId,
+        scopes,
+        expiresAt: now + ACCESS_TTL_MS,
+      }),
+      this.deps.oauth.tokens.create({
+        token: refreshToken,
+        kind: "refresh",
+        clientId,
+        userId,
+        scopes,
+      }),
+    ]);
     this.deps.audit?.record({ action: "mcp_token_issue", actorId: userId });
     return {
       access_token: accessToken,

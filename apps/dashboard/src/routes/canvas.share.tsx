@@ -67,7 +67,10 @@ export default function Share() {
     return <Skeleton className="h-64" />;
   }
 
-  const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const save = (patch: Parameters<typeof update.mutate>[0]) =>
+    update.mutate(patch, {
+      onError: (err) => toast(err instanceof ApiError ? err.hint : "Couldn't save", "error"),
+    });
 
   const saveGallery = async (patch: Parameters<typeof update.mutate>[0]) => {
     try {
@@ -385,7 +388,8 @@ function AccessLadder({
 }) {
   const rungs = RUNGS.filter((r) => !r.adminGated || allowPublic || value === r.value);
   return (
-    <fieldset className="space-y-2" aria-label="Who can access this canvas">
+    <fieldset className="space-y-2">
+      <legend className="sr-only">Who can access this canvas</legend>
       {rungs.map((r) => {
         const blocked = disabled && r.value !== "private";
         return (
@@ -430,7 +434,12 @@ function Allowlist({ canvasId }: { canvasId: string }) {
     api
       .listAllowlist(canvasId)
       .then(setEntries)
-      .catch(() => setEntries([]));
+      .catch((err) => {
+        // Surface the failure instead of silently showing an empty list — an
+        // inaccessible allowlist must be distinguishable from a real-empty one.
+        toast(err instanceof ApiError ? err.hint : "Couldn't load the access list", "error");
+        setEntries([]);
+      });
   };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvasId change only

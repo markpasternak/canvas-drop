@@ -1,0 +1,182 @@
+import type { Canvas } from "@canvas-drop/shared/db";
+import { describe, expect, it } from "vitest";
+import { type CanvasSettingsInput, resolveSettingsUpdate } from "./settings-update.js";
+
+/**
+ * Pure-function unit tests for the listability invariant + share/gallery
+ * preconditions (review server-canvas-4). resolveSettingsUpdate is the single
+ * source of truth behind both the management PATCH route and the MCP
+ * update_canvas tool, so every denial branch — including NOT_PUBLISHED and
+ * PASSWORD_PROTECTED, which the route-level suites only exercise indirectly —
+ * gets an explicit test here. No I/O.
+ */
+
+/** A published, shared (whole_org), unprotected canvas — the gallery-eligible base. */
+function canvas(overrides: Partial<Canvas> = {}): Canvas {
+  return {
+    id: "cv1",
+    slug: "s",
+    slugCustom: false,
+    title: "Title",
+    description: null,
+    ownerId: "owner",
+    access: "whole_org",
+    sharedExpiresAt: null,
+    galleryListed: false,
+    galleryTemplatable: false,
+    gallerySummary: null,
+    galleryTags: null,
+    galleryPublishedAt: null,
+    passwordHash: null,
+    passwordVersion: 0,
+    spaFallback: false,
+    previewMode: "auto",
+    backendEnabled: false,
+    capKv: true,
+    capFiles: true,
+    capAi: true,
+    capRealtime: true,
+    guestAiEnabled: false,
+    guestAiCap: 0,
+    apiKeyHash: "h",
+    status: "active",
+    disabledReason: null,
+    currentVersionId: "v1",
+    clonedFromCanvasId: null,
+    createdAt: 0,
+    updatedAt: 0,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+const PUBLIC_OK = { canPublishPublic: true };
+const PUBLIC_DENIED = { canPublishPublic: false };
+
+function resolve(cv: Canvas, input: CanvasSettingsInput, opts = PUBLIC_OK) {
+  return resolveSettingsUpdate(cv, input, opts);
+}
+
+describe("resolveSettingsUpdate — denial paths", () => {
+  it("SHARE_REQUIRES_PUBLISH: sharing an unpublished canvas is rejected (409)", () => {
+    const r = resolve(canvas({ access: "private", currentVersionId: null }), {
+      access: "whole_org",
+    });
+    expect(r).toMatchObject({ ok: false, code: "SHARE_REQUIRES_PUBLISH", status: 409 });
+  });
+
+  it("SHARE_REQUIRES_PUBLISH: an archived canvas (with a version) is not 'published'", () => {
+    const r = resolve(canvas({ access: "private", status: "archived" }), { access: "whole_org" });
+    expect(r).toMatchObject({ ok: false, code: "SHARE_REQUIRES_PUBLISH", status: 409 });
+  });
+
+  it("PUBLIC_NOT_ALLOWED: public_link without the admin grant is rejected (403)", () => {
+    const r = resolve(canvas(), { access: "public_link" }, PUBLIC_DENIED);
+    expect(r).toMatchObject({ ok: false, code: "PUBLIC_NOT_ALLOWED", status: 403 });
+  });
+
+  it("NOT_SHARED: listing a private canvas is rejected (409)", () => {
+    const r = resolve(canvas({ access: "private" }), { galleryListed: true });
+    expect(r).toMatchObject({ ok: false, code: "NOT_SHARED", status: 409 });
+  });
+
+  it("NOT_PUBLISHED: listing a shared-but-unpublished canvas is rejected (409)", () => {
+    // Already shared (so NOT_SHARED doesn't fire) but never published.
+    const r = resolve(canvas({ currentVersionId: null }), { galleryListed: true });
+    expect(r).toMatchObject({ ok: false, code: "NOT_PUBLISHED", status: 409 });
+  });
+
+  it("PASSWORD_PROTECTED: listing while a password stays set is rejected (409)", () => {
+    const r = resolve(canvas({ passwordHash: "argon2-hash" }), { galleryListed: true });
+    expect(r).toMatchObject({ ok: false, code: "PASSWORD_PROTECTED", status: 409 });
+  });
+
+  it("PASSWORD_PROTECTED: listing while ADDING a password in the same patch is rejected", () => {
+    const r = resolve(canvas(), { galleryListed: true, password: "hunter2" });
+    expect(r).toMatchObject({ ok: false, code: "PASSWORD_PROTECTED", status: 409 });
+  });
+
+  it("NOT_LISTED: enabling templatable without the canvas being listed is rejected (409)", () => {
+    const r = resolve(canvas(), { galleryTemplatable: true });
+    expect(r).toMatchObject({ ok: false, code: "NOT_LISTED", status: 409 });
+  });
+});
+
+describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => {
+  it("lists a published, shared, unprotected canvas", () => {
+    const r = resolve(canvas(), { galleryListed: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.patch.galleryListed).toBe(true);
+  });
+
+  it("lists + templatable together when all preconditions hold", () => {
+    const r = resolve(canvas(), { galleryListed: true, galleryTemplatable: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.galleryListed).toBe(true);
+      expect(r.patch.galleryTemplatable).toBe(true);
+    }
+  });
+
+  it("removing the password (null) clears the protection so listing is allowed", () => {
+    const r = resolve(canvas({ passwordHash: "argon2-hash" }), {
+      galleryListed: true,
+      password: null,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.galleryListed).toBe(true);
+      expect(r.password).toBeNull();
+    }
+  });
+
+  it("setting a password un-lists AND clears the gallery metadata", () => {
+    const cv = canvas({ galleryListed: true, gallerySummary: "s", galleryTags: ["a"] });
+    const r = resolve(cv, { password: "hunter2" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.galleryListed).toBe(false);
+      expect(r.patch.galleryTemplatable).toBe(false);
+      expect(r.patch.gallerySummary).toBeNull();
+      expect(r.patch.galleryTags).toBeNull();
+    }
+  });
+
+  it("going private un-lists but KEEPS the gallery summary/tags (re-sharing restores them)", () => {
+    const cv = canvas({ galleryListed: true, gallerySummary: "s", galleryTags: ["a"] });
+    const r = resolve(cv, { access: "private" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.galleryListed).toBe(false);
+      expect(r.patch.galleryTemplatable).toBe(false);
+      // Summary/tags are NOT cleared on going-private (only on setting a password).
+      expect(r.patch.gallerySummary).toBeUndefined();
+      expect(r.patch.galleryTags).toBeUndefined();
+      expect(r.targetAccess).toBe("private");
+    }
+  });
+
+  it("deprecated `shared: true` boolean maps to whole_org", () => {
+    const r = resolve(canvas({ access: "private" }), { shared: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.targetAccess).toBe("whole_org");
+  });
+
+  it("deprecated `shared: false` boolean maps to private", () => {
+    const r = resolve(canvas(), { shared: false });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.targetAccess).toBe("private");
+  });
+
+  it("public_link with the admin grant is allowed", () => {
+    const r = resolve(canvas(), { access: "public_link" }, PUBLIC_OK);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.targetAccess).toBe("public_link");
+  });
+
+  it("a no-op patch leaves access unchanged (targetAccess undefined)", () => {
+    const r = resolve(canvas(), { title: "Renamed" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.targetAccess).toBeUndefined();
+  });
+});

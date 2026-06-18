@@ -16,20 +16,30 @@ export function Toggle({
   description?: ReactNode;
   disabled?: boolean;
 }) {
-  const id = useId();
+  // A <label htmlFor> only names labelable elements (input/select/…), NOT a
+  // role="switch" button — browsers don't propagate it as the button's accessible
+  // name. Wire the NAME via aria-labelledby (the label only, so AT announces the
+  // control by its label) and the supplementary copy via aria-describedby.
+  const labelId = useId();
+  const descId = useId();
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="space-y-0.5">
-        <label htmlFor={id} className="text-sm font-medium text-fg">
+        <span id={labelId} className="block text-sm font-medium text-fg">
           {label}
-        </label>
-        {description && <p className="text-xs text-muted">{description}</p>}
+        </span>
+        {description && (
+          <p id={descId} className="text-xs text-muted">
+            {description}
+          </p>
+        )}
       </div>
       <button
-        id={id}
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-describedby={description ? descId : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(

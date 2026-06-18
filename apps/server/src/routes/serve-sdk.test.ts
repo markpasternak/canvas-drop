@@ -10,6 +10,14 @@ describe("serveSdkRoutes", () => {
     expect(await res.text()).toBe("window.canvasdrop={};");
   });
 
+  it("carries the baseline security headers (self-Response doesn't bypass them)", async () => {
+    const app = serveSdkRoutes({ loadBundle: () => "window.canvasdrop={};" });
+    const res = await app.request("/sdk/v1.js");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("referrer-policy")).toBe("same-origin");
+    expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
+  });
+
   it("503s with guidance when the bundle isn't built", async () => {
     const app = serveSdkRoutes({ loadBundle: () => null });
     const res = await app.request("/sdk/v1.js");

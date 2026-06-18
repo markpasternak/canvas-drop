@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { usersRepository } from "../db/repositories/users.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { devStrategy } from "./dev.js";
 import { type AuthEvent, type AuthEventSink, authGateway } from "./gateway.js";
@@ -59,14 +59,14 @@ function buildApp(
   return app;
 }
 
-describe("authGateway", () => {
+describe.each(DIALECTS)("authGateway [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("dev mode: authenticates the request and exposes the user downstream", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const events: AuthEvent[] = [];
     const res = await buildApp(client, { events }).request("/me");
     expect(res.status).toBe(200);
@@ -77,7 +77,7 @@ describe("authGateway", () => {
   });
 
   it("rejects an identity whose email domain is not allowed", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const events: AuthEvent[] = [];
     const evilStrategy: AuthStrategy = {
       async resolveIdentity() {
@@ -92,7 +92,7 @@ describe("authGateway", () => {
   });
 
   it("admits an out-of-domain email only once it's on the individual allowlist (D14)", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const outsider: AuthStrategy = {
       async resolveIdentity() {
         return { sub: "partner", email: "partner@external.com" };
@@ -110,7 +110,7 @@ describe("authGateway", () => {
   });
 
   it("still rejects an out-of-domain email that is NOT individually allowlisted", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     await allowedEmailsRepository(client).add("someone@external.com", null);
     const other: AuthStrategy = {
       async resolveIdentity() {
@@ -122,7 +122,7 @@ describe("authGateway", () => {
   });
 
   it("fails closed (denies, not 500) when the allowlist DB lookup throws", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const outsider: AuthStrategy = {
       async resolveIdentity() {
         return { sub: "partner", email: "partner@external.com" };
@@ -140,7 +140,7 @@ describe("authGateway", () => {
   });
 
   it("creates exactly one user across repeat requests (upsert, no duplicate)", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const app = buildApp(client);
     const b1 = (await (await app.request("/me")).json()) as { id: string };
     const b2 = (await (await app.request("/me")).json()) as { id: string };
@@ -148,14 +148,14 @@ describe("authGateway", () => {
   });
 
   it("does not grant admin to a non-admin email", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const res = await buildApp(client, { config: nonAdminConfig }).request("/me");
     const body = (await res.json()) as { isAdmin: boolean };
     expect(body.isAdmin).toBe(false);
   });
 
   it("rejects a blocked user with 403", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const app = buildApp(client);
     await app.request("/me"); // first sight creates the user
     const repo = usersRepository(client);
@@ -166,7 +166,7 @@ describe("authGateway", () => {
   });
 
   it("oidc mode: an unauthenticated request redirects to login carrying the public returnTo", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const oidcConfig = loadConfig({
       CANVAS_DROP_AUTH_MODE: "oidc",
       CANVAS_DROP_URL_MODE: "subdomain",

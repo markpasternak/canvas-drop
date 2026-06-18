@@ -231,4 +231,70 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
       svc.begin(canvas, ownerId, [{ path: "../escape.html", hash: sha("a"), size: 1 }]),
     ).rejects.toMatchObject({ code: "ZIP_SLIP_REJECTED" });
   });
+
+  it("no double-publish when commit fails after the handle is consumed (server-canvas-1)", async () => {
+    // Build a service whose engine.commitReadyVersion throws on the first call only,
+    // simulating a transient DB hiccup right after the handle is marked consumed.
+    // markConsumed runs BEFORE commitReadyVersion, so a retry must be refused
+    // (UPLOAD_ALREADY_FINALIZED) rather than create a second identical version.
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const uploadSessions = uploadSessionsRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    let commitCalls = 0;
+    const flakyEngine = {
+      ...engine,
+      commitReadyVersion: (...args: Parameters<typeof engine.commitReadyVersion>) => {
+        commitCalls++;
+        if (commitCalls === 1) throw new Error("transient commit failure");
+        return engine.commitReadyVersion(...args);
+      },
+    };
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const canvas = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const svc = uploadService({
+      config,
+      canvases,
+      users,
+      uploadSessions,
+      storage,
+      engine: flakyEngine,
+      log: silent,
+      now: () => clock,
+    });
+
+    const files = { "index.html": "<h1>once</h1>" };
+    const { uploadId } = await svc.begin(canvas, owner.id, manifestFor(files));
+    await svc.stageBlob(
+      uploadId,
+      owner.id,
+      canvas.id,
+      sha(files["index.html"]),
+      enc(files["index.html"]),
+    );
+
+    // First finalize: handle marked consumed, then the commit throws.
+    await expect(svc.finalize(uploadId, owner.id, canvas.id)).rejects.toThrow(
+      "transient commit failure",
+    );
+    // Retry: the consumed handle is terminal — a fresh begin() is required, so NO
+    // second version is created from the same content.
+    await expect(svc.finalize(uploadId, owner.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_ALREADY_FINALIZED",
+    });
+    expect(commitCalls).toBe(1); // commit was never re-attempted by a retry
+    // No live version was committed (the only commit attempt failed), and the row
+    // table never gained a second pending/ready version from a re-claim.
+    const after = await canvases.findById(canvas.id);
+    expect(after?.currentVersionId ?? null).toBeNull();
+  });
 });

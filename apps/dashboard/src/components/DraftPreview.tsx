@@ -7,7 +7,7 @@ import {
   Play,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn.js";
 import { IconButton, IconLink } from "./IconButton.js";
 import { PaneHeader, WorkspacePane } from "./Surface.js";
@@ -66,6 +66,28 @@ export function DraftPreview({
   useEffect(() => {
     if (!usesScripts) setRanScripted(false);
   }, [usesScripts]);
+
+  // Fullscreen is a modal overlay: save the trigger, focus the overlay on open,
+  // restore focus on close, and let Escape exit (mirrors Dialog.tsx). Read the
+  // latest onToggleFullscreen from a ref so a fresh arrow each render doesn't tear
+  // down and re-run the effect.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const toggleFullscreenRef = useRef(onToggleFullscreen);
+  toggleFullscreenRef.current = onToggleFullscreen;
+  useEffect(() => {
+    if (!fullscreen) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    overlayRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") toggleFullscreenRef.current();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [fullscreen]);
   // The sandboxed frame is shown for a static draft, or once the owner runs a scripted one.
   const showFrame = !usesScripts || ranScripted;
 
@@ -191,10 +213,17 @@ export function DraftPreview({
 
   if (fullscreen) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 p-4 backdrop-blur-sm">
+      <div
+        ref={overlayRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Draft preview (full screen)"
+        tabIndex={-1}
+        className="fixed inset-0 z-50 flex flex-col bg-canvas/95 p-4 outline-none backdrop-blur-sm"
+      >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-popover)]">
           {header}
-          <div className="min-h-0 flex-1">{frame}</div>
+          <div className="min-h-0 flex-1">{body}</div>
         </div>
       </div>
     );

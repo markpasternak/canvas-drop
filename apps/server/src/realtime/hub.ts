@@ -3,6 +3,7 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { decideCanvasAccess, principalLookupKey } from "../canvas/authorization.js";
 import { assertCapability } from "../canvas/capability-guard.js";
 import type { Principal } from "../http/types.js";
+import type { Logger } from "../log/logger.js";
 
 /**
  * In-memory realtime pub/sub + presence hub (§6.7 / D22, plan 009 / M9, D-RT-3).
@@ -25,7 +26,12 @@ import type { Principal } from "../http/types.js";
 export const MAX_CONNECTIONS_PER_CANVAS = 30;
 export const MAX_MESSAGES_PER_MIN = 100;
 export const MAX_MESSAGE_BYTES = 16 * 1024;
-const RATE_WINDOW_MS = 60_000;
+/** Max distinct channels a single connection may subscribe to (resource bound). */
+export const MAX_CHANNELS_PER_CONN = 64;
+/** Max byte length of a channel name (resource bound; well under the frame cap). */
+export const MAX_CHANNEL_BYTES = 128;
+/** Sliding rate-limit window for per-connection publishes. */
+export const RATE_WINDOW_MS = 60_000;
 
 /** Close codes (D-RT-2). */
 export const CLOSE_UNAUTHORIZED = 4401;
@@ -52,13 +58,16 @@ export interface Conn {
   readonly canvasId: string;
   readonly user: ConnUser;
   readonly channels: Set<string>;
-  /** Sliding-window publish timestamps for per-user rate limiting. */
+  /** Sliding-window publish timestamps for per-connection rate limiting. A user
+   *  with multiple connections has a separate window per connection. */
   readonly sends: number[];
   closed: boolean;
 }
 
 export interface HubDeps {
   config: Config;
+  /** Optional logger so fail-closed re-auth drops leave a server-side trace. */
+  log?: Logger;
   /** Re-fetch the canvas for live re-authorization. */
   resolveCanvas(canvasId: string): Promise<Canvas | null>;
   /** Optional liveness check — false drops the socket (blocked / deleted user). */
@@ -132,6 +141,12 @@ export function createHub(deps: HubDeps) {
       send(conn, { type: "subscribed", channel });
       return;
     }
+    // Bound per-connection channel growth: each novel channel costs a `join`
+    // broadcast and widens every later broadcast's linear scan, so cap it.
+    if (conn.channels.size >= MAX_CHANNELS_PER_CONN) {
+      send(conn, { type: "error", code: "CHANNEL_LIMIT", message: "too many channels" });
+      return;
+    }
     const wasPresent = userSubCount(conn.canvasId, channel, conn.user.id) > 0;
     conn.channels.add(channel);
     send(conn, { type: "subscribed", channel });
@@ -190,7 +205,7 @@ export function createHub(deps: HubDeps) {
     // Emit leaves for every channel before tearing down.
     for (const channel of [...conn.channels]) doUnsubscribe(conn, channel);
     conn.closed = true;
-    conns(conn.canvasId).delete(conn);
+    removeConn(conn);
     // Guard close() too: a throwing socket must not abort closeAll/dropCanvas/
     // revalidateCanvas iteration over the remaining sockets.
     try {
@@ -198,6 +213,15 @@ export function createHub(deps: HubDeps) {
     } catch {
       /* socket already torn down */
     }
+  }
+
+  /** Delete a conn from its canvas Set and prune the Set once it empties, so
+   *  `byCanvas` never accumulates one stale empty Set per canvas ever connected. */
+  function removeConn(conn: Conn): void {
+    const set = byCanvas.get(conn.canvasId);
+    if (!set) return;
+    set.delete(conn);
+    if (set.size === 0) byCanvas.delete(conn.canvasId);
   }
 
   return {
@@ -221,7 +245,7 @@ export function createHub(deps: HubDeps) {
       if (conn.closed) return;
       for (const channel of [...conn.channels]) doUnsubscribe(conn, channel);
       conn.closed = true;
-      conns(conn.canvasId).delete(conn);
+      removeConn(conn);
     },
 
     connectionCount(canvasId: string): number {
@@ -245,6 +269,23 @@ export function createHub(deps: HubDeps) {
         return;
       }
       const channel = typeof frame.channel === "string" ? frame.channel : "";
+      // Reject an over-long channel name on the channel-bearing frame types before
+      // it can be added to conn.channels / fan-out keys (resource bound).
+      if (
+        channel &&
+        Buffer.byteLength(channel) > MAX_CHANNEL_BYTES &&
+        (frame.type === "subscribe" ||
+          frame.type === "unsubscribe" ||
+          frame.type === "publish" ||
+          frame.type === "presence")
+      ) {
+        send(conn, {
+          type: "error",
+          code: "CHANNEL_NAME_TOO_LARGE",
+          message: "channel name too long",
+        });
+        return;
+      }
       switch (frame.type) {
         case "subscribe":
           if (channel) doSubscribe(conn, channel);
@@ -310,9 +351,13 @@ export function createHub(deps: HubDeps) {
         if (canvas.access === "specific_people" && deps.isPrincipalAllowed) {
           try {
             isAllowed = await deps.isPrincipalAllowed(canvas.id, principalLookupKey(principal));
-          } catch {
+          } catch (err) {
             // Fail closed: a transient DB error must drop the socket (deny), never
             // leave a stale grant alive, and never abort the rest of the sweep.
+            deps.log?.error(
+              { err, canvasId, userId: conn.user.id },
+              "realtime: isPrincipalAllowed error — failing closed",
+            );
             isAllowed = false;
           }
         }
@@ -340,7 +385,11 @@ export function createHub(deps: HubDeps) {
         if (deps.isUserActive) {
           try {
             isActive = await deps.isUserActive(conn.user.id);
-          } catch {
+          } catch (err) {
+            deps.log?.error(
+              { err, canvasId, userId: conn.user.id },
+              "realtime: isUserActive error — failing closed",
+            );
             isActive = false;
           }
         }
@@ -360,7 +409,20 @@ export function createHub(deps: HubDeps) {
     async dropGatedNonOwners(canvasId: string): Promise<void> {
       const live = [...conns(canvasId)];
       if (live.length === 0) return;
-      const canvas = await deps.resolveCanvas(canvasId);
+      // Fail closed like revalidateCanvas: if the canvas lookup errors we cannot tell
+      // owner from non-owner, so drop EVERY live socket rather than leaving a viewer
+      // connected through a newly-set password gate with no trace (§12.0 stale grant).
+      let canvas: Canvas | null;
+      try {
+        canvas = await deps.resolveCanvas(canvasId);
+      } catch (err) {
+        deps.log?.error(
+          { err, canvasId },
+          "realtime: dropGatedNonOwners resolveCanvas error — failing closed (dropping all sockets)",
+        );
+        for (const conn of live) dropConn(conn, CLOSE_UNAUTHORIZED, "password gate");
+        return;
+      }
       for (const conn of live) {
         if (conn.closed) continue;
         const isOwner = !!canvas && canvas.ownerId === conn.user.id;

@@ -102,7 +102,7 @@ describe("passwordGate", () => {
     await audit.flush();
     const rows = await auditRepository(client).recent();
     expect(rows[0]).toMatchObject({ action: "password_attempt" });
-    expect(rows[0].meta).toMatchObject({ success: false });
+    expect(rows[0]?.meta).toMatchObject({ success: false });
   });
 
   it("correct password → sets gate cookie and redirects past the gate", async () => {

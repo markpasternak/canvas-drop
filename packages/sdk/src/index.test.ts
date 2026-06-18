@@ -78,6 +78,21 @@ describe("errorFromResponse", () => {
     expect(err.code).toBe("GUEST_AI_CAP");
     expect(err.status).toBe(429);
   });
+
+  it("maps 409 KEY_LIMIT to QuotaExceededError but NOT 409 NOT_NUMERIC", () => {
+    expect(errorFromResponse(409, { code: "KEY_LIMIT" })).toBeInstanceOf(QuotaExceededError);
+    const notNumeric = errorFromResponse(409, { code: "NOT_NUMERIC" });
+    expect(notNumeric).toBeInstanceOf(CanvasdropError);
+    expect(notNumeric).not.toBeInstanceOf(QuotaExceededError);
+    expect(notNumeric.code).toBe("NOT_NUMERIC");
+    expect(notNumeric.status).toBe(409);
+  });
+
+  it("a 429 QUOTA_EXCEEDED carries status 429 (not the old 409 default)", () => {
+    const err = errorFromResponse(429, { code: "QUOTA_EXCEEDED" });
+    expect(err).toBeInstanceOf(QuotaExceededError);
+    expect(err.status).toBe(429);
+  });
 });
 
 describe("createClient", () => {
@@ -129,6 +144,53 @@ describe("createClient", () => {
     );
     const client = createClient({ context: ctx, fetch });
     await expect(client.kv.get("x")).rejects.toBeInstanceOf(CapabilityDisabledError);
+  });
+
+  it("kv.list with options builds the prefix/cursor/limit query string", async () => {
+    const fetch = fetchMock(async () => res(200, { entries: [], nextCursor: null }));
+    const client = createClient({ context: ctx, fetch });
+    await client.kv.list({ prefix: "p:", cursor: "c1", limit: 50 });
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://canvases.example.com/v1/c/foo/kv?prefix=p%3A&cursor=c1&limit=50",
+    );
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it("kv.list with no options requests a plain URL and parses the page", async () => {
+    const fetch = fetchMock(async () =>
+      res(200, { entries: [{ key: "a", value: 1 }], nextCursor: "next" }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const page = await client.kv.list();
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/kv");
+    expect(page).toEqual({ entries: [{ key: "a", value: 1 }], nextCursor: "next" });
+  });
+
+  it("kv.delete DELETEs the encoded key URL", async () => {
+    const fetch = fetchMock(async () => res(204, undefined));
+    const client = createClient({ context: ctx, fetch });
+    await client.kv.delete("a b");
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/kv/a%20b");
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("DELETE");
+  });
+
+  it("files.list GETs /files and unwraps the files array", async () => {
+    const fetch = fetchMock(async () =>
+      res(200, { files: [{ id: "f1", name: "a.txt", size: 3 }] }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const files = await client.files.list();
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/files");
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(files).toEqual([{ id: "f1", name: "a.txt", size: 3 }]);
+  });
+
+  it("files.delete DELETEs the encoded file id URL", async () => {
+    const fetch = fetchMock(async () => res(204, undefined));
+    const client = createClient({ context: ctx, fetch });
+    await client.files.delete("id/1");
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/files/id%2F1");
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("DELETE");
   });
 
   it("files.url() builds the content path synchronously", () => {
@@ -198,6 +260,34 @@ describe("ai", () => {
     expect(out).toEqual(["a", "b"]);
   });
 
+  it("releases the response body reader lock when the caller breaks out early", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        const text = [
+          { type: "delta", text: "a" },
+          { type: "delta", text: "b" },
+          { type: "delta", text: "c" },
+        ]
+          .map((f) => `data: ${JSON.stringify(f)}\n\n`)
+          .join("");
+        c.enqueue(new TextEncoder().encode(text));
+        c.close();
+      },
+    });
+    const response = new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+    const client = createClient({ context: ctx, fetch: fetchMock(async () => response) });
+    for await (const d of client.ai.stream([{ role: "user", content: "hi" }], {
+      model: "claude-haiku-4-5",
+    })) {
+      if (d === "a") break; // early termination mid-stream
+    }
+    // If the lock were still held, getReader() would throw "already locked".
+    expect(() => response.body?.getReader()).not.toThrow();
+  });
+
   it("maps an in-stream error frame to a typed error", async () => {
     const fetch = fetchMock(async () =>
       sseRes([
@@ -209,6 +299,58 @@ describe("ai", () => {
     await expect(
       client.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
     ).rejects.toBeInstanceOf(CanvasdropError);
+  });
+
+  it("maps an in-stream QUOTA_EXCEEDED frame to QuotaExceededError with status 429", async () => {
+    const fetch = fetchMock(async () =>
+      sseRes([
+        { type: "delta", text: "x" },
+        { type: "error", code: "QUOTA_EXCEEDED", message: "cap hit" },
+      ]),
+    );
+    const client = createClient({ context: ctx, fetch });
+    await expect(
+      client.ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toMatchObject({ code: "QUOTA_EXCEEDED", status: 429 });
+    await expect(
+      createClient({
+        context: ctx,
+        fetch: fetchMock(async () => sseRes([{ type: "error", code: "QUOTA_EXCEEDED" }])),
+      }).ai.chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" }),
+    ).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+
+  it("maps an in-stream GUEST_AI_CAP frame to QuotaExceededError with status 429", async () => {
+    const client = createClient({
+      context: ctx,
+      fetch: fetchMock(async () => sseRes([{ type: "error", code: "GUEST_AI_CAP" }])),
+    });
+    const err = await client.ai
+      .chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(QuotaExceededError);
+    expect(err.status).toBe(429);
+  });
+
+  it("a malformed SSE data line yields a typed CanvasdropError (not a raw SyntaxError)", async () => {
+    const fetch = fetchMock(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("data: {not json\n\n"));
+              c.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const err = await client.ai
+      .chat([{ role: "user", content: "hi" }], { model: "claude-haiku-4-5" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(CanvasdropError);
+    expect(err.code).toBe("MALFORMED_FRAME");
   });
 
   it("throws AI_STREAM_TRUNCATED when the stream ends without a done/error frame", async () => {
@@ -373,14 +515,27 @@ describe("realtime", () => {
     await expect(p).rejects.toBeInstanceOf(CanvasdropError);
   });
 
-  it("close() then publish() does not reconnect", async () => {
+  it("close() then publish() throws CHANNEL_CLOSED and does not reconnect", async () => {
     const client = realtimeClient();
     const ch = client.realtime.channel("room");
     ch.subscribe(() => {});
     lastWs().open();
     ch.close();
     const count = FakeWS.instances.length;
-    ch.publish("x", 1);
+    expect(() => ch.publish("x", 1)).toThrowError(
+      expect.objectContaining({ code: "CHANNEL_CLOSED" }),
+    );
     expect(FakeWS.instances.length).toBe(count); // no new socket for a closed channel
+  });
+
+  it("close() rejects an in-flight presence() with CHANNEL_CLOSED (never hangs)", async () => {
+    const client = realtimeClient();
+    const ch = client.realtime.channel("room");
+    ch.subscribe(() => {});
+    lastWs().open();
+    const p = ch.presence(); // in flight, no presence frame yet
+    ch.close();
+    await expect(p).rejects.toBeInstanceOf(CanvasdropError);
+    await expect(p).rejects.toMatchObject({ code: "CHANNEL_CLOSED" });
   });
 });

@@ -22,11 +22,11 @@ describe.each(DIALECTS)("auditLog [%s]", (dialect) => {
 
     const rows = await auditRepository(client).recent();
     expect(rows).toHaveLength(1);
-    expect(rows[0].action).toBe("session_create");
-    expect(rows[0].actorId).toBe("u1");
-    expect(rows[0].ip).toBe("127.0.0.1");
-    expect(typeof rows[0].createdAt).toBe("number");
-    expect(rows[0].createdAt).toBeGreaterThanOrEqual(before);
+    expect(rows[0]?.action).toBe("session_create");
+    expect(rows[0]?.actorId).toBe("u1");
+    expect(rows[0]?.ip).toBe("127.0.0.1");
+    expect(typeof rows[0]?.createdAt).toBe("number");
+    expect(rows[0]?.createdAt).toBeGreaterThanOrEqual(before);
   });
 
   it("records auth_denied (domain) with the rejected email in meta", async () => {
@@ -36,8 +36,8 @@ describe.each(DIALECTS)("auditLog [%s]", (dialect) => {
     await audit.flush();
 
     const rows = await auditRepository(client).recent();
-    expect(rows[0].action).toBe("auth_denied");
-    expect(rows[0].meta).toMatchObject({ reason: "domain_not_allowed", email: "x@evil.org" });
+    expect(rows[0]?.action).toBe("auth_denied");
+    expect(rows[0]?.meta).toMatchObject({ reason: "domain_not_allowed", email: "x@evil.org" });
   });
 
   it("folds the correlation id into meta", async () => {
@@ -47,7 +47,7 @@ describe.each(DIALECTS)("auditLog [%s]", (dialect) => {
     await audit.flush();
 
     const rows = await auditRepository(client).recent();
-    expect(rows[0].meta).toMatchObject({ correlationId: "corr-9" });
+    expect(rows[0]?.meta).toMatchObject({ correlationId: "corr-9" });
   });
 
   it("swallows a write failure without throwing into the caller", async () => {
@@ -56,6 +56,7 @@ describe.each(DIALECTS)("auditLog [%s]", (dialect) => {
     const brokenRepo = {
       append: () => Promise.reject(new Error("db down")),
       recent: async () => [],
+      pruneBefore: async () => 0,
     };
     const audit = createAuditLog(brokenRepo, silent);
     expect(() => audit.recordAudit({ action: "auth_ok", actorId: "u1" })).not.toThrow();

@@ -48,7 +48,7 @@ export function authGateway(deps: AuthGatewayDeps) {
       return unauthorized(c, deps.config);
     }
 
-    if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails))) {
+    if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails, c.get("log")))) {
       deps.audit?.record({
         action: "auth_denied",
         reason: "domain_not_allowed",

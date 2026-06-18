@@ -18,7 +18,12 @@ const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46]); // "RIFF" — stand-in by
 
 describe("servePreview — handler logic (U7)", () => {
   /** Mount servePreview with the canvas pre-set (as canvasAccess would) + a terminal. */
-  function app(opts: { enabled: boolean; storeKey?: string; previewMode?: string }) {
+  function app(opts: {
+    enabled: boolean;
+    storeKey?: string;
+    previewMode?: string;
+    access?: Canvas["access"];
+  }) {
     const storage = memStorage();
     if (opts.storeKey) storage.put(opts.storeKey, webp, { contentType: "image/webp" });
     const a = new Hono<AppEnv>();
@@ -27,6 +32,7 @@ describe("servePreview — handler logic (U7)", () => {
         id: "cv1",
         slug: "s",
         status: "active",
+        access: opts.access ?? "public_link",
         previewMode: opts.previewMode ?? "auto",
       } as Canvas);
       await next();
@@ -93,6 +99,40 @@ describe("servePreview — handler logic (U7)", () => {
     a.all("*", (c) => c.notFound());
     expect((await a.request(`${PREVIEW_URL}?rendition=og`)).status).toBe(200);
     expect((await a.request(`${PREVIEW_URL}?rendition=card`)).status).toBe(404); // only og stored
+  });
+
+  it("og rendition is PUBLIC-cacheable only for a public_link canvas (server-canvas-8)", async () => {
+    const res = await app({
+      enabled: true,
+      access: "public_link",
+      storeKey: screenshotKey("cv1", "og"),
+    }).request(`${PREVIEW_URL}?rendition=og`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toContain("public");
+  });
+
+  it("og rendition is PRIVATE-cached for a whole_org canvas (no public CDN leak; server-canvas-8)", async () => {
+    const res = await app({
+      enabled: true,
+      access: "whole_org",
+      storeKey: screenshotKey("cv1", "og"),
+    }).request(`${PREVIEW_URL}?rendition=og`);
+    expect(res.status).toBe(200);
+    const cc = res.headers.get("Cache-Control") ?? "";
+    expect(cc).toContain("private");
+    expect(cc).not.toContain("public");
+  });
+
+  it("card/thumb renditions are always private (even on a public_link canvas)", async () => {
+    const res = await app({
+      enabled: true,
+      access: "public_link",
+      storeKey: screenshotKey("cv1", "card"),
+    }).request(`${PREVIEW_URL}?rendition=card`);
+    expect(res.status).toBe(200);
+    const cc = res.headers.get("Cache-Control") ?? "";
+    expect(cc).toContain("private");
+    expect(cc).not.toContain("public");
   });
 });
 

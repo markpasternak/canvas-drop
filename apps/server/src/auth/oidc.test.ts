@@ -6,13 +6,14 @@ import type { DbClient } from "../db/factory.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import {
   callbackUrl,
   completeLogin,
   emailExplicitlyUnverified,
   makeOidc,
+  makeOidcConfigLoader,
   type OidcDeps,
 } from "./oidc.js";
 import { SESSION_COOKIE, sessionService } from "./session.js";
@@ -135,21 +136,21 @@ function readTxCookie(res: Response): { state?: string; verifier?: string; retur
   return JSON.parse(decodeURIComponent(value));
 }
 
-describe("oidc callback — pre-exchange guards", () => {
+describe.each(DIALECTS)("oidc callback — pre-exchange guards [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("rejects a callback with no transaction cookie", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const res = await buildApp(client).request("/auth/callback?state=abc&code=x");
     expect(res.status).toBe(400);
     expect((await jsonOf<{ error: string }>(res)).error).toBe("missing_oidc_state");
   });
 
   it("rejects a callback whose state does not match the transaction (CSRF defense)", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const tx = encodeURIComponent(JSON.stringify({ state: "s1", verifier: "v1" }));
     const res = await buildApp(client).request("/auth/callback?state=s2&code=x", {
       headers: { Cookie: `${OIDC_TX_COOKIE}=${tx}` },
@@ -200,14 +201,14 @@ describe("oidc emailExplicitlyUnverified — email_verified trust", () => {
   });
 });
 
-describe("oidc completeLogin — security seam", () => {
+describe.each(DIALECTS)("oidc completeLogin — security seam [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("creates the user, mints a session, and redirects on an allowed domain", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const res = await buildApp(client).request("/complete?email=ada@example.com");
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
@@ -216,7 +217,7 @@ describe("oidc completeLogin — security seam", () => {
   });
 
   it("redirects to a validated returnTo after login, but ignores an off-host one", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const ok = await buildApp(client).request(
       "/complete?email=ada@example.com&returnTo=https%3A%2F%2Fart.canvases.example.com%2F",
     );
@@ -228,22 +229,58 @@ describe("oidc completeLogin — security seam", () => {
     expect(evil.headers.get("location")).toBe("/");
   });
 
-  it("rejects a login whose email domain is not allowed", async () => {
-    client = await makeTestDb("sqlite");
+  it("rejects a login whose email domain is not allowed (recoverable error)", async () => {
+    client = await makeTestDb(dialect);
+    // Not-allowed is a recoverable, mid-flow error: it renders the friendly
+    // "try signing in again" page (400) for browsers, JSON for API clients.
     const res = await buildApp(client).request("/complete?email=attacker@evil.org");
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
     expect((await jsonOf<{ error: string }>(res)).error).toBe("email_domain_not_allowed");
   });
 
+  it("rejects a blocked user with 403 forbidden at the OIDC seam", async () => {
+    client = await makeTestDb(dialect);
+    // First sight creates the user via completeLogin's upsert, then block them.
+    await buildApp(client).request("/complete?email=ada@example.com");
+    const repo = usersRepository(client);
+    const user = await repo.findByProviderSub("s");
+    await repo.setBlocked(user?.id ?? "", true);
+    const res = await buildApp(client).request("/complete?email=ada@example.com");
+    expect(res.status).toBe(403);
+    expect((await jsonOf<{ error: string }>(res)).error).toBe("forbidden");
+  });
+
   it("admits an out-of-domain email that is on the individual allowlist (D14)", async () => {
-    client = await makeTestDb("sqlite");
-    // Rejection path first: out-of-domain is denied until allowlisted.
+    client = await makeTestDb(dialect);
+    // Rejection path first: out-of-domain is denied (recoverable 400) until allowlisted.
     expect((await buildApp(client).request("/complete?email=partner@external.com")).status).toBe(
-      403,
+      400,
     );
     await allowedEmailsRepository(client).add("partner@external.com", null);
     const res = await buildApp(client).request("/complete?email=partner@external.com");
     expect(res.status).toBe(302);
     expect(res.headers.getSetCookie().some((c) => c.startsWith(SESSION_COOKIE))).toBe(true);
+  });
+});
+
+describe("makeOidcConfigLoader — failed discovery is not cached", () => {
+  it("retries after a transient discovery failure instead of poisoning the cache", async () => {
+    // Inject a discovery stub: the first call rejects (transient network error),
+    // the second succeeds. The loader must NOT cache the failure, so the second
+    // call retries and resolves — proving one boot-time hiccup can't permanently
+    // disable OIDC for the process lifetime.
+    const fake = {} as client.Configuration;
+    let calls = 0;
+    const discover: typeof client.discovery = (async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("idp unreachable");
+      return fake;
+    }) as typeof client.discovery;
+    const loader = makeOidcConfigLoader(config, discover);
+
+    await expect(loader()).rejects.toThrow("idp unreachable");
+    // The failure must have cleared the cache — the next call retries and succeeds.
+    await expect(loader()).resolves.toBe(fake);
+    expect(calls).toBe(2);
   });
 });

@@ -29,6 +29,13 @@ export interface GuestService {
     email: string,
     expiresAt?: number | null,
   ): Promise<{ token: string; invite: GuestInvite }>;
+  /**
+   * Read-only peek at a magic-link token's invite — does NOT consume it (the
+   * single-use token stays pending). Returns the still-valid pending invite, or
+   * null when it's missing / revoked / already-used / expired. Lets a caller check
+   * a precondition (e.g. the target canvas is still active) BEFORE burning the token.
+   */
+  peekInvite(token: string): Promise<GuestInvite | null>;
   /** Consume a magic-link token: establish a guest session + cookie. Single-use. */
   consumeMagicLink(c: Context<AppEnv>, token: string): Promise<Principal | null>;
   /** Resolve the guest cookie to a principal, or null. Cross-checks the invite (R12). */
@@ -69,6 +76,16 @@ export function guestService(config: Config, guests: GuestRepository): GuestServ
         expiresAt: expiresAt ?? null,
       });
       return { token, invite };
+    },
+
+    async peekInvite(token) {
+      const now = Date.now();
+      const invite = await guests.findInviteByTokenHash(hashToken(token));
+      // Mirror the consume guards WITHOUT mutating state: only a still-pending,
+      // unexpired invite is a valid candidate to consume.
+      if (invite?.state !== "pending") return null;
+      if (invite.expiresAt !== null && invite.expiresAt <= now) return null;
+      return invite;
     },
 
     async consumeMagicLink(c, token) {

@@ -81,8 +81,12 @@ export class LocalDriver implements StorageDriver {
     try {
       await access(this.pathFor(key));
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      // Only a missing file means "doesn't exist". EACCES/EIO etc. are real
+      // failures a caller must not mistake for absence (which would drive a wrong
+      // fork decision). Aligns with get()/copy()'s isNotFound handling.
+      if (isNotFound(err)) return false;
+      throw err;
     }
   }
 
@@ -96,7 +100,17 @@ export class LocalDriver implements StorageDriver {
   }
 
   private async *walk(dir: string): AsyncGenerator<string> {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [] as Dirent[]);
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      // A missing directory is genuinely empty (the storage root or a pruned
+      // subtree) — yield nothing. Any other error (EACCES, EIO, ENOTDIR) would
+      // silently truncate the key list, making GC/purge sweeps treat present
+      // blobs as absent; surface it as a typed, loggable failure instead.
+      if (isNotFound(err)) return;
+      throw new StorageError(`readdir failed for ${dir}: ${(err as Error).message}`, "list_failed");
+    }
     for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {

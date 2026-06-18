@@ -67,6 +67,11 @@ export type AccessRung = "private" | "specific_people" | "whole_org" | "public_l
  *  cover, "custom" is an owner-uploaded image that survives publishes. */
 export type PreviewMode = "auto" | "off" | "custom";
 
+/** Canvas lifecycle status (the raw stored state, distinct from the derived
+ *  PublicationState). `disabled` is an admin takedown; `deleted` is the soft-delete
+ *  recovery window. Shared by the owner Canvas and the admin canvas row. */
+export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
+
 export interface Canvas {
   id: string;
   slug: string;
@@ -104,7 +109,7 @@ export interface Canvas {
   capabilities: StoredCapabilities;
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
-  status: string;
+  status: CanvasStatus;
   /** Single derived lifecycle the UI renders as the Publication chip (server-computed). */
   publicationState: PublicationState;
   /** Admin takedown reason (§6.10.2) — owner-only surface; null unless disabled. */
@@ -133,12 +138,13 @@ export interface CanvasOwnerSummary {
   neverDeployed: number;
 }
 
-/** What a version serves at the canvas root (computed server-side). `path` is
- *  the entry file; null with reason "ambiguous"/"none" means the root 404s. */
-export interface RootEntry {
-  path: string | null;
-  reason: "index" | "single" | "ambiguous" | "none";
-}
+/** What a version serves at the canvas root (computed server-side). Discriminated
+ *  on the resolution: `index`/`single` resolve to a `path`; `ambiguous`/`none` have
+ *  no path and 404 at the root. The union makes the path/reason pairing unrepresentable
+ *  in an invalid combination (e.g. a non-null path with reason "none"). */
+export type RootEntry =
+  | { path: string; reason: "index" | "single" }
+  | { path: null; reason: "ambiguous" | "none" };
 
 export interface VersionInfo {
   number: number;
@@ -524,14 +530,14 @@ function jsonBody(body: unknown): RequestInit {
 // --- Admin surface (§6.10, M7). Only reachable by an admin user; the server
 //     404s non-admins, and the UI hides the entry behind `me.isAdmin`. ---
 
-export type AdminCanvasStatus = "active" | "disabled" | "archived" | "deleted";
+export type AdminCanvasStatus = CanvasStatus;
 
 export interface AdminCanvasRow {
   id: string;
   slug: string;
   url: string;
   title: string;
-  status: string;
+  status: CanvasStatus;
   /** Derived publication lifecycle (server-projected), for parity with the row's status. */
   publicationState: PublicationState;
   /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
@@ -655,8 +661,8 @@ export interface AdminAiUsage {
   }>;
 }
 
-/** One row of the admin Configuration view. Secrets never carry a raw `value`. */
-export interface AdminConfigField {
+/** Fields shared by every admin Configuration row, secret or not. */
+interface AdminConfigFieldBase {
   key: string;
   env: string;
   group: string;
@@ -664,16 +670,28 @@ export interface AdminConfigField {
   help?: string;
   type: "string" | "number" | "boolean" | "enum" | "csv";
   enumValues?: string[];
-  secret: boolean;
   editable: boolean;
   source: "database" | "environment" | "default";
   overridden: boolean;
-  /** Non-secret effective value (display string). Absent for secrets. */
-  value?: string;
-  /** Secret-only: configured? + last 4 chars. Never the value. */
-  set?: boolean;
-  last4?: string;
 }
+
+/** One row of the admin Configuration view, discriminated on `secret`: a non-secret
+ *  field carries its effective `value` (display string); a secret field never echoes
+ *  the value — only whether it's `set` and the last 4 chars. The union makes the
+ *  illegal combinations (a secret with a raw `value`, a non-secret with `last4`)
+ *  unrepresentable. */
+export type AdminConfigField =
+  | (AdminConfigFieldBase & {
+      secret: false;
+      /** Non-secret effective value (display string). */
+      value?: string;
+    })
+  | (AdminConfigFieldBase & {
+      secret: true;
+      /** Secret-only: configured? + last 4 chars. Never the value. */
+      set?: boolean;
+      last4?: string;
+    });
 
 export const api = {
   me: () => request<Me>("/api/me"),

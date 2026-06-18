@@ -75,17 +75,24 @@ export interface OidcDeps {
  * cached — otherwise one hiccup at first login would permanently break OIDC for
  * the process lifetime. The next call retries.
  */
-export function makeOidcConfigLoader(config: Config): () => Promise<client.Configuration> {
+export function makeOidcConfigLoader(
+  config: Config,
+  // Injectable for tests so the "failed discovery isn't cached" invariant is
+  // verifiable without a live IdP. Defaults to openid-client's real discovery.
+  discover: typeof client.discovery = client.discovery,
+): () => Promise<client.Configuration> {
   let cached: Promise<client.Configuration> | undefined;
   const { issuer, clientId, clientSecret } = config.auth.oidc;
   return () => {
     if (cached) return cached;
-    const pending = client
-      .discovery(new URL(issuer as string), clientId as string, clientSecret as string)
-      .catch((err) => {
-        cached = undefined; // allow retry on the next call
-        throw err;
-      });
+    const pending = discover(
+      new URL(issuer as string),
+      clientId as string,
+      clientSecret as string,
+    ).catch((err) => {
+      cached = undefined; // allow retry on the next call
+      throw err;
+    });
     cached = pending;
     return pending;
   };
@@ -186,13 +193,34 @@ export function makeOidc(deps: OidcDeps) {
       }
 
       const identity = claims ? claimsToIdentity(claims, "oidc") : null;
-      if (!identity) return c.json({ error: "no_email_claim" }, 400);
+      if (!identity) {
+        c.get("log")?.warn({}, "oidc callback: no email claim in the ID token");
+        return recoverableAuthError(
+          c,
+          deps.config,
+          "no_email_claim",
+          "Your identity provider didn't share an email address, which we need to sign you in. Please try again.",
+          tx.returnTo,
+        );
+      }
       // Defense-in-depth: never trust an email the IdP explicitly says it did not
       // verify (a permissive provider could let a user self-assert an allowlisted
-      // address).
+      // address). Log the domain only — never the full address (data-minimisation).
       if (claims && emailExplicitlyUnverified(claims)) {
-        c.get("log")?.warn({ email: identity.email }, "oidc email not verified");
-        return c.json({ error: "email_not_verified" }, 403);
+        c.get("log")?.warn(
+          {
+            emailDomain: identity.email.slice(identity.email.lastIndexOf("@") + 1),
+            emailVerified: false,
+          },
+          "oidc email not verified",
+        );
+        return recoverableAuthError(
+          c,
+          deps.config,
+          "email_not_verified",
+          "Your identity provider hasn't verified your email address. Verify it with them, then try again.",
+          tx.returnTo,
+        );
       }
       return completeLogin(deps, c, identity, tx.returnTo);
     },
@@ -234,10 +262,18 @@ export async function completeLogin(
   identity: ResolvedIdentity,
   returnTo?: string,
 ) {
-  if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails))) {
-    return c.json({ error: "email_domain_not_allowed" }, 403);
+  if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails, c.get("log")))) {
+    return recoverableAuthError(
+      c,
+      deps.config,
+      "email_domain_not_allowed",
+      "Your account isn't allowed to sign in to this instance. Ask an administrator to add you.",
+      returnTo,
+    );
   }
   const user = await mapIdentityToUser(deps.users, identity, deps.config);
+  // Blocked is a deliberate admin action — keep it terse and don't offer a retry
+  // loop (a "try again" button would just bounce them back here).
   if (user.isBlocked) return c.json({ error: "forbidden" }, 403);
   await deps.sessionSvc.issue(c, user.id);
   // Re-validate at the seam: the tx cookie is httpOnly but unsigned, so never trust

@@ -28,7 +28,7 @@ export type ConfigGroup =
 
 export type ConfigType = "string" | "number" | "boolean" | "enum" | "csv";
 
-export interface ConfigField {
+interface ConfigFieldBase {
   /** Stable internal id (also the dashboard row key). */
   key: string;
   /** The env var that sets this (shown in the view; used for source attribution). */
@@ -39,14 +39,29 @@ export interface ConfigField {
   type: ConfigType;
   /** Masked everywhere: never serialized raw, only `{ set, last4 }`. */
   secret: boolean;
-  /** Runtime-editable via a DB override (else read-only, env/default only). */
-  editable: boolean;
   enumValues?: readonly string[];
   /** The boot value (env ?? default), read off the typed Config. */
   fromConfig: (c: Config) => unknown;
-  /** Settings-store key for the DB override (editable fields only). */
-  settingKey?: string;
 }
+
+/**
+ * A config field, as a discriminated union on `editable` so the editable↔settingKey
+ * invariant is structural (compile-time), not just a runtime throw in
+ * setConfigOverride: an editable field MUST carry a `settingKey`; a read-only field
+ * MUST NOT. Adding an editable field without its store key is now a type error.
+ */
+export type ConfigField =
+  | (ConfigFieldBase & {
+      /** Runtime-editable via a DB override. */
+      editable: true;
+      /** Settings-store key for the DB override (required for editable fields). */
+      settingKey: string;
+    })
+  | (ConfigFieldBase & {
+      /** Read-only (env/default only). */
+      editable: false;
+      settingKey?: never;
+    });
 
 const csv = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : []);
 

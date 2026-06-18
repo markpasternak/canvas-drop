@@ -84,4 +84,25 @@ describe.each(DIALECTS)("sessionsRepository [%s]", (dialect) => {
     await repo.touchExpiry(token, Date.now() + HOUR);
     expect(await repo.findLiveByToken(token)).not.toBeNull();
   });
+
+  it("pruneExpiredBefore deletes only sessions that expired before the cutoff", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client);
+    const repo = sessionsRepository(client);
+    const now = Date.now();
+    const stale = generateSessionToken();
+    const recent = generateSessionToken();
+    const live = generateSessionToken();
+    await repo.create({ userId, token: stale, expiresAt: now - 2 * HOUR });
+    await repo.create({ userId, token: recent, expiresAt: now - 1 });
+    await repo.create({ userId, token: live, expiresAt: now + HOUR });
+
+    const removed = await repo.pruneExpiredBefore(now - HOUR);
+    expect(removed).toBe(1); // only the 2-hour-stale row
+    // The recent (just-expired) and live rows still exist as rows; refresh the
+    // recent one's expiry to prove it was not deleted.
+    await repo.touchExpiry(recent, now + HOUR);
+    expect(await repo.findLiveByToken(recent)).not.toBeNull();
+    expect(await repo.findLiveByToken(live)).not.toBeNull();
+  });
 });

@@ -10,7 +10,7 @@ import {
   SquaresFour,
   X,
 } from "@phosphor-icons/react";
-import { Link, Outlet } from "@tanstack/react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
 import { CommandPalette } from "./components/CommandPalette.js";
@@ -139,6 +139,30 @@ function DocsLink({
   );
 }
 
+/** Map a pathname to the human page name used in document.title. Keep it coarse —
+ *  enough for a screen-reader user to know which page they landed on after an SPA
+ *  navigation (TanStack Router manages neither title nor focus on route change). */
+function pageNameForPath(pathname: string): string {
+  if (pathname === "/") return "Canvases";
+  if (pathname === "/gallery") return "Gallery";
+  if (pathname === "/new") return "Create canvas";
+  if (pathname === "/onboarding") return "Get started";
+  if (pathname === "/admin/canvases") return "Admin · Canvases";
+  if (pathname === "/admin/users") return "Admin · Users";
+  if (pathname === "/admin/settings") return "Admin · Settings";
+  if (pathname === "/admin") return "Admin";
+  if (pathname.startsWith("/canvases/")) {
+    if (pathname.endsWith("/editor")) return "Editor";
+    if (pathname.endsWith("/share")) return "Share";
+    if (pathname.endsWith("/versions")) return "Versions";
+    if (pathname.endsWith("/settings")) return "Settings";
+    if (pathname.endsWith("/capabilities")) return "Capabilities";
+    if (pathname.endsWith("/usage")) return "Usage";
+    return "Canvas";
+  }
+  return "canvas-drop";
+}
+
 /** The root shell: a fixed left navigation rail (brand · create · nav · account)
  * at `lg+`, collapsing to a top bar + hamburger below `lg`. The routed content
  * renders to the right of the rail and keeps its own behavior — critically the
@@ -153,6 +177,16 @@ export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // SPA navigations are silent for screen readers unless we manage title + focus
+  // ourselves (TanStack Router does neither). On each pathname change, set
+  // document.title and move focus to the #main-content landmark so AT announces
+  // the new page. Keyed on pathname only — not on every router state tick.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => {
+    document.title = `${pageNameForPath(pathname)} — canvas-drop`;
+    document.getElementById("main-content")?.focus();
+  }, [pathname]);
   // The mobile menu is `lg:hidden`; if the viewport grows past `lg` (the fixed
   // rail takes over) while it's open, reset the state so it doesn't reappear on a
   // later shrink back to mobile.

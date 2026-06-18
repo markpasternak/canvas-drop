@@ -79,16 +79,19 @@ export async function purgeDeletedCanvases(
 
   for (const canvas of doomed) {
     try {
-      const versions = await deps.versions.listByCanvas(canvas.id);
-      const draft = await deps.drafts.getByCanvas(canvas.id);
-      // Under content-addressing every blob for the canvas lives under one
-      // per-canvas prefix, so a single list+deleteMany reclaims them all (the
-      // canvas dies whole — no refcounting needed, KTD-1). Includes draft-only
-      // blobs (a canvas drafted but never published).
-      const keys = await deps.storage.list(canvasBlobPrefix(canvas.id));
-      // The canvas's one preview set (plan 004 / U10) lives under its own prefix —
-      // reclaim it in the same pass.
-      const shotKeys = await deps.storage.list(screenshotPrefix(canvas.id));
+      // These four reads are independent; run them concurrently (on S3 each
+      // storage.list is a network round-trip, so the sequential pattern multiplied
+      // per-canvas latency by 4x). Under content-addressing every blob for the
+      // canvas lives under one per-canvas prefix, so a single list+deleteMany
+      // reclaims them all (the canvas dies whole — no refcounting, KTD-1; includes
+      // draft-only blobs). The canvas's one preview set (plan 004 / U10) lives
+      // under its own prefix and is reclaimed in the same pass.
+      const [versions, draft, keys, shotKeys] = await Promise.all([
+        deps.versions.listByCanvas(canvas.id),
+        deps.drafts.getByCanvas(canvas.id),
+        deps.storage.list(canvasBlobPrefix(canvas.id)),
+        deps.storage.list(screenshotPrefix(canvas.id)),
+      ]);
 
       // Nothing reclaimable — leave the tombstone untouched and don't count it
       // (keeps re-runs idempotent: a second pass reports zero).

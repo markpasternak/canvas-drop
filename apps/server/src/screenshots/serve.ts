@@ -31,11 +31,16 @@ import type { StorageDriver } from "../storage/driver.js";
 export const PREVIEW_ASSET_PATH = "__canvasdrop_preview";
 
 // `card`/`thumb` are served to authenticated sessions on possibly-private canvases →
-// `private`. The `og` rendition is only ever served for public_link canvases (the
-// access gate already decided that), and the URL is version-cache-busted, so it may be
-// shared-cached (CDN) — `public` (review #8).
-const cacheControl = (rendition: ScreenshotRendition): string =>
-  `${rendition === "og" ? "public" : "private"}, max-age=300, must-revalidate`;
+// always `private`. The `og` rendition MAY be shared-cached (CDN), but only for a
+// public_link canvas — the public directive must be gated on the canvas's actual
+// access rung, not the rendition alone (review server-canvas-8): an authorized member
+// requesting ?rendition=og on a whole_org/private canvas would otherwise hand an
+// intermediary cache a `public` screenshot of non-public content. The URL is
+// version-cache-busted, so a public_link og is safe to shared-cache.
+const cacheControl = (rendition: ScreenshotRendition, canvas: Canvas): string => {
+  const shareable = rendition === "og" && canvas.access === "public_link";
+  return `${shareable ? "public" : "private"}, max-age=300, must-revalidate`;
+};
 
 function parseRendition(raw: string | undefined): ScreenshotRendition {
   return (SCREENSHOT_RENDITIONS as readonly string[]).includes(raw ?? "")
@@ -73,7 +78,7 @@ export function servePreview(deps: ServePreviewDeps) {
     // serveCanvas).
     return new Response(new Uint8Array(bytes), {
       status: 200,
-      headers: { "Content-Type": "image/webp", "Cache-Control": cacheControl(rendition) },
+      headers: { "Content-Type": "image/webp", "Cache-Control": cacheControl(rendition, canvas) },
     });
   });
 }

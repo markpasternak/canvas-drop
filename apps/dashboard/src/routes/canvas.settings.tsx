@@ -76,7 +76,10 @@ export default function Settings() {
     return <Skeleton className="h-64" />;
   }
 
-  const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const save = (patch: Parameters<typeof update.mutate>[0]) =>
+    update.mutate(patch, {
+      onError: (err) => toast(err instanceof ApiError ? err.hint : "Couldn't save", "error"),
+    });
 
   const onPreviewFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -99,6 +102,9 @@ export default function Settings() {
   };
 
   const previewBusy = uploadPreview.isPending || clearPreview.isPending;
+  // Compute the deploy snippet once and reuse it for both the copy button and the
+  // visible <pre> — building it twice risks the two surfaces drifting.
+  const curlSnippet = deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" });
 
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
@@ -249,14 +255,10 @@ export default function Settings() {
                   Replace <code className="font-mono text-fg">$CANVAS_DROP_KEY</code> with your
                   secret key.
                 </p>
-                <CopyButton
-                  value={deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" })}
-                  label="Copy"
-                  toastMessage="Snippet copied"
-                />
+                <CopyButton value={curlSnippet} label="Copy" toastMessage="Snippet copied" />
               </div>
               <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs text-muted">
-                {deployCurl({ url: canvas.url, id: canvas.id, apiKey: "$CANVAS_DROP_KEY" })}
+                {curlSnippet}
               </pre>
             </div>
           </details>

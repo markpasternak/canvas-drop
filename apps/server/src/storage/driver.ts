@@ -36,10 +36,14 @@ export interface StorageDriver {
   list(prefix: string): Promise<string[]>;
 }
 
+/** The closed set of {@link StorageError} codes. A typo on a throw site, or a
+ *  caller switching on a non-existent code, is now a compile-time error. */
+export type StorageErrorCode = "not_found" | "delete_failed" | "invalid_key" | "list_failed";
+
 export class StorageError extends Error {
   constructor(
     message: string,
-    public readonly code: string,
+    public readonly code: StorageErrorCode,
   ) {
     super(message);
     this.name = "StorageError";

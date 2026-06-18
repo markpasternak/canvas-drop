@@ -291,6 +291,18 @@ describe("deployApiRoutes (Bearer key)", () => {
       body: JSON.stringify({ version: 99 }),
     });
     expect(bad.status).toBe(404);
+
+    // a float or non-positive version is a malformed body → 400 (Zod-validated,
+    // not a cast that lets 1.5 / -1 / 0 fall through to a misleading 404).
+    for (const version of [1.5, -1, 0]) {
+      const res = await app.request(`/v1/canvases/${a.id}/rollback`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${a.key}`, "content-type": "application/json" },
+        body: JSON.stringify({ version }),
+      });
+      expect(res.status).toBe(400);
+      expect((await jsonOf<{ error: string }>(res)).error).toBe("invalid_body");
+    }
   });
 
   it("GET /files reads back the live version — listing, raw content, and 404s", async () => {

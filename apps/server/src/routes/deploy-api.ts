@@ -4,6 +4,7 @@ import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
 import { publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import { bearerToken, hashApiKey } from "../canvas/api-key.js";
 import { liveManifest } from "../canvas/manifest.js";
@@ -15,6 +16,7 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { fromZip } from "../deploy/ingest.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
+import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -54,7 +56,12 @@ export interface DeployApiDeps {
 export function deployApiRoutes(deps: DeployApiDeps) {
   const app = new Hono<AppEnv>();
 
-  /** Resolve + verify the Bearer key against the :id canvas, or deny. */
+  /** Resolve + verify the Bearer key against the :id canvas, or deny. The repo's
+   *  {@link CanvasesRepository.findByApiKeyHash} only matches `status = 'active'`
+   *  rows, so an archived/disabled/deleted canvas resolves as 401 here — the
+   *  status guard the management surface needs (NOT_ACTIVE 409) is already enforced
+   *  upstream for every Bearer-keyed mutation (see deploy-api.test "a key for a
+   *  disabled/archived canvas is rejected"). */
   async function authCanvas(c: Context<AppEnv>): Promise<Canvas | { error: 401 | 403 }> {
     const token = bearerToken(c.req.header("authorization"));
     if (!token) return { error: 401 };
@@ -249,15 +256,12 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     if (!entry) return c.json({ code: "NOT_FOUND", message: `no file at "${path}"` }, 404);
     const bytes = await deps.storage.get(blobKey(auth.id, entry.hash));
     if (!bytes) return c.json({ code: "NOT_FOUND", message: "file blob missing" }, 404);
-    return new Response(new Uint8Array(bytes), {
-      status: 200,
-      headers: {
-        "Content-Type": entry.mime,
-        ETag: `"${entry.hash}"`,
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "no-store",
-      },
-    });
+    const headers = new Headers();
+    baseSecurityHeaders(headers);
+    headers.set("Content-Type", entry.mime);
+    headers.set("ETag", `"${entry.hash}"`);
+    headers.set("Cache-Control", "no-store");
+    return new Response(new Uint8Array(bytes), { status: 200, headers });
   });
 
   app.post("/:id/rollback", async (c) => {
@@ -265,13 +269,14 @@ export function deployApiRoutes(deps: DeployApiDeps) {
     if ("error" in auth) return c.json({ error: "unauthorized" }, auth.error);
     const limited = deployThrottle(c, auth.id);
     if (limited) return limited;
-    const body = (await c.req.json().catch(() => ({}))) as { version?: number };
-    if (typeof body.version !== "number") {
-      return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);
-    }
-    const target = await deps.versions.findReadyByNumber(auth.id, body.version);
+    const parsed = z
+      .object({ version: z.number().int().positive() })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid_body" }, 400);
+    const version = parsed.data.version;
+    const target = await deps.versions.findReadyByNumber(auth.id, version);
     if (!target) {
-      return c.json({ code: "INVALID_PATH", message: `no ready version ${body.version}` }, 404);
+      return c.json({ code: "INVALID_PATH", message: `no ready version ${version}` }, 404);
     }
     // Atomic guarded swap (see management rollback) — a concurrent prune may have
     // deleted the target between selection and the swap.
@@ -285,9 +290,9 @@ export function deployApiRoutes(deps: DeployApiDeps) {
       action: "rollback",
       actorId: auth.ownerId,
       targetId: auth.id,
-      meta: { version: body.version },
+      meta: { version },
     });
-    return c.json({ url: canvasUrl(deps.config, auth.slug), version: body.version });
+    return c.json({ url: canvasUrl(deps.config, auth.slug), version });
   });
 
   return app;

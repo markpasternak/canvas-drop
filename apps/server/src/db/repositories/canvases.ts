@@ -428,7 +428,11 @@ export function canvasesRepository(client: DbClient) {
     async revertPublicForOwner(ownerId: string): Promise<void> {
       await db
         .update(t)
-        .set({ access: "private", updatedAt: Date.now() })
+        // Clear the full publication field set, not just `access` — leaving
+        // galleryListed/galleryTemplatable/galleryPublishedAt set would keep stale
+        // listed/template counts in ownerSummary and listByOwnerFiltered (which
+        // match on galleryListed alone). Mirrors archive/unpublish.
+        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.ownerId, ownerId), eq(t.access, "public_link")));
     },
 

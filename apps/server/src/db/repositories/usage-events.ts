@@ -137,22 +137,33 @@ export function usageEventsRepository(client: DbClient) {
       sinceMs: number,
       now: number,
     ): Promise<Array<{ dayMs: number; count: number }>> {
-      const rows = (await db
-        .select({ createdAt: t.createdAt })
-        .from(t)
-        .where(
-          and(eq(t.canvasId, canvasId), eq(t.type, "view"), gte(t.createdAt, sinceMs)),
-        )) as Array<{ createdAt: number }>;
-
       const DAY = 24 * 60 * 60 * 1000;
+      // Bucket on the DB side with integer arithmetic — `(created_at / DAY) * DAY`
+      // floors each timestamp to its UTC day start. This stays dialect-neutral (no
+      // date()/date_trunc() divergence) and returns at most ~31 rows regardless of
+      // event volume, instead of transferring every raw timestamp into Node.
+      //
+      // DAY is inlined as a SQL literal (not a bound parameter): SQLite does
+      // *floating-point* division when the divisor is bound, yielding fractional
+      // buckets that neither group nor match the integer JS keys; an integer
+      // literal forces integer division on both dialects (bigint/int truncates on
+      // Postgres too). DAY is a fixed trusted constant, so inlining is safe.
+      const dayLit = sql.raw(String(DAY));
+      const dayMsExpr = sql<number>`(${t.createdAt} / ${dayLit}) * ${dayLit}`;
+      const rows = (await db
+        .select({ dayMs: dayMsExpr, count: sql<number>`count(*)` })
+        .from(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.type, "view"), gte(t.createdAt, sinceMs)))
+        .groupBy(dayMsExpr)) as Array<{ dayMs: number; count: number }>;
+
       // Build the dense series of UTC day-start buckets from `sinceMs`'s day to `now`'s.
       const startDay = Math.floor(sinceMs / DAY) * DAY;
       const endDay = Math.floor(now / DAY) * DAY;
       const counts = new Map<number, number>();
       for (let d = startDay; d <= endDay; d += DAY) counts.set(d, 0);
       for (const row of rows) {
-        const day = Math.floor(Number(row.createdAt) / DAY) * DAY;
-        if (counts.has(day)) counts.set(day, (counts.get(day) ?? 0) + 1);
+        const day = Number(row.dayMs);
+        if (counts.has(day)) counts.set(day, (counts.get(day) ?? 0) + Number(row.count));
       }
       return [...counts.entries()].map(([dayMs, count]) => ({ dayMs, count }));
     },

@@ -126,7 +126,7 @@ const settingsSchema = z.object({
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
   gallerySummary: z.string().max(500).nullable().optional(),
-  galleryTags: z.array(z.string()).optional(),
+  galleryTags: z.array(z.string().max(50)).max(20).optional(),
 });
 
 /**
@@ -135,9 +135,14 @@ const settingsSchema = z.object({
  * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
  * sees why"). It is NOT a public/shared projection: any future non-owner-facing
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
- * and other owner-only fields. Misnamed "public" for historical reasons.
+ * and other owner-only fields.
  */
-function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals, hasPreview = false) {
+function ownerCanvasView(
+  config: Config,
+  cv: Canvas,
+  globals: CapabilityGlobals,
+  hasPreview = false,
+) {
   return {
     id: cv.id,
     slug: cv.slug,
@@ -227,7 +232,8 @@ const ownerListQuerySchema = z.object({
 /**
  * Canvas lifecycle management API (§11.3), mounted at `/api/canvases`. Owner (or
  * admin) authenticated via the foundation gateway; same-origin enforced on
- * mutating routes. Deploy routes are added by U19.
+ * mutating routes. Covers CRUD, settings, access/allowlist, capabilities,
+ * deploy (paste/zip/folder), rollback, and lifecycle (archive/unarchive/unpublish).
  */
 export function managementRoutes(deps: ManagementDeps) {
   const app = new Hono<AppEnv>();
@@ -249,7 +255,7 @@ export function managementRoutes(deps: ManagementDeps) {
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-    return publicCanvas(deps.config, cv, await resolveGlobals(), hasPreview);
+    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview);
   }
 
   /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
@@ -257,6 +263,23 @@ export function managementRoutes(deps: ManagementDeps) {
    *  treated like any other member here (404); cross-owner admin power is the admin
    *  routes only (list + disable/enable/restore). */
   const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
+
+  /** Fire-and-forget realtime revalidation with a LOGGED swallow — a persistent
+   *  hub failure (stale sockets after a settings change) is now observable. */
+  const revalidate = async (c: Context<AppEnv>, canvasId: string) => {
+    if (!deps.hub) return;
+    await deps.hub
+      .revalidateCanvas(canvasId)
+      .catch((err) => c.get("log")?.warn({ err, canvasId }, "hub: revalidateCanvas failed"));
+  };
+  /** Guest-grant revocation with a LOGGED swallow at ERROR level — a silent
+   *  failure means guests keep access after archive/delete/unpublish. */
+  const revokeGuests = async (c: Context<AppEnv>, canvasId: string) => {
+    if (!deps.guests) return;
+    await deps.guests
+      .revokeAllForCanvas(canvasId)
+      .catch((err) => c.get("log")?.error({ err, canvasId }, "guests: revokeAllForCanvas failed"));
+  };
 
   /** 409 body for deploy/rollback on a non-active (archived/disabled) canvas.
    *  Publishing to a canvas whose public URL 404s is incoherent — make the caller
@@ -341,7 +364,7 @@ export function managementRoutes(deps: ManagementDeps) {
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
-        ...publicCanvas(deps.config, cv, globals, previewVisible(cv, previews)),
+        ...ownerCanvasView(deps.config, cv, globals, previewVisible(cv, previews)),
         lastDeploy: v
           ? {
               version: v.number,
@@ -501,8 +524,17 @@ export function managementRoutes(deps: ManagementDeps) {
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost
     // access; a newly-set password drops gated non-owners (no re-verified grant).
     if (deps.hub) {
-      await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-      if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
+      await deps.hub
+        .revalidateCanvas(cv.id)
+        .catch((err) =>
+          c.get("log")?.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"),
+        );
+      if (typeof password === "string")
+        await deps.hub
+          .dropGatedNonOwners(cv.id)
+          .catch((err) =>
+            c.get("log")?.warn({ err, canvasId: cv.id }, "hub: dropGatedNonOwners failed"),
+          );
     }
     return c.json(await canvasView(updated));
   });
@@ -600,7 +632,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { entryId, kind: entry?.principalKind ?? null },
     });
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    await revalidate(c, cv.id);
     return c.json({ ok: true });
   });
 
@@ -620,7 +652,7 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Turning realtime (or the backend group) off must drop live sockets — the
     // heartbeat would too, but this makes it instant (D-RT-6).
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
+    await revalidate(c, cv.id);
     return c.json(await canvasView(updated));
   });
 
@@ -726,8 +758,8 @@ export function managementRoutes(deps: ManagementDeps) {
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     // Deleted → everyone (incl. owner) loses access; drop their live sockets.
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+    await revalidate(c, cv.id);
+    await revokeGuests(c, cv.id);
     return c.json({ ok: true });
   });
 
@@ -745,8 +777,8 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Archived → offline for everyone; drop live sockets (D-RT-6) and revoke guest
     // grants so re-publishing later doesn't silently resurrect them.
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+    await revalidate(c, cv.id);
+    await revokeGuests(c, cv.id);
     return c.json(await canvasView({ ...cv, status: "archived", ...CLEARED_PUBLICATION_FIELDS }));
   });
 
@@ -785,8 +817,8 @@ export function managementRoutes(deps: ManagementDeps) {
     });
     // Offline for everyone now → drop live sockets (D-RT-6) and revoke guest grants
     // so re-publishing later doesn't silently resurrect them.
-    if (deps.hub) await deps.hub.revalidateCanvas(cv.id).catch(() => {});
-    if (deps.guests) await deps.guests.revokeAllForCanvas(cv.id).catch(() => {});
+    await revalidate(c, cv.id);
+    await revokeGuests(c, cv.id);
     return c.json(
       await canvasView({ ...cv, currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS }),
     );
@@ -820,13 +852,14 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
-    const body = (await c.req.json().catch(() => ({}))) as { version?: number };
-    if (typeof body.version !== "number") {
-      return c.json({ code: "INVALID_PATH", message: "version (number) required" }, 400);
-    }
-    const target = await deps.versions.findReadyByNumber(cv.id, body.version);
+    const parsed = z
+      .object({ version: z.number().int().positive() })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid_body" }, 400);
+    const version = parsed.data.version;
+    const target = await deps.versions.findReadyByNumber(cv.id, version);
     if (!target) {
-      return c.json({ code: "INVALID_PATH", message: `no ready version ${body.version}` }, 404);
+      return c.json({ code: "INVALID_PATH", message: `no ready version ${version}` }, 404);
     }
     // Atomic guarded swap — false means a concurrent prune deleted the target
     // between selection and the swap; surface a clean retry rather than a
@@ -844,13 +877,13 @@ export function managementRoutes(deps: ManagementDeps) {
       action: "rollback",
       actorId: c.get("user").id,
       targetId: cv.id,
-      meta: { version: body.version },
+      meta: { version },
     });
     // Reflect the swap from known-good data (target.id) rather than re-reading —
     // avoids returning a stale snapshot if a refetch transiently fails.
     return c.json({
       ...(await canvasView({ ...cv, currentVersionId: target.id })),
-      version: body.version,
+      version,
     });
   });
 
@@ -962,5 +995,3 @@ export function managementRoutes(deps: ManagementDeps) {
 
   return app;
 }
-
-export { publicCanvas };
