@@ -1365,6 +1365,7 @@ describe("managementRoutes", () => {
         name: "User One",
         avatarUrl: null,
         isAdmin: true,
+        canPublishPublic: true,
         providerSub: "secret-sub",
         isBlocked: false,
         createdAt: 123,
@@ -1380,6 +1381,7 @@ describe("managementRoutes", () => {
       "authMode",
       "avatarUrl",
       "baseUrl",
+      "canPublishPublic",
       "email",
       "id",
       "isAdmin",
@@ -1389,6 +1391,7 @@ describe("managementRoutes", () => {
     expect(body.providerSub).toBeUndefined();
     expect(body.isBlocked).toBeUndefined();
     expect(body.isAdmin).toBe(true);
+    expect(body.canPublishPublic).toBe(true);
     // authMode is instance config, not a spread of the user row.
     expect(body.authMode).toBe("oidc");
   });

@@ -99,6 +99,14 @@ export function serveCanvas(deps: ServeDeps) {
 
     const headers = new Headers({ ETag: etag, "Cache-Control": cacheControl });
     headers.set("Content-Type", contentType);
+    // Cross-canvas XSS guard for path mode (review server-canvas-5): in path mode all
+    // canvases share one origin, so an inline-served SVG with embedded <script> would
+    // execute in the shared origin and reach other canvases' sessions. Force SVGs to
+    // download instead of rendering. Subdomain mode isolates each canvas to its own
+    // origin, so the inline SVG can't reach across canvases there — leave it inline.
+    if (deps.config.urlMode === "path" && contentType.startsWith("image/svg+xml")) {
+      headers.set("Content-Disposition", "attachment");
+    }
     securityHeaders(headers);
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view.
     return new Response(new Uint8Array(bytes), { status: 200, headers });

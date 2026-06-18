@@ -7,9 +7,12 @@ import {
   type Conn,
   type ConnUser,
   createHub,
+  MAX_CHANNEL_BYTES,
+  MAX_CHANNELS_PER_CONN,
   MAX_CONNECTIONS_PER_CANVAS,
   MAX_MESSAGE_BYTES,
   MAX_MESSAGES_PER_MIN,
+  RATE_WINDOW_MS,
   type Socket,
 } from "./hub.js";
 
@@ -337,5 +340,122 @@ describe("RealtimeHub", () => {
     hub.disconnect(a);
     expect(sb.ofType("leave").some((l) => (l.user as { id: string }).id === "ua")).toBe(true);
     expect(hub.connectionCount("c1")).toBe(1);
+  });
+
+  it("emits INVALID_FRAME on non-JSON input", () => {
+    const hub = makeHub();
+    const s = new FakeSocket();
+    const a = mc(hub, "c1", user("ua"), s);
+    hub.handleMessage(a, "not-json");
+    expect(s.ofType("error").some((e) => e.code === "INVALID_FRAME")).toBe(true);
+  });
+
+  it("emits UNKNOWN_FRAME on an unrecognized frame type", () => {
+    const hub = makeHub();
+    const s = new FakeSocket();
+    const a = mc(hub, "c1", user("ua"), s);
+    hub.handleMessage(a, JSON.stringify({ type: "bogus" }));
+    expect(s.ofType("error").some((e) => e.code === "UNKNOWN_FRAME")).toBe(true);
+  });
+
+  it("recovers after the rate-limit window expires (sliding-window prune)", () => {
+    const hub = makeHub();
+    const s = new FakeSocket();
+    const a = mc(hub, "c1", user("ua"), s);
+    hub.handleMessage(a, JSON.stringify({ type: "subscribe", channel: "room" }));
+    const now = 1_000_000;
+    for (let i = 0; i < MAX_MESSAGES_PER_MIN; i++) {
+      hub.handleMessage(
+        a,
+        JSON.stringify({ type: "publish", channel: "room", event: "x", data: i }),
+        now,
+      );
+    }
+    // One over the cap in the same window → RATE_LIMITED.
+    hub.handleMessage(
+      a,
+      JSON.stringify({ type: "publish", channel: "room", event: "x", data: "over" }),
+      now,
+    );
+    expect(s.ofType("error").some((e) => e.code === "RATE_LIMITED")).toBe(true);
+    // After the window elapses the old timestamps are pruned and a publish succeeds.
+    const errsBefore = s.ofType("error").length;
+    const msgsBefore = s.ofType("message").length;
+    hub.handleMessage(
+      a,
+      JSON.stringify({ type: "publish", channel: "room", event: "x", data: "after" }),
+      now + RATE_WINDOW_MS + 1,
+    );
+    expect(s.ofType("error").length).toBe(errsBefore); // no new RATE_LIMITED
+    expect(s.ofType("message").length).toBe(msgsBefore + 1); // delivered to self (subscriber)
+  });
+
+  it("revalidateCanvas fails closed (drops every socket) when resolveCanvas throws", async () => {
+    // A transient DB error during the canvas lookup must drop all live sockets with
+    // CLOSE_UNAUTHORIZED rather than abandon the sweep and leave stale grants alive.
+    const hub = createHub({
+      config,
+      resolveCanvas: async () => {
+        throw new Error("db down");
+      },
+    });
+    const ownerSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    expect(ownerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(ownerSock.closed?.reason).toBe("revalidation_error");
+  });
+
+  it("dropGatedNonOwners fails closed (drops every socket) when resolveCanvas throws", async () => {
+    const hub = createHub({
+      config,
+      resolveCanvas: async () => {
+        throw new Error("db down");
+      },
+    });
+    const ownerSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.dropGatedNonOwners("c1");
+    // Cannot tell owner from non-owner on a lookup error → drop everyone.
+    expect(ownerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("caps the channels a single connection may subscribe to (CHANNEL_LIMIT)", () => {
+    const hub = makeHub();
+    const s = new FakeSocket();
+    const a = mc(hub, "c1", user("ua"), s);
+    for (let i = 0; i < MAX_CHANNELS_PER_CONN; i++) {
+      hub.handleMessage(a, JSON.stringify({ type: "subscribe", channel: `room-${i}` }));
+    }
+    // The (cap+1)th distinct channel is refused.
+    hub.handleMessage(a, JSON.stringify({ type: "subscribe", channel: "one-too-many" }));
+    expect(s.ofType("error").some((e) => e.code === "CHANNEL_LIMIT")).toBe(true);
+    expect(s.ofType("subscribed")).toHaveLength(MAX_CHANNELS_PER_CONN);
+  });
+
+  it("rejects an over-long channel name (CHANNEL_NAME_TOO_LARGE)", () => {
+    const hub = makeHub();
+    const s = new FakeSocket();
+    const a = mc(hub, "c1", user("ua"), s);
+    const longName = "x".repeat(MAX_CHANNEL_BYTES + 1);
+    hub.handleMessage(a, JSON.stringify({ type: "subscribe", channel: longName }));
+    expect(s.ofType("error").some((e) => e.code === "CHANNEL_NAME_TOO_LARGE")).toBe(true);
+    expect(s.ofType("subscribed")).toHaveLength(0);
+  });
+
+  it("prunes the canvas key from byCanvas once its last connection disconnects", () => {
+    const hub = makeHub();
+    const a = mc(hub, "c1", user("ua"), new FakeSocket());
+    expect(hub.activeCanvasIds()).toContain("c1");
+    hub.disconnect(a);
+    expect(hub.connectionCount("c1")).toBe(0);
+    // The empty Set is removed, not retained — no stale per-canvas entry leaks.
+    expect(hub.activeCanvasIds()).not.toContain("c1");
   });
 });

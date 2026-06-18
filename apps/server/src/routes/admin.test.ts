@@ -494,6 +494,42 @@ describe("admin routes", () => {
     expect(res.status).toBe(403);
   });
 
+  // Every admin MUTATION route must reject a cross-site request (CSRF guard, §12).
+  // Mirrors the `app.post/put/delete(... sameOrigin ...)` list in admin.ts — a
+  // regression that drops `sameOrigin` from any one route fails here, not silently.
+  const adminMutations: Array<{ method: "POST" | "PUT" | "DELETE"; path: string }> = [
+    { method: "POST", path: "/api/admin/canvases/c1/disable" },
+    { method: "POST", path: "/api/admin/canvases/c1/enable" },
+    { method: "POST", path: "/api/admin/canvases/c1/restore" },
+    { method: "POST", path: "/api/admin/users/u1/block" },
+    { method: "POST", path: "/api/admin/users/u1/unblock" },
+    { method: "POST", path: "/api/admin/users/u1/promote" },
+    { method: "POST", path: "/api/admin/users/u1/demote" },
+    { method: "POST", path: "/api/admin/users/u1/grant-public" },
+    { method: "POST", path: "/api/admin/users/u1/revoke-public" },
+    { method: "POST", path: "/api/admin/allowed-emails" },
+    { method: "DELETE", path: "/api/admin/allowed-emails/e1" },
+    { method: "PUT", path: "/api/admin/settings/models" },
+    { method: "PUT", path: "/api/admin/settings/quotas" },
+    { method: "PUT", path: "/api/admin/config/ai.models" },
+    { method: "DELETE", path: "/api/admin/config/ai.models" },
+  ];
+  it.each(adminMutations)("rejects $method $path when Sec-Fetch-Site is cross-site", async ({
+    method,
+    path,
+  }) => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const res = await app.request(path, {
+      method,
+      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({}),
+    });
+    // The same-origin guard runs before any handler logic, so the cross-site
+    // request is rejected with 403 regardless of whether the target id exists.
+    expect(res.status).toBe(403);
+  });
+
   it("GET /config returns every setting; secrets never carry a raw value", async () => {
     client = await makeTestDb("sqlite");
     const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });

@@ -2,13 +2,15 @@ import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, Draft, Manifest, Version } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
+import { looksLikeApiKey } from "../canvas/api-key.js";
 import { collectGarbage } from "../canvas/blob-gc.js";
-import { mimeFor } from "../canvas/mime.js";
+import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
-import { KEEP_VERSIONS } from "../deploy/engine.js";
+import { createPendingVersionWithRetry, KEEP_VERSIONS } from "../deploy/constants.js";
 import { DeployError, LIMITS } from "../deploy/errors.js";
 import { normalizeEntryPath } from "../deploy/validate.js";
 import type { Logger } from "../log/logger.js";
@@ -22,6 +24,14 @@ export interface DraftServiceDeps {
   storage: StorageDriver;
   audit: AuditLog;
   log: Logger;
+  /**
+   * In-flight upload sessions (plan 003). Threaded into the blob-GC live set so a
+   * publish-triggered sweep can't reclaim blobs that a concurrent staged upload
+   * session references only via its (not-yet-finalized) manifest, mirroring the
+   * deploy engine's prune() (review server-canvas-2). Optional (absent in tests
+   * that don't exercise the staged-upload race).
+   */
+  uploadSessions?: UploadSessionsRepository;
   /**
    * Screenshot capture trigger (plan 004 / U6+U12). The effective-gated, best-effort
    * `screenshotTrigger` — it checks env-available AND admin-enabled internally and never
@@ -117,7 +127,19 @@ export function draftService(deps: DraftServiceDeps) {
       }
       const next: Manifest = { ...(draft.manifest as Manifest) };
       const hash = sha256(bytes);
-      next[path] = { size, hash, mime: mimeFor(path).contentType };
+      const mime = mimeFor(path).contentType;
+      next[path] = { size, hash, mime };
+
+      // Warn (don't block) if a text file edited in the in-browser editor / via the
+      // MCP write_draft_file channel appears to embed a canvas API key (§12.1.2 —
+      // keys are server-side only). Mirrors the deploy engine's deploy-time scan so
+      // every ingestion path surfaces the same lint (review server-canvas-11).
+      if (isTextContentType(mime) && looksLikeApiKey(decodeText(bytes))) {
+        deps.log.warn(
+          { canvasId: canvas.id, path },
+          "draft file may contain a canvas API key — remove it before publishing",
+        );
+      }
 
       const stats = manifestStats(next);
       if (stats.totalBytes > LIMITS.maxCanvasBytes) {
@@ -135,7 +157,15 @@ export function draftService(deps: DraftServiceDeps) {
     },
 
     /** Remove a file from the draft (blob left for GC). */
-    async deleteFile(canvas: Canvas, path: string): Promise<Draft> {
+    async deleteFile(canvas: Canvas, rawPath: string): Promise<Draft> {
+      // Manifest keys are always normalized (no leading './', no backslashes), so
+      // normalize the lookup key too — an agent passing './index.html' must resolve
+      // to the real file rather than spuriously 404 (review server-canvas-3, mirrors
+      // writeFile). null = not a writable file path at all.
+      const path = normalizeEntryPath(rawPath);
+      if (path === null) {
+        throw new DeployError("INVALID_PATH", `not a writable file path: ${rawPath}`, rawPath);
+      }
       const draft = await service.getOrCreate(canvas);
       const next: Manifest = { ...(draft.manifest as Manifest) };
       if (!next[path]) throw new DeployError("INVALID_PATH", `no such draft file: ${path}`, path);
@@ -144,7 +174,14 @@ export function draftService(deps: DraftServiceDeps) {
     },
 
     /** Move a file within the draft (same blob, new path) — rename or relocate. */
-    async renameFile(canvas: Canvas, from: string, rawTo: string): Promise<Draft> {
+    async renameFile(canvas: Canvas, rawFrom: string, rawTo: string): Promise<Draft> {
+      // Normalize BOTH endpoints against the (always-normalized) manifest keys so a
+      // conventional relative-style source like './foo.html' resolves to the real
+      // file instead of a spurious INVALID_PATH (review server-canvas-3).
+      const from = normalizeEntryPath(rawFrom);
+      if (from === null) {
+        throw new DeployError("INVALID_PATH", `not a writable file path: ${rawFrom}`, rawFrom);
+      }
       const to = normalizeEntryPath(rawTo);
       if (to === null) {
         throw new DeployError("INVALID_PATH", `not a writable file path: ${rawTo}`, rawTo);
@@ -217,7 +254,11 @@ export function draftService(deps: DraftServiceDeps) {
     async restore(canvas: Canvas, versionNumber: number): Promise<Draft> {
       const target = await deps.versions.findReadyByNumber(canvas.id, versionNumber);
       if (!target?.manifest) {
-        throw new DeployError("INVALID_PATH", `no ready version ${versionNumber}`);
+        // A missing/pruned target version is a "not found", not a path-validation
+        // error — VERSION_UNAVAILABLE maps to 404 (matching the management rollback
+        // route's missing-version response), not INVALID_PATH's 400 (review
+        // server-canvas-7).
+        throw new DeployError("VERSION_UNAVAILABLE", `no ready version ${versionNumber}`);
       }
       await service.getOrCreate(canvas); // ensure the draft row exists
       return deps.drafts.resetToBase(canvas.id, target.manifest as Manifest, target.id);
@@ -230,22 +271,16 @@ export function draftService(deps: DraftServiceDeps) {
       manifest: Manifest,
       stats: { fileCount: number; totalBytes: number },
     ): Promise<Version> {
-      let lastErr: unknown;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const number = await deps.versions.nextNumber(canvasId);
-        try {
-          const pending = await deps.versions.createPending({
-            canvasId,
-            number,
-            createdBy: actorId,
-            source: "editor",
-          });
-          return await deps.versions.markReady(pending.id, { ...stats, manifest });
-        } catch (err) {
-          lastErr = err; // (canvas_id, number) collision from a concurrent publish/deploy — retry
-        }
-      }
-      throw lastErr;
+      // Shared collision-retry for the pending row (review server-canvas-10), then
+      // mark it ready. markReady runs outside the retry so a transient markReady
+      // failure can't spuriously re-pick a version number.
+      const pending = await createPendingVersionWithRetry(
+        deps.versions,
+        canvasId,
+        actorId,
+        "editor",
+      );
+      return deps.versions.markReady(pending.id, { ...stats, manifest });
     },
 
     /** Fire-and-forget row prune + blob GC, mirroring the deploy engine's prune. */
@@ -257,7 +292,16 @@ export function draftService(deps: DraftServiceDeps) {
           deps.log.error({ err, canvasId }, "publish row prune failed (live unaffected)");
         }
         await collectGarbage(
-          { versions: deps.versions, drafts: deps.drafts, storage: deps.storage, log: deps.log },
+          {
+            versions: deps.versions,
+            drafts: deps.drafts,
+            storage: deps.storage,
+            log: deps.log,
+            // Keep blobs referenced by in-flight staged upload sessions in the live
+            // set so a concurrent publish doesn't sweep them out from under a staged
+            // finalize (review server-canvas-2, mirrors the deploy engine's prune()).
+            uploadSessions: deps.uploadSessions,
+          },
           canvasId,
         );
       })().catch((err) => deps.log.error({ err, canvasId }, "publish prune dispatch failed"));

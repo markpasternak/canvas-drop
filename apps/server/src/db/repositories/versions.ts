@@ -117,22 +117,6 @@ export function versionsRepository(client: DbClient) {
     },
 
     /**
-     * Prune ready version **rows** beyond the newest `keep`, never the live
-     * current one. Returns the rows actually deleted so the caller knows which
-     * versions are gone. Storage is NOT touched here: under content-addressed
-     * blobs (M5), a version's bytes may be shared with surviving versions or the
-     * draft, so blob reclamation is a separate per-canvas mark-sweep GC (KTD-4),
-     * never a per-version prefix delete.
-     *
-     * The live current pointer is re-read ATOMICALLY inside the DELETE (a
-     * correlated subquery on `canvases.current_version_id`), NOT from a snapshot —
-     * so a concurrent rollback that just made an old version current never has it
-     * pruned out from under it (prune-vs-rollback race). With the companion
-     * `setCurrentVersionIfReady` guard, every interleaving is safe without a
-     * cross-dialect transaction. `notInArray` over an `isNotNull`-filtered
-     * subquery avoids NULL-poisoning when the canvas has no current version yet.
-     */
-    /**
      * Hard-delete every version row for a canvas (purge). The caller removes the
      * versions' storage objects first; this clears the rows so the canvas row
      * can then be deleted without tripping the `canvas_id` FK.
@@ -141,6 +125,23 @@ export function versionsRepository(client: DbClient) {
       await db.delete(t).where(eq(t.canvasId, canvasId));
     },
 
+    /**
+     * Prune ready version **rows** beyond the newest `keep`, never the live
+     * current one. Returns the rows actually deleted so the caller knows which
+     * versions are gone. Storage is NOT touched here: under content-addressed
+     * blobs (M5), a version's bytes may be shared with surviving versions or the
+     * draft, so blob reclamation is a separate per-canvas mark-sweep GC (KTD-4),
+     * never a per-version prefix delete.
+     *
+     * The candidate set is collected in a prior SELECT (a snapshot); the
+     * live-current exclusion is re-evaluated ATOMICALLY inside the DELETE as a
+     * correlated subquery on `canvases.current_version_id`, so a concurrent
+     * rollback that just made an old version current never has it pruned out from
+     * under it (prune-vs-rollback race). With the companion
+     * `setCurrentVersionIfReady` guard, every interleaving is safe without a
+     * cross-dialect transaction. `notInArray` over an `isNotNull`-filtered
+     * subquery avoids NULL-poisoning when the canvas has no current version yet.
+     */
     async pruneBeyond(canvasId: string, keep: number): Promise<Version[]> {
       const ready = (await db
         .select()

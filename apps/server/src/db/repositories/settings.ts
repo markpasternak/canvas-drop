@@ -18,12 +18,13 @@ export function settingsRepository(client: DbClient) {
     },
 
     async set(key: string, value: Json): Promise<void> {
-      const existing = await db.select().from(t).where(eq(t.key, key)).limit(1);
-      if (existing[0]) {
-        await db.update(t).set({ value }).where(eq(t.key, key));
-      } else {
-        await db.insert(t).values({ key, value });
-      }
+      // Single-statement atomic upsert — two concurrent writers (e.g. an admin
+      // saving in two tabs) can't both observe an absent row and race to INSERT,
+      // which would surface a unique-constraint 500. Matches the kv/guest pattern.
+      await db.insert(t).values({ key, value }).onConflictDoUpdate({
+        target: t.key,
+        set: { value },
+      });
     },
 
     /** Remove a stored override so the value falls back to env/default. */

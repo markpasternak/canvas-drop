@@ -2,7 +2,18 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Json } from "@canvas-drop/shared/db";
 import { describe, expect, it } from "vitest";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import { adminSettingsService } from "./settings-service.js";
+import { adminSettingsService, type ConfigFieldView } from "./settings-service.js";
+
+/** Narrow a view row to its secret arm (asserting it's present + secret). */
+function asSecret(row: ConfigFieldView | undefined): Extract<ConfigFieldView, { secret: true }> {
+  if (!row?.secret) throw new Error(`expected a secret config row, got: ${row?.key}`);
+  return row;
+}
+/** Narrow a view row to its non-secret arm (asserting it's present + non-secret). */
+function asPlain(row: ConfigFieldView | undefined): Extract<ConfigFieldView, { secret: false }> {
+  if (!row || row.secret) throw new Error(`expected a non-secret config row, got: ${row?.key}`);
+  return row;
+}
 
 /** In-memory settings store — the service logic (fallback/override/validation) is
  *  dialect-independent, so a fake avoids spinning up a DB. */
@@ -119,7 +130,7 @@ describe("adminSettingsService — AI provider key (write-only secret)", () => {
       envPresent: new Set(["CANVAS_DROP_AUTH_MODE"]),
     });
     expect(await noKey.aiEnabled()).toBe(false);
-    expect((await aiKeyRow(noKey))?.set).toBe(false);
+    expect(asSecret(await aiKeyRow(noKey)).set).toBe(false);
     await noKey.setConfigOverride("ai.apiKey", "sk-ant-fresh-0000");
     expect(await noKey.aiEnabled()).toBe(true);
   });
@@ -134,9 +145,11 @@ describe("adminSettingsService — AI provider key (write-only secret)", () => {
   it("a READ-ONLY secret exposes only `set` — never last4 (no fragment leak)", async () => {
     // Session secret is secret + read-only → set:true, but NO last4.
     const s = configSvc();
-    const sessionSecret = (await s.describeConfig()).find((r) => r.key === "core.sessionSecret");
+    const sessionSecret = asSecret(
+      (await s.describeConfig()).find((r) => r.key === "core.sessionSecret"),
+    );
     expect(sessionSecret).toMatchObject({ secret: true, editable: false, set: true });
-    expect(sessionSecret?.last4).toBeUndefined();
+    expect(sessionSecret.last4).toBeUndefined();
     expect(sessionSecret).not.toHaveProperty("value");
   });
 });
@@ -145,9 +158,9 @@ describe("adminSettingsService — unified Configuration view", () => {
   it("describeConfig masks secrets (set + last4, no raw value) and labels the source", async () => {
     const s = configSvc();
     const rows = await s.describeConfig();
-    const key = rows.find((r) => r.key === "ai.apiKey");
+    const key = asSecret(rows.find((r) => r.key === "ai.apiKey"));
     expect(key).toMatchObject({ secret: true, editable: true, set: true, source: "environment" });
-    expect(key?.last4).toBe("WXYZ");
+    expect(key.last4).toBe("WXYZ");
     expect(key).not.toHaveProperty("value"); // raw value never serialized
     expect(JSON.stringify(rows)).not.toContain("sk-ant-env-key-WXYZ");
   });
@@ -155,10 +168,10 @@ describe("adminSettingsService — unified Configuration view", () => {
   it("describeConfig shows non-secret values and flips source to database on override", async () => {
     const s = configSvc();
     let rows = await s.describeConfig();
-    const models = rows.find((r) => r.key === "ai.models");
+    const models = asPlain(rows.find((r) => r.key === "ai.models"));
     // CANVAS_DROP_AI_MODELS isn't in our ENV set → the value comes from the default.
     expect(models).toMatchObject({ secret: false, editable: true, source: "default" });
-    expect(models?.value).toContain("claude");
+    expect(models.value).toContain("claude");
 
     await s.setConfigOverride("ai.models", ["claude-opus-4-8"]);
     rows = await s.describeConfig();

@@ -29,8 +29,9 @@ const rootRoute = createRootRoute({
   notFoundComponent: DashboardNotFoundState,
 });
 
-/** Your-canvases filter/search/sort params (plan 004). Filtering is client-side
- *  over the already-loaded owned list. The state lives in the URL so a filtered view
+/** Your-canvases filter/search/sort params (plan 004). Filtering, search, and sort
+ *  are server-side: each param change fires a new /api/canvases request (plan 005).
+ *  The state lives in the URL so a filtered view
  *  is shareable and back-button-able. The index route is left UN-validated on
  *  purpose: typing a fourth search route tips TanStack's un-anchored `navigate`
  *  inference into whole-router union mode (which breaks the gallery's updaters), so

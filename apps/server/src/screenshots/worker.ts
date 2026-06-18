@@ -118,7 +118,7 @@ export function screenshotWorker(deps: ScreenshotWorkerDeps): ScreenshotWorker {
     if (!job) return false;
     try {
       const canvas = await deps.canvases.findById(job.canvasId);
-      if (!canvas || canvas.status !== "active") {
+      if (canvas?.status !== "active") {
         await deps.jobs.markFailedOrRetry(
           job.id,
           `canvas not capturable: ${job.canvasId}`,

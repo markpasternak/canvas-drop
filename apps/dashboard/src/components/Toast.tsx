@@ -28,32 +28,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 2600);
   }, []);
 
-  // Errors interrupt the screen reader (assertive); confirmations wait their turn.
-  const hasError = toasts.some((t) => t.tone === "error");
+  const toastItem = (t: Toast) => (
+    <div
+      key={t.id}
+      data-state={t.exiting ? "closed" : "open"}
+      className={
+        "cd-anim-toast pointer-events-auto rounded-lg border px-3.5 py-2 text-sm shadow-[var(--shadow-popover)] " +
+        (t.tone === "error"
+          ? "border-danger/30 bg-danger-subtle text-danger"
+          : "border-border bg-surface-raised text-fg")
+      }
+    >
+      {t.message}
+    </div>
+  );
 
   return (
     <ToastContext.Provider value={push}>
       {children}
-      {/* Live region so confirmations are announced to screen readers. */}
-      <div
-        className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2"
-        role={hasError ? "alert" : "status"}
-        aria-live={hasError ? "assertive" : "polite"}
-      >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            data-state={t.exiting ? "closed" : "open"}
-            className={
-              "cd-anim-toast pointer-events-auto rounded-lg border px-3.5 py-2 text-sm shadow-[var(--shadow-popover)] " +
-              (t.tone === "error"
-                ? "border-danger/30 bg-danger-subtle text-danger"
-                : "border-border bg-surface-raised text-fg")
-            }
-          >
-            {t.message}
-          </div>
-        ))}
+      {/* Two ALWAYS-present live regions, routed by tone. Errors interrupt the
+          screen reader (role=alert / assertive); confirmations wait their turn
+          (role=status / polite). Swapping a single region's role dynamically can
+          make AT miss the new content, so we keep both mounted and stack them. */}
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
+        <div role="status" aria-live="polite" className="flex flex-col items-center gap-2">
+          {toasts.filter((t) => t.tone !== "error").map(toastItem)}
+        </div>
+        <div role="alert" aria-live="assertive" className="flex flex-col items-center gap-2">
+          {toasts.filter((t) => t.tone === "error").map(toastItem)}
+        </div>
       </div>
     </ToastContext.Provider>
   );

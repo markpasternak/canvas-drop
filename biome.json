@@ -13,6 +13,7 @@
       "!apps/server/src/docs/generated-content.ts",
       "!scripts/*.workflow.mjs",
       "!docs/site/assets/*.js",
+      "!docs/audits",
       "!design"
     ]
   },

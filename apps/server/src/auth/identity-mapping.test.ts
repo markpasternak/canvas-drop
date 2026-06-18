@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
-import { isAdminEmail, isEmailDomainAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import {
+  claimsToIdentity,
+  isAdminEmail,
+  isEmailDomainAllowed,
+  mapIdentityToUser,
+} from "./identity-mapping.js";
 
 const config = loadConfig({
   CANVAS_DROP_AUTH_MODE: "dev",
@@ -17,6 +22,40 @@ describe("isEmailDomainAllowed", () => {
     expect(isEmailDomainAllowed("a@example.com", config)).toBe(true);
     expect(isEmailDomainAllowed("a@evil.org", config)).toBe(false);
     expect(isEmailDomainAllowed("no-at-sign", config)).toBe(false);
+  });
+});
+
+describe("claimsToIdentity", () => {
+  it("namespaces the subject by trust source and maps optional name/avatar", () => {
+    expect(
+      claimsToIdentity(
+        { sub: "abc123", email: "Ada@example.com", name: "Ada", picture: "https://img/a.png" },
+        "oidc",
+      ),
+    ).toEqual({
+      sub: "oidc:abc123",
+      email: "Ada@example.com",
+      name: "Ada",
+      avatarUrl: "https://img/a.png",
+    });
+  });
+
+  it("falls back to the email as the subject when sub is empty or absent", () => {
+    expect(claimsToIdentity({ sub: "", email: "a@example.com" }, "oidc")?.sub).toBe(
+      "oidc:a@example.com",
+    );
+    expect(claimsToIdentity({ email: "a@example.com" }, "proxy")?.sub).toBe("proxy:a@example.com");
+  });
+
+  it("returns null when there is no usable email claim", () => {
+    expect(claimsToIdentity({ sub: "abc" }, "oidc")).toBeNull();
+    expect(claimsToIdentity({ sub: "abc", email: 42 }, "oidc")).toBeNull();
+  });
+
+  it("omits optional name/avatar when missing or non-string", () => {
+    expect(
+      claimsToIdentity({ sub: "s", email: "a@example.com", name: 5, picture: {} }, "oidc"),
+    ).toEqual({ sub: "oidc:s", email: "a@example.com", name: undefined, avatarUrl: undefined });
   });
 });
 

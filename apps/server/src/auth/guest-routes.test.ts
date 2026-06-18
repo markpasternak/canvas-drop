@@ -1,10 +1,14 @@
 import { loadConfig } from "@canvas-drop/shared";
+import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
+import type { AuditLog, RecordAuditInput } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { hashToken } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
+import type { AppEnv } from "../http/types.js";
 import { guestService } from "./guest.js";
 import { guestRoutes } from "./guest-routes.js";
 
@@ -86,5 +90,70 @@ describe.each(DIALECTS)("guestRoutes [%s]", (dialect) => {
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("set-cookie")).toContain("__canvasdrop_guest");
+  });
+
+  it("records a guest_login audit event carrying the actor id and client IP", async () => {
+    // Regression (server-auth-2): the guest_login audit row must include the client
+    // IP (forensic attribution for a leaked magic link) like every other auth event.
+    client = await makeTestDb(dialect);
+    const { canvasId, token } = await seed(client);
+    const events: RecordAuditInput[] = [];
+    const audit: AuditLog = {
+      recordAudit: (e) => events.push(e),
+      record: () => {},
+      flush: async () => {},
+    };
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => {
+      c.set("clientIp", "203.0.113.7");
+      await next();
+    });
+    app.route(
+      "/",
+      guestRoutes({
+        config,
+        guests: guestService(config, guestRepository(client)),
+        canvases: canvasesRepository(client),
+        audit,
+      }),
+    );
+
+    const res = await app.request(`/guest/${token}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+    });
+    expect(res.status).toBe(302);
+    const login = events.find((e) => e.action === "guest_login");
+    expect(login).toBeDefined();
+    expect(login?.ip).toBe("203.0.113.7");
+    expect(login?.targetId).toBe(canvasId);
+    expect(login?.actorId).toBeTruthy(); // guest:<inviteId>
+  });
+
+  it("an archived canvas yields 410 WITHOUT burning the single-use invite", async () => {
+    // Regression (server-auth-1): the canvas-status check must run BEFORE the token
+    // is consumed, so archiving an invited canvas mid-flight doesn't dead-end the
+    // guest by permanently burning their only link.
+    client = await makeTestDb(dialect);
+    const { canvasId, token } = await seed(client);
+    await canvasesRepository(client).archive(canvasId);
+    const app = appFor(client);
+
+    const res = await app.request(`/guest/${token}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+    });
+    expect(res.status).toBe(410);
+    expect(res.headers.get("set-cookie")).toBeNull(); // no session minted
+
+    // The invite is still pending — un-archive and the same link consumes cleanly.
+    const invite = await guestRepository(client).findInviteByTokenHash(hashToken(token));
+    expect(invite?.state).toBe("pending");
+    await canvasesRepository(client).unarchive(canvasId);
+    const ok = await app.request(`/guest/${token}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+    });
+    expect(ok.status).toBe(302);
   });
 });

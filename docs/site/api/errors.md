@@ -63,15 +63,17 @@ table above.
 | `NotAuthenticatedError` | `NOT_AUTHENTICATED` | 401 |
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 |
 | `NotFoundError` | `NOT_FOUND` | 404 |
-| `QuotaExceededError` | `QUOTA_EXCEEDED` (default) | 409 (default) |
+| `QuotaExceededError` | `QUOTA_EXCEEDED` (default) | 429 (default) |
 | `CanvasdropError` (base) | any code | any status |
 
 `QuotaExceededError` is the one quota-shaped class, so it's reused for related
-limits: the SDK constructs it with the actual wire `code` and `status` for 409
-and 413 responses (e.g. `KEY_LIMIT`, `VALUE_TOO_LARGE`, `KEY_TOO_LARGE`), for the
-guest-AI cap (`code: "GUEST_AI_CAP"`, `status: 429`), and realtime constructs it
-with `code: "CONNECTION_LIMIT"`, `status: 429`. Always read `err.code`/`err.status`
-— don't assume a `QuotaExceededError` is literally `QUOTA_EXCEEDED`.
+limits: the SDK constructs it for the `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, and
+`KEY_LIMIT` (409) codes, for every `413` `*_TOO_LARGE` size response (e.g.
+`VALUE_TOO_LARGE`, `KEY_TOO_LARGE`, `FILE_TOO_LARGE`), and realtime constructs it
+with `code: "CONNECTION_LIMIT"`, `status: 429`. Other `409`s — notably
+`NOT_NUMERIC` (an invalid-operation error, not a limit) — surface as the base
+`CanvasdropError`, so branch on `err.code`/`err.status` rather than catching the
+class — and don't assume a `QuotaExceededError` is literally `QUOTA_EXCEEDED`.
 
 Classes such as `CrossCanvasForbiddenError`, `ModelNotAllowedError`, and
 `PasswordRequiredError` do **not** exist; those codes arrive on the base

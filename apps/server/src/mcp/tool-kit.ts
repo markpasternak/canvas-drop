@@ -27,16 +27,37 @@ export function failDeploy(e: unknown): ToolResult {
   throw e;
 }
 
-/** The owner-facing canvas projection returned by most tools (never a secret). */
+/** The owner-facing canvas projection returned by most tools (never a secret). It
+ *  echoes every field an agent can set via `update_canvas` / `set_capabilities` so a
+ *  write is confirmable from the response (read-your-writes) without a follow-up call —
+ *  parity with the HTTP PATCH `/settings` projection. The password hash itself is never
+ *  exposed; `hasPassword` reports only whether a gate is set. */
 export function canvasView(
   config: Config,
   cv: {
     id: string;
     slug: string;
     title: string;
+    description?: string | null;
+    // `status`/`previewMode`/`access` are stored as plain text columns (no `$type` on
+    // the dual-dialect schema), so they widen to `string` on the inferred `Canvas` type;
+    // the cast below narrows at this single boundary. Tightening the columns to
+    // `$type<CanvasStatus>()` etc. (schema.pg.ts + schema.sqlite.ts) would let us drop it.
     status: string;
     currentVersionId: string | null;
     previewMode: string;
+    access?: string;
+    passwordHash?: string | null;
+    sharedExpiresAt?: number | null;
+    spaFallback?: boolean;
+    backendEnabled?: boolean;
+    disabledReason?: string | null;
+    galleryListed?: boolean;
+    galleryTemplatable?: boolean;
+    gallerySummary?: string | null;
+    galleryTags?: unknown;
+    guestAiEnabled?: boolean;
+    guestAiCap?: number;
     viewCount: number;
     lastViewedAt: number | null;
   },
@@ -51,9 +72,24 @@ export function canvasView(
     slug: cv.slug,
     url,
     title: cv.title,
+    description: cv.description ?? null,
     status: cv.status,
     publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
     currentVersionId: cv.currentVersionId,
+    // Sharing / settings fields (parity with the Settings + Share dashboard tabs) so an
+    // agent can confirm an `update_canvas` write from this response, not a second call.
+    access: cv.access,
+    hasPassword: cv.passwordHash != null,
+    sharedExpiresAt: cv.sharedExpiresAt ?? null,
+    spaFallback: cv.spaFallback,
+    backendEnabled: cv.backendEnabled,
+    disabledReason: cv.disabledReason ?? null,
+    galleryListed: cv.galleryListed,
+    galleryTemplatable: cv.galleryTemplatable,
+    gallerySummary: cv.gallerySummary ?? null,
+    galleryTags: cv.galleryTags,
+    guestAiEnabled: cv.guestAiEnabled,
+    guestAiCap: cv.guestAiCap,
     // Preview policy (plan 004): auto/off/custom — so an agent can read the current
     // setting before changing it (parity with the dashboard Preview control).
     previewMode: cv.previewMode,

@@ -178,4 +178,67 @@ describe.each(DIALECTS)("oauthRepository [%s]", (dialect) => {
     expect(await repo.tokens.findLive(access)).toBeNull();
     expect(await repo.tokens.findLive(refresh, "refresh")).toBeNull();
   });
+
+  it("codes.pruneConsumedOrExpiredBefore removes only spent codes past the cutoff", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client);
+    const repo = oauthRepository(client);
+    const now = Date.now();
+    const base = {
+      clientId: "client-a",
+      userId,
+      redirectUri: "https://client.example/callback",
+      codeChallenge: "challenge",
+    };
+    const expiredStale = generateSessionToken();
+    const liveCode = generateSessionToken();
+    const consumedStale = generateSessionToken();
+    await repo.codes.create({ ...base, code: expiredStale, expiresAt: now - 2 * HOUR });
+    await repo.codes.create({ ...base, code: liveCode, expiresAt: now + HOUR });
+    await repo.codes.create({ ...base, code: consumedStale, expiresAt: now + HOUR });
+    // Consume one well before the cutoff so its consumedAt predates it.
+    await repo.codes.consume(consumedStale, now - 2 * HOUR);
+
+    const removed = await repo.codes.pruneConsumedOrExpiredBefore(now - HOUR);
+    expect(removed).toBe(2); // expired-stale + consumed-stale
+    expect(await repo.codes.findLive(liveCode, now)).not.toBeNull(); // live code untouched
+  });
+
+  it("tokens.pruneRevokedOrExpiredBefore removes only dead tokens past the cutoff", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client);
+    const repo = oauthRepository(client);
+    const now = Date.now();
+    const expiredStale = generateSessionToken();
+    const liveAccess = generateSessionToken();
+    const revokedStale = generateSessionToken();
+    const liveRefresh = generateSessionToken();
+    await repo.tokens.create({
+      token: expiredStale,
+      kind: "access",
+      clientId: "client-a",
+      userId,
+      expiresAt: now - 2 * HOUR,
+    });
+    await repo.tokens.create({
+      token: liveAccess,
+      kind: "access",
+      clientId: "client-a",
+      userId,
+      expiresAt: now + HOUR,
+    });
+    await repo.tokens.create({
+      token: revokedStale,
+      kind: "refresh",
+      clientId: "client-a",
+      userId,
+    });
+    await repo.tokens.consume(revokedStale, "refresh", now - 2 * HOUR); // revoked well before cutoff
+    await repo.tokens.create({ token: liveRefresh, kind: "refresh", clientId: "client-a", userId });
+
+    const removed = await repo.tokens.pruneRevokedOrExpiredBefore(now - HOUR);
+    expect(removed).toBe(2); // expired-stale access + revoked-stale refresh
+    expect(await repo.tokens.findLive(liveAccess, "access", now)).not.toBeNull();
+    expect(await repo.tokens.findLive(liveRefresh, "refresh", now)).not.toBeNull();
+  });
 });

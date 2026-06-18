@@ -21,8 +21,8 @@ const last4 = (s: string) => (s.length <= 4 ? s : s.slice(-4));
 /** Source of a setting's effective value, for the admin Configuration view. */
 export type ConfigSource = "database" | "environment" | "default";
 
-/** One row in the admin Configuration view. Secrets carry NO raw value. */
-export interface ConfigFieldView {
+/** Shared columns on every Configuration-view row, regardless of secret-ness. */
+interface ConfigFieldViewBase {
   key: string;
   env: string;
   group: ConfigGroup;
@@ -30,17 +30,31 @@ export interface ConfigFieldView {
   help?: string;
   type: ConfigField["type"];
   enumValues?: readonly string[];
-  secret: boolean;
   editable: boolean;
   source: ConfigSource;
   /** Whether a DB override is currently set (editable fields). */
   overridden: boolean;
-  /** Non-secret effective value (display form). Omitted for secrets. */
-  value?: string;
-  /** Secret-only: is a value configured, and its last 4 chars. Never the value. */
-  set?: boolean;
-  last4?: string;
 }
+
+/**
+ * One row in the admin Configuration view, as a discriminated union on `secret`
+ * so the secret↔value invariant is structural: a secret row carries NO raw `value`
+ * (only `{ set, last4 }`); a non-secret row carries `value` and never `set`/`last4`.
+ * A consumer must narrow on `.secret` before reading `.value` — it cannot
+ * accidentally read a secret's raw value (which is never present).
+ */
+export type ConfigFieldView =
+  | (ConfigFieldViewBase & {
+      secret: true;
+      /** Is a value configured, and its last 4 chars. NEVER the raw value. */
+      set: boolean;
+      last4?: string;
+    })
+  | (ConfigFieldViewBase & {
+      secret: false;
+      /** Non-secret effective value (display form). */
+      value: string;
+    });
 
 /**
  * Admin-tunable global quota keys (§6.10.4, §12.3). Stored in the `settings`
@@ -221,7 +235,6 @@ export function adminSettingsService(deps: {
             help: f.help,
             type: f.type,
             enumValues: f.enumValues,
-            secret: f.secret,
             editable: f.editable,
             source,
             overridden,
@@ -232,9 +245,14 @@ export function adminSettingsService(deps: {
             // a key you can set here. Read-only env secrets (session secret, DB URL,
             // OIDC/S3 secrets) expose nothing but "configured" — no fragment leaks.
             const showLast4 = f.editable && s !== "";
-            return { ...base, set: s !== "", last4: showLast4 ? last4(s) : undefined };
+            return {
+              ...base,
+              secret: true,
+              set: s !== "",
+              last4: showLast4 ? last4(s) : undefined,
+            };
           }
-          return { ...base, value: asDisplayString(f.type, effective) };
+          return { ...base, secret: false, value: asDisplayString(f.type, effective) };
         }),
       );
     },
@@ -263,9 +281,10 @@ export function adminSettingsService(deps: {
           await settings.set(sk, n);
           return;
         }
-        // boolean/enum: forward-compat scaffolding. No editable field is boolean or
-        // enum today (realtime/rate-limit/auth-mode are read-only), so these branches
-        // are unreached until the editable set grows; kept so that's a one-line flip.
+        // boolean: live — used by the editable `screenshots.enabled` toggle (its
+        // boolean branch is covered by settings-service.test.ts). enum: not yet
+        // editable (auth-mode/url-mode/etc. are read-only), so it's still forward-
+        // compat scaffolding handled by the default branch's enumValues check.
         case "boolean": {
           const b = typeof raw === "boolean" ? raw : raw === "true";
           await settings.set(sk, b);

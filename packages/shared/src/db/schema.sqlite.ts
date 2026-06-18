@@ -1,6 +1,16 @@
 import { sql } from "drizzle-orm";
 import { check, index, primaryKey, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sqlite as c } from "./columns.js";
+// Type-only (fully erased at runtime — no module cycle) domain unions threaded
+// onto the CHECK-constrained text columns so callers get compile-time-checked
+// comparisons instead of raw `string`. Defined in types.js, the canonical surface.
+import type {
+  GuestInviteState,
+  McpTokenKind,
+  UsageEventType,
+  VersionSource,
+  VersionStatus,
+} from "./types.js";
 
 /**
  * SQLite schema (BUILD_BRIEF.md §10). Structurally identical to schema.pg.ts —
@@ -97,7 +107,7 @@ export const mcpTokens = sqliteTable(
     id: c.text("id").primaryKey(),
     tokenHash: c.text("token_hash").notNull(),
     // "access" | "refresh".
-    kind: c.text("kind").notNull(),
+    kind: c.text("kind").$type<McpTokenKind>().notNull(),
     clientId: c.text("client_id").notNull(),
     userId: c
       .text("user_id")
@@ -244,6 +254,17 @@ export const canvasAllowlist = sqliteTable(
     uniqueIndex("canvas_allowlist_canvas_user_uq").on(t.canvasId, t.userId),
     uniqueIndex("canvas_allowlist_canvas_email_uq").on(t.canvasId, t.email),
     check("canvas_allowlist_kind_chk", sql`${t.principalKind} in ('member', 'guest')`),
+    // XOR invariant: a member row references a user (no email); a guest row carries
+    // an email (no user). Enforces the principal coupling at the DB layer so a
+    // malformed insert can't create a ghost/mis-routed grant (D4 access-control).
+    check(
+      "canvas_allowlist_member_chk",
+      sql`${t.principalKind} != 'member' OR ${t.userId} IS NOT NULL`,
+    ),
+    check(
+      "canvas_allowlist_guest_chk",
+      sql`${t.principalKind} != 'guest' OR ${t.email} IS NOT NULL`,
+    ),
   ],
 );
 
@@ -260,7 +281,7 @@ export const guestInvites = sqliteTable(
       .references(() => canvases.id),
     email: c.text("email").notNull(),
     tokenHash: c.text("token_hash").notNull(),
-    state: c.text("state").notNull().default("pending"), // pending | active | revoked
+    state: c.text("state").$type<GuestInviteState>().notNull().default("pending"), // pending | active | revoked
     expiresAt: c.epochMs("expires_at"),
     consumedAt: c.epochMs("consumed_at"),
     createdAt: c.epochMs("created_at").notNull(),
@@ -330,8 +351,8 @@ export const versions = sqliteTable(
       .text("created_by")
       .notNull()
       .references(() => users.id),
-    source: c.text("source").notNull(), // folder | zip | paste | api | editor | upload
-    status: c.text("status").notNull().default("pending"), // pending | ready
+    source: c.text("source").$type<VersionSource>().notNull(), // folder | zip | paste | api | editor | upload
+    status: c.text("status").$type<VersionStatus>().notNull().default("pending"), // pending | ready
     fileCount: c.int("file_count").notNull().default(0),
     totalBytes: c.int("total_bytes").notNull().default(0),
     manifest: c.json("manifest"), // path -> { size, hash, mime }; null until ready
@@ -410,7 +431,8 @@ export const drafts = sqliteTable(
 );
 
 // Per-op metering substrate (D24, plan 007 / M6). Append-only; one row per
-// primitive op (kv_op | file_op; future: view | deploy | rt_connect). Stats are
+// primitive op. Current types: kv_op | file_op | view | deploy | rt_connect (all
+// live — recordView writes 'view', canvas-realtime writes 'rt_connect'). Stats are
 // derived by COUNT over a window; a created_at-keyed prune bounds growth.
 export const usageEvents = sqliteTable(
   "usage_events",
@@ -423,7 +445,7 @@ export const usageEvents = sqliteTable(
     // Attribution: an org user id OR a guest principal id (`guest:<inviteId>`, U9),
     // so guest primitive ops are attributed — not an FK to users for that reason.
     userId: c.text("user_id").notNull(),
-    type: c.text("type").notNull(), // kv_op | file_op | view | deploy | rt_connect
+    type: c.text("type").$type<UsageEventType>().notNull(), // kv_op | file_op | view | deploy | rt_connect
     meta: c.json("meta"), // op detail, e.g. { op: 'set' }
     createdAt: c.epochMs("created_at").notNull(),
   },

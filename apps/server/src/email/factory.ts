@@ -13,15 +13,22 @@ import { smtpMailer } from "./smtp.js";
  * change — adding a future API provider is a new driver file + a case here.
  */
 export function setupMailer(config: Config, log: Logger): Mailer {
-  switch (config.email.driver) {
+  const driver = config.email.driver;
+  switch (driver) {
     case "smtp":
       return smtpMailer(config.email, config.email.from, log);
     case "mailgun":
       return mailgunMailer(config.email, config.email.from, log);
     case "noop":
       return noopMailer();
-    default:
+    case "log":
       return logMailer(log);
+    default: {
+      // Exhaustiveness: a new driver added to the config enum without a case here
+      // is a compile error (never a silent fall-through to the token-logging driver).
+      const _exhaustive: never = driver;
+      throw new Error(`unknown email driver: ${String(_exhaustive)}`);
+    }
   }
 }
 

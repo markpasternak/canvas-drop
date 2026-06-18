@@ -3,8 +3,9 @@ import { TabContentFrame } from "../components/CanvasDetail.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
+import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import type { FeatureCapability } from "../lib/api.js";
+import { ApiError, type FeatureCapability } from "../lib/api.js";
 import { useUpdateCapabilities } from "../lib/mutations.js";
 import { useCanvas } from "../lib/queries.js";
 
@@ -44,12 +45,16 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
  */
 export default function Capabilities() {
   const { id } = useParams({ strict: false }) as { id: string };
+  const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const update = useUpdateCapabilities(id);
 
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;
   }
+
+  const onSaveError = (err: unknown) =>
+    toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
 
   const backendOn = canvas.backendEnabled;
   // A public_link canvas serves static files only — every primitive is refused for
@@ -81,7 +86,7 @@ export default function Capabilities() {
           label="Enable backend"
           description="Off by default. A canvas is static until you turn this on."
           checked={backendOn}
-          onChange={(next) => update.mutate({ backendEnabled: next })}
+          onChange={(next) => update.mutate({ backendEnabled: next }, { onError: onSaveError })}
         />
         <RowDivider />
 
@@ -103,7 +108,7 @@ export default function Capabilities() {
               }
               checked={storedOn}
               disabled={!backendOn}
-              onChange={(next) => update.mutate({ [f.key]: next })}
+              onChange={(next) => update.mutate({ [f.key]: next }, { onError: onSaveError })}
             />
           );
         })}

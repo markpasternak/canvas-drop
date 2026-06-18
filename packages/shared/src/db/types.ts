@@ -2,6 +2,7 @@ import type {
   aiUsage,
   allowedEmails,
   auditLog,
+  canvasAllowlist,
   canvases,
   drafts,
   files,
@@ -66,6 +67,8 @@ export type UploadSession = typeof uploadSessions.$inferSelect;
 export type NewUploadSession = typeof uploadSessions.$inferInsert;
 export type ScreenshotJob = typeof screenshotJobs.$inferSelect;
 export type NewScreenshotJob = typeof screenshotJobs.$inferInsert;
+export type CanvasAllowlistEntry = typeof canvasAllowlist.$inferSelect;
+export type NewCanvasAllowlistEntry = typeof canvasAllowlist.$inferInsert;
 
 /** Screenshot job status values (stored as text, CHECK-constrained in the schema). */
 export type ScreenshotJobStatus = "pending" | "running" | "done" | "failed";
@@ -105,5 +108,19 @@ export type AllowlistPrincipalKind = "member" | "guest";
 /**
  * Version source values (`editor` = published from the in-browser draft, M5;
  * `upload` = published via the two-channel staging→finalize flow, plan 003).
+ * `VersionSource` is the alias matching the `versions.source` column name.
  */
 export type DeploySource = "folder" | "zip" | "paste" | "api" | "editor" | "upload";
+export type VersionSource = DeploySource;
+
+/** Version readiness (`versions.status`, CHECK-constrained in the schema). */
+export type VersionStatus = "pending" | "ready";
+
+/** MCP token kind (`mcp_tokens.kind`). */
+export type McpTokenKind = "access" | "refresh";
+
+/** Guest-invite lifecycle state (`guest_invites.state`, CHECK-constrained). */
+export type GuestInviteState = "pending" | "active" | "revoked";
+
+/** Usage-event types (`usage_events.type`). All five are live (see schema comment). */
+export type UsageEventType = "kv_op" | "file_op" | "view" | "deploy" | "rt_connect";

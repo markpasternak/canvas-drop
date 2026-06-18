@@ -8,6 +8,7 @@ import { FilesQuotaError, type FilesService, FileTooLargeError } from "../canvas
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
 import type { AppEnv } from "../http/types.js";
+import { blobBodyLimit } from "./deploy-common.js";
 
 export interface CanvasFilesDeps {
   config: Config;
@@ -34,7 +35,7 @@ export function canvasFilesRoutes(deps: CanvasFilesDeps): Hono<AppEnv> {
       .catch(() => {});
   };
 
-  app.post("/", async (c) => {
+  app.post("/", blobBodyLimit, async (c) => {
     const cv = canvas(c);
     let file: unknown;
     try {

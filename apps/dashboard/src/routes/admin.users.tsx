@@ -10,6 +10,7 @@ import { SearchInput } from "../components/SearchInput.js";
 import { ADMIN_PAGE_SIZE, type AdminUserSort } from "../lib/api.js";
 import { useAdminUsers, useMe } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
+import { usePagination } from "../lib/use-pagination.js";
 
 /** Admin users-list search params (plan 006), URL-driven like the canvas list. */
 interface AdminUsersSearch {
@@ -72,10 +73,12 @@ export default function AdminUsers() {
 
   const users = data?.users ?? [];
   const total = data?.total ?? 0;
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + users.length, total);
-  const hasPrev = page > 1;
-  const hasNext = offset + users.length < total;
+  const { from, to, hasPrev, hasNext } = usePagination({
+    total,
+    offset,
+    itemCount: users.length,
+    page,
+  });
 
   return (
     <div className="space-y-6">

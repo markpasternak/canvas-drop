@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { hashToken, sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import { SESSION_COOKIE, sessionBackedStrategy, sessionService } from "./session.js";
 
@@ -60,14 +60,14 @@ function buildApp(config: Config, client: DbClient) {
   return app;
 }
 
-describe("sessionService", () => {
+describe.each(DIALECTS)("sessionService [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("issues an HttpOnly SameSite=Lax cookie holding a token whose hash is stored", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
     const app = buildApp(pathConfig, client);
     const res = await app.request(`/issue/${uid}`);
@@ -82,7 +82,7 @@ describe("sessionService", () => {
   });
 
   it("resolves a valid cookie to the user id and rejects garbage / missing cookies", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
     const app = buildApp(pathConfig, client);
     const token = cookieToken(await app.request(`/issue/${uid}`)) as string;
@@ -100,7 +100,7 @@ describe("sessionService", () => {
   });
 
   it("revokes the session on logout", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
     const app = buildApp(pathConfig, client);
     const token = cookieToken(await app.request(`/issue/${uid}`)) as string;
@@ -112,7 +112,7 @@ describe("sessionService", () => {
   });
 
   it("records session_create and session_revoke audit events when a sink is provided", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
     const events: Array<{ action: string; actorId?: string | null }> = [];
     const svc = sessionService(pathConfig, sessionsRepository(client), {
@@ -140,7 +140,7 @@ describe("sessionService", () => {
   });
 
   it("scopes the cookie to the base domain in subdomain mode, host-only in path mode", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
 
     const sub = await buildApp(subConfig, client).request(`/issue/${uid}`);
@@ -153,14 +153,14 @@ describe("sessionService", () => {
   });
 });
 
-describe("sessionBackedStrategy", () => {
+describe.each(DIALECTS)("sessionBackedStrategy [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("resolves identity from a live session cookie, null otherwise", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const uid = await seedUser(client);
     const app = buildApp(pathConfig, client);
     const token = cookieToken(await app.request(`/issue/${uid}`)) as string;

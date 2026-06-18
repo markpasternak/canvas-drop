@@ -108,4 +108,29 @@ describe("dual-dialect schema parity (KTD-1)", () => {
       fkShape(pgCfg.foreignKeys as never),
     );
   });
+
+  // CHECK constraints encode invariants (status/access domains, the allowlist
+  // member/guest XOR coupling). A check dropped on one dialect would silently
+  // weaken the invariant there — assert the set of check names matches.
+  it.each(TABLE_KEYS)("%s has identical CHECK constraint names across dialects", (key) => {
+    const checkNames = (cfg: { checks?: Array<{ name: string }> }) =>
+      (cfg.checks ?? []).map((c) => c.name).sort();
+    expect(checkNames(getSqliteTableConfig(sqliteTables[key]) as never), `${key} checks`).toEqual(
+      checkNames(getPgTableConfig(pgTables[key]) as never),
+    );
+  });
+
+  it("canvas_allowlist carries the kind + member + guest CHECK constraints on both dialects", () => {
+    const expected = [
+      "canvas_allowlist_guest_chk",
+      "canvas_allowlist_kind_chk",
+      "canvas_allowlist_member_chk",
+    ];
+    const pgNames = (getPgTableConfig(pg.canvasAllowlist).checks ?? []).map((c) => c.name).sort();
+    const sqNames = (getSqliteTableConfig(sq.canvasAllowlist).checks ?? [])
+      .map((c) => c.name)
+      .sort();
+    expect(pgNames).toEqual(expected);
+    expect(sqNames).toEqual(expected);
+  });
 });

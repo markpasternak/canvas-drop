@@ -16,6 +16,7 @@ import type { DraftService } from "../draft/service.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { blobBodyLimit } from "./deploy-common.js";
 
 export interface DraftApiDeps {
   config: Config;
@@ -108,7 +109,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   });
 
   // Write/replace a draft file (raw body bytes — works for text and binary).
-  app.put("/:id/draft/file", sameOrigin, async (c) => {
+  app.put("/:id/draft/file", sameOrigin, blobBodyLimit, async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const path = c.req.query("path");
@@ -231,9 +232,11 @@ export function draftApiRoutes(deps: DraftApiDeps) {
           "Content-Security-Policy": "frame-ancestors 'self'",
         },
       });
-    } catch {
+    } catch (err) {
       // A storage/DB hiccup shouldn't surface a raw 500 with a stack trace — mirror
-      // the sibling handlers and return the stable not-found shape.
+      // the sibling handlers and return the stable not-found shape. Log first so a
+      // systematic failure in the preview pipeline is diagnosable, not a silent 404.
+      c.get("log")?.error({ err }, "draft preview: unexpected error, returning not_found");
       return previewNotFound(c);
     }
   };

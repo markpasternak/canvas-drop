@@ -2,8 +2,9 @@
  * BRAND — product identity in one place (name, wordmark, fonts, accent, meta).
  *
  * The brand layer (with `BRAND_TOKENS` in `tokens.ts` and the mark in `logo.ts`).
- * A self-hoster re-brands by editing this file + `tokens.ts`; see `REBRAND.md`.
- * Org-agnostic by rule — no organisation-specific naming lives in components.
+ * A self-hoster re-brands in two files: edit `brand.ts` for the name/domain/fonts
+ * and `tokens.ts` for the colors/logo. Org-agnostic by rule — no organisation-
+ * specific naming lives in components.
  */
 export const BRAND = {
   /** Product name. Lowercase wordmark; referenced everywhere instead of a literal. */

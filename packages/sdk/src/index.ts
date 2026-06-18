@@ -1,8 +1,9 @@
 /**
  * @canvas-drop/sdk — the zero-config browser SDK exposed as the global
  * `canvasdrop` (plan 007 / M6, area J). Canvas code calls `canvasdrop.kv`,
- * `canvasdrop.files`, and `canvasdrop.me()`; the SDK derives the canvas slug +
- * API base from `location`, sends credentialed requests, and throws typed errors.
+ * `canvasdrop.files`, `canvasdrop.ai`, `canvasdrop.realtime`, and
+ * `canvasdrop.me()`; the SDK derives the canvas slug + API base from `location`,
+ * sends credentialed requests, and throws typed errors.
  * No secrets ever live here — identity rides the IAP/session cookie.
  */
 
@@ -79,7 +80,7 @@ export class CapabilityDisabledError extends CanvasdropError {
   }
 }
 export class QuotaExceededError extends CanvasdropError {
-  constructor(code = "QUOTA_EXCEEDED", status = 409) {
+  constructor(code = "QUOTA_EXCEEDED", status = 429) {
     super(code, status, "quota exceeded");
     this.name = "QuotaExceededError";
   }
@@ -112,10 +113,17 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     return new CapabilityDisabledError(cap);
   }
   if (status === 404) return new NotFoundError();
-  // Quota signalled either by code (AI: 429 QUOTA_EXCEEDED, or the per-canvas guest
-  // AI cap: 429 GUEST_AI_CAP) or by the KV/files limit statuses (409 KEY_LIMIT,
-  // 413 *_TOO_LARGE).
-  if (code === "QUOTA_EXCEEDED" || code === "GUEST_AI_CAP" || status === 409 || status === 413) {
+  // Quota/limit errors map to QuotaExceededError, signalled either by code (AI:
+  // 429 QUOTA_EXCEEDED, or the per-canvas guest AI cap: 429 GUEST_AI_CAP; KV
+  // key-count: 409 KEY_LIMIT) or by the 413 *_TOO_LARGE size statuses. Other 409s
+  // (notably NOT_NUMERIC — an invalid-operation error, not a limit) fall through
+  // to the generic CanvasdropError so callers can branch on err.code.
+  if (
+    code === "QUOTA_EXCEEDED" ||
+    code === "GUEST_AI_CAP" ||
+    code === "KEY_LIMIT" ||
+    status === 413
+  ) {
     return new QuotaExceededError(code || undefined, status);
   }
   return new CanvasdropError(code || "REQUEST_FAILED", status);
@@ -354,19 +362,36 @@ async function* readSSE(res: Response): AsyncGenerator<SseFrame> {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx = buf.indexOf("\n\n");
-    while (idx !== -1) {
-      const block = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      for (const line of block.split("\n")) {
-        if (line.startsWith("data:")) yield JSON.parse(line.slice(5).trim()) as SseFrame;
+  // try/finally guarantees the reader lock is released on normal completion,
+  // early `break` out of the caller's `for await`, or a thrown error — otherwise
+  // the lock (and the underlying connection) leaks until GC.
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx = buf.indexOf("\n\n");
+      while (idx !== -1) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        for (const line of block.split("\n")) {
+          if (line.startsWith("data:")) {
+            let frame: SseFrame;
+            try {
+              frame = JSON.parse(line.slice(5).trim()) as SseFrame;
+            } catch {
+              // Truncated/corrupt data line (proxy teardown, partial flush). Keep
+              // the typed-error contract rather than leaking a raw SyntaxError.
+              throw new CanvasdropError("MALFORMED_FRAME", 502, "malformed SSE data line");
+            }
+            yield frame;
+          }
+        }
+        idx = buf.indexOf("\n\n");
       }
-      idx = buf.indexOf("\n\n");
     }
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -375,7 +400,11 @@ function aiErrorFromFrame(frame: SseFrame): CanvasdropError {
   const code = typeof frame.code === "string" ? frame.code : "AI_ERROR";
   const message = typeof frame.message === "string" ? frame.message : undefined;
   if (code === "CAPABILITY_DISABLED") return new CapabilityDisabledError("ai");
-  if (code === "QUOTA_EXCEEDED") return new QuotaExceededError(code);
+  // Quota signals carry 429 (matching ERROR_CODES) so callers reading err.status
+  // see a rate-limit, and `err instanceof QuotaExceededError` catches the
+  // per-canvas guest-AI cap in-stream just as it does pre-stream.
+  if (code === "GUEST_AI_CAP" || code === "QUOTA_EXCEEDED")
+    return new QuotaExceededError(code, 429);
   return new CanvasdropError(code, 502, message);
 }
 
@@ -595,8 +624,13 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
   }
 
   function makeChannel(name: string): Channel {
+    // Per-handle closed latch. After close() this handle is dead: publish/presence
+    // must throw rather than silently strand a frame in the outbox (which would
+    // never flush, since a closed channel triggers no reconnect).
+    let closed = false;
     return {
       publish(event, data) {
+        if (closed) throw new CanvasdropError("CHANNEL_CLOSED", 0, "channel is closed");
         if (terminal) throw terminal;
         connect();
         rawSend({ type: "publish", channel: name, event, data });
@@ -620,6 +654,8 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
         rawSend({ type: "unsubscribe", channel: name });
       },
       presence() {
+        if (closed)
+          return Promise.reject(new CanvasdropError("CHANNEL_CLOSED", 0, "channel is closed"));
         if (terminal) return Promise.reject(terminal);
         const s = st(name);
         connect();
@@ -638,7 +674,18 @@ function createRealtime(opts: Required<ClientOptions>): RealtimeNamespace {
         st(name).onLeave.push(handler);
       },
       close() {
+        closed = true;
+        // Reject any in-flight presence() waiters before dropping the state — once
+        // the channel leaves the map, neither rejectPendingPresence nor the
+        // 'presence' frame handler (both iterate channels.values()) can reach them,
+        // so the awaiting Promise would otherwise hang forever.
+        const s = channels.get(name);
         channels.delete(name);
+        if (s) {
+          const err = new CanvasdropError("CHANNEL_CLOSED", 0, "channel closed");
+          for (const w of s.presenceWaiters) w.reject(err);
+          s.presenceWaiters = [];
+        }
         rawSend({ type: "unsubscribe", channel: name });
         if (channels.size === 0 && ws) {
           ws.close(1000, "no channels");

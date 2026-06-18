@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Hono } from "hono";
+import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 
 /**
@@ -46,12 +47,11 @@ export function serveSdkRoutes(opts: ServeSdkOptions = {}): Hono<AppEnv> {
         503,
       );
     }
-    return new Response(cached, {
-      headers: {
-        "content-type": "application/javascript; charset=utf-8",
-        "cache-control": "public, max-age=3600",
-      },
-    });
+    const headers = new Headers();
+    baseSecurityHeaders(headers);
+    headers.set("content-type", "application/javascript; charset=utf-8");
+    headers.set("cache-control", "public, max-age=3600");
+    return new Response(cached, { headers });
   });
 
   // NOTE: `/llms.txt` is no longer served here. It moved to the PUBLIC docs band

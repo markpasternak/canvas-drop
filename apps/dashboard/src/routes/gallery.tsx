@@ -16,6 +16,8 @@ import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
 import { cardHoverClass } from "../lib/row-styles.js";
+import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
+import { usePagination } from "../lib/use-pagination.js";
 import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
@@ -166,34 +168,8 @@ export default function Gallery() {
   const page = Math.max(1, Math.floor(search.page ?? 1));
   const offset = (page - 1) * GALLERY_PAGE_SIZE;
 
-  // Local mirror of the search box, debounced into the route param. Seeded on `q`
-  // so a shared URL or back-nav populates the field.
-  const [text, setText] = useState(q ?? "");
-  useEffect(() => {
-    setText(q ?? "");
-  }, [q]);
-
-  // Typing debounces (300ms); clearing the field applies immediately so the grid
-  // doesn't stay filtered after the user emptied the box. Inlined (rather than a
-  // shared setter) so the effect's only deps are the values it reads.
-  useEffect(() => {
-    const value = text.trim() || undefined;
-    if (value === q) return; // already in sync — no navigation
-    if (value === undefined) {
-      navigate({
-        to: "/gallery",
-        search: (prev: GallerySearch) => ({ ...prev, q: undefined, page: 1 }),
-      });
-      return;
-    }
-    const id = setTimeout(() => {
-      navigate({
-        to: "/gallery",
-        search: (prev: GallerySearch) => ({ ...prev, q: value, page: 1 }),
-      });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [text, q, navigate]);
+  // Search box ⇆ URL `q`, debounced (shared with the Your-canvases/admin lists).
+  const [text, setText] = useDebouncedUrlSearch(q, "/gallery");
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useGallery({
     q,
@@ -234,12 +210,12 @@ export default function Gallery() {
 
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
-  const from = total === 0 ? 0 : offset + 1;
-  // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
-  // "Showing 49–49 of 5" before the page snaps back.
-  const to = Math.min(offset + items.length, total);
-  const hasPrev = page > 1;
-  const hasNext = offset + items.length < total;
+  const { from, to, hasPrev, hasNext } = usePagination({
+    total,
+    offset,
+    itemCount: items.length,
+    page,
+  });
   const filtering = Boolean(q || tag || owner || templatable);
 
   function setOwner(next: string) {

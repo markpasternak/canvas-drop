@@ -320,6 +320,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       "/",
       mcpRoutes({
         config: deps.config,
+        log: deps.rootLogger,
         strategy: deps.strategy,
         users: deps.users,
         allowedEmails,

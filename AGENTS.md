@@ -33,7 +33,7 @@ The repo owner (Mark) prefers that, once a plan is approved, an agent **executes
 5. **Ship** — push, open the PR, wait for the CI matrix to go green (fix any red), then **merge it** (squash, delete branch). The autonomous merge is authorized once: all units done + full suite green on both dialects + code review run and findings fixed + CI green on the PR.
 6. **Close out** — close the issue, capture learnings in `docs/solutions/`, update the active-plan pointers, leave `main` green.
 
-The safety net for the autonomous merge is the CI matrix (the explicit, authoritative gate) + the completed code review — not a human gate, and not an implicit local hook. Server-side branch protection arrives when the repo goes public / on Pro.
+The safety net for the autonomous merge is the CI matrix (the explicit, authoritative gate) + the completed code review — not a human gate, and not an implicit local hook. **Server-side branch protection is now enabled** (the repo is at v1): `main` cannot be pushed to directly and the CI matrix is a required check, so the autonomous merge lands only through a green PR.
 
 **This is the default for plan-driven rounds on this repo unless Mark says otherwise.** A single round may span many units, a full review, and the merge — all without interruption.
 
@@ -122,8 +122,18 @@ pnpm build          # build all workspace packages (sdk, dashboard, server) via 
   CI is the **explicit, authoritative gate** — there is no local pre-push hook.
 - **Gate yourself explicitly before pushing:** run `pnpm lint && pnpm typecheck && pnpm test`
   yourself (don't rely on an implicit hook). CI re-runs the full matrix on the PR, in a
-  clean environment, and that green is what authorizes the merge. Server-side branch
-  protection arrives when the repo goes public (BUILD_BRIEF OPEN-8) or on Pro.
+  clean environment, and that green is what authorizes the merge. **Server-side branch
+  protection is enabled (v1):** `main` is push-protected and the CI matrix is a required
+  status check, so every change lands through a green PR — never a direct push.
+- **Schema changes need a migration (v1: the production DB is NOT wiped at deploy).** The
+  service runs pending migrations at boot (`runMigrations` → `client.migrate()`), so a
+  change to `schema.pg.ts`/`schema.sqlite.ts` only reaches an existing DB via a generated
+  migration. After editing the schema, generate one for **both** dialects:
+  `npx drizzle-kit generate --config=drizzle.pg.config.ts --name=<slug>` and the same with
+  `drizzle.sqlite.config.ts`, then commit `drizzle/pg/*` and `drizzle/sqlite/*`. Tests run
+  the real migrations on a fresh DB, so a schema-only change (no migration) silently never
+  reaches the DB. Design migrations to be **additive / backward-compatible** — no destructive
+  rewrites of live data.
 
 ## Read first when working in these areas
 

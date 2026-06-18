@@ -9,13 +9,11 @@ import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../http/types.js";
 
 /**
- * Capability runtime guard (plan 006). This is the seam the future backend
- * primitives (KV/Files/AI/Realtime in M6/M9, and the runtime `me()` identity
- * endpoint) plug into: each primitive route group runs `requireCapability(cap,
- * config)` after `canvasAccess` (U15) has resolved + authorized the canvas, and
- * gets a typed 403 when the capability is off.
- *
- * No primitive routes exist yet — this module ships the guard and its tests so
+ * Capability runtime guard (plan 006). The seam each backend primitive
+ * (KV / Files / AI / Realtime, and the runtime `me()` identity endpoint —
+ * all shipped in M6/M9) plugs into: each primitive route group runs
+ * `requireCapability(cap, config)` after `canvasAccess` (U15) has resolved +
+ * authorized the canvas, and gets a typed 403 when the capability is off — so
  * the primitives are a thin handler behind one shared check rather than
  * scattered, retrofitted gating.
  */

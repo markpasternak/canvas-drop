@@ -178,9 +178,11 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     await expect(svc.publish(canvas, "actor")).rejects.toMatchObject({ code: "EMPTY_DEPLOY" });
   });
 
-  it("restoring a non-existent version throws INVALID_PATH", async () => {
+  it("restoring a non-existent version throws VERSION_UNAVAILABLE (404, not 400)", async () => {
     const { svc, canvas } = await setup();
-    await expect(svc.restore(canvas, 999)).rejects.toMatchObject({ code: "INVALID_PATH" });
+    // A missing/pruned version is a not-found, mapped to 404 by the route — matching
+    // the management rollback route — rather than INVALID_PATH's 400 (server-canvas-7).
+    await expect(svc.restore(canvas, 999)).rejects.toMatchObject({ code: "VERSION_UNAVAILABLE" });
   });
 
   it("getOrCreate returns the existing draft when one already exists (insert-or-get)", async () => {
@@ -253,6 +255,60 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     // Renaming a path to itself (after normalization) changes nothing and doesn't throw.
     const same = await svc.renameFile(await reload(), "new.html", "./new.html");
     expect(Object.keys(same.manifest as object)).toEqual(["new.html"]);
+  });
+
+  it("deleteFile + renameFile normalize the source path (./prefix resolves; server-canvas-3)", async () => {
+    const { svc, canvas, reload } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("<h1>home</h1>"));
+    await svc.writeFile(await reload(), "keep.html", enc("<h1>keep</h1>"));
+
+    // A relative-style source must resolve to the real (normalized) manifest key
+    // rather than spuriously 404 — agents pass './foo' conventionally.
+    const renamed = await svc.renameFile(await reload(), "./keep.html", "moved.html");
+    expect(Object.keys(renamed.manifest as object).sort()).toEqual(["index.html", "moved.html"]);
+
+    const deleted = await svc.deleteFile(await reload(), "./index.html");
+    expect(Object.keys(deleted.manifest as object)).toEqual(["moved.html"]);
+  });
+
+  it("warns (does not block) when a draft text file looks like it embeds an API key (server-canvas-11)", async () => {
+    const client2 = await makeTestDb("sqlite");
+    try {
+      const storage = memStorage();
+      const users = usersRepository(client2);
+      const canvases = canvasesRepository(client2);
+      const versions = versionsRepository(client2);
+      const drafts = draftsRepository(client2);
+      const audit = createAuditLog(auditRepository(client2), silent);
+      const warnings: unknown[] = [];
+      const log = {
+        ...silent,
+        warn: (obj: unknown) => warnings.push(obj),
+      } as unknown as typeof silent;
+      const svc = draftService({ config, canvases, versions, drafts, storage, audit, log });
+      const owner = await users.upsert({
+        providerSub: "k",
+        email: "k@e.com",
+        name: "K",
+        isAdmin: false,
+      });
+      const cv = (await canvases.create({
+        ownerId: owner.id,
+        slug: "kk",
+        apiKeyHash: "k",
+      })) as Canvas;
+      // A key-shaped string in an editor-written .js file warns but still writes.
+      const draft = await svc.writeFile(
+        cv,
+        "config.js",
+        // `cd_` + 40+ base64url chars matches the §12.1.2 key-shaped lint.
+        enc('const k = "cd_0123456789abcdefABCDEF0123456789abcdefABCDEF";'),
+      );
+      expect((draft.manifest as Record<string, unknown>)["config.js"]).toBeDefined();
+      expect(warnings.length).toBeGreaterThan(0);
+    } finally {
+      await client2.close();
+    }
   });
 });
 

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, Manifest, UploadSession } from "@canvas-drop/shared/db";
+import { looksLikeApiKey } from "../canvas/api-key.js";
 import { soleHtmlEntry } from "../canvas/manifest.js";
-import { mimeFor } from "../canvas/mime.js";
+import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { blobKey, canvasBlobPrefix, hashFromBlobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -106,6 +107,17 @@ export function uploadService(deps: UploadServiceDeps) {
       throw new DeployError(
         "BLOB_HASH_MISMATCH",
         `staged size ${bytes.byteLength} != declared ${expected.size} for ${hash}`,
+      );
+    }
+    // Warn (don't block) if a text blob appears to embed a canvas API key (§12.1.2 —
+    // keys are server-side only, never in canvas files). Mirrors the engine's deploy-
+    // time scan so the staged-upload channel surfaces the same lint (review
+    // server-canvas-11). The deploy engine emits this in the deploy result's warnings;
+    // the staging channel has no per-blob warning surface, so it logs instead.
+    if (expected && isTextContentType(expected.mime) && looksLikeApiKey(decodeText(bytes))) {
+      deps.log?.warn(
+        { canvasId: session.canvasId, hash },
+        "staged file may contain a canvas API key — remove it before deploying",
       );
     }
     await putBlobIfAbsent(session.canvasId, hash, bytes);
@@ -282,8 +294,14 @@ export function uploadService(deps: UploadServiceDeps) {
           claimed.ownerId,
           "upload",
         );
-        await deps.engine.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
+        // Mark the handle terminal BEFORE the commit so a transient failure in
+        // commitReadyVersion (or markConsumed itself succeeding then the commit
+        // throwing) can never let a retry re-claim the session and create a second
+        // identical version (double-publish, review server-canvas-1). The blobs are
+        // already staged, so a failed commit after this point requires a fresh
+        // begin()/stage/finalize cycle — acceptable, and never duplicates a version.
         await deps.uploadSessions.markConsumed(claimed.id);
+        await deps.engine.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
 
         return {
           url: canvasUrl(deps.config, canvas.slug),
@@ -293,10 +311,19 @@ export function uploadService(deps: UploadServiceDeps) {
           warnings,
         };
       } catch (err) {
-        // Release the lease so a legitimate retry (transient commit failure, or a
-        // client that still needs to upload a missing blob) can re-claim. Only a
-        // SUCCESSFUL finalize marks the handle consumed (terminal).
-        await deps.uploadSessions.clearFinalizing(claimed.id).catch(() => {});
+        // Release the lease so a legitimate retry (a client that still needs to
+        // upload a missing blob, or a pre-markConsumed failure) can re-claim. Once
+        // the handle is marked consumed (just before commitReadyVersion), a retry
+        // is intentionally refused with UPLOAD_ALREADY_FINALIZED — a fresh begin()
+        // is required — so a transient commit failure can't double-publish.
+        await deps.uploadSessions
+          .clearFinalizing(claimed.id)
+          .catch((clearErr) =>
+            deps.log?.warn(
+              { err: clearErr, sessionId: claimed.id },
+              "clearFinalizing failed; session lease will self-heal after FINALIZE_LEASE_MS",
+            ),
+          );
         throw err;
       }
     },

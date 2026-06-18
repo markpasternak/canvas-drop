@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { User } from "@canvas-drop/shared/db";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import type { Logger } from "../log/logger.js";
 import type { ResolvedIdentity } from "./strategy.js";
 
 /**
@@ -39,6 +40,7 @@ export async function isEmailAllowed(
   email: string,
   config: Config,
   allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">,
+  log?: Logger,
 ): Promise<boolean> {
   if (isEmailDomainAllowed(email, config)) return true;
   // Fail closed: a DB error on the individual-allowlist lookup denies sign-in
@@ -46,7 +48,13 @@ export async function isEmailAllowed(
   // path. Domain-allowed identities short-circuit above and never reach here.
   try {
     return await allowedEmails.isAllowed(email);
-  } catch {
+  } catch (err) {
+    // Surface the failure so a transient DB outage is not silently indistinguishable
+    // from a genuine denial. Log the domain only (data-minimisation — no local part).
+    log?.error(
+      { err, emailDomain: email.slice(email.lastIndexOf("@") + 1) },
+      "allowlist DB lookup failed; denying sign-in (fail-closed)",
+    );
     return false;
   }
 }

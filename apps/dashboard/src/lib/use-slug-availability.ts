@@ -30,8 +30,13 @@ export function useSlugAvailability(slug: string): SlugStatus {
         const res = await api.slugAvailable(slug);
         if (cancelled) return;
         setStatus(res.available ? "available" : (res.reason ?? "taken"));
-      } catch {
-        if (!cancelled) setStatus("idle");
+      } catch (err) {
+        // Non-blocking: fall back to idle so a flaky GET never hard-fails the UI
+        // (the server re-validates on submit). Warn so the failure isn't fully silent.
+        if (!cancelled) {
+          console.warn("slug availability check failed", err);
+          setStatus("idle");
+        }
       }
     }, DEBOUNCE_MS);
     return () => {

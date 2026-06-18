@@ -162,6 +162,13 @@
       "when": 1781816089570,
       "tag": "0022_view_rollups",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781822296836,
+      "tag": "0023_canvas_allowlist_checks",
+      "breakpoints": true
     }
   ]
 }

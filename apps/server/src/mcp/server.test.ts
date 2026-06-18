@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { zipSync } from "fflate";
 import { pino } from "pino";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { cloneService } from "../canvas/clone-service.js";
@@ -88,6 +89,7 @@ async function connect(
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
       audit,
+      log: silent,
       screenshots: screenshotsRepository(client),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
     },
@@ -108,6 +110,10 @@ function payload(result: any): any {
 function isError(result: any): boolean {
   return result.isError === true;
 }
+// biome-ignore lint/suspicious/noExplicitAny: tool results are JSON text payloads
+function text(result: any): string {
+  return result.content[0].text;
+}
 
 const zip = (files: Record<string, string>) =>
   Buffer.from(
@@ -117,6 +123,16 @@ const zip = (files: Record<string, string>) =>
   ).toString("base64");
 
 const sha = (s: string) => createHash("sha256").update(new TextEncoder().encode(s)).digest("hex");
+
+/** A small valid PNG, base64-encoded, for the set_canvas_preview tests. */
+async function pngBase64(): Promise<string> {
+  const buf = await sharp({
+    create: { width: 64, height: 48, channels: 3, background: { r: 10, g: 120, b: 200 } },
+  })
+    .png()
+    .toBuffer();
+  return buf.toString("base64");
+}
 
 describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
   let client: DbClient;
@@ -577,8 +593,10 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       "get_canvas",
       "list_versions",
       "unpublish_canvas",
+      "rollback_canvas",
       "get_canvas_file",
       "update_canvas",
+      "set_canvas_preview",
       "set_capabilities",
       "set_canvas_slug",
       "regenerate_deploy_key",
@@ -828,5 +846,128 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       arguments: { id: made.id, manifest: [{ path: "index.html", hash: sha("x"), size: 1 }] },
     });
     expect(isError(begin)).toBe(true);
+  });
+
+  it("set_canvas_preview uploads a custom cover, clears it back to auto, and rejects garbage", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    // (1) A valid base64 image becomes the cover and pins previewMode to 'custom'.
+    const set = payload(
+      await mcp.callTool({
+        name: "set_canvas_preview",
+        arguments: { id: made.id, image: await pngBase64() },
+      }),
+    );
+    expect(set.previewMode).toBe("custom");
+
+    // (2) Clearing from custom reverts to auto (the orphaned renditions are dropped).
+    const cleared = payload(
+      await mcp.callTool({ name: "set_canvas_preview", arguments: { id: made.id } }),
+    );
+    expect(cleared.previewMode).toBe("auto");
+
+    // (3) Clearing again (already auto) is a no-op — never deletes an auto screenshot.
+    const noop = payload(
+      await mcp.callTool({ name: "set_canvas_preview", arguments: { id: made.id } }),
+    );
+    expect(noop.previewMode).toBe("auto");
+
+    // (4) Garbage that decodes to non-empty bytes but isn't an image → isError.
+    const bad = await mcp.callTool({
+      name: "set_canvas_preview",
+      arguments: { id: made.id, image: Buffer.from("not an image").toString("base64") },
+    });
+    expect(isError(bad)).toBe(true);
+  });
+
+  it("update_canvas response reflects a changed access (read-your-writes)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    expect(made.access).toBe("private");
+    // Sharing above private requires a published version first (else SHARE_REQUIRES_PUBLISH).
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: made.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+    });
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: made.id, access: "whole_org" },
+      }),
+    );
+    expect(updated.access).toBe("whole_org");
+  });
+
+  it("deploy/begin_deploy/rollback refuse an archived canvas with NOT_ACTIVE", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    // Publish twice so a rollback target exists, then archive.
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: made.id, zipBase64: zip({ "index.html": "v1" }) },
+    });
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: made.id, zipBase64: zip({ "index.html": "v2" }) },
+    });
+    await mcp.callTool({ name: "archive_canvas", arguments: { id: made.id } });
+
+    const deployRes = await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: made.id, zipBase64: zip({ "index.html": "v3" }) },
+    });
+    expect(isError(deployRes)).toBe(true);
+    expect(text(deployRes)).toContain("NOT_ACTIVE");
+
+    const beginRes = await mcp.callTool({
+      name: "begin_deploy",
+      arguments: { id: made.id, manifest: [{ path: "index.html", hash: sha("v3"), size: 2 }] },
+    });
+    expect(isError(beginRes)).toBe(true);
+    expect(text(beginRes)).toContain("NOT_ACTIVE");
+
+    const rollbackRes = await mcp.callTool({
+      name: "rollback_canvas",
+      arguments: { id: made.id, version: 1 },
+    });
+    expect(isError(rollbackRes)).toBe(true);
+    expect(text(rollbackRes)).toContain("NOT_ACTIVE");
+  });
+
+  it("finalize_deploy refuses an archived canvas with NOT_ACTIVE", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const made = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    // Open + stage an upload while the canvas is still active...
+    const begun = payload(
+      await mcp.callTool({
+        name: "begin_deploy",
+        arguments: { id: made.id, manifest: [{ path: "index.html", hash: sha("v1"), size: 2 }] },
+      }),
+    );
+    await mcp.callTool({
+      name: "add_files",
+      arguments: {
+        id: made.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "index.html", content: "v1" }],
+      },
+    });
+    // ...then archive before finalizing: the publish must be refused, mirroring begin_deploy.
+    await mcp.callTool({ name: "archive_canvas", arguments: { id: made.id } });
+    const finalizeRes = await mcp.callTool({
+      name: "finalize_deploy",
+      arguments: { id: made.id, uploadId: begun.uploadId },
+    });
+    expect(isError(finalizeRes)).toBe(true);
+    expect(text(finalizeRes)).toContain("NOT_ACTIVE");
   });
 });

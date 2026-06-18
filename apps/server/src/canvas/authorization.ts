@@ -166,8 +166,10 @@ export interface CanvasAccessDeps {
  * Resolve the parts of {@link AccessContext} that need a DB lookup, for a given
  * principal + canvas. The single canonical allowlist check (KTD4) every caller
  * routes through — keeps the membership predicate from drifting across the content
- * chain, the runtime API, and the realtime handshake. Only the `specific_people`
- * rung needs the lookup; other rungs short-circuit to no context.
+ * chain, the runtime API, and the realtime handshake. Two rungs need a DB lookup:
+ * the `public_link` rung checks whether the owner's publish capability is still
+ * enabled (`isOwnerPublishEnabled`); the `specific_people` rung checks the allowlist
+ * (`isPrincipalAllowed`). All other rungs short-circuit to empty context.
  */
 export async function resolveAccessContext(
   canvases: Pick<CanvasesRepository, "isPrincipalAllowed" | "isOwnerPublishEnabled">,

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { pgSchema, type Session, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -83,6 +83,20 @@ export function sessionsRepository(client: DbClient) {
         .update(t)
         .set({ expiresAt })
         .where(eq(t.tokenHash, hashToken(token)));
+    },
+
+    /**
+     * Retention prune (KTD-7): hard-delete sessions that expired before `cutoffMs`.
+     * Sessions carry IP + User-Agent (PII); an already-expired session is dead
+     * weight, so dropping it past the window honors the limited-retention promise
+     * in the privacy policy. Returns the number of rows removed.
+     */
+    async pruneExpiredBefore(cutoffMs: number): Promise<number> {
+      const rows = (await db
+        .delete(t)
+        .where(lt(t.expiresAt, cutoffMs))
+        .returning({ id: t.id })) as Array<{ id: string }>;
+      return rows.length;
     },
   };
 }

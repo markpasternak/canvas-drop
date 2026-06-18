@@ -172,6 +172,29 @@ describe.each(DIALECTS)("filesService [%s]", (dialect) => {
     expect(await service.delete(other.id, row.id)).toBe(false);
   });
 
+  it("logs (does not throw) when the blob delete fails after row removal (server-canvas-6)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const base = memStorage();
+    const warns: unknown[] = [];
+    const storage = { ...base, delete: () => Promise.reject(new Error("storage down")) };
+    const service = filesService({
+      files: filesRepository(client),
+      storage: storage as typeof base,
+      log: { warn: (obj: unknown) => warns.push(obj) } as never,
+    });
+    const row = await service.create({
+      canvasId,
+      filename: "a.txt",
+      mime: "text/plain",
+      bytes: new Uint8Array([1]),
+      userId,
+    });
+    // The row delete succeeds; the blob delete throws but is swallowed + logged.
+    expect(await service.delete(canvasId, row.id)).toBe(true);
+    expect(warns.length).toBe(1);
+  });
+
   it("cleans up the orphan blob when the row insert fails", async () => {
     client = await makeTestDb(dialect);
     await seed(client);

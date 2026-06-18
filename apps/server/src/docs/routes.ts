@@ -13,6 +13,9 @@ import { renderDocPage } from "./render.js";
 import { SEARCH_CLIENT_JS } from "./search.client.js";
 import { THEME_CLIENT_JS } from "./theme.client.js";
 
+/** SEARCH_INDEX is a module-level constant — serialize it once, not per request. */
+const SEARCH_INDEX_JSON = JSON.stringify(SEARCH_INDEX);
+
 /**
  * Public docs router — mounted at "/" BEFORE the auth gateway (see app.ts), so
  * `/docs/*` and `/llms.txt` are served to signed-out agents and OSS browsers on
@@ -84,6 +87,11 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
   // Public base URL → absolute og:image / og:url (social crawlers require absolute).
   const origin = config.baseUrl;
 
+  // Pre-build the skill zip at mount time so the first /skill.zip request doesn't
+  // block the event loop on synchronous readFileSync/readdirSync/zipSync work.
+  // (Memoized in buildSkillZip; a transient FS miss here is retried on first request.)
+  buildSkillZip();
+
   // Social share card (`pnpm og:build`). Public so crawlers can fetch the image —
   // the auth-gated SPA can't serve it to an unauthenticated unfurl. A missing file
   // (deploy didn't ship docs/site/og.png) is a plain 404.
@@ -124,7 +132,7 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
     baseSecurityHeaders(h);
     h.set("Content-Type", "application/json; charset=utf-8");
     h.set("Cache-Control", "public, max-age=3600");
-    return new Response(JSON.stringify(SEARCH_INDEX), { status: 200, headers: h });
+    return new Response(SEARCH_INDEX_JSON, { status: 200, headers: h });
   });
 
   // The landing product-tour carousel bundle (Embla + autoplay), committed by

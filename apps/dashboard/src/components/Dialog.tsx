@@ -2,6 +2,27 @@ import type { ReactNode } from "react";
 import { useEffect, useId, useRef } from "react";
 import { useExitTransition } from "../lib/use-exit-transition.js";
 
+// Module-level ref-counted body-scroll lock. Overlapping dialogs would otherwise
+// race on document.body.style.overflow: the first to close would restore the
+// (already-hidden) value, leaving the body scrollable while a dialog is still open,
+// or stranding `overflow: hidden` after all close. The count tracks open locks; we
+// hide on the first acquire and restore the saved value on the last release.
+let scrollLockCount = 0;
+let savedBodyOverflow = "";
+function acquireScrollLock() {
+  if (scrollLockCount === 0) {
+    savedBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  scrollLockCount += 1;
+}
+function releaseScrollLock() {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount === 0) {
+    document.body.style.overflow = savedBodyOverflow;
+  }
+}
+
 /**
  * Focus-trapped modal. Traps Tab within the panel, closes on Escape + backdrop
  * click, and restores focus to the element that opened it. Used directly (e.g.
@@ -69,11 +90,10 @@ export function Dialog({
       }
     }
     document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    acquireScrollLock();
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
+      releaseScrollLock();
       restoreRef.current?.focus?.();
     };
   }, [open]);

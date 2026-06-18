@@ -105,6 +105,46 @@ function buildApiWithSettings(
   return app;
 }
 
+/** Build the API with a GUEST principal so the guest-AI gate branches run. The
+ *  guest still carries a `user` row (the resolved guest identity) for metering. */
+function buildGuestApi(
+  client: DbClient,
+  guestEmail: string,
+  canvasId: string,
+  provider: ModelProvider,
+  config = aiConfig,
+) {
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    // A complete guest principal (id/inviteId/canvasId/email) so requestPrincipal
+    // resolves a guest and the specific_people access check matches by email.
+    c.set("principal", {
+      kind: "guest",
+      id: `guest:${guestEmail}`,
+      inviteId: "inv1",
+      canvasId,
+      email: guestEmail,
+    } as never);
+    await next();
+  });
+  app.route(
+    "/v1/c/:slug",
+    canvasApiRoutes({
+      config,
+      canvases: canvasesRepository(client),
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      kv: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      files: {} as any,
+      // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
+      usage: {} as any,
+      aiUsage: aiUsageRepository(client),
+      aiProvider: provider,
+    }),
+  );
+  return app;
+}
+
 /** Parse an SSE body into the list of decoded `data:` JSON objects. */
 function parseSSE(body: string): Array<Record<string, unknown>> {
   return body
@@ -363,6 +403,55 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { code: string }).code).toBe("INVALID_BODY");
+  });
+
+  /** Make a specific_people canvas with the given guest email on the allowlist so a
+   *  guest principal passes the access gate and reaches the guest-AI branch. */
+  async function makeGuestCanvas(opts: { guestAiEnabled: boolean; guestAiCap?: number }) {
+    const guestEmail = "guest@example.com";
+    const { cv } = await makeCanvas(client);
+    const repo = canvasesRepository(client);
+    await repo.setAccess(cv.id, "specific_people");
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: guestEmail });
+    await repo.updateSettings(cv.id, {
+      guestAiEnabled: opts.guestAiEnabled,
+      ...(opts.guestAiCap !== undefined ? { guestAiCap: opts.guestAiCap } : {}),
+    });
+    return { cv, guestEmail };
+  }
+
+  it("403 GUEST_AI_DISABLED when a guest calls and the owner has not opted the canvas in", async () => {
+    client = await makeTestDb("sqlite");
+    const { cv, guestEmail } = await makeGuestCanvas({ guestAiEnabled: false });
+    const res = await post(
+      buildGuestApi(client, guestEmail, cv.id, fakeProvider({ deltas: ["x"] })),
+      { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] },
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("GUEST_AI_DISABLED");
+  });
+
+  it("429 GUEST_AI_CAP when guest AI is on but the canvas monthly spend meets the cap", async () => {
+    client = await makeTestDb("sqlite");
+    const { cv, guestEmail } = await makeGuestCanvas({ guestAiEnabled: true, guestAiCap: 1 });
+    // Seed canvas monthly spend at the guest cap so the guest call trips it.
+    await aiUsageRepository(client).record({
+      canvasId: cv.id,
+      userId: cv.ownerId,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 1, // exactly the guest cap
+    });
+    const res = await post(
+      buildGuestApi(client, guestEmail, cv.id, fakeProvider({ deltas: ["x"] })),
+      { model: "claude-haiku-4-5", messages: [{ role: "user", content: "hi" }] },
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { code: string; scope: string };
+    expect(body.code).toBe("GUEST_AI_CAP");
+    expect(body.scope).toBe("guest");
   });
 
   it("records usage even when the client aborts before streaming (no quota leak)", async () => {

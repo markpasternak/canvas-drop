@@ -79,6 +79,11 @@ export function isTextContentType(contentType: string): boolean {
   );
 }
 
+/** Lenient UTF-8 decode used by the ingestion paths to scan text blobs (e.g. API-key detection). */
+export function decodeText(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
 export function mimeFor(path: string): MimeResult {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   if (BLOCKED_EXECUTABLE.has(ext)) {

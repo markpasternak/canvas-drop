@@ -1,9 +1,9 @@
 /**
  * Email abstraction (U5) — driver-behind-interface like DB/storage/auth. Used by
- * the guest-invite flow (U8) to send magic-link sign-in emails. Three drivers:
- * `mailgun` (HTTP API), `log` (dev — writes the message + link to the logger),
- * and `noop` (discards). The driver is config-selected; `config` stays the only
- * `process.env` reader (BUILD_BRIEF §8.1).
+ * the guest-invite flow (U8) to send magic-link sign-in emails. Four drivers:
+ * `mailgun` (HTTP API), `smtp` (any SMTP server), `log` (dev — records the
+ * envelope only, never the magic-link body), and `noop` (discards). The driver is
+ * config-selected; `config` stays the only `process.env` reader (BUILD_BRIEF §8.1).
  *
  * Sending must never throw — a transport failure returns `{ ok: false, error }`
  * so the invite flow surfaces it without crashing the request.
@@ -25,8 +25,9 @@ export interface Mailer {
   send(msg: EmailMessage): Promise<SendResult>;
   /**
    * Whether the invite flow can actually deliver a usable link. True for `mailgun`
-   * (a real send) and `log` (the link lands in the logger, usable in dev); false
-   * for `noop`. The invite flow checks this to refuse cleanly when email is off.
+   * and `smtp` when configured (a real send) and `log` (dev — the link reaches the
+   * caller directly); false for `noop` or an unconfigured driver. The invite flow
+   * checks this to refuse cleanly when email is off.
    */
   readonly canSend: boolean;
 }
@@ -49,7 +50,7 @@ export function renderGuestInvite(input: {
   canvasTitle: string;
   inviterName: string;
   inviteUrl: string;
-}): EmailMessage & { to: string } {
+}): Omit<EmailMessage, "to"> {
   const title = input.canvasTitle.trim() || "a canvas";
   const subject = `${input.inviterName} shared "${title}" with you`;
   const text = [
@@ -65,6 +66,7 @@ export function renderGuestInvite(input: {
     `<p><a href="${esc(input.inviteUrl)}">Open the canvas</a> — this link is just for you and will expire.</p>`,
     `<p style="color:#888;font-size:12px">If you weren't expecting this, you can ignore this email.</p>`,
   ].join("\n");
-  // `to` is filled by the caller; placeholder keeps the return shape uniform.
-  return { to: "", subject, text, html };
+  // `to` is intentionally omitted: the caller fills it (`{ ...msg, to: email }`).
+  // Omitting it from the type makes forgetting the recipient a compile error.
+  return { subject, text, html };
 }

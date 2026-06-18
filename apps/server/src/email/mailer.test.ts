@@ -36,16 +36,21 @@ describe("noopMailer", () => {
 });
 
 describe("logMailer", () => {
-  it("logs the message body (incl. the link) and reports canSend=true", async () => {
+  it("logs only the envelope (to, subject) and NEVER the magic-link body", async () => {
     const info = vi.fn();
     const m = logMailer({ info } as unknown as Logger);
     expect(m.canSend).toBe(true);
     const res = await m.send({ to: "g@x.com", subject: "hi", text: "open https://x/guest/tok" });
     expect(res.ok).toBe(true);
+    // Envelope is logged for dev visibility…
     expect(info).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "g@x.com", body: expect.stringContaining("guest/tok") }),
+      expect.objectContaining({ to: "g@x.com", subject: "hi" }),
       expect.any(String),
     );
+    // …but the one-time credential body is redacted — it must never reach the logs.
+    const [logged] = info.mock.calls[0] as [Record<string, unknown>, string];
+    expect(logged).not.toHaveProperty("body");
+    expect(JSON.stringify(logged)).not.toContain("guest/tok");
   });
 });
 

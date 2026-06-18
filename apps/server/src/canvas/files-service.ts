@@ -2,6 +2,7 @@ import type { FileRow } from "@canvas-drop/shared/db";
 import { v7 as uuidv7 } from "uuid";
 import type { QuotaResolver } from "../admin/settings-service.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 
 /** Files primitive limits (§6.5.5). Admin-tunable defaults (M7). */
@@ -48,8 +49,10 @@ export function filesService(deps: {
   storage: StorageDriver;
   /** Admin-tunable quota resolver (M7). Absent → the hard constants above. */
   quota?: QuotaResolver;
+  /** Optional logger so best-effort blob cleanups that fail are at least observable. */
+  log?: Logger;
 }) {
-  const { files, storage, quota } = deps;
+  const { files, storage, quota, log } = deps;
 
   return {
     async create(input: CreateFileInput): Promise<FileRow> {
@@ -75,8 +78,17 @@ export function filesService(deps: {
           uploadedBy: input.userId,
         });
       } catch (err) {
-        // Row insert failed after the blob landed — clean up the orphan blob.
-        await storage.delete(storageKey).catch(() => {});
+        // Row insert failed after the blob landed — clean up the orphan blob. The
+        // cleanup is best-effort but not silent: a failed delete leaves a blob with
+        // no row to find it by, so log it for observability (review server-canvas-6).
+        await storage
+          .delete(storageKey)
+          .catch((cleanupErr) =>
+            log?.warn(
+              { err: cleanupErr, canvasId: input.canvasId, storageKey },
+              "orphan blob cleanup failed after files row insert error",
+            ),
+          );
         throw err;
       }
     },
@@ -89,7 +101,17 @@ export function filesService(deps: {
     async delete(canvasId: string, id: string): Promise<boolean> {
       const row = await files.remove(canvasId, id);
       if (!row) return false;
-      await storage.delete(row.storageKey).catch(() => {});
+      // The DB row is authoritative, so a failed blob delete is best-effort — but
+      // it must not be silent: the orphaned blob no longer maps to any row, so the
+      // GC sweep can't find it by normal means. Log it so it's observable.
+      await storage
+        .delete(row.storageKey)
+        .catch((err) =>
+          log?.warn(
+            { err, canvasId, storageKey: row.storageKey },
+            "blob delete failed after file row removal — orphaned blob",
+          ),
+        );
       return true;
     },
 

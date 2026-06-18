@@ -10,8 +10,9 @@ import type { AppEnv } from "./types.js";
  * middleware's `c.header(...)`:
  *
  *  - **Self-Response handlers** (canvas serve, file serving, SPA shell, draft
- *    preview, disabled page, 404) call {@link baseSecurityHeaders} on their own
- *    `Headers` and layer their stricter CSP/frame-ancestors on top.
+ *    preview, disabled page, 404, the browser SDK at `/sdk/v1.js`, and the Bearer
+ *    deploy read-back `GET /v1/canvases/:id/files`) call {@link baseSecurityHeaders}
+ *    on their own `Headers` and layer their stricter CSP/frame-ancestors on top.
  *  - **JSON API responses** (`c.json` — management, admin, runtime, me) inherit
  *    the baseline from {@link securityHeadersMiddleware}, which previously had no
  *    baseline at all.
