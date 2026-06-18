@@ -4,8 +4,10 @@ import {
   ArrowsIn,
   ArrowsOut,
   Browser,
+  Play,
   X,
 } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { cn } from "../lib/cn.js";
 import { IconButton, IconLink } from "./IconButton.js";
 import { PaneHeader, WorkspacePane } from "./Surface.js";
@@ -20,10 +22,13 @@ export interface DraftPreviewProps {
   /** Hide the inline preview (omitted in the fullscreen overlay). */
   onHide?: () => void;
   /**
-   * The draft ships JavaScript. The inline frame is sandboxed to an opaque origin, so
-   * ES modules are CORS-blocked and the SDK's signed-in calls can't authenticate —
-   * the page wouldn't run faithfully here. When set, we replace the frame with a
-   * notice + an "Open full preview" CTA (the new tab is top-level and runs everything).
+   * The draft ships JavaScript. The inline frame is sandboxed to an opaque origin
+   * (no `allow-same-origin` — that isolation is the R13 invariant and is NOT relaxed),
+   * so ES modules are CORS-blocked and the SDK's signed-in calls can't authenticate.
+   * Rather than hard-gate the preview off, we start on a notice that explains the
+   * caveat and offers an opt-in **Run preview** that loads the draft into the SAME
+   * sandbox — classic inline scripts still run there; only ES-module / signed-in-SDK
+   * features won't (those need the top-level "Open full preview" tab). See {@link onHide}.
    */
   usesScripts?: boolean;
 }
@@ -53,6 +58,17 @@ export function DraftPreview({
   // The full, live preview: top-level (not sandboxed), so scripts + signed-in calls run.
   const fullSrc = `/api/canvases/${canvasId}/preview/`;
 
+  // For a scripted draft we start on the notice and let the owner opt into running it
+  // in the sandboxed frame ("Run preview"). Static drafts show the frame immediately.
+  // Reset the opt-in whenever the draft stops/starts using scripts so the notice
+  // re-appears for a newly-scripted draft.
+  const [ranScripted, setRanScripted] = useState(false);
+  useEffect(() => {
+    if (!usesScripts) setRanScripted(false);
+  }, [usesScripts]);
+  // The sandboxed frame is shown for a static draft, or once the owner runs a scripted one.
+  const showFrame = !usesScripts || ranScripted;
+
   const openInNewTab = (
     <IconLink
       href={fullSrc}
@@ -71,12 +87,13 @@ export function DraftPreview({
     </IconButton>
   );
 
-  // Script-bearing drafts can't run in the sandbox, so the only useful controls are
-  // open-in-new-tab + hide (refresh/full-screen act on the frame we're not showing).
+  // Refresh/full-screen act on the sandboxed frame, so they appear only while it's
+  // shown (a static draft, or a scripted one the owner opted to run). On the notice the
+  // only useful controls are open-in-new-tab + hide.
   const controls = (
     <div className="flex shrink-0 items-center gap-1">
       {openInNewTab}
-      {!usesScripts && (
+      {showFrame && (
         <>
           <IconButton type="button" className={iconBtn} onClick={onRefresh} label="Refresh preview">
             <ArrowClockwise size={15} weight="bold" aria-hidden />
@@ -143,24 +160,34 @@ export function DraftPreview({
       <div className="space-y-1.5">
         <p className="text-sm font-medium text-fg">This canvas runs JavaScript</p>
         <p className="mx-auto max-w-[22rem] text-xs leading-relaxed text-subtle">
-          The inline preview is sandboxed, so scripts and signed-in API calls don't run here (and
-          self-hosted fonts may not load). HTML, CSS, and images still render. Open the full preview
-          in a new tab to see it live.
+          The inline preview is sandboxed for isolation. Most scripts run here, but ES modules,
+          signed-in API calls, and self-hosted fonts won't. Run it in the sandbox below, or open the
+          full preview in a new tab to see it exactly as it ships.
         </p>
       </div>
-      <a
-        href={fullSrc}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3.5 text-[0.8125rem] font-medium text-accent-fg shadow-[var(--shadow-xs)] transition-colors hover:bg-accent-hover"
-      >
-        <ArrowSquareOut size={15} weight="bold" aria-hidden />
-        Open full preview
-      </a>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => setRanScripted(true)}
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3.5 text-[0.8125rem] font-medium text-accent-fg shadow-[var(--shadow-xs)] transition-colors hover:bg-accent-hover"
+        >
+          <Play size={15} weight="bold" aria-hidden />
+          Run preview
+        </button>
+        <a
+          href={fullSrc}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-surface-raised px-3.5 text-[0.8125rem] font-medium text-fg shadow-[var(--shadow-xs)] transition-colors hover:bg-surface-hover"
+        >
+          <ArrowSquareOut size={15} weight="bold" aria-hidden />
+          Open full preview
+        </a>
+      </div>
     </div>
   );
 
-  const body = usesScripts ? scriptsNotice : frame;
+  const body = showFrame ? frame : scriptsNotice;
 
   if (fullscreen) {
     return (

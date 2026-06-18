@@ -1,13 +1,10 @@
 import { useEffect, useId, useState } from "react";
 import { cn } from "../lib/cn.js";
 import { cosmeticSlug, slugPreviewUrl } from "../lib/cosmetic-slug.js";
+import { inputControl } from "../lib/input-styles.js";
 import { type SlugStatus, useSlugAvailability } from "../lib/use-slug-availability.js";
 
-const control =
-  "w-full rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm text-fg " +
-  "placeholder:text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
-  "focus:border-accent focus:outline-none focus-visible:outline-none " +
-  "focus:ring-2 focus:ring-accent/30 disabled:opacity-50";
+const control = inputControl;
 
 /** A status message + tone for each terminal/transient state. `idle` renders the hint. */
 function statusMessage(status: SlugStatus): { text: string; tone: "muted" | "danger" } | null {

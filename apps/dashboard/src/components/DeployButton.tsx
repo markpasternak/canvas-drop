@@ -58,7 +58,7 @@ export function DeployButton({
     if (input.kind !== "paste") setProgress(0);
     try {
       const res = await deploy.mutateAsync(input);
-      toast(`Published v${res.version}`);
+      toast(`Published version ${res.version}`);
       close();
     } catch (err) {
       setProgress(null);

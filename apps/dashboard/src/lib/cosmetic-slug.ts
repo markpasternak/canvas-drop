@@ -5,6 +5,17 @@
  * endpoint remain the authority; this just shapes the live preview as the user types.
  */
 
+/**
+ * Whether a canvas path param is a canvas id (UUIDv7) rather than a cosmetic slug.
+ * Canvas ids are 36-char hyphenated UUIDs (8-4-4-4-12); slugs are short
+ * lowercase-alphanumeric-and-hyphen labels (e.g. `quiet-otter`). Used by the canvas
+ * detail route to decide whether to attempt a slug → id resolution before 404ing.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isCanvasId(param: string): boolean {
+  return UUID_RE.test(param);
+}
+
 /** Lowercase, collapse runs of invalid chars to a hyphen, trim edge hyphens. */
 export function cosmeticSlug(raw: string): string {
   return raw

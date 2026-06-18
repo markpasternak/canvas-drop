@@ -12,6 +12,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.js";
+import { useExitTransition } from "../lib/use-exit-transition.js";
+import type { Tone } from "./variants.js";
 
 /**
  * The single overflow / "kebab" menu for row- and card-level actions across the
@@ -63,6 +65,10 @@ export function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  // Defer the portal unmount so the dropdown can animate OUT (data-state="closed").
+  // All open-true logic (positioning, focus, pointer/keyboard) stays keyed on `open`;
+  // this only keeps the node mounted briefly after close. Reduced-motion-safe.
+  const { mounted, state } = useExitTransition(open);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -84,10 +90,10 @@ export function ActionMenu({
   // Position before paint to avoid a flash at the wrong spot, then keep it pinned
   // to the trigger while open (scroll/resize).
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    // While closing (open=false but still mounted for the exit anim) keep the last
+    // position so the dropdown stays visible as it animates out; it's recomputed on
+    // the next open.
+    if (!open) return;
     computePosition();
     const onChange = () => computePosition();
     window.addEventListener("scroll", onChange, true);
@@ -175,13 +181,14 @@ export function ActionMenu({
       >
         <DotsThreeVertical size={18} weight="bold" aria-hidden />
       </button>
-      {open &&
+      {mounted &&
         createPortal(
           <div
             ref={menuRef}
             id={menuId}
             role="menu"
             aria-label={label}
+            data-state={state}
             onKeyDown={onMenuKeyDown}
             style={{
               position: "fixed",
@@ -191,7 +198,7 @@ export function ActionMenu({
               // Hide until positioned so it never paints at the wrong spot.
               visibility: pos ? "visible" : "hidden",
             }}
-            className="z-50 min-w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
+            className="cd-anim-pop z-50 min-w-44 rounded-lg border border-border bg-surface-raised p-1 shadow-[var(--shadow-popover)]"
           >
             <ActionMenuCtx.Provider value={{ close }}>{children}</ActionMenuCtx.Provider>
           </div>,
@@ -214,10 +221,13 @@ const itemBase =
   "transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
 
-const itemTones = {
+// A menu item is either the quiet default or the shared `danger` tone.
+type ItemTone = "default" | Extract<Tone, "danger">;
+
+const itemTones: Record<ItemTone, string> = {
   default: "text-muted hover:bg-surface-hover hover:text-fg focus-visible:bg-surface-hover",
   danger: "text-muted hover:bg-danger-subtle hover:text-danger focus-visible:bg-danger-subtle",
-} as const;
+};
 
 export interface ActionMenuItemProps {
   children: ReactNode;

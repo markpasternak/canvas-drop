@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>canvas-drop — Editorial Creator OS preview</title>
+<!--
+  Design-direction preview for canvas-drop's "Editorial Creator OS" rebrand.
+  Single self-contained file. Shows the proposed warm-paper LIGHT + deep-navy DARK
+  ramps, soft elevation, bigger radii, and the serif/sans/mono type system on a
+  faithful "Your canvases" three-panel mock (left rail / center library / right
+  detail rail). Toggle serif (Fraunces vs Newsreader) + density up top.
+
+  NOTE: the "cd" mark below is the CURRENT logo as a placeholder — swap in the new
+  mock-logo where marked LOGO SLOT once provided.
+
+  Fonts via Google Fonts CDN for preview convenience only; production self-hosts
+  (org-agnostic / no phone-home). All visual values are CSS vars so this doubles
+  as a token sanity check.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&family=Newsreader:opsz,wght@6..72,300..600&family=Geist:wght@300..600&family=Geist+Mono:wght@400..500&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================= TOKENS == */
+:root {
+  --font-serif: "Fraunces", Georgia, serif;          /* swapped by the toggle */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radii — bigger, "paper & objects" */
+  --r-sm: 0.5rem;
+  --r-md: 0.75rem;
+  --r-lg: 1rem;
+  --r-xl: 1.25rem;
+  --r-2xl: 1.5rem;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-serif="newsreader"] { --font-serif: "Newsreader", Georgia, serif; }
+
+/* ---- LIGHT: warm paper (hue ~85, low chroma) ---- */
+.frame.light {
+  color-scheme: light;
+  --canvas: oklch(0.969 0.008 85);
+  --surface: oklch(0.987 0.006 85);
+  --surface-raised: oklch(0.998 0.004 85);
+  --surface-sunken: oklch(0.945 0.010 85);
+  --surface-hover: oklch(0.955 0.010 85);
+  --fg: oklch(0.255 0.012 75);
+  --muted: oklch(0.475 0.012 75);
+  --subtle: oklch(0.500 0.012 75);          /* AA-fixed */
+  --border: oklch(0.895 0.010 85);
+  --border-strong: oklch(0.820 0.012 85);
+
+  --accent: oklch(0.49 0.105 200);
+  --accent-hover: oklch(0.43 0.10 200);
+  --accent-fg: oklch(0.99 0.02 200);
+  --accent-subtle: oklch(0.93 0.045 197);
+
+  --success: oklch(0.52 0.13 152);
+  --success-subtle: oklch(0.95 0.04 152);
+  --warning: oklch(0.53 0.14 58);
+  --warning-subtle: oklch(0.95 0.05 80);
+  --ring: oklch(0.49 0.105 200);
+
+  --logo-frame: oklch(0.255 0.012 75);
+  --logo-drop: oklch(0.49 0.105 200);
+
+  --shadow-card: 0 1px 2px hsl(40 30% 38% / 0.06), 0 8px 22px hsl(40 24% 34% / 0.09);
+  --shadow-card-hover: 0 2px 4px hsl(40 30% 38% / 0.07), 0 16px 38px hsl(40 24% 34% / 0.13);
+  --shadow-pop: 0 14px 34px hsl(40 24% 30% / 0.14), 0 3px 8px hsl(40 24% 30% / 0.08);
+  --shadow-ctrl: 0 1px 2px hsl(40 28% 38% / 0.08);
+}
+
+/* ---- DARK: deep navy (hue ~265, real chroma) ---- */
+.frame.dark {
+  color-scheme: dark;
+  --canvas: oklch(0.175 0.018 265);
+  --surface: oklch(0.212 0.020 265);
+  --surface-raised: oklch(0.245 0.022 265);
+  --surface-sunken: oklch(0.150 0.016 265);
+  --surface-hover: oklch(0.262 0.022 265);
+  --fg: oklch(0.965 0.004 265);
+  --muted: oklch(0.715 0.014 265);
+  --subtle: oklch(0.620 0.014 265);          /* AA-fixed */
+  --border: oklch(0.295 0.020 265);
+  --border-strong: oklch(0.390 0.022 265);
+
+  --accent: oklch(0.78 0.105 195);
+  --accent-hover: oklch(0.83 0.09 195);
+  --accent-fg: oklch(0.16 0.04 210);
+  --accent-subtle: oklch(0.30 0.06 200);
+
+  --success: oklch(0.78 0.16 155);
+  --success-subtle: oklch(0.27 0.06 155);
+  --warning: oklch(0.82 0.15 80);
+  --warning-subtle: oklch(0.27 0.06 70);
+  --ring: oklch(0.83 0.09 195);
+
+  --logo-frame: oklch(0.965 0.004 265);
+  --logo-drop: oklch(0.78 0.105 195);
+
+  --shadow-card: 0 1px 2px hsl(265 60% 2% / 0.5), 0 10px 26px hsl(265 60% 2% / 0.5);
+  --shadow-card-hover: 0 2px 6px hsl(265 60% 2% / 0.55), 0 18px 40px hsl(265 60% 2% / 0.6);
+  --shadow-pop: 0 16px 40px hsl(265 60% 1% / 0.6), 0 3px 10px hsl(265 60% 1% / 0.5);
+  --shadow-ctrl: 0 1px 2px hsl(265 60% 2% / 0.45);
+}
+
+/* ============================================================= BASE == */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #c9c4ba;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color: #1d1b17;
+}
+[data-density="compact"] { --row-pad: 0.5rem; }
+h1, h2, h3, h4 { margin: 0; }
+
+.serif { font-family: var(--font-serif); font-optical-sizing: auto; letter-spacing: -0.01em; }
+.mono { font-family: var(--font-mono); font-feature-settings: "zero", "ss01"; }
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* ----- toolbar ----- */
+.toolbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;
+  padding: 0.85rem 1.5rem;
+  background: #16151a; color: #e9e7e2;
+  font-size: 0.8125rem;
+}
+.toolbar strong { font-weight: 600; }
+.seg { display: inline-flex; background: #2a2832; border-radius: 999px; padding: 3px; gap: 2px; }
+.seg button {
+  font: inherit; color: #b7b4c0; border: 0; background: transparent;
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: #565167; color: #fff; }
+.toolbar .spacer { flex: 1; }
+.toolbar .note { color: #8d8a99; }
+
+/* ----- stage: two frames side by side ----- */
+.stage {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.75rem;
+  padding: 1.75rem; align-items: start;
+}
+.frame-wrap { display: flex; flex-direction: column; gap: 0.6rem; }
+.frame-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: #4f4b43; letter-spacing: 0.12em; text-transform: uppercase; }
+
+/* ----- the app shell ----- */
+.frame {
+  background: var(--canvas); color: var(--fg);
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  display: grid; grid-template-columns: 168px 1fr 256px;
+  min-height: 720px;
+  border: 1px solid var(--border);
+}
+
+/* left rail */
+.rail-l { padding: 1.1rem 0.85rem; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 1.25rem; background: var(--surface); }
+.brand { display: flex; align-items: center; gap: 0.55rem; padding: 0.2rem 0.4rem; }
+.brand .mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; box-shadow: var(--shadow-ctrl); }
+.brand .word { font-weight: 600; font-size: 0.95rem; letter-spacing: -0.02em; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: var(--r-md); color: var(--muted); font-size: 0.85rem; font-weight: 500; text-decoration: none; }
+.nav a .ic { width: 16px; height: 16px; opacity: 0.8; }
+.nav a.active { background: var(--accent-subtle); color: var(--accent); }
+.frame.dark .nav a.active { color: var(--fg); }
+.rail-l .user { margin-top: auto; display: flex; align-items: center; gap: 0.55rem; padding: 0.4rem; border-radius: var(--r-md); }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg,#a78bfa,#6d5ef0); }
+.user .who { font-size: 0.78rem; line-height: 1.2; }
+.user .who small { color: var(--subtle); }
+
+/* center */
+.main { padding: 1.6rem 1.5rem; overflow: hidden; }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.head h1 { font-size: 2rem; font-weight: 500; line-height: 1.05; }
+.head p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.85rem; max-width: 46ch; }
+.cta { font: inherit; font-weight: 600; font-size: 0.85rem; color: var(--accent-fg); background: var(--accent); border: 0; padding: 0.6rem 0.95rem; border-radius: var(--r-md); cursor: pointer; box-shadow: var(--shadow-ctrl); display: inline-flex; gap: 0.4rem; align-items: center; white-space: nowrap; }
+.cta:hover { background: var(--accent-hover); }
+
+.stats { display: flex; gap: 0; margin: 1.3rem 0 1.1rem; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
+.stat { flex: 1; padding: 0.7rem 0.9rem; border-right: 1px solid var(--border); }
+.stat:last-child { border-right: 0; }
+.stat .k { font-size: 0.68rem; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.07em; }
+.stat .v { font-size: 1.25rem; font-weight: 500; margin-top: 2px; }
+
+.toolrow { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.9rem; }
+.search { flex: 1; display: flex; align-items: center; gap: 0.5rem; background: var(--surface-raised); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: 0.5rem 0.7rem; color: var(--subtle); font-size: 0.82rem; box-shadow: var(--shadow-ctrl); }
+.pill-seg { display: inline-flex; background: var(--surface-sunken); border-radius: var(--r-md); padding: 3px; gap: 2px; }
+.pill-seg button { font: inherit; font-size: 0.8rem; font-weight: 500; border: 0; background: transparent; color: var(--muted); padding: 0.32rem 0.7rem; border-radius: calc(var(--r-md) - 3px); cursor: pointer; }
+.pill-seg button[aria-pressed="true"] { background: var(--surface-raised); color: var(--fg); box-shadow: var(--shadow-ctrl); }
+
+.chips { display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+.chip { font-size: 0.74rem; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 0.28rem 0.6rem; }
+.chip b { color: var(--fg); font-weight: 600; margin-left: 0.3rem; }
+
+/* card grid — gallery-first */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-card); transition: transform 0.16s var(--ease), box-shadow 0.16s var(--ease); cursor: pointer; }
+.card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card-hover); }
+.card.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cover { height: 116px; position: relative; }
+.cover.c1 { background: radial-gradient(120% 120% at 20% 15%, oklch(0.78 0.17 300) 0%, oklch(0.62 0.2 274) 38%, oklch(0.55 0.17 250) 70%, oklch(0.6 0.15 200) 100%); }
+.cover.c2 { background: radial-gradient(120% 120% at 80% 10%, oklch(0.8 0.16 60) 0%, oklch(0.62 0.21 30) 45%, oklch(0.5 0.18 350) 100%); }
+.cover.c3 { background: var(--surface-sunken); display:grid; place-items:center; }
+.cover.c3 .mini { width: 78%; height: 70%; background: var(--surface-raised); border:1px solid var(--border); border-radius: 8px; padding:8px; }
+.cover.c3 .ln { height:6px; border-radius:3px; background: var(--border-strong); margin-bottom:6px; }
+.cover.c3 .ln.s { width:60%; }
+.cover .badge { position: absolute; left: 10px; bottom: 10px; }
+.cbody { padding: 0.75rem 0.85rem 0.9rem; }
+.cbody h3 { font-size: 1.02rem; font-weight: 500; }
+.cbody .meta { color: var(--subtle); font-size: 0.74rem; margin-top: 0.25rem; }
+.cbody .row { display: flex; align-items: center; justify-content: space-between; margin-top: 0.6rem; }
+.linkbtn { font-size: 0.78rem; font-weight: 600; color: var(--accent); display: inline-flex; gap: 0.3rem; align-items: center; }
+.frame.dark .linkbtn { color: var(--fg); }
+
+.badge { display: inline-flex; align-items: center; gap: 0.32rem; font-size: 0.7rem; font-weight: 600; padding: 0.18rem 0.5rem; border-radius: 999px; }
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge.pub { color: var(--success); background: var(--success-subtle); }
+.badge.prot { color: var(--warning); background: var(--warning-subtle); }
+.badge.tmpl { color: var(--accent); background: var(--accent-subtle); }
+.frame.dark .badge.tmpl { color: var(--fg); }
+.badge.glass { color: #fff; background: rgba(20,18,30,0.42); backdrop-filter: blur(6px); }
+
+/* right rail */
+.rail-r { border-left: 1px solid var(--border); background: var(--surface); padding: 1.2rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
+.rail-r h2 { font-size: 1.12rem; font-weight: 500; }
+.rail-r .rcover { height: 116px; border-radius: var(--r-lg); }
+.acts { display: flex; flex-direction: column; gap: 4px; }
+.acts button { font: inherit; font-size: 0.82rem; text-align: left; display: flex; align-items: center; justify-content: space-between; background: transparent; border: 0; color: var(--fg); padding: 0.5rem 0.55rem; border-radius: var(--r-md); cursor: pointer; }
+.acts button:hover { background: var(--surface-hover); }
+.acts button .k { color: var(--subtle); }
+.sect-t { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--subtle); margin-bottom: 0.4rem; }
+.det { display: flex; flex-direction: column; gap: 0.4rem; }
+.det .r { display: flex; justify-content: space-between; font-size: 0.8rem; }
+.det .r .k { color: var(--muted); }
+.act-feed { display: flex; flex-direction: column; gap: 0.65rem; }
+.act-feed .it { display: flex; gap: 0.55rem; align-items: center; font-size: 0.78rem; }
+.act-feed .it .av { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg,#f0abfc,#818cf8); flex: none; }
+.act-feed .it small { color: var(--subtle); }
+
+/* ===== specimen section ===== */
+.specimen { padding: 0 1.75rem 3rem; max-width: 1400px; }
+.specimen h2.sh { font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: #4f4b43; margin: 2rem 0 0.9rem; }
+.panel { background: #fbfaf7; border: 1px solid #e4ddd0; border-radius: var(--r-xl); padding: 1.5rem; box-shadow: 0 8px 24px rgba(80,70,50,0.08); }
+.panel.dark { background: oklch(0.212 0.020 265); border-color: oklch(0.295 0.020 265); color: oklch(0.965 0.004 265); }
+.ramp { display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; margin-bottom: 1rem; }
+.sw { height: 56px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.08); display: flex; align-items: flex-end; padding: 5px; font-size: 0.6rem; }
+.type-rows > div { padding: 0.6rem 0; border-bottom: 1px solid #ece6da; }
+.type-rows small { color: #8a8170; font-size: 0.7rem; letter-spacing: 0.04em; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+</style>
+</head>
+<body data-serif="fraunces" data-density="comfortable">
+
+<div class="toolbar">
+  <strong>canvas-drop · Editorial Creator OS — direction preview</strong>
+  <div class="spacer"></div>
+  <span class="note">Serif</span>
+  <div class="seg" id="serifSeg">
+    <button data-serif="fraunces" aria-pressed="true">Fraunces</button>
+    <button data-serif="newsreader" aria-pressed="false">Newsreader</button>
+  </div>
+  <span class="note">Headline weight</span>
+  <div class="seg" id="wtSeg">
+    <button data-wt="400" aria-pressed="true">Light</button>
+    <button data-wt="500" aria-pressed="false">Medium</button>
+  </div>
+</div>
+
+<div class="stage">
+  <!-- ============ LIGHT ============ -->
+  <div class="frame-wrap">
+    <div class="frame-label">☀ Light — warm paper</div>
+    <div class="frame light">
+      <!-- left rail -->
+      <aside class="rail-l">
+        <div class="brand">
+          <!-- LOGO SLOT: swap this .mark contents with the new mock-logo -->
+          <span class="mark"><svg width="18" height="18" viewBox="0 0 48 48" fill="none"><path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 14v16.5m-7-7 7 7 7-7" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 40h12" stroke="#fff" stroke-width="4.75" stroke-linecap="round"/></svg></span>
+          <span class="word">canvas-drop</span>
+        </div>
+        <nav class="nav">
+          <a class="active" href="#">▦ Canvases</a>
+          <a href="#">◈ Gallery</a>
+          <a href="#">▤ Templates</a>
+          <a href="#">◫ Shared</a>
+          <a href="#">🗑 Trash</a>
+        </nav>
+        <div class="user">
+          <span class="avatar"></span>
+          <span class="who">Alex Morgan<br><small>alex@canvasdrop.io</small></span>
+        </div>
+      </aside>
+
+      <!-- center -->
+      <main class="main">
+        <div class="head">
+          <div>
+            <h1 class="serif">Your canvases</h1>
+            <p>A calm, curated archive of your published artifacts — drafts, versions, sharing and settings in one place.</p>
+          </div>
+          <button class="cta">＋ Create canvas</button>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="k">Active</div><div class="v tnum">6</div></div>
+          <div class="stat"><div class="k">Archived</div><div class="v tnum">13</div></div>
+          <div class="stat"><div class="k">Templates</div><div class="v tnum">1</div></div>
+          <div class="stat"><div class="k">Protected</div><div class="v tnum">2</div></div>
+        </div>
+
+        <div class="toolrow">
+          <div class="search">⌕ Search your canvases</div>
+          <div class="pill-seg"><button aria-pressed="true">Active</button><button aria-pressed="false">Archived</button></div>
+        </div>
+        <div class="chips">
+          <span class="chip">Shared<b class="tnum">6</b></span>
+          <span class="chip">Protected<b class="tnum">2</b></span>
+          <span class="chip">Listed<b class="tnum">2</b></span>
+          <span class="chip">Templates<b class="tnum">1</b></span>
+        </div>
+
+        <div class="grid">
+          <div class="card sel">
+            <div class="cover c1"><span class="badge glass" style="position:absolute;left:10px;bottom:10px">●</span></div>
+            <div class="cbody">
+              <h3 class="serif">Three.js demo</h3>
+              <div class="meta">Whole org · Edited 4h ago</div>
+              <div class="row"><span class="badge pub"><span class="dot"></span>Published</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c2"></div>
+            <div class="cbody">
+              <h3 class="serif">Board CPTO</h3>
+              <div class="meta">Whole org · protected · Edited 5h ago</div>
+              <div class="row"><span class="badge prot"><span class="dot"></span>Protected</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c3"><div class="mini"><div class="ln"></div><div class="ln s"></div><div class="ln"></div><div class="ln s"></div></div></div>
+            <div class="cbody">
+              <h3 class="serif">Static files, with backend</h3>
+              <div class="meta">Whole org · Edited 5h ago</div>
+              <div class="row"><span class="badge tmpl"><span class="dot"></span>Template</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c1" style="filter:hue-rotate(40deg)"></div>
+            <div class="cbody">
+              <h3 class="serif">Studio Roadmap</h3>
+              <div class="meta">Whole org · Edited 6h ago</div>
+              <div class="row"><span class="badge pub"><span class="dot"></span>Published</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- right rail -->
+      <aside class="rail-r">
+        <h2 class="serif">Three.js demo</h2>
+        <span class="badge pub" style="align-self:flex-start"><span class="dot"></span>Published</span>
+        <div class="rcover cover c1"></div>
+        <div style="font-size:0.74rem;color:var(--subtle)">Updated 4h ago by Alex Morgan</div>
+        <div class="acts">
+          <button>Open canvas <span class="k">↗</span></button>
+          <button>Share <span class="k">👥</span></button>
+          <button>Duplicate <span class="k">⧉</span></button>
+          <button>More actions <span class="k">⋯</span></button>
+        </div>
+        <div>
+          <div class="sect-t">Details</div>
+          <div class="det">
+            <div class="r"><span class="k">Access</span><span>Whole org</span></div>
+            <div class="r"><span class="k">Visibility</span><span>Listed</span></div>
+            <div class="r"><span class="k">Status</span><span>Published</span></div>
+            <div class="r"><span class="k">Last edited</span><span class="tnum">May 21, 10:24</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="sect-t">Recent activity</div>
+          <div class="act-feed">
+            <div class="it"><span class="av"></span>Alex Morgan<br><small>edited · 4h</small></div>
+            <div class="it"><span class="av"></span>Taylor Lee<br><small>commented · 8h</small></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ============ DARK ============ -->
+  <div class="frame-wrap">
+    <div class="frame-label">☾ Dark — deep navy</div>
+    <div class="frame dark">
+      <aside class="rail-l">
+        <div class="brand">
+          <span class="mark"><svg width="18" height="18" viewBox="0 0 48 48" fill="none"><path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 14v16.5m-7-7 7 7 7-7" stroke="#fff" stroke-width="4.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 40h12" stroke="#fff" stroke-width="4.75" stroke-linecap="round"/></svg></span>
+          <span class="word">canvas-drop</span>
+        </div>
+        <nav class="nav">
+          <a class="active" href="#">▦ Canvases</a>
+          <a href="#">◈ Gallery</a>
+          <a href="#">▤ Templates</a>
+          <a href="#">◫ Shared</a>
+          <a href="#">🗑 Trash</a>
+        </nav>
+        <div class="user">
+          <span class="avatar"></span>
+          <span class="who">Alex Morgan<br><small>alex@canvasdrop.io</small></span>
+        </div>
+      </aside>
+      <main class="main">
+        <div class="head">
+          <div>
+            <h1 class="serif">Your canvases</h1>
+            <p>A calm, curated archive of your published artifacts — drafts, versions, sharing and settings in one place.</p>
+          </div>
+          <button class="cta">＋ Create canvas</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="k">Active</div><div class="v tnum">6</div></div>
+          <div class="stat"><div class="k">Archived</div><div class="v tnum">13</div></div>
+          <div class="stat"><div class="k">Templates</div><div class="v tnum">1</div></div>
+          <div class="stat"><div class="k">Protected</div><div class="v tnum">2</div></div>
+        </div>
+        <div class="toolrow">
+          <div class="search">⌕ Search your canvases</div>
+          <div class="pill-seg"><button aria-pressed="true">Active</button><button aria-pressed="false">Archived</button></div>
+        </div>
+        <div class="chips">
+          <span class="chip">Shared<b class="tnum">6</b></span>
+          <span class="chip">Protected<b class="tnum">2</b></span>
+          <span class="chip">Listed<b class="tnum">2</b></span>
+          <span class="chip">Templates<b class="tnum">1</b></span>
+        </div>
+        <div class="grid">
+          <div class="card sel">
+            <div class="cover c1"></div>
+            <div class="cbody">
+              <h3 class="serif">Three.js demo</h3>
+              <div class="meta">Whole org · Edited 4h ago</div>
+              <div class="row"><span class="badge pub"><span class="dot"></span>Published</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c2"></div>
+            <div class="cbody">
+              <h3 class="serif">Board CPTO</h3>
+              <div class="meta">Whole org · protected · Edited 5h ago</div>
+              <div class="row"><span class="badge prot"><span class="dot"></span>Protected</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c3"><div class="mini"><div class="ln"></div><div class="ln s"></div><div class="ln"></div><div class="ln s"></div></div></div>
+            <div class="cbody">
+              <h3 class="serif">Static files, with backend</h3>
+              <div class="meta">Whole org · Edited 5h ago</div>
+              <div class="row"><span class="badge tmpl"><span class="dot"></span>Template</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="cover c1" style="filter:hue-rotate(40deg)"></div>
+            <div class="cbody">
+              <h3 class="serif">Studio Roadmap</h3>
+              <div class="meta">Whole org · Edited 6h ago</div>
+              <div class="row"><span class="badge pub"><span class="dot"></span>Published</span><span class="linkbtn">Open ↗</span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+      <aside class="rail-r">
+        <h2 class="serif">Three.js demo</h2>
+        <span class="badge pub" style="align-self:flex-start"><span class="dot"></span>Published</span>
+        <div class="rcover cover c1"></div>
+        <div style="font-size:0.74rem;color:var(--subtle)">Updated 4h ago by Alex Morgan</div>
+        <div class="acts">
+          <button>Open canvas <span class="k">↗</span></button>
+          <button>Share <span class="k">👥</span></button>
+          <button>Duplicate <span class="k">⧉</span></button>
+          <button>More actions <span class="k">⋯</span></button>
+        </div>
+        <div>
+          <div class="sect-t">Details</div>
+          <div class="det">
+            <div class="r"><span class="k">Access</span><span>Whole org</span></div>
+            <div class="r"><span class="k">Visibility</span><span>Listed</span></div>
+            <div class="r"><span class="k">Status</span><span>Published</span></div>
+            <div class="r"><span class="k">Last edited</span><span class="tnum">May 21, 10:24</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="sect-t">Recent activity</div>
+          <div class="act-feed">
+            <div class="it"><span class="av"></span>Alex Morgan<br><small>edited · 4h</small></div>
+            <div class="it"><span class="av"></span>Taylor Lee<br><small>commented · 8h</small></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SPECIMEN ===================== -->
+<div class="specimen">
+  <h2 class="sh">Type system — serif (editorial) · sans (functional) · mono (identifiers)</h2>
+  <div class="panel">
+    <div class="cols">
+      <div class="type-rows">
+        <div><small>HERO / PAGE TITLE — serif, opsz large</small><div class="serif" style="font-size:2.4rem;font-weight:400;line-height:1.05;">Your canvases</div></div>
+        <div><small>CARD TITLE — serif, opsz small</small><div class="serif" style="font-size:1.1rem;font-weight:500;">Primitives showcase</div></div>
+        <div><small>LEAD PROSE — serif</small><div class="serif" style="font-size:0.98rem;line-height:1.5;color:#3a362e;">A calm, premium workspace for publishing and managing visual artifacts.</div></div>
+        <div><small>BODY / LABEL — sans (Geist)</small><div style="font-size:0.9rem;color:#3a362e;">Manage drafts, published versions, sharing, and settings from one place.</div></div>
+        <div><small>IDENTIFIER — mono (Geist Mono)</small><div class="mono" style="font-size:0.85rem;">three-js-demo · v3 · cd_secret_key_••••</div></div>
+      </div>
+      <div>
+        <small style="color:#8a8170">LIGHT — warm paper ramp</small>
+        <div class="ramp" style="margin-top:8px">
+          <div class="sw" style="background:oklch(0.969 0.008 85)">canvas</div>
+          <div class="sw" style="background:oklch(0.987 0.006 85)">surface</div>
+          <div class="sw" style="background:oklch(0.998 0.004 85)">raised</div>
+          <div class="sw" style="background:oklch(0.945 0.010 85)">sunken</div>
+          <div class="sw" style="background:oklch(0.895 0.010 85)">border</div>
+          <div class="sw" style="background:oklch(0.820 0.012 85)">strong</div>
+          <div class="sw" style="background:oklch(0.500 0.012 75);color:#fff">subtle</div>
+          <div class="sw" style="background:oklch(0.255 0.012 75);color:#fff">fg</div>
+          <div class="sw" style="background:oklch(0.49 0.105 200);color:#fff">accent</div>
+          <div class="sw" style="background:oklch(0.93 0.045 197)">acc·sub</div>
+        </div>
+        <small style="color:#8a8170">DARK — deep navy ramp</small>
+        <div class="ramp" style="margin-top:8px">
+          <div class="sw" style="background:oklch(0.175 0.018 265);color:#fff">canvas</div>
+          <div class="sw" style="background:oklch(0.212 0.020 265);color:#fff">surface</div>
+          <div class="sw" style="background:oklch(0.245 0.022 265);color:#fff">raised</div>
+          <div class="sw" style="background:oklch(0.150 0.016 265);color:#fff">sunken</div>
+          <div class="sw" style="background:oklch(0.295 0.020 265);color:#fff">border</div>
+          <div class="sw" style="background:oklch(0.390 0.022 265);color:#fff">strong</div>
+          <div class="sw" style="background:oklch(0.620 0.014 265)">subtle</div>
+          <div class="sw" style="background:oklch(0.965 0.004 265)">fg</div>
+          <div class="sw" style="background:oklch(0.78 0.105 195);color:#fff">accent</div>
+          <div class="sw" style="background:oklch(0.300 0.075 274);color:#fff">acc·sub</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const body = document.body;
+  document.getElementById('serifSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    body.dataset.serif = b.dataset.serif;
+    [...e.currentTarget.children].forEach(c => c.setAttribute('aria-pressed', c === b));
+  });
+  document.getElementById('wtSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.querySelectorAll('.head h1.serif').forEach(h => h.style.fontWeight = b.dataset.wt);
+    [...e.currentTarget.children].forEach(c => c.setAttribute('aria-pressed', c === b));
+  });
+</script>
+</body>
+</html>

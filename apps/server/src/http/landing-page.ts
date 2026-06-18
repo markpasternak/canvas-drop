@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Config } from "@canvas-drop/shared";
+import { type Config, MARKETING_ACCENT, rampCssVars } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -25,9 +25,10 @@ import type { AppEnv } from "./types.js";
  * in `app.ts`, but only when the visitor has no session — a signed-in request to
  * `/` still falls through to the dashboard SPA.
  *
- * Visual language mirrors the dashboard design tokens (`tokens.css`): a cool
- * graphite ramp + a single indigo-violet accent, authored in OKLCH, Geist with a
- * system fallback. Screenshots are the committed, regenerable dark assets served at
+ * Visual language derives from the canonical BRAND_TOKENS (Editorial Creator OS):
+ * a warm-paper / deep-navy ramp + a single deep-teal accent, authored in OKLCH,
+ * via rampCssVars() — the same source the dashboard uses. Screenshots are the
+ * committed, regenerable dark assets served at
  * `/docs/assets/landing-*.webp` (refresh with `pnpm landing:screenshots`).
  *
  * Operator-/instance-specific copy is centralized in `SITE` below — the single
@@ -228,29 +229,39 @@ ${FAVICON_LINKS}
 }
 
 /**
- * All page CSS. The `:root` OKLCH ramp below is a HAND-MAINTAINED FORK of the
- * dashboard's design tokens (`apps/dashboard/src/styles/tokens.css`, the
- * `--canvas … --accent` semantic vars): this page is served pre-gateway and
- * cannot import the SPA's CSS bundle. If the token ramp changes there, sync the
- * values here — nothing fails a build or test if they drift.
+ * All page CSS. The semantic colour ramp comes from the canonical `BRAND_TOKENS`
+ * (`@canvas-drop/shared`, via `rampCssVars()`) — the SAME source the dashboard and
+ * every other server surface use, so the landing can't drift (the old hand-forked
+ * ramp is gone). Landing-only chrome vars (--ink/--on-ink hero band, shadows,
+ * easing, max width) are layered on top.
  */
 const STYLES = `
+/* Self-hosted Newsreader (the editorial serif). Served same-origin by
+   brandAssetRoutes() so this pre-gateway page needs no CDN — canvas-drop never
+   phones home. Variable weight (200–800), Latin subset; normal + italic (the
+   hero's italic-accent clause). Matches the @fontsource definitions. */
+@font-face {
+  font-family: "Newsreader Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Newsreader Variable";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
+}
 :root {
-  --canvas: oklch(0.968 0.0025 264);
-  --surface: oklch(0.995 0.0015 264);
-  --surface-sunken: oklch(0.945 0.004 264);
-  --fg: oklch(0.235 0.013 266);
-  --muted: oklch(0.475 0.013 266);
-  --subtle: oklch(0.555 0.012 266);
-  --border: oklch(0.905 0.005 264);
-  --accent: oklch(0.515 0.214 274);
-  --accent-hover: oklch(0.455 0.205 274);
-  --accent-fg: oklch(0.99 0.012 274);
-  --logo-frame: oklch(0.24 0.014 266);
-  --logo-drop: oklch(0.515 0.214 274);
-  --shadow-color: 265 24% 16%;
-  --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 4px 12px hsl(var(--shadow-color)/0.07);
-  --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 6px 16px hsl(var(--shadow-color)/0.1);
+${rampCssVars("light", "  ")}
+  --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --amber: ${MARKETING_ACCENT.light.amber};
+  --amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};
+  --shadow-color: 40 30% 38%;
+  --shadow-panel: 0 1px 2px hsl(var(--shadow-color)/0.05), 0 8px 22px hsl(var(--shadow-color)/0.09);
+  --shadow-lg: 0 24px 56px hsl(var(--shadow-color)/0.18), 0 8px 18px hsl(var(--shadow-color)/0.12);
   --ink: oklch(0.16 0.008 266);
   --ink-2: oklch(0.205 0.011 266);
   --on-ink: oklch(0.97 0.003 266);
@@ -261,21 +272,12 @@ const STYLES = `
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: oklch(0.155 0.006 266);
-    --surface: oklch(0.192 0.007 266);
-    --surface-sunken: oklch(0.128 0.005 266);
-    --fg: oklch(0.965 0.003 266);
-    --muted: oklch(0.705 0.013 266);
-    --subtle: oklch(0.585 0.013 266);
-    --border: oklch(0.272 0.008 266);
-    --accent: oklch(0.685 0.18 274);
-    --accent-hover: oklch(0.75 0.16 274);
-    --accent-fg: oklch(0.16 0.045 274);
-    --logo-frame: oklch(0.965 0.003 266);
-    --logo-drop: oklch(0.685 0.18 274);
+${rampCssVars("dark", "    ")}
     --shadow-color: 265 50% 1%;
     --ink: oklch(0.115 0.006 266);
     --ink-2: oklch(0.16 0.008 266);
+    --amber: ${MARKETING_ACCENT.dark.amber};
+    --amber-ink: ${MARKETING_ACCENT.dark["amber-ink"]};
   }
 }
 * { box-sizing: border-box; }
@@ -291,6 +293,7 @@ body {
 a { color: inherit; text-decoration: none; }
 .wrap { width: min(100%, var(--maxw)); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 2.5rem); }
 .mono { font-family: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; }
+.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
 
 /* --- top bar --- */
 header {
@@ -302,7 +305,7 @@ header {
 .nav { display: flex; align-items: center; gap: 1rem; height: 4rem; }
 .brand { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.012em; color: var(--on-ink); }
 .brand .mark { width: 1.65rem; height: 1.65rem; }
-.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.7 0.17 274); }
+.brand--ink { --logo-frame: var(--on-ink); --logo-drop: oklch(0.78 0.11 195); }
 .nav .spacer { flex: 1; }
 .nav-links { display: flex; align-items: center; gap: .35rem; }
 .nav a.link { color: var(--on-ink-muted); padding: .45rem .7rem; border-radius: .5rem; font-size: .92rem; transition: color .15s var(--ease), background .15s var(--ease); }
@@ -317,8 +320,8 @@ header {
   border: 1px solid transparent; cursor: pointer;
   transition: transform .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
-.btn-primary { background: var(--accent); color: var(--accent-fg); box-shadow: 0 1px 0 oklch(1 0 0 / 0.18) inset, var(--shadow-panel); }
-.btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.btn-primary { background: var(--amber); color: oklch(0.25 0.08 60); box-shadow: 0 1px 0 oklch(1 0 0 / 0.25) inset, 0 8px 24px oklch(0.18 0.06 220 / 0.35); }
+.btn-primary:hover { background: oklch(0.83 0.14 75); transform: translateY(-1px); }
 .btn-ghost { background: oklch(1 0 0 / 0.04); color: var(--on-ink); border-color: var(--on-ink-border); }
 .btn-ghost:hover { background: oklch(1 0 0 / 0.09); transform: translateY(-1px); }
 .btn-outline { background: transparent; color: var(--fg); border-color: var(--border); }
@@ -326,13 +329,13 @@ header {
 .btn svg { width: 1.05em; height: 1.05em; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .25rem; }
 
-/* --- hero --- */
+/* --- hero — drenched teal→navy "Committed" band with a warm amber glow --- */
 .hero {
   position: relative; overflow: hidden;
   background:
-    radial-gradient(120% 90% at 84% -10%, oklch(0.515 0.214 274 / 0.42), transparent 60%),
-    radial-gradient(90% 70% at 8% 6%, oklch(0.6 0.16 286 / 0.18), transparent 55%),
-    linear-gradient(180deg, var(--ink-2), var(--ink));
+    radial-gradient(90% 120% at 82% -12%, oklch(0.78 0.15 72 / 0.42), transparent 46%),
+    radial-gradient(80% 120% at 10% 6%, oklch(0.55 0.12 196 / 0.55), transparent 52%),
+    linear-gradient(160deg, oklch(0.32 0.095 205) 0%, oklch(0.21 0.075 212) 55%, oklch(0.15 0.05 222) 100%);
   color: var(--on-ink);
   border-bottom: 1px solid var(--on-ink-border);
 }
@@ -347,34 +350,42 @@ header {
 .hero-inner { position: relative; padding-block: clamp(0.75rem, 2vw, 1.5rem) clamp(1.25rem, 2.5vw, 2rem); }
 .eyebrow {
   display: inline-flex; align-items: center; gap: .5rem;
-  font-size: .8rem; letter-spacing: .02em; color: var(--on-ink-muted);
-  border: 1px solid var(--on-ink-border); border-radius: 100px; padding: .3rem .7rem;
-  background: oklch(1 0 0 / 0.03);
+  font-size: .8rem; letter-spacing: .16em; text-transform: uppercase; color: var(--amber); font-weight: 600;
+  border: 1px solid oklch(0.78 0.15 72 / 0.32); border-radius: 100px; padding: .3rem .75rem;
+  background: oklch(0.78 0.15 72 / 0.08);
 }
-.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: oklch(0.7 0.17 274); box-shadow: 0 0 0 4px oklch(0.7 0.17 274 / 0.22); }
+.eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: var(--amber); box-shadow: 0 0 0 4px oklch(0.78 0.15 72 / 0.22); }
 h1 {
-  margin: 1.1rem 0 0; max-width: 16ch;
-  font-size: clamp(2.6rem, 7vw, 4.6rem); line-height: 1.02; letter-spacing: -.035em; font-weight: 660;
+  margin: 1.1rem 0 0; max-width: 15ch;
+  font-family: var(--font-serif); font-optical-sizing: auto;
+  font-size: clamp(2.7rem, 7vw, 4.8rem); line-height: 1.0; letter-spacing: -.02em; font-weight: 460;
 }
-h1 .accent { color: oklch(0.78 0.15 274); }
-.lede { margin: 1.4rem 0 0; max-width: 46ch; font-size: clamp(1.02rem, 2.2vw, 1.22rem); color: var(--on-ink-muted); }
+h1 .accent { font-style: italic; color: var(--amber); }
+.lede { margin: 1.4rem 0 0; max-width: 48ch; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.06rem, 2.2vw, 1.3rem); line-height: 1.5; color: oklch(0.88 0.025 205); }
 .cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
 .cue { margin-top: 1rem; font-size: .85rem; color: var(--on-ink-muted); }
 .cue .mono { color: var(--on-ink); }
 
 /* --- section scaffolding --- */
 section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
-.kicker { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
-.s-head { max-width: 34ch; margin: .7rem 0 0; font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.08; letter-spacing: -.025em; font-weight: 640; }
+.kicker { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--amber-ink); font-weight: 600; }
+.s-head { max-width: 34ch; margin: .7rem 0 0; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.06; letter-spacing: -.015em; font-weight: 440; }
 .s-sub { max-width: 52ch; margin: .9rem 0 0; color: var(--muted); font-size: 1.05rem; }
 
-/* value band */
-.values { display: grid; gap: clamp(1.5rem, 4vw, 2.5rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
+/* value band — editorial cards with a coloured top-rule + big serif numeral */
+.values { display: grid; gap: clamp(1.25rem, 3vw, 1.75rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 @media (max-width: 800px) { .values { grid-template-columns: 1fr; } }
-.value h3 { margin: 0 0 .5rem; font-size: 1.15rem; letter-spacing: -.01em; }
-.value .num { font-family: "Geist Mono Variable", ui-monospace, monospace; color: var(--accent); font-size: .85rem; }
+.value { position: relative; padding: 1.7rem 1.5rem 1.5rem; border: 1px solid var(--border); border-radius: .875rem; background: var(--surface); overflow: hidden; }
+.value::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; }
+.value:nth-child(1)::before { background: var(--accent); }
+.value:nth-child(2)::before { background: var(--amber); }
+.value:nth-child(3)::before { background: oklch(0.6 0.16 168); }
+.value h3 { margin: .5rem 0; font-family: var(--font-serif); font-weight: 500; font-size: 1.35rem; letter-spacing: -.01em; }
+.value .num { font-family: var(--font-serif); font-weight: 500; font-size: 2.3rem; line-height: 1; }
+.value:nth-child(1) .num { color: var(--accent); }
+.value:nth-child(2) .num { color: var(--amber-ink); }
+.value:nth-child(3) .num { color: oklch(0.5 0.14 168); }
 .value p { margin: .25rem 0 0; color: var(--muted); }
-.value { border-top: 1px solid var(--border); padding-top: 1.1rem; }
 
 /* primitives showcase */
 .prims { display: grid; gap: 1px; grid-template-columns: repeat(5, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
@@ -384,20 +395,43 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .prim:hover { background: var(--surface-sunken); }
 .prim .ic { width: 2.1rem; height: 2.1rem; display: grid; place-items: center; border-radius: .55rem; border: 1px solid var(--border); color: var(--accent); margin-bottom: .9rem; }
 .prim .ic svg { width: 1.15rem; height: 1.15rem; }
-.prim h4 { margin: 0; font-size: 1.02rem; letter-spacing: -.01em; }
-.prim .tag { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: .72rem; color: var(--subtle); }
+.prim h4 { margin: 0; font-family: var(--font-serif); font-weight: 500; font-size: 1.08rem; letter-spacing: -.01em; }
+.prim .tag { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: .72rem; padding: .1rem .4rem; border-radius: 6px; vertical-align: .08em; }
 .prim p { margin: .5rem 0 0; font-size: .9rem; color: var(--muted); line-height: 1.5; }
+/* per-primitive colour tints — expressive editorial pop, no indigo */
+.p-kv .ic, .p-kv .tag { color: oklch(0.45 0.10 200); }
+.p-kv .tag { background: oklch(0.93 0.05 197); }
+.p-files .ic, .p-files .tag { color: oklch(0.48 0.15 65); }
+.p-files .tag { background: oklch(0.95 0.06 75); }
+.p-ai .ic, .p-ai .tag { color: oklch(0.45 0.15 168); }
+.p-ai .tag { background: oklch(0.94 0.05 168); }
+.p-identity .ic, .p-identity .tag { color: oklch(0.48 0.17 350); }
+.p-identity .tag { background: oklch(0.95 0.05 350); }
+.p-realtime .ic, .p-realtime .tag { color: oklch(0.46 0.16 240); }
+.p-realtime .tag { background: oklch(0.94 0.05 240); }
+@media (prefers-color-scheme: dark) {
+  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag { background: oklch(1 0 0 / 0.06); }
+}
 
 /* framed screenshot (carousel slides) */
 .shot { border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-panel); background: var(--surface); }
 .shot img { display: block; width: 100%; height: auto; }
 
-/* open-source CTA */
-.oss { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-block: 1px solid var(--on-ink-border); }
-.oss .wrap { text-align: center; }
+/* open-source CTA — drenched teal→navy closing band with an amber glow + CTA */
+.oss {
+  position: relative; overflow: hidden; color: var(--on-ink);
+  background:
+    radial-gradient(80% 140% at 85% 8%, oklch(0.78 0.15 72 / 0.34), transparent 50%),
+    linear-gradient(150deg, oklch(0.33 0.095 205), oklch(0.17 0.06 220));
+  border-block: 1px solid var(--on-ink-border);
+}
+.oss .wrap { position: relative; text-align: center; }
+.oss .kicker { color: var(--amber); }
 .oss .s-head { margin-inline: auto; max-width: 22ch; }
-.oss .s-sub { margin-inline: auto; color: var(--on-ink-muted); }
+.oss .s-head em { font-style: italic; color: var(--amber); }
+.oss .s-sub { margin-inline: auto; color: oklch(0.88 0.025 205); }
 .oss .cta-row { justify-content: center; }
+.oss a { color: var(--amber); }
 
 /* footer */
 footer { background: var(--surface); border-top: 1px solid var(--border); padding-block: 3rem; }
@@ -408,22 +442,15 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .foot-links a:hover { color: var(--fg); }
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
 
-/* product tour carousel — native CSS scroll-snap (the browser positions the
-   slides; JS only drives autoplay + the dot/arrow controls). No transform math. */
+/* product tour carousel — Embla (embla-carousel + autoplay), bundled at
+   /docs/assets/landing-carousel.js. Embla translates the container; viewport just
+   clips. JS (the bundle) wires the arrows/dots/autoplay. */
 .carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-.viewport {
-  display: flex;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: none;            /* Firefox — hide the scrollbar */
-  -ms-overflow-style: none;
-}
-.viewport::-webkit-scrollbar { display: none; }
-/* Each slide is exactly the viewport width and a snap target. margin:0 resets the
-   UA default figure margin-inline (40px), which would otherwise offset the slide. */
-.slide { flex: 0 0 100%; min-width: 0; margin: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.viewport { overflow: hidden; }
+.embla-container { display: flex; touch-action: pan-y pinch-zoom; }
+/* Each slide is exactly the viewport width. margin:0 resets the UA default figure
+   margin-inline (40px), which would otherwise offset the slide. */
+.slide { flex: 0 0 100%; min-width: 0; margin: 0; }
 .slide .shot { box-shadow: var(--shadow-lg); }
 .slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
 .slide figcaption strong { color: var(--fg); font-weight: 600; }
@@ -458,12 +485,12 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 /* dark band (Private by design) — reuse the hero ink + on-ink tokens */
 .band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
 .band-dark .s-sub { color: var(--on-ink-muted); }
-.band-dark .kicker { color: oklch(0.78 0.15 274); }
+.band-dark .kicker { color: var(--amber); }
 .band-dark .feat { border-top-color: var(--on-ink-border); }
 .band-dark .feat h3 { color: var(--on-ink); }
-.band-dark .feat h3 svg { color: oklch(0.8 0.13 274); }
+.band-dark .feat h3 svg { color: var(--amber); }
 .band-dark .feat p { color: var(--on-ink-muted); }
-.band-dark a { color: oklch(0.8 0.13 274); }
+.band-dark a { color: var(--amber); }
 
 /* --- entrance + scroll reveal --- */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
@@ -523,9 +550,9 @@ function featItem(f: { title: string; body: string }): string {
 }
 
 function primitiveCard(p: (typeof PRIMITIVES)[number]): string {
-  return `<div class="prim">
+  return `<div class="prim p-${escapeHtml(p.tag)}">
   <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="${p.glyph}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-  <h4>${escapeHtml(p.name)} <span class="tag">${escapeHtml(p.tag)}</span></h4>
+  <h4>${escapeHtml(p.name)} <span class="tag mono">${escapeHtml(p.tag)}</span></h4>
   <p>${escapeHtml(p.blurb)}</p>
 </div>`;
 }
@@ -590,14 +617,16 @@ ${head(origin)}
       <p class="kicker reveal">A guided tour</p>
       <h2 class="s-head reveal">See it across the whole workflow.</h2>
       <p class="s-sub reveal">Create, edit, share, and govern. Every surface of canvas-drop, in one place.</p>
-      <div class="carousel reveal" data-carousel aria-roledescription="carousel" aria-label="Product tour">
-        <div class="viewport">
+      <div class="carousel reveal" data-embla aria-roledescription="carousel" aria-label="Product tour">
+        <div class="viewport" data-embla-viewport>
+          <div class="embla-container">
 ${TOUR.map(tourSlide).join("\n")}
+          </div>
         </div>
-        <button class="car-btn car-prev" type="button" aria-label="Previous screen">${arrowLeft}</button>
-        <button class="car-btn car-next" type="button" aria-label="Next screen">${arrow}</button>
+        <button class="car-btn car-prev" type="button" data-embla-prev aria-label="Previous screen">${arrowLeft}</button>
+        <button class="car-btn car-next" type="button" data-embla-next aria-label="Next screen">${arrow}</button>
         <div class="dots" role="tablist" aria-label="Choose screen">
-${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
+${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
         </div>
       </div>
     </div>
@@ -649,8 +678,8 @@ ${PRIVACY.map(featItem).join("\n")}
 
   <section class="oss">
     <div class="wrap">
-      <p class="kicker reveal" style="color:oklch(0.78 0.15 274)">Open source</p>
-      <h2 class="s-head reveal">Yours to run. MIT-licensed, self-hostable.</h2>
+      <p class="kicker reveal">Open source</p>
+      <h2 class="s-head reveal">Yours to run. <em>MIT-licensed</em>, self-hostable.</h2>
       <p class="s-sub reveal">canvas-drop is open source and self-contained: your database, your storage, your sign-in. SQLite or Postgres, local disk or S3, all a config change away. No telemetry, no phone-home. Host it on a single VPS or bring your own cloud.</p>
       <div class="cta-row reveal">
         <a class="btn btn-ghost" href="${escapeHtml(SITE.githubUrl)}" target="_blank" rel="noopener noreferrer">${ghIcon} View on GitHub</a>
@@ -692,49 +721,9 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
   }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 })();
-// Product-tour carousel — native CSS scroll-snap. JS only scrolls the viewport
-// for the arrows/dots/autoplay and reflects the current slide in the dots. The
-// browser owns positioning, so there's no transform math to get wrong.
-(function () {
-  document.querySelectorAll('[data-carousel]').forEach(function (car) {
-    var vp = car.querySelector('.viewport');
-    var slides = car.querySelectorAll('.slide');
-    var dots = car.querySelectorAll('.dot');
-    var timer = null, scrollT = null;
-    function index() { return Math.round(vp.scrollLeft / vp.clientWidth); }
-    function goTo(n) {
-      var from = index();
-      var i = (n + slides.length) % slides.length;
-      // Wrapping (a multi-step jump) snaps instantly; a single step animates.
-      vp.scrollTo({ left: i * vp.clientWidth, behavior: (REDUCE || Math.abs(i - from) > 1) ? 'auto' : 'smooth' });
-    }
-    function syncDots() {
-      var i = index();
-      dots.forEach(function (d, k) { d.setAttribute('aria-current', k === i ? 'true' : 'false'); });
-    }
-    var prev = car.querySelector('.car-prev');
-    var next = car.querySelector('.car-next');
-    if (prev) prev.addEventListener('click', function () { goTo(index() - 1); restart(); });
-    if (next) next.addEventListener('click', function () { goTo(index() + 1); restart(); });
-    dots.forEach(function (d, k) { d.addEventListener('click', function () { goTo(k); restart(); }); });
-    // Any scroll settle — a manual swipe as much as a programmatic goTo — re-syncs the
-    // dots AND re-arms autoplay, so the slide you just landed on gets a full interval
-    // instead of inheriting the previous slide's leftover countdown.
-    vp.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(function () { syncDots(); restart(); }, 120); }, { passive: true });
-    function stop() { if (timer) { clearInterval(timer); timer = null; } }
-    function start() { stop(); if (!REDUCE) timer = setInterval(function () { goTo(index() + 1); }, 5200); }
-    function restart() { start(); }
-    car.addEventListener('mouseenter', stop);
-    car.addEventListener('mouseleave', start);
-    car.addEventListener('focusin', stop);
-    car.addEventListener('focusout', start);
-    // Pause while a finger is down so the timer can't advance mid-swipe; the scroll
-    // settle above re-arms it once the gesture ends.
-    car.addEventListener('touchstart', stop, { passive: true });
-    syncDots(); start();
-  });
-})();
 </script>
+<!-- Product-tour carousel — Embla + autoplay (bundled, served same-origin). -->
+<script src="/docs/assets/landing-carousel.js" defer></script>
 </body>
 </html>`;
 }

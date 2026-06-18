@@ -1,6 +1,6 @@
 {
-  "name": "Canvasdrop",
-  "short_name": "Canvasdrop",
+  "name": "canvas-drop",
+  "short_name": "canvas-drop",
   "icons": [
     {
       "src": "/brand/canvasdrop-mark.svg",
@@ -21,7 +21,7 @@
       "purpose": "any"
     }
   ],
-  "theme_color": "#2563eb",
-  "background_color": "#f5f5f2",
+  "theme_color": "#0c7b88",
+  "background_color": "#f7f4ed",
   "display": "standalone"
 }

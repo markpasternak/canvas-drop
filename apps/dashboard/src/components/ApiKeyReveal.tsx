@@ -1,5 +1,5 @@
 import { Button } from "./Button.js";
-import { CopyButton } from "./CopyButton.js";
+import { CodeBox } from "./CodeBox.js";
 import { Dialog } from "./Dialog.js";
 
 /**
@@ -18,10 +18,7 @@ export function ApiKeyReveal({ apiKey, onClose }: { apiKey: string; onClose: () 
       description="This is the only time it's shown. Store it in a password manager or your deploy secrets."
     >
       <div className="space-y-4">
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-sunken p-3">
-          <code className="min-w-0 flex-1 truncate font-mono text-sm text-fg">{apiKey}</code>
-          <CopyButton value={apiKey} label="Copy" toastMessage="Key copied" />
-        </div>
+        <CodeBox value={apiKey} copy copyToast="Key copied" />
         <p className="text-xs text-muted">
           Lost it? You can regenerate the key in Settings. The old one stops working immediately.
         </p>

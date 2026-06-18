@@ -37,13 +37,15 @@ describe("legal pages — rendered content", () => {
     expect(html).toContain("mark.pasternak@gmail.com");
   });
 
-  it("both documents cross-link and are light-mode only (no dark-scheme block)", () => {
+  it("both documents cross-link and are pinned to dark (light styles kept for later)", () => {
     for (const html of [renderPrivacyPage(), renderTermsPage()]) {
       expect(html).toContain('href="/privacy"');
       expect(html).toContain('href="/terms"');
-      // Light-mode only per the design brief: no dark-scheme media query.
-      expect(html).not.toContain("prefers-color-scheme: dark");
-      expect(html).not.toContain("color-scheme: light dark");
+      // Forced dark for now via the html attribute, but the light/dark token styles
+      // stay in the page so a future toggle is just an attribute change.
+      expect(html).toContain('<html lang="en" data-theme="dark">');
+      // The light styles are retained for a future toggle (the media query stays).
+      expect(html).toContain("prefers-color-scheme: dark");
     }
   });
 });

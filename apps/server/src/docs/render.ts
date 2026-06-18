@@ -117,15 +117,14 @@ ${LIGHT_TOKENS}
   }
   nav.toc a:hover { background: var(--surface-sunken); color: var(--fg); }
   nav.toc a[aria-current="page"] { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
-  /* <main> inherits a centered card (border/radius/shadow/42rem width) from the
-     shared SYSTEM_PAGE_STYLES. Docs want an open content column, not a card — reset
-     those so the content doesn't collide with the sidebar + topbar. */
+  /* <main> inherits a centered 40rem column from the shared SYSTEM_PAGE_STYLES.
+     Docs want a full content column beside the sidebar — widen it. */
   .content {
     min-width: 0; width: auto; max-width: none;
-    border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible;
     padding: clamp(2rem, 4vw, 3.5rem) clamp(1.5rem, 4vw, 2.75rem);
   }
   .doc { max-width: 46rem; }
+  .doc h1, .doc h2, .doc h3 { font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; }
   .doc h1 { margin: 0 0 1rem; font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.1; letter-spacing: -.02em; }
   /* Lede treatment: the page's opening heading reads larger, and the intro
      paragraph that follows it is set as a muted lede with a hairline rule, so each

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>canvas-drop — logo (teal scheme)</title>
+<!-- Logo adapted from the reference: rounded download-frame + down arrow + </> code mark.
+     Frame = ink, arrow + code = teal accent. Wordmark = Geist 600 lowercase. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --teal: oklch(0.49 0.105 200);          /* light accent */
+  --teal-bright: oklch(0.78 0.105 195);   /* dark accent */
+  --ink: oklch(0.27 0.022 235);           /* deep cool ink for the frame on light */
+  --paper: oklch(0.969 0.008 85);
+  --paper-raised: oklch(0.998 0.004 85);
+  --navy: oklch(0.175 0.018 265);
+  --navy-raised: oklch(0.245 0.022 265);
+  --fg-light: oklch(0.255 0.012 75);
+  --fg-dark: oklch(0.965 0.004 265);
+  --border-l: oklch(0.895 0.010 85);
+  --border-d: oklch(0.295 0.020 265);
+  --font: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#c9c4ba;font-family:var(--font);color:var(--fg-light);padding:2.5rem}
+h1{font-size:1.1rem;font-weight:600;margin:0 0 1.5rem;letter-spacing:-0.01em}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:1100px}
+.panel{border-radius:1.25rem;padding:2.5rem;border:1px solid var(--border-l);box-shadow:0 10px 30px rgba(80,70,50,0.10);display:flex;flex-direction:column;gap:1.6rem;align-items:flex-start;justify-content:center;min-height:230px}
+.panel.light{background:var(--paper-raised)}
+.panel.dark{background:var(--navy);border-color:var(--border-d);color:var(--fg-dark)}
+.cap{font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;opacity:0.55}
+.lockup{display:flex;align-items:center;gap:0.9rem}
+.word{font-weight:600;font-size:2.1rem;letter-spacing:-0.03em}
+.row{display:flex;align-items:center;gap:1.6rem;flex-wrap:wrap}
+.tile{border-radius:13px;display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,0,0,0.18)}
+.tile.teal{background:var(--teal)}
+.swatches{display:flex;gap:1rem;margin-top:1.5rem;font-family:var(--mono);font-size:0.72rem}
+.sw{display:flex;align-items:center;gap:0.5rem}
+.chip{width:22px;height:22px;border-radius:6px;border:1px solid rgba(0,0,0,0.1)}
+.note{max-width:1100px;margin-top:1.5rem;font-size:0.85rem;color:#4f4b43;line-height:1.5}
+.note code{font-family:var(--mono);background:#fff;padding:1px 5px;border-radius:5px;border:1px solid var(--border-l)}
+</style>
+</head>
+<body>
+<h1>canvas-drop — logo, teal scheme</h1>
+
+<!-- ===== reusable SVG mark =====
+  frame stroke = var(--mk-frame); arrow + code stroke = var(--mk-drop) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<g id="cdmark">
+  <!-- frame: dropped lower to leave room for a big arrow on top; wide gap (x25..x39) -->
+  <path d="M25 24 H21 a9 9 0 0 0 -9 9 V51 a9 9 0 0 0 9 9 H43 a9 9 0 0 0 9 -9 V33 a9 9 0 0 0 -9 -9 H39"
+        fill="none" stroke="var(--mk-frame)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- arrow: big + bold, mostly above the frame, head spans the gap -->
+  <path d="M32 6 V30" stroke="var(--mk-drop)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M25 23 L32 30 L39 23" fill="none" stroke="var(--mk-drop)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- code </> : drawn paths (font-free), bold chevron + slash, fills the frame body -->
+  <path d="M24 37 L18 44 L24 51" fill="none" stroke="var(--mk-drop)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M35 36 L29 52" stroke="var(--mk-drop)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M40 37 L46 44 L40 51" fill="none" stroke="var(--mk-drop)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</defs></svg>
+
+<div class="grid">
+  <!-- primary lockup, light -->
+  <div class="panel light" style="--mk-frame:var(--ink);--mk-drop:var(--teal)">
+    <span class="cap">Primary lockup — light</span>
+    <div class="lockup">
+      <svg viewBox="0 0 64 64" width="56" height="56"><use href="#cdmark"/></svg>
+      <span class="word" style="color:var(--fg-light)">canvas-drop</span>
+    </div>
+  </div>
+
+  <!-- primary lockup, dark -->
+  <div class="panel dark" style="--mk-frame:var(--fg-dark);--mk-drop:var(--teal-bright)">
+    <span class="cap">Primary lockup — dark</span>
+    <div class="lockup">
+      <svg viewBox="0 0 64 64" width="56" height="56"><use href="#cdmark"/></svg>
+      <span class="word" style="color:var(--fg-dark)">canvas-drop</span>
+    </div>
+  </div>
+
+  <!-- app tile + standalone marks, light -->
+  <div class="panel light">
+    <span class="cap">App tile + standalone — light</span>
+    <div class="row">
+      <span class="tile teal" style="width:52px;height:52px;--mk-frame:#fff;--mk-drop:#fff">
+        <svg viewBox="0 0 64 64" width="34" height="34"><use href="#cdmark"/></svg>
+      </span>
+      <span style="--mk-frame:var(--ink);--mk-drop:var(--teal)"><svg viewBox="0 0 64 64" width="48" height="48"><use href="#cdmark"/></svg></span>
+      <span style="--mk-frame:var(--teal);--mk-drop:var(--teal)"><svg viewBox="0 0 64 64" width="48" height="48"><use href="#cdmark"/></svg></span>
+    </div>
+  </div>
+
+  <!-- app tile + standalone marks, dark -->
+  <div class="panel dark">
+    <span class="cap">App tile + standalone — dark</span>
+    <div class="row">
+      <span class="tile teal" style="width:52px;height:52px;--mk-frame:#fff;--mk-drop:#fff">
+        <svg viewBox="0 0 64 64" width="34" height="34"><use href="#cdmark"/></svg>
+      </span>
+      <span style="--mk-frame:var(--fg-dark);--mk-drop:var(--teal-bright)"><svg viewBox="0 0 64 64" width="48" height="48"><use href="#cdmark"/></svg></span>
+      <span style="--mk-frame:var(--teal-bright);--mk-drop:var(--teal-bright)"><svg viewBox="0 0 64 64" width="48" height="48"><use href="#cdmark"/></svg></span>
+    </div>
+  </div>
+
+  <!-- favicon sizes -->
+  <div class="panel light">
+    <span class="cap">Favicon / small sizes</span>
+    <div class="row" style="align-items:flex-end;gap:1.4rem;--mk-frame:var(--ink);--mk-drop:var(--teal)">
+      <svg viewBox="0 0 64 64" width="16" height="16"><use href="#cdmark"/></svg>
+      <svg viewBox="0 0 64 64" width="24" height="24"><use href="#cdmark"/></svg>
+      <svg viewBox="0 0 64 64" width="32" height="32"><use href="#cdmark"/></svg>
+      <span class="tile teal" style="width:32px;height:32px;border-radius:8px;--mk-frame:#fff;--mk-drop:#fff"><svg viewBox="0 0 64 64" width="22" height="22"><use href="#cdmark"/></svg></span>
+      <span class="tile teal" style="width:44px;height:44px;border-radius:10px;--mk-frame:#fff;--mk-drop:#fff"><svg viewBox="0 0 64 64" width="30" height="30"><use href="#cdmark"/></svg></span>
+    </div>
+  </div>
+
+  <!-- stacked / centered lockup -->
+  <div class="panel light" style="align-items:center;text-align:center;--mk-frame:var(--ink);--mk-drop:var(--teal)">
+    <span class="cap">Stacked lockup</span>
+    <svg viewBox="0 0 64 64" width="60" height="60"><use href="#cdmark"/></svg>
+    <span class="word" style="color:var(--fg-light);font-size:1.7rem">canvas-drop</span>
+  </div>
+</div>
+
+<div class="note">
+  Mark = the reference adapted to teal: rounded download-frame + down arrow + <code>&lt;/&gt;</code> code glyph
+  (drop a web tool in). Frame in ink <code>oklch(0.27 0.022 235)</code> on light / near-white on dark; arrow + code in
+  teal <code>#0c7b88</code> (light) / <code>#56c9d3</code> (dark). On the accent tile the whole mark goes white.
+  Wordmark: Geist 600, lowercase, <code>-0.03em</code> tracking. One SVG source → favicon, PWA icons, app tile all derive from it.
+</div>
+</body>
+</html>

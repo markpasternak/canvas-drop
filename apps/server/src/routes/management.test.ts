@@ -168,6 +168,39 @@ describe("managementRoutes", () => {
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
   });
 
+  it("GET /by-slug/:slug resolves an owner's slug to its id, 404 for non-owner/unknown (U17)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await jsonOf<{ id: string; slug: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+
+    // Owner: resolves to the canonical id (and nothing else leaks).
+    const asOwner = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/by-slug/${created.slug}`,
+    );
+    expect(asOwner.status).toBe(200);
+    const body = await jsonOf<Record<string, unknown>>(asOwner);
+    expect(body).toEqual({ id: created.id });
+
+    // Non-owner: 404, no existence leak (same posture as GET /:id).
+    const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/by-slug/${created.slug}`,
+    );
+    expect(asOther.status).toBe(404);
+
+    // Unknown slug: 404 for the owner too.
+    const unknown = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases/by-slug/no-such-slug",
+    );
+    expect(unknown.status).toBe(404);
+  });
+
   it("hasPreview reflects a captured preview only when the pipeline is enabled (plan 004)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
@@ -2158,7 +2191,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     }>(res);
     expect(body.total).toBe(2);
     expect(body.canvases).toHaveLength(2);
-    expect(body.limit).toBe(24);
+    expect(body.limit).toBe(48);
     expect(body.offset).toBe(0);
     expect(body.summary).toMatchObject({
       active: 2,
@@ -2216,13 +2249,13 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     for (let i = 0; i < 3; i++) {
       await repo.create({ ownerId: owner.id, slug: `c${i}`, apiKeyHash: `k${i}` });
     }
-    // limit over the max clamps to 60; negative offset clamps to 0.
+    // limit over the max clamps to 100; negative offset clamps to 0.
     const over = await jsonOf<{ limit: number; offset: number; total: number }>(
       await buildApp(client, { id: owner.id, isAdmin: false }).request(
         "/api/canvases?limit=9999&offset=-5",
       ),
     );
-    expect(over.limit).toBe(60);
+    expect(over.limit).toBe(100);
     expect(over.offset).toBe(0);
     expect(over.total).toBe(3);
     // non-numeric limit falls back to the default page size, not a 400.
@@ -2230,7 +2263,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       "/api/canvases?limit=abc",
     );
     expect(junk.status).toBe(200);
-    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(24);
+    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(48);
   });
 
   it("GET / never returns another user's canvas, even with permissive params", async () => {

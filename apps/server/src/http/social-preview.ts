@@ -199,7 +199,7 @@ ${redirectHead}
   body { margin: 0; min-height: 100dvh; display: grid; place-items: center;
     font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     background: #0b0b0d; color: #a1a1aa; }
-  a { color: #60a5fa; text-decoration: none; }
+  a { color: #56c9d3; text-decoration: none; }
 </style>
 </head>
 <body>

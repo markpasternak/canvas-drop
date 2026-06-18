@@ -7,8 +7,8 @@ import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { DeployButton } from "../components/DeployButton.js";
+import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
-import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
@@ -90,22 +90,18 @@ export default function Versions() {
 
   return (
     <TabContentFrame>
-      <Panel className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
-        <div className="min-w-0 space-y-1">
-          <h2 className="text-sm font-semibold text-fg">Version history</h2>
-          <p className="text-xs text-muted">
-            {versions.length} {versions.length === 1 ? "version" : "versions"} kept for this canvas.
-            {isActive
-              ? " Switch the current version, or add a new version with the button above."
-              : " Unarchive to publish or change the current version."}
-          </p>
-        </div>
-      </Panel>
-
-      <ul className="space-y-2">
-        {versions.map((v) => (
-          <li key={v.number}>
-            <Panel className="flex items-center gap-4 p-4 sm:p-4">
+      <Section
+        id="version-history"
+        title="Version history"
+        description={`${versions.length} ${versions.length === 1 ? "version" : "versions"} kept for this canvas.${
+          isActive
+            ? " Switch the current version, or add a new version with the button above."
+            : " Unarchive to publish or change the current version."
+        }`}
+      >
+        <ul className="divide-y divide-border border-t border-border">
+          {versions.map((v) => (
+            <li key={v.number} className="flex items-center gap-4 py-4 first:pt-0">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
@@ -141,10 +137,10 @@ export default function Versions() {
                   </ActionMenu>
                 </div>
               )}
-            </Panel>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      </Section>
 
       <ConfirmDialog
         open={target !== null}

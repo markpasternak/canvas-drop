@@ -47,13 +47,13 @@ export function CollapsibleSection({
   }, [storageKey, open]);
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
+    <section className="border-border border-b">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={regionId}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-surface-hover sm:px-5"
+        className="flex w-full items-center gap-2 py-3 text-left transition-colors hover:text-accent"
       >
         <CaretRight
           size={14}
@@ -66,11 +66,7 @@ export function CollapsibleSection({
       {/* Always render the region (toggle visibility with `hidden`) so the button's
           aria-controls always references a present element — a collapsed disclosure
           that points at a missing id is an invalid ARIA contract. */}
-      <div
-        id={regionId}
-        hidden={!open}
-        className={cn(flush ? "border-t border-border" : "px-4 pb-4 sm:px-5 sm:pb-5")}
-      >
+      <div id={regionId} hidden={!open} className={cn(flush ? "border-t border-border" : "pb-4")}>
         {children}
       </div>
     </section>

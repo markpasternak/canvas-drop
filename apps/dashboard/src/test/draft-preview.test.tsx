@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DraftPreview } from "../components/DraftPreview.js";
 import { draftUsesScripts } from "../lib/file-kind.js";
@@ -23,7 +24,7 @@ describe("DraftPreview script-aware rendering", () => {
     expect(screen.queryByTestId("preview-scripts-notice")).toBeNull();
   });
 
-  it("swaps the frame for a notice + full-preview link when the draft runs JS", () => {
+  it("starts on a notice with Run preview + full-preview link when the draft runs JS", () => {
     render(
       <DraftPreview
         canvasId="c1"
@@ -34,17 +35,43 @@ describe("DraftPreview script-aware rendering", () => {
         usesScripts
       />,
     );
-    // No sandboxed iframe — it can't run the JS faithfully.
+    // The frame isn't mounted until the owner opts in (Run preview).
     expect(document.querySelector("iframe")).toBeNull();
     expect(screen.getByTestId("preview-scripts-notice")).toBeInTheDocument();
-    // Prominent CTA points at the top-level (non-sandboxed) preview, new tab. Exact
-    // name so it doesn't also match the "Open full preview in new tab" icon link.
+    // Opt-in affordance to run the draft in the existing sandbox.
+    expect(screen.getByRole("button", { name: "Run preview" })).toBeInTheDocument();
+    // And the top-level (non-sandboxed) preview link remains. Exact name so it doesn't
+    // also match the "Open full preview in new tab" icon link.
     const cta = screen.getByRole("link", { name: "Open full preview" });
     expect(cta).toHaveAttribute("href", "/api/canvases/c1/preview/");
     expect(cta).toHaveAttribute("target", "_blank");
   });
 
-  it("hides refresh/fullscreen controls in the JS notice state", () => {
+  it("runs a scripted draft in the SAME sandbox after Run preview (isolation preserved)", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen={false}
+        onToggleFullscreen={noop}
+        usesScripts
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Run preview" }));
+
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement;
+    expect(iframe).not.toBeNull();
+    // Critical: the opt-in must NOT relax the sandbox — no allow-same-origin (R13).
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    // The notice is gone; frame controls (refresh/fullscreen) are now available.
+    expect(screen.queryByTestId("preview-scripts-notice")).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Full screen preview" })).toBeInTheDocument();
+  });
+
+  it("hides refresh/fullscreen controls in the JS notice state (before Run preview)", () => {
     const onRefresh = vi.fn();
     render(
       <DraftPreview

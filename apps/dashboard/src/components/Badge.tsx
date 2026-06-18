@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { AccessRung, Canvas, PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-
-type Tone = "neutral" | "accent" | "success" | "danger" | "warning";
+import { type Concept, conceptColor } from "./concept-colors.js";
+import type { Tone } from "./variants.js";
 
 const tones: Record<Tone, string> = {
   neutral: "bg-surface-raised text-muted border-border",
@@ -18,6 +18,28 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
         tones[tone],
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * A badge tinted by a canvas-state {@link Concept} — the colour-coded counterpart
+ * to {@link Badge}. Reads the concept's tint from the shared `CONCEPT_COLORS` map
+ * so a row badge, its filter chip, and its stat all carry the SAME colour. The
+ * text label is always present, so the colour is a redundant accent (AA-safe).
+ */
+export function ConceptBadge({ concept, children }: { concept: Concept; children: ReactNode }) {
+  const c = conceptColor(concept);
+  return (
+    <span
+      data-concept={concept}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium",
+        c.bg,
+        c.text,
       )}
     >
       {children}
@@ -109,7 +131,7 @@ export function GalleryBadge({
 }: {
   canvas: Pick<Canvas, "galleryListed" | "galleryTemplatable">;
 }) {
-  if (canvas.galleryTemplatable) return <Badge tone="accent">Template</Badge>;
-  if (canvas.galleryListed) return <Badge tone="neutral">Listed</Badge>;
+  if (canvas.galleryTemplatable) return <ConceptBadge concept="templates">Template</ConceptBadge>;
+  if (canvas.galleryListed) return <ConceptBadge concept="listed">Listed</ConceptBadge>;
   return <Badge tone="neutral">Unlisted</Badge>;
 }

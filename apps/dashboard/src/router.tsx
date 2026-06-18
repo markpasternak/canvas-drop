@@ -53,6 +53,9 @@ export interface CanvasesSearch {
   view?: "grid";
   /** 1-based page for server-side pagination (plan 005). */
   page?: number;
+  /** The single "focused" canvas for the detail rail (plan rebrand P4). Distinct
+   *  from the multi-select checkbox set; clicking a row/card body sets it. */
+  selected?: string;
 }
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,

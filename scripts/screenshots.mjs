@@ -38,17 +38,22 @@ const WEBP_QUALITY = LANDING ? 82 : 80;
 // can fire before rows render, so the landing (populated) shots wait a beat.
 const SETTLE_MS = LANDING ? 1800 : 0;
 
-/** Find the first canvas id linked from the dashboard, for the canvas-scoped tour
- *  screens. Returns null if none is seeded (those shots are then skipped). */
-async function discoverCanvasId(page) {
+/** Find a canvas id linked from the dashboard, for the canvas-scoped tour screens.
+ *  Prefers a canvas by visible title (so the editor slide showcases a clean,
+ *  code-rich demo app) and falls back to the first one. Returns null if none is
+ *  seeded (those shots are then skipped). */
+async function discoverCanvasId(page, preferTitle) {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
   await page.waitForTimeout(SETTLE_MS || 1200);
-  return page.evaluate(() => {
-    const href = Array.from(document.querySelectorAll("a[href]"))
-      .map((a) => a.getAttribute("href"))
-      .find((h) => /^\/canvases\/[0-9a-f-]+$/.test(h ?? ""));
+  return page.evaluate((title) => {
+    const links = Array.from(document.querySelectorAll("a[href]")).filter((a) =>
+      /^\/canvases\/[0-9a-f-]+$/.test(a.getAttribute("href") ?? ""),
+    );
+    const pick =
+      (title && links.find((a) => (a.textContent || "").trim().includes(title))) || links[0];
+    const href = pick?.getAttribute("href");
     return href ? href.split("/")[2] : null;
-  });
+  }, preferTitle ?? null);
 }
 
 /** Resolve the list of {path, name} shots for the active mode. */
@@ -66,7 +71,9 @@ async function resolveShots(page) {
     { path: "/gallery", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
   ];
-  const id = await discoverCanvasId(page);
+  // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides — its
+  // hand-authored multi-line index.html reads as real, interesting code in the editor.
+  const id = await discoverCanvasId(page, "Pricing Calculator");
   if (id) {
     shots.push(
       { path: `/canvases/${id}/editor`, name: "tour-editor.webp" },
@@ -135,6 +142,13 @@ async function main() {
   }
 
   await browser.close();
+
+  // Landing mode: rebuild the animated product-tour loop from the fresh frames, so
+  // the README's tour.webp refreshes whenever the preview images do.
+  if (LANDING) {
+    const { buildTourLoop } = await import("./landing-gif.mjs");
+    await buildTourLoop();
+  }
 }
 
 main();

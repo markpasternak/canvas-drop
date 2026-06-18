@@ -227,11 +227,11 @@ describe("galleryRoutes", () => {
 
     const huge = await get(client, "/api/gallery?limit=9999");
     expect(huge.status).toBe(200);
-    expect(huge.body.limit).toBe(60); // clamped to MAX_LIMIT
+    expect(huge.body.limit).toBe(100); // clamped to MAX_LIMIT
 
     const junk = await get(client, "/api/gallery?limit=abc&offset=-5");
     expect(junk.status).toBe(200);
-    expect(junk.body.limit).toBe(24); // default
+    expect(junk.body.limit).toBe(48); // default
     expect(junk.body.offset).toBe(0); // clamped
   });
 

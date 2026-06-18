@@ -2,12 +2,14 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
+import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
-import { rowPrimaryActionClass } from "../lib/row-styles.js";
-import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
+import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row-styles.js";
+import { AccessBadge, accessRungLabel, ConceptBadge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
+import { Tag } from "./Tag.js";
 
 const MAX_ROW_TAGS = 3;
 
@@ -39,14 +41,16 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       )}
       {/* Public is the only beyond-the-org rung — flag it prominently by the title. */}
       {canvas.access === "public_link" && <AccessBadge access="public_link" />}
-      {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
+      {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
       {/* Listed-but-not-template: gallery state used to be its own column. */}
-      {canvas.galleryListed && !canvas.galleryTemplatable && <Badge tone="neutral">Listed</Badge>}
+      {canvas.galleryListed && !canvas.galleryTemplatable && (
+        <ConceptBadge concept="listed">Listed</ConceptBadge>
+      )}
       {canvas.hasPassword && (
-        <Badge tone="neutral">
+        <ConceptBadge concept="protected">
           <LockSimple size={12} weight="bold" aria-hidden />
           Protected
-        </Badge>
+        </ConceptBadge>
       )}
     </>
   );
@@ -58,19 +62,17 @@ function RowTags({ tags }: { tags: string[] }) {
   }
   const shown = tags.slice(0, MAX_ROW_TAGS);
   const extra = tags.length - shown.length;
-  const chip =
-    "rounded border border-border bg-surface-sunken px-1.5 py-0.5 text-[0.6875rem] font-medium";
   return (
     <span className="flex flex-wrap items-center gap-1">
       {shown.map((tag) => (
-        <span key={tag} className={`${chip} text-muted`}>
+        <Tag key={tag} size="xs">
           {tag}
-        </span>
+        </Tag>
       ))}
       {extra > 0 && (
-        <span className={`${chip} text-subtle`} title={`${extra} more tags`}>
+        <Tag size="xs" tone="subtle" title={`${extra} more tags`}>
           +{extra}
-        </span>
+        </Tag>
       )}
     </span>
   );
@@ -99,9 +101,18 @@ function visibility(canvas: CanvasListItem): { primary: string; secondary: strin
 }
 
 /** Most recent activity on a canvas: the later of its last edit (settings/deploy
- *  bump `updatedAt`) and its last publish. Drives the "Edited …" row hint. */
-function lastActivity(canvas: CanvasListItem): number {
+ *  bump `updatedAt`) and its last publish. Drives the "Edited …" row hint. Exported
+ *  so the detail rail (DetailPanel) shares the exact same recency logic. */
+export function lastActivity(canvas: CanvasListItem): number {
   return Math.max(canvas.updatedAt, canvas.lastDeploy?.createdAt ?? 0);
+}
+
+/** Short visibility line — leads with the access rung and flags a password gate.
+ *  Exported (canonical) so the detail rail renders the same label as the list and
+ *  the two never drift. */
+export function visibilityLabel(canvas: CanvasListItem): string {
+  const base = accessRungLabel(canvas.access);
+  return canvas.hasPassword ? `${base} · Protected` : base;
 }
 
 /** Quiet, dot-separated identity line — who can see it and when it last changed.
@@ -151,8 +162,10 @@ export function CanvasListHeader({
   onSelectAll?: (next: boolean) => void;
 } = {}) {
   return (
+    // Flat Lovable-style header: a quiet column label on the plain page background
+    // with just a hairline divider underneath — no filled sunken bar, no card.
     <div
-      className="hidden items-center gap-3 rounded-t-lg border-border border-b bg-surface-sunken px-4 py-2 text-xs font-medium text-muted lg:flex"
+      className="hidden items-center gap-3 border-border border-b px-4 py-2 text-xs font-medium text-muted lg:flex"
       // Not aria-hidden when it carries the interactive select-all control.
       aria-hidden={selectable ? undefined : true}
     >
@@ -222,6 +235,9 @@ export function CanvasRow({
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
+  /** The row's "Details" action (opening the inline detail rail) is wired by the
+   *  caller directly to the Details button in the `actions` slot — the body click no
+   *  longer routes through this component, so there is no `onActivate` body handler. */
 }) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
@@ -231,27 +247,37 @@ export function CanvasRow({
   const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const navigate = useNavigate();
-  const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
+  // The whole-row body click (and keyboard Enter/Space) opens the canvas's detail /
+  // management page (`/canvases/$id` — Overview/Editor/Share/…). This is independent
+  // of `onActivate`, which the explicit "Details" button uses to open the inline rail.
+  const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
-    // Keyboard access to the canvas is the focusable title <Link> below (and the
-    // inner Open/copy/menu controls). The whole-row click is a mouse convenience;
-    // the <li> stays non-interactive (no role/tabIndex) because biome's a11y rules
-    // disallow an interactive role on <li> and a tab stop here would only duplicate
-    // the title link. onKeyDown is retained to satisfy useKeyWithClickEvents.
+    // Keyboard access to the canvas is the focusable title <Link> below (and the inner
+    // Open/copy/menu controls). The whole-row single-click — and keyboard Enter/Space —
+    // navigates to the canvas detail page (`/canvases/$id`); the row's "Details" button
+    // opens the inline detail rail instead (via onActivate). There is no double-click
+    // behaviour (single-click already navigates). The <li> stays non-interactive (no
+    // role/tabIndex) because biome's a11y rules disallow an interactive role on <li>
+    // and a tab stop here would only duplicate the title link; keyboard users navigate
+    // via the title link (single-click equivalent). onKeyDown is retained to satisfy
+    // useKeyWithClickEvents.
     <li
-      className={`cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised${
-        selected ? " bg-accent-subtle lg:bg-accent-subtle" : ""
-      }`}
+      data-canvas-item
+      className={cn(
+        "cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised",
+        rowHoverClass,
+        selected && "bg-accent-subtle lg:bg-accent-subtle",
+      )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        openDetails();
+        openDetail();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        openDetails();
+        openDetail();
       }}
     >
       <div className="flex items-center gap-3 sm:gap-4">
@@ -281,7 +307,7 @@ export function CanvasRow({
             <Link
               to="/canvases/$id"
               params={{ id: canvas.id }}
-              className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+              className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
               aria-label={`View details for ${title}`}
             >
               {title}
@@ -364,25 +390,33 @@ export function CanvasCard({
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
+  /** See {@link CanvasRow}: the card body click navigates to the canvas detail page;
+   *  the "Details" action (inline rail) is wired by the caller to the Details button
+   *  in the `actions` slot, not to the body. */
 }) {
   const title = canvasTitle(canvas);
   const navigate = useNavigate();
-  const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
+  // Body click / Enter navigates to the canvas detail page (`/canvases/$id`); the
+  // "Details" button in the actions slot opens the inline rail instead.
+  const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
     <li
-      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong${
-        selected ? " border-accent ring-1 ring-accent" : ""
-      }`}
+      data-canvas-item
+      className={cn(
+        "group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
+        cardHoverClass,
+        selected && "border-accent ring-1 ring-accent",
+      )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        openDetails();
+        openDetail();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        openDetails();
+        openDetail();
       }}
     >
       <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">
@@ -412,19 +446,19 @@ export function CanvasCard({
           <Link
             to="/canvases/$id"
             params={{ id: canvas.id }}
-            className="min-w-0 truncate rounded-sm text-sm font-semibold text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
             aria-label={`View details for ${title}`}
           >
             {title}
           </Link>
           <span className="flex shrink-0 flex-wrap items-center gap-1">
             {canvas.access === "public_link" && <AccessBadge access="public_link" />}
-            {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
+            {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
             {canvas.hasPassword && (
-              <Badge tone="neutral">
+              <ConceptBadge concept="protected">
                 <LockSimple size={12} weight="bold" aria-hidden />
                 Protected
-              </Badge>
+              </ConceptBadge>
             )}
           </span>
         </div>

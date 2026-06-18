@@ -11,6 +11,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
 import { Button } from "../components/Button.js";
+import { CodeBox } from "../components/CodeBox.js";
 import { CopyButton } from "../components/CopyButton.js";
 import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
@@ -208,7 +209,7 @@ export default function CreateCanvas() {
       <Panel className="p-5">
         <Toggle
           label="Enable backend"
-          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in Capabilities."
+          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in the Backend tab."
           checked={backendEnabled}
           onChange={setBackendEnabled}
         />
@@ -369,10 +370,7 @@ function ApiSnippet({
       {/* The key is shown once, here. Navigating away forfeits it (regenerate to recover). */}
       <div className="space-y-2">
         <p className="text-sm font-semibold text-fg">Your secret key (shown once)</p>
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-sunken p-3">
-          <code className="min-w-0 flex-1 truncate font-mono text-sm text-fg">{result.apiKey}</code>
-          <CopyButton value={result.apiKey} label="Copy" toastMessage="Key copied" />
-        </div>
+        <CodeBox value={result.apiKey} copy copyToast="Key copied" />
         <p className="text-xs text-muted">
           Store it now. It cannot be shown again. Lost it? Regenerate in canvas settings.
         </p>
@@ -382,9 +380,7 @@ function ApiSnippet({
           <p className="text-sm font-semibold text-fg">Deploy with the API</p>
           <CopyButton value={snippet} label="Copy" toastMessage="Snippet copied" />
         </div>
-        <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs text-muted">
-          {snippet}
-        </pre>
+        <CodeBox value={snippet} variant="block" />
       </div>
       <Button onClick={onDone}>Go to canvas</Button>
     </div>

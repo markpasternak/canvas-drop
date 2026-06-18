@@ -10,6 +10,7 @@ import {
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/cn.js";
 import { Button } from "./Button.js";
+import { SegmentedControl } from "./SegmentedControl.js";
 
 export type EditorSurface = "code" | "onpage";
 export type EditorPane = "files" | "code" | "preview" | "onpage";
@@ -89,21 +90,22 @@ export function PublishBar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-border bg-surface-sunken p-0.5">
-            <ModeButton active={surface === "code"} onClick={onCodeMode}>
-              <Code size={15} weight="bold" aria-hidden />
-              Code
-            </ModeButton>
-            <ModeButton
-              active={surface === "onpage"}
-              onClick={onOnPageMode}
-              disabled={!onPageAvailable}
-              title={onPageAvailable ? "Edit text directly on the rendered page" : onPageHint}
-            >
-              <TextAa size={15} weight="bold" aria-hidden />
-              Page text
-            </ModeButton>
-          </div>
+          <SegmentedControl
+            aria-label="Editor mode"
+            size="sm"
+            value={surface}
+            onChange={(next) => (next === "code" ? onCodeMode() : onOnPageMode())}
+            items={[
+              { value: "code", label: "Code", icon: Code },
+              {
+                value: "onpage",
+                label: "Page text",
+                icon: TextAa,
+                disabled: !onPageAvailable,
+                title: onPageAvailable ? "Edit text directly on the rendered page" : onPageHint,
+              },
+            ]}
+          />
           <Button
             size="sm"
             onClick={onPublish}
@@ -156,29 +158,6 @@ export function PublishBar({
   );
 }
 
-function ModeButton({
-  active,
-  className,
-  children,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { active: boolean }) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
-        active
-          ? "bg-surface-raised text-fg shadow-[var(--shadow-panel)]"
-          : "text-muted hover:text-fg",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
-
 function PaneButton({
   active,
   className,
@@ -188,6 +167,7 @@ function PaneButton({
   return (
     <button
       type="button"
+      aria-pressed={active}
       className={cn(
         "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-40",
         active

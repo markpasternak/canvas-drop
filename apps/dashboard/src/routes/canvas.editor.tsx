@@ -66,7 +66,7 @@ function DraftRepairNotice({
   action?: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-warning/30 bg-warning-subtle/40 px-4 py-3 text-warning shadow-[var(--shadow-panel)]">
+    <section className="border border-warning/30 bg-warning-subtle/40 px-4 py-3 text-warning">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-0.5">
           <h2 className="text-sm font-semibold text-fg">{title}</h2>
@@ -398,6 +398,29 @@ export default function Editor() {
       toast(err instanceof ApiError ? err.hint : "Couldn't publish", "error");
     }
   }
+
+  // ⌘↵ / Ctrl+Enter publishes the draft — the keyboard mirror of the Publish button.
+  // Scoped to the editor by this route's mount lifetime (mirrors the editor-local ⌘S
+  // in CodeEditor). Reads the publish gate via a ref so the listener stays mounted
+  // once and never goes stale; a no-op when the draft isn't publishable or a publish
+  // is already in flight.
+  const publishShortcutRef = useRef<() => void>(() => {});
+  publishShortcutRef.current = () => {
+    if (!draft || publish.isPending) return;
+    const publishable = draft.files.length > 0 && (draft.dirty || draft.stale);
+    if (!publishable) return;
+    void onPublish();
+  };
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        publishShortcutRef.current();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   if (canvas && canvas.status !== "active") {
     return (

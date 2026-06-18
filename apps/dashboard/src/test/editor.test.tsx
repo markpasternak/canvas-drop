@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WorkspacePane } from "../components/Surface.js";
 import { ToastProvider } from "../components/Toast.js";
 import type { DraftView } from "../lib/api.js";
 import { keys } from "../lib/queries.js";
@@ -250,6 +251,62 @@ describe("Editor route", () => {
     );
   });
 
+  it("⌘↵ publishes when the draft is dirty and publishable", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+      "POST /api/canvases/c1/publish": () =>
+        json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
+    });
+    renderEditor();
+    // Wait for the editor to be live (Publish enabled) before firing the shortcut.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
+        true,
+      ),
+    );
+  });
+
+  it("Ctrl+↵ also publishes", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: true })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+      "POST /api/canvases/c1/publish": () =>
+        json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
+    });
+    renderEditor();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
+        true,
+      ),
+    );
+  });
+
+  it("⌘↵ is a no-op when the draft isn't publishable (clean)", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+      "POST /api/canvases/c1/publish": () =>
+        json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
+    });
+    renderEditor();
+    // Publish is disabled for a clean draft; the shortcut must respect the same gate.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled());
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    // Give any (incorrect) publish a chance to fire, then assert none did.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
+      false,
+    );
+  });
+
   it("pauses editing for a non-active canvas", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json({ ...CANVAS, status: "archived" }),
@@ -472,5 +529,22 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/couldn.t load this file/i)).toBeInTheDocument();
+  });
+});
+
+describe("WorkspacePane chrome (flat)", () => {
+  it("renders a flat bordered pane with no rounded-card / shadow chrome", () => {
+    const { container } = render(
+      <WorkspacePane data-testid="pane">
+        <div>contents</div>
+      </WorkspacePane>,
+    );
+    const pane = container.querySelector("section");
+    expect(pane).not.toBeNull();
+    // KTD4: the editor's panes are flat bordered seams, not rounded shadow cards.
+    expect(pane?.className).not.toMatch(/\brounded-xl\b/);
+    expect(pane?.className).not.toMatch(/shadow-\[var\(--shadow-panel\)\]/);
+    // Still a bordered pane (the hairline seams between panes).
+    expect(pane?.className).toMatch(/\bborder\b/);
   });
 });

@@ -1,4 +1,4 @@
-import { type Config, loadConfig } from "@canvas-drop/shared";
+import { type Config, loadConfig, MARKETING_ACCENT } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -81,9 +81,44 @@ describe("landing page — rendered content", () => {
     expect(html).toContain('src="/docs/assets/landing-gallery.webp');
   });
 
+  it("renders the editorial serif hero with the amber second accent (Committed bold)", () => {
+    const html = renderLandingPage();
+    // The hero headline carries the self-hosted serif and the italic-accent clause.
+    expect(html).toContain("--font-serif:");
+    expect(html).toContain('<span class="accent">Share it out.</span>');
+    // h1.accent is the italic amber clause.
+    expect(html).toMatch(/h1 \.accent \{[^}]*font-style: italic[^}]*color: var\(--amber\)/);
+    // The amber comes from MARKETING_ACCENT (shared) — sourced, never inlined.
+    expect(html).toContain(`--amber: ${MARKETING_ACCENT.light.amber};`);
+    expect(html).toContain(`--amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};`);
+    // Decorative chrome references the token, not a hard-coded amber value.
+    expect(html).toContain("var(--amber)");
+    // Per-primitive colour tints are present.
+    expect(html).toContain('class="prim p-kv"');
+    expect(html).toContain('class="prim p-realtime"');
+    // No indigo-violet anywhere (the parity scan's hue — kept clean).
+    expect(html).not.toMatch(/oklch\([^)]*\b27[0-9]\b/);
+  });
+
+  it("self-hosts the Newsreader serif — no external/CDN font request (no phone-home)", () => {
+    const html = renderLandingPage();
+    // @font-face points at the same-origin, self-served woff2 (brandAssetRoutes).
+    expect(html).toContain("@font-face");
+    expect(html).toContain("/fonts/newsreader-latin-wght-normal.woff2");
+    expect(html).toContain("/fonts/newsreader-latin-standard-italic.woff2");
+    expect(html).toContain('font-family: "Newsreader Variable"');
+    // --font-serif resolves to the self-hosted family for the editorial hero.
+    expect(html).toContain("--font-serif:");
+    // Absolutely no external font sources.
+    expect(html).not.toContain("fonts.googleapis.com");
+    expect(html).not.toContain("fonts.gstatic.com");
+  });
+
   it("includes the product-tour carousel and the team + privacy sections", () => {
     const html = renderLandingPage();
-    expect(html).toContain("data-carousel");
+    // Embla carousel: the viewport + the bundled controller script.
+    expect(html).toContain("data-embla");
+    expect(html).toContain('src="/docs/assets/landing-carousel.js"');
     expect(html).toContain('src="/docs/assets/tour-editor.webp');
     expect(html).toContain("Built for teams");
     expect(html).toContain("Private by design");

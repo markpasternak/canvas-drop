@@ -103,7 +103,7 @@ export function DashboardRouteErrorState({ error, reset }: ErrorComponentProps) 
         className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-3.5 text-sm font-semibold text-accent-fg shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px"
       >
         <ArrowClockwise size={16} weight="bold" aria-hidden />
-        Retry
+        Try again
       </button>
     </ErrorShell>
   );

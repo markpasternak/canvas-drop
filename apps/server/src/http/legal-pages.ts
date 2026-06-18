@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, rampCssVars } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
@@ -57,7 +57,8 @@ function socialMeta(path: string, title: string, description: string, origin: st
   return ogMeta({ origin, path, title: `${title} · canvas-drop`, description });
 }
 
-/** Shared minimal, light-mode-only page chrome (logo + wordmark, title, body). */
+/** Shared minimal flat page chrome (logo + wordmark, serif title, body), warm-paper
+ *  light with a deep-navy dark alternate — matching the brand token ramp. */
 function renderLegalPage(opts: {
   title: string;
   intro: string;
@@ -65,8 +66,11 @@ function renderLegalPage(opts: {
   path: string;
   origin: string;
 }): string {
+  // Legal pages are intentionally pinned to dark for now (data-theme="dark"). The
+  // light + system styles below are kept intact so flipping to a togglable theme later
+  // is just removing this attribute (or wiring SYSTEM_THEME_INIT back in).
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -74,16 +78,30 @@ function renderLegalPage(opts: {
 ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 ${FAVICON_LINKS}
 <style>
+  @font-face {
+    font-family: "Newsreader Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 200 800;
+    src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
+  }
   :root {
-    --canvas: #f5f5f2;
-    --surface: #fbfbf8;
-    --fg: #18181b;
-    --muted: #5b5b63;
-    --subtle: #898991;
-    --border: #dfdfdc;
-    --accent: #2563eb;
-    --logo-frame: #111418;
-    --logo-drop: #2563eb;
+${rampCssVars("light", "    ")}
+    --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+${rampCssVars("dark", "      ")}
+    }
+  }
+  /* Theme overrides kept for a future toggle. The page hardcodes data-theme="dark"
+     on <html> (forced dark for now); these selectors outrank the media query so light
+     is reachable later just by changing/removing that attribute. */
+  :root[data-theme="dark"] {
+${rampCssVars("dark", "    ")}
+  }
+  :root[data-theme="light"] {
+${rampCssVars("light", "    ")}
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -114,7 +132,10 @@ ${FAVICON_LINKS}
   .mark { width: 1.85rem; height: 1.85rem; flex: 0 0 auto; }
   h1 {
     margin: 0 0 .35rem;
-    font-size: clamp(1.6rem, 5vw, 2.25rem);
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(1.9rem, 5vw, 2.6rem);
     line-height: 1.1;
     letter-spacing: -.02em;
   }
@@ -125,8 +146,11 @@ ${FAVICON_LINKS}
   }
   .intro { margin: 0 0 1.75rem; color: var(--muted); font-size: 1.0625rem; }
   h2 {
-    margin: 2rem 0 .5rem;
-    font-size: 1.0625rem;
+    margin: 2.25rem 0 .5rem;
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: 1.3rem;
     letter-spacing: -.01em;
   }
   p { margin: .6rem 0; color: var(--muted); }

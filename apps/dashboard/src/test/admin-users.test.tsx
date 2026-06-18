@@ -124,7 +124,10 @@ describe("admin users", () => {
     });
     renderAt("/admin/users");
     const user = userEvent.setup();
-    await screen.findByText("Me");
+    // "Me" is the row's display name AND the signed-in account label shown in the
+    // rail footer's account control, so scope the load wait to the user table.
+    const table = await screen.findByRole("table");
+    await within(table).findByText("Me");
     await user.click(screen.getByRole("button", { name: "Actions for Me" }));
     // Your own row's block + demote items are disabled (aria-disabled menuitems).
     expect(await screen.findByRole("menuitem", { name: "Block user" })).toHaveAttribute(

@@ -1,4 +1,6 @@
-import { Link, Outlet, useParams } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 import { AccessBadge, GalleryBadge, PublicationBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
@@ -6,9 +8,54 @@ import { DeployButton } from "../components/DeployButton.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, api } from "../lib/api.js";
+import { isCanvasId } from "../lib/cosmetic-slug.js";
 import { useUnarchiveCanvas } from "../lib/mutations.js";
 import { useCanvas } from "../lib/queries.js";
+
+/**
+ * Resolve a non-id path param (a pasted cosmetic slug) to the canonical canvas id and
+ * redirect to it (rebrand U17). A param shaped like a UUID is already canonical — we
+ * never fire a lookup for it. Owner-scoped server-side; an unknown/non-owned slug
+ * stays unresolved so the shell falls through to its not-found state (no leak).
+ * Returns whether a redirect is pending so the caller can hold the not-found render.
+ */
+function useSlugRedirect(param: string): { resolving: boolean } {
+  const navigate = useNavigate();
+  const looksLikeId = isCanvasId(param);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const slugQuery = useQuery({
+    queryKey: ["canvas-slug", param],
+    queryFn: () => api.resolveSlug(param),
+    enabled: !looksLikeId,
+    retry: false,
+  });
+
+  const resolvedId = looksLikeId ? null : (slugQuery.data?.id ?? null);
+  // Capture the sub-route once and fire the redirect a single time. `pathname` updates
+  // as the router transitions, so keying the effect off it (or omitting the guard) would
+  // re-issue navigate every render and loop the router. Reading it via a ref keeps the
+  // sub-route current without making it a redirect trigger.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  // Latch on the *param we last redirected for*, not a bare boolean. A boolean
+  // never resets within one CanvasLayout mount, so a second cosmetic-slug nav
+  // (slug A → id → slug B) would early-return on the stale latch and strand the
+  // user on the not-found skeleton. Keying off the param re-arms per slug.
+  const redirectedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resolvedId || redirectedForRef.current === param) return;
+    redirectedForRef.current = param;
+    // Preserve the sub-route (e.g. /editor, /share) when swapping slug → id.
+    const rest = pathnameRef.current.slice(`/canvases/${param}`.length);
+    void navigate({ to: `/canvases/${resolvedId}${rest}`, replace: true });
+  }, [resolvedId, param, navigate]);
+
+  if (looksLikeId) return { resolving: false };
+  // Resolving while the lookup is in flight, or a match was found and the redirect
+  // is queued — either way, hold the not-found render until we've left this route.
+  return { resolving: slugQuery.isLoading || resolvedId !== null };
+}
 
 /** Canvas detail shell: breadcrumb back-affordance, header, routed tabs, Outlet. */
 export default function CanvasLayout() {
@@ -16,6 +63,15 @@ export default function CanvasLayout() {
   const { data: canvas, isLoading, isError } = useCanvas(id);
   const unarchive = useUnarchiveCanvas(id);
   const toast = useToast();
+  // When `id` is actually a cosmetic slug, resolve it to the canonical id + redirect.
+  const { resolving } = useSlugRedirect(id);
+
+  if (isError && resolving) {
+    // The id lookup 404'd because `id` is a slug; a redirect to the real id is in
+    // flight (or the slug lookup is still settling). Hold a quiet skeleton rather
+    // than flashing "not found" before the canonical route loads.
+    return <Skeleton className="h-40 w-full" />;
+  }
 
   if (isError) {
     return (

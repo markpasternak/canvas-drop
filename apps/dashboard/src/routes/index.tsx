@@ -3,13 +3,12 @@ import {
   ArrowSquareOut,
   Copy,
   CopySimple,
-  MagnifyingGlass,
   Rows,
   SquaresFour,
   Trash,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { BulkActionBar } from "../components/BulkActionBar.js";
@@ -24,8 +23,13 @@ import {
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { type Concept, conceptColor, conceptIcon } from "../components/concept-colors.js";
+import { DetailDrawer } from "../components/DetailDrawer.js";
+import { DetailPanel } from "../components/DetailPanel.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
+import { SegmentedControl } from "../components/SegmentedControl.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import {
@@ -41,6 +45,7 @@ import { useArchiveCanvas, useDeleteCanvas, useUnarchiveCanvas } from "../lib/mu
 import { useCanvases } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
+import { useMediaQuery } from "../lib/use-media-query.js";
 import type { CanvasesSearch } from "../router.js";
 import Onboarding from "./onboarding.js";
 
@@ -58,12 +63,18 @@ const STATE_CHIPS: Array<{
   key: keyof CanvasesSearch;
   label: string;
   countKey: keyof CanvasOwnerSummary;
+  concept: Concept;
 }> = [
-  { key: "shared", label: "Shared", countKey: "shared" },
-  { key: "protected", label: "Protected", countKey: "protected" },
-  { key: "listed", label: "Listed", countKey: "listed" },
-  { key: "template", label: "Templates", countKey: "templates" },
-  { key: "undeployed", label: "Never deployed", countKey: "neverDeployed" },
+  { key: "shared", label: "Shared", countKey: "shared", concept: "shared" },
+  { key: "protected", label: "Protected", countKey: "protected", concept: "protected" },
+  { key: "listed", label: "Listed", countKey: "listed", concept: "listed" },
+  { key: "template", label: "Templates", countKey: "templates", concept: "templates" },
+  {
+    key: "undeployed",
+    label: "Never deployed",
+    countKey: "neverDeployed",
+    concept: "neverDeployed",
+  },
 ];
 
 const CANVASES_SORT_OPTIONS = [
@@ -79,6 +90,9 @@ interface RowSelectionProps {
   onSelectChange: (next: boolean) => void;
   /** Which presentation to render — the list row or the grid card. */
   view: CanvasView;
+  /** Focus this canvas in the detail rail (body click / Enter); distinct from the
+   *  multi-select checkbox above. */
+  onActivate: () => void;
 }
 
 const MENU_ICON_SIZE = 15;
@@ -91,6 +105,7 @@ function ActiveRow({
   selected,
   onSelectChange,
   view,
+  onActivate,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -129,6 +144,17 @@ function ActiveRow({
       onSelectChange={onSelectChange}
       actions={
         <>
+          {/* The whole-row body click navigates to the canvas detail page. "Details"
+              is the explicit affordance for the inline detail rail (sets ?selected) —
+              same button shape as Open. */}
+          <button
+            type="button"
+            onClick={onActivate}
+            className={rowPrimaryActionClass}
+            aria-label={`Show details for ${title}`}
+          >
+            Details
+          </button>
           {deployed ? (
             <a
               href={canvas.url}
@@ -212,6 +238,7 @@ function ArchivedRow({
   selected,
   onSelectChange,
   view,
+  onActivate,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -239,6 +266,15 @@ function ArchivedRow({
       onSelectChange={onSelectChange}
       actions={
         <>
+          {/* Body click navigates to the canvas detail page; "Details" opens the rail. */}
+          <button
+            type="button"
+            onClick={onActivate}
+            className={rowPrimaryActionClass}
+            aria-label={`Show details for ${title}`}
+          >
+            Details
+          </button>
           <Button
             size="sm"
             variant="secondary"
@@ -301,66 +337,32 @@ function ScopeToggle({
   summary: CanvasOwnerSummary;
 }) {
   return (
-    <div
-      role="tablist"
+    <SegmentedControl
       aria-label="Canvas scope"
-      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
-    >
-      {(["active", "archived"] as const).map((s) => (
-        <button
-          key={s}
-          type="button"
-          role="tab"
-          aria-selected={value === s}
-          onClick={() => onChange(s)}
-          className={cn(
-            "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium transition-colors",
-            value === s
-              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
-              : "text-muted hover:text-fg",
-          )}
-        >
-          <span className="capitalize">{s}</span>
-          <span className="ml-1.5 text-xs text-subtle">{summary[s]}</span>
-        </button>
-      ))}
-    </div>
+      value={value}
+      onChange={onChange}
+      items={[
+        { value: "active", label: "Active", count: summary.active },
+        { value: "archived", label: "Archived", count: summary.archived },
+      ]}
+    />
   );
 }
 
 /** List ⇄ grid layout switch. Mirrors the segmented styling of the scope toggle;
  *  the choice lives in the URL (`?view=grid`) so a layout is shareable + sticky. */
 function ViewToggle({ value, onChange }: { value: CanvasView; onChange: (v: CanvasView) => void }) {
-  const options = [
-    { v: "list", label: "List view", Icon: Rows },
-    { v: "grid", label: "Grid view", Icon: SquaresFour },
-  ] as const;
   return (
-    <div
-      role="tablist"
+    <SegmentedControl
       aria-label="Canvas layout"
-      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
-    >
-      {options.map(({ v, label, Icon }) => (
-        <button
-          key={v}
-          type="button"
-          role="tab"
-          aria-selected={value === v}
-          aria-label={label}
-          title={label}
-          onClick={() => onChange(v)}
-          className={cn(
-            "inline-flex h-8 items-center rounded-md px-2.5 transition-colors",
-            value === v
-              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
-              : "text-muted hover:text-fg",
-          )}
-        >
-          <Icon size={16} weight={value === v ? "fill" : "regular"} aria-hidden />
-        </button>
-      ))}
-    </div>
+      iconOnly
+      value={value}
+      onChange={onChange}
+      items={[
+        { value: "list", label: "List view", icon: Rows },
+        { value: "grid", label: "Grid view", icon: SquaresFour },
+      ]}
+    />
   );
 }
 
@@ -371,28 +373,65 @@ function SummaryStrip({
   summary: CanvasOwnerSummary;
   archivedView: boolean;
 }) {
-  const items = [
-    { label: "Active", value: summary.active, active: !archivedView },
-    { label: "Archived", value: summary.archived, active: archivedView },
-    { label: "Templates", value: summary.templates },
-    { label: "Never deployed", value: summary.neverDeployed },
-    { label: "Protected", value: summary.protected },
+  const items: Array<{
+    label: string;
+    value: number;
+    concept: Concept;
+    active?: boolean;
+  }> = [
+    { label: "Active", value: summary.active, concept: "active", active: !archivedView },
+    { label: "Archived", value: summary.archived, concept: "archived", active: archivedView },
+    { label: "Templates", value: summary.templates, concept: "templates" },
+    { label: "Never deployed", value: summary.neverDeployed, concept: "neverDeployed" },
+    { label: "Protected", value: summary.protected, concept: "protected" },
   ];
   return (
     <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-5">
-      {items.map((item, index) => (
-        <div
-          key={item.label}
-          className={cn(
-            "bg-surface px-3 py-2",
-            index === items.length - 1 && "col-span-2 sm:col-span-1",
-            item.active && "bg-accent-subtle text-accent",
-          )}
-        >
-          <dt className="text-[0.6875rem] font-medium text-subtle">{item.label}</dt>
-          <dd className="mt-0.5 text-lg font-semibold tabular-nums text-fg">{item.value}</dd>
-        </div>
-      ))}
+      {items.map((item, index) => {
+        // Each stat is a per-concept accent-coloured icon tile + a label + an
+        // expressive number. The tile carries the colour (the concept's -subtle
+        // wash behind the concept-coloured glyph, both from the shared concept
+        // map); the surface itself stays calm warm-paper/deep-navy. The active
+        // lifecycle scope still gets its accent wash so the current scope stands
+        // out. Icon + colour are read from one source, so they can't drift.
+        const color = conceptColor(item.concept);
+        const Icon = conceptIcon(item.concept);
+        return (
+          <div
+            key={item.label}
+            data-concept={item.concept}
+            className={cn(
+              "flex items-center gap-2.5 bg-surface px-3 py-2.5",
+              index === items.length - 1 && "col-span-2 sm:col-span-1",
+              item.active && "bg-accent-subtle",
+            )}
+          >
+            <span
+              className={cn(
+                "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                color.bg,
+                color.text,
+              )}
+              aria-hidden
+            >
+              <Icon size={18} weight="duotone" />
+            </span>
+            <div className="min-w-0">
+              <dt className="truncate text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
+                {item.label}
+              </dt>
+              <dd
+                className={cn(
+                  "text-2xl font-bold leading-none tracking-tight tabular-nums text-fg",
+                  item.active && "text-accent",
+                )}
+              >
+                {item.value}
+              </dd>
+            </div>
+          </div>
+        );
+      })}
     </dl>
   );
 }
@@ -428,6 +467,10 @@ function EmptyHome({ archivedCount }: { archivedCount: number }) {
 export default function CanvasList() {
   const search = useSearch({ strict: false }) as CanvasesSearch;
   const navigate = useNavigate();
+  // At `xl` the detail rail is the inline sticky column; below it, the slide-in
+  // drawer. Tracking the breakpoint here keeps the drawer's focus-trap +
+  // body-scroll-lock from firing while the inline rail is the one on screen.
+  const isXl = useMediaQuery("(min-width: 1280px)");
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
@@ -575,14 +618,39 @@ export default function CanvasList() {
   function goToPage(next: number) {
     navigate({ to: "/", search: (prev) => ({ ...prev, page: next }) });
   }
+  // The detail-rail focus (plan rebrand P4): a single "focused" canvas in the URL
+  // (`?selected=<id>`), distinct from the multi-select checkbox set. Patch search,
+  // preserving view/scope/filters/page so a focus survives every other axis.
+  function setFocused(id: string | undefined) {
+    navigate({ to: "/", search: (prev) => ({ ...prev, selected: id }) });
+  }
+  // Duplicate from the detail rail (P4 / U4): opens the SAME shared CloneDialog the
+  // rows use, for the focused canvas. Any owned canvas can be cloned (the rows clone
+  // unconditionally), so this is offered for every focused canvas — not gated on
+  // templatable the way the gallery is (that gate is for OTHER people's canvases).
+  // (State + the "reset on focus change" effect live below `focusedId`.)
 
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
   const summary = data?.summary ?? EMPTY_SUMMARY;
-  const activeChipKeys = archivedView
-    ? []
-    : STATE_CHIPS.filter((chip) => search[chip.key] === true).map((chip) => chip.key);
-  const lastActiveChipKey = activeChipKeys.at(-1);
+  // The focused canvas for the detail rail (U3 consumes this). Validate against the
+  // visible page so a stale/unknown `?selected=` is simply ignored rather than
+  // pointing the rail at a canvas that isn't here.
+  const focusedId =
+    typeof search.selected === "string" && items.some((c) => c.id === search.selected)
+      ? search.selected
+      : undefined;
+  // The focused canvas object for the detail rail (U3), looked up from the
+  // already-loaded page items — no extra request. `null` → DetailPanel's empty state.
+  const focusedCanvas = focusedId ? (items.find((c) => c.id === focusedId) ?? null) : null;
+  // Duplicate from the detail rail (P4 / U4): opens the SAME shared CloneDialog the
+  // rows use, for the focused canvas. Reset whenever the focus changes (or clears)
+  // so the dialog never points at a canvas other than the one it was opened for.
+  const [cloneOpen, setCloneOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on focus change, not on `cloneOpen`.
+  useEffect(() => {
+    setCloneOpen(false);
+  }, [focusedId]);
   const from = total === 0 ? 0 : offset + 1;
   // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
   // "Showing 49–49 of 5" before the page snaps back.
@@ -610,238 +678,354 @@ export default function CanvasList() {
   const pristineEmpty =
     !archivedView && Boolean(data) && items.length === 0 && total === 0 && !filtering;
 
+  // Whether to render the inline (xl) detail rail: only when a canvas is focused
+  // AND we're showing the library (the pristine onboarding view has no rail). When
+  // nothing is focused the library spans full width and the page looks as it did
+  // before the rail existed (the grid collapses to a single column).
+  const showRail = !pristineEmpty && focusedCanvas !== null;
+
+  // Inline rail (xl) dismissal: unlike the drawer it has no scrim, so wire its own
+  // outside-click + Escape to clear the focus. An outside click clears only when it
+  // lands on truly-empty space — NOT on the rail itself, NOT on a canvas row/card
+  // (clicking another row reselects via its own handler), and NOT on an interactive
+  // control (links/buttons/menus keep their behavior). Escape always clears. Gated on
+  // the inline rail being the one on screen (`isXl`) so it never fights the drawer's
+  // own Escape/scrim handling below xl.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setFocused only delegates to the identity-stable router navigate, so the listener closure stays correct across focus changes; re-bind only when the inline rail toggles.
+  useEffect(() => {
+    if (!showRail || !isXl) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      // Inside the rail, on a row/card, or on any interactive control → leave the
+      // selection alone (those have their own click semantics).
+      if (
+        target.closest("[data-detail-rail]") ||
+        target.closest("[data-canvas-item]") ||
+        // Also skip an overlay's own dismiss backdrop (a dialog/drawer opened FROM
+        // the rail, e.g. Duplicate): its scrim is role="presentation", so clicking
+        // it to close the dialog must not also clear the rail focus underneath.
+        target.closest(
+          "a, button, input, select, textarea, summary, [role='button'], [role='dialog'], [role='presentation']",
+        )
+      ) {
+        return;
+      }
+      setFocused(undefined);
+    }
+    function onKey(e: KeyboardEvent) {
+      // Yield to any higher-level overlay that already handled Escape (e.g. the
+      // account menu calls preventDefault on its own Escape) so closing a popover
+      // doesn't also clear the rail selection underneath.
+      if (e.key === "Escape" && !e.defaultPrevented) setFocused(undefined);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [showRail, isXl]);
+
   return (
-    <div className="space-y-6">
-      {/* The dominant create action lives once, in the top bar (available on every
-          page). No duplicate here. */}
+    // The focused canvas (detail rail, U3) rides as a data attribute so route tests
+    // (and U1) can assert the focus without depending on the rail's DOM.
+    <div className="space-y-6" data-selected-canvas={focusedId ?? undefined}>
+      {/* The dominant create action lives once, in the navigation rail (available
+          on every page). No duplicate here. */}
       <PageHeader
         title="Your canvases"
         description="Manage drafts, published versions, sharing, and settings from one place."
       />
 
-      {pristineEmpty ? (
-        <EmptyHome archivedCount={summary.archived} />
-      ) : (
-        <>
-          <SummaryStrip summary={summary} archivedView={archivedView} />
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative min-w-[14rem] flex-1">
-              <MagnifyingGlass
-                size={16}
-                className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-                aria-hidden
-              />
-              <input
-                type="search"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Search your canvases"
-                aria-label="Search your canvases"
-                className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-              />
-            </div>
-            <ScopeToggle
-              value={archivedView ? "archived" : "active"}
-              onChange={setScope}
-              summary={summary}
-            />
-            {!archivedView && (
-              <FilterSelect
-                label="Filter by access"
-                options={ACCESS_FILTER_OPTIONS}
-                value={access ?? "all"}
-                onValueChange={setAccess}
-              />
-            )}
-            <FilterSelect
-              label="Sort your canvases"
-              options={CANVASES_SORT_OPTIONS}
-              value={sort}
-              onValueChange={setSort}
-            />
-            <ViewToggle value={view} onChange={setView} />
-          </div>
-
-          {/* Attribute filters apply to the live set only — hidden in the archive. */}
-          {!archivedView && (
-            <FilterBar>
-              {STATE_CHIPS.map((chip, index) => (
-                <Fragment key={chip.key}>
-                  <FilterChip active={search[chip.key] === true} onClick={() => toggle(chip.key)}>
-                    <span>{chip.label}</span>
-                    <span className="ml-2 text-xs tabular-nums text-subtle" aria-hidden>
-                      {summary[chip.countKey]}
-                    </span>
-                  </FilterChip>
-                  {filtering &&
-                    (chip.key === lastActiveChipKey ||
-                      (lastActiveChipKey === undefined && index === STATE_CHIPS.length - 1)) && (
-                      <button
-                        type="button"
-                        onClick={clearFilters}
-                        className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                </Fragment>
-              ))}
-            </FilterBar>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-subtle">{isLoading ? "Loading canvases..." : resultLabel}</p>
-            {archivedView && filtering && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="h-8 rounded-md px-2 text-xs font-medium text-subtle transition-colors hover:bg-surface-hover hover:text-fg"
-              >
-                Clear all
-              </button>
-            )}
-          </div>
-
-          {isLoading && (view === "grid" ? <GridSkeleton /> : <ListSkeleton />)}
-
-          {isError && (
-            <EmptyState
-              title="Couldn't load your canvases"
-              description="Something went wrong fetching the list."
-              action={
-                <Button variant="secondary" size="sm" onClick={() => refetch()}>
-                  Try again
-                </Button>
-              }
-            />
-          )}
-
-          {data && items.length === 0 && filtering && (
-            <EmptyState
-              title={
-                archivedView ? "No archived canvases match" : "No canvases match these filters"
-              }
-              description="Try removing a filter, or clear them all to see everything."
-              action={
-                <Button variant="secondary" size="sm" onClick={clearFilters}>
-                  Clear filters
-                </Button>
-              }
-            />
-          )}
-
-          {archivedView && data && items.length === 0 && !filtering && (
-            <EmptyState
-              title="No archived canvases"
-              description="When you archive a canvas it lands here — offline but kept (files, settings, and its reserved URL) until you restore or delete it."
-            />
-          )}
-
-          {items.length > 0 && (
+      {/* Two-pane layout (U3): the library + an additive right rail. At `xl` the rail
+          is an inline sticky column (~340px) shown only when a canvas is focused;
+          below `xl` it becomes the slide-in DetailDrawer further down. When nothing
+          is focused the library is full width and nothing else changes. */}
+      <div
+        className={cn(
+          "gap-6",
+          showRail ? "xl:grid xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start" : "",
+        )}
+      >
+        <div className="min-w-0 space-y-6">
+          {pristineEmpty ? (
+            <EmptyHome archivedCount={summary.archived} />
+          ) : (
             <>
-              {view === "grid" ? (
-                <div className="space-y-3">
-                  <label className="flex w-fit cursor-pointer items-center gap-2 text-xs font-medium text-muted">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someSelected;
-                      }}
-                      onChange={(event) => toggleSelectAll(event.target.checked)}
-                      aria-label="Select all canvases on this page"
-                      className="size-4 cursor-pointer accent-accent"
-                    />
-                    Select all
-                  </label>
-                  <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {items.map((c) =>
-                      archivedView ? (
-                        <ArchivedRow
-                          key={c.id}
-                          canvas={c}
-                          view={view}
-                          selected={selected.has(c.id)}
-                          onSelectChange={(next) => toggleSelected(c.id, next)}
-                        />
-                      ) : (
-                        <ActiveRow
-                          key={c.id}
-                          canvas={c}
-                          view={view}
-                          selected={selected.has(c.id)}
-                          onSelectChange={(next) => toggleSelected(c.id, next)}
-                        />
-                      ),
-                    )}
-                  </ul>
-                </div>
-              ) : (
-                <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
-                  <CanvasListHeader
-                    selectable
-                    allSelected={allSelected}
-                    someSelected={someSelected}
-                    onSelectAll={toggleSelectAll}
+              <SummaryStrip summary={summary} archivedView={archivedView} />
+
+              <div className="flex flex-wrap items-center gap-3">
+                <SearchInput
+                  value={text}
+                  onChange={setText}
+                  placeholder="Search your canvases"
+                  aria-label="Search your canvases"
+                />
+                <ScopeToggle
+                  value={archivedView ? "archived" : "active"}
+                  onChange={setScope}
+                  summary={summary}
+                />
+                {!archivedView && (
+                  <FilterSelect
+                    label="Filter by access"
+                    options={ACCESS_FILTER_OPTIONS}
+                    value={access ?? "all"}
+                    onValueChange={setAccess}
                   />
-                  <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
-                    {items.map((c) =>
-                      archivedView ? (
-                        <ArchivedRow
-                          key={c.id}
-                          canvas={c}
-                          view={view}
-                          selected={selected.has(c.id)}
-                          onSelectChange={(next) => toggleSelected(c.id, next)}
-                        />
-                      ) : (
-                        <ActiveRow
-                          key={c.id}
-                          canvas={c}
-                          view={view}
-                          selected={selected.has(c.id)}
-                          onSelectChange={(next) => toggleSelected(c.id, next)}
-                        />
-                      ),
-                    )}
-                  </ul>
-                </div>
+                )}
+                <FilterSelect
+                  label="Sort your canvases"
+                  options={CANVASES_SORT_OPTIONS}
+                  value={sort}
+                  onValueChange={setSort}
+                />
+                <ViewToggle value={view} onChange={setView} />
+              </div>
+
+              {/* Attribute filters apply to the live set only — hidden in the archive.
+                  "Clear all" trails the whole chip row (only while a filter is active),
+                  not wedged between two chips. */}
+              {!archivedView && (
+                <FilterBar>
+                  {STATE_CHIPS.map((chip) => (
+                    <FilterChip
+                      key={chip.key}
+                      active={search[chip.key] === true}
+                      onClick={() => toggle(chip.key)}
+                      dotClassName={conceptColor(chip.concept).dot}
+                    >
+                      <span>{chip.label}</span>
+                      <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                        {summary[chip.countKey]}
+                      </span>
+                    </FilterChip>
+                  ))}
+                  {filtering && (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="ml-1 h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </FilterBar>
               )}
 
-              {selected.size > 0 && (
-                <BulkActionBar
-                  selectedIds={[...selected]}
-                  scope={archivedView ? "archived" : "active"}
-                  onClear={() => setSelected(new Set())}
-                  onResult={(result) => setSelected(new Set(result.failed))}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-subtle">
+                  {isLoading ? "Loading canvases..." : resultLabel}
+                </p>
+                {archivedView && filtering && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="h-8 rounded-md px-2 text-xs font-medium text-subtle transition-colors hover:bg-surface-hover hover:text-fg"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              {isLoading && (view === "grid" ? <GridSkeleton /> : <ListSkeleton />)}
+
+              {isError && (
+                <EmptyState
+                  title="Couldn't load your canvases"
+                  description="We couldn't reach your canvases just now. Try again."
+                  action={
+                    <Button variant="secondary" size="sm" onClick={() => refetch()}>
+                      Try again
+                    </Button>
+                  }
                 />
               )}
 
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <p className="text-xs text-subtle">{resultLabel}</p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!hasPrev}
-                    onClick={() => goToPage(page - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!hasNext}
-                    onClick={() => goToPage(page + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
+              {data && items.length === 0 && filtering && (
+                <EmptyState
+                  title={
+                    archivedView ? "No archived canvases match" : "No canvases match these filters"
+                  }
+                  description="Try removing a filter, or clear them all to see everything."
+                  action={
+                    <Button variant="secondary" size="sm" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  }
+                />
+              )}
+
+              {archivedView && data && items.length === 0 && !filtering && (
+                <EmptyState
+                  title="No archived canvases"
+                  description="When you archive a canvas it lands here — offline but kept (files, settings, and its reserved URL) until you restore or delete it."
+                />
+              )}
+
+              {items.length > 0 && (
+                <>
+                  {view === "grid" ? (
+                    <div className="space-y-3">
+                      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs font-medium text-muted">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected;
+                          }}
+                          onChange={(event) => toggleSelectAll(event.target.checked)}
+                          aria-label="Select all canvases on this page"
+                          className="size-4 cursor-pointer accent-accent"
+                        />
+                        Select all
+                      </label>
+                      <ul
+                        className={cn(
+                          "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3",
+                          // When the inline detail rail is showing at xl (alongside
+                          // the 15rem left nav), a 4-col grid crushes cards to ~140px
+                          // on 1280–1440px. Cap at 3 cols while the rail occupies the
+                          // row; only go to 4 when the library spans full width.
+                          !showRail && "xl:grid-cols-4",
+                        )}
+                      >
+                        {items.map((c) =>
+                          archivedView ? (
+                            <ArchivedRow
+                              key={c.id}
+                              canvas={c}
+                              view={view}
+                              selected={selected.has(c.id)}
+                              onSelectChange={(next) => toggleSelected(c.id, next)}
+                              onActivate={() => setFocused(c.id)}
+                            />
+                          ) : (
+                            <ActiveRow
+                              key={c.id}
+                              canvas={c}
+                              view={view}
+                              selected={selected.has(c.id)}
+                              onSelectChange={(next) => toggleSelected(c.id, next)}
+                              onActivate={() => setFocused(c.id)}
+                            />
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  ) : (
+                    // Flat Lovable-style list: no surrounding card/border/background —
+                    // a quiet hairline column header over rows divided by hairlines on
+                    // the plain page background.
+                    <div className="space-y-2 lg:space-y-0">
+                      <CanvasListHeader
+                        selectable
+                        allSelected={allSelected}
+                        someSelected={someSelected}
+                        onSelectAll={toggleSelectAll}
+                      />
+                      <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
+                        {items.map((c) =>
+                          archivedView ? (
+                            <ArchivedRow
+                              key={c.id}
+                              canvas={c}
+                              view={view}
+                              selected={selected.has(c.id)}
+                              onSelectChange={(next) => toggleSelected(c.id, next)}
+                              onActivate={() => setFocused(c.id)}
+                            />
+                          ) : (
+                            <ActiveRow
+                              key={c.id}
+                              canvas={c}
+                              view={view}
+                              selected={selected.has(c.id)}
+                              onSelectChange={(next) => toggleSelected(c.id, next)}
+                              onActivate={() => setFocused(c.id)}
+                            />
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  )}
+
+                  {selected.size > 0 && (
+                    <BulkActionBar
+                      selectedIds={[...selected]}
+                      scope={archivedView ? "archived" : "active"}
+                      onClear={() => setSelected(new Set())}
+                      onResult={(result) => setSelected(new Set(result.failed))}
+                    />
+                  )}
+
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <p className="text-xs text-subtle">{resultLabel}</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={!hasPrev}
+                        onClick={() => goToPage(page - 1)}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={!hasNext}
+                        onClick={() => goToPage(page + 1)}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
-        </>
+        </div>
+
+        {/* Inline rail — `xl` and up only; the drawer below covers narrower widths.
+            Pinned full-height (sticky + viewport height) so it stays in place while the
+            library scrolls, with its own internal scroll for long detail. A flat
+            hairline divides it from the library (no boxy card — the DetailPanel is
+            chrome-less). Gated on `isXl` (not just a `hidden xl:block` CSS class) so
+            below `xl` only the drawer renders the DetailPanel — one details region. */}
+        {showRail && isXl && (
+          <div
+            className="sticky top-6 hidden h-[calc(100dvh-3rem)] border-border border-l pl-6 xl:block"
+            data-detail-rail
+          >
+            <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
+          </div>
+        )}
+      </div>
+
+      {/* Slide-in drawer — below `xl`. Opens when a canvas is focused; Escape, the
+          scrim, or the close button all clear the selection. Hidden at `xl` (the
+          inline rail takes over) via the drawer's own `xl:hidden`. */}
+      <DetailDrawer
+        open={focusedCanvas !== null && !isXl}
+        onClose={() => setFocused(undefined)}
+        label="Canvas details"
+      >
+        <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
+      </DetailDrawer>
+
+      {/* One shared CloneDialog for the rail's Duplicate (both the inline + drawer
+          DetailPanel route through it). Mounted once at the route level — keyed to
+          the focused canvas — so the inline and drawer instances don't each carry a
+          dialog. Confirming clones + navigates to the new canvas's editor. */}
+      {focusedCanvas && (
+        <CloneDialog
+          open={cloneOpen}
+          onClose={() => setCloneOpen(false)}
+          sourceId={focusedCanvas.id}
+          sourceTitle={focusedCanvas.title}
+          keepsPassword={focusedCanvas.hasPassword}
+        />
       )}
     </div>
   );

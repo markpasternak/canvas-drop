@@ -1,5 +1,7 @@
+import { rampCssVars } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { BRAND_MARK } from "./brand.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
 
@@ -88,41 +90,15 @@ export function errorResponse(
  * theme override (the docs site, via a `data-theme` attribute matching the
  * dashboard) can re-assert either palette without duplicating the values.
  */
-export const LIGHT_TOKENS = `    --canvas: #f5f5f2;
-    --surface: #fbfbf8;
-    --surface-raised: #fefefb;
-    --surface-sunken: #ededeb;
-    --fg: #18181b;
-    --muted: #5b5b63;
-    --subtle: #898991;
-    --border: #dfdfdc;
-    --border-strong: #c8c8c3;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --accent-fg: #f8fbff;
-    --accent-subtle: #eaf1ff;
-    --logo-frame: #111418;
-    --logo-drop: #2563eb;
-    --shadow-color: 240 12% 12%;
-    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.08);`;
+// Derived from the canonical BRAND_TOKENS (single source — no drift, no parallel
+// ramp). Shadows are the only system-page-specific addition.
+export const LIGHT_TOKENS = `${rampCssVars("light", "    ")}
+    --shadow-color: 40 30% 38%;
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.09);`;
 
-export const DARK_TOKENS = `    --canvas: #0b0b0d;
-    --surface: #141416;
-    --surface-raised: #1c1c20;
-    --surface-sunken: #09090b;
-    --fg: #f4f4f5;
-    --muted: #a1a1aa;
-    --subtle: #6e6e78;
-    --border: #27272b;
-    --border-strong: #3a3a40;
-    --accent: #60a5fa;
-    --accent-hover: #93c5fd;
-    --accent-fg: #07111f;
-    --accent-subtle: #0d2a4d;
-    --logo-frame: #f4f4f5;
-    --logo-drop: #60a5fa;
-    --shadow-color: 0 0% 0%;
-    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.28);`;
+export const DARK_TOKENS = `${rampCssVars("dark", "    ")}
+    --shadow-color: 265 60% 2%;
+    --shadow-panel: 0 18px 60px hsl(var(--shadow-color) / 0.5);`;
 
 /**
  * Shared visual chrome for self-contained system pages (the branded 4xx/5xx
@@ -130,9 +106,20 @@ export const DARK_TOKENS = `    --canvas: #0b0b0d;
  * block + brand header so they render in ONE design language and cannot drift
  * apart. Page-specific layout (error meta grid, gate form) is layered after.
  */
-export const SYSTEM_PAGE_STYLES = `  :root {
+export const SYSTEM_PAGE_STYLES = `  /* Self-hosted Newsreader (the editorial serif), served same-origin by
+     brandAssetRoutes() — these pre-gateway pages need no CDN, matching the
+     landing page + the dashboard @fontsource definitions. */
+  @font-face {
+    font-family: "Newsreader Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 200 800;
+    src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
+  }
+  :root {
     color-scheme: light dark;
 ${LIGHT_TOKENS}
+    --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -141,48 +128,44 @@ ${LIGHT_TOKENS}
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    padding: clamp(1.25rem, 3vw, 3rem);
+    padding: clamp(1.5rem, 5vw, 4rem);
     background:
-      radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-subtle), transparent 28%), transparent 30rem),
-      linear-gradient(135deg, var(--canvas), var(--surface-sunken));
+      radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-subtle), transparent 30%), transparent 32rem),
+      linear-gradient(155deg, var(--canvas), var(--surface-sunken));
     color: var(--fg);
     font: 15px/1.55 "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  main {
-    width: min(100%, 42rem);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
-    box-shadow: var(--shadow-panel);
-    overflow: hidden;
-  }
+  /* Flat + card-less: content sits on the page (brand mark + content), not boxed in
+     a heavy card with a filled header bar — mirrors the dashboard's flat surfaces. */
+  main { width: min(100%, 40rem); }
   .brand {
     display: flex;
     align-items: center;
-    gap: .65rem;
-    padding: 1rem 1.15rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-raised);
+    gap: .6rem;
+    margin: 0 0 clamp(2rem, 6vw, 3rem);
     font-weight: 650;
     letter-spacing: -.011em;
   }
   .mark {
-    width: 2rem;
-    height: 2rem;
+    width: 1.9rem;
+    height: 1.9rem;
     flex: 0 0 auto;
   }
   @media (prefers-color-scheme: dark) {
     :root {
 ${DARK_TOKENS}
     }
-    body {
-      background:
-        radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-subtle), transparent 35%), transparent 30rem),
-        linear-gradient(135deg, var(--canvas), var(--surface-sunken));
-    }
-    main { background: color-mix(in srgb, var(--surface) 96%, transparent); }
+  }
+  /* Manual theme override (data-theme), set pre-paint by SYSTEM_THEME_INIT from the
+     dashboard's canvas-drop-theme choice. The attribute selectors outrank the media
+     query, so an explicit light/dark choice wins over the OS — matching the docs. */
+  :root[data-theme="dark"] {
+${DARK_TOKENS}
+  }
+  :root[data-theme="light"] {
+${LIGHT_TOKENS}
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -191,13 +174,34 @@ ${DARK_TOKENS}
     }
   }`;
 
+/**
+ * Pre-paint theme sync for self-contained server pages. Mirrors the dashboard +
+ * docs mechanism: an explicit `?theme=light|dark` wins for the initial paint, else
+ * the persisted `canvas-drop-theme` choice, else the OS (no attribute → the
+ * prefers-color-scheme media query). Inline + synchronous in <head> so there's no
+ * flash. Static markup (no user input), so it needs no CSP relaxation beyond the
+ * pages' existing policy (which sets no script-src).
+ *
+ * NOTE: localStorage is per-origin — this carries the dashboard's choice on
+ * app-origin pages (and path-mode canvas pages), but NOT onto canvas subdomains
+ * (different origin); those still follow the OS. See the brand-conventions learning.
+ */
+export const SYSTEM_THEME_INIT = `<script>
+  (() => {
+    try {
+      const p = new URLSearchParams(location.search).get("theme");
+      const s = localStorage.getItem("canvas-drop-theme");
+      const c = p === "light" || p === "dark" ? p : (s === "light" || s === "dark" ? s : "system");
+      if (c !== "system") document.documentElement.setAttribute("data-theme", c);
+    } catch (_) {
+      /* private mode / no storage — fall back to prefers-color-scheme */
+    }
+  })();
+</script>`;
+
 /** The canvas-drop logo + wordmark header, shared by every system page. */
 export const SYSTEM_PAGE_BRAND = `    <div class="brand">
-      <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="var(--logo-frame)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="var(--logo-drop)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-        <path d="M18 40h12" stroke="var(--logo-drop)" stroke-linecap="round" stroke-width="4.75"/>
-      </svg>
+      ${BRAND_MARK}
       <span>canvas-drop</span>
     </div>`;
 
@@ -227,40 +231,45 @@ function renderErrorPage(input: ErrorPageDetails): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${status} ${title}</title>
+${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
-  .content { padding: clamp(1.5rem, 4vw, 2.5rem); }
   .kicker {
-    margin: 0 0 .75rem;
+    margin: 0 0 1rem;
     color: var(--subtle);
     font: 700 .75rem/1 ui-monospace, "SF Mono", Menlo, monospace;
-    letter-spacing: .08em;
+    letter-spacing: .1em;
+    text-transform: uppercase;
   }
   h1 {
     margin: 0;
-    max-width: 12ch;
+    max-width: 14ch;
     color: var(--fg);
-    font-size: clamp(2rem, 8vw, 4.25rem);
-    line-height: .96;
-    letter-spacing: -.03em;
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(2.25rem, 7vw, 3.75rem);
+    line-height: 1.02;
+    letter-spacing: -.02em;
   }
   .message {
-    margin: 1.15rem 0 0;
-    max-width: 58ch;
+    margin: 1.25rem 0 0;
+    max-width: 54ch;
     color: var(--muted);
-    font-size: 1rem;
+    font-size: 1.0625rem;
+    line-height: 1.6;
   }
+  /* Flat spec list — hairline-divided rows, not a sunken boxed panel. */
   .meta {
     display: grid;
     grid-template-columns: minmax(5rem, auto) 1fr;
-    gap: .65rem 1rem;
-    margin: 1.5rem 0 0;
-    padding: 1rem;
-    border: 1px solid var(--border);
-    border-radius: .75rem;
-    background: var(--surface-sunken);
+    margin: 2rem 0 0;
+    border-top: 1px solid var(--border);
   }
   dt {
+    align-self: center;
+    padding: .7rem 1rem .7rem 0;
+    border-bottom: 1px solid var(--border);
     color: var(--subtle);
     font-size: .75rem;
     font-weight: 600;
@@ -268,24 +277,26 @@ ${SYSTEM_PAGE_STYLES}
   dd {
     min-width: 0;
     margin: 0;
+    padding: .7rem 0;
+    border-bottom: 1px solid var(--border);
     overflow-wrap: anywhere;
     color: var(--fg);
     font: .8125rem/1.45 ui-monospace, "SF Mono", Menlo, monospace;
   }
+  /* A quiet accent note (callout), not a bordered box. */
   .hint {
-    margin: 1rem 0 0;
-    padding: .85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
-    border-radius: .75rem;
+    margin: 1.25rem 0 0;
+    padding: .8rem 1rem;
+    border-radius: .625rem;
     background: var(--accent-subtle);
     color: var(--accent);
-    font-size: .875rem;
+    font-size: .9rem;
   }
   .actions {
     display: flex;
     flex-wrap: wrap;
     gap: .75rem;
-    margin-top: 1.5rem;
+    margin-top: 1.75rem;
   }
   a {
     display: inline-flex;

@@ -1,4 +1,4 @@
-import { ArrowSquareOut, Copy, MagnifyingGlass, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, X } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
@@ -8,11 +8,14 @@ import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { SearchInput } from "../components/SearchInput.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
+import { Tag } from "../components/Tag.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
+import { cardHoverClass } from "../lib/row-styles.js";
 import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
@@ -20,7 +23,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
   const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
+    <li
+      className={`group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] ${cardHoverClass}`}
+    >
       {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
           screenshot will later render into this same box with no layout change.
           Decorative (not a link) so the title below stays the single open
@@ -41,7 +46,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
             href={item.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate text-sm font-semibold text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
+            className="min-w-0 truncate font-serif text-[0.95rem] font-medium text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
           >
             {item.title || "Untitled canvas"}
           </a>
@@ -53,9 +58,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
         {item.tags.length > 0 && (
           <div className="relative z-10 flex flex-wrap gap-1.5">
             {item.tags.map((tag) => (
-              <button
+              <Tag
                 key={tag}
-                type="button"
+                size="sm"
                 onClick={() =>
                   navigate({
                     to: "/gallery",
@@ -63,10 +68,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
                     search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
                   })
                 }
-                className="rounded-md border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-muted transition-colors hover:text-fg"
               >
                 {tag}
-              </button>
+              </Tag>
             ))}
           </div>
         )}
@@ -90,8 +94,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
               visible "Make a copy" primary; the kebab carries the rest. */}
           <div className="relative z-10 flex shrink-0 items-center gap-1">
             {item.templatable && (
-              <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
-                Make a copy
+              <Button size="sm" variant="secondary" onClick={() => setCloneOpen(true)}>
+                Duplicate
+                <Copy size={14} weight="bold" aria-hidden />
               </Button>
             )}
             <ActionMenu label={`More actions for ${item.title || "this canvas"}`}>
@@ -285,21 +290,12 @@ export default function Gallery() {
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[14rem]">
-          <MagnifyingGlass
-            size={16}
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-subtle"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Search the gallery"
-            aria-label="Search the gallery"
-            className="h-9 w-full rounded-lg border border-border bg-surface pr-3 pl-9 text-sm text-fg placeholder:text-subtle focus:border-border-strong focus:outline-none"
-          />
-        </div>
+        <SearchInput
+          value={text}
+          onChange={setText}
+          placeholder="Search the gallery"
+          aria-label="Search the gallery"
+        />
         <FilterSelect
           label="Sort canvases"
           options={sortOptions}
@@ -350,7 +346,7 @@ export default function Gallery() {
       {isError && (
         <EmptyState
           title="Couldn't load the gallery"
-          description="Something went wrong fetching listed canvases."
+          description="We couldn't reach the gallery just now. Try again."
           action={
             <Button variant="secondary" size="sm" onClick={() => refetch()}>
               Try again

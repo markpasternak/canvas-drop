@@ -107,7 +107,22 @@ export function HoldButton({
         }}
       />
       {loading && (
-        <span className="relative size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <>
+          <span
+            aria-hidden
+            className="cd-busy-spinner relative size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+          />
+          <span className="cd-busy-text sr-only">Working…</span>
+        </>
+      )}
+      {/* Under reduced-motion the global block suppresses the sweeping fill above,
+          so the hold has no visible progress. This text cue surfaces only under
+          reduced-motion (cd-hold-cue) while holding, keeping the gesture legible;
+          the JS timer is unaffected. */}
+      {holding && (
+        <span className="cd-hold-cue sr-only" aria-hidden>
+          Holding…
+        </span>
       )}
       <span className="label relative inline-flex items-center gap-2 transition-transform duration-150">
         {children}

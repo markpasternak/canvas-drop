@@ -4,7 +4,12 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
-import { escapeHtml, SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
+import {
+  escapeHtml,
+  SYSTEM_PAGE_BRAND,
+  SYSTEM_PAGE_STYLES,
+  SYSTEM_THEME_INIT,
+} from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { principalAttributionId, requestPrincipal } from "./authorization.js";
@@ -131,6 +136,7 @@ export function gatePage(title: string, error: boolean): string {
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="robots" content="noindex">
 <title>Password required</title>
+${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
   main { width: min(100%, 27rem); }
@@ -142,7 +148,7 @@ ${SYSTEM_PAGE_STYLES}
     letter-spacing: .08em;
     text-transform: uppercase;
   }
-  h1 { margin: 0; color: var(--fg); font-size: 1.2rem; line-height: 1.25; letter-spacing: -.015em; }
+  h1 { margin: 0; color: var(--fg); font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; font-size: 1.6rem; line-height: 1.2; letter-spacing: -.015em; }
   .lede { margin: .5rem 0 1.25rem; color: var(--muted); font-size: .9rem; }
   .err {
     margin: 0 0 .85rem;

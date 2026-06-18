@@ -6,12 +6,30 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="application-name" content="canvas-drop" />
     <meta name="apple-mobile-web-app-title" content="canvas-drop" />
-    <meta name="theme-color" content="#2563eb" />
+    <meta name="theme-color" content="#0c7b88" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32x32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <link rel="manifest" href="/site.webmanifest" />
     <title>canvas-drop</title>
+    <script>
+      // Pre-paint theme: apply the persisted/param override before first paint so a
+      // manual dark/light choice never flashes the wrong theme (FOUC). Light is the
+      // default; dark otherwise follows prefers-color-scheme via CSS.
+      (() => {
+        try {
+          const param = new URLSearchParams(location.search).get("theme");
+          const t = param === "light" || param === "dark"
+            ? param
+            : localStorage.getItem("canvas-drop-theme");
+          if (t === "light" || t === "dark") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch {
+          /* private mode — non-fatal */
+        }
+      })();
+    </script>
     <!-- Social share tags. The dashboard sits behind the auth gateway, so a crawler
          can't actually unfurl it today — these are here for completeness and any
          future public landing. The crawlable surfaces (docs, legal) carry their own

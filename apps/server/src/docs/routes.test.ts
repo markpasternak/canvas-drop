@@ -61,7 +61,12 @@ describe("docs routes", () => {
   it("escapes a reflected unknown slug (no reflected XSS)", async () => {
     const res = await app().request("/docs/%3Cscript%3E", { headers: { accept: "text/html" } });
     expect(res.status).toBe(404);
-    expect(await res.text()).not.toContain("<script>");
+    const html = await res.text();
+    // The malicious path must be reflected URL-encoded + escaped, never as a live tag.
+    // (The page legitimately carries the static SYSTEM_THEME_INIT <script>, so assert
+    // on the reflected path specifically rather than the absence of any <script>.)
+    expect(html).toContain("/docs/%3Cscript%3E");
+    expect(html).not.toContain("/docs/<script>");
   });
 
   it("rejects a non-allow-listed asset name and a missing asset", async () => {

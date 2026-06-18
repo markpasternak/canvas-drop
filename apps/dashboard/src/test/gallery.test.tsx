@@ -76,7 +76,7 @@ function renderGallery(initial = "/gallery") {
 const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPage => ({
   items,
   total: items.length,
-  limit: 24,
+  limit: 48,
   offset: 0,
   ...over,
 });
@@ -100,7 +100,7 @@ describe("Gallery view", () => {
     stubGallery(() => page([item({ id: "t1", templatable: true })]));
     renderGallery();
     expect(await screen.findByText("Template")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Make a copy" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
   });
 
   it("hides the clone action for non-templatable items", async () => {
@@ -108,7 +108,7 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByText("Budget chart");
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Make a copy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Duplicate" })).not.toBeInTheDocument();
   });
 
   it("shows the no-canvases-yet empty state (no filters) with a link back", async () => {
@@ -185,14 +185,14 @@ describe("Gallery view", () => {
   it("resets to page 1 (offset 0) when a filter changes while on a later page", async () => {
     const calls = stubGallery((p) =>
       page([item({ title: p.get("q") ? "Filtered" : "Page two" })], {
-        total: 50,
-        limit: 24,
+        total: 80,
+        limit: 48,
         offset: Number(p.get("offset") ?? 0),
       }),
     );
     renderGallery("/gallery?page=2");
     await screen.findByRole("link", { name: "Page two" });
-    expect(calls.some((c) => c.get("offset") === "24")).toBe(true);
+    expect(calls.some((c) => c.get("offset") === "48")).toBe(true);
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search the gallery" }), "revenue");
     // The search request goes out at offset 0, not the stale page-2 offset.
@@ -204,33 +204,33 @@ describe("Gallery view", () => {
   });
 
   it("paginates: derives range from the response and advances offset", async () => {
-    const items = Array.from({ length: 24 }, (_, i) => item({ id: `c${i}`, title: `Canvas ${i}` }));
+    const items = Array.from({ length: 48 }, (_, i) => item({ id: `c${i}`, title: `Canvas ${i}` }));
     const calls = stubGallery((p) => {
       const offset = Number(p.get("offset") ?? 0);
       return offset === 0
-        ? page(items, { total: 30, limit: 24, offset: 0 })
-        : page([item({ id: "x", title: "Last page item" })], { total: 30, limit: 24, offset: 24 });
+        ? page(items, { total: 60, limit: 48, offset: 0 })
+        : page([item({ id: "x", title: "Last page item" })], { total: 60, limit: 48, offset: 48 });
     });
     renderGallery();
 
     await screen.findByRole("link", { name: "Canvas 0" });
-    expect(screen.getByText("Showing 1–24 of 30")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–48 of 60")).toBeInTheDocument();
     const prev = screen.getByRole("button", { name: "Previous" });
     expect(prev).toBeDisabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(calls.some((c) => c.get("offset") === "24")).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.get("offset") === "48")).toBe(true));
     await screen.findByRole("link", { name: "Last page item" });
-    expect(screen.getByText("Showing 25–25 of 30")).toBeInTheDocument();
+    expect(screen.getByText("Showing 49–49 of 60")).toBeInTheDocument();
   });
 
   it("snaps back to page 1 when the offset exceeds total after a refetch", async () => {
     const calls = stubGallery((p) => {
       const offset = Number(p.get("offset") ?? 0);
       // Page 2 requested but only 3 items exist now → out of range.
-      return offset >= 24
-        ? page([], { total: 3, limit: 24, offset })
-        : page([item({ title: "Reset to first" })], { total: 3, limit: 24, offset: 0 });
+      return offset >= 48
+        ? page([], { total: 3, limit: 48, offset })
+        : page([item({ title: "Reset to first" })], { total: 3, limit: 48, offset: 0 });
     });
     renderGallery("/gallery?page=2");
 

@@ -1,5 +1,6 @@
 import { type ComponentPropsWithoutRef, forwardRef, type ReactNode } from "react";
 import { cn } from "../lib/cn.js";
+import type { Tone } from "./variants.js";
 
 export function PageHeader({
   title,
@@ -23,7 +24,7 @@ export function PageHeader({
     >
       <div className="min-w-0 space-y-1">
         {eyebrow && <div className="text-xs font-medium text-subtle">{eyebrow}</div>}
-        <h1 className="truncate text-[1.5rem] font-semibold leading-tight tracking-[-0.02em] text-fg">
+        <h1 className="truncate font-serif text-h1 font-medium leading-tight tracking-[-0.02em] text-fg">
           {title}
         </h1>
         {description && <p className="max-w-2xl text-sm text-muted">{description}</p>}
@@ -52,10 +53,7 @@ export const WorkspacePane = forwardRef<HTMLElement, ComponentPropsWithoutRef<"s
     return (
       <section
         ref={ref}
-        className={cn(
-          "min-h-0 min-w-0 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
-          className,
-        )}
+        className={cn("min-h-0 min-w-0 overflow-hidden border border-border bg-surface", className)}
         {...props}
       >
         {children}
@@ -80,7 +78,7 @@ export function PaneHeader({
   return (
     <div
       className={cn(
-        "flex min-h-12 items-center justify-between gap-3 border-b border-border bg-surface-raised px-3 py-2",
+        "flex min-h-12 items-center justify-between gap-3 border-b border-border bg-surface px-3 py-2",
         className,
       )}
     >
@@ -98,7 +96,8 @@ export function PaneHeader({
   );
 }
 
-type NoticeTone = "neutral" | "accent" | "success" | "warning" | "danger";
+// InlineNotice speaks the shared surface Tone vocabulary.
+type NoticeTone = Tone;
 
 const noticeTones: Record<NoticeTone, string> = {
   neutral: "border-border bg-surface-raised text-muted",

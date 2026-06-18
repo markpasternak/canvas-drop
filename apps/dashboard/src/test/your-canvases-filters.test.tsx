@@ -98,7 +98,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
         return true;
       });
-      const limit = Number(sp.get("limit") ?? 24);
+      const limit = Number(sp.get("limit") ?? 48);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
         canvases: matched.slice(offset, offset + limit),
@@ -260,7 +260,9 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     await userEvent.click(screen.getByRole("heading", { name: "Your canvases" }));
 
     await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
-    expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
+    // The dropdown animates OUT before unmounting (~150ms exit delay), so wait for
+    // it to leave the DOM rather than asserting synchronously.
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull());
   });
 
   it("searches by title (debounced into a server request)", async () => {
@@ -317,7 +319,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     // The archived canvas is not in the default (active) scope.
     expect(screen.queryByText("Archived one")).toBeNull();
 
-    await userEvent.click(screen.getByRole("tab", { name: /archived/i }));
+    await userEvent.click(screen.getByRole("button", { name: /archived/i }));
 
     // Archived scope: the archived row appears, the active one drops out, and the
     // row exposes Restore (not Open) — the ArchivedRow branch.
@@ -327,16 +329,139 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(screen.queryByRole("link", { name: "Open Archived one" })).toBeNull();
   });
 
+  it("colour-codes the stat strip + filter chips with concept dots, and the row badges (rebrand)", async () => {
+    stub([
+      canvas({
+        id: "a",
+        title: "Listed template",
+        galleryListed: true,
+        galleryTemplatable: true,
+        hasPassword: true,
+      }),
+    ]);
+    renderAt("/");
+    await screen.findByText("Listed template");
+
+    // Stat strip: each stat carries its concept on a data attribute (the dot rides it).
+    // Scope to the <dt> (the stat label) — "Active"/"Archived" also appear in the
+    // scope toggle, so match on the strip's definition-term cells only.
+    const stripLabel = screen
+      .getAllByText("Active")
+      .find((el) => el.tagName.toLowerCase() === "dt");
+    const strip = stripLabel?.closest("dl");
+    expect(strip).not.toBeNull();
+    const concepts = within(strip as HTMLElement)
+      .getAllByText(/^(Active|Archived|Templates|Never deployed|Protected)$/)
+      .map((el) => el.closest("[data-concept]")?.getAttribute("data-concept"));
+    expect(concepts).toEqual(
+      expect.arrayContaining(["active", "archived", "templates", "neverDeployed", "protected"]),
+    );
+
+    // Each stat cell renders a per-concept accent icon TILE (the -subtle wash + the
+    // concept-coloured glyph) alongside its number — the visual upgrade. Spot-check
+    // the Templates cell: the tile carries the accent (teal) text + bg classes from
+    // the shared concept map, holds an svg glyph, and the cell shows its count.
+    const templatesLabel = within(strip as HTMLElement)
+      .getAllByText("Templates")
+      .find((el) => el.tagName.toLowerCase() === "dt");
+    const templatesCell = templatesLabel?.closest("[data-concept]") as HTMLElement;
+    expect(templatesCell).not.toBeNull();
+    const templatesTile = templatesCell.querySelector(".text-accent.bg-accent-subtle");
+    expect(templatesTile).not.toBeNull();
+    expect((templatesTile as HTMLElement).querySelector("svg")).not.toBeNull();
+    expect(within(templatesCell).getByText("1")).toBeInTheDocument();
+
+    // Filter chips carry the same concept colours: the Listed chip's dot is the
+    // info (blue) tint that the Listed row badge also uses. (Several controls match
+    // /listed/i — the toggle chip is the one carrying aria-pressed.)
+    const listedChip = screen
+      .getAllByRole("button", { name: /listed/i })
+      .find((b) => b.getAttribute("aria-pressed") !== null);
+    expect(listedChip).toBeDefined();
+    expect((listedChip as HTMLElement).querySelector(".bg-info")).not.toBeNull();
+
+    // Row badges read the concept tints from the same map. "Template"/"Protected"
+    // text also appears as a stat label, so target the row badge by its data-concept.
+    const templateBadge = screen.getByText("Template");
+    expect(templateBadge).toHaveAttribute("data-concept", "templates");
+    expect(templateBadge.className).toContain("text-accent");
+    const protectedBadge = document.querySelector('span[data-concept="protected"]');
+    expect(protectedBadge).not.toBeNull();
+    expect((protectedBadge as HTMLElement).className).toContain("text-warning");
+    expect(protectedBadge).toHaveTextContent("Protected");
+  });
+
+  it("renders the list view flat — no boxy card around the rows, a hairline column header", async () => {
+    stub([canvas({ id: "a", slug: "sa", title: "Alpha" })]);
+    renderAt("/");
+    await screen.findByText("Alpha");
+
+    // The flat (Lovable-style) list has a quiet "Canvas" column header carrying the
+    // select-all checkbox. Its wrapper is a hairline divider underneath — a bottom
+    // border, not a filled sunken bar — and it is NOT wrapped in a bordered card.
+    const selectAll = screen.getByRole("checkbox", {
+      name: "Select all canvases on this page",
+    });
+    const header = selectAll.closest("div") as HTMLElement;
+    expect(header).not.toBeNull();
+    expect(header.className).toContain("border-b");
+    // Flattened: the old filled sunken bar + rounded-top card chrome is gone.
+    expect(header.className).not.toContain("bg-surface-sunken");
+    expect(header.className).not.toContain("rounded-t-lg");
+
+    // The list container that wraps the header + rows no longer carries the boxy
+    // card classes (border / surface background / rounded-lg) it used to.
+    const listContainer = header.parentElement as HTMLElement;
+    expect(listContainer.className).not.toContain("lg:rounded-lg");
+    expect(listContainer.className).not.toContain("lg:border");
+    expect(listContainer.className).not.toContain("lg:bg-surface");
+
+    // Rows are still separated by hairline dividers (divide-y) on the page bg.
+    const list = listContainer.querySelector("ul") as HTMLElement;
+    expect(list.className).toContain("lg:divide-y");
+  });
+
+  it("flat list keeps select-all working — toggles every row on the page", async () => {
+    stub([
+      canvas({ id: "a", slug: "sa", title: "Alpha" }),
+      canvas({ id: "b", slug: "sb", title: "Beta" }),
+    ]);
+    renderAt("/");
+    await screen.findByText("Alpha");
+
+    const selectAll = screen.getByRole("checkbox", {
+      name: "Select all canvases on this page",
+    }) as HTMLInputElement;
+    const rowA = screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement;
+    const rowB = screen.getByRole("checkbox", { name: "Select Beta" }) as HTMLInputElement;
+
+    await userEvent.click(selectAll);
+    expect(rowA.checked).toBe(true);
+    expect(rowB.checked).toBe(true);
+    expect(await screen.findByText("2 canvases selected")).toBeInTheDocument();
+
+    // Indeterminate state: unticking one row leaves the header checkbox partial.
+    await userEvent.click(rowA);
+    expect(selectAll.indeterminate).toBe(true);
+    expect(selectAll.checked).toBe(false);
+
+    // Toggling select-all off again clears the page.
+    await userEvent.click(selectAll);
+    // (header was indeterminate → click sets it checked, selecting all again)
+    expect(rowA.checked).toBe(true);
+    expect(rowB.checked).toBe(true);
+  });
+
   it("paginates: shows the page window and a working Next control", async () => {
-    // 25 canvases → page size 24 → page 1 shows 24, Next reveals the 25th.
-    const many = Array.from({ length: 25 }, (_, i) =>
+    // 49 canvases → page size 48 → page 1 shows 48, Next reveals the 49th.
+    const many = Array.from({ length: 49 }, (_, i) =>
       canvas({ id: `c${i}`, slug: `s${i}`, title: `Canvas ${String(i).padStart(2, "0")}` }),
     );
     stub(many);
     renderAt("/?sort=title");
-    expect(await screen.findAllByText("Showing 1–24 of 25")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 1–48 of 49")).toHaveLength(2);
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findAllByText("Showing 25–25 of 25")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 49–49 of 49")).toHaveLength(2);
   });
 });

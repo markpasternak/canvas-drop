@@ -17,12 +17,12 @@ const OUT = join(root, "docs/site/og.png");
 const W = 1200;
 const H = 630;
 
-// A self-contained branded card matching the marketing hero: the box-drop mark +
-// wordmark, the "Drop it in. Share it out." headline (accent on the second line),
-// a one-line subhead, and a quiet footer — on the dark brand surface with the same
-// indigo-violet radial glow + faint grid motif. Authored in OKLCH (Chromium
-// renders it) so the accent matches the dashboard tokens exactly. Inline
-// everything (no external fonts/assets) so the render is deterministic.
+// A self-contained branded card matching the marketing hero: the canonical drop-frame
+// `</>` mark + wordmark, the "Drop it in. Share it out." headline (amber accent on the
+// second line), a one-line subhead, and a quiet footer — on the drenched teal->navy
+// "Committed" surface with the warm amber glow + faint grid motif (the landing hero).
+// Authored in OKLCH (Chromium renders it) so the teal + amber match the brand tokens.
+// Inline everything (no external fonts/assets) so the render is deterministic.
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: ${W}px; height: ${H}px; }
@@ -30,9 +30,9 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
     position: relative; overflow: hidden;
     font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
     background:
-      radial-gradient(120% 95% at 85% -12%, oklch(0.515 0.214 274 / 0.45), transparent 60%),
-      radial-gradient(90% 75% at 6% 4%, oklch(0.6 0.16 286 / 0.20), transparent 55%),
-      linear-gradient(180deg, oklch(0.165 0.008 266), oklch(0.115 0.006 266));
+      radial-gradient(95% 120% at 84% -14%, oklch(0.78 0.15 72 / 0.42), transparent 50%),
+      radial-gradient(85% 120% at 6% 4%, oklch(0.55 0.12 196 / 0.5), transparent 55%),
+      linear-gradient(155deg, oklch(0.31 0.092 205) 0%, oklch(0.2 0.072 214) 55%, oklch(0.14 0.05 224) 100%);
     color: oklch(0.97 0.003 266);
     display: flex; flex-direction: column; justify-content: center;
     padding: 78px 96px;
@@ -47,13 +47,13 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
     mask-image: radial-gradient(120% 85% at 50% 0%, #000 35%, transparent 72%);
   }
   .brand { position: relative; display: flex; align-items: center; gap: 26px; }
-  .mark { width: 92px; height: 92px; }
+  .mark { width: auto; height: 104px; }
   .word { font-size: 60px; font-weight: 650; letter-spacing: -0.025em; }
   .headline {
     position: relative; margin-top: 40px;
     font-size: 96px; line-height: 0.98; font-weight: 660; letter-spacing: -0.035em;
   }
-  .headline .accent { color: oklch(0.78 0.15 274); }
+  .headline .accent { color: oklch(0.82 0.14 75); }
   .subhead {
     position: relative; margin-top: 30px; max-width: 860px;
     font-size: 33px; line-height: 1.3; font-weight: 450; color: oklch(0.74 0.012 266);
@@ -66,10 +66,13 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body>
   <div class="grid"></div>
   <div class="brand">
-    <svg class="mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <path d="M14 37h-4a5 5 0 0 1-5-5V11a5 5 0 0 1 5-5h28a5 5 0 0 1 5 5v21a5 5 0 0 1-5 5h-4" stroke="oklch(0.97 0.003 266)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-      <path d="M24 14v16.5m-7-7 7 7 7-7" stroke="oklch(0.72 0.16 274)" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.75"/>
-      <path d="M18 40h12" stroke="oklch(0.72 0.16 274)" stroke-linecap="round" stroke-width="4.75"/>
+    <svg class="mark" viewBox="158 209 372 432" fill="none" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M245 335H218C191.49 335 170 356.49 170 383V581C170 607.51 191.49 629 218 629H470C496.51 629 518 607.51 518 581V383C518 356.49 496.51 335 470 335H443" stroke="oklch(0.97 0.003 266)" stroke-width="24"/>
+      <path d="M344 222V392" stroke="oklch(0.78 0.11 195)" stroke-width="27"/>
+      <path d="M291 349L344 402L397 349" stroke="oklch(0.78 0.11 195)" stroke-width="27"/>
+      <path d="M286 462L241 507L286 552" stroke="oklch(0.78 0.11 195)" stroke-width="25"/>
+      <path d="M402 462L447 507L402 552" stroke="oklch(0.78 0.11 195)" stroke-width="25"/>
+      <path d="M366 452L326 566" stroke="oklch(0.78 0.11 195)" stroke-width="20"/>
     </svg>
     <span class="word">canvas-drop</span>
   </div>

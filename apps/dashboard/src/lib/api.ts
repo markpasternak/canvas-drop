@@ -320,11 +320,16 @@ export interface GalleryFacets {
 }
 
 /** Gallery page size: the client's `limit` AND the page→offset divisor. One
- *  constant so the page math can never desync from the requested page size. */
-export const GALLERY_PAGE_SIZE = 24;
+ *  constant so the page math can never desync from the requested page size. 48 is
+ *  divisible by 2/3/4 — the responsive card grid's column counts — so a full page
+ *  never leaves an orphan partial row, and it's large enough that typical accounts
+ *  rarely paginate. */
+export const GALLERY_PAGE_SIZE = 48;
 
-/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor. */
-export const CANVASES_PAGE_SIZE = 24;
+/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor. 48
+ *  is divisible by 2/3/4 (the grid's column counts, incl. with the detail rail
+ *  open), so a full page never leaves an orphan partial row. */
+export const CANVASES_PAGE_SIZE = 48;
 
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {
@@ -710,6 +715,12 @@ export const api = {
   },
 
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
+
+  /** Resolve an owner's cosmetic slug to the canonical canvas id (rebrand U17). Used
+   *  when the owner pastes a `/canvases/<slug>` URL; the route redirects to the id.
+   *  Owner-scoped server-side — a non-owned/unknown slug 404s (an ApiError), no leak. */
+  resolveSlug: (slug: string) =>
+    request<{ id: string }>(`/api/canvases/by-slug/${encodeURIComponent(slug)}`),
 
   getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),
 
