@@ -142,7 +142,7 @@ ${SYSTEM_PAGE_STYLES}
     letter-spacing: .08em;
     text-transform: uppercase;
   }
-  h1 { margin: 0; color: var(--fg); font-size: 1.2rem; line-height: 1.25; letter-spacing: -.015em; }
+  h1 { margin: 0; color: var(--fg); font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; font-size: 1.6rem; line-height: 1.2; letter-spacing: -.015em; }
   .lede { margin: .5rem 0 1.25rem; color: var(--muted); font-size: .9rem; }
   .err {
     margin: 0 0 .85rem;

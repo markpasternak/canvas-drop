@@ -37,13 +37,13 @@ describe("legal pages — rendered content", () => {
     expect(html).toContain("mark.pasternak@gmail.com");
   });
 
-  it("both documents cross-link and are light-mode only (no dark-scheme block)", () => {
+  it("both documents cross-link and support the warm-paper / deep-navy themes", () => {
     for (const html of [renderPrivacyPage(), renderTermsPage()]) {
       expect(html).toContain('href="/privacy"');
       expect(html).toContain('href="/terms"');
-      // Light-mode only per the design brief: no dark-scheme media query.
-      expect(html).not.toContain("prefers-color-scheme: dark");
-      expect(html).not.toContain("color-scheme: light dark");
+      // Warm-paper light default with a deep-navy dark alternate (brand ramp), so the
+      // legal pages match the dashboard/error/docs surfaces instead of forcing light.
+      expect(html).toContain("prefers-color-scheme: dark");
     }
   });
 });
