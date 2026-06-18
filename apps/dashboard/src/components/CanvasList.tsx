@@ -31,13 +31,6 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
     : false;
 }
 
-/** Double-clicking a row/card opens the canvas's SETTINGS / management page (not the
- *  live canvas — the explicit "Open" action does that). Single-click focuses it into
- *  the detail rail; double-click goes to where you manage it. */
-function openCanvas(canvas: CanvasListItem, navigate: ReturnType<typeof useNavigate>): void {
-  navigate({ to: "/canvases/$id/settings", params: { id: canvas.id } });
-}
-
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   return (
     <>
@@ -235,7 +228,6 @@ export function CanvasRow({
   selectable = false,
   selected = false,
   onSelectChange,
-  onActivate,
 }: {
   canvas: CanvasListItem;
   actions?: ReactNode;
@@ -243,10 +235,9 @@ export function CanvasRow({
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
-  /** Body click / Enter handler. When set (Your-canvases detail rail), focusing the
-   *  row runs this instead of navigating to the detail route; the title link still
-   *  navigates. Absent → the default whole-row click opens the detail route. */
-  onActivate?: () => void;
+  /** The row's "Details" action (opening the inline detail rail) is wired by the
+   *  caller directly to the Details button in the `actions` slot — the body click no
+   *  longer routes through this component, so there is no `onActivate` body handler. */
 }) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
@@ -256,19 +247,21 @@ export function CanvasRow({
   const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const navigate = useNavigate();
-  const activate =
-    onActivate ?? (() => navigate({ to: "/canvases/$id", params: { id: canvas.id } }));
+  // The whole-row body click (and keyboard Enter/Space) opens the canvas's detail /
+  // management page (`/canvases/$id` — Overview/Editor/Share/…). This is independent
+  // of `onActivate`, which the explicit "Details" button uses to open the inline rail.
+  const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
-    // Keyboard access to the canvas is the focusable title <Link> below (and the
-    // inner Open/copy/menu controls). The whole-row single-click focuses (sets the
-    // detail rail); double-clicking the body OPENS the canvas (live URL in a new tab,
-    // or the editor when never deployed) — a pointer convenience that mirrors the
-    // Open action. The <li> stays non-interactive (no role/tabIndex) because biome's
-    // a11y rules disallow an interactive role on <li> and a tab stop here would only
-    // duplicate the title link; keyboard users focus via the title link (single-click
-    // equivalent) and open via the keyboard-reachable Open action in the rail.
-    // onKeyDown is retained to satisfy useKeyWithClickEvents.
+    // Keyboard access to the canvas is the focusable title <Link> below (and the inner
+    // Open/copy/menu controls). The whole-row single-click — and keyboard Enter/Space —
+    // navigates to the canvas detail page (`/canvases/$id`); the row's "Details" button
+    // opens the inline detail rail instead (via onActivate). There is no double-click
+    // behaviour (single-click already navigates). The <li> stays non-interactive (no
+    // role/tabIndex) because biome's a11y rules disallow an interactive role on <li>
+    // and a tab stop here would only duplicate the title link; keyboard users navigate
+    // via the title link (single-click equivalent). onKeyDown is retained to satisfy
+    // useKeyWithClickEvents.
     <li
       data-canvas-item
       className={cn(
@@ -278,17 +271,13 @@ export function CanvasRow({
       )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        activate();
-      }}
-      onDoubleClick={(event) => {
-        if (isInteractiveTarget(event.target)) return;
-        openCanvas(canvas, navigate);
+        openDetail();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        activate();
+        openDetail();
       }}
     >
       <div className="flex items-center gap-3 sm:gap-4">
@@ -395,21 +384,21 @@ export function CanvasCard({
   selectable = false,
   selected = false,
   onSelectChange,
-  onActivate,
 }: {
   canvas: CanvasListItem;
   actions?: ReactNode;
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
-  /** Body click / Enter handler. See {@link CanvasRow} — focuses (sets the detail
-   *  rail) when set, navigates to the detail route otherwise. */
-  onActivate?: () => void;
+  /** See {@link CanvasRow}: the card body click navigates to the canvas detail page;
+   *  the "Details" action (inline rail) is wired by the caller to the Details button
+   *  in the `actions` slot, not to the body. */
 }) {
   const title = canvasTitle(canvas);
   const navigate = useNavigate();
-  const activate =
-    onActivate ?? (() => navigate({ to: "/canvases/$id", params: { id: canvas.id } }));
+  // Body click / Enter navigates to the canvas detail page (`/canvases/$id`); the
+  // "Details" button in the actions slot opens the inline rail instead.
+  const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
     <li
@@ -421,17 +410,13 @@ export function CanvasCard({
       )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        activate();
-      }}
-      onDoubleClick={(event) => {
-        if (isInteractiveTarget(event.target)) return;
-        openCanvas(canvas, navigate);
+        openDetail();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        activate();
+        openDetail();
       }}
     >
       <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">

@@ -142,11 +142,11 @@ function ActiveRow({
       selectable
       selected={selected}
       onSelectChange={onSelectChange}
-      onActivate={onActivate}
       actions={
         <>
-          {/* Details opens the right rail (the common intent) — same button shape as
-              Open, so the row offers an explicit affordance alongside the row click. */}
+          {/* The whole-row body click navigates to the canvas detail page. "Details"
+              is the explicit affordance for the inline detail rail (sets ?selected) —
+              same button shape as Open. */}
           <button
             type="button"
             onClick={onActivate}
@@ -264,9 +264,9 @@ function ArchivedRow({
       selectable
       selected={selected}
       onSelectChange={onSelectChange}
-      onActivate={onActivate}
       actions={
         <>
+          {/* Body click navigates to the canvas detail page; "Details" opens the rail. */}
           <button
             type="button"
             onClick={onActivate}

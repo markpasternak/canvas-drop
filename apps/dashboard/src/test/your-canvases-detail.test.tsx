@@ -129,8 +129,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Your canvases — detail-rail focus (?selected)", () => {
-  it("clicking a card body sets ?selected without navigating away", async () => {
+describe("Your canvases — row/card body click opens the detail page", () => {
+  it("clicking a card body navigates to /canvases/$id (grid view)", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/?view=grid");
     await screen.findByText("Alpha canvas");
@@ -140,16 +140,12 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
     // interactive child (the meta line).
     await userEvent.click(screen.getByText(/Edited/));
 
-    await waitFor(() => expect(selectedAttr()).toBe("alpha"));
-    // Still on the library route, not the detail route.
-    expect(router.state.location.pathname).toBe("/");
-    expect(router.state.location.search).toMatchObject({ selected: "alpha" });
-    // The canvas is still in the library (its title link). With a selection the rail
-    // also shows the title (an <h2>), so scope to the library link to stay specific.
-    expect(screen.getByRole("link", { name: "View details for Alpha canvas" })).toBeInTheDocument();
+    // Navigates to the canvas detail/overview page — not the inline rail.
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/alpha"));
+    expect(selectedAttr()).toBeNull();
   });
 
-  it("clicking a row body sets ?selected without navigating away (list view)", async () => {
+  it("clicking a row body navigates to /canvases/$id (list view)", async () => {
     stub([canvas({ id: "row1", slug: "row1", title: "Row canvas" })]);
     const router = renderAt("/");
     await screen.findByText("Row canvas");
@@ -157,46 +153,23 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
     // The slug line in the row is a non-interactive body region.
     await userEvent.click(screen.getByText("row1"));
 
-    await waitFor(() => expect(selectedAttr()).toBe("row1"));
-    expect(router.state.location.pathname).toBe("/");
-  });
-
-  it("clicking Open / checkbox / kebab does NOT focus the canvas", async () => {
-    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
-    renderAt("/");
-    await screen.findByText("Alpha canvas");
-
-    // Open link (interactive child) must not set focus.
-    await userEvent.click(screen.getByRole("link", { name: "Open Alpha canvas" }));
-    expect(selectedAttr()).toBeNull();
-
-    // The multi-select checkbox must not set focus.
-    await userEvent.click(screen.getByRole("checkbox", { name: "Select Alpha canvas" }));
-    expect(selectedAttr()).toBeNull();
-
-    // The overflow kebab must not set focus.
-    await userEvent.click(screen.getByRole("button", { name: "More actions for Alpha canvas" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/row1"));
     expect(selectedAttr()).toBeNull();
   });
 
-  it("focusing another canvas updates ?selected", async () => {
-    stub([
-      canvas({ id: "one", slug: "one", title: "First canvas" }),
-      canvas({ id: "two", slug: "two", title: "Second canvas" }),
-    ]);
-    renderAt("/");
-    await screen.findByText("First canvas");
+  it("clicking a never-deployed row body also opens its detail page", async () => {
+    stub([canvas({ id: "nd1", slug: "nd1", title: "Draft canvas", lastDeploy: null })]);
+    const router = renderAt("/");
+    await screen.findByText("Draft canvas");
 
-    await userEvent.click(screen.getByText("one"));
-    await waitFor(() => expect(selectedAttr()).toBe("one"));
+    await userEvent.click(screen.getByText("nd1"));
 
-    await userEvent.click(screen.getByText("two"));
-    await waitFor(() => expect(selectedAttr()).toBe("two"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/nd1"));
   });
 
-  it("Enter on a focused row focuses it", async () => {
+  it("Enter on the row body navigates to /canvases/$id", async () => {
     stub([canvas({ id: "kb", slug: "kb", title: "Keyboard canvas" })]);
-    renderAt("/");
+    const router = renderAt("/");
     await screen.findByText("Keyboard canvas");
 
     // Fire Enter from a non-interactive body element inside the row.
@@ -204,7 +177,30 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
     body.focus();
     await userEvent.type(body, "{Enter}");
 
-    await waitFor(() => expect(selectedAttr()).toBe("kb"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/kb"));
+    expect(selectedAttr()).toBeNull();
+  });
+
+  it("clicking Open / checkbox / kebab does NOT navigate and does NOT focus", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    const router = renderAt("/");
+    await screen.findByText("Alpha canvas");
+
+    // Open link (interactive child) targets the live URL in a new tab — it must not
+    // navigate the dashboard to the detail page nor set ?selected.
+    await userEvent.click(screen.getByRole("link", { name: "Open Alpha canvas" }));
+    expect(router.state.location.pathname).toBe("/");
+    expect(selectedAttr()).toBeNull();
+
+    // The multi-select checkbox toggles selection only — no navigation, no focus.
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Alpha canvas" }));
+    expect(router.state.location.pathname).toBe("/");
+    expect(selectedAttr()).toBeNull();
+
+    // The overflow kebab opens the menu — no navigation, no focus.
+    await userEvent.click(screen.getByRole("button", { name: "More actions for Alpha canvas" }));
+    expect(router.state.location.pathname).toBe("/");
+    expect(selectedAttr()).toBeNull();
   });
 
   it("ignores an invalid / unknown ?selected", async () => {
@@ -217,57 +213,35 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
   });
 });
 
-describe("Your canvases — double-click opens the settings page", () => {
-  it("double-clicking a row body navigates to the canvas settings page", async () => {
-    stub([canvas({ id: "dc1", slug: "dc1", title: "Deployed canvas", url: "http://x/c/dc1" })]);
+describe("Your canvases — the Details button opens the inline rail (?selected)", () => {
+  it("clicking Details sets ?selected without leaving the list", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Deployed canvas");
-
-    // Double-click a non-interactive body region (the slug line).
-    await userEvent.dblClick(screen.getByText("dc1"));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/dc1/settings"));
-  });
-
-  it("double-clicking a card body navigates to settings (grid view)", async () => {
-    stub([canvas({ id: "dc2", slug: "dc2", title: "Grid canvas", url: "http://x/c/dc2" })]);
-    const router = renderAt("/?view=grid");
-    await screen.findByText("Grid canvas");
-
-    await userEvent.dblClick(screen.getByText(/Edited/));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/dc2/settings"));
-  });
-
-  it("double-clicking a never-deployed row also opens its settings page", async () => {
-    stub([canvas({ id: "nd1", slug: "nd1", title: "Draft canvas", lastDeploy: null })]);
-    const router = renderAt("/");
-    await screen.findByText("Draft canvas");
-
-    await userEvent.dblClick(screen.getByText("nd1"));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/nd1/settings"));
-  });
-
-  it("single-click only focuses — it does not navigate to settings", async () => {
-    stub([canvas({ id: "sc1", slug: "sc1", title: "Single canvas" })]);
-    const router = renderAt("/");
-    await screen.findByText("Single canvas");
-
-    await userEvent.click(screen.getByText("sc1"));
-    await waitFor(() => expect(selectedAttr()).toBe("sc1"));
-    expect(router.state.location.pathname).toBe("/");
-  });
-
-  it("double-clicking the checkbox does not navigate to settings", async () => {
-    stub([canvas({ id: "g1", slug: "g1", title: "Guard canvas", url: "http://x/c/g1" })]);
-    const router = renderAt("/");
-    await screen.findByText("Guard canvas");
-
-    // The body's onDoubleClick must be guarded against firing for interactive children.
-    await userEvent.dblClick(screen.getByRole("checkbox", { name: "Select Guard canvas" }));
-    expect(router.state.location.pathname).toBe("/");
+    await screen.findByText("Alpha canvas");
     expect(selectedAttr()).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));
+
+    await waitFor(() => expect(selectedAttr()).toBe("alpha"));
+    // Still on the library route — the rail opened, not a navigation.
+    expect(router.state.location.pathname).toBe("/");
+    expect(router.state.location.search).toMatchObject({ selected: "alpha" });
+    expect(screen.getByRole("link", { name: "View details for Alpha canvas" })).toBeInTheDocument();
+  });
+
+  it("Details on another canvas updates ?selected", async () => {
+    stub([
+      canvas({ id: "one", slug: "one", title: "First canvas" }),
+      canvas({ id: "two", slug: "two", title: "Second canvas" }),
+    ]);
+    renderAt("/");
+    await screen.findByText("First canvas");
+
+    await userEvent.click(screen.getByRole("button", { name: "Show details for First canvas" }));
+    await waitFor(() => expect(selectedAttr()).toBe("one"));
+
+    await userEvent.click(screen.getByRole("button", { name: "Show details for Second canvas" }));
+    await waitFor(() => expect(selectedAttr()).toBe("two"));
   });
 });
 
@@ -309,7 +283,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     await screen.findByText("Alpha canvas");
     expect(detailRegion()).toBeNull();
 
-    await userEvent.click(screen.getByText(/Edited/));
+    await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));
     await waitFor(() => expect(detailRegion()).not.toBeNull());
     expect(selectedAttr()).toBe("alpha");
 
@@ -411,7 +385,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     await waitFor(() => expect(selectedAttr()).toBeNull());
   });
 
-  it("inline rail (xl): clicking a row does NOT clear the focus (it reselects)", async () => {
+  it("inline rail (xl): another row's Details reselects without clearing the focus", async () => {
     stubXl();
     stub([
       canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" }),
@@ -421,9 +395,9 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     await screen.findByRole("link", { name: "View details for Alpha canvas" });
     await waitFor(() => expect(selectedAttr()).toBe("alpha"));
 
-    // Clicking another row's body reselects rather than clearing — the outside-click
-    // handler must skip clicks landing on a canvas row/card.
-    await userEvent.click(screen.getByText("beta"));
+    // Clicking another row's Details button reselects rather than clearing — the
+    // outside-click handler must skip clicks landing on an interactive control.
+    await userEvent.click(screen.getByRole("button", { name: "Show details for Beta canvas" }));
     await waitFor(() => expect(selectedAttr()).toBe("beta"));
   });
 
