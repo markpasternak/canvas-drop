@@ -144,6 +144,9 @@ importers:
       '@canvas-drop/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@fontsource-variable/newsreader':
+        specifier: ^5.2.5
+        version: 5.2.10
       '@hono/mcp':
         specifier: ^0.3.0
         version: 0.3.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(hono-rate-limiter@0.5.3(hono@4.12.25))(hono@4.12.25)(zod@4.4.3)

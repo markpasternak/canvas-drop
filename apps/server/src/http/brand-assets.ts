@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
@@ -23,6 +24,34 @@ import type { AppEnv } from "./types.js";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const PUBLIC_DIR = join(REPO_ROOT, "apps/dashboard/public");
 
+/**
+ * Self-hosted Newsreader (the editorial serif) for the server-rendered, pre-gateway
+ * pages (the signed-out landing, legal, error pages). Those pages can't use the SPA's
+ * bundled fonts — they sit before the auth gateway and ship no Vite bundle — so the
+ * serif (`--font-serif`) would otherwise fall back to a system serif. canvas-drop never
+ * phones home, so we serve the woff2 ourselves rather than pulling from a CDN.
+ *
+ * The files come from `@fontsource-variable/newsreader` (a workspace dep; OFL-licensed,
+ * free to self-serve), resolved through Node module resolution so the path is correct
+ * from both `src/` (dev/test) and `dist/` (prod) regardless of the pnpm store layout.
+ * Both are variable-weight (200–800) over the Latin subset — the landing is English —
+ * one normal, one italic (the hero's italic-accent clause). `format('woff2-variations')`
+ * + `font-weight: 200 800` in the page `@font-face` matches the fontsource definitions.
+ */
+const FONTS: Record<string, string> = {
+  "/fonts/newsreader-latin-wght-normal.woff2": "newsreader-latin-wght-normal.woff2",
+  "/fonts/newsreader-latin-standard-italic.woff2": "newsreader-latin-standard-italic.woff2",
+};
+
+/** Absolute path to a Newsreader woff2 inside the resolved package `files/` dir.
+ *  Resolved via Node's real module resolver (`createRequire`) so it is correct from
+ *  both `src/` and `dist/` and across the pnpm store layout — and unaffected by the
+ *  test bundler's `import.meta.resolve` override. */
+const requireFont = createRequire(import.meta.url);
+function fontPath(file: string): string {
+  return requireFont.resolve(`@fontsource-variable/newsreader/files/${file}`);
+}
+
 const ASSETS: Record<string, { file: string; type: string }> = {
   "/favicon.svg": { file: "favicon.svg", type: "image/svg+xml" },
   "/favicon-32x32.png": { file: "favicon-32x32.png", type: "image/png" },
@@ -45,6 +74,21 @@ export function brandAssetRoutes(): Hono<AppEnv> {
         baseSecurityHeaders(headers);
         headers.set("Content-Type", type);
         headers.set("Cache-Control", "public, max-age=86400");
+        return new Response(bytes, { status: 200, headers });
+      } catch {
+        return c.notFound();
+      }
+    });
+  }
+  // Self-hosted Newsreader woff2 (immutable, content-stable filenames → 1-year cache).
+  for (const [route, file] of Object.entries(FONTS)) {
+    app.get(route, async (c) => {
+      try {
+        const bytes = await readFile(fontPath(file));
+        const headers = new Headers();
+        baseSecurityHeaders(headers);
+        headers.set("Content-Type", "font/woff2");
+        headers.set("Cache-Control", "public, max-age=31536000, immutable");
         return new Response(bytes, { status: 200, headers });
       } catch {
         return c.notFound();
