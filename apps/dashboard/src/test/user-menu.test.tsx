@@ -192,7 +192,7 @@ describe("UserMenu", () => {
     expect(localStorage.getItem("canvas-drop-theme")).toBe("dark");
   });
 
-  it("orders the menu: identity header → Theme → Keyboard shortcuts → About → Sign out", () => {
+  it("orders the menu: identity header → Theme → About → Sign out", () => {
     renderMenu(<UserMenu me={makeMe()} />);
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
     const menu = screen.getByRole("menu");
@@ -200,7 +200,6 @@ describe("UserMenu", () => {
     const order = [
       text.indexOf("Mark Pasternak"), // identity header
       text.indexOf("Theme"),
-      text.indexOf("Keyboard shortcuts"),
       text.indexOf("About canvas-drop"),
       text.indexOf("Sign out"),
     ];
@@ -257,9 +256,9 @@ describe("UserMenu", () => {
     expect(last).toHaveFocus();
   });
 
-  it("keeps the keyboard-shortcuts trigger; it is a menuitem button", () => {
+  it("does not link keyboard shortcuts in the menu (kept app-wide via the `?` binding)", () => {
     renderMenu(<UserMenu me={makeMe()} />);
     fireEvent.click(screen.getByRole("button", { name: /account/i }));
-    expect(screen.getByRole("menuitem", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /keyboard shortcuts/i })).not.toBeInTheDocument();
   });
 });

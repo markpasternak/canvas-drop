@@ -8,7 +8,7 @@ import {
   Trash,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { BulkActionBar } from "../components/BulkActionBar.js";
@@ -145,6 +145,16 @@ function ActiveRow({
       onActivate={onActivate}
       actions={
         <>
+          {/* Details opens the right rail (the common intent) — same button shape as
+              Open, so the row offers an explicit affordance alongside the row click. */}
+          <button
+            type="button"
+            onClick={onActivate}
+            className={rowPrimaryActionClass}
+            aria-label={`Show details for ${title}`}
+          >
+            Details
+          </button>
           {deployed ? (
             <a
               href={canvas.url}
@@ -257,6 +267,14 @@ function ArchivedRow({
       onActivate={onActivate}
       actions={
         <>
+          <button
+            type="button"
+            onClick={onActivate}
+            className={rowPrimaryActionClass}
+            aria-label={`Show details for ${title}`}
+          >
+            Details
+          </button>
           <Button
             size="sm"
             variant="secondary"
@@ -633,10 +651,6 @@ export default function CanvasList() {
   useEffect(() => {
     setCloneOpen(false);
   }, [focusedId]);
-  const activeChipKeys = archivedView
-    ? []
-    : STATE_CHIPS.filter((chip) => search[chip.key] === true).map((chip) => chip.key);
-  const lastActiveChipKey = activeChipKeys.at(-1);
   const from = total === 0 ? 0 : offset + 1;
   // Clamp to `total` so a stale-data render (keepPreviousData) can't briefly show
   // "Showing 49–49 of 5" before the page snaps back.
@@ -764,35 +778,33 @@ export default function CanvasList() {
                 <ViewToggle value={view} onChange={setView} />
               </div>
 
-              {/* Attribute filters apply to the live set only — hidden in the archive. */}
+              {/* Attribute filters apply to the live set only — hidden in the archive.
+                  "Clear all" trails the whole chip row (only while a filter is active),
+                  not wedged between two chips. */}
               {!archivedView && (
                 <FilterBar>
-                  {STATE_CHIPS.map((chip, index) => (
-                    <Fragment key={chip.key}>
-                      <FilterChip
-                        active={search[chip.key] === true}
-                        onClick={() => toggle(chip.key)}
-                        dotClassName={conceptColor(chip.concept).dot}
-                      >
-                        <span>{chip.label}</span>
-                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
-                          {summary[chip.countKey]}
-                        </span>
-                      </FilterChip>
-                      {filtering &&
-                        (chip.key === lastActiveChipKey ||
-                          (lastActiveChipKey === undefined &&
-                            index === STATE_CHIPS.length - 1)) && (
-                          <button
-                            type="button"
-                            onClick={clearFilters}
-                            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
-                          >
-                            Clear all
-                          </button>
-                        )}
-                    </Fragment>
+                  {STATE_CHIPS.map((chip) => (
+                    <FilterChip
+                      key={chip.key}
+                      active={search[chip.key] === true}
+                      onClick={() => toggle(chip.key)}
+                      dotClassName={conceptColor(chip.concept).dot}
+                    >
+                      <span>{chip.label}</span>
+                      <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                        {summary[chip.countKey]}
+                      </span>
+                    </FilterChip>
                   ))}
+                  {filtering && (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="ml-1 h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+                    >
+                      Clear all
+                    </button>
+                  )}
                 </FilterBar>
               )}
 
@@ -970,11 +982,16 @@ export default function CanvasList() {
         </div>
 
         {/* Inline rail — `xl` and up only; the drawer below covers narrower widths.
-            Sticky so it follows as the library scrolls. Gated on `isXl` (not just a
-            `hidden xl:block` CSS class) so below `xl` only the drawer renders the
-            DetailPanel — one canvas-details region, not two. */}
+            Pinned full-height (sticky + viewport height) so it stays in place while the
+            library scrolls, with its own internal scroll for long detail. A flat
+            hairline divides it from the library (no boxy card — the DetailPanel is
+            chrome-less). Gated on `isXl` (not just a `hidden xl:block` CSS class) so
+            below `xl` only the drawer renders the DetailPanel — one details region. */}
         {showRail && isXl && (
-          <div className="sticky top-6 hidden xl:block" data-detail-rail>
+          <div
+            className="sticky top-6 hidden h-[calc(100dvh-3rem)] border-border border-l pl-6 xl:block"
+            data-detail-rail
+          >
             <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
           </div>
         )}

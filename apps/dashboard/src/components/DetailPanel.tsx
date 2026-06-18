@@ -15,11 +15,16 @@ const PUBLICATION_LABEL: Record<CanvasListItem["publicationState"], string> = {
   deleted: "Deleted",
 };
 
-const actionClass =
-  "inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border " +
-  "bg-surface-raised px-3 text-[0.8125rem] font-medium text-fg transition-colors duration-100 " +
-  "[transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-hover " +
+const actionBase =
+  "inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-3 text-[0.8125rem] " +
+  "font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
+
+/** The single coloured CTA — the teal accent moment in the rail. */
+const primaryClass = `${actionBase} bg-accent text-accent-fg hover:bg-accent-hover`;
+
+/** Flat secondary actions — no raised card, just a quiet hairline + subtle hover. */
+const secondaryClass = `${actionBase} border border-border text-fg hover:bg-surface-sunken`;
 
 function DetailRow({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
   return (
@@ -59,7 +64,7 @@ export function DetailPanel({
     return (
       <aside
         aria-label="Canvas details"
-        className="flex h-full flex-col items-center justify-center rounded-xl border border-border border-dashed bg-surface p-6 text-center"
+        className="flex h-full flex-col items-center justify-center p-6 text-center"
       >
         <p className="text-sm text-subtle">Select a canvas to see details.</p>
       </aside>
@@ -73,10 +78,7 @@ export function DetailPanel({
     : undefined;
 
   return (
-    <aside
-      aria-label="Canvas details"
-      className="flex h-full flex-col gap-4 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)]"
-    >
+    <aside aria-label="Canvas details" className="flex h-full flex-col gap-4 overflow-y-auto">
       {/* Hero cover */}
       <div className="aspect-[3/2] w-full overflow-hidden rounded-lg border border-border/60 bg-surface-sunken">
         <CanvasCover seed={canvas.id} previewUrl={previewUrl} />
@@ -98,7 +100,7 @@ export function DetailPanel({
             href={canvas.url}
             target="_blank"
             rel="noreferrer"
-            className={actionClass}
+            className={primaryClass}
             aria-label={`Open ${title}`}
           >
             Open
@@ -108,7 +110,7 @@ export function DetailPanel({
           <Link
             to="/canvases/$id/editor"
             params={{ id: canvas.id }}
-            className={actionClass}
+            className={primaryClass}
             aria-label={`Continue setup for ${title}`}
           >
             Continue setup
@@ -118,7 +120,7 @@ export function DetailPanel({
           <Link
             to="/canvases/$id/share"
             params={{ id: canvas.id }}
-            className={actionClass}
+            className={secondaryClass}
             aria-label={`Share ${title}`}
           >
             Share
@@ -128,7 +130,7 @@ export function DetailPanel({
             type="button"
             onClick={onDuplicate}
             disabled={!onDuplicate}
-            className={`${actionClass} disabled:opacity-50 disabled:pointer-events-none`}
+            className={`${secondaryClass} disabled:opacity-50 disabled:pointer-events-none`}
             aria-label={`Duplicate ${title}`}
           >
             Duplicate
@@ -138,10 +140,10 @@ export function DetailPanel({
         <Link
           to="/canvases/$id"
           params={{ id: canvas.id }}
-          className={actionClass}
-          aria-label={`More details for ${title}`}
+          className={secondaryClass}
+          aria-label={`Manage ${title}`}
         >
-          Details
+          Manage
           <DotsThree size={16} weight="bold" aria-hidden />
         </Link>
       </div>

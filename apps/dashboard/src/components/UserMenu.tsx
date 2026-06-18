@@ -1,7 +1,6 @@
 import {
   CaretDown,
   Info,
-  Keyboard,
   Monitor,
   MoonStars,
   ShieldCheck,
@@ -13,7 +12,6 @@ import type { Me } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { useTheme } from "../lib/theme.js";
 import { SegmentedControl } from "./SegmentedControl.js";
-import { openShortcuts } from "./Shortcuts.js";
 
 /** First letter of the display name, falling back to the email — a calm avatar
  * fallback when the identity provider gives no `avatarUrl`. Tolerates a null/absent
@@ -29,8 +27,9 @@ function label(me: Me): string {
 }
 
 /** Account control in the top bar: an avatar button that opens a popover with the
- * signed-in identity, the theme switch, keyboard-shortcuts + about links, and
- * (when the instance owns a revocable session) Sign out.
+ * signed-in identity, the theme switch, an About link, and (when the instance owns a
+ * revocable session) Sign out. (Keyboard shortcuts stay available via the `?` global
+ * binding — see Shortcuts — but are intentionally not linked here.)
  *
  * In `proxy` mode the trusted proxy owns identity and there is no app session to
  * revoke, so the menu omits Sign out and only surfaces who you are. Sign out is a
@@ -213,19 +212,6 @@ export function UserMenu({
               ]}
             />
           </div>
-
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              openShortcuts();
-            }}
-            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-fg text-sm transition-colors hover:bg-surface-sunken"
-          >
-            <Keyboard size={16} aria-hidden className="text-muted" />
-            Keyboard shortcuts
-          </button>
 
           {/* Real navigation to the server-rendered public landing — not an SPA route. */}
           <a
