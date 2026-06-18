@@ -127,3 +127,8 @@ P4 detail rail (U1–4) · P3 primitives SegmentedControl/SearchInput/TabNav/Dat
 
 ### NEXT (per Mark): preview parity — left-rail app shell + colourful elements → then mega code review + fix
 Plan: docs/plans/2026-06-18-002-feat-preview-parity-plan.md
+
+### Preview parity COMPLETE (U1–U3) + MEGA CODE REVIEW + fixes ✅ — all green
+- Preview parity: left-rail AppShell (teal logo tile, vertical nav active in accent-subtle, Create canvas, Docs/theme/account pinned bottom) + responsive hamburger; brand-aware vivid GenerativeCover (curated teal+amber hue band, per-canvas distinct). Verified live: left rail · library · right detail rail (three panels), colourful covers.
+- Mega review: 4 parallel reviewers (correctness, security, frontend/a11y, project-standards) over the 28-commit / 93-file range since the last review. **Security: clean** (by-slug endpoint owner-scoped + no existence leak; JS-preview sandbox isolation preserved; no path traversal). Fixed all real findings: slug-redirect latch (P2), command-palette scroll-active-into-view (P2), grid 3-col when rail open (P3), DetailDrawer exit motion (P3), DetailPanel helper dedup (P3), DESIGN.md drift (P3). Residual risks (logo mirror, pre-existing Dialog aria-describedby, sub-150ms exit-scrim) noted, not blocking.
+- Final: every commit green (typecheck, lint, dual-dialect test ~1541 server / 338 dashboard, build). Branch `feat/rebrand-readiness`, ~30 commits, **nothing pushed or merged** — awaiting Mark's final yes.
