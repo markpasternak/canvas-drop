@@ -86,10 +86,16 @@ export function DetailDrawer({
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      {/* The scrim sits above the presentation container in the stacking order, so an
+          outside click lands on it (not the container). Close from the scrim's own
+          mousedown so clicking the backdrop dismisses the drawer + clears selection. */}
       <div
         className="cd-anim-scrim absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
         data-state={state}
         aria-hidden
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       />
       <div
         ref={panelRef}

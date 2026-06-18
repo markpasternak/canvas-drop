@@ -169,8 +169,10 @@ export function CanvasListHeader({
   onSelectAll?: (next: boolean) => void;
 } = {}) {
   return (
+    // Flat Lovable-style header: a quiet column label on the plain page background
+    // with just a hairline divider underneath — no filled sunken bar, no card.
     <div
-      className="hidden items-center gap-3 rounded-t-lg border-border border-b bg-surface-sunken px-4 py-2 text-xs font-medium text-muted lg:flex"
+      className="hidden items-center gap-3 border-border border-b px-4 py-2 text-xs font-medium text-muted lg:flex"
       // Not aria-hidden when it carries the interactive select-all control.
       aria-hidden={selectable ? undefined : true}
     >
@@ -268,6 +270,7 @@ export function CanvasRow({
     // equivalent) and open via the keyboard-reachable Open action in the rail.
     // onKeyDown is retained to satisfy useKeyWithClickEvents.
     <li
+      data-canvas-item
       className={cn(
         "cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised",
         rowHoverClass,
@@ -410,6 +413,7 @@ export function CanvasCard({
 
   return (
     <li
+      data-canvas-item
       className={cn(
         "group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
         cardHoverClass,

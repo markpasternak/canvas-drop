@@ -391,6 +391,67 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(protectedBadge).toHaveTextContent("Protected");
   });
 
+  it("renders the list view flat — no boxy card around the rows, a hairline column header", async () => {
+    stub([canvas({ id: "a", slug: "sa", title: "Alpha" })]);
+    renderAt("/");
+    await screen.findByText("Alpha");
+
+    // The flat (Lovable-style) list has a quiet "Canvas" column header carrying the
+    // select-all checkbox. Its wrapper is a hairline divider underneath — a bottom
+    // border, not a filled sunken bar — and it is NOT wrapped in a bordered card.
+    const selectAll = screen.getByRole("checkbox", {
+      name: "Select all canvases on this page",
+    });
+    const header = selectAll.closest("div") as HTMLElement;
+    expect(header).not.toBeNull();
+    expect(header.className).toContain("border-b");
+    // Flattened: the old filled sunken bar + rounded-top card chrome is gone.
+    expect(header.className).not.toContain("bg-surface-sunken");
+    expect(header.className).not.toContain("rounded-t-lg");
+
+    // The list container that wraps the header + rows no longer carries the boxy
+    // card classes (border / surface background / rounded-lg) it used to.
+    const listContainer = header.parentElement as HTMLElement;
+    expect(listContainer.className).not.toContain("lg:rounded-lg");
+    expect(listContainer.className).not.toContain("lg:border");
+    expect(listContainer.className).not.toContain("lg:bg-surface");
+
+    // Rows are still separated by hairline dividers (divide-y) on the page bg.
+    const list = listContainer.querySelector("ul") as HTMLElement;
+    expect(list.className).toContain("lg:divide-y");
+  });
+
+  it("flat list keeps select-all working — toggles every row on the page", async () => {
+    stub([
+      canvas({ id: "a", slug: "sa", title: "Alpha" }),
+      canvas({ id: "b", slug: "sb", title: "Beta" }),
+    ]);
+    renderAt("/");
+    await screen.findByText("Alpha");
+
+    const selectAll = screen.getByRole("checkbox", {
+      name: "Select all canvases on this page",
+    }) as HTMLInputElement;
+    const rowA = screen.getByRole("checkbox", { name: "Select Alpha" }) as HTMLInputElement;
+    const rowB = screen.getByRole("checkbox", { name: "Select Beta" }) as HTMLInputElement;
+
+    await userEvent.click(selectAll);
+    expect(rowA.checked).toBe(true);
+    expect(rowB.checked).toBe(true);
+    expect(await screen.findByText("2 canvases selected")).toBeInTheDocument();
+
+    // Indeterminate state: unticking one row leaves the header checkbox partial.
+    await userEvent.click(rowA);
+    expect(selectAll.indeterminate).toBe(true);
+    expect(selectAll.checked).toBe(false);
+
+    // Toggling select-all off again clears the page.
+    await userEvent.click(selectAll);
+    // (header was indeterminate → click sets it checked, selecting all again)
+    expect(rowA.checked).toBe(true);
+    expect(rowB.checked).toBe(true);
+  });
+
   it("paginates: shows the page window and a working Next control", async () => {
     // 25 canvases → page size 24 → page 1 shows 24, Next reveals the 25th.
     const many = Array.from({ length: 25 }, (_, i) =>

@@ -670,6 +670,43 @@ export default function CanvasList() {
   // before the rail existed (the grid collapses to a single column).
   const showRail = !pristineEmpty && focusedCanvas !== null;
 
+  // Inline rail (xl) dismissal: unlike the drawer it has no scrim, so wire its own
+  // outside-click + Escape to clear the focus. An outside click clears only when it
+  // lands on truly-empty space — NOT on the rail itself, NOT on a canvas row/card
+  // (clicking another row reselects via its own handler), and NOT on an interactive
+  // control (links/buttons/menus keep their behavior). Escape always clears. Gated on
+  // the inline rail being the one on screen (`isXl`) so it never fights the drawer's
+  // own Escape/scrim handling below xl.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setFocused is stable for this purpose; re-bind only when the inline rail toggles.
+  useEffect(() => {
+    if (!showRail || !isXl) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      // Inside the rail, on a row/card, or on any interactive control → leave the
+      // selection alone (those have their own click semantics).
+      if (
+        target.closest("[data-detail-rail]") ||
+        target.closest("[data-canvas-item]") ||
+        target.closest(
+          "a, button, input, select, textarea, summary, [role='button'], [role='dialog']",
+        )
+      ) {
+        return;
+      }
+      setFocused(undefined);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setFocused(undefined);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [showRail, isXl]);
+
   return (
     // The focused canvas (detail rail, U3) rides as a data attribute so route tests
     // (and U1) can assert the focus without depending on the rail's DOM.
@@ -860,7 +897,10 @@ export default function CanvasList() {
                       </ul>
                     </div>
                   ) : (
-                    <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
+                    // Flat Lovable-style list: no surrounding card/border/background —
+                    // a quiet hairline column header over rows divided by hairlines on
+                    // the plain page background.
+                    <div className="space-y-2 lg:space-y-0">
                       <CanvasListHeader
                         selectable
                         allSelected={allSelected}
@@ -934,7 +974,7 @@ export default function CanvasList() {
             `hidden xl:block` CSS class) so below `xl` only the drawer renders the
             DetailPanel — one canvas-details region, not two. */}
         {showRail && isXl && (
-          <div className="sticky top-6 hidden xl:block">
+          <div className="sticky top-6 hidden xl:block" data-detail-rail>
             <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
           </div>
         )}

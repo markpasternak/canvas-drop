@@ -339,6 +339,25 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     );
   });
 
+  it("drawer (narrow): clicking the scrim closes and clears the selection", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    const dialog = await screen.findByRole("dialog", { name: "Canvas details" });
+    expect(dialog).toBeInTheDocument();
+    expect(selectedAttr()).toBe("alpha");
+
+    // The scrim/backdrop is the click-to-dismiss surface (aria-hidden, behind the
+    // panel). A mousedown on it routes through onClose → setFocused(undefined).
+    const scrim = document.querySelector(".cd-anim-scrim") as HTMLElement;
+    expect(scrim).not.toBeNull();
+    await userEvent.click(scrim);
+
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Canvas details" })).toBeNull(),
+    );
+  });
+
   it("drawer (narrow): the close button clears the selection", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     renderAt("/?selected=alpha");
@@ -346,6 +365,66 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Close details" }));
     await waitFor(() => expect(selectedAttr()).toBeNull());
+  });
+
+  /** Force the xl breakpoint so the INLINE sticky rail (no scrim) renders instead of
+   *  the drawer. matchMedia is read by useMediaQuery("(min-width: 1280px)"). */
+  function stubXl() {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("1280"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }));
+  }
+
+  it("inline rail (xl): Escape clears the selection", async () => {
+    stubXl();
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    // Inline rail: a details region exists but it is NOT a focus-trapped dialog.
+    await waitFor(() => expect(detailRegion()).not.toBeNull());
+    expect(screen.queryByRole("dialog", { name: "Canvas details" })).toBeNull();
+    expect(selectedAttr()).toBe("alpha");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+    await waitFor(() => expect(detailRegion()).toBeNull());
+  });
+
+  it("inline rail (xl): clicking empty space outside the rail/rows clears the selection", async () => {
+    stubXl();
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    await waitFor(() => expect(detailRegion()).not.toBeNull());
+    expect(selectedAttr()).toBe("alpha");
+
+    // Click the page heading — truly-empty space (not the rail, not a row/card, not
+    // an interactive control) → the inline rail dismisses + clears ?selected.
+    await userEvent.click(screen.getByText("Your canvases"));
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+  });
+
+  it("inline rail (xl): clicking a row does NOT clear the focus (it reselects)", async () => {
+    stubXl();
+    stub([
+      canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" }),
+      canvas({ id: "beta", slug: "beta", title: "Beta canvas" }),
+    ]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    await waitFor(() => expect(selectedAttr()).toBe("alpha"));
+
+    // Clicking another row's body reselects rather than clearing — the outside-click
+    // handler must skip clicks landing on a canvas row/card.
+    await userEvent.click(screen.getByText("beta"));
+    await waitFor(() => expect(selectedAttr()).toBe("beta"));
   });
 
   it("Duplicate in the rail opens the shared clone confirm dialog (U4)", async () => {
