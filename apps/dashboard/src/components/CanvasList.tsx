@@ -215,6 +215,7 @@ export function CanvasRow({
   selectable = false,
   selected = false,
   onSelectChange,
+  onActivate,
 }: {
   canvas: CanvasListItem;
   actions?: ReactNode;
@@ -222,6 +223,10 @@ export function CanvasRow({
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
+  /** Body click / Enter handler. When set (Your-canvases detail rail), focusing the
+   *  row runs this instead of navigating to the detail route; the title link still
+   *  navigates. Absent → the default whole-row click opens the detail route. */
+  onActivate?: () => void;
 }) {
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
@@ -231,7 +236,8 @@ export function CanvasRow({
   const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const navigate = useNavigate();
-  const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
+  const activate =
+    onActivate ?? (() => navigate({ to: "/canvases/$id", params: { id: canvas.id } }));
 
   return (
     // Keyboard access to the canvas is the focusable title <Link> below (and the
@@ -245,13 +251,13 @@ export function CanvasRow({
       }`}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        openDetails();
+        activate();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        openDetails();
+        activate();
       }}
     >
       <div className="flex items-center gap-3 sm:gap-4">
@@ -358,16 +364,21 @@ export function CanvasCard({
   selectable = false,
   selected = false,
   onSelectChange,
+  onActivate,
 }: {
   canvas: CanvasListItem;
   actions?: ReactNode;
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (next: boolean) => void;
+  /** Body click / Enter handler. See {@link CanvasRow} — focuses (sets the detail
+   *  rail) when set, navigates to the detail route otherwise. */
+  onActivate?: () => void;
 }) {
   const title = canvasTitle(canvas);
   const navigate = useNavigate();
-  const openDetails = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
+  const activate =
+    onActivate ?? (() => navigate({ to: "/canvases/$id", params: { id: canvas.id } }));
 
   return (
     <li
@@ -376,13 +387,13 @@ export function CanvasCard({
       }`}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
-        openDetails();
+        activate();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
-        openDetails();
+        activate();
       }}
     >
       <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">

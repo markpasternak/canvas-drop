@@ -79,6 +79,9 @@ interface RowSelectionProps {
   onSelectChange: (next: boolean) => void;
   /** Which presentation to render — the list row or the grid card. */
   view: CanvasView;
+  /** Focus this canvas in the detail rail (body click / Enter); distinct from the
+   *  multi-select checkbox above. */
+  onActivate: () => void;
 }
 
 const MENU_ICON_SIZE = 15;
@@ -91,6 +94,7 @@ function ActiveRow({
   selected,
   onSelectChange,
   view,
+  onActivate,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -127,6 +131,7 @@ function ActiveRow({
       selectable
       selected={selected}
       onSelectChange={onSelectChange}
+      onActivate={onActivate}
       actions={
         <>
           {deployed ? (
@@ -212,6 +217,7 @@ function ArchivedRow({
   selected,
   onSelectChange,
   view,
+  onActivate,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -237,6 +243,7 @@ function ArchivedRow({
       selectable
       selected={selected}
       onSelectChange={onSelectChange}
+      onActivate={onActivate}
       actions={
         <>
           <Button
@@ -575,10 +582,23 @@ export default function CanvasList() {
   function goToPage(next: number) {
     navigate({ to: "/", search: (prev) => ({ ...prev, page: next }) });
   }
+  // The detail-rail focus (plan rebrand P4): a single "focused" canvas in the URL
+  // (`?selected=<id>`), distinct from the multi-select checkbox set. Patch search,
+  // preserving view/scope/filters/page so a focus survives every other axis.
+  function setFocused(id: string) {
+    navigate({ to: "/", search: (prev) => ({ ...prev, selected: id }) });
+  }
 
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
   const summary = data?.summary ?? EMPTY_SUMMARY;
+  // The focused canvas for the detail rail (U3 consumes this). Validate against the
+  // visible page so a stale/unknown `?selected=` is simply ignored rather than
+  // pointing the rail at a canvas that isn't here.
+  const focusedId =
+    typeof search.selected === "string" && items.some((c) => c.id === search.selected)
+      ? search.selected
+      : undefined;
   const activeChipKeys = archivedView
     ? []
     : STATE_CHIPS.filter((chip) => search[chip.key] === true).map((chip) => chip.key);
@@ -611,7 +631,9 @@ export default function CanvasList() {
     !archivedView && Boolean(data) && items.length === 0 && total === 0 && !filtering;
 
   return (
-    <div className="space-y-6">
+    // The focused canvas (detail rail, U3) rides as a data attribute for now —
+    // state-only here; U3 renders the rail off `focusedId`.
+    <div className="space-y-6" data-selected-canvas={focusedId ?? undefined}>
       {/* The dominant create action lives once, in the top bar (available on every
           page). No duplicate here. */}
       <PageHeader
@@ -764,6 +786,7 @@ export default function CanvasList() {
                           view={view}
                           selected={selected.has(c.id)}
                           onSelectChange={(next) => toggleSelected(c.id, next)}
+                          onActivate={() => setFocused(c.id)}
                         />
                       ) : (
                         <ActiveRow
@@ -772,6 +795,7 @@ export default function CanvasList() {
                           view={view}
                           selected={selected.has(c.id)}
                           onSelectChange={(next) => toggleSelected(c.id, next)}
+                          onActivate={() => setFocused(c.id)}
                         />
                       ),
                     )}
@@ -794,6 +818,7 @@ export default function CanvasList() {
                           view={view}
                           selected={selected.has(c.id)}
                           onSelectChange={(next) => toggleSelected(c.id, next)}
+                          onActivate={() => setFocused(c.id)}
                         />
                       ) : (
                         <ActiveRow
@@ -802,6 +827,7 @@ export default function CanvasList() {
                           view={view}
                           selected={selected.has(c.id)}
                           onSelectChange={(next) => toggleSelected(c.id, next)}
+                          onActivate={() => setFocused(c.id)}
                         />
                       ),
                     )}
