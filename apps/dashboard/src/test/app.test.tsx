@@ -345,9 +345,10 @@ describe("dashboard app", () => {
     await waitFor(() => expect(menuLinks[0]).toHaveFocus());
 
     // Tab cycles within the menu: shift+Tab from the first focusable wraps to the
-    // LAST focusable in the menu. The menu footer adds a Docs anchor + theme
-    // buttons after the section links, so the last focusable is the trailing theme
-    // control — not the last section link. The trap stays inside the menu either way.
+    // LAST focusable in the menu. The menu footer adds a Docs anchor after the
+    // section links (theme now lives in the account menu, not here), so the last
+    // focusable is the trailing Docs link — not the last section link. The trap
+    // stays inside the menu either way.
     const menuFocusables = menuNav.querySelectorAll<HTMLElement>("a[href],button:not([disabled])");
     const lastFocusable = menuFocusables[menuFocusables.length - 1];
     await user.keyboard("{Shift>}{Tab}{/Shift}");

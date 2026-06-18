@@ -188,8 +188,8 @@ function publicCanvas(config: Config, cv: Canvas, globals: CapabilityGlobals, ha
   };
 }
 
-const CANVASES_PAGE_SIZE = 24;
-const CANVASES_MAX_LIMIT = 60;
+const CANVASES_PAGE_SIZE = 48;
+const CANVASES_MAX_LIMIT = 100;
 
 /** Coerce an optional query flag ("1"/"true" → true; absent/anything else → false). */
 const boolFlag = z

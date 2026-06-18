@@ -4,26 +4,21 @@ import {
   BookOpen,
   Compass,
   List,
-  Monitor,
-  MoonStars,
   Plus,
   ShieldCheck,
   SidebarSimple,
   SquaresFour,
-  Sun,
   X,
 } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
 import { CommandPalette } from "./components/CommandPalette.js";
-import { SegmentedControl } from "./components/SegmentedControl.js";
 import { ShortcutsHost } from "./components/Shortcuts.js";
 import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useNavCollapsed } from "./lib/nav-collapsed.js";
 import { useMe } from "./lib/queries.js";
-import { useTheme } from "./lib/theme.js";
 
 /** Section links shown in the left rail and the mobile menu. `exact` keeps
  *  "Canvases" from lighting on canvas detail pages; `adminOnly` is filtered by
@@ -43,24 +38,6 @@ const SECTION_LINKS: ReadonlyArray<{
   // (and the admin API independently 404s non-admins).
   { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
 ];
-
-function ThemeSwitch({ vertical }: { vertical?: boolean }) {
-  const { choice, setChoice } = useTheme();
-  return (
-    <SegmentedControl
-      aria-label="Theme"
-      iconOnly
-      vertical={vertical}
-      value={choice}
-      onChange={setChoice}
-      items={[
-        { value: "system", label: "Use system theme", title: "Theme: System", icon: Monitor },
-        { value: "light", label: "Use light theme", title: "Theme: Light", icon: Sun },
-        { value: "dark", label: "Use dark theme", title: "Theme: Dark", icon: MoonStars },
-      ]}
-    />
-  );
-}
 
 /** The teal logo tile from the preview's `.brand .mark`: a rounded accent-filled
  *  square with the white brand mark, paired with the "canvas-drop" wordmark. A
@@ -389,9 +366,11 @@ export function AppLayout() {
                 aria-label="Sections"
               >
                 {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
+                {/* Theme lives in the account menu (reachable from the mobile top
+                    bar), so the mobile menu footer carries only the Docs link — no
+                    duplicate theme control. */}
                 <div className="mt-2 flex items-center justify-between gap-2 border-border/70 border-t pt-3">
                   <DocsLink onSelect={() => setMenuOpen(false)} />
-                  <ThemeSwitch />
                 </div>
               </nav>
             </>

@@ -98,7 +98,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
         return true;
       });
-      const limit = Number(sp.get("limit") ?? 24);
+      const limit = Number(sp.get("limit") ?? 48);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
         canvases: matched.slice(offset, offset + limit),
@@ -453,15 +453,15 @@ describe("Your canvases — server-side filters (plan 005)", () => {
   });
 
   it("paginates: shows the page window and a working Next control", async () => {
-    // 25 canvases → page size 24 → page 1 shows 24, Next reveals the 25th.
-    const many = Array.from({ length: 25 }, (_, i) =>
+    // 49 canvases → page size 48 → page 1 shows 48, Next reveals the 49th.
+    const many = Array.from({ length: 49 }, (_, i) =>
       canvas({ id: `c${i}`, slug: `s${i}`, title: `Canvas ${String(i).padStart(2, "0")}` }),
     );
     stub(many);
     renderAt("/?sort=title");
-    expect(await screen.findAllByText("Showing 1–24 of 25")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 1–48 of 49")).toHaveLength(2);
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findAllByText("Showing 25–25 of 25")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 49–49 of 49")).toHaveLength(2);
   });
 });
