@@ -193,6 +193,9 @@ Start simple, scale by changing env — never code:
 - **Database → Postgres:** `CANVAS_DROP_DB=postgres` plus `CANVAS_DROP_DATABASE_URL`.
 - **Auth → IAP:** put a JWT-issuing identity-aware proxy in front and switch
   `CANVAS_DROP_AUTH_MODE=proxy`.
+- **A CDN in front:** see [Behind a CDN](/docs/self-hosting/cdn) — set the trusted-proxy
+  IPs and client-IP header so rate-limiting/audit stay per-user, add a cache rule that
+  bypasses on the session cookie, and review the public edge-cache TTL.
 
 ## Backups
 

@@ -587,6 +587,43 @@ describe("managementRoutes", () => {
     expect(cleared.hasPassword).toBe(false);
   });
 
+  it("settings: restricting a public_link canvas returns a CDN edge-cache warning", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false, canPublishPublic: true });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    // Make it anonymously public, then restrict it back to private.
+    await app.request(`/api/canvases/${created.id}/settings`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ access: "public_link" }),
+    });
+    const restricted = await jsonOf<{ warning?: string }>(
+      await app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ access: "private" }),
+      }),
+    );
+    expect(restricted.warning).toMatch(/CDN/);
+
+    // A non-downgrade edit carries no warning.
+    const renamed = await jsonOf<{ warning?: string }>(
+      await app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ title: "Renamed" }),
+      }),
+    );
+    expect(renamed.warning).toBeUndefined();
+  });
+
   it("regenerate-slug changes the slug and the old no longer resolves; regenerate-key rotates", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

@@ -488,11 +488,13 @@ export function managementRoutes(deps: ManagementDeps) {
     // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
     const resolution = resolveSettingsUpdate(cv, body.data, {
       canPublishPublic: c.get("user").canPublishPublic,
+      publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
+      now: Date.now(),
     });
     if (!resolution.ok) {
       return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
     }
-    const { patch, password, targetAccess } = resolution;
+    const { patch, password, targetAccess, warning } = resolution;
 
     let updated = cv;
     if (Object.keys(patch).length > 0) {
@@ -533,7 +535,8 @@ export function managementRoutes(deps: ManagementDeps) {
       await deps.hub.revalidateCanvas(cv.id).catch(() => {});
       if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
     }
-    return c.json(await canvasView(updated));
+    const view = await canvasView(updated);
+    return c.json(warning ? { ...view, warning } : view);
   });
 
   // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------

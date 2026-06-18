@@ -11,22 +11,33 @@ import { ipAllowed } from "../auth/proxy.js";
  *   - the **real client** (this function) — the human behind the proxy. Wanted
  *     for per-user login throttling and audit-log accuracy.
  *
- * `X-Forwarded-For` is consulted ONLY when the immediate hop is a configured
- * trusted proxy (`CANVAS_DROP_TRUSTED_PROXY_IPS`). Otherwise the peer IS the
- * client (or an untrusted hop we won't look behind), so we return it verbatim —
- * an untrusted caller cannot inject a fake client IP via XFF. Even in the trusted
- * case this value only keys a rate-limit bucket / audit row (never an auth
- * decision), so a worst-case wrong value mis-buckets a limit — it cannot bypass
- * auth (that lives on `peerIp` in proxy.ts).
+ * A forwarded client IP — the configured CDN header (`CANVAS_DROP_CLIENT_IP_HEADER`,
+ * e.g. `True-Client-IP`) if set, else `X-Forwarded-For` — is consulted ONLY when the
+ * immediate hop is a configured trusted proxy (`CANVAS_DROP_TRUSTED_PROXY_IPS`).
+ * Otherwise the peer IS the client (or an untrusted hop we won't look behind), so we
+ * return it verbatim — an untrusted caller cannot inject a fake client IP. Even in the
+ * trusted case this value only keys a rate-limit bucket / audit row (never an auth
+ * decision), so a worst-case wrong value mis-buckets a limit — it cannot bypass auth
+ * (that lives on `peerIp` in proxy.ts).
+ *
+ * `cdnClientIp` is the already-read value of the configured single-IP CDN header. When
+ * present (and the peer is trusted) it wins over XFF — a CDN that sets a dedicated
+ * real-client header is the most direct source. It is a single address, so no list walk.
  */
 export function resolveClientIp(
   peerIp: string | undefined,
   xffHeader: string | undefined,
   trustedProxyIps: readonly string[],
+  cdnClientIp?: string | undefined,
 ): string | undefined {
   if (!peerIp) return undefined;
-  // Untrusted peer (or no trust list): the peer is the client; ignore any XFF.
+  // Untrusted peer (or no trust list): the peer is the client; ignore any forwarded
+  // header — a CDN header from an untrusted hop is as forgeable as XFF.
   if (trustedProxyIps.length === 0 || !ipAllowed(peerIp, trustedProxyIps)) return peerIp;
+  // Trusted peer: a dedicated CDN client-IP header (single address) is the most direct
+  // real-client source, so prefer it over the XFF hop walk when configured + present.
+  const cdn = cdnClientIp?.trim();
+  if (cdn) return cdn;
   if (!xffHeader) return peerIp;
   // XFF is "client, proxy1, proxy2, …" — each hop appends the address it saw, so
   // the rightmost entries are the closest (most trustworthy) proxies. Walk

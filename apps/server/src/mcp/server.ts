@@ -729,7 +729,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
         "preconditions (sharing/listing need a published canvas; public_link needs an admin grant; a " +
         "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
-        "grant_access / revoke_access.",
+        "grant_access / revoke_access. When restricting a previously-public canvas, the response may " +
+        "include a `warning` string (a plain-language CDN edge-cache staleness notice) — surface it to " +
+        "the user.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         title: z.string().max(200).optional(),
@@ -769,9 +771,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const user = await deps.users.findById(caller.userId);
       const resolution = resolveSettingsUpdate(cv, input, {
         canPublishPublic: user?.canPublishPublic ?? false,
+        publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
+        now: Date.now(),
       });
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
-      const { patch, password, targetAccess } = resolution;
+      const { patch, password, targetAccess, warning } = resolution;
 
       let updated = cv;
       if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
@@ -808,7 +812,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub.revalidateCanvas(cv.id).catch(() => {});
         if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
       }
-      return ok(canvasView(deps.config, updated));
+      const view = canvasView(deps.config, updated);
+      return ok(warning ? { ...view, warning } : view);
     },
   );
 

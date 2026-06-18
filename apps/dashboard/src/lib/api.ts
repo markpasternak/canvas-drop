@@ -768,8 +768,14 @@ export const api = {
   deployPaste: (id: string, html: string) =>
     request<DeployResult>(`/api/canvases/${id}/deploy/paste`, jsonBody({ html })),
 
+  // The server may attach an ephemeral `warning` (e.g. a CDN edge-cache staleness
+  // advisory on an access downgrade). It is NOT part of the Canvas entity — never
+  // store it in the cache — so it is widened only on this return type, not on `Canvas`.
   updateSettings: (id: string, patch: CanvasSettings) =>
-    request<Canvas>(`/api/canvases/${id}/settings`, { ...jsonBody(patch), method: "PATCH" }),
+    request<Canvas & { warning?: string }>(`/api/canvases/${id}/settings`, {
+      ...jsonBody(patch),
+      method: "PATCH",
+    }),
 
   // Custom preview image (plan 004). Uploading sets previewMode="custom" — the image is
   // used as the cover and is NOT overwritten by screenshots on publish. Clearing reverts

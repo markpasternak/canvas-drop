@@ -4,13 +4,14 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { canvasCacheControl, effectiveEdgeTtlSec } from "../http/cdn-cache.js";
 import { errorResponse } from "../http/error-pages.js";
 import { baseSecurityHeaders } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { assetPathFor, resolveAsset } from "./asset-resolver.js";
-import { principalAttributionId } from "./authorization.js";
+import { isAnonymouslyPublic, principalAttributionId } from "./authorization.js";
 import { mimeFor } from "./mime.js";
 import { blobKey } from "./storage-keys.js";
 
@@ -54,6 +55,26 @@ export function serveCanvas(deps: ServeDeps) {
     const entry = manifest[resolved.path] as ManifestEntry;
     const etag = `"${entry.hash}"`;
     const { contentType } = mimeFor(resolved.path);
+    // Only `public_link` with no password gate AND an unexpired share — the single
+    // state an anonymous request can reach — may be cached by a shared CDN; every
+    // other rung stays `private` (§12.2). The s-maxage is clamped to the share expiry
+    // so a CDN can never keep serving a public canvas past the moment it locks down.
+    const now = Date.now();
+    const anonymouslyPublic = isAnonymouslyPublic(
+      canvas.access,
+      canvas.passwordHash !== null,
+      canvas.sharedExpiresAt,
+      now,
+    );
+    const cacheControl = canvasCacheControl({
+      contentHashed: CONTENT_HASH_RE.test(resolved.path),
+      anonymouslyPublic,
+      edgeTtlSec: effectiveEdgeTtlSec(
+        deps.config.serving.publicEdgeCacheTtlSec,
+        canvas.sharedExpiresAt,
+        now,
+      ),
+    });
 
     // Record a view on the initial HTML-document load of a session (D24, §6.9.6).
     // HTML docs only (sub-assets like js/css/img never count); deduped per viewer
@@ -63,8 +84,12 @@ export function serveCanvas(deps: ServeDeps) {
     recordView(c, deps, canvas, contentType);
 
     // Conditional GET → 304 (revalidation is cheap; the ETag is the content hash).
-    if (c.req.header("if-none-match") === etag) {
-      const headers = new Headers(cacheHeaders(resolved.path, etag));
+    // Match weak-ETag-tolerantly: a CDN/proxy in front may downgrade our strong
+    // validator to `W/"…"` when it compresses the response, and would then send the
+    // weak form back in If-None-Match. A strict `===` would miss it and force a full
+    // 200 — the opposite of what a CDN is for. ifNoneMatchHits normalizes both sides.
+    if (ifNoneMatchHits(c.req.header("if-none-match"), etag)) {
+      const headers = new Headers({ ETag: etag, "Cache-Control": cacheControl });
       securityHeaders(headers);
       return new Response(null, { status: 304, headers });
     }
@@ -72,7 +97,7 @@ export function serveCanvas(deps: ServeDeps) {
     const bytes = await deps.storage.get(blobKey(canvas.id, entry.hash));
     if (!bytes) return notFound(c, "missing");
 
-    const headers = new Headers(cacheHeaders(resolved.path, etag));
+    const headers = new Headers({ ETag: etag, "Cache-Control": cacheControl });
     headers.set("Content-Type", contentType);
     securityHeaders(headers);
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view.
@@ -111,13 +136,22 @@ function recordView(
     });
 }
 
-function cacheHeaders(path: string, etag: string): Record<string, string> {
-  // Content-hashed filenames are immutable; everything else revalidates (instant
-  // redeploys via the pointer swap). The ETag makes revalidation a cheap 304.
-  const cacheControl = CONTENT_HASH_RE.test(path)
-    ? "public, max-age=31536000, immutable"
-    : "no-cache";
-  return { ETag: etag, "Cache-Control": cacheControl };
+/**
+ * True when an `If-None-Match` request header validates against our (strong) ETag.
+ * Tolerates a weak (`W/"…"`) validator and a comma-separated list, both of which an
+ * intermediary CDN may produce, by comparing on the opaque-tag value alone. (We never
+ * serve `*`, and a strong/weak distinction is irrelevant for a content-hash ETag, so a
+ * value match is a content match.)
+ */
+function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
+  if (!header) return false;
+  const want = etagValue(etag);
+  return header.split(",").some((candidate) => etagValue(candidate) === want);
+}
+
+/** Strip an optional `W/` weakness marker and surrounding whitespace from an ETag. */
+function etagValue(raw: string): string {
+  return raw.trim().replace(/^W\//, "");
 }
 
 function securityHeaders(headers: Headers): void {
