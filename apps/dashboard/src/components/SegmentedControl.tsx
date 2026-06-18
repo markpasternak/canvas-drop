@@ -28,6 +28,11 @@ export interface SegmentedControlProps<V extends string> {
    * only). Items without an `icon` still show their text label. Defaults to false.
    */
   iconOnly?: boolean;
+  /**
+   * Stack the options vertically instead of in a horizontal track. Pairs with
+   * `iconOnly` for narrow contexts (e.g. the collapsed left rail). Defaults to false.
+   */
+  vertical?: boolean;
   size?: Size;
   className?: string;
 }
@@ -48,6 +53,7 @@ export function SegmentedControl<V extends string>({
   onChange,
   "aria-label": ariaLabel,
   iconOnly = false,
+  vertical = false,
   size = "md",
   className,
 }: SegmentedControlProps<V>) {
@@ -57,8 +63,10 @@ export function SegmentedControl<V extends string>({
       role="group"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center rounded-lg border border-border bg-surface-sunken p-0.5",
-        size === "sm" ? "h-8" : size === "lg" ? "h-10" : "h-9",
+        "inline-flex rounded-lg border border-border bg-surface-sunken p-0.5",
+        vertical ? "flex-col" : "items-center",
+        // The vertical stack sizes to its content; the horizontal track is a fixed-height bar.
+        !vertical && (size === "sm" ? "h-8" : size === "lg" ? "h-10" : "h-9"),
         className,
       )}
     >
@@ -76,7 +84,8 @@ export function SegmentedControl<V extends string>({
             disabled={item.disabled}
             onClick={() => onChange(item.value)}
             className={cn(
-              "inline-flex h-full items-center justify-center gap-1.5 rounded-md font-medium transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40",
+              vertical ? "h-8 w-full" : "h-full",
               iconOnly ? "px-2.5" : "px-3",
               size === "sm" ? "text-xs" : "text-sm",
               active

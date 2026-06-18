@@ -21,7 +21,7 @@ function renderApp(initialPath: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
-  render(
+  return render(
     <ThemeProvider>
       <QueryClientProvider client={qc}>
         <ToastProvider>
@@ -50,6 +50,12 @@ function renderTestRouter(router: unknown) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // The rail collapse choice persists in localStorage; clear it so tests don't bleed.
+  try {
+    localStorage.removeItem("canvas-drop-nav-collapsed");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
 });
 
 describe("dashboard app", () => {
@@ -322,6 +328,64 @@ describe("dashboard app", () => {
     expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
     const reopened = screen.getByRole("button", { name: "Open menu" });
     expect(reopened).toHaveFocus();
+  });
+
+  it("left rail: the collapse toggle collapses/expands the rail and flips its aria state", async () => {
+    stubFetch(false);
+    renderApp("/");
+    await screen.findByRole("link", { name: "Gallery" });
+    const user = userEvent.setup();
+
+    // Expanded by default: the wordmark + nav labels are visible, toggle reads
+    // "Collapse sidebar" with aria-expanded=true.
+    const toggle = screen.getByRole("button", { name: "Collapse sidebar" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const [railNav] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!railNav) throw new Error("expected the rail Sections nav");
+    // The visible label text is present while expanded.
+    expect(within(railNav).getByText("Gallery")).toBeInTheDocument();
+
+    // Collapse it.
+    await user.click(toggle);
+    const expandToggle = screen.getByRole("button", { name: "Expand sidebar" });
+    expect(expandToggle).toHaveAttribute("aria-expanded", "false");
+    // Collapsed: the wordmark text is gone (the home link keeps its aria-label),
+    // and the nav label text is gone — but the icon link keeps its accessible name.
+    const [collapsedRail] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!collapsedRail) throw new Error("expected the collapsed rail Sections nav");
+    expect(within(collapsedRail).queryByText("Gallery")).toBeNull();
+    // Accessible name survives via aria-label even though the visible text is gone.
+    expect(within(collapsedRail).getByRole("link", { name: "Gallery" })).toBeInTheDocument();
+    // The rail brand no longer renders the "canvas-drop" wordmark text (only the
+    // mobile top bar copy remains).
+    expect(screen.getAllByText("canvas-drop")).toHaveLength(1);
+
+    // Expand again restores the labels.
+    await user.click(expandToggle);
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
+    const [reRail] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!reRail) throw new Error("expected the re-expanded rail Sections nav");
+    expect(within(reRail).getByText("Gallery")).toBeInTheDocument();
+  });
+
+  it("left rail: the collapse choice persists in localStorage and is read on next mount", async () => {
+    stubFetch(false);
+    // First mount: collapse the rail, which should write the persistence key.
+    const first = renderApp("/");
+    await screen.findByRole("link", { name: "Gallery" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(localStorage.getItem("canvas-drop-nav-collapsed")).toBe("1");
+    first.unmount();
+
+    // Second mount reads the stored choice and starts collapsed.
+    renderApp("/");
+    await screen.findByRole("link", { name: "Gallery" });
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("detail lives under /canvases/:id (NOT /c/:id, which is canvas content in path mode)", async () => {

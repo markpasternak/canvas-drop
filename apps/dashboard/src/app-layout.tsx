@@ -7,6 +7,7 @@ import {
   MoonStars,
   Plus,
   ShieldCheck,
+  SidebarSimple,
   SquaresFour,
   Sun,
   X,
@@ -19,6 +20,7 @@ import { SegmentedControl } from "./components/SegmentedControl.js";
 import { ShortcutsHost } from "./components/Shortcuts.js";
 import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
+import { useNavCollapsed } from "./lib/nav-collapsed.js";
 import { useMe } from "./lib/queries.js";
 import { useTheme } from "./lib/theme.js";
 
@@ -41,12 +43,13 @@ const SECTION_LINKS: ReadonlyArray<{
   { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
 ];
 
-function ThemeSwitch() {
+function ThemeSwitch({ vertical }: { vertical?: boolean }) {
   const { choice, setChoice } = useTheme();
   return (
     <SegmentedControl
       aria-label="Theme"
       iconOnly
+      vertical={vertical}
       value={choice}
       onChange={setChoice}
       items={[
@@ -61,17 +64,23 @@ function ThemeSwitch() {
 /** The teal logo tile from the preview's `.brand .mark`: a rounded accent-filled
  *  square with the white brand mark, paired with the "canvas-drop" wordmark. A
  *  link home; org-agnostic and re-skinnable. */
-function Brand() {
+function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
     <Link
       to="/"
       aria-label="canvas-drop home"
-      className="group flex min-w-0 items-center gap-2.5 text-fg"
+      title={collapsed ? "canvas-drop" : undefined}
+      className={cn(
+        "group flex min-w-0 items-center gap-2.5 text-fg",
+        collapsed && "justify-center",
+      )}
     >
       <span className="grid size-9 shrink-0 place-items-center rounded-[0.625rem] bg-accent shadow-[var(--shadow-ctrl,0_1px_2px_hsl(var(--shadow-color)/0.12))] [--logo-frame:var(--accent-fg)] [--logo-drop:var(--accent-fg)]">
         <BrandMark className="size-5" />
       </span>
-      <span className="truncate text-[0.9375rem] font-semibold tracking-tight">canvas-drop</span>
+      {!collapsed && (
+        <span className="truncate text-[0.9375rem] font-semibold tracking-tight">canvas-drop</span>
+      )}
     </Link>
   );
 }
@@ -82,10 +91,13 @@ function CreateCanvasButton({
   onSelect,
   className,
   compact,
+  collapsed,
 }: {
   onSelect?: () => void;
   className?: string;
   compact?: boolean;
+  /** Rail-collapsed: render icon-only, keeping the accessible name via aria-label/title. */
+  collapsed?: boolean;
 }) {
   return (
     <Link
@@ -94,20 +106,31 @@ function CreateCanvasButton({
       title="Create canvas"
       onClick={onSelect}
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3.5 text-[0.8125rem] font-semibold text-accent-fg",
+        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent text-[0.8125rem] font-semibold text-accent-fg",
+        collapsed ? "px-0" : "px-3.5",
         "shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px",
         className,
       )}
     >
       <Plus size={16} weight="bold" aria-hidden />
-      <span>Create{compact ? <span className="hidden sm:inline"> canvas</span> : " canvas"}</span>
+      {!collapsed && (
+        <span>Create{compact ? <span className="hidden sm:inline"> canvas</span> : " canvas"}</span>
+      )}
     </Link>
   );
 }
 
 /** Docs anchor. Docs are server-rendered at /docs (outside the SPA), so this is a
  *  plain anchor, NOT a TanStack <Link>. */
-function DocsLink({ onSelect, className }: { onSelect?: () => void; className?: string }) {
+function DocsLink({
+  onSelect,
+  className,
+  collapsed,
+}: {
+  onSelect?: () => void;
+  className?: string;
+  collapsed?: boolean;
+}) {
   return (
     <a
       href="/docs"
@@ -115,12 +138,13 @@ function DocsLink({ onSelect, className }: { onSelect?: () => void; className?: 
       title="Documentation"
       onClick={onSelect}
       className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg",
+        "inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg",
+        collapsed ? "w-9 justify-center px-0" : "px-3",
         className,
       )}
     >
       <BookOpen size={16} weight="regular" aria-hidden />
-      <span>Docs</span>
+      {!collapsed && <span>Docs</span>}
     </a>
   );
 }
@@ -134,6 +158,8 @@ export function AppLayout() {
   // isAdmin is server-resolved (/api/me). Hiding the link is UX only — the admin
   // API independently 404s non-admins, so this is not a security boundary.
   const me = useMe();
+  // lg+ rail collapse state, persisted in localStorage (default = expanded).
+  const { collapsed, toggle: toggleCollapsed } = useNavCollapsed();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -194,9 +220,14 @@ export function AppLayout() {
   const navLinkClass =
     "flex items-center gap-2.5 rounded-md px-3 py-2 text-[0.875rem] font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-fg aria-[current=page]:bg-accent-subtle aria-[current=page]:text-accent";
   // One renderer for both navs so a future Link-prop change can't be applied to
-  // only one copy. `onSelect` is the sole difference (the mobile menu closes on
-  // tap); the rail passes none.
-  const renderLink = (l: (typeof SECTION_LINKS)[number], onSelect?: () => void) => {
+  // only one copy. `onSelect` is the mobile-menu close-on-tap; `isCollapsed`
+  // (rail only) drops the visible label to an icon-only item that keeps its
+  // accessible name via aria-label/title.
+  const renderLink = (
+    l: (typeof SECTION_LINKS)[number],
+    onSelect?: () => void,
+    isCollapsed?: boolean,
+  ) => {
     const Ic = l.icon;
     return (
       <Link
@@ -204,42 +235,74 @@ export function AppLayout() {
         to={l.to}
         activeOptions={l.exact ? { exact: true } : undefined}
         onClick={onSelect}
-        className={navLinkClass}
+        aria-label={isCollapsed ? l.label : undefined}
+        title={isCollapsed ? l.label : undefined}
+        className={cn(navLinkClass, isCollapsed && "justify-center px-0")}
         activeProps={{ "aria-current": "page" }}
       >
         <Ic size={17} weight="regular" aria-hidden className="shrink-0" />
-        <span className="truncate">{l.label}</span>
+        {!isCollapsed && <span className="truncate">{l.label}</span>}
       </Link>
     );
   };
 
   return (
-    <div className="min-h-dvh bg-canvas lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+    <div
+      className={cn(
+        "min-h-dvh bg-canvas lg:grid",
+        // The rail column width follows the collapse state so the content area
+        // reflows. The width transition is reduced-motion-safe — base.css zeroes
+        // transition-duration under prefers-reduced-motion.
+        "transition-[grid-template-columns] duration-200 [transition-timing-function:var(--ease-out)]",
+        collapsed ? "lg:grid-cols-[4rem_minmax(0,1fr)]" : "lg:grid-cols-[15rem_minmax(0,1fr)]",
+      )}
+    >
       {/* Command palette (⌘K) — mounted once app-wide; owns its own open shortcut. */}
       <CommandPalette />
       {/* Keyboard-shortcut cheatsheet (?) — mounted once; owns its "?" shortcut. */}
       <ShortcutsHost />
 
-      {/* ── Left navigation rail (lg+): fixed ~240px. Brand tile + create at the
-          top, the vertical section nav in the middle, the account + docs + theme
-          pinned at the bottom. ─────────────────────────────────────────────── */}
+      {/* ── Left navigation rail (lg+): fixed ~240px expanded, ~4rem collapsed.
+          Brand tile + collapse toggle + create at the top, the vertical section
+          nav in the middle, the account + docs + theme pinned at the bottom.
+          When collapsed every item is icon-only but keeps its accessible name. ── */}
       <aside
-        className="sticky top-0 hidden h-dvh flex-col gap-5 border-border/80 border-r bg-surface px-3.5 py-4 lg:flex"
+        className={cn(
+          "sticky top-0 hidden h-dvh flex-col gap-5 border-border/80 border-r bg-surface py-4 lg:flex",
+          collapsed ? "px-2" : "px-3.5",
+        )}
         aria-label="Sidebar"
       >
-        <div className="px-1">
-          <Brand />
+        <div
+          className={cn("flex items-center gap-1", collapsed ? "flex-col" : "justify-between pl-1")}
+        >
+          <Brand collapsed={collapsed} />
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-surface-hover hover:text-fg"
+          >
+            <SidebarSimple size={18} weight="regular" aria-hidden />
+          </button>
         </div>
-        <CreateCanvasButton />
+        <CreateCanvasButton collapsed={collapsed} />
         {/* Primary section nav: the first "Sections" landmark in the shell. */}
         <nav className="flex flex-col gap-0.5" aria-label="Sections">
-          {links.map((l) => renderLink(l))}
+          {links.map((l) => renderLink(l, undefined, collapsed))}
         </nav>
         {/* Footer: docs + theme + account, pinned to the bottom of the rail. */}
         <div className="mt-auto flex flex-col gap-3 border-border/70 border-t pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <DocsLink />
-            <ThemeSwitch />
+          <div
+            className={cn(
+              "flex gap-2",
+              collapsed ? "flex-col items-center" : "items-center justify-between",
+            )}
+          >
+            <DocsLink collapsed={collapsed} />
+            <ThemeSwitch vertical={collapsed} />
           </div>
           {me.data && <UserMenu me={me.data} />}
         </div>
