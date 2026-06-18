@@ -3,6 +3,7 @@ import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { isUniqueViolation, SLUG_UNIQUE } from "../unique-violation.js";
 import { canvasesRepository, type OwnerListOptions } from "./canvases.js";
+import { usageEventsRepository } from "./usage-events.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
 
@@ -660,6 +661,49 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
         await repo.listByOwnerFiltered({ ownerId: me, sort: "created", limit: 50, offset: 0 })
       ).items.map((cv) => cv.id),
     ).toEqual([c.id, b.id, a.id]);
+  });
+
+  it("listByOwnerFiltered sorts by popular (recent views) over the window, with stable tiebreak (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const hot = await repo.create({ ownerId: me, slug: "hot", apiKeyHash: "k-hot" });
+    const warm = await repo.create({ ownerId: me, slug: "warm", apiKeyHash: "k-warm" });
+    const cold = await repo.create({ ownerId: me, slug: "cold", apiKeyHash: "k-cold" });
+
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    const since = t0 - win; // window floor for the assertions below
+    // hot: 2 recent views. warm: 1 recent + 1 OLD (out-of-window). cold: 0 recent.
+    const viewerB = await seedOwner(client, "b");
+    await usage.recordView({ canvasId: hot.id, userId: me, windowMs: win, now: t0 });
+    await usage.recordView({ canvasId: hot.id, userId: viewerB, windowMs: win, now: t0 + 1_000 });
+    await usage.recordView({ canvasId: warm.id, userId: me, windowMs: win, now: t0 });
+    await usage.recordView({ canvasId: warm.id, userId: me, windowMs: win, now: since - 10 * win });
+
+    const ranked = (
+      await repo.listByOwnerFiltered({
+        ownerId: me,
+        sort: "popular",
+        popularSinceMs: since,
+        limit: 50,
+        offset: 0,
+      })
+    ).items.map((c) => c.id);
+    // hot (2) > warm (1) > cold (0). The out-of-window warm view does not count.
+    expect(ranked).toEqual([hot.id, warm.id, cold.id]);
+
+    // Pagination over the ranked set is stable; total is the full filtered count.
+    const page = await repo.listByOwnerFiltered({
+      ownerId: me,
+      sort: "popular",
+      popularSinceMs: since,
+      limit: 1,
+      offset: 1,
+    });
+    expect(page.items.map((c) => c.id)).toEqual([warm.id]);
+    expect(page.total).toBe(3);
   });
 
   it("listByOwnerFiltered windows with limit/offset while total reflects the full filtered count", async () => {

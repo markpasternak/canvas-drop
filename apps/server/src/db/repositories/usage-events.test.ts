@@ -98,6 +98,69 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
     expect((await repo.countByType(canvasId, null)).view).toBe(2);
   });
 
+  it("a counted view bumps the canvas view rollups; a deduped refresh does not (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const repo = usageEventsRepository(client);
+    const canvases = canvasesRepository(client);
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 })).toBe(true);
+    let cv = await canvases.findById(canvasId);
+    expect(cv?.viewCount).toBe(1);
+    expect(cv?.lastViewedAt).toBe(t0);
+
+    // Refresh inside the window → no new event, so the rollups must NOT move.
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 30_000 })).toBe(
+      false,
+    );
+    cv = await canvases.findById(canvasId);
+    expect(cv?.viewCount).toBe(1);
+    expect(cv?.lastViewedAt).toBe(t0);
+
+    // A new session → bump again, last-viewed advances.
+    expect(await repo.recordView({ canvasId, userId, windowMs: win, now: t0 + 90_000 })).toBe(true);
+    cv = await canvases.findById(canvasId);
+    expect(cv?.viewCount).toBe(2);
+    expect(cv?.lastViewedAt).toBe(t0 + 90_000);
+  });
+
+  it("recentViewCounts groups view counts per canvas within the window (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const other = await canvasesRepository(client).create({
+      ownerId: userId,
+      slug: "other",
+      apiKeyHash: "h2",
+    });
+    const viewerB = await usersRepository(client).upsert({
+      providerSub: "b",
+      email: "b@example.com",
+      name: "B",
+      isAdmin: false,
+    });
+    const repo = usageEventsRepository(client);
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    // canvasId: 1 old view out-of-window (A), then 2 in-window (A new session, B).
+    await repo.recordView({ canvasId, userId, windowMs: win, now: t0 - 2 * win });
+    await repo.recordView({ canvasId, userId, windowMs: win, now: t0 });
+    await repo.recordView({ canvasId, userId: viewerB.id, windowMs: win, now: t0 + win });
+    // other: 1 view in-window.
+    await repo.recordView({ canvasId: other.id, userId, windowMs: win, now: t0 });
+    // Noise that must not count as a view.
+    await repo.record({ canvasId, userId, type: "kv_op" });
+
+    // since just below t0 excludes the t0-2*win view, capturing only the two recent ones.
+    const counts = await repo.recentViewCounts([canvasId, other.id], t0 - 1);
+    expect(counts.get(canvasId)).toBe(2);
+    expect(counts.get(other.id)).toBe(1);
+    // Empty input → no query, empty map. Unknown ids are simply absent.
+    expect((await repo.recentViewCounts([], t0 - 1)).size).toBe(0);
+    expect((await repo.recentViewCounts(["nope"], t0 - 1)).has("nope")).toBe(false);
+  });
+
   it("viewStats returns total, unique viewers, and last-viewed; excludes non-view types", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

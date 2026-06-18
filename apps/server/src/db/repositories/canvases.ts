@@ -16,6 +16,7 @@ import {
   eq,
   exists,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -142,12 +143,16 @@ export interface GalleryFacets {
 }
 
 /**
- * Your-canvases sort axes (plan 005). `updated` is the default (most-recently
- * changed first); `created` is newest-first by creation; `title` is
- * case-insensitive A–Z. An unknown value falls back to `updated` at the route, so
- * the repo only ever receives one of these three.
+ * Your-canvases sort axes (plan 005; `popular` added plan 004 popularity).
+ * `updated` is the default (most-recently changed first); `created` is newest-first
+ * by creation; `title` is case-insensitive A–Z; `popular` ranks by trending views
+ * over a recent window (see {@link OwnerListOptions.popularSinceMs}). An unknown
+ * value falls back to `updated` at the route, so the repo only ever receives one of these.
  */
-export type CanvasesSort = "updated" | "created" | "title";
+export type CanvasesSort = "updated" | "created" | "title" | "popular";
+
+/** Default trending window for the `popular` sort when the caller passes none (30d). */
+export const POPULAR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Options for the owner's own filtered/sorted/paginated list (plan 005). Every
@@ -169,6 +174,9 @@ export interface OwnerListOptions {
   /** Scope to the owner's ARCHIVED canvases instead of the active set (default). */
   archived?: boolean;
   sort?: CanvasesSort;
+  /** Lower bound (epoch ms) for the `popular` sort's trending window; ignored by
+   *  every other sort. Defaults to now − {@link POPULAR_WINDOW_MS} when omitted. */
+  popularSinceMs?: number;
   limit: number;
   offset: number;
 }
@@ -333,6 +341,59 @@ export function canvasesRepository(client: DbClient) {
       if (opts.neverDeployed) filters.push(isNull(t.currentVersionId));
 
       const where = and(...filters);
+
+      // Trending sort (plan 004): rank the WHOLE filtered owner set by recent views,
+      // then paginate. Kept off the default path on purpose — only this opt-in sort
+      // pays the usage aggregate. Two bounded queries (filtered ids, then one grouped
+      // count over the recent window riding `usage_events(canvasId, createdAt)`), the
+      // ranking + slice in JS, then a hydrate of just the page. At single-org scale the
+      // owner's id set is small and the window is 90-day-pruned, so this stays cheap.
+      if (opts.sort === "popular") {
+        const sinceMs = opts.popularSinceMs ?? Date.now() - POPULAR_WINDOW_MS;
+        const idRows = (await db
+          .select({ id: t.id, updatedAt: t.updatedAt })
+          .from(t)
+          .where(where)) as Array<{ id: string; updatedAt: number }>;
+        const total = idRows.length;
+        if (total === 0) return { items: [], total: 0 };
+
+        const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+        const countRows = (await db
+          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
+          .from(ue)
+          .where(
+            and(
+              eq(ue.type, "view"),
+              gte(ue.createdAt, sinceMs),
+              inArray(
+                ue.canvasId,
+                idRows.map((r) => r.id),
+              ),
+            ),
+          )
+          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
+        const views = new Map(countRows.map((r) => [r.canvasId, Number(r.c)]));
+
+        // (recent views desc, updatedAt desc, id desc) — same id tiebreak as the SQL
+        // sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
+        const pageIds = idRows
+          .map((r) => ({ id: r.id, updatedAt: Number(r.updatedAt), v: views.get(r.id) ?? 0 }))
+          .sort((a, b) => b.v - a.v || b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1))
+          .slice(opts.offset, opts.offset + opts.limit)
+          .map((r) => r.id);
+        if (pageIds.length === 0) return { items: [], total };
+
+        const byId = new Map(
+          ((await db.select().from(t).where(inArray(t.id, pageIds))) as Canvas[]).map((cv) => [
+            cv.id,
+            cv,
+          ]),
+        );
+        const items = pageIds
+          .map((id) => byId.get(id))
+          .filter((cv): cv is Canvas => cv !== undefined);
+        return { items, total };
+      }
 
       // Default is most-recently-updated; `created` and `title` are alternatives.
       // Every axis keeps an `id` tiebreak (uuidv7 monotonic) so pages don't shuffle
