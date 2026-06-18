@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an idea or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        canvas-drop is deliberately small — a fixed set of primitives (KV, files, AI, identity, realtime), static-first and org-agnostic (see [BUILD_BRIEF.md](https://github.com/markpasternak/canvas-drop/blob/main/BUILD_BRIEF.md)). It "gets very good at saying no." The most useful requests describe a real problem and make the case for why it belongs in the core rather than in a canvas.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that's hard or impossible today? Describe the use case, not just the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see. Rough is fine.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Anything you've tried or thought about — including doing it inside a canvas.
+
+  - type: textarea
+    id: fit
+    attributes:
+      label: Fit with the product
+      description: Why does this belong in the core (a primitive, the dashboard, the deploy/MCP surface) rather than in a canvas an author writes?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
