@@ -40,6 +40,8 @@ const CANVAS: Canvas = {
   publicationState: "draft",
   disabledReason: null,
   currentVersionId: null,
+  viewCount: 0,
+  lastViewedAt: null,
   createdAt: 0,
   updatedAt: 0,
 };

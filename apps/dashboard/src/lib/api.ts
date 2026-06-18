@@ -110,6 +110,10 @@ export interface Canvas {
   /** Admin takedown reason (§6.10.2) — owner-only surface; null unless disabled. */
   disabledReason: string | null;
   currentVersionId: string | null;
+  /** All-time deduped view count (plan 004), denormalized for O(1) reads. */
+  viewCount: number;
+  /** Last counted-view timestamp (plan 004), or null if never viewed. */
+  lastViewedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -121,7 +125,12 @@ export interface LastDeploy {
   totalBytes: number;
 }
 
-export type CanvasListItem = Canvas & { lastDeploy: LastDeploy | null };
+export type CanvasListItem = Canvas & {
+  lastDeploy: LastDeploy | null;
+  /** Trending views over the recent window (plan 004) — drives the per-row number and
+   *  the `popular` sort order. Always present on the list (0 when none in-window). */
+  recentViews: number;
+};
 
 export interface CanvasOwnerSummary {
   active: number;
@@ -279,8 +288,9 @@ export interface CanvasesPage {
   summary: CanvasOwnerSummary;
 }
 
-/** Your-canvases sort axes (plan 005). `updated` (default) = most-recently-changed. */
-export type CanvasesSort = "updated" | "created" | "title";
+/** Your-canvases sort axes (plan 005; `popular` added plan 004). `updated` (default)
+ *  = most-recently-changed; `popular` = most trending views over the recent window. */
+export type CanvasesSort = "updated" | "created" | "title" | "popular";
 
 /** Your-canvases browse query (plan 005). State flags map 1:1 to the row pills. */
 export interface CanvasesQuery {
