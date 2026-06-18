@@ -67,7 +67,18 @@ export default function Share() {
     return <Skeleton className="h-64" />;
   }
 
-  const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  const save = async (patch: Parameters<typeof update.mutate>[0]) => {
+    // Optimistic write (onError rolls the cache back). This is the shared handler for
+    // access / expiry / guest-AI changes, so a failure must surface — don't swallow it.
+    // On success, surface the server's advisory (e.g. the CDN edge-cache staleness
+    // notice on an access downgrade) as a toast.
+    try {
+      const { warning } = await update.mutateAsync(patch);
+      if (warning) toast(warning);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error");
+    }
+  };
 
   const saveGallery = async (patch: Parameters<typeof update.mutate>[0]) => {
     try {
@@ -90,10 +101,11 @@ export default function Share() {
 
   async function setOrClearPassword(next: string | null) {
     try {
-      await update.mutateAsync({ password: next });
+      const { warning } = await update.mutateAsync({ password: next });
       setPassword("");
       setRevealPassword(false);
       toast(next ? "Password set" : "Password cleared");
+      if (warning) toast(warning);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't update password", "error");
     }

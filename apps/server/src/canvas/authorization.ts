@@ -33,6 +33,26 @@ export function memberPrincipal(user: { id: string; isAdmin: boolean }): Princip
 }
 
 /**
+ * True when a canvas is reachable by an ANONYMOUS request — the `public_link` rung,
+ * with no password gate and an unexpired share. This is the single rung a shared CDN
+ * may cache (cdn-cache.ts) and the basis of the access-downgrade warning
+ * (settings-update.ts). It mirrors {@link decideCanvasAccess}'s `public_link` allow
+ * exactly — same password and `sharedExpiresAt <= now` expiry test — so the cache
+ * scope can never outlive what the live access decision actually permits.
+ * Pure (takes primitives + `now`) so both the serve path and the settings resolver
+ * can evaluate it against a current row or a resolved post-patch state.
+ */
+export function isAnonymouslyPublic(
+  access: Canvas["access"],
+  hasPassword: boolean,
+  sharedExpiresAt: number | null,
+  now: number,
+): boolean {
+  const expired = sharedExpiresAt !== null && sharedExpiresAt <= now;
+  return access === "public_link" && !hasPassword && !expired;
+}
+
+/**
  * The allowlist lookup key for a principal: a member matches by user id, a guest by
  * email, anyone else matches nothing. The single mapping shared by
  * {@link resolveAccessContext} and the realtime hub's re-auth, so a new principal

@@ -41,4 +41,20 @@ describe("resolveClientIp", () => {
   it("returns undefined when there is no peer", () => {
     expect(resolveClientIp(undefined, "1.2.3.4", TRUSTED)).toBeUndefined();
   });
+
+  describe("CDN client-IP header", () => {
+    it("prefers the CDN header over XFF when the peer is trusted", () => {
+      // e.g. True-Client-IP from Cloudflare/Fastly — a single, authoritative address.
+      expect(resolveClientIp("127.0.0.1", "9.9.9.9", TRUSTED, "203.0.113.7")).toBe("203.0.113.7");
+    });
+
+    it("IGNORES the CDN header from an untrusted peer (as forgeable as XFF)", () => {
+      expect(resolveClientIp("8.8.8.8", undefined, TRUSTED, "203.0.113.7")).toBe("8.8.8.8");
+    });
+
+    it("falls back to XFF when the CDN header is absent/blank", () => {
+      expect(resolveClientIp("127.0.0.1", "203.0.113.7", TRUSTED, "  ")).toBe("203.0.113.7");
+      expect(resolveClientIp("127.0.0.1", "203.0.113.7", TRUSTED, undefined)).toBe("203.0.113.7");
+    });
+  });
 });

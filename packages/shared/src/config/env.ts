@@ -78,6 +78,12 @@ const posInt = (def: number) =>
     .optional()
     .transform((s) => (s === undefined || s === "" ? def : Number(s)))
     .refine((n) => Number.isInteger(n) && n >= 1, { message: "must be an integer >= 1" });
+const nonNegInt = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((s) => (s === undefined || s === "" ? def : Number(s)))
+    .refine((n) => Number.isInteger(n) && n >= 0, { message: "must be an integer >= 0" });
 
 const domainOf = (email: string): string => email.slice(email.lastIndexOf("@") + 1).toLowerCase();
 
@@ -162,6 +168,16 @@ const rawSchema = z
     CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN: posInt(10),
     CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN: posInt(5),
 
+    // Serving / CDN. How long (seconds) a SHARED cache (a CDN/proxy in front) may hold
+    // a *publicly* reachable canvas's HTML — the `public_link`, no-password rung, the
+    // only rung an anonymous request can reach. Emitted as `s-maxage`; the browser
+    // still revalidates every load (instant access changes for the viewer). This same
+    // window is exactly how long a canvas can stay visible at the edge after its owner
+    // restricts access, so it doubles as the staleness figure in the downgrade warning.
+    // 0 disables shared caching (HTML stays `no-cache`); auth-gated rungs are NEVER
+    // shared-cacheable regardless of this value.
+    CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL: nonNegInt(300),
+
     // Database
     CANVAS_DROP_DB: z.enum(["sqlite", "postgres"]).optional().default("sqlite"),
     CANVAS_DROP_SQLITE_PATH: z.string().optional().default("./data/canvasdrop.db"),
@@ -190,6 +206,12 @@ const rawSchema = z
     CANVAS_DROP_AUTH_PROXY_JWT_ISSUER: z.string().optional(),
     CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE: z.string().optional(),
     CANVAS_DROP_TRUSTED_PROXY_IPS: csv(),
+    // The header carrying the real end-client IP when a CDN/load balancer sits in
+    // front (e.g. `True-Client-IP`, `CF-Connecting-IP`, `Fly-Client-IP`). Read ONLY
+    // when the socket peer is a configured trusted proxy (§12.5); otherwise ignored.
+    // Org-agnostic: name your CDN's header here rather than hardcoding a vendor. When
+    // unset, the real client falls back to the rightmost-untrusted X-Forwarded-For hop.
+    CANVAS_DROP_CLIENT_IP_HEADER: z.string().optional(),
     CANVAS_DROP_OIDC_ISSUER: z.url().optional(),
     CANVAS_DROP_OIDC_CLIENT_ID: z.string().optional(),
     CANVAS_DROP_OIDC_CLIENT_SECRET: z.string().optional(),
@@ -442,6 +464,11 @@ const rawSchema = z
         passwordGatePerMin: r.CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN,
       },
 
+      serving: {
+        // Seconds a shared/CDN cache may hold a public canvas's HTML; 0 = off.
+        publicEdgeCacheTtlSec: r.CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL,
+      },
+
       db:
         r.CANVAS_DROP_DB === "postgres"
           ? ({ driver: "postgres", url: r.CANVAS_DROP_DATABASE_URL as string } as const)
@@ -471,6 +498,11 @@ const rawSchema = z
           jwtIssuer: r.CANVAS_DROP_AUTH_PROXY_JWT_ISSUER,
           jwtAudience: r.CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE,
           trustedProxyIps: r.CANVAS_DROP_TRUSTED_PROXY_IPS,
+          // Normalize to a lowercase header name (HTTP headers are case-insensitive)
+          // or undefined when unset/blank, so the resolver can do a plain lookup.
+          clientIpHeader: r.CANVAS_DROP_CLIENT_IP_HEADER?.trim()
+            ? r.CANVAS_DROP_CLIENT_IP_HEADER.trim().toLowerCase()
+            : undefined,
         },
         oidc: {
           issuer: r.CANVAS_DROP_OIDC_ISSUER,

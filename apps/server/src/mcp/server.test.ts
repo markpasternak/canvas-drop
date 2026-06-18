@@ -162,6 +162,27 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(got.publicationState).toBe("published");
   });
 
+  it("update_canvas restricting a public_link canvas returns a CDN edge-cache warning (parity)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: created.id, zipBase64: zip({ "index.html": "<h1>hi</h1>" }) },
+    });
+    // Seed the anonymously-public state directly (public_link is admin-gated), then
+    // exercise the downgrade through the MCP tool — the warning must reach the agent.
+    await canvasesRepository(client).updateSettings(created.id, { access: "public_link" });
+    const restricted = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, access: "private" },
+      }),
+    );
+    expect(restricted.warning).toMatch(/CDN/);
+  });
+
   it("get_canvas_file reads back the live version — listing and content — for verification", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
