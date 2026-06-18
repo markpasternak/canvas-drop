@@ -67,6 +67,125 @@ interface DemoApp {
   html: string;
 }
 
+/** Hand-authored (not via the minifying `page()` shell) so the editor tour slide
+ *  shows clean, multi-line, syntax-highlightable HTML + CSS + JS — a real little
+ *  interactive tool, not a wall of minified markup. The screenshot pipeline pins the
+ *  canvas-scoped tour shots to this app (see scripts/screenshots.mjs). */
+const PRICING_CALCULATOR_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pricing Calculator</title>
+    <style>
+      :root {
+        --accent: #0891b2;
+        --ink: #0f172a;
+        --muted: #64748b;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: var(--ink);
+        background: #ecfeff;
+        -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
+        padding: 32px;
+      }
+      h1 { font-size: 22px; letter-spacing: -0.02em; }
+      .muted { color: var(--muted); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 760px; }
+      .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; }
+      label { display: block; font-size: 13px; margin: 14px 0 6px; }
+      label:first-of-type { margin-top: 0; }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      select, input[type="number"] {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        font: inherit;
+      }
+      .total { background: linear-gradient(160deg, #0891b2, #0e7490); color: #fff; border: none; }
+      .total .amount { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; margin: 6px 0; }
+      .line {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.18);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <header style="margin-bottom: 22px">
+      <h1>Pricing Calculator</h1>
+      <p class="muted">Estimate your team's monthly plan</p>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <label for="seats">Team seats — <strong id="seatsOut">24</strong></label>
+        <input id="seats" type="range" min="1" max="200" value="24" />
+
+        <label for="mau">Monthly active users</label>
+        <input id="mau" type="number" value="12000" />
+
+        <label for="tier">Support tier</label>
+        <select id="tier">
+          <option value="0">Community</option>
+          <option value="240" selected>Priority</option>
+          <option value="600">Dedicated</option>
+        </select>
+      </div>
+
+      <div class="card total">
+        <div style="opacity: 0.85; font-size: 13px">Estimated monthly</div>
+        <div class="amount" id="amount">$0</div>
+        <div style="opacity: 0.85; font-size: 13px; margin-bottom: 16px">
+          billed annually · save 18%
+        </div>
+        <div class="line"><span>Base platform</span><span id="base">$0</span></div>
+        <div class="line"><span>Seats</span><span id="seatsCost">$0</span></div>
+        <div class="line"><span>Usage</span><span id="usage">$0</span></div>
+        <div class="line"><span>Support</span><span id="support">$0</span></div>
+      </div>
+    </div>
+
+    <script>
+      const PLATFORM = 1200; // flat base, per month
+      const PER_SEAT = 40;
+      const PER_1K_MAU = 45;
+
+      const $ = (id) => document.getElementById(id);
+      const money = (n) => "$" + Math.round(n).toLocaleString();
+
+      function recalc() {
+        const seats = Number($("seats").value);
+        const mau = Number($("mau").value) || 0;
+        const support = Number($("tier").value);
+
+        const seatsCost = seats * PER_SEAT;
+        const usage = (mau / 1000) * PER_1K_MAU;
+        const total = PLATFORM + seatsCost + usage + support;
+
+        $("seatsOut").textContent = seats;
+        $("base").textContent = money(PLATFORM);
+        $("seatsCost").textContent = money(seatsCost);
+        $("usage").textContent = money(usage);
+        $("support").textContent = money(support);
+        $("amount").textContent = money(total);
+      }
+
+      for (const id of ["seats", "mau", "tier"]) {
+        $(id).addEventListener("input", recalc);
+      }
+      recalc();
+    </script>
+  </body>
+</html>
+`;
+
 const APPS: DemoApp[] = [
   {
     title: "Q3 Revenue Dashboard",
@@ -155,46 +274,8 @@ ${(cards as string[])
     title: "Pricing Calculator",
     tags: ["tool", "finance"],
     summary: "Plug in seats and usage to see the monthly total update instantly.",
-    templatable: false,
-    html: page(
-      "Pricing Calculator",
-      "#0891b2",
-      "#ecfeff",
-      `<header style="margin-bottom:22px"><h1>Pricing Calculator</h1><p class="muted">Estimate your monthly plan</p></header>
-<div class="row">
-<div class="card col">
-${[
-  ["Team seats", "24"],
-  ["Monthly active users", "12,000"],
-  ["Storage (GB)", "350"],
-  ["Support tier", "Priority"],
-]
-  .map(
-    ([
-      k,
-      v,
-    ]) => `<div style="margin-bottom:16px"><label class="muted" style="font-size:13px">${k}</label>
-<div style="margin-top:6px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-weight:600">${v}</div></div>`,
-  )
-  .join("")}
-</div>
-<div class="card col" style="background:linear-gradient(160deg,#0891b2,#0e7490);color:#fff;border:none">
-<div style="opacity:.85;font-size:13px">Estimated monthly</div>
-<div style="font-size:44px;font-weight:800;letter-spacing:-.03em;margin:6px 0">$2,940</div>
-<div style="opacity:.85;font-size:13px;margin-bottom:18px">billed annually · save 18%</div>
-${[
-  ["Base platform", "$1,200"],
-  ["Seats × 24", "$960"],
-  ["Usage", "$540"],
-  ["Priority support", "$240"],
-]
-  .map(
-    ([k, v]) =>
-      `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.18);font-size:14px"><span style="opacity:.9">${k}</span><span style="font-weight:600">${v}</span></div>`,
-  )
-  .join("")}
-</div></div>`,
-    ),
+    templatable: true,
+    html: PRICING_CALCULATOR_HTML,
   },
   {
     title: "Color Palette Lab",
