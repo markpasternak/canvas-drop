@@ -206,6 +206,17 @@ async function main() {
   const drizzle = dbClient.db as any;
   const t = sqliteSchema.canvases;
 
+  // `--if-empty`: used by the dev launcher to populate a FRESH build only —
+  // skip (no-op) when the DB already has canvases, so re-running `pnpm dev`
+  // never clobbers or duplicates existing data.
+  if (process.argv.includes("--if-empty")) {
+    const existing = await drizzle.select({ id: t.id }).from(t).limit(1);
+    if (existing.length > 0) {
+      process.stdout.write("seed:canvases --if-empty: canvases already present — skipping.\n");
+      return;
+    }
+  }
+
   const users = usersRepository(dbClient);
   const canvases = canvasesRepository(dbClient);
   const versions = versionsRepository(dbClient);

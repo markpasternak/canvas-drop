@@ -19,8 +19,24 @@
 //   - already-set environment variables WIN over the file, so an explicit export
 //     (e.g. a parallel agent's `CANVAS_DROP_PORT=3003 pnpm dev`) and production's
 //     systemd env both still override. Dev-only; production never runs this.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { unlinkSync, writeFileSync } from "node:fs";
+
+// Populate a FRESH dev build with realistic sample canvases so the dashboard +
+// gallery look like the real thing on first boot (the data behind the marketing
+// screenshots). `--if-empty` makes this a no-op once data exists, so repeated
+// `pnpm dev` runs never reseed or duplicate. Opt out with CANVAS_DROP_DEV_SEED=0;
+// it only runs against the SQLite dev DB (the seed guards other drivers itself).
+if (process.env.CANVAS_DROP_DEV_SEED !== "0") {
+  const seed = spawnSync(
+    "pnpm",
+    ["--filter", "@canvas-drop/server", "exec", "tsx", "scripts/seed-canvases.ts", "--if-empty"],
+    { stdio: "inherit" },
+  );
+  if (seed.status !== 0) {
+    console.warn("dev launcher: sample-canvas seed skipped/failed (non-fatal) — continuing.");
+  }
+}
 
 // Record THIS launcher's pid (worktree-root `.dev.pid`, gitignored) so
 // `pnpm dev:stop` can tear the tree down cleanly instead of leaving orphans:

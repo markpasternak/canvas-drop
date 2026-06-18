@@ -20,6 +20,7 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "dev:fresh": "pnpm reset:data && pnpm seed:canvases && pnpm dev",
     "dev:stop": "node scripts/dev-stop.mjs",
     "dev:restart": "node scripts/dev-stop.mjs && node --env-file-if-exists=.env scripts/dev.mjs",
     "build": "pnpm -r build",
