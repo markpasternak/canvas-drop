@@ -399,6 +399,29 @@ export default function Editor() {
     }
   }
 
+  // ⌘↵ / Ctrl+Enter publishes the draft — the keyboard mirror of the Publish button.
+  // Scoped to the editor by this route's mount lifetime (mirrors the editor-local ⌘S
+  // in CodeEditor). Reads the publish gate via a ref so the listener stays mounted
+  // once and never goes stale; a no-op when the draft isn't publishable or a publish
+  // is already in flight.
+  const publishShortcutRef = useRef<() => void>(() => {});
+  publishShortcutRef.current = () => {
+    if (!draft || publish.isPending) return;
+    const publishable = draft.files.length > 0 && (draft.dirty || draft.stale);
+    if (!publishable) return;
+    void onPublish();
+  };
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        publishShortcutRef.current();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   if (canvas && canvas.status !== "active") {
     return (
       <TabEmptyState

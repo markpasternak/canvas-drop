@@ -2,7 +2,9 @@ import { BookOpen, List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icon
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
+import { CommandPalette } from "./components/CommandPalette.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
+import { ShortcutsHost } from "./components/Shortcuts.js";
 import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
@@ -120,6 +122,10 @@ export function AppLayout() {
 
   return (
     <div className="min-h-dvh bg-canvas">
+      {/* Command palette (⌘K) — mounted once app-wide; owns its own open shortcut. */}
+      <CommandPalette />
+      {/* Keyboard-shortcut cheatsheet (?) — mounted once; owns its "?" shortcut. */}
+      <ShortcutsHost />
       <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78">
         <div className="mx-auto flex h-16 max-w-[112rem] items-center justify-between gap-4 px-5">
           <div className="flex min-w-0 items-center gap-3 md:gap-5">

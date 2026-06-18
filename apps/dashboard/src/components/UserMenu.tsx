@@ -1,7 +1,8 @@
-import { CaretDown, Info, ShieldCheck, SignOut } from "@phosphor-icons/react";
+import { CaretDown, Info, Keyboard, ShieldCheck, SignOut } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { Me } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import { openShortcuts } from "./Shortcuts.js";
 
 /** First letter of the display name, falling back to the email — a calm avatar
  * fallback when the identity provider gives no `avatarUrl`. Tolerates a null/absent
@@ -102,11 +103,24 @@ export function UserMenu({ me }: { me: Me }) {
             </div>
           </div>
 
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              openShortcuts();
+            }}
+            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-fg text-sm transition-colors hover:bg-surface-sunken"
+          >
+            <Keyboard size={16} aria-hidden className="text-muted" />
+            Keyboard shortcuts
+          </button>
+
           {/* Real navigation to the server-rendered public landing — not an SPA route. */}
           <a
             href="/welcome"
             role="menuitem"
-            className="flex items-center gap-2.5 px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
+            className="flex items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
           >
             <Info size={16} aria-hidden className="text-muted" />
             About canvas-drop
