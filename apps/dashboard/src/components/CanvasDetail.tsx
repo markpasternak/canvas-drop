@@ -1,51 +1,21 @@
 import { ArrowSquareOut } from "@phosphor-icons/react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
 import { CopyButton } from "./CopyButton.js";
 import { EmptyState } from "./EmptyState.js";
 import { IconLink } from "./IconButton.js";
 import { Skeleton } from "./Skeleton.js";
+import { TabNav, type TabNavItem } from "./TabNav.js";
 
-const TABS = [
-  { to: "/canvases/$id", label: "Overview", exact: true, path: (id: string) => `/canvases/${id}` },
-  {
-    to: "/canvases/$id/editor",
-    label: "Editor",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/editor`,
-  },
-  {
-    to: "/canvases/$id/share",
-    label: "Share",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/share`,
-  },
-  {
-    to: "/canvases/$id/versions",
-    label: "Versions",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/versions`,
-  },
-  {
-    to: "/canvases/$id/capabilities",
-    label: "Backend",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/capabilities`,
-  },
-  {
-    to: "/canvases/$id/usage",
-    label: "Usage",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/usage`,
-  },
-  {
-    to: "/canvases/$id/settings",
-    label: "Settings",
-    exact: false,
-    path: (id: string) => `/canvases/${id}/settings`,
-  },
-] as const;
+const TABS: ReadonlyArray<Omit<TabNavItem, "params">> = [
+  { to: "/canvases/$id", label: "Overview", end: true },
+  { to: "/canvases/$id/editor", label: "Editor" },
+  { to: "/canvases/$id/share", label: "Share" },
+  { to: "/canvases/$id/versions", label: "Versions" },
+  { to: "/canvases/$id/capabilities", label: "Backend" },
+  { to: "/canvases/$id/usage", label: "Usage" },
+  { to: "/canvases/$id/settings", label: "Settings" },
+];
 
 export function CanvasDetailChrome({
   id,
@@ -63,19 +33,6 @@ export function CanvasDetailChrome({
   /** Optional status pill rendered next to the title (e.g. gallery/template state). */
   badge?: ReactNode;
 }) {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-
-  // Keep the current section visible in the horizontally-scrolling tab row. On a
-  // phone the six tabs overflow; without this the active tab (e.g. "Usage") can
-  // sit half-clipped off the right edge. `nearest` avoids any vertical page jump.
-  const activeTabRef = useRef<HTMLAnchorElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the intended trigger — the effect re-scrolls the (changed) active tab into view on each route change, it doesn't read pathname's value.
-  useEffect(() => {
-    // Optional-chain the method: jsdom (tests) doesn't implement scrollIntoView,
-    // and it's a pure progressive enhancement, so a no-op there is correct.
-    activeTabRef.current?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
-  }, [pathname]);
-
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]">
       <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -113,35 +70,11 @@ export function CanvasDetailChrome({
         )}
       </div>
 
-      <div className="overflow-x-auto border-t border-border px-3">
-        {/* Section links (not ARIA tabs): they navigate routes and mark the current
-            one with aria-current, the correct pattern for nav-style links. */}
-        <nav className="flex w-max min-w-full gap-1" aria-label="Canvas sections">
-          {TABS.map((tab) => {
-            const tabPath = tab.path(id);
-            const isActive = tab.exact ? pathname === tabPath : pathname.startsWith(tabPath);
-
-            return (
-              <Link
-                key={tab.label}
-                ref={isActive ? activeTabRef : undefined}
-                to={tab.to}
-                params={{ id }}
-                aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "relative -mb-px border-b-2 px-3 py-3 text-sm font-medium transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-                  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
-                  isActive
-                    ? "border-accent text-fg"
-                    : "border-transparent text-muted hover:text-fg",
-                )}
-              >
-                {tab.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      <TabNav
+        items={TABS.map((tab) => ({ ...tab, params: { id } }))}
+        aria-label="Canvas sections"
+        className="border-t border-border px-3"
+      />
     </section>
   );
 }
