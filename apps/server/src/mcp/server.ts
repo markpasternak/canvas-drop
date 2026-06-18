@@ -18,7 +18,7 @@ import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
-import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -113,23 +113,42 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "list_canvases",
     {
-      description: "List the canvases you own (most-recently-updated first).",
+      description:
+        "List the canvases you own. Default order is most-recently-updated; pass " +
+        'sort="popular" to rank by trending views over the last 30 days. Each item ' +
+        "carries `recentViews` (trending count) plus lifetime `viewCount` and `lastViewedAt`.",
       inputSchema: {
         query: z.string().optional().describe("Optional text filter on title/slug."),
+        sort: z
+          .enum(["updated", "created", "title", "popular"])
+          .optional()
+          .describe('Sort order (default "updated"). "popular" = most trending views (30d).'),
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ query, limit }) => {
+    async ({ query, sort, limit }) => {
+      const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const { items, total } = await deps.canvases.listByOwnerFiltered({
         ownerId: caller.userId,
         q: query,
+        sort,
+        popularSinceMs: recentSinceMs,
         limit: limit ?? 50,
         offset: 0,
       });
-      const previews = await previewIds(items.map((cv) => cv.id));
+      const [previews, recentViews] = await Promise.all([
+        previewIds(items.map((cv) => cv.id)),
+        deps.usage.recentViewCounts(
+          items.map((cv) => cv.id),
+          recentSinceMs,
+        ),
+      ]);
       return ok({
         total,
-        canvases: items.map((cv) => canvasView(deps.config, cv, previewVisible(cv, previews))),
+        canvases: items.map((cv) => ({
+          ...canvasView(deps.config, cv, previewVisible(cv, previews)),
+          recentViews: recentViews.get(cv.id) ?? 0,
+        })),
       });
     },
   );
