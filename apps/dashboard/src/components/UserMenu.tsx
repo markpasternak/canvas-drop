@@ -1,4 +1,5 @@
 import {
+  ArrowSquareOut,
   CaretDown,
   Info,
   Monitor,
@@ -215,14 +216,18 @@ export function UserMenu({
             />
           </div>
 
-          {/* Real navigation to the server-rendered public landing — not an SPA route. */}
+          {/* The server-rendered public landing — like Docs, it lives outside the SPA,
+              so open it in a new tab with the same external-link affordance. */}
           <a
             href="/welcome"
             role="menuitem"
+            target="_blank"
+            rel="noreferrer"
             className="flex items-center gap-2.5 border-border border-t px-3.5 py-2.5 text-fg text-sm transition-colors hover:bg-surface-sunken"
           >
             <Info size={16} aria-hidden className="text-muted" />
             About canvas-drop
+            <ArrowSquareOut size={13} weight="bold" aria-hidden className="ml-auto text-subtle" />
           </a>
 
           {canSignOut && (
