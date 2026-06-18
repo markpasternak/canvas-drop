@@ -217,6 +217,60 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
   });
 });
 
+describe("Your canvases — double-click opens the settings page", () => {
+  it("double-clicking a row body navigates to the canvas settings page", async () => {
+    stub([canvas({ id: "dc1", slug: "dc1", title: "Deployed canvas", url: "http://x/c/dc1" })]);
+    const router = renderAt("/");
+    await screen.findByText("Deployed canvas");
+
+    // Double-click a non-interactive body region (the slug line).
+    await userEvent.dblClick(screen.getByText("dc1"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/dc1/settings"));
+  });
+
+  it("double-clicking a card body navigates to settings (grid view)", async () => {
+    stub([canvas({ id: "dc2", slug: "dc2", title: "Grid canvas", url: "http://x/c/dc2" })]);
+    const router = renderAt("/?view=grid");
+    await screen.findByText("Grid canvas");
+
+    await userEvent.dblClick(screen.getByText(/Edited/));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/dc2/settings"));
+  });
+
+  it("double-clicking a never-deployed row also opens its settings page", async () => {
+    stub([canvas({ id: "nd1", slug: "nd1", title: "Draft canvas", lastDeploy: null })]);
+    const router = renderAt("/");
+    await screen.findByText("Draft canvas");
+
+    await userEvent.dblClick(screen.getByText("nd1"));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/nd1/settings"));
+  });
+
+  it("single-click only focuses — it does not navigate to settings", async () => {
+    stub([canvas({ id: "sc1", slug: "sc1", title: "Single canvas" })]);
+    const router = renderAt("/");
+    await screen.findByText("Single canvas");
+
+    await userEvent.click(screen.getByText("sc1"));
+    await waitFor(() => expect(selectedAttr()).toBe("sc1"));
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("double-clicking the checkbox does not navigate to settings", async () => {
+    stub([canvas({ id: "g1", slug: "g1", title: "Guard canvas", url: "http://x/c/g1" })]);
+    const router = renderAt("/");
+    await screen.findByText("Guard canvas");
+
+    // The body's onDoubleClick must be guarded against firing for interactive children.
+    await userEvent.dblClick(screen.getByRole("checkbox", { name: "Select Guard canvas" }));
+    expect(router.state.location.pathname).toBe("/");
+    expect(selectedAttr()).toBeNull();
+  });
+});
+
 describe("Your canvases — detail rail (two-pane / drawer)", () => {
   /** The detail rail (inline at xl, drawer below) is the canvas-details region. */
   function detailRegion(): HTMLElement | null {

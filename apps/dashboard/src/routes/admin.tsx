@@ -114,7 +114,7 @@ function AdminOverview() {
   return (
     <div className="space-y-6">
       <AdminHeader
-        title="Overview"
+        title="Administration"
         description="Platform-wide visibility and governance health at a glance."
       />
 

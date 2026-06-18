@@ -31,6 +31,13 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
     : false;
 }
 
+/** Double-clicking a row/card opens the canvas's SETTINGS / management page (not the
+ *  live canvas — the explicit "Open" action does that). Single-click focuses it into
+ *  the detail rail; double-click goes to where you manage it. */
+function openCanvas(canvas: CanvasListItem, navigate: ReturnType<typeof useNavigate>): void {
+  navigate({ to: "/canvases/$id/settings", params: { id: canvas.id } });
+}
+
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
   return (
     <>
@@ -252,10 +259,14 @@ export function CanvasRow({
 
   return (
     // Keyboard access to the canvas is the focusable title <Link> below (and the
-    // inner Open/copy/menu controls). The whole-row click is a mouse convenience;
-    // the <li> stays non-interactive (no role/tabIndex) because biome's a11y rules
-    // disallow an interactive role on <li> and a tab stop here would only duplicate
-    // the title link. onKeyDown is retained to satisfy useKeyWithClickEvents.
+    // inner Open/copy/menu controls). The whole-row single-click focuses (sets the
+    // detail rail); double-clicking the body OPENS the canvas (live URL in a new tab,
+    // or the editor when never deployed) — a pointer convenience that mirrors the
+    // Open action. The <li> stays non-interactive (no role/tabIndex) because biome's
+    // a11y rules disallow an interactive role on <li> and a tab stop here would only
+    // duplicate the title link; keyboard users focus via the title link (single-click
+    // equivalent) and open via the keyboard-reachable Open action in the rail.
+    // onKeyDown is retained to satisfy useKeyWithClickEvents.
     <li
       className={cn(
         "cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised",
@@ -265,6 +276,10 @@ export function CanvasRow({
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
         activate();
+      }}
+      onDoubleClick={(event) => {
+        if (isInteractiveTarget(event.target)) return;
+        openCanvas(canvas, navigate);
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -403,6 +418,10 @@ export function CanvasCard({
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
         activate();
+      }}
+      onDoubleClick={(event) => {
+        if (isInteractiveTarget(event.target)) return;
+        openCanvas(canvas, navigate);
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;

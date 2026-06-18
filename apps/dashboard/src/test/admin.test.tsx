@@ -234,6 +234,8 @@ describe("admin dashboard", () => {
     });
     renderAt("/admin");
     expect(await screen.findByText("Total views")).toBeInTheDocument();
+    // The page heading is "Administration" (the tab stays "Overview").
+    expect(screen.getByRole("heading", { name: "Administration" })).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // user count
     // New engagement/activity cards.
     expect(screen.getByText("3,120")).toBeInTheDocument();
