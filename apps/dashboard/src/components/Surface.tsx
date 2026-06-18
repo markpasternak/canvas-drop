@@ -1,5 +1,6 @@
 import { type ComponentPropsWithoutRef, forwardRef, type ReactNode } from "react";
 import { cn } from "../lib/cn.js";
+import type { Tone } from "./variants.js";
 
 export function PageHeader({
   title,
@@ -98,7 +99,8 @@ export function PaneHeader({
   );
 }
 
-type NoticeTone = "neutral" | "accent" | "success" | "warning" | "danger";
+// InlineNotice speaks the shared surface Tone vocabulary.
+type NoticeTone = Tone;
 
 const noticeTones: Record<NoticeTone, string> = {
   neutral: "border-border bg-surface-raised text-muted",

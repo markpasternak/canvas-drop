@@ -1,8 +1,9 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "../lib/cn.js";
+import type { Size as ControlSize, Variant } from "./variants.js";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
-type Size = "sm" | "md";
+// Button renders only the two smaller sizes of the shared scale.
+type Size = Extract<ControlSize, "sm" | "md">;
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;

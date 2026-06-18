@@ -1,8 +1,11 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import { cn } from "../lib/cn.js";
+import type { Size as ControlSize, Tone as SurfaceTone } from "./variants.js";
 
-type Tone = "default" | "accent" | "danger";
-type Size = "sm" | "md";
+// Icon buttons use a quiet `default` baseline (no shared Tone equivalent) plus the
+// accent/danger members of the shared Tone vocabulary.
+type Tone = "default" | Extract<SurfaceTone, "accent" | "danger">;
+type Size = Extract<ControlSize, "sm" | "md">;
 
 const base =
   "inline-grid place-items-center rounded-md border font-medium transition-all duration-100 " +

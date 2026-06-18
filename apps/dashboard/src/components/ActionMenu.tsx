@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.js";
+import type { Tone } from "./variants.js";
 
 /**
  * The single overflow / "kebab" menu for row- and card-level actions across the
@@ -214,10 +215,13 @@ const itemBase =
   "transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
 
-const itemTones = {
+// A menu item is either the quiet default or the shared `danger` tone.
+type ItemTone = "default" | Extract<Tone, "danger">;
+
+const itemTones: Record<ItemTone, string> = {
   default: "text-muted hover:bg-surface-hover hover:text-fg focus-visible:bg-surface-hover",
   danger: "text-muted hover:bg-danger-subtle hover:text-danger focus-visible:bg-danger-subtle",
-} as const;
+};
 
 export interface ActionMenuItemProps {
   children: ReactNode;

@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import type { AccessRung, Canvas, PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-
-type Tone = "neutral" | "accent" | "success" | "danger" | "warning";
+import type { Tone } from "./variants.js";
 
 const tones: Record<Tone, string> = {
   neutral: "bg-surface-raised text-muted border-border",
