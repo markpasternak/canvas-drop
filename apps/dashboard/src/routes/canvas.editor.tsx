@@ -66,7 +66,7 @@ function DraftRepairNotice({
   action?: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-warning/30 bg-warning-subtle/40 px-4 py-3 text-warning shadow-[var(--shadow-panel)]">
+    <section className="border border-warning/30 bg-warning-subtle/40 px-4 py-3 text-warning">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-0.5">
           <h2 className="text-sm font-semibold text-fg">{title}</h2>

@@ -53,10 +53,7 @@ export const WorkspacePane = forwardRef<HTMLElement, ComponentPropsWithoutRef<"s
     return (
       <section
         ref={ref}
-        className={cn(
-          "min-h-0 min-w-0 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
-          className,
-        )}
+        className={cn("min-h-0 min-w-0 overflow-hidden border border-border bg-surface", className)}
         {...props}
       >
         {children}
@@ -81,7 +78,7 @@ export function PaneHeader({
   return (
     <div
       className={cn(
-        "flex min-h-12 items-center justify-between gap-3 border-b border-border bg-surface-raised px-3 py-2",
+        "flex min-h-12 items-center justify-between gap-3 border-b border-border bg-surface px-3 py-2",
         className,
       )}
     >

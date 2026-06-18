@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WorkspacePane } from "../components/Surface.js";
 import { ToastProvider } from "../components/Toast.js";
 import type { DraftView } from "../lib/api.js";
 import { keys } from "../lib/queries.js";
@@ -528,5 +529,22 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/couldn.t load this file/i)).toBeInTheDocument();
+  });
+});
+
+describe("WorkspacePane chrome (flat)", () => {
+  it("renders a flat bordered pane with no rounded-card / shadow chrome", () => {
+    const { container } = render(
+      <WorkspacePane data-testid="pane">
+        <div>contents</div>
+      </WorkspacePane>,
+    );
+    const pane = container.querySelector("section");
+    expect(pane).not.toBeNull();
+    // KTD4: the editor's panes are flat bordered seams, not rounded shadow cards.
+    expect(pane?.className).not.toMatch(/\brounded-xl\b/);
+    expect(pane?.className).not.toMatch(/shadow-\[var\(--shadow-panel\)\]/);
+    // Still a bordered pane (the hairline seams between panes).
+    expect(pane?.className).toMatch(/\bborder\b/);
   });
 });
