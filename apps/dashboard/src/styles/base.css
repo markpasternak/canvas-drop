@@ -93,6 +93,22 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+
+    /* The blanket suppression above freezes the busy spinner and the HoldButton
+       progress sweep — so under reduced-motion they stop being a signal. Surface
+       the companion text cue (sr-only by default) as a visible, static busy
+       indicator so feedback never depends on a frozen animation. */
+    .cd-busy-text,
+    .cd-hold-cue {
+      position: static;
+      width: auto;
+      height: auto;
+      margin: 0;
+      overflow: visible;
+      clip: auto;
+      clip-path: none;
+      white-space: nowrap;
+    }
   }
 }
 
@@ -121,3 +137,25 @@
 .cd-anim-pop { animation: cd-pop 160ms var(--ease-out, ease-out); }
 .cd-anim-toast { animation: cd-toast 180ms var(--ease-out, ease-out); }
 .cd-anim-sheet { animation: cd-sheet 200ms var(--ease-out, ease-out); }
+
+/*
+ * Exit motion: the symmetric reverse of the enter set, gated by [data-state="closed"]
+ * so a component can animate OUT before it unmounts (caller delays the unmount ~150ms;
+ * see CLOSE_MS). Same transform/opacity-only, --ease-in. The reduced-motion block
+ * collapses these to ~0ms, so the delayed unmount resolves effectively instantly.
+ */
+@keyframes cd-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes cd-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(4px) scale(0.985); }
+}
+@keyframes cd-toast-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(8px); }
+}
+.cd-anim-scrim[data-state="closed"] { animation: cd-fade-out 130ms var(--ease-in, ease-in) forwards; }
+.cd-anim-pop[data-state="closed"] { animation: cd-pop-out 130ms var(--ease-in, ease-in) forwards; }
+.cd-anim-toast[data-state="closed"] { animation: cd-toast-out 150ms var(--ease-in, ease-in) forwards; }

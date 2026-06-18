@@ -47,7 +47,16 @@ export function Button({
       {...rest}
     >
       {loading && (
-        <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <>
+          {/* The global reduced-motion block freezes this spinner, so it stops
+              being a signal. The companion text below surfaces under reduced-motion
+              only (cd-busy-text) so a frozen spinner is never the sole busy cue. */}
+          <span
+            aria-hidden
+            className="cd-busy-spinner size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+          />
+          <span className="cd-busy-text sr-only">Working…</span>
+        </>
       )}
       {children}
     </button>

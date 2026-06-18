@@ -15,6 +15,7 @@ import { Tag } from "../components/Tag.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
+import { cardHoverClass } from "../lib/row-styles.js";
 import type { GallerySearch } from "../router.js";
 
 function GalleryCard({ item }: { item: GalleryItem }) {
@@ -22,7 +23,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
   const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-[transform,border-color] duration-100 [transition-timing-function:var(--ease-out)] hover:-translate-y-0.5 hover:border-border-strong">
+    <li
+      className={`group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] ${cardHoverClass}`}
+    >
       {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
           screenshot will later render into this same box with no layout change.
           Decorative (not a link) so the title below stays the single open

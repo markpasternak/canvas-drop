@@ -7,7 +7,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "../components/ErrorState.js";
@@ -239,6 +239,42 @@ describe("dashboard app", () => {
     await user.click(screen.getByTestId("menu-backdrop"));
     expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Open menu" })).toBeInTheDocument();
+  });
+
+  it("mobile menu: opening moves focus into the menu, Escape closes + restores focus, Tab cycles within", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    renderApp("/");
+    await screen.findByText("canvas-drop");
+    const user = userEvent.setup();
+
+    const toggle = screen.getByRole("button", { name: "Open menu" });
+    await user.click(toggle);
+
+    // Opening moves focus into the menu — onto its first link (Canvases).
+    const menuNav = screen.getAllByRole("navigation", { name: "Sections" }).at(-1);
+    if (!menuNav) throw new Error("expected the mobile Sections nav");
+    const menuLinks = within(menuNav).getAllByRole("link");
+    await waitFor(() => expect(menuLinks[0]).toHaveFocus());
+
+    // Tab cycles within the menu: shift+Tab from the first focusable wraps to the last.
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(menuNav.contains(document.activeElement)).toBe(true);
+    expect(menuLinks[menuLinks.length - 1]).toHaveFocus();
+
+    // Escape closes the menu and restores focus to the toggle.
+    await user.keyboard("{Escape}");
+    expect(screen.getAllByRole("link", { name: "Gallery" })).toHaveLength(1);
+    const reopened = screen.getByRole("button", { name: "Open menu" });
+    expect(reopened).toHaveFocus();
   });
 
   it("detail lives under /canvases/:id (NOT /c/:id, which is canvas content in path mode)", async () => {

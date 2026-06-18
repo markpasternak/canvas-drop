@@ -1,6 +1,6 @@
 import { BookOpen, List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
 import { UserMenu } from "./components/UserMenu.js";
@@ -48,6 +48,8 @@ export function AppLayout() {
   // API independently 404s non-admins, so this is not a security boundary.
   const me = useMe();
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   // The mobile menu is `md:hidden`; if the viewport grows past `md` while it's
   // open, reset the state so it doesn't reappear on a later shrink back to mobile.
   useEffect(() => {
@@ -59,6 +61,44 @@ export function AppLayout() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  // Focus management for the mobile section menu, mirroring the Dialog pattern:
+  // move focus into the menu on open, trap Tab within it, close on Escape, and
+  // restore focus to the toggle when it closes. Keyboard-only nav can't escape
+  // the open menu and never strands focus on a hidden element.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const menu = menuRef.current;
+    // Move focus into the menu (first focusable link) on open.
+    menu?.querySelector<HTMLElement>("a[href]")?.focus() ?? menu?.focus();
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        return;
+      }
+      if (e.key !== "Tab" || !menu) return;
+      const focusables = menu.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Restore focus to the toggle when the menu closes.
+      menuTriggerRef.current?.focus?.();
+    };
+  }, [menuOpen]);
   const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
   const linkClass =
     "rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]";
@@ -86,6 +126,7 @@ export function AppLayout() {
             {/* Mobile menu toggle — the section links collapse below `md`, so this
                 is the only way to reach Archived / Admin / Gallery on a phone. */}
             <button
+              ref={menuTriggerRef}
               type="button"
               aria-label={menuOpen ? "Close menu" : "Open menu"}
               aria-expanded={menuOpen}
@@ -162,6 +203,7 @@ export function AppLayout() {
               onClick={() => setMenuOpen(false)}
             />
             <nav
+              ref={menuRef}
               className="relative z-30 flex flex-col gap-1 border-border border-t bg-surface px-5 py-3 text-sm md:hidden"
               aria-label="Sections"
             >

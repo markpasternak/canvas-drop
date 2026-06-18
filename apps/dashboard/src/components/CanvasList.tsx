@@ -2,8 +2,9 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
+import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
-import { rowPrimaryActionClass } from "../lib/row-styles.js";
+import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row-styles.js";
 import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
@@ -245,9 +246,11 @@ export function CanvasRow({
     // disallow an interactive role on <li> and a tab stop here would only duplicate
     // the title link. onKeyDown is retained to satisfy useKeyWithClickEvents.
     <li
-      className={`cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-raised lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised${
-        selected ? " bg-accent-subtle lg:bg-accent-subtle" : ""
-      }`}
+      className={cn(
+        "cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised",
+        rowHoverClass,
+        selected && "bg-accent-subtle lg:bg-accent-subtle",
+      )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
         activate();
@@ -381,9 +384,11 @@ export function CanvasCard({
 
   return (
     <li
-      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong${
-        selected ? " border-accent ring-1 ring-accent" : ""
-      }`}
+      className={cn(
+        "group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
+        cardHoverClass,
+        selected && "border-accent ring-1 ring-accent",
+      )}
       onClick={(event) => {
         if (isInteractiveTarget(event.target)) return;
         activate();

@@ -87,6 +87,10 @@ describe("ActionMenu", () => {
     await screen.findByRole("menuitem", { name: "Duplicate" });
     await user.click(screen.getByRole("button", { name: "outside" }));
     await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
-    expect(screen.queryByRole("menuitem", { name: "Duplicate" })).not.toBeInTheDocument();
+    // The dropdown animates OUT before unmounting (~150ms exit delay), so wait for
+    // it to leave the DOM rather than asserting synchronously.
+    await waitFor(() =>
+      expect(screen.queryByRole("menuitem", { name: "Duplicate" })).not.toBeInTheDocument(),
+    );
   });
 });

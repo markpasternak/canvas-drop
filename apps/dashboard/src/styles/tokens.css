@@ -224,8 +224,10 @@
   --radius-xl: 1.25rem;
   --radius-2xl: 1.5rem;
 
-  /* Motion: ≤180ms, ease-out, state-change only (DESIGN.md). */
+  /* Motion: ≤180ms, ease-out, state-change only (DESIGN.md). --ease-in mirrors it
+     for exit motion (overlays animate out before unmount). */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
 }
 
 /* Plain tokens (not Tailwind utility groups) — control heights + content width. */

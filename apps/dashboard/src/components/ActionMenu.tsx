@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.js";
+import { useExitTransition } from "../lib/use-exit-transition.js";
 import type { Tone } from "./variants.js";
 
 /**
@@ -64,6 +65,10 @@ export function ActionMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  // Defer the portal unmount so the dropdown can animate OUT (data-state="closed").
+  // All open-true logic (positioning, focus, pointer/keyboard) stays keyed on `open`;
+  // this only keeps the node mounted briefly after close. Reduced-motion-safe.
+  const { mounted, state } = useExitTransition(open);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -85,10 +90,10 @@ export function ActionMenu({
   // Position before paint to avoid a flash at the wrong spot, then keep it pinned
   // to the trigger while open (scroll/resize).
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    // While closing (open=false but still mounted for the exit anim) keep the last
+    // position so the dropdown stays visible as it animates out; it's recomputed on
+    // the next open.
+    if (!open) return;
     computePosition();
     const onChange = () => computePosition();
     window.addEventListener("scroll", onChange, true);
@@ -176,13 +181,14 @@ export function ActionMenu({
       >
         <DotsThreeVertical size={18} weight="bold" aria-hidden />
       </button>
-      {open &&
+      {mounted &&
         createPortal(
           <div
             ref={menuRef}
             id={menuId}
             role="menu"
             aria-label={label}
+            data-state={state}
             onKeyDown={onMenuKeyDown}
             style={{
               position: "fixed",

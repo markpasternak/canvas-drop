@@ -260,7 +260,9 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     await userEvent.click(screen.getByRole("heading", { name: "Your canvases" }));
 
     await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
-    expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
+    // The dropdown animates OUT before unmounting (~150ms exit delay), so wait for
+    // it to leave the DOM rather than asserting synchronously.
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull());
   });
 
   it("searches by title (debounced into a server request)", async () => {
