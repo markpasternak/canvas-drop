@@ -20,9 +20,9 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 
 ## Why canvas-drop
 
-- **Distribution is the problem it solves.** Most AI tools build the artifact (v0, Lovable, Bolt). canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
+- **Distribution is the problem it solves.** AI build tools make the artifact. canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
 - **Agents ship from the workflow they already use.** A keyed deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop. The building happens where you already work, not inside a chat box bolted onto the tool.
-- **A real backend when you need it.** As capable as a Lovable: five built-in primitives (KV, files, AI, identity, realtime) added with one `<script>` tag, no provisioning, **no secrets in the browser**. Stay fully static when you do not.
+- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) added with one `<script>` tag, no provisioning, **no secrets in the browser**. Stay fully static when you do not.
 - **A rich, scriptable API.** The whole lifecycle is programmable: create, deploy (including a content-addressed staged upload that sends only changed bytes), read-back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
 - **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so re-deploys write only what changed.
 - **A deliberate sharing ladder.** Private, Specific people (org members or email-invited guests), Whole org, or an admin-gated Public link. Revocable and optionally time-boxed.
