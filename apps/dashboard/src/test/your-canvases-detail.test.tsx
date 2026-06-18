@@ -290,6 +290,24 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     await waitFor(() => expect(selectedAttr()).toBeNull());
   });
 
+  it("Duplicate in the rail opens the shared clone confirm dialog (U4)", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    // The rail (drawer below xl) is up for the focused canvas.
+    const dialog = await screen.findByRole("dialog", { name: "Canvas details" });
+    expect(dialog).toBeInTheDocument();
+
+    // The Duplicate action is enabled (onDuplicate is wired by the route).
+    const duplicate = screen.getByRole("button", { name: "Duplicate Alpha canvas" });
+    expect(duplicate).toBeEnabled();
+    await userEvent.click(duplicate);
+
+    // The shared CloneDialog confirm opens — its body explains the clone (naming the
+    // source as "Copy of …") and offers the "Duplicate canvas" confirm button.
+    expect(await screen.findByText(/Copy of/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Duplicate canvas$/ })).toBeInTheDocument();
+  });
+
   it("keeps the bulk-action bar working with a canvas focused", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     renderAt("/?selected=alpha");

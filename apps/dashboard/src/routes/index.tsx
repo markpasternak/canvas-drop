@@ -595,6 +595,11 @@ export default function CanvasList() {
   function setFocused(id: string | undefined) {
     navigate({ to: "/", search: (prev) => ({ ...prev, selected: id }) });
   }
+  // Duplicate from the detail rail (P4 / U4): opens the SAME shared CloneDialog the
+  // rows use, for the focused canvas. Any owned canvas can be cloned (the rows clone
+  // unconditionally), so this is offered for every focused canvas — not gated on
+  // templatable the way the gallery is (that gate is for OTHER people's canvases).
+  // (State + the "reset on focus change" effect live below `focusedId`.)
 
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
@@ -609,6 +614,14 @@ export default function CanvasList() {
   // The focused canvas object for the detail rail (U3), looked up from the
   // already-loaded page items — no extra request. `null` → DetailPanel's empty state.
   const focusedCanvas = focusedId ? (items.find((c) => c.id === focusedId) ?? null) : null;
+  // Duplicate from the detail rail (P4 / U4): opens the SAME shared CloneDialog the
+  // rows use, for the focused canvas. Reset whenever the focus changes (or clears)
+  // so the dialog never points at a canvas other than the one it was opened for.
+  const [cloneOpen, setCloneOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on focus change, not on `cloneOpen`.
+  useEffect(() => {
+    setCloneOpen(false);
+  }, [focusedId]);
   const activeChipKeys = archivedView
     ? []
     : STATE_CHIPS.filter((chip) => search[chip.key] === true).map((chip) => chip.key);
@@ -910,7 +923,7 @@ export default function CanvasList() {
             DetailPanel — one canvas-details region, not two. */}
         {showRail && isXl && (
           <div className="sticky top-6 hidden xl:block">
-            <DetailPanel canvas={focusedCanvas} />
+            <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
           </div>
         )}
       </div>
@@ -923,8 +936,22 @@ export default function CanvasList() {
         onClose={() => setFocused(undefined)}
         label="Canvas details"
       >
-        <DetailPanel canvas={focusedCanvas} />
+        <DetailPanel canvas={focusedCanvas} onDuplicate={() => setCloneOpen(true)} />
       </DetailDrawer>
+
+      {/* One shared CloneDialog for the rail's Duplicate (both the inline + drawer
+          DetailPanel route through it). Mounted once at the route level — keyed to
+          the focused canvas — so the inline and drawer instances don't each carry a
+          dialog. Confirming clones + navigates to the new canvas's editor. */}
+      {focusedCanvas && (
+        <CloneDialog
+          open={cloneOpen}
+          onClose={() => setCloneOpen(false)}
+          sourceId={focusedCanvas.id}
+          sourceTitle={focusedCanvas.title}
+          keepsPassword={focusedCanvas.hasPassword}
+        />
+      )}
     </div>
   );
 }
