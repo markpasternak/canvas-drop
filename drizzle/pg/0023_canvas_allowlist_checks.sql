@@ -1,0 +1,2 @@
+ALTER TABLE "canvas_allowlist" ADD CONSTRAINT "canvas_allowlist_member_chk" CHECK ("canvas_allowlist"."principal_kind" != 'member' OR "canvas_allowlist"."user_id" IS NOT NULL);--> statement-breakpoint
+ALTER TABLE "canvas_allowlist" ADD CONSTRAINT "canvas_allowlist_guest_chk" CHECK ("canvas_allowlist"."principal_kind" != 'guest' OR "canvas_allowlist"."email" IS NOT NULL);
