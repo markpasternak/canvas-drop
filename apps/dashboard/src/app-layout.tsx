@@ -270,6 +270,17 @@ export function AppLayout() {
         collapsed ? "lg:grid-cols-[4rem_minmax(0,1fr)]" : "lg:grid-cols-[15rem_minmax(0,1fr)]",
       )}
     >
+      {/* Skip-to-content: the first focusable element in the DOM, so a keyboard or
+          screen-reader user can jump straight to the routed content without tabbing
+          through the whole rail. Visually hidden until focused (Tailwind's
+          sr-only / focus:not-sr-only), then it pops to the top-left as a real chip.
+          Targets the #main-content landmark below. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:inline-flex focus:h-9 focus:items-center focus:rounded-lg focus:border focus:border-border focus:bg-surface-raised focus:px-3.5 focus:font-medium focus:text-fg focus:text-sm focus:shadow-[var(--shadow-popover)]"
+      >
+        Skip to content
+      </a>
       {/* Command palette (⌘K) — mounted once app-wide; owns its own open shortcut. */}
       <CommandPalette />
       {/* Keyboard-shortcut cheatsheet (?) — mounted once; owns its "?" shortcut. */}
@@ -387,7 +398,14 @@ export function AppLayout() {
           )}
         </header>
 
-        <main className="mx-auto w-full max-w-[var(--content-max)] px-5 py-6">
+        {/* The routed-content landmark + skip-link target. tabIndex={-1} makes it a
+            programmatic focus target so activating "Skip to content" moves focus here
+            (not just the scroll position), which is what AT/keyboard users expect. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-[var(--content-max)] px-5 py-6 outline-none"
+        >
           <Outlet />
         </main>
       </div>

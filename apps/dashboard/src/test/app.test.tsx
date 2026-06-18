@@ -79,6 +79,33 @@ describe("dashboard app", () => {
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();
   });
 
+  it("exposes a skip-to-content link that targets the main landmark", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ canvases: [], total: 0, limit: 24, offset: 0 }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    const { container } = renderApp("/");
+    await screen.findAllByText("canvas-drop");
+
+    // The skip link is the first focusable element in the DOM (before the rail), so
+    // a keyboard user's first Tab lands on it.
+    const skip = screen.getByRole("link", { name: /skip to content/i });
+    expect(skip).toHaveAttribute("href", "#main-content");
+    const firstLink = container.querySelector("a[href]");
+    expect(firstLink).toBe(skip);
+
+    // The target is a real main landmark and a programmatic focus target.
+    const main = container.querySelector("main#main-content");
+    expect(main).not.toBeNull();
+    expect(main).toHaveAttribute("tabindex", "-1");
+  });
+
   it("points at the Archived view when every canvas is archived (not onboarding)", async () => {
     // The empty-home pointer reads the archived count from the list response summary:
     // an empty active list whose summary reports one archived canvas.
