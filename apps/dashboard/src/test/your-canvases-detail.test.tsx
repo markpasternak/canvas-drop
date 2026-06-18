@@ -144,7 +144,9 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
     // Still on the library route, not the detail route.
     expect(router.state.location.pathname).toBe("/");
     expect(router.state.location.search).toMatchObject({ selected: "alpha" });
-    expect(screen.getByText("Alpha canvas")).toBeInTheDocument();
+    // The canvas is still in the library (its title link). With a selection the rail
+    // also shows the title (an <h2>), so scope to the library link to stay specific.
+    expect(screen.getByRole("link", { name: "View details for Alpha canvas" })).toBeInTheDocument();
   });
 
   it("clicking a row body sets ?selected without navigating away (list view)", async () => {
@@ -212,5 +214,94 @@ describe("Your canvases — detail-rail focus (?selected)", () => {
 
     // Unknown id is not on the visible page → not reflected as a focus.
     expect(selectedAttr()).toBeNull();
+  });
+});
+
+describe("Your canvases — detail rail (two-pane / drawer)", () => {
+  /** The detail rail (inline at xl, drawer below) is the canvas-details region. */
+  function detailRegion(): HTMLElement | null {
+    return document.querySelector('[aria-label="Canvas details"]');
+  }
+
+  it("renders the DetailPanel for the focused canvas (its title in the rail)", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    // Wait on the library link (unambiguous — the rail's title is an <h2>).
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+
+    // The rail renders with the focused canvas's title (a heading, distinct from
+    // the row's link text). jsdom's stubbed matchMedia reports below-xl, so this
+    // is the drawer path.
+    await waitFor(() => {
+      const region = detailRegion();
+      expect(region).not.toBeNull();
+      expect(region?.querySelector("h2")?.textContent).toBe("Alpha canvas");
+    });
+  });
+
+  it("renders no detail rail when nothing is focused", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/");
+    await screen.findByText("Alpha canvas");
+
+    expect(selectedAttr()).toBeNull();
+    // The full-width library: no canvas-details region in the DOM.
+    expect(detailRegion()).toBeNull();
+  });
+
+  it("selecting a canvas opens the rail; clearing it removes the rail", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    const router = renderAt("/");
+    await screen.findByText("Alpha canvas");
+    expect(detailRegion()).toBeNull();
+
+    await userEvent.click(screen.getByText(/Edited/));
+    await waitFor(() => expect(detailRegion()).not.toBeNull());
+    expect(selectedAttr()).toBe("alpha");
+
+    // Clearing the selection (drop ?selected) removes the rail.
+    router.navigate({ to: "/", search: {} });
+    await waitFor(() => expect(detailRegion()).toBeNull());
+    expect(selectedAttr()).toBeNull();
+  });
+
+  it("drawer (narrow): Escape closes and clears the selection", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+
+    // The drawer is a focus-trapped dialog (matchMedia stub → below xl).
+    const dialog = await screen.findByRole("dialog", { name: "Canvas details" });
+    expect(dialog).toBeInTheDocument();
+
+    // Escape routes through onClose → setFocused(undefined): the rail closes and
+    // the focus (?selected / data-selected-canvas) is cleared.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+    expect(document.querySelector('[aria-label="Canvas details"]')).toBeNull();
+  });
+
+  it("drawer (narrow): the close button clears the selection", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("dialog", { name: "Canvas details" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Close details" }));
+    await waitFor(() => expect(selectedAttr()).toBeNull());
+  });
+
+  it("keeps the bulk-action bar working with a canvas focused", async () => {
+    stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
+    renderAt("/?selected=alpha");
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    // The rail is up.
+    await waitFor(() => expect(selectedAttr()).toBe("alpha"));
+
+    // Multi-select is independent of the focus: ticking the checkbox surfaces the
+    // bulk-action bar while the rail stays focused.
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Alpha canvas" }));
+    expect(await screen.findByText(/1 canvas selected/i)).toBeInTheDocument();
+    // Focus is untouched by the multi-select.
+    expect(selectedAttr()).toBe("alpha");
   });
 });

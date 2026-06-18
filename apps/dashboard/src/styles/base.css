@@ -113,6 +113,11 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes cd-sheet {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
 .cd-anim-scrim { animation: cd-fade 140ms var(--ease-out, ease-out); }
 .cd-anim-pop { animation: cd-pop 160ms var(--ease-out, ease-out); }
 .cd-anim-toast { animation: cd-toast 180ms var(--ease-out, ease-out); }
+.cd-anim-sheet { animation: cd-sheet 200ms var(--ease-out, ease-out); }
