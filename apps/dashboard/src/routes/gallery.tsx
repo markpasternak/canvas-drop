@@ -11,6 +11,7 @@ import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
+import { Tag } from "../components/Tag.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
@@ -54,9 +55,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
         {item.tags.length > 0 && (
           <div className="relative z-10 flex flex-wrap gap-1.5">
             {item.tags.map((tag) => (
-              <button
+              <Tag
                 key={tag}
-                type="button"
+                size="sm"
                 onClick={() =>
                   navigate({
                     to: "/gallery",
@@ -64,10 +65,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
                     search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
                   })
                 }
-                className="rounded-md border border-border bg-surface-sunken px-2 py-0.5 text-xs font-medium text-muted transition-colors hover:text-fg"
               >
                 {tag}
-              </button>
+              </Tag>
             ))}
           </div>
         )}

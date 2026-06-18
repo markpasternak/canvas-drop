@@ -6,6 +6,7 @@ import { relativeTime } from "../lib/format.js";
 import { useAdminBlockUser, useAdminPromoteUser, useAdminPublishPublic } from "../lib/mutations.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { Badge } from "./Badge.js";
+import { DataTable } from "./DataTable.js";
 import { useToast } from "./Toast.js";
 
 const MENU_ICON = 15;
@@ -103,65 +104,60 @@ export function AdminUserTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-left text-sm">
-        <thead className="border-border border-b bg-surface-sunken text-xs text-muted">
-          <tr>
-            <th className="px-3 py-2 font-medium">User</th>
-            <th className="px-3 py-2 text-right font-medium">Canvases</th>
-            <th className="px-3 py-2 font-medium">Role</th>
-            <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium">Last seen</th>
-            <th className="px-3 py-2 font-medium" aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {users.map((u) => (
-            <tr key={u.id} className="align-middle">
-              <td className="px-3 py-2">
-                <div className="font-medium text-fg">
-                  {u.name || u.email}
-                  {u.id === meId && <span className="ml-2 text-xs text-subtle">(you)</span>}
-                </div>
-                <div className="text-xs text-muted">{u.email}</div>
-              </td>
-              <td className="px-3 py-2 text-right text-muted">
-                <div className="flex items-center justify-end gap-2">
-                  <span className="tabular-nums">{u.canvasCount.toLocaleString()}</span>
-                  <button
-                    type="button"
-                    onClick={() => viewCanvases(u)}
-                    className="rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent-subtle hover:underline"
-                    aria-label={`View canvases owned by ${u.email}`}
-                  >
-                    View
-                  </button>
-                </div>
-              </td>
-              <td className="px-3 py-2">
-                {u.isAdmin ? (
-                  <Badge tone="accent">Admin</Badge>
-                ) : (
-                  <span className="text-subtle">—</span>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {u.isBlocked ? (
-                  <Badge tone="danger">Blocked</Badge>
-                ) : (
-                  <Badge tone="success">Active</Badge>
-                )}
-              </td>
-              <td className="px-3 py-2 text-muted">
-                {u.lastSeenAt !== null ? relativeTime(u.lastSeenAt) : "never"}
-              </td>
-              <td className="px-3 py-2 text-right">
-                <RowActions user={u} meId={meId} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={[
+        { header: "User" },
+        { header: "Canvases", align: "right" },
+        { header: "Role" },
+        { header: "Status" },
+        { header: "Last seen" },
+        { srOnly: "Actions" },
+      ]}
+    >
+      {users.map((u) => (
+        <tr key={u.id} className="align-middle">
+          <td className="px-3 py-2">
+            <div className="font-medium text-fg">
+              {u.name || u.email}
+              {u.id === meId && <span className="ml-2 text-xs text-subtle">(you)</span>}
+            </div>
+            <div className="text-xs text-muted">{u.email}</div>
+          </td>
+          <td className="px-3 py-2 text-right text-muted">
+            <div className="flex items-center justify-end gap-2">
+              <span className="tabular-nums">{u.canvasCount.toLocaleString()}</span>
+              <button
+                type="button"
+                onClick={() => viewCanvases(u)}
+                className="rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent-subtle hover:underline"
+                aria-label={`View canvases owned by ${u.email}`}
+              >
+                View
+              </button>
+            </div>
+          </td>
+          <td className="px-3 py-2">
+            {u.isAdmin ? (
+              <Badge tone="accent">Admin</Badge>
+            ) : (
+              <span className="text-subtle">—</span>
+            )}
+          </td>
+          <td className="px-3 py-2">
+            {u.isBlocked ? (
+              <Badge tone="danger">Blocked</Badge>
+            ) : (
+              <Badge tone="success">Active</Badge>
+            )}
+          </td>
+          <td className="px-3 py-2 text-muted">
+            {u.lastSeenAt !== null ? relativeTime(u.lastSeenAt) : "never"}
+          </td>
+          <td className="px-3 py-2 text-right">
+            <RowActions user={u} meId={meId} />
+          </td>
+        </tr>
+      ))}
+    </DataTable>
   );
 }

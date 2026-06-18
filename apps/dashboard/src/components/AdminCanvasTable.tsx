@@ -19,6 +19,7 @@ import {
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { AccessBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
+import { DataTable } from "./DataTable.js";
 import { Dialog } from "./Dialog.js";
 import { TextareaField } from "./Field.js";
 import { useToast } from "./Toast.js";
@@ -169,80 +170,75 @@ export function AdminCanvasTable({
   const navigate = useNavigate();
   const openCanvas = (id: string) => navigate({ to: "/canvases/$id", params: { id } });
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-left text-sm">
-        <thead className="border-border border-b bg-surface-sunken text-xs text-muted">
-          <tr>
-            <th className="px-3 py-2 font-medium">Canvas</th>
-            <th className="px-3 py-2 font-medium">Owner</th>
-            <th className="px-3 py-2 font-medium">Access</th>
-            <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 text-right font-medium">Size</th>
-            <th className="px-3 py-2 text-right font-medium">Usage</th>
-            <th className="px-3 py-2 font-medium">Last activity</th>
-            <th className="px-3 py-2 font-medium" aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {canvases.map((c) => (
-            <tr key={c.id} className="align-middle">
-              <td className="px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => openCanvas(c.id)}
-                  className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
-                  aria-label={`Open ${c.title || c.slug}`}
-                >
-                  {c.title || c.slug}
-                </button>
-                <div className="font-mono text-xs text-muted">{c.slug}</div>
-                {c.disabledReason && (
-                  <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>
-                )}
-                {c.status === "deleted" && c.deletedAt !== null && (
-                  <div
-                    className="mt-0.5 text-xs text-subtle"
-                    title={`Deleted ${relativeTime(c.deletedAt)}`}
-                  >
-                    Deleted {daysSince(c.deletedAt)}d ago · awaiting purge
-                  </div>
-                )}
-              </td>
-              <td className="px-3 py-2 text-muted">
-                {c.owner && onOwnerClick ? (
-                  <button
-                    type="button"
-                    onClick={() => onOwnerClick?.(c.owner as NonNullable<AdminCanvasRow["owner"]>)}
-                    className="rounded-md px-1 py-0.5 text-left text-accent transition-colors hover:bg-accent-subtle hover:underline"
-                  >
-                    {c.owner.email}
-                  </button>
-                ) : c.owner ? (
-                  c.owner.email
-                ) : (
-                  "—"
-                )}
-              </td>
-              <td className="px-3 py-2">
-                <AccessBadge access={c.access} />
-              </td>
-              <td className="px-3 py-2">
-                <StatusBadge status={c.status} />
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums text-muted">
-                {formatBytes(c.sizeBytes)}
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums text-muted">
-                {c.usageOps.toLocaleString()}
-              </td>
-              <td className="px-3 py-2 text-muted">{relativeTime(c.lastActivityAt)}</td>
-              <td className="px-3 py-2 text-right">
-                <RowActions canvas={c} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={[
+        { header: "Canvas" },
+        { header: "Owner" },
+        { header: "Access" },
+        { header: "Status" },
+        { header: "Size", align: "right" },
+        { header: "Usage", align: "right" },
+        { header: "Last activity" },
+        { srOnly: "Actions" },
+      ]}
+    >
+      {canvases.map((c) => (
+        <tr key={c.id} className="align-middle">
+          <td className="px-3 py-2">
+            <button
+              type="button"
+              onClick={() => openCanvas(c.id)}
+              className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
+              aria-label={`Open ${c.title || c.slug}`}
+            >
+              {c.title || c.slug}
+            </button>
+            <div className="font-mono text-xs text-muted">{c.slug}</div>
+            {c.disabledReason && (
+              <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>
+            )}
+            {c.status === "deleted" && c.deletedAt !== null && (
+              <div
+                className="mt-0.5 text-xs text-subtle"
+                title={`Deleted ${relativeTime(c.deletedAt)}`}
+              >
+                Deleted {daysSince(c.deletedAt)}d ago · awaiting purge
+              </div>
+            )}
+          </td>
+          <td className="px-3 py-2 text-muted">
+            {c.owner && onOwnerClick ? (
+              <button
+                type="button"
+                onClick={() => onOwnerClick?.(c.owner as NonNullable<AdminCanvasRow["owner"]>)}
+                className="rounded-md px-1 py-0.5 text-left text-accent transition-colors hover:bg-accent-subtle hover:underline"
+              >
+                {c.owner.email}
+              </button>
+            ) : c.owner ? (
+              c.owner.email
+            ) : (
+              "—"
+            )}
+          </td>
+          <td className="px-3 py-2">
+            <AccessBadge access={c.access} />
+          </td>
+          <td className="px-3 py-2">
+            <StatusBadge status={c.status} />
+          </td>
+          <td className="px-3 py-2 text-right tabular-nums text-muted">
+            {formatBytes(c.sizeBytes)}
+          </td>
+          <td className="px-3 py-2 text-right tabular-nums text-muted">
+            {c.usageOps.toLocaleString()}
+          </td>
+          <td className="px-3 py-2 text-muted">{relativeTime(c.lastActivityAt)}</td>
+          <td className="px-3 py-2 text-right">
+            <RowActions canvas={c} />
+          </td>
+        </tr>
+      ))}
+    </DataTable>
   );
 }

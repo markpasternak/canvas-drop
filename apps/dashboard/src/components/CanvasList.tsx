@@ -8,6 +8,7 @@ import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
+import { Tag } from "./Tag.js";
 
 const MAX_ROW_TAGS = 3;
 
@@ -58,19 +59,17 @@ function RowTags({ tags }: { tags: string[] }) {
   }
   const shown = tags.slice(0, MAX_ROW_TAGS);
   const extra = tags.length - shown.length;
-  const chip =
-    "rounded border border-border bg-surface-sunken px-1.5 py-0.5 text-[0.6875rem] font-medium";
   return (
     <span className="flex flex-wrap items-center gap-1">
       {shown.map((tag) => (
-        <span key={tag} className={`${chip} text-muted`}>
+        <Tag key={tag} size="xs">
           {tag}
-        </span>
+        </Tag>
       ))}
       {extra > 0 && (
-        <span className={`${chip} text-subtle`} title={`${extra} more tags`}>
+        <Tag size="xs" tone="subtle" title={`${extra} more tags`}>
           +{extra}
-        </span>
+        </Tag>
       )}
     </span>
   );
