@@ -28,6 +28,7 @@ import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { SegmentedControl } from "../components/SegmentedControl.js";
 import { PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import {
@@ -311,66 +312,32 @@ function ScopeToggle({
   summary: CanvasOwnerSummary;
 }) {
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a button-group filter (role=group + aria-label), not a form fieldset
-    <div
-      role="group"
+    <SegmentedControl
       aria-label="Canvas scope"
-      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
-    >
-      {(["active", "archived"] as const).map((s) => (
-        <button
-          key={s}
-          type="button"
-          aria-pressed={value === s}
-          onClick={() => onChange(s)}
-          className={cn(
-            "inline-flex h-8 items-center rounded-md px-3 text-sm font-medium transition-colors",
-            value === s
-              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
-              : "text-muted hover:text-fg",
-          )}
-        >
-          <span className="capitalize">{s}</span>
-          <span className="ml-1.5 text-xs text-subtle">{summary[s]}</span>
-        </button>
-      ))}
-    </div>
+      value={value}
+      onChange={onChange}
+      items={[
+        { value: "active", label: "Active", count: summary.active },
+        { value: "archived", label: "Archived", count: summary.archived },
+      ]}
+    />
   );
 }
 
 /** List ⇄ grid layout switch. Mirrors the segmented styling of the scope toggle;
  *  the choice lives in the URL (`?view=grid`) so a layout is shareable + sticky. */
 function ViewToggle({ value, onChange }: { value: CanvasView; onChange: (v: CanvasView) => void }) {
-  const options = [
-    { v: "list", label: "List view", Icon: Rows },
-    { v: "grid", label: "Grid view", Icon: SquaresFour },
-  ] as const;
   return (
-    <div
-      role="tablist"
+    <SegmentedControl
       aria-label="Canvas layout"
-      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
-    >
-      {options.map(({ v, label, Icon }) => (
-        <button
-          key={v}
-          type="button"
-          role="tab"
-          aria-selected={value === v}
-          aria-label={label}
-          title={label}
-          onClick={() => onChange(v)}
-          className={cn(
-            "inline-flex h-8 items-center rounded-md px-2.5 transition-colors",
-            value === v
-              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
-              : "text-muted hover:text-fg",
-          )}
-        >
-          <Icon size={16} weight={value === v ? "fill" : "regular"} aria-hidden />
-        </button>
-      ))}
-    </div>
+      iconOnly
+      value={value}
+      onChange={onChange}
+      items={[
+        { value: "list", label: "List view", icon: Rows },
+        { value: "grid", label: "Grid view", icon: SquaresFour },
+      ]}
+    />
   );
 }
 

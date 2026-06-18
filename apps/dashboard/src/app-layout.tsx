@@ -2,6 +2,7 @@ import { BookOpen, List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icon
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
+import { SegmentedControl } from "./components/SegmentedControl.js";
 import { UserMenu } from "./components/UserMenu.js";
 import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
@@ -25,38 +26,18 @@ const SECTION_LINKS: ReadonlyArray<{
 
 function ThemeSwitch() {
   const { choice, setChoice } = useTheme();
-  const options = [
-    { id: "system", label: "System", icon: Monitor },
-    { id: "light", label: "Light", icon: Sun },
-    { id: "dark", label: "Dark", icon: MoonStars },
-  ] as const;
-
   return (
-    <fieldset
+    <SegmentedControl
       aria-label="Theme"
-      className="m-0 grid grid-cols-3 rounded-lg border border-border bg-surface-sunken p-0.5"
-    >
-      {options.map((option) => {
-        const Icon = option.icon;
-        const active = choice === option.id;
-        return (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => setChoice(option.id)}
-            aria-pressed={active}
-            aria-label={`Use ${option.label.toLowerCase()} theme`}
-            title={`Theme: ${option.label}`}
-            className={cn(
-              "grid size-8 place-items-center rounded-md text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:text-fg active:translate-y-px",
-              active && "bg-surface text-fg shadow-[0_1px_3px_hsl(var(--shadow-color)/0.14)]",
-            )}
-          >
-            <Icon size={16} weight={active ? "fill" : "regular"} aria-hidden />
-          </button>
-        );
-      })}
-    </fieldset>
+      iconOnly
+      value={choice}
+      onChange={setChoice}
+      items={[
+        { value: "system", label: "Use system theme", title: "Theme: System", icon: Monitor },
+        { value: "light", label: "Use light theme", title: "Theme: Light", icon: Sun },
+        { value: "dark", label: "Use dark theme", title: "Theme: Dark", icon: MoonStars },
+      ]}
+    />
   );
 }
 
