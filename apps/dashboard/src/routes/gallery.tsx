@@ -94,8 +94,9 @@ function GalleryCard({ item }: { item: GalleryItem }) {
               visible "Make a copy" primary; the kebab carries the rest. */}
           <div className="relative z-10 flex shrink-0 items-center gap-1">
             {item.templatable && (
-              <Button size="sm" variant="ghost" onClick={() => setCloneOpen(true)}>
+              <Button size="sm" variant="secondary" onClick={() => setCloneOpen(true)}>
                 Duplicate
+                <Copy size={14} weight="bold" aria-hidden />
               </Button>
             )}
             <ActionMenu label={`More actions for ${item.title || "this canvas"}`}>
