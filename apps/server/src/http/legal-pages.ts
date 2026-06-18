@@ -1,7 +1,7 @@
 import { type Config, rampCssVars } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
-import { escapeAttribute, escapeHtml, SYSTEM_THEME_INIT } from "./error-pages.js";
+import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
@@ -66,15 +66,17 @@ function renderLegalPage(opts: {
   path: string;
   origin: string;
 }): string {
+  // Legal pages are intentionally pinned to dark for now (data-theme="dark"). The
+  // light + system styles below are kept intact so flipping to a togglable theme later
+  // is just removing this attribute (or wiring SYSTEM_THEME_INIT back in).
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(opts.title)} · canvas-drop</title>
 ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 ${FAVICON_LINKS}
-${SYSTEM_THEME_INIT}
 <style>
   @font-face {
     font-family: "Newsreader Variable";
@@ -92,8 +94,9 @@ ${rampCssVars("light", "    ")}
 ${rampCssVars("dark", "      ")}
     }
   }
-  /* Manual theme override (data-theme), set pre-paint from the dashboard's
-     canvas-drop-theme choice — outranks the media query (matches docs + system pages). */
+  /* Theme overrides kept for a future toggle. The page hardcodes data-theme="dark"
+     on <html> (forced dark for now); these selectors outrank the media query so light
+     is reachable later just by changing/removing that attribute. */
   :root[data-theme="dark"] {
 ${rampCssVars("dark", "    ")}
   }
