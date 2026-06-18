@@ -46,6 +46,15 @@
   --warning: oklch(0.53 0.14 58);
   --warning-subtle: oklch(0.95 0.05 80);
 
+  /* Concept tints (canvas-state colour-coding, see concept-colors.ts). Two extra
+     hues harmonious with the teal/amber brand: a soft blue (Listed, hue ~245 —
+     deliberately clear of the rejected indigo band) and a warm rose (Shared, hue
+     ~14). AA-targeted: -fg readable on -subtle in both themes. */
+  --info: oklch(0.50 0.11 245);
+  --info-subtle: oklch(0.94 0.035 245);
+  --shared: oklch(0.55 0.15 14);
+  --shared-subtle: oklch(0.95 0.035 14);
+
   --ring: oklch(0.49 0.105 200);
   --logo-frame: oklch(0.27 0.022 235);
   --logo-drop: oklch(0.49 0.105 200);
@@ -93,6 +102,12 @@
     --warning: oklch(0.82 0.15 80);
     --warning-subtle: oklch(0.27 0.06 70);
 
+    /* Concept tints (mirror of light) — brighter -fg on a deep -subtle for AA in dark. */
+    --info: oklch(0.80 0.12 245);
+    --info-subtle: oklch(0.30 0.07 250);
+    --shared: oklch(0.80 0.14 16);
+    --shared-subtle: oklch(0.30 0.08 18);
+
     --ring: oklch(0.83 0.09 195);
     --logo-frame: oklch(0.965 0.004 265);
     --logo-drop: oklch(0.78 0.105 195);
@@ -138,6 +153,12 @@
   --success-subtle: oklch(0.27 0.06 155);
   --warning: oklch(0.82 0.15 80);
   --warning-subtle: oklch(0.27 0.06 70);
+
+  /* Concept tints (mirror of light) — brighter -fg on a deep -subtle for AA in dark. */
+  --info: oklch(0.80 0.12 245);
+  --info-subtle: oklch(0.30 0.07 250);
+  --shared: oklch(0.80 0.14 16);
+  --shared-subtle: oklch(0.30 0.08 18);
 
   --ring: oklch(0.83 0.09 195);
   --logo-frame: oklch(0.965 0.004 265);
@@ -189,6 +210,13 @@
   --color-success-subtle: var(--success-subtle);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
+
+  /* Concept tints (canvas-state colour-coding) — Listed (blue) + Shared (rose). */
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-shared: var(--shared);
+  --color-shared-subtle: var(--shared-subtle);
+
   --color-ring: var(--ring);
 
   /* Elevation registered as utilities (shadow-xs … shadow-lg). */

@@ -329,6 +329,54 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(screen.queryByRole("link", { name: "Open Archived one" })).toBeNull();
   });
 
+  it("colour-codes the stat strip + filter chips with concept dots, and the row badges (rebrand)", async () => {
+    stub([
+      canvas({
+        id: "a",
+        title: "Listed template",
+        galleryListed: true,
+        galleryTemplatable: true,
+        hasPassword: true,
+      }),
+    ]);
+    renderAt("/");
+    await screen.findByText("Listed template");
+
+    // Stat strip: each stat carries its concept on a data attribute (the dot rides it).
+    // Scope to the <dt> (the stat label) — "Active"/"Archived" also appear in the
+    // scope toggle, so match on the strip's definition-term cells only.
+    const stripLabel = screen
+      .getAllByText("Active")
+      .find((el) => el.tagName.toLowerCase() === "dt");
+    const strip = stripLabel?.closest("dl");
+    expect(strip).not.toBeNull();
+    const concepts = within(strip as HTMLElement)
+      .getAllByText(/^(Active|Archived|Templates|Never deployed|Protected)$/)
+      .map((el) => el.closest("[data-concept]")?.getAttribute("data-concept"));
+    expect(concepts).toEqual(
+      expect.arrayContaining(["active", "archived", "templates", "neverDeployed", "protected"]),
+    );
+
+    // Filter chips carry the same concept colours: the Listed chip's dot is the
+    // info (blue) tint that the Listed row badge also uses. (Several controls match
+    // /listed/i — the toggle chip is the one carrying aria-pressed.)
+    const listedChip = screen
+      .getAllByRole("button", { name: /listed/i })
+      .find((b) => b.getAttribute("aria-pressed") !== null);
+    expect(listedChip).toBeDefined();
+    expect((listedChip as HTMLElement).querySelector(".bg-info")).not.toBeNull();
+
+    // Row badges read the concept tints from the same map. "Template"/"Protected"
+    // text also appears as a stat label, so target the row badge by its data-concept.
+    const templateBadge = screen.getByText("Template");
+    expect(templateBadge).toHaveAttribute("data-concept", "templates");
+    expect(templateBadge.className).toContain("text-accent");
+    const protectedBadge = document.querySelector('span[data-concept="protected"]');
+    expect(protectedBadge).not.toBeNull();
+    expect((protectedBadge as HTMLElement).className).toContain("text-warning");
+    expect(protectedBadge).toHaveTextContent("Protected");
+  });
+
   it("paginates: shows the page window and a working Next control", async () => {
     // 25 canvases → page size 24 → page 1 shows 24, Next reveals the 25th.
     const many = Array.from({ length: 25 }, (_, i) =>

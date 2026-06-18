@@ -5,7 +5,7 @@ import type { CanvasListItem } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row-styles.js";
-import { AccessBadge, accessRungLabel, Badge, PublicationBadge } from "./Badge.js";
+import { AccessBadge, accessRungLabel, ConceptBadge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
@@ -41,14 +41,16 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       )}
       {/* Public is the only beyond-the-org rung — flag it prominently by the title. */}
       {canvas.access === "public_link" && <AccessBadge access="public_link" />}
-      {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
+      {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
       {/* Listed-but-not-template: gallery state used to be its own column. */}
-      {canvas.galleryListed && !canvas.galleryTemplatable && <Badge tone="neutral">Listed</Badge>}
+      {canvas.galleryListed && !canvas.galleryTemplatable && (
+        <ConceptBadge concept="listed">Listed</ConceptBadge>
+      )}
       {canvas.hasPassword && (
-        <Badge tone="neutral">
+        <ConceptBadge concept="protected">
           <LockSimple size={12} weight="bold" aria-hidden />
           Protected
-        </Badge>
+        </ConceptBadge>
       )}
     </>
   );
@@ -443,12 +445,12 @@ export function CanvasCard({
           </Link>
           <span className="flex shrink-0 flex-wrap items-center gap-1">
             {canvas.access === "public_link" && <AccessBadge access="public_link" />}
-            {canvas.galleryTemplatable && <Badge tone="accent">Template</Badge>}
+            {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
             {canvas.hasPassword && (
-              <Badge tone="neutral">
+              <ConceptBadge concept="protected">
                 <LockSimple size={12} weight="bold" aria-hidden />
                 Protected
-              </Badge>
+              </ConceptBadge>
             )}
           </span>
         </div>

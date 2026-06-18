@@ -23,6 +23,7 @@ import {
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { type Concept, conceptColor } from "../components/concept-colors.js";
 import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -62,12 +63,18 @@ const STATE_CHIPS: Array<{
   key: keyof CanvasesSearch;
   label: string;
   countKey: keyof CanvasOwnerSummary;
+  concept: Concept;
 }> = [
-  { key: "shared", label: "Shared", countKey: "shared" },
-  { key: "protected", label: "Protected", countKey: "protected" },
-  { key: "listed", label: "Listed", countKey: "listed" },
-  { key: "template", label: "Templates", countKey: "templates" },
-  { key: "undeployed", label: "Never deployed", countKey: "neverDeployed" },
+  { key: "shared", label: "Shared", countKey: "shared", concept: "shared" },
+  { key: "protected", label: "Protected", countKey: "protected", concept: "protected" },
+  { key: "listed", label: "Listed", countKey: "listed", concept: "listed" },
+  { key: "template", label: "Templates", countKey: "templates", concept: "templates" },
+  {
+    key: "undeployed",
+    label: "Never deployed",
+    countKey: "neverDeployed",
+    concept: "neverDeployed",
+  },
 ];
 
 const CANVASES_SORT_OPTIONS = [
@@ -348,28 +355,43 @@ function SummaryStrip({
   summary: CanvasOwnerSummary;
   archivedView: boolean;
 }) {
-  const items = [
-    { label: "Active", value: summary.active, active: !archivedView },
-    { label: "Archived", value: summary.archived, active: archivedView },
-    { label: "Templates", value: summary.templates },
-    { label: "Never deployed", value: summary.neverDeployed },
-    { label: "Protected", value: summary.protected },
+  const items: Array<{
+    label: string;
+    value: number;
+    concept: Concept;
+    active?: boolean;
+  }> = [
+    { label: "Active", value: summary.active, concept: "active", active: !archivedView },
+    { label: "Archived", value: summary.archived, concept: "archived", active: archivedView },
+    { label: "Templates", value: summary.templates, concept: "templates" },
+    { label: "Never deployed", value: summary.neverDeployed, concept: "neverDeployed" },
+    { label: "Protected", value: summary.protected, concept: "protected" },
   ];
   return (
     <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-5">
-      {items.map((item, index) => (
-        <div
-          key={item.label}
-          className={cn(
-            "bg-surface px-3 py-2",
-            index === items.length - 1 && "col-span-2 sm:col-span-1",
-            item.active && "bg-accent-subtle text-accent",
-          )}
-        >
-          <dt className="text-[0.6875rem] font-medium text-subtle">{item.label}</dt>
-          <dd className="mt-0.5 text-lg font-semibold tabular-nums text-fg">{item.value}</dd>
-        </div>
-      ))}
+      {items.map((item, index) => {
+        // A small concept-coloured dot keeps the chrome calm (the surface stays
+        // neutral) while making each stat readable at a glance. The active scope
+        // still gets its accent wash so the current lifecycle scope stands out.
+        const color = conceptColor(item.concept);
+        return (
+          <div
+            key={item.label}
+            data-concept={item.concept}
+            className={cn(
+              "bg-surface px-3 py-2",
+              index === items.length - 1 && "col-span-2 sm:col-span-1",
+              item.active && "bg-accent-subtle text-accent",
+            )}
+          >
+            <dt className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-subtle">
+              <span className={cn("size-1.5 shrink-0 rounded-full", color.dot)} aria-hidden />
+              {item.label}
+            </dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-fg">{item.value}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
@@ -691,9 +713,10 @@ export default function CanvasList() {
                       <FilterChip
                         active={search[chip.key] === true}
                         onClick={() => toggle(chip.key)}
+                        dotClassName={conceptColor(chip.concept).dot}
                       >
                         <span>{chip.label}</span>
-                        <span className="ml-2 text-xs tabular-nums text-subtle" aria-hidden>
+                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
                           {summary[chip.countKey]}
                         </span>
                       </FilterChip>
