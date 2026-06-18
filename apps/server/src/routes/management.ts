@@ -337,8 +337,14 @@ export function managementRoutes(deps: ManagementDeps) {
    *  version lookup (no N+1). Shared by the active list and the archived list.
    *  `recentSinceMs` is the trending-window floor for the per-row `recentViews`
    *  number — one batched `recentViewCounts` over the page (same window the
-   *  `popular` sort ranks by), so the displayed count matches the sort order. */
-  async function withLastDeploy(list: Canvas[], recentSinceMs: number) {
+   *  `popular` sort ranks by), so the displayed count matches the sort order.
+   *  `precomputedViews` lets the `popular` path hand back the counts it already
+   *  ranked by, so that sort never aggregates `usage_events` twice (plan 004). */
+  async function withLastDeploy(
+    list: Canvas[],
+    recentSinceMs: number,
+    precomputedViews?: Map<string, number>,
+  ) {
     const currentIds = list
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
@@ -346,12 +352,14 @@ export function managementRoutes(deps: ManagementDeps) {
     // Globals are request-global (not per-canvas) — resolve once, reuse for the row.
     const globals = await resolveGlobals();
     // Batched lookups for the whole page (no N+1): preview hints + recent view counts.
+    // The popular sort already computed the page's counts, so reuse them there.
     const [previews, recentViews] = await Promise.all([
       previewIds(list.map((cv) => cv.id)),
-      deps.usage.recentViewCounts(
-        list.map((cv) => cv.id),
-        recentSinceMs,
-      ),
+      precomputedViews ??
+        deps.usage.recentViewCounts(
+          list.map((cv) => cv.id),
+          recentSinceMs,
+        ),
     ]);
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
@@ -403,7 +411,7 @@ export function managementRoutes(deps: ManagementDeps) {
     const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
     // The filtered page and the (filter-independent) inventory summary have no data
     // dependency — run them concurrently rather than serially.
-    const [{ items, total }, summary] = await Promise.all([
+    const [{ items, total, recentViews }, summary] = await Promise.all([
       deps.canvases.listByOwnerFiltered({
         ownerId: userId,
         q: data.q,
@@ -421,7 +429,7 @@ export function managementRoutes(deps: ManagementDeps) {
       }),
       deps.canvases.ownerSummary(userId),
     ]);
-    const canvases = await withLastDeploy(items, recentSinceMs);
+    const canvases = await withLastDeploy(items, recentSinceMs, recentViews);
     return c.json({ canvases, total, limit, offset, summary });
   });
 

@@ -128,7 +128,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     },
     async ({ query, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
-      const { items, total } = await deps.canvases.listByOwnerFiltered({
+      const {
+        items,
+        total,
+        recentViews: rankedViews,
+      } = await deps.canvases.listByOwnerFiltered({
         ownerId: caller.userId,
         q: query,
         sort,
@@ -136,12 +140,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: limit ?? 50,
         offset: 0,
       });
+      // The popular sort already aggregated the page's counts — reuse them rather than
+      // hitting usage_events twice (plan 004); other sorts aggregate the page here.
       const [previews, recentViews] = await Promise.all([
         previewIds(items.map((cv) => cv.id)),
-        deps.usage.recentViewCounts(
-          items.map((cv) => cv.id),
-          recentSinceMs,
-        ),
+        rankedViews ??
+          deps.usage.recentViewCounts(
+            items.map((cv) => cv.id),
+            recentSinceMs,
+          ),
       ]);
       return ok({
         total,

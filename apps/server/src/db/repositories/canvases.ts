@@ -307,8 +307,15 @@ export function canvasesRepository(client: DbClient) {
      * every option ANDs onto it and can only ever shrink the owner's active set —
      * a missing/malformed option still returns only the caller's canvases (§12).
      * Two-query count posture (no new index) at single-org scale, like the gallery.
+     *
+     * For `sort=popular` the result also carries `recentViews` — the page's trending
+     * counts the ranking already computed — so the caller reuses them for the per-row
+     * display instead of re-aggregating `usage_events` a second time (plan 004). It is
+     * undefined for every other sort (the caller aggregates the page itself there).
      */
-    async listByOwnerFiltered(opts: OwnerListOptions): Promise<{ items: Canvas[]; total: number }> {
+    async listByOwnerFiltered(
+      opts: OwnerListOptions,
+    ): Promise<{ items: Canvas[]; total: number; recentViews?: Map<string, number> }> {
       // Typed to allow `or(...)` (which is SQL | undefined) to be pushed, matching
       // the gallery's filter-array shape that `and(...)` accepts.
       const filters: Array<SQL | undefined> = [
@@ -355,7 +362,7 @@ export function canvasesRepository(client: DbClient) {
           .from(t)
           .where(where)) as Array<{ id: string; updatedAt: number }>;
         const total = idRows.length;
-        if (total === 0) return { items: [], total: 0 };
+        if (total === 0) return { items: [], total: 0, recentViews: new Map() };
 
         const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
         const countRows = (await db
@@ -381,7 +388,7 @@ export function canvasesRepository(client: DbClient) {
           .sort((a, b) => b.v - a.v || b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1))
           .slice(opts.offset, opts.offset + opts.limit)
           .map((r) => r.id);
-        if (pageIds.length === 0) return { items: [], total };
+        if (pageIds.length === 0) return { items: [], total, recentViews: new Map() };
 
         const byId = new Map(
           ((await db.select().from(t).where(inArray(t.id, pageIds))) as Canvas[]).map((cv) => [
@@ -392,7 +399,10 @@ export function canvasesRepository(client: DbClient) {
         const items = pageIds
           .map((id) => byId.get(id))
           .filter((cv): cv is Canvas => cv !== undefined);
-        return { items, total };
+        // Hand the page's trending counts back so the caller doesn't re-aggregate
+        // `usage_events` for the same rows (the ranking already has them).
+        const recentViews = new Map(pageIds.map((id) => [id, views.get(id) ?? 0]));
+        return { items, total, recentViews };
       }
 
       // Default is most-recently-updated; `created` and `title` are alternatives.

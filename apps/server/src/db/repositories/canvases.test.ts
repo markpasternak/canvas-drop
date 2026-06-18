@@ -706,6 +706,38 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(page.total).toBe(3);
   });
 
+  it("listByOwnerFiltered popular sort never crosses the owner boundary (§12 owner-scope)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const other = await seedOwner(client, "other");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const mine = await repo.create({ ownerId: me, slug: "mine", apiKeyHash: "k-mine" });
+    const theirs = await repo.create({ ownerId: other, slug: "theirs", apiKeyHash: "k-theirs" });
+
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    // The OTHER owner's canvas is far more popular — if the popular path's hydrate ever
+    // dropped the owner filter, `theirs` would outrank and surface in my list.
+    for (let i = 0; i < 5; i++) {
+      await usage.recordView({ canvasId: theirs.id, userId: `v${i}`, windowMs: win, now: t0 + i });
+    }
+    await usage.recordView({ canvasId: mine.id, userId: me, windowMs: win, now: t0 });
+
+    const res = await repo.listByOwnerFiltered({
+      ownerId: me,
+      sort: "popular",
+      popularSinceMs: t0 - win,
+      limit: 50,
+      offset: 0,
+    });
+    // Only my canvas comes back — never the other owner's, despite its higher view count.
+    expect(res.items.map((c) => c.id)).toEqual([mine.id]);
+    expect(res.total).toBe(1);
+    // The reused trending map is scoped to my page only — no other-owner counts leak.
+    expect([...(res.recentViews?.keys() ?? [])]).toEqual([mine.id]);
+  });
+
   it("listByOwnerFiltered windows with limit/offset while total reflects the full filtered count", async () => {
     client = await makeTestDb(dialect);
     const me = await seedOwner(client, "me");
