@@ -47,6 +47,7 @@ change, never a code change.
 | `CANVAS_DROP_MCP` | `on` | `on` \| `off`. When `off`, the `/mcp` control-plane routes are not mounted. |
 | `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE` | `false` | Must be `true` to boot `path` mode with `proxy`/`oidc` auth (path mode has reduced browser isolation). |
 | `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the built dashboard SPA path; defaults to a location resolved from the server module. |
+| `CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL` | `300` | Seconds a shared cache (a CDN in front) may hold a **public** canvas's HTML (emitted as `s-maxage`; the browser still revalidates each load). Only the `public_link`, no-password rung is ever shared-cacheable — auth-gated canvases stay `private`. Also the window a canvas can stay visible at the edge after access is restricted (the dashboard warns owners with this figure). `0` disables shared caching. See [Behind a CDN](cdn). |
 
 ## Auth
 
@@ -98,7 +99,8 @@ cryptographic) **or** the trusted-header path. Boot fails if neither is set.
 | `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` | (unset) | Enables the JWT path. When set, identity headers are never honored. |
 | `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER` | (unset) | **Required when JWKS is set.** |
 | `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE` | (unset) | **Required when JWKS is set.** |
-| `CANVAS_DROP_TRUSTED_PROXY_IPS` | (empty) | CSV of IPv4 addresses or CIDRs. The only peers whose identity headers are trusted. Gates on the socket peer IP (never `X-Forwarded-For`). Each entry is validated at boot: `/0`, malformed IPv4, and IPv6 are rejected. |
+| `CANVAS_DROP_TRUSTED_PROXY_IPS` | (empty) | CSV of IPv4 addresses or CIDRs. The only peers whose identity headers are trusted. Gates on the socket peer IP (never `X-Forwarded-For`). Each entry is validated at boot: `/0`, malformed IPv4, and IPv6 are rejected. Also makes login throttling + audit logging per-user behind a proxy/CDN — see [Behind a CDN](cdn). |
+| `CANVAS_DROP_CLIENT_IP_HEADER` | (unset) | Header carrying the real client IP behind a CDN (e.g. `True-Client-IP`, `CF-Connecting-IP`, `Fly-Client-IP`). Read **only** when the socket peer is a trusted proxy above, so it can't be spoofed. Org-agnostic — name whatever header your CDN sends. Falls back to `X-Forwarded-For` when unset. |
 
 In `proxy` mode you must set either `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` (with
 its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.

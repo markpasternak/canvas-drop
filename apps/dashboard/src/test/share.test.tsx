@@ -114,6 +114,56 @@ describe("share route", () => {
     });
   });
 
+  it("surfaces the server's CDN staleness warning as a toast (password path)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...CANVAS, hasPassword: true, warning: "CDN edge may keep showing this canvas." }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.type(await screen.findByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: /set password/i }));
+
+    expect(await screen.findByText(/CDN edge may keep showing this canvas/i)).toBeInTheDocument();
+  });
+
+  it("surfaces the CDN warning when an access change (save) returns one", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({
+          ...published,
+          access: "whole_org",
+          warning: "Heads up: a CDN may keep serving it.",
+        }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("radio", { name: /whole org/i }));
+    expect(await screen.findByText(/a CDN may keep serving it/i)).toBeInTheDocument();
+  });
+
+  it("shows an error toast when an access change (save) fails (no silent swallow)", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () =>
+        json(
+          { code: "SHARE_REQUIRES_PUBLISH", message: "Could not change the access level." },
+          409,
+        ),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("radio", { name: /whole org/i }));
+    expect(await screen.findByText(/could not change the access level/i)).toBeInTheDocument();
+  });
+
   it("Generate fills a strong password and reveals it for copying", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
     const user = userEvent.setup();

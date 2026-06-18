@@ -40,8 +40,11 @@ const base: CanvasListItem = {
   publicationState: "published",
   disabledReason: null,
   currentVersionId: "v-1",
+  viewCount: 0,
+  lastViewedAt: null,
   createdAt: Date.UTC(2024, 0, 1),
   updatedAt: Date.UTC(2024, 0, 2),
+  recentViews: 0,
   lastDeploy: { version: 3, createdAt: Date.UTC(2024, 0, 2), fileCount: 4, totalBytes: 12_000 },
 };
 

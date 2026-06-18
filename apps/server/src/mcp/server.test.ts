@@ -178,6 +178,27 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(got.publicationState).toBe("published");
   });
 
+  it("update_canvas restricting a public_link canvas returns a CDN edge-cache warning (parity)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: created.id, zipBase64: zip({ "index.html": "<h1>hi</h1>" }) },
+    });
+    // Seed the anonymously-public state directly (public_link is admin-gated), then
+    // exercise the downgrade through the MCP tool — the warning must reach the agent.
+    await canvasesRepository(client).updateSettings(created.id, { access: "public_link" });
+    const restricted = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, access: "private" },
+      }),
+    );
+    expect(restricted.warning).toMatch(/CDN/);
+  });
+
   it("get_canvas_file reads back the live version — listing and content — for verification", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -630,6 +651,34 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const list = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
     expect(list.total).toBe(2);
     expect(list.canvases).toHaveLength(2);
+  });
+
+  it("list_canvases sort=popular ranks by recent views and reports view rollups (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const hot = payload(await mcp.callTool({ name: "create_canvas", arguments: { title: "hot" } }));
+    const cold = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "cold" } }),
+    );
+    const usage = usageEventsRepository(client);
+    const now = Date.now();
+    // hot: two distinct recent viewers (guest ids have no FK on userId); cold: none.
+    await usage.recordView({ canvasId: hot.id, userId, windowMs: 60_000, now });
+    await usage.recordView({ canvasId: hot.id, userId: "guest:y", windowMs: 60_000, now: now + 1 });
+
+    const list = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { sort: "popular" } }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(list.canvases.map((cv: any) => cv.id)).toEqual([hot.id, cold.id]);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    const hotRow = list.canvases.find((cv: any) => cv.id === hot.id);
+    expect(hotRow.recentViews).toBe(2);
+    expect(hotRow.viewCount).toBe(2); // lifetime rollup bumped by the counted views
+    expect(hotRow.lastViewedAt).toBe(now + 1);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(list.canvases.find((cv: any) => cv.id === cold.id).recentViews).toBe(0);
   });
 
   it("get_canvas / list_canvases expose hasPreview + previewUrl only when the pipeline is on (plan 004)", async () => {

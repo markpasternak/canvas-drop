@@ -128,6 +128,24 @@ function deployFootprint(canvas: CanvasListItem): string | null {
   return `${formatBytes(d.totalBytes)} · ${d.fileCount} ${d.fileCount === 1 ? "file" : "files"}`;
 }
 
+/** Popularity summary (plan 004), shared by the row + card so the two never drift.
+ *  `recentViews` is the trending 30-day count the "Most popular" sort ranks by; the
+ *  tooltip adds the all-time total. `lastViewed` is a relative "Viewed Nd ago" line,
+ *  or null when the canvas has never been viewed. */
+function viewsSummary(canvas: CanvasListItem): {
+  count: number;
+  lastViewed: string | null;
+  title: string;
+} {
+  const lastViewed = canvas.lastViewedAt ? `Viewed ${relativeTime(canvas.lastViewedAt)}` : null;
+  const allTime = `${canvas.viewCount} all-time ${canvas.viewCount === 1 ? "view" : "views"}`;
+  return {
+    count: canvas.recentViews,
+    lastViewed,
+    title: `${canvas.recentViews} in the last 30 days · ${allTime}`,
+  };
+}
+
 /** A right-aligned secondary stat (Published / Created) that fills the list row's
  *  wide-screen gutter without re-introducing the old dense column grid. */
 function StatCol({
@@ -246,6 +264,7 @@ export function CanvasRow({
   // gallery summary — so the line on the row matches what populates when you open it.
   const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
+  const views = viewsSummary(canvas);
   const navigate = useNavigate();
   // The whole-row body click (and keyboard Enter/Space) opens the canvas's detail /
   // management page (`/canvases/$id` — Overview/Editor/Share/…). This is independent
@@ -332,12 +351,18 @@ export function CanvasRow({
         </div>
 
         {/* Wide-screen gutter: the publish footprint + age that the dense column grid
-            used to carry, now as two airy right-aligned stats instead of five columns. */}
+            used to carry, now as airy right-aligned stats instead of five columns. */}
         <div className="hidden shrink-0 items-center gap-8 lg:flex">
           <StatCol
             label={deploy ? "Published" : "Status"}
             primary={deploy ? `v${deploy.version}` : "Not deployed"}
             secondary={footprint}
+          />
+          <StatCol
+            label="Views"
+            primary={`${views.count}`}
+            secondary={views.lastViewed}
+            title={views.title}
           />
           <StatCol
             label="Created"
@@ -395,6 +420,7 @@ export function CanvasCard({
    *  in the `actions` slot, not to the body. */
 }) {
   const title = canvasTitle(canvas);
+  const cardViews = viewsSummary(canvas);
   const navigate = useNavigate();
   // Body click / Enter navigates to the canvas detail page (`/canvases/$id`); the
   // "Details" button in the actions slot opens the inline rail instead.
@@ -464,6 +490,10 @@ export function CanvasCard({
         </div>
         <div className="truncate text-xs text-subtle" title={fullTime(lastActivity(canvas))}>
           {metaLine(canvas)}
+        </div>
+        <div className="truncate text-xs text-subtle" title={cardViews.title}>
+          {`${cardViews.count} ${cardViews.count === 1 ? "view" : "views"}`}
+          {cardViews.lastViewed ? ` · ${cardViews.lastViewed}` : ""}
         </div>
         <div className="mt-auto flex items-center justify-end gap-1 pt-2">
           {actions ?? <DefaultRowActions canvas={canvas} />}

@@ -3,7 +3,12 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { AppEnv, Principal } from "../http/types.js";
-import { canvasAccess, decideCanvasAccess, principalLookupKey } from "./authorization.js";
+import {
+  canvasAccess,
+  decideCanvasAccess,
+  isAnonymouslyPublic,
+  principalLookupKey,
+} from "./authorization.js";
 
 const NOW = 1_000_000;
 
@@ -39,6 +44,8 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     disabledReason: null,
     currentVersionId: "v1",
     clonedFromCanvasId: null,
+    viewCount: 0,
+    lastViewedAt: null,
     createdAt: 0,
     updatedAt: 0,
     deletedAt: null,
@@ -404,5 +411,36 @@ describe("decideCanvasAccess — internal capture principal", () => {
       status: 403,
       reason: "disabled",
     });
+  });
+});
+
+describe("isAnonymouslyPublic — the shared-cacheable predicate", () => {
+  it("true only for public_link with no password and an unexpired share", () => {
+    expect(isAnonymouslyPublic("public_link", false, null, NOW)).toBe(true);
+    expect(isAnonymouslyPublic("public_link", false, NOW + 1000, NOW)).toBe(true);
+  });
+
+  it("false for every auth-gated rung", () => {
+    expect(isAnonymouslyPublic("private", false, null, NOW)).toBe(false);
+    expect(isAnonymouslyPublic("whole_org", false, null, NOW)).toBe(false);
+    expect(isAnonymouslyPublic("specific_people", false, null, NOW)).toBe(false);
+  });
+
+  it("false when password-gated, even on public_link", () => {
+    expect(isAnonymouslyPublic("public_link", true, null, NOW)).toBe(false);
+  });
+
+  it("treats the expiry boundary EXACTLY like decideCanvasAccess (<= now is expired)", () => {
+    // Pin the needle at exactly `now`: <= now must read as expired (matches the
+    // share_expired deny in decideCanvasAccess), so an accidental `< now` would fail here.
+    expect(isAnonymouslyPublic("public_link", false, NOW, NOW)).toBe(false);
+    expect(isAnonymouslyPublic("public_link", false, NOW - 1, NOW)).toBe(false);
+    expect(isAnonymouslyPublic("public_link", false, NOW + 1, NOW)).toBe(true);
+    // And the same boundary in decideCanvasAccess denies an anon public_link viewer.
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link", sharedExpiresAt: NOW }), anon, NOW, {
+        publicEnabled: true,
+      }),
+    ).toMatchObject({ action: "deny", reason: "share_expired" });
   });
 });

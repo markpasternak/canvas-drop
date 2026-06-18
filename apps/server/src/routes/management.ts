@@ -29,6 +29,7 @@ import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
   CLEARED_PUBLICATION_FIELDS,
+  POPULAR_WINDOW_MS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
@@ -188,6 +189,11 @@ function ownerCanvasView(
     // Admin takedown reason (§6.10.2, M7). Owner-only surface — see the doc above.
     disabledReason: cv.disabledReason,
     currentVersionId: cv.currentVersionId,
+    // Denormalized view rollups (plan 004): lifetime deduped views + the last-viewed
+    // stamp, both O(1) off the canvas row. The trending (recent-window) number used by
+    // the list + the `popular` sort is added per-page as `recentViews` (list only).
+    viewCount: cv.viewCount,
+    lastViewedAt: cv.lastViewedAt,
     createdAt: cv.createdAt,
     updatedAt: cv.updatedAt,
   };
@@ -224,7 +230,7 @@ const ownerListQuerySchema = z.object({
   // Lifecycle scope: the active set (default) or the archived set (Your-canvases
   // Active/Archived toggle). A junk value falls back to active.
   scope: z.enum(["active", "archived"]).catch("active"),
-  sort: z.enum(["updated", "created", "title"]).catch("updated"),
+  sort: z.enum(["updated", "created", "title", "popular"]).catch("updated"),
   limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
   offset: z.coerce.number().int().catch(0),
 });
@@ -351,20 +357,39 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched
-   *  version lookup (no N+1). Shared by the active list and the archived list. */
-  async function withLastDeploy(list: Canvas[]) {
+   *  version lookup (no N+1). Shared by the active list and the archived list.
+   *  `recentSinceMs` is the trending-window floor for the per-row `recentViews`
+   *  number — one batched `recentViewCounts` over the page (same window the
+   *  `popular` sort ranks by), so the displayed count matches the sort order.
+   *  `precomputedViews` lets the `popular` path hand back the counts it already
+   *  ranked by, so that sort never aggregates `usage_events` twice (plan 004). */
+  async function withLastDeploy(
+    list: Canvas[],
+    recentSinceMs: number,
+    precomputedViews?: Map<string, number>,
+  ) {
     const currentIds = list
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
     // Globals are request-global (not per-canvas) — resolve once, reuse for the row.
     const globals = await resolveGlobals();
-    // Batched `hasPreview` lookup for the whole list (no N+1).
-    const previews = await previewIds(list.map((cv) => cv.id));
+    // Batched lookups for the whole page (no N+1): preview hints + recent view counts.
+    // The popular sort already computed the page's counts, so reuse them there.
+    const [previews, recentViews] = await Promise.all([
+      previewIds(list.map((cv) => cv.id)),
+      precomputedViews ??
+        deps.usage.recentViewCounts(
+          list.map((cv) => cv.id),
+          recentSinceMs,
+        ),
+    ]);
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
       return {
         ...ownerCanvasView(deps.config, cv, globals, previewVisible(cv, previews)),
+        // Trending views over the recent window (0 when the canvas has none).
+        recentViews: recentViews.get(cv.id) ?? 0,
         lastDeploy: v
           ? {
               version: v.number,
@@ -404,9 +429,12 @@ export function managementRoutes(deps: ManagementDeps) {
     const offset = Math.max(data.offset, 0);
 
     const userId = c.get("user").id;
+    // One trending-window floor reused for BOTH the `popular` ranking and the per-row
+    // `recentViews` number, so the order and the displayed counts can't disagree.
+    const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
     // The filtered page and the (filter-independent) inventory summary have no data
     // dependency — run them concurrently rather than serially.
-    const [{ items, total }, summary] = await Promise.all([
+    const [{ items, total, recentViews }, summary] = await Promise.all([
       deps.canvases.listByOwnerFiltered({
         ownerId: userId,
         q: data.q,
@@ -418,12 +446,13 @@ export function managementRoutes(deps: ManagementDeps) {
         neverDeployed: data.undeployed,
         archived: data.scope === "archived",
         sort: data.sort,
+        popularSinceMs: recentSinceMs,
         limit,
         offset,
       }),
       deps.canvases.ownerSummary(userId),
     ]);
-    const canvases = await withLastDeploy(items);
+    const canvases = await withLastDeploy(items, recentSinceMs, recentViews);
     return c.json({ canvases, total, limit, offset, summary });
   });
 
@@ -482,11 +511,13 @@ export function managementRoutes(deps: ManagementDeps) {
     // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
     const resolution = resolveSettingsUpdate(cv, body.data, {
       canPublishPublic: c.get("user").canPublishPublic,
+      publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
+      now: Date.now(),
     });
     if (!resolution.ok) {
       return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
     }
-    const { patch, password, targetAccess } = resolution;
+    const { patch, password, targetAccess, warning } = resolution;
 
     let updated = cv;
     if (Object.keys(patch).length > 0) {
@@ -536,7 +567,8 @@ export function managementRoutes(deps: ManagementDeps) {
             c.get("log")?.warn({ err, canvasId: cv.id }, "hub: dropGatedNonOwners failed"),
           );
     }
-    return c.json(await canvasView(updated));
+    const view = await canvasView(updated);
+    return c.json(warning ? { ...view, warning } : view);
   });
 
   // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------

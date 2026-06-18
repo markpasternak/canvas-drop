@@ -1,5 +1,7 @@
 import type { Canvas } from "@canvas-drop/shared/db";
 import type { CanvasSettingsPatch } from "../db/repositories/canvases.js";
+import { cdnAccessDowngradeWarning } from "../http/cdn-cache.js";
+import { isAnonymouslyPublic } from "./authorization.js";
 
 /** The settings a caller may change (the management `settingsSchema` shape, minus the
  *  transport concerns). `shared` is the deprecated boolean alias for `access`. */
@@ -31,6 +33,9 @@ export type SettingsResolution =
       password: string | null | undefined;
       /** The resolved target access rung, or undefined when unchanged (for the audit event). */
       targetAccess?: "private" | "specific_people" | "whole_org" | "public_link";
+      /** Non-blocking advisory for the owner — e.g. CDN edge-cache staleness on an
+       *  access downgrade. Present only when there's something worth surfacing. */
+      warning?: string;
     };
 
 /**
@@ -47,7 +52,7 @@ export type SettingsResolution =
 export function resolveSettingsUpdate(
   cv: Canvas,
   input: CanvasSettingsInput,
-  opts: { canPublishPublic: boolean },
+  opts: { canPublishPublic: boolean; publicEdgeCacheTtlSec: number; now: number },
 ): SettingsResolution {
   const { password, shared, access, ...rest } = input;
   // The target rung: the first-class `access` field wins; else the deprecated
@@ -134,5 +139,32 @@ export function resolveSettingsUpdate(
     patch.gallerySummary = null;
     patch.galleryTags = null;
   }
-  return { ok: true, patch, password, targetAccess };
+
+  // CDN staleness advisory: if this change moves the canvas OFF the anonymously-public
+  // state (public_link + no password + unexpired share — the only shared-cacheable
+  // one), a CDN in front may keep serving the old public page until its edge cache
+  // expires. Warn in plain terms, quoting the configured TTL. The expiry dimension is
+  // included on both sides so restricting via a past `sharedExpiresAt` warns too, and
+  // setting a future expiry on a still-public canvas does not. Suppressed when shared
+  // caching is off (TTL 0).
+  const effectiveExpiresAt =
+    rest.sharedExpiresAt !== undefined ? rest.sharedExpiresAt : cv.sharedExpiresAt;
+  const wasAnonPublic = isAnonymouslyPublic(
+    cv.access,
+    cv.passwordHash !== null,
+    cv.sharedExpiresAt,
+    opts.now,
+  );
+  const willBeAnonPublic = isAnonymouslyPublic(
+    effectiveAccess,
+    willBeProtected,
+    effectiveExpiresAt,
+    opts.now,
+  );
+  const warning =
+    wasAnonPublic && !willBeAnonPublic
+      ? (cdnAccessDowngradeWarning(opts.publicEdgeCacheTtlSec) ?? undefined)
+      : undefined;
+
+  return { ok: true, patch, password, targetAccess, warning };
 }

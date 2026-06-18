@@ -147,6 +147,28 @@ describe("managementRoutes", () => {
     expect(cv?.apiKeyHash).not.toBe(body.apiKey);
   });
 
+  it("GET /?sort=popular ranks by recent views and reports recentViews per row (plan 004)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const hot = await repo.create({ ownerId: owner.id, slug: "hot", apiKeyHash: "kh" });
+    const cold = await repo.create({ ownerId: owner.id, slug: "cold", apiKeyHash: "kc" });
+    const now = Date.now();
+    // hot: two distinct recent viewers; cold: none. (guest ids have no FK on userId.)
+    await usage.recordView({ canvasId: hot.id, userId: owner.id, windowMs: 60_000, now });
+    await usage.recordView({ canvasId: hot.id, userId: "guest:x", windowMs: 60_000, now: now + 1 });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases?sort=popular",
+    );
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ canvases: Array<{ id: string; recentViews: number }> }>(res);
+    expect(body.canvases.map((cv) => cv.id)).toEqual([hot.id, cold.id]);
+    expect(body.canvases.find((cv) => cv.id === hot.id)?.recentViews).toBe(2);
+    expect(body.canvases.find((cv) => cv.id === cold.id)?.recentViews).toBe(0);
+  });
+
   it("GET /:id returns the canvas to its owner, 404 to a different user", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
@@ -563,6 +585,43 @@ describe("managementRoutes", () => {
       }),
     );
     expect(cleared.hasPassword).toBe(false);
+  });
+
+  it("settings: restricting a public_link canvas returns a CDN edge-cache warning", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false, canPublishPublic: true });
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases/paste", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ html: "<h1>hi</h1>" }),
+      }),
+    );
+    // Make it anonymously public, then restrict it back to private.
+    await app.request(`/api/canvases/${created.id}/settings`, {
+      method: "PATCH",
+      headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ access: "public_link" }),
+    });
+    const restricted = await jsonOf<{ warning?: string }>(
+      await app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ access: "private" }),
+      }),
+    );
+    expect(restricted.warning).toMatch(/CDN/);
+
+    // A non-downgrade edit carries no warning.
+    const renamed = await jsonOf<{ warning?: string }>(
+      await app.request(`/api/canvases/${created.id}/settings`, {
+        method: "PATCH",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: JSON.stringify({ title: "Renamed" }),
+      }),
+    );
+    expect(renamed.warning).toBeUndefined();
   });
 
   it("regenerate-slug changes the slug and the old no longer resolves; regenerate-key rotates", async () => {

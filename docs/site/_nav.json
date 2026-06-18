@@ -61,6 +61,7 @@
         "title": "Security model"
       },
       { "path": "self-hosting/deploy", "file": "self-hosting/deploy.md", "title": "Deploy" },
+      { "path": "self-hosting/cdn", "file": "self-hosting/cdn.md", "title": "Behind a CDN" },
       {
         "path": "self-hosting/screenshots",
         "file": "self-hosting/screenshots.md",

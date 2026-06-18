@@ -29,8 +29,15 @@ describe("serveCanvas (integration)", () => {
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
-  async function setup(opts: { spaFallback?: boolean; config?: Config } = {}) {
-    const cfg = opts.config ?? config;
+  async function setup(
+    opts: {
+      spaFallback?: boolean;
+      access?: "private" | "specific_people" | "whole_org" | "public_link";
+      passwordHash?: string;
+      sharedExpiresAt?: number;
+      serveConfig?: Config;
+    } = {},
+  ) {
     client = await makeTestDb("sqlite");
     dir = await mkdtemp(join(tmpdir(), "cd-serve-"));
     storage = new LocalDriver(dir);
@@ -45,6 +52,10 @@ describe("serveCanvas (integration)", () => {
     });
     const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
     if (opts.spaFallback) await canvases.updateSettings(cv.id, { spaFallback: true });
+    if (opts.access) await canvases.updateSettings(cv.id, { access: opts.access });
+    if (opts.sharedExpiresAt !== undefined)
+      await canvases.updateSettings(cv.id, { sharedExpiresAt: opts.sharedExpiresAt });
+    if (opts.passwordHash) await canvases.setPassword(cv.id, opts.passwordHash);
 
     // deploy a version: index.html + app.js + a hashed asset
     const files: Record<string, string> = {
@@ -84,7 +95,7 @@ describe("serveCanvas (integration)", () => {
       c.set("user", owner);
       await next();
     });
-    app.all("*", serveCanvas({ config: cfg, versions, storage, usage }));
+    app.all("*", serveCanvas({ config: opts.serveConfig ?? config, versions, storage, usage }));
     return { app, canvas: updated, owner, usage, versions };
   }
 
@@ -154,7 +165,7 @@ describe("serveCanvas (integration)", () => {
       CANVAS_DROP_URL_MODE: "subdomain",
       CANVAS_DROP_BASE_URL: "https://canvases.example.com",
     });
-    const { app } = await setup({ config: subdomainConfig });
+    const { app } = await setup({ serveConfig: subdomainConfig });
     // In subdomain mode the slug comes from the host; the asset path is the bare path.
     const res = await app.request("/logo.svg");
     expect(res.status).toBe(200);
@@ -162,13 +173,84 @@ describe("serveCanvas (integration)", () => {
     expect(res.headers.get("Content-Disposition")).toBeNull();
   });
 
-  it("sets ETag + no-cache for stable names, immutable for content-hashed names", async () => {
+  it("auth-gated canvas: HTML is private/no-cache, hashed asset private/immutable", async () => {
+    // Default access is `private` — a shared CDN must never store its bytes (§12.2).
     const { app } = await setup();
     const html = await app.request("/c/s/index.html");
     expect(html.headers.get("ETag")).toBeTruthy();
-    expect(html.headers.get("Cache-Control")).toBe("no-cache");
+    expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
     const hashed = await app.request("/c/s/assets/app.abcdef12.js");
-    expect(hashed.headers.get("Cache-Control")).toContain("immutable");
+    expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+  });
+
+  it("public_link canvas: HTML is shared-cacheable (s-maxage), hashed is public/immutable", async () => {
+    // Only the anonymously-public rung may be cached by a CDN. TTL comes from config
+    // (default 300); the browser still revalidates each load via max-age=0.
+    const { app } = await setup({ access: "public_link" });
+    const html = await app.request("/c/s/index.html");
+    expect(html.headers.get("Cache-Control")).toBe("public, max-age=0, s-maxage=300");
+    const hashed = await app.request("/c/s/assets/app.abcdef12.js");
+    expect(hashed.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("public_link HTML falls back to public/no-cache when edge caching is off (TTL 0)", async () => {
+    const serveConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL: "0",
+    });
+    const { app } = await setup({ access: "public_link", serveConfig });
+    const html = await app.request("/c/s/index.html");
+    expect(html.headers.get("Cache-Control")).toBe("public, no-cache");
+  });
+
+  it("public_link WITH a password is private — a CDN must never cache a gated canvas (§12.2)", async () => {
+    const { app } = await setup({ access: "public_link", passwordHash: "hashed" });
+    const html = await app.request("/c/s/index.html");
+    expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
+    const hashed = await app.request("/c/s/assets/app.abcdef12.js");
+    expect(hashed.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+  });
+
+  it("EXPIRED public_link is private — an expired share is no longer shared-cacheable", async () => {
+    const { app } = await setup({ access: "public_link", sharedExpiresAt: Date.now() - 1000 });
+    const html = await app.request("/c/s/index.html");
+    expect(html.headers.get("Cache-Control")).toBe("private, no-cache");
+  });
+
+  it("public_link expiring soon clamps s-maxage to the time left, not the full TTL", async () => {
+    // Expiry ~30s out, well under the 300s default TTL → s-maxage must not outlive it.
+    const { app } = await setup({ access: "public_link", sharedExpiresAt: Date.now() + 30_000 });
+    const html = await app.request("/c/s/index.html");
+    const cc = html.headers.get("Cache-Control") as string;
+    const sMaxAge = Number(/s-maxage=(\d+)/.exec(cc)?.[1]);
+    expect(cc).toMatch(/^public, max-age=0, s-maxage=/);
+    expect(sMaxAge).toBeGreaterThan(0);
+    expect(sMaxAge).toBeLessThanOrEqual(30);
+  });
+
+  it("clearing an expired share re-enables full shared caching", async () => {
+    // An expired public_link serves private; clearing the expiry must restore the
+    // full-TTL public header (the predicate has no lingering state).
+    const { app, canvas, owner, versions } = await setup({
+      access: "public_link",
+      sharedExpiresAt: Date.now() - 1000,
+    });
+    expect((await app.request("/c/s/index.html")).headers.get("Cache-Control")).toBe(
+      "private, no-cache",
+    );
+    await canvasesRepository(client).updateSettings(canvas.id, { sharedExpiresAt: null });
+    // Re-serve with a fresh middleware bound to the updated row.
+    const updated = (await canvasesRepository(client).findById(canvas.id)) as Canvas;
+    const app2 = new Hono<AppEnv>();
+    app2.use("*", async (c, next) => {
+      c.set("canvas", updated);
+      c.set("user", owner);
+      await next();
+    });
+    app2.all("*", serveCanvas({ config, versions, storage, usage: usageEventsRepository(client) }));
+    expect((await app2.request("/c/s/index.html")).headers.get("Cache-Control")).toBe(
+      "public, max-age=0, s-maxage=300",
+    );
   });
 
   it("conditional GET with matching If-None-Match → 304", async () => {
@@ -177,6 +259,28 @@ describe("serveCanvas (integration)", () => {
     const etag = first.headers.get("ETag") as string;
     const second = await app.request("/c/s/index.html", { headers: { "If-None-Match": etag } });
     expect(second.status).toBe(304);
+  });
+
+  it('conditional GET still 304s when a CDN weakened the ETag to W/"…"', async () => {
+    // A CDN that compresses our response downgrades the strong validator to weak and
+    // echoes it back in If-None-Match; we must still recognize it as a content match.
+    const { app } = await setup();
+    const first = await app.request("/c/s/index.html");
+    const etag = first.headers.get("ETag") as string;
+    const weak = await app.request("/c/s/index.html", {
+      headers: { "If-None-Match": `W/${etag}` },
+    });
+    expect(weak.status).toBe(304);
+  });
+
+  it("conditional GET 304s when our ETag is one of a comma-separated If-None-Match list", async () => {
+    const { app } = await setup();
+    const first = await app.request("/c/s/index.html");
+    const etag = first.headers.get("ETag") as string;
+    const res = await app.request("/c/s/index.html", {
+      headers: { "If-None-Match": `"other-etag", W/${etag}` },
+    });
+    expect(res.status).toBe(304);
   });
 
   it("sets the §12.4 security headers (incl. COOP, added M7)", async () => {

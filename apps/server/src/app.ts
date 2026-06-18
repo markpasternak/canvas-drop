@@ -203,10 +203,19 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // throttling + audit logs; peerIp gates trust. See http/client-ip.ts.
   const extractPeerIp = deps.peerIp ?? ((c) => getConnInfo(c).remote.address);
   const trustedProxyIps = deps.config.auth.proxy.trustedProxyIps;
+  // Optional CDN real-client header (e.g. True-Client-IP) — read only when the peer is
+  // a trusted proxy, inside resolveClientIp. Normalized to lowercase at config load.
+  const clientIpHeader = deps.config.auth.proxy.clientIpHeader;
   app.use("*", async (c, next) => {
     const peer = extractPeerIp(c);
     if (peer) c.set("peerIp", peer);
-    const client = resolveClientIp(peer, c.req.header("x-forwarded-for"), trustedProxyIps);
+    const cdnClientIp = clientIpHeader ? c.req.header(clientIpHeader) : undefined;
+    const client = resolveClientIp(
+      peer,
+      c.req.header("x-forwarded-for"),
+      trustedProxyIps,
+      cdnClientIp,
+    );
     if (client) c.set("clientIp", client);
     await next();
   });

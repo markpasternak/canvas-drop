@@ -475,6 +475,17 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     editable: false,
     fromConfig: (c) => c.rateLimit.passwordGatePerMin,
   },
+  {
+    key: "serving.publicEdgeCacheTtlSec",
+    env: "CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL",
+    group: "Core",
+    label: "Public edge-cache TTL (s)",
+    help: "Seconds a CDN may cache a public canvas's HTML (s-maxage). Also the staleness window after an access downgrade. 0 disables shared caching.",
+    type: "number",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.serving.publicEdgeCacheTtlSec,
+  },
 
   // ── Access (who may sign in / who is admin) — read-only for now ───────────
   // §12 invariant surface (auth). Shown for transparency; live-editing is a
@@ -561,6 +572,17 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     secret: false,
     editable: false,
     fromConfig: (c) => c.auth.proxy.trustedProxyIps,
+  },
+  {
+    key: "auth.proxy.clientIpHeader",
+    env: "CANVAS_DROP_CLIENT_IP_HEADER",
+    group: "Auth",
+    label: "CDN client-IP header",
+    help: "Header carrying the real client IP behind a CDN (e.g. True-Client-IP). Trusted only from a trusted proxy IP.",
+    type: "string",
+    secret: false,
+    editable: false,
+    fromConfig: (c) => c.auth.proxy.clientIpHeader,
   },
   {
     key: "auth.oidc.issuer",
