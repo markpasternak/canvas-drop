@@ -43,7 +43,7 @@ function summaryFor(canvases: unknown[]) {
   };
 }
 
-function renderListWith(canvases: unknown[]) {
+function renderListWith(canvases: unknown[], initialPath = "/") {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -79,7 +79,7 @@ function renderListWith(canvases: unknown[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   render(
     <ThemeProvider>
@@ -99,7 +99,7 @@ afterEach(() => {
 });
 
 describe("list row badges", () => {
-  it("splits the access rung into the Visibility column, distinctly flagging Public", async () => {
+  it("shows the access rung on the row's meta line, distinctly flagging Public", async () => {
     renderListWith([
       canvas({ id: "a", slug: "s-priv", title: "Private one", access: "private", shared: false }),
       canvas({ id: "b", slug: "s-org", title: "Org one", access: "whole_org", shared: true }),
@@ -122,19 +122,16 @@ describe("list row badges", () => {
     ]);
     await screen.findByText("Private one"); // list rendered
 
-    // Each rung renders its own Visibility cell. The rung *names* also appear once in
-    // the access FilterSelect options, so assert on the unique secondary lines (which
-    // only the rows render) to prove each rung's cell is present.
-    expect(screen.getByText("Owner only")).toBeInTheDocument(); // private
-    expect(screen.getByText("Org members")).toBeInTheDocument(); // whole_org
-    expect(screen.getByText("Invited only")).toBeInTheDocument(); // specific_people
-    expect(screen.getByText("Anyone with the link")).toBeInTheDocument(); // public_link
-    // Public is the only beyond-the-org rung: a distinct near-title pill PLUS the
-    // Visibility column (plus the filter option), so it appears at least twice.
+    // Visibility now rides the quiet meta line (the access "primary"), not a dedicated
+    // column. The protected-on-org primary is unique to the row (not a filter option).
+    expect(screen.getByText(/Whole org \+ protected/)).toBeInTheDocument();
+    // Public is the only beyond-the-org rung: a distinct near-title pill PLUS the access
+    // filter option, so it appears at least twice.
     expect(screen.getAllByText("Public").length).toBeGreaterThan(1);
-    // A password layered on a shared rung surfaces in both the primary and secondary.
-    expect(screen.getByText("Whole org + protected")).toBeInTheDocument();
-    expect(screen.getByText("Password required")).toBeInTheDocument();
+    // The old Visibility column's secondary lines are gone.
+    expect(screen.queryByText("Owner only")).toBeNull();
+    expect(screen.queryByText("Anyone with the link")).toBeNull();
+    expect(screen.queryByText("Password required")).toBeNull();
   });
 
   it("surfaces draft-only deployment state, but not zeros for deployed canvases", async () => {
@@ -149,8 +146,9 @@ describe("list row badges", () => {
       canvas({ id: "draft", slug: "draft", title: "Draft one" }), // base: draft, lastDeploy null
     ]);
     await screen.findByText("Shipped one");
-    expect(screen.getByText("Published v1")).toBeInTheDocument();
-    // The draft row reads "Draft" in the Publication column (and a near-title chip).
+    // Deployed: the "Published" stat column carries the live version + footprint.
+    expect(screen.getByText("v1")).toBeInTheDocument();
+    // The draft row reads "Draft" in a near-title chip.
     expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
     expect(screen.queryByText("0 B")).toBeNull();
     expect(screen.queryByText("0 files")).toBeNull();
@@ -189,7 +187,7 @@ describe("list row badges", () => {
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
-  it("separates gallery listing state from tags", async () => {
+  it("surfaces gallery listing as a near-title badge, separate from tags", async () => {
     renderListWith([
       canvas({
         id: "listed",
@@ -208,9 +206,13 @@ describe("list row badges", () => {
     ]);
     await screen.findByText("Listed one");
 
-    expect(screen.getAllByText("Gallery").length).toBeGreaterThan(1);
-    expect(screen.getByText("In gallery")).toBeInTheDocument();
-    expect(screen.getByText("Hidden from gallery")).toBeInTheDocument();
+    // Listing state is a near-title badge now (no dedicated Gallery column). "Listed"
+    // also appears as a filter chip, so it shows more than once.
+    expect(screen.getAllByText("Listed").length).toBeGreaterThan(1);
+    // The old Gallery column's secondary lines are gone.
+    expect(screen.queryByText("In gallery")).toBeNull();
+    expect(screen.queryByText("Hidden from gallery")).toBeNull();
+    // Tags still render as pills, independent of listing state.
     expect(screen.getByText("docs")).toBeInTheDocument();
     expect(screen.getByText("internal")).toBeInTheDocument();
   });
@@ -227,7 +229,34 @@ describe("list row badges", () => {
   it("shows no tag pills for an untagged canvas", async () => {
     renderListWith([canvas({ id: "u", slug: "untagged", title: "Untagged one" })]);
     await screen.findByText("Untagged one");
-    expect(screen.getByText("No tags")).toBeInTheDocument();
+    // Untagged rows simply omit the tag row now — no "No tags" placeholder, no +N pill.
+    expect(screen.queryByText("No tags")).toBeNull();
     expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+  });
+
+  it("renders the grid layout when ?view=grid (cover cards, no list stat columns)", async () => {
+    renderListWith(
+      [
+        canvas({
+          id: "g",
+          slug: "g",
+          title: "Gridded one",
+          publicationState: "published",
+          lastDeploy: { version: 2, createdAt: 0, fileCount: 1, totalBytes: 10 },
+        }),
+      ],
+      "/?view=grid",
+    );
+    await screen.findByText("Gridded one");
+    // Cards overlay the publication state on the cover (shown for every state, unlike
+    // the list row which only badges the non-happy-path states).
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    // ...but the grid drops the list's right-aligned "Created" stat column.
+    expect(screen.queryByText("Created")).toBeNull();
+    // Bulk selection still works in the grid (per-card checkbox + the select-all control).
+    expect(
+      screen.getByRole("checkbox", { name: "Select all canvases on this page" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Gridded one" })).toBeInTheDocument();
   });
 });

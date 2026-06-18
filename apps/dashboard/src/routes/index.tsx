@@ -4,6 +4,8 @@ import {
   Copy,
   CopySimple,
   MagnifyingGlass,
+  Rows,
+  SquaresFour,
   Trash,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -13,9 +15,11 @@ import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { BulkActionBar } from "../components/BulkActionBar.js";
 import { Button } from "../components/Button.js";
 import {
+  CanvasCard,
   CanvasListHeader,
   CanvasRow,
   canvasTitle,
+  GridSkeleton,
   ListSkeleton,
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
@@ -68,9 +72,13 @@ const CANVASES_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
 ];
 
+type CanvasView = "list" | "grid";
+
 interface RowSelectionProps {
   selected: boolean;
   onSelectChange: (next: boolean) => void;
+  /** Which presentation to render — the list row or the grid card. */
+  view: CanvasView;
 }
 
 const MENU_ICON_SIZE = 15;
@@ -82,6 +90,7 @@ function ActiveRow({
   canvas,
   selected,
   onSelectChange,
+  view,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -91,6 +100,7 @@ function ActiveRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const title = canvasTitle(canvas);
   const deployed = canvas.lastDeploy !== null;
+  const RowComponent = view === "grid" ? CanvasCard : CanvasRow;
 
   async function doArchive() {
     try {
@@ -112,7 +122,7 @@ function ActiveRow({
   }
 
   return (
-    <CanvasRow
+    <RowComponent
       canvas={canvas}
       selectable
       selected={selected}
@@ -201,6 +211,7 @@ function ArchivedRow({
   canvas,
   selected,
   onSelectChange,
+  view,
 }: { canvas: CanvasListItem } & RowSelectionProps) {
   const toast = useToast();
   const copy = useClipboardCopy();
@@ -208,6 +219,7 @@ function ArchivedRow({
   const del = useDeleteCanvas(canvas.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const title = canvasTitle(canvas);
+  const RowComponent = view === "grid" ? CanvasCard : CanvasRow;
 
   async function doDelete() {
     try {
@@ -220,7 +232,7 @@ function ArchivedRow({
   }
 
   return (
-    <CanvasRow
+    <RowComponent
       canvas={canvas}
       selectable
       selected={selected}
@@ -316,6 +328,42 @@ function ScopeToggle({
   );
 }
 
+/** List ⇄ grid layout switch. Mirrors the segmented styling of the scope toggle;
+ *  the choice lives in the URL (`?view=grid`) so a layout is shareable + sticky. */
+function ViewToggle({ value, onChange }: { value: CanvasView; onChange: (v: CanvasView) => void }) {
+  const options = [
+    { v: "list", label: "List view", Icon: Rows },
+    { v: "grid", label: "Grid view", Icon: SquaresFour },
+  ] as const;
+  return (
+    <div
+      role="tablist"
+      aria-label="Canvas layout"
+      className="inline-flex h-9 items-center rounded-lg border border-border bg-surface p-0.5"
+    >
+      {options.map(({ v, label, Icon }) => (
+        <button
+          key={v}
+          type="button"
+          role="tab"
+          aria-selected={value === v}
+          aria-label={label}
+          title={label}
+          onClick={() => onChange(v)}
+          className={cn(
+            "inline-flex h-8 items-center rounded-md px-2.5 transition-colors",
+            value === v
+              ? "bg-surface-sunken text-fg shadow-[var(--shadow-panel)]"
+              : "text-muted hover:text-fg",
+          )}
+        >
+          <Icon size={16} weight={value === v ? "fill" : "regular"} aria-hidden />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SummaryStrip({
   summary,
   archivedView,
@@ -383,6 +431,7 @@ export default function CanvasList() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
+  const view: CanvasView = search.view === "grid" ? "grid" : "list";
   // Lifecycle scope: the active list (default) or the archived set. The attribute
   // chips (Shared/Listed/…) are active-only, so the archived view drops them.
   const archivedView = search.scope === "archived";
@@ -478,6 +527,13 @@ export default function CanvasList() {
         sort: next === "updated" ? undefined : (next as CanvasesSearch["sort"]),
         page: 1,
       }),
+    });
+  }
+  function setView(next: CanvasView) {
+    // Layout is a pure view concern — preserve filters/scope/page, just flip `view`.
+    navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, view: next === "grid" ? "grid" : undefined }),
     });
   }
   function setAccess(next: string) {
@@ -604,6 +660,7 @@ export default function CanvasList() {
               value={sort}
               onValueChange={setSort}
             />
+            <ViewToggle value={view} onChange={setView} />
           </div>
 
           {/* Attribute filters apply to the live set only — hidden in the archive. */}
@@ -646,7 +703,7 @@ export default function CanvasList() {
             )}
           </div>
 
-          {isLoading && <ListSkeleton />}
+          {isLoading && (view === "grid" ? <GridSkeleton /> : <ListSkeleton />)}
 
           {isError && (
             <EmptyState
@@ -683,33 +740,74 @@ export default function CanvasList() {
 
           {items.length > 0 && (
             <>
-              <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
-                <CanvasListHeader
-                  selectable
-                  allSelected={allSelected}
-                  someSelected={someSelected}
-                  onSelectAll={toggleSelectAll}
-                />
-                <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
-                  {items.map((c) =>
-                    archivedView ? (
-                      <ArchivedRow
-                        key={c.id}
-                        canvas={c}
-                        selected={selected.has(c.id)}
-                        onSelectChange={(next) => toggleSelected(c.id, next)}
-                      />
-                    ) : (
-                      <ActiveRow
-                        key={c.id}
-                        canvas={c}
-                        selected={selected.has(c.id)}
-                        onSelectChange={(next) => toggleSelected(c.id, next)}
-                      />
-                    ),
-                  )}
-                </ul>
-              </div>
+              {view === "grid" ? (
+                <div className="space-y-3">
+                  <label className="flex w-fit cursor-pointer items-center gap-2 text-xs font-medium text-muted">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={(event) => toggleSelectAll(event.target.checked)}
+                      aria-label="Select all canvases on this page"
+                      className="size-4 cursor-pointer accent-accent"
+                    />
+                    Select all
+                  </label>
+                  <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {items.map((c) =>
+                      archivedView ? (
+                        <ArchivedRow
+                          key={c.id}
+                          canvas={c}
+                          view={view}
+                          selected={selected.has(c.id)}
+                          onSelectChange={(next) => toggleSelected(c.id, next)}
+                        />
+                      ) : (
+                        <ActiveRow
+                          key={c.id}
+                          canvas={c}
+                          view={view}
+                          selected={selected.has(c.id)}
+                          onSelectChange={(next) => toggleSelected(c.id, next)}
+                        />
+                      ),
+                    )}
+                  </ul>
+                </div>
+              ) : (
+                <div className="space-y-2 lg:space-y-0 lg:rounded-lg lg:border lg:border-border lg:bg-surface">
+                  <CanvasListHeader
+                    selectable
+                    allSelected={allSelected}
+                    someSelected={someSelected}
+                    onSelectAll={toggleSelectAll}
+                  />
+                  <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
+                    {items.map((c) =>
+                      archivedView ? (
+                        <ArchivedRow
+                          key={c.id}
+                          canvas={c}
+                          view={view}
+                          selected={selected.has(c.id)}
+                          onSelectChange={(next) => toggleSelected(c.id, next)}
+                        />
+                      ) : (
+                        <ActiveRow
+                          key={c.id}
+                          canvas={c}
+                          view={view}
+                          selected={selected.has(c.id)}
+                          onSelectChange={(next) => toggleSelected(c.id, next)}
+                        />
+                      ),
+                    )}
+                  </ul>
+                </div>
+              )}
 
               {selected.size > 0 && (
                 <BulkActionBar
