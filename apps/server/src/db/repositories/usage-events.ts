@@ -1,5 +1,5 @@
 import { type Json, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -23,6 +23,8 @@ export function usageEventsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
   const t = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+  // Denormalized view-rollup target (plan 004): bumped in lockstep with a counted view.
+  const canvasesT = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
 
   return {
     async record(input: UsageEventInput): Promise<void> {
@@ -92,7 +94,36 @@ export function usageEventsRepository(client: DbClient) {
         meta: null,
         createdAt: input.now,
       });
+      // Keep the denormalized rollups on `canvases` in lockstep with the deduped
+      // event — only a counted view bumps the lifetime total + last-viewed stamp, so
+      // a refresh inside the window (returned above) never double-counts. Two writes,
+      // not a transaction: best-effort metering on the trusted-org model, and the
+      // counter is a convenience rollup (authoritative views remain the event log).
+      await db
+        .update(canvasesT)
+        .set({ viewCount: sql`${canvasesT.viewCount} + 1`, lastViewedAt: input.now })
+        .where(eq(canvasesT.id, input.canvasId));
       return true;
+    },
+
+    /**
+     * Recent (windowed) `view` counts for a set of canvases — the trending signal
+     * behind the Your-canvases "Most popular" sort + the per-row number (plan 004).
+     * One bounded `GROUP BY` over the append-only log, scoped to the given canvas
+     * ids and `createdAt >= sinceMs`, riding the `(canvasId, createdAt)` index. Empty
+     * input → no query. Canvases with zero views in the window are absent from the
+     * map (callers default them to 0). Counts coerced through `Number()` (pg strings).
+     */
+    async recentViewCounts(canvasIds: string[], sinceMs: number): Promise<Map<string, number>> {
+      const out = new Map<string, number>();
+      if (canvasIds.length === 0) return out;
+      const rows = (await db
+        .select({ canvasId: t.canvasId, count: sql<number>`count(*)` })
+        .from(t)
+        .where(and(eq(t.type, "view"), gte(t.createdAt, sinceMs), inArray(t.canvasId, canvasIds)))
+        .groupBy(t.canvasId)) as Array<{ canvasId: string; count: number }>;
+      for (const r of rows) out.set(r.canvasId, Number(r.count));
+      return out;
     },
 
     /**

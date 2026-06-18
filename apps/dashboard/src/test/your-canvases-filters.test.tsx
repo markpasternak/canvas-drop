@@ -31,8 +31,11 @@ function canvas(over: Record<string, unknown> = {}) {
     publicationState: "published",
     disabledReason: null,
     currentVersionId: "v1",
+    viewCount: 0,
+    lastViewedAt: null,
     createdAt: 0,
     updatedAt: 0,
+    recentViews: 0,
     lastDeploy: { version: 1, createdAt: 0, fileCount: 1, totalBytes: 10 },
     ...over,
   };
@@ -98,10 +101,15 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         if (q && !`${c.title} ${c.slug}`.toLowerCase().includes(q)) return false;
         return true;
       });
+      // Server-side ordering the route applies (plan 004 adds `popular` = trending views).
+      const ordered =
+        sp.get("sort") === "popular"
+          ? [...matched].sort((a, b) => (b.recentViews ?? 0) - (a.recentViews ?? 0))
+          : matched;
       const limit = Number(sp.get("limit") ?? 48);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
-        canvases: matched.slice(offset, offset + limit),
+        canvases: ordered.slice(offset, offset + limit),
         total: matched.length,
         limit,
         offset,
@@ -463,5 +471,21 @@ describe("Your canvases — server-side filters (plan 005)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findAllByText("Showing 49–49 of 49")).toHaveLength(2);
+  });
+
+  it("Most popular sort ranks by trending views and shows the per-row view count (plan 004)", async () => {
+    stub([
+      canvas({ id: "warm", title: "Warm canvas", recentViews: 3 }),
+      canvas({ id: "hot", title: "Hot canvas", recentViews: 9 }),
+    ]);
+    // Selecting "Most popular" requests sort=popular; the stub returns trending order.
+    renderAt("/?sort=popular");
+    const hot = await screen.findByText("Hot canvas");
+    const warm = screen.getByText("Warm canvas");
+    // Hot (9) ranks above Warm (3) — DOM order reflects the server ranking.
+    expect(hot.compareDocumentPosition(warm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The per-row trending count is rendered (list-view "Views" stat).
+    expect(screen.getByText("9")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
   });
 });

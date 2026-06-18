@@ -37,6 +37,8 @@ export function canvasView(
     status: string;
     currentVersionId: string | null;
     previewMode: string;
+    viewCount: number;
+    lastViewedAt: number | null;
   },
   // A captured screenshot preview exists (plan 004). When true, `previewUrl` points at
   // the access-gated cover (`card` rendition) so an agent can surface it the way the
@@ -55,6 +57,11 @@ export function canvasView(
     // Preview policy (plan 004): auto/off/custom — so an agent can read the current
     // setting before changing it (parity with the dashboard Preview control).
     previewMode: cv.previewMode,
+    // Denormalized view rollups (plan 004): lifetime deduped views + last-viewed stamp,
+    // so an agent reads the same popularity signal the dashboard shows. Trending
+    // (recent-window) counts ride `list_canvases` as `recentViews`.
+    viewCount: cv.viewCount,
+    lastViewedAt: cv.lastViewedAt,
     hasPreview,
     ...(hasPreview
       ? { previewUrl: `${url.replace(/\/$/, "")}/${PREVIEW_ASSET_PATH}?rendition=card` }

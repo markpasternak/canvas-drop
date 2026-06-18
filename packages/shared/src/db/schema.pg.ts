@@ -195,6 +195,14 @@ export const canvases = pgTable(
     // Lineage: the canvas this one was cloned from (plan 002). Pointer, not an FK —
     // the source may be archived/purged independently; null for non-clones.
     clonedFromCanvasId: c.text("cloned_from_canvas_id"),
+    // Denormalized view rollups (plan 004 popularity). All-time deduped view count
+    // and the last-counted-view timestamp, bumped inside `recordView` only when a
+    // view row is actually inserted (the 30-min dedup "added"). They keep the
+    // Your-canvases list O(1) for "last viewed" + a lifetime figure without touching
+    // the append-only usage_events log; the trending (recent-window) number used by
+    // the `popular` sort is a separate bounded aggregate over usage_events.
+    viewCount: c.int("view_count").notNull().default(0),
+    lastViewedAt: c.epochMs("last_viewed_at"),
     createdAt: c.epochMs("created_at").notNull(),
     updatedAt: c.epochMs("updated_at").notNull(),
     deletedAt: c.epochMs("deleted_at"),

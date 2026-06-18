@@ -81,6 +81,7 @@ const CANVASES_SORT_OPTIONS = [
   { value: "updated", label: "Recently updated" },
   { value: "created", label: "Newest" },
   { value: "title", label: "Title A–Z" },
+  { value: "popular", label: "Most popular" },
 ];
 
 type CanvasView = "list" | "grid";

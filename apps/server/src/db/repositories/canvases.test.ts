@@ -3,6 +3,7 @@ import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { isUniqueViolation, SLUG_UNIQUE } from "../unique-violation.js";
 import { canvasesRepository, type OwnerListOptions } from "./canvases.js";
+import { usageEventsRepository } from "./usage-events.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
 
@@ -660,6 +661,81 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
         await repo.listByOwnerFiltered({ ownerId: me, sort: "created", limit: 50, offset: 0 })
       ).items.map((cv) => cv.id),
     ).toEqual([c.id, b.id, a.id]);
+  });
+
+  it("listByOwnerFiltered sorts by popular (recent views) over the window, with stable tiebreak (plan 004)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const hot = await repo.create({ ownerId: me, slug: "hot", apiKeyHash: "k-hot" });
+    const warm = await repo.create({ ownerId: me, slug: "warm", apiKeyHash: "k-warm" });
+    const cold = await repo.create({ ownerId: me, slug: "cold", apiKeyHash: "k-cold" });
+
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    const since = t0 - win; // window floor for the assertions below
+    // hot: 2 recent views. warm: 1 recent + 1 OLD (out-of-window). cold: 0 recent.
+    const viewerB = await seedOwner(client, "b");
+    await usage.recordView({ canvasId: hot.id, userId: me, windowMs: win, now: t0 });
+    await usage.recordView({ canvasId: hot.id, userId: viewerB, windowMs: win, now: t0 + 1_000 });
+    await usage.recordView({ canvasId: warm.id, userId: me, windowMs: win, now: t0 });
+    await usage.recordView({ canvasId: warm.id, userId: me, windowMs: win, now: since - 10 * win });
+
+    const ranked = (
+      await repo.listByOwnerFiltered({
+        ownerId: me,
+        sort: "popular",
+        popularSinceMs: since,
+        limit: 50,
+        offset: 0,
+      })
+    ).items.map((c) => c.id);
+    // hot (2) > warm (1) > cold (0). The out-of-window warm view does not count.
+    expect(ranked).toEqual([hot.id, warm.id, cold.id]);
+
+    // Pagination over the ranked set is stable; total is the full filtered count.
+    const page = await repo.listByOwnerFiltered({
+      ownerId: me,
+      sort: "popular",
+      popularSinceMs: since,
+      limit: 1,
+      offset: 1,
+    });
+    expect(page.items.map((c) => c.id)).toEqual([warm.id]);
+    expect(page.total).toBe(3);
+  });
+
+  it("listByOwnerFiltered popular sort never crosses the owner boundary (§12 owner-scope)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const other = await seedOwner(client, "other");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const mine = await repo.create({ ownerId: me, slug: "mine", apiKeyHash: "k-mine" });
+    const theirs = await repo.create({ ownerId: other, slug: "theirs", apiKeyHash: "k-theirs" });
+
+    const t0 = 1_700_000_000_000;
+    const win = 60_000;
+    // The OTHER owner's canvas is far more popular — if the popular path's hydrate ever
+    // dropped the owner filter, `theirs` would outrank and surface in my list.
+    for (let i = 0; i < 5; i++) {
+      await usage.recordView({ canvasId: theirs.id, userId: `v${i}`, windowMs: win, now: t0 + i });
+    }
+    await usage.recordView({ canvasId: mine.id, userId: me, windowMs: win, now: t0 });
+
+    const res = await repo.listByOwnerFiltered({
+      ownerId: me,
+      sort: "popular",
+      popularSinceMs: t0 - win,
+      limit: 50,
+      offset: 0,
+    });
+    // Only my canvas comes back — never the other owner's, despite its higher view count.
+    expect(res.items.map((c) => c.id)).toEqual([mine.id]);
+    expect(res.total).toBe(1);
+    // The reused trending map is scoped to my page only — no other-owner counts leak.
+    expect([...(res.recentViews?.keys() ?? [])]).toEqual([mine.id]);
   });
 
   it("listByOwnerFiltered windows with limit/offset while total reflects the full filtered count", async () => {

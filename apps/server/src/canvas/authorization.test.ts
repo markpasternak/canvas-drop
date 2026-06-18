@@ -39,6 +39,8 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     disabledReason: null,
     currentVersionId: "v1",
     clonedFromCanvasId: null,
+    viewCount: 0,
+    lastViewedAt: null,
     createdAt: 0,
     updatedAt: 0,
     deletedAt: null,
