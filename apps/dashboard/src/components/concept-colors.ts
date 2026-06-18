@@ -15,7 +15,22 @@
  *
  * Colour is always an accent, never the sole signal: every concept carries its
  * text label too, so the dots/tints are decorative-redundant and AA-compliant.
+ *
+ * The same module also owns the concept → icon map (phosphor), so the stat-strip
+ * tiles, and any future surface that wants a per-concept glyph, draw the icon and
+ * its colour from one place — they can never disagree.
  */
+
+import {
+  Archive,
+  type Icon,
+  ListChecks,
+  Pulse,
+  RocketLaunch,
+  ShieldCheck,
+  Stack,
+  UsersThree,
+} from "@phosphor-icons/react";
 
 /** The canvas-state concepts we colour-code across the dashboard. */
 export type Concept =
@@ -62,4 +77,33 @@ export const CONCEPT_COLORS: Record<Concept, ConceptColor> = {
 /** Lookup helper — typed accessor so callers can't ask for an unknown concept. */
 export function conceptColor(concept: Concept): ConceptColor {
   return CONCEPT_COLORS[concept];
+}
+
+/**
+ * The concept → icon map (phosphor). One glyph per concept so a stat tile (or any
+ * future per-concept surface) reads its icon from the same source as its colour.
+ * Every concept is covered — including Listed + Shared, which the stat strip does
+ * not currently show — so the map stays reusable by the chips/badges later without
+ * a second lookup table to keep in sync.
+ */
+export const CONCEPT_ICONS: Record<Concept, Icon> = {
+  // Active → Pulse: the live, beating state.
+  active: Pulse,
+  // Archived → Archive: boxed away but kept.
+  archived: Archive,
+  // Templates → Stack: the clone-source, a stack you copy from.
+  templates: Stack,
+  // Protected → ShieldCheck: a gate is in place.
+  protected: ShieldCheck,
+  // Listed → ListChecks: enumerated in the gallery.
+  listed: ListChecks,
+  // Shared → UsersThree: reaches beyond the owner.
+  shared: UsersThree,
+  // Never-deployed → RocketLaunch: not yet launched.
+  neverDeployed: RocketLaunch,
+};
+
+/** Lookup helper — typed accessor for a concept's icon component. */
+export function conceptIcon(concept: Concept): Icon {
+  return CONCEPT_ICONS[concept];
 }

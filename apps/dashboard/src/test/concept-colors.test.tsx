@@ -1,7 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ConceptBadge } from "../components/Badge.js";
-import { CONCEPT_COLORS, type Concept, conceptColor } from "../components/concept-colors.js";
+import {
+  CONCEPT_COLORS,
+  CONCEPT_ICONS,
+  type Concept,
+  conceptColor,
+  conceptIcon,
+} from "../components/concept-colors.js";
 
 /**
  * The concept colour-coding contract (rebrand): the canvas-state concepts each map
@@ -45,6 +51,25 @@ describe("concept-colors map", () => {
     const colored: Concept[] = ["active", "templates", "protected", "listed", "shared"];
     const dots = colored.map((c) => conceptColor(c).dot);
     expect(new Set(dots).size).toBe(colored.length);
+  });
+});
+
+describe("concept-icons map", () => {
+  it("maps every concept to a renderable icon component", () => {
+    for (const concept of ALL_CONCEPTS) {
+      const Icon = conceptIcon(concept);
+      expect(Icon).toBeDefined();
+      // Phosphor icons are forwardRef components — callable/renderable references.
+      expect(["function", "object"]).toContain(typeof Icon);
+    }
+    // The map covers exactly the concept set (including Listed + Shared, which the
+    // stat strip doesn't show but the map keeps reusable).
+    expect(Object.keys(CONCEPT_ICONS).sort()).toEqual([...ALL_CONCEPTS].sort());
+  });
+
+  it("gives each concept its own distinct icon (no glyph reuse)", () => {
+    const icons = ALL_CONCEPTS.map((c) => conceptIcon(c));
+    expect(new Set(icons).size).toBe(ALL_CONCEPTS.length);
   });
 });
 

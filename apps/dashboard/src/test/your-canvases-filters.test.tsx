@@ -357,6 +357,20 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       expect.arrayContaining(["active", "archived", "templates", "neverDeployed", "protected"]),
     );
 
+    // Each stat cell renders a per-concept accent icon TILE (the -subtle wash + the
+    // concept-coloured glyph) alongside its number — the visual upgrade. Spot-check
+    // the Templates cell: the tile carries the accent (teal) text + bg classes from
+    // the shared concept map, holds an svg glyph, and the cell shows its count.
+    const templatesLabel = within(strip as HTMLElement)
+      .getAllByText("Templates")
+      .find((el) => el.tagName.toLowerCase() === "dt");
+    const templatesCell = templatesLabel?.closest("[data-concept]") as HTMLElement;
+    expect(templatesCell).not.toBeNull();
+    const templatesTile = templatesCell.querySelector(".text-accent.bg-accent-subtle");
+    expect(templatesTile).not.toBeNull();
+    expect((templatesTile as HTMLElement).querySelector("svg")).not.toBeNull();
+    expect(within(templatesCell).getByText("1")).toBeInTheDocument();
+
     // Filter chips carry the same concept colours: the Listed chip's dot is the
     // info (blue) tint that the Listed row badge also uses. (Several controls match
     // /listed/i — the toggle chip is the one carrying aria-pressed.)

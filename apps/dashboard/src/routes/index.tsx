@@ -23,7 +23,7 @@ import {
 } from "../components/CanvasList.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { type Concept, conceptColor } from "../components/concept-colors.js";
+import { type Concept, conceptColor, conceptIcon } from "../components/concept-colors.js";
 import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -370,25 +370,47 @@ function SummaryStrip({
   return (
     <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-5">
       {items.map((item, index) => {
-        // A small concept-coloured dot keeps the chrome calm (the surface stays
-        // neutral) while making each stat readable at a glance. The active scope
-        // still gets its accent wash so the current lifecycle scope stands out.
+        // Each stat is a per-concept accent-coloured icon tile + a label + an
+        // expressive number. The tile carries the colour (the concept's -subtle
+        // wash behind the concept-coloured glyph, both from the shared concept
+        // map); the surface itself stays calm warm-paper/deep-navy. The active
+        // lifecycle scope still gets its accent wash so the current scope stands
+        // out. Icon + colour are read from one source, so they can't drift.
         const color = conceptColor(item.concept);
+        const Icon = conceptIcon(item.concept);
         return (
           <div
             key={item.label}
             data-concept={item.concept}
             className={cn(
-              "bg-surface px-3 py-2",
+              "flex items-center gap-2.5 bg-surface px-3 py-2.5",
               index === items.length - 1 && "col-span-2 sm:col-span-1",
-              item.active && "bg-accent-subtle text-accent",
+              item.active && "bg-accent-subtle",
             )}
           >
-            <dt className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-subtle">
-              <span className={cn("size-1.5 shrink-0 rounded-full", color.dot)} aria-hidden />
-              {item.label}
-            </dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-fg">{item.value}</dd>
+            <span
+              className={cn(
+                "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                color.bg,
+                color.text,
+              )}
+              aria-hidden
+            >
+              <Icon size={18} weight="duotone" />
+            </span>
+            <div className="min-w-0">
+              <dt className="truncate text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
+                {item.label}
+              </dt>
+              <dd
+                className={cn(
+                  "text-2xl font-bold leading-none tracking-tight tabular-nums text-fg",
+                  item.active && "text-accent",
+                )}
+              >
+                {item.value}
+              </dd>
+            </div>
           </div>
         );
       })}
