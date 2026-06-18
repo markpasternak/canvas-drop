@@ -630,8 +630,8 @@ export default function CanvasList() {
     // The focused canvas (detail rail, U3) rides as a data attribute so route tests
     // (and U1) can assert the focus without depending on the rail's DOM.
     <div className="space-y-6" data-selected-canvas={focusedId ?? undefined}>
-      {/* The dominant create action lives once, in the top bar (available on every
-          page). No duplicate here. */}
+      {/* The dominant create action lives once, in the navigation rail (available
+          on every page). No duplicate here. */}
       <PageHeader
         title="Your canvases"
         description="Manage drafts, published versions, sharing, and settings from one place."

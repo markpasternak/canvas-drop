@@ -1,4 +1,16 @@
-import { BookOpen, List, Monitor, MoonStars, Plus, Sun, X } from "@phosphor-icons/react";
+import type { Icon } from "@phosphor-icons/react";
+import {
+  BookOpen,
+  Compass,
+  List,
+  Monitor,
+  MoonStars,
+  Plus,
+  ShieldCheck,
+  SquaresFour,
+  Sun,
+  X,
+} from "@phosphor-icons/react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./components/Brand.js";
@@ -10,20 +22,23 @@ import { cn } from "./lib/cn.js";
 import { useMe } from "./lib/queries.js";
 import { useTheme } from "./lib/theme.js";
 
-/** Section links shown in the desktop bar and the mobile menu. `exact` keeps
+/** Section links shown in the left rail and the mobile menu. `exact` keeps
  *  "Canvases" from lighting on canvas detail pages; `adminOnly` is filtered by
- *  the server-resolved me.isAdmin (UX only — the admin API 404s non-admins). */
+ *  the server-resolved me.isAdmin (UX only — the admin API 404s non-admins).
+ *  Icons match the preview's left-rail nav (icon + label per item). These are the
+ *  REAL routes — no fake Templates/Trash entries the preview used as filler. */
 const SECTION_LINKS: ReadonlyArray<{
   to: "/" | "/admin" | "/gallery";
   label: string;
+  icon: Icon;
   exact?: boolean;
   adminOnly?: boolean;
 }> = [
-  { to: "/", label: "Canvases", exact: true },
-  { to: "/gallery", label: "Gallery" },
-  // Admin sits last — to the right of the member-facing sections, visible only to
-  // admins (and the admin API independently 404s non-admins).
-  { to: "/admin", label: "Admin", adminOnly: true },
+  { to: "/", label: "Canvases", icon: SquaresFour, exact: true },
+  { to: "/gallery", label: "Gallery", icon: Compass },
+  // Admin sits last — below the member-facing sections, visible only to admins
+  // (and the admin API independently 404s non-admins).
+  { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
 ];
 
 function ThemeSwitch() {
@@ -43,8 +58,78 @@ function ThemeSwitch() {
   );
 }
 
-/** The root shell: a slim top bar (wordmark + create + theme) over the routed
- * content. The wordmark is org-agnostic and re-skinnable. */
+/** The teal logo tile from the preview's `.brand .mark`: a rounded accent-filled
+ *  square with the white brand mark, paired with the "canvas-drop" wordmark. A
+ *  link home; org-agnostic and re-skinnable. */
+function Brand() {
+  return (
+    <Link
+      to="/"
+      aria-label="canvas-drop home"
+      className="group flex min-w-0 items-center gap-2.5 text-fg"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-[0.625rem] bg-accent shadow-[var(--shadow-ctrl,0_1px_2px_hsl(var(--shadow-color)/0.12))] [--logo-frame:var(--accent-fg)] [--logo-drop:var(--accent-fg)]">
+        <BrandMark className="size-5" />
+      </span>
+      <span className="truncate text-[0.9375rem] font-semibold tracking-tight">canvas-drop</span>
+    </Link>
+  );
+}
+
+/** The prominent "Create canvas" button — the dominant create action, pinned near
+ *  the brand in the rail (and in the mobile top bar). */
+function CreateCanvasButton({
+  onSelect,
+  className,
+  compact,
+}: {
+  onSelect?: () => void;
+  className?: string;
+  compact?: boolean;
+}) {
+  return (
+    <Link
+      to="/new"
+      aria-label="Create canvas"
+      title="Create canvas"
+      onClick={onSelect}
+      className={cn(
+        "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-3.5 text-[0.8125rem] font-semibold text-accent-fg",
+        "shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px",
+        className,
+      )}
+    >
+      <Plus size={16} weight="bold" aria-hidden />
+      <span>Create{compact ? <span className="hidden sm:inline"> canvas</span> : " canvas"}</span>
+    </Link>
+  );
+}
+
+/** Docs anchor. Docs are server-rendered at /docs (outside the SPA), so this is a
+ *  plain anchor, NOT a TanStack <Link>. */
+function DocsLink({ onSelect, className }: { onSelect?: () => void; className?: string }) {
+  return (
+    <a
+      href="/docs"
+      aria-label="Documentation"
+      title="Documentation"
+      onClick={onSelect}
+      className={cn(
+        "inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg",
+        className,
+      )}
+    >
+      <BookOpen size={16} weight="regular" aria-hidden />
+      <span>Docs</span>
+    </a>
+  );
+}
+
+/** The root shell: a fixed left navigation rail (brand · create · nav · account)
+ * at `lg+`, collapsing to a top bar + hamburger below `lg`. The routed content
+ * renders to the right of the rail and keeps its own behavior — critically the
+ * canvases route's right detail rail, so at `xl` it reads: left nav · library ·
+ * detail. The wordmark is org-agnostic and re-skinnable. */
 export function AppLayout() {
   // isAdmin is server-resolved (/api/me). Hiding the link is UX only — the admin
   // API independently 404s non-admins, so this is not a security boundary.
@@ -52,10 +137,11 @@ export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  // The mobile menu is `md:hidden`; if the viewport grows past `md` while it's
-  // open, reset the state so it doesn't reappear on a later shrink back to mobile.
+  // The mobile menu is `lg:hidden`; if the viewport grows past `lg` (the fixed
+  // rail takes over) while it's open, reset the state so it doesn't reappear on a
+  // later shrink back to mobile.
   useEffect(() => {
-    const mq = window.matchMedia?.("(min-width: 768px)");
+    const mq = window.matchMedia?.("(min-width: 1024px)");
     if (!mq) return;
     const onChange = (e: MediaQueryListEvent) => {
       if (e.matches) setMenuOpen(false);
@@ -101,129 +187,128 @@ export function AppLayout() {
       menuTriggerRef.current?.focus?.();
     };
   }, [menuOpen]);
+
   const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
-  const linkClass =
-    "rounded-md px-3 py-1.5 font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface hover:text-fg aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]";
+  // Vertical nav item: icon + label, active item lifted to accent-subtle/accent
+  // (matches the preview's `.nav a.active`).
+  const navLinkClass =
+    "flex items-center gap-2.5 rounded-md px-3 py-2 text-[0.875rem] font-medium text-muted transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover hover:text-fg aria-[current=page]:bg-accent-subtle aria-[current=page]:text-accent";
   // One renderer for both navs so a future Link-prop change can't be applied to
   // only one copy. `onSelect` is the sole difference (the mobile menu closes on
-  // tap); the desktop bar passes none.
-  const renderLink = (l: (typeof SECTION_LINKS)[number], onSelect?: () => void) => (
-    <Link
-      key={l.to}
-      to={l.to}
-      activeOptions={l.exact ? { exact: true } : undefined}
-      onClick={onSelect}
-      className={linkClass}
-      activeProps={{ "aria-current": "page" }}
-    >
-      {l.label}
-    </Link>
-  );
+  // tap); the rail passes none.
+  const renderLink = (l: (typeof SECTION_LINKS)[number], onSelect?: () => void) => {
+    const Ic = l.icon;
+    return (
+      <Link
+        key={l.to}
+        to={l.to}
+        activeOptions={l.exact ? { exact: true } : undefined}
+        onClick={onSelect}
+        className={navLinkClass}
+        activeProps={{ "aria-current": "page" }}
+      >
+        <Ic size={17} weight="regular" aria-hidden className="shrink-0" />
+        <span className="truncate">{l.label}</span>
+      </Link>
+    );
+  };
 
   return (
-    <div className="min-h-dvh bg-canvas">
+    <div className="min-h-dvh bg-canvas lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
       {/* Command palette (⌘K) — mounted once app-wide; owns its own open shortcut. */}
       <CommandPalette />
       {/* Keyboard-shortcut cheatsheet (?) — mounted once; owns its "?" shortcut. */}
       <ShortcutsHost />
-      <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78">
-        <div className="mx-auto flex h-16 max-w-[112rem] items-center justify-between gap-4 px-5">
-          <div className="flex min-w-0 items-center gap-3 md:gap-5">
-            {/* Mobile menu toggle — the section links collapse below `md`, so this
-                is the only way to reach Archived / Admin / Gallery on a phone. */}
-            <button
-              ref={menuTriggerRef}
-              type="button"
-              aria-label={menuOpen ? "Close menu" : "Open menu"}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-              className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-sunken text-muted transition-colors hover:text-fg md:hidden"
-            >
-              {menuOpen ? (
-                <X size={18} weight="bold" aria-hidden />
-              ) : (
-                <List size={18} weight="bold" aria-hidden />
-              )}
-            </button>
-            <Link
-              to="/"
-              aria-label="canvas-drop home"
-              className="group flex min-w-0 items-center gap-2.5 text-fg"
-            >
-              <BrandMark className="size-8" />
-              <span className="truncate text-[0.9375rem] font-semibold tracking-tight">
-                canvas-drop
-              </span>
-            </Link>
-            {/* Primary section nav: the first secondary navigation in the shell.
-                "Canvases" matches only the list root (exact) so it isn't lit on
-                canvas detail pages; "Archived" lights on /archived. */}
-            <nav
-              className="hidden items-center gap-1 rounded-lg border border-border bg-surface-sunken p-1 text-[0.8125rem] md:flex"
-              aria-label="Sections"
-            >
-              {links.map((l) => renderLink(l))}
-            </nav>
-          </div>
-          <nav className="flex shrink-0 items-center gap-2" aria-label="Primary actions">
-            <Link
-              to="/new"
-              aria-label="Create canvas"
-              title="Create canvas"
-              className={cn(
-                "inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[0.8125rem] font-semibold text-accent-fg",
-                "shadow-[var(--shadow-panel)] transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-accent-hover active:translate-y-px",
-              )}
-            >
-              <Plus size={16} weight="bold" aria-hidden />
-              <span>
-                Create <span className="hidden sm:inline">canvas</span>
-              </span>
-            </Link>
-            {/* Docs are server-rendered at /docs (outside the SPA), so this is a
-                plain anchor, NOT a TanStack <Link>. Icon-only on the narrowest bar. */}
-            <a
-              href="/docs"
-              aria-label="Documentation"
-              title="Documentation"
-              className="hidden h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken px-3 text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg sm:inline-flex"
-            >
-              <BookOpen size={16} weight="regular" aria-hidden />
-              <span className="hidden lg:inline">Docs</span>
-            </a>
-            <ThemeSwitch />
-            {me.data && <UserMenu me={me.data} />}
-          </nav>
-        </div>
 
-        {/* Mobile section menu (below `md`). A backdrop closes on outside tap; each
-            link closes on select. Hidden from the a11y tree + tab order when shut. */}
-        {menuOpen && (
-          <>
-            <button
-              type="button"
-              aria-hidden
-              tabIndex={-1}
-              data-testid="menu-backdrop"
-              className="fixed inset-0 top-16 z-20 cursor-default bg-transparent md:hidden"
-              onClick={() => setMenuOpen(false)}
-            />
-            <nav
-              ref={menuRef}
-              className="relative z-30 flex flex-col gap-1 border-border border-t bg-surface px-5 py-3 text-sm md:hidden"
-              aria-label="Sections"
-            >
-              {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
-              <a href="/docs" onClick={() => setMenuOpen(false)} className={linkClass}>
-                Docs
-              </a>
-            </nav>
-          </>
-        )}
-      </header>
-      <main className="mx-auto max-w-[112rem] px-5 py-6">
-        <Outlet />
-      </main>
+      {/* ── Left navigation rail (lg+): fixed ~240px. Brand tile + create at the
+          top, the vertical section nav in the middle, the account + docs + theme
+          pinned at the bottom. ─────────────────────────────────────────────── */}
+      <aside
+        className="sticky top-0 hidden h-dvh flex-col gap-5 border-border/80 border-r bg-surface px-3.5 py-4 lg:flex"
+        aria-label="Sidebar"
+      >
+        <div className="px-1">
+          <Brand />
+        </div>
+        <CreateCanvasButton />
+        {/* Primary section nav: the first "Sections" landmark in the shell. */}
+        <nav className="flex flex-col gap-0.5" aria-label="Sections">
+          {links.map((l) => renderLink(l))}
+        </nav>
+        {/* Footer: docs + theme + account, pinned to the bottom of the rail. */}
+        <div className="mt-auto flex flex-col gap-3 border-border/70 border-t pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <DocsLink />
+            <ThemeSwitch />
+          </div>
+          {me.data && <UserMenu me={me.data} />}
+        </div>
+      </aside>
+
+      {/* ── Right column: a slim top bar below `lg` (brand + hamburger + create +
+          account), then the routed content. The content keeps `--content-max`
+          and the canvases route's own right detail rail. ──────────────────── */}
+      <div className="flex min-w-0 flex-col">
+        <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/90 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78 lg:hidden">
+          <div className="flex h-16 items-center justify-between gap-3 px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              {/* Mobile menu toggle — the section nav lives in the rail, hidden
+                  below `lg`, so this hamburger is the only way to reach the
+                  sections on a phone. */}
+              <button
+                ref={menuTriggerRef}
+                type="button"
+                aria-label={menuOpen ? "Close menu" : "Open menu"}
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+                className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-sunken text-muted transition-colors hover:text-fg"
+              >
+                {menuOpen ? (
+                  <X size={18} weight="bold" aria-hidden />
+                ) : (
+                  <List size={18} weight="bold" aria-hidden />
+                )}
+              </button>
+              <Brand />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <CreateCanvasButton compact className="px-3" />
+              {me.data && <UserMenu me={me.data} />}
+            </div>
+          </div>
+
+          {/* Mobile section menu (below `lg`). A backdrop closes on outside tap;
+              each link closes on select. Hidden from the a11y tree + tab order
+              when shut. Reuses the focus-trap above. */}
+          {menuOpen && (
+            <>
+              <button
+                type="button"
+                aria-hidden
+                tabIndex={-1}
+                data-testid="menu-backdrop"
+                className="fixed inset-0 top-16 z-20 cursor-default bg-transparent"
+                onClick={() => setMenuOpen(false)}
+              />
+              <nav
+                ref={menuRef}
+                className="relative z-30 flex flex-col gap-0.5 border-border border-t bg-surface px-5 py-3"
+                aria-label="Sections"
+              >
+                {links.map((l) => renderLink(l, () => setMenuOpen(false)))}
+                <div className="mt-2 flex items-center justify-between gap-2 border-border/70 border-t pt-3">
+                  <DocsLink onSelect={() => setMenuOpen(false)} />
+                  <ThemeSwitch />
+                </div>
+              </nav>
+            </>
+          )}
+        </header>
+
+        <main className="mx-auto w-full max-w-[var(--content-max)] px-5 py-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

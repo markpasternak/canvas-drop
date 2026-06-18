@@ -65,8 +65,9 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    // shell chrome
-    expect(await screen.findByText("canvas-drop")).toBeInTheDocument();
+    // shell chrome — the wordmark renders in both the left rail and the mobile
+    // top bar (both in the DOM under jsdom; CSS shows one per width).
+    expect((await screen.findAllByText("canvas-drop")).length).toBeGreaterThanOrEqual(1);
     // empty list → onboarding
     expect(await screen.findByText(/ship your first canvas/i)).toBeInTheDocument();
     expect(screen.getByText(/paste html/i)).toBeInTheDocument();
@@ -157,7 +158,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("canvas-drop");
+    await screen.findAllByText("canvas-drop");
     const user = userEvent.setup();
 
     // Closed: only the (always-rendered) desktop nav has the Gallery link.
@@ -217,6 +218,47 @@ describe("dashboard app", () => {
     expect(within(desktopNav).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
+  it("left rail: brand, Create canvas, the section nav, and the account menu all render", async () => {
+    stubFetch(false);
+    renderApp("/");
+    // The account menu is pinned in the rail (and the mobile top bar) — it renders
+    // once /api/me resolves.
+    await screen.findAllByRole("button", { name: /^Account:/ });
+    // The teal brand tile links home.
+    expect(screen.getAllByRole("link", { name: "canvas-drop home" }).length).toBeGreaterThanOrEqual(
+      1,
+    );
+    // The dominant create action is the prominent rail button → /new.
+    const create = screen.getAllByRole("link", { name: "Create canvas" });
+    expect(create.length).toBeGreaterThanOrEqual(1);
+    expect(create[0]?.getAttribute("href")).toBe("/new");
+  });
+
+  it("left rail: the active route is marked aria-current and a section link navigates", async () => {
+    stubFetch(false);
+    renderApp("/");
+    await screen.findByRole("link", { name: "Gallery" });
+    const [railNav] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!railNav) throw new Error("expected the rail Sections nav");
+    // On "/", Canvases is the active item (aria-current=page).
+    const canvases = within(railNav).getByRole("link", { name: "Canvases" });
+    await waitFor(() => expect(canvases).toHaveAttribute("aria-current", "page"));
+    expect(within(railNav).getByRole("link", { name: "Gallery" })).not.toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    // Navigating to Gallery moves the active marker.
+    const user = userEvent.setup();
+    await user.click(within(railNav).getByRole("link", { name: "Gallery" }));
+    await waitFor(() =>
+      expect(within(railNav).getByRole("link", { name: "Gallery" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      ),
+    );
+  });
+
   it("mobile menu: clicking the backdrop closes the menu", async () => {
     vi.stubGlobal(
       "fetch",
@@ -229,7 +271,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("canvas-drop");
+    await screen.findAllByText("canvas-drop");
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
@@ -253,7 +295,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("canvas-drop");
+    await screen.findAllByText("canvas-drop");
     const user = userEvent.setup();
 
     const toggle = screen.getByRole("button", { name: "Open menu" });
@@ -265,10 +307,15 @@ describe("dashboard app", () => {
     const menuLinks = within(menuNav).getAllByRole("link");
     await waitFor(() => expect(menuLinks[0]).toHaveFocus());
 
-    // Tab cycles within the menu: shift+Tab from the first focusable wraps to the last.
+    // Tab cycles within the menu: shift+Tab from the first focusable wraps to the
+    // LAST focusable in the menu. The menu footer adds a Docs anchor + theme
+    // buttons after the section links, so the last focusable is the trailing theme
+    // control — not the last section link. The trap stays inside the menu either way.
+    const menuFocusables = menuNav.querySelectorAll<HTMLElement>("a[href],button:not([disabled])");
+    const lastFocusable = menuFocusables[menuFocusables.length - 1];
     await user.keyboard("{Shift>}{Tab}{/Shift}");
     expect(menuNav.contains(document.activeElement)).toBe(true);
-    expect(menuLinks[menuLinks.length - 1]).toHaveFocus();
+    expect(lastFocusable).toHaveFocus();
 
     // Escape closes the menu and restores focus to the toggle.
     await user.keyboard("{Escape}");
@@ -353,7 +400,7 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    await screen.findByText("canvas-drop");
+    await screen.findAllByText("canvas-drop");
     const docs = screen.getByRole("link", { name: "Documentation" });
     // A plain anchor (server-served), not a client route.
     expect(docs.tagName).toBe("A");
