@@ -168,6 +168,39 @@ describe("managementRoutes", () => {
     expect(asOther.status).toBe(404); // not 403 — don't confirm existence
   });
 
+  it("GET /by-slug/:slug resolves an owner's slug to its id, 404 for non-owner/unknown (U17)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const created = await jsonOf<{ id: string; slug: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+
+    // Owner: resolves to the canonical id (and nothing else leaks).
+    const asOwner = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/by-slug/${created.slug}`,
+    );
+    expect(asOwner.status).toBe(200);
+    const body = await jsonOf<Record<string, unknown>>(asOwner);
+    expect(body).toEqual({ id: created.id });
+
+    // Non-owner: 404, no existence leak (same posture as GET /:id).
+    const asOther = await buildApp(client, { id: other.id, isAdmin: false }).request(
+      `/api/canvases/by-slug/${created.slug}`,
+    );
+    expect(asOther.status).toBe(404);
+
+    // Unknown slug: 404 for the owner too.
+    const unknown = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases/by-slug/no-such-slug",
+    );
+    expect(unknown.status).toBe(404);
+  });
+
   it("hasPreview reflects a captured preview only when the pipeline is enabled (plan 004)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

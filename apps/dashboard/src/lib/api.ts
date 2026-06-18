@@ -711,6 +711,12 @@ export const api = {
 
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
 
+  /** Resolve an owner's cosmetic slug to the canonical canvas id (rebrand U17). Used
+   *  when the owner pastes a `/canvases/<slug>` URL; the route redirects to the id.
+   *  Owner-scoped server-side — a non-owned/unknown slug 404s (an ApiError), no leak. */
+  resolveSlug: (slug: string) =>
+    request<{ id: string }>(`/api/canvases/by-slug/${encodeURIComponent(slug)}`),
+
   getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),
 
   createCanvas: (body: {

@@ -417,6 +417,22 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json(taken ? { available: false, reason: "taken" } : { available: true });
   });
 
+  // Owner-scoped slug → id resolution (rebrand U17). When the owner pastes a canvas's
+  // cosmetic slug URL (`/canvases/<slug>`) the dashboard resolves it here, then
+  // redirects to the canonical id route. Static path segment, so it's registered
+  // before `/:id` (Hono captures it as `:id="by-slug"` otherwise). Returns ONLY the
+  // opaque id, and ONLY when the caller owns that slug — a non-owned/unknown slug
+  // 404s with no existence leak (§12.0 owner-scope, same posture as `/:id`).
+  app.get("/by-slug/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    if (!slug) return c.json({ error: "not_found" }, 404);
+    const cv = await deps.canvases.findBySlug(slug);
+    if (!cv || cv.status === "deleted" || cv.ownerId !== c.get("user").id) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    return c.json({ id: cv.id });
+  });
+
   app.get("/:id", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
