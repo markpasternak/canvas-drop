@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
-import { ActionRow, Panel } from "./Surface.js";
+import { ActionRow } from "./Surface.js";
 
-/** A titled card grouping related controls. `tone="danger"` tints it for
- *  destructive actions (red border + heading), matching the danger token. */
+/** A titled, flat section grouping related controls. Renders as a hairline-divided
+ *  band (serif heading + content) — not a boxed card — so stacked sections read as
+ *  editorial bands (DESIGN §Typography/§"Patterns to avoid"). `tone="danger"` colors
+ *  the heading `text-danger` (no red box); the destructive control carries the tone. */
 export function Section({
   id,
   title,
@@ -18,19 +20,25 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <Panel
+    <section
       id={id}
-      // Clear the sticky top bar (h-14) when jumped to via the section nav.
-      className={cn("scroll-mt-20", tone === "danger" ? "border-danger/40" : "border-border")}
+      // Flat band: first section is flush; the rest are separated by a top hairline
+      // + vertical rhythm. `scroll-mt-20` clears the sticky top bar when section-nav jumps here.
+      className="scroll-mt-20 border-t border-border pt-6 first:border-t-0 first:pt-0"
     >
       <div className="mb-5 space-y-1">
-        <h2 className={cn("text-sm font-semibold", tone === "danger" ? "text-danger" : "text-fg")}>
+        <h2
+          className={cn(
+            "font-serif text-h2 font-medium leading-tight tracking-[-0.01em]",
+            tone === "danger" ? "text-danger" : "text-fg",
+          )}
+        >
           {title}
         </h2>
-        {description && <p className="text-xs text-muted">{description}</p>}
+        {description && <p className="text-sm text-muted">{description}</p>}
       </div>
       <div className="space-y-4">{children}</div>
-    </Panel>
+    </section>
   );
 }
 
