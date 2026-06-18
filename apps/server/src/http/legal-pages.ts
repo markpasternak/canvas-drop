@@ -1,7 +1,7 @@
 import { type Config, rampCssVars } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
-import { escapeAttribute, escapeHtml } from "./error-pages.js";
+import { escapeAttribute, escapeHtml, SYSTEM_THEME_INIT } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
@@ -74,6 +74,7 @@ function renderLegalPage(opts: {
 <title>${escapeHtml(opts.title)} · canvas-drop</title>
 ${socialMeta(opts.path, opts.title, opts.intro, opts.origin)}
 ${FAVICON_LINKS}
+${SYSTEM_THEME_INIT}
 <style>
   @font-face {
     font-family: "Newsreader Variable";
@@ -90,6 +91,14 @@ ${rampCssVars("light", "    ")}
     :root {
 ${rampCssVars("dark", "      ")}
     }
+  }
+  /* Manual theme override (data-theme), set pre-paint from the dashboard's
+     canvas-drop-theme choice — outranks the media query (matches docs + system pages). */
+  :root[data-theme="dark"] {
+${rampCssVars("dark", "    ")}
+  }
+  :root[data-theme="light"] {
+${rampCssVars("light", "    ")}
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }

@@ -158,12 +158,46 @@ ${LIGHT_TOKENS}
 ${DARK_TOKENS}
     }
   }
+  /* Manual theme override (data-theme), set pre-paint by SYSTEM_THEME_INIT from the
+     dashboard's canvas-drop-theme choice. The attribute selectors outrank the media
+     query, so an explicit light/dark choice wins over the OS — matching the docs. */
+  :root[data-theme="dark"] {
+${DARK_TOKENS}
+  }
+  :root[data-theme="light"] {
+${LIGHT_TOKENS}
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: .01ms !important;
       transition-duration: .01ms !important;
     }
   }`;
+
+/**
+ * Pre-paint theme sync for self-contained server pages. Mirrors the dashboard +
+ * docs mechanism: an explicit `?theme=light|dark` wins for the initial paint, else
+ * the persisted `canvas-drop-theme` choice, else the OS (no attribute → the
+ * prefers-color-scheme media query). Inline + synchronous in <head> so there's no
+ * flash. Static markup (no user input), so it needs no CSP relaxation beyond the
+ * pages' existing policy (which sets no script-src).
+ *
+ * NOTE: localStorage is per-origin — this carries the dashboard's choice on
+ * app-origin pages (and path-mode canvas pages), but NOT onto canvas subdomains
+ * (different origin); those still follow the OS. See the brand-conventions learning.
+ */
+export const SYSTEM_THEME_INIT = `<script>
+  (() => {
+    try {
+      const p = new URLSearchParams(location.search).get("theme");
+      const s = localStorage.getItem("canvas-drop-theme");
+      const c = p === "light" || p === "dark" ? p : (s === "light" || s === "dark" ? s : "system");
+      if (c !== "system") document.documentElement.setAttribute("data-theme", c);
+    } catch (_) {
+      /* private mode / no storage — fall back to prefers-color-scheme */
+    }
+  })();
+</script>`;
 
 /** The canvas-drop logo + wordmark header, shared by every system page. */
 export const SYSTEM_PAGE_BRAND = `    <div class="brand">
@@ -197,6 +231,7 @@ function renderErrorPage(input: ErrorPageDetails): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${status} ${title}</title>
+${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
   .kicker {

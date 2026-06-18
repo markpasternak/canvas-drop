@@ -4,7 +4,12 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AuditLog } from "../audit/audit-log.js";
-import { escapeHtml, SYSTEM_PAGE_BRAND, SYSTEM_PAGE_STYLES } from "../http/error-pages.js";
+import {
+  escapeHtml,
+  SYSTEM_PAGE_BRAND,
+  SYSTEM_PAGE_STYLES,
+  SYSTEM_THEME_INIT,
+} from "../http/error-pages.js";
 import { type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { AppEnv } from "../http/types.js";
 import { principalAttributionId, requestPrincipal } from "./authorization.js";
@@ -131,6 +136,7 @@ export function gatePage(title: string, error: boolean): string {
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="robots" content="noindex">
 <title>Password required</title>
+${SYSTEM_THEME_INIT}
 <style>
 ${SYSTEM_PAGE_STYLES}
   main { width: min(100%, 27rem); }
