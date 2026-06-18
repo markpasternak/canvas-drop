@@ -142,7 +142,8 @@ essential feedback — e.g. a "Saving…" label when a spinner is suppressed).
 
 The dashboard is an **app shell**, not a page:
 
-- **Left rail** — primary nav (Canvases, Gallery, Templates, Shared, Trash) + account.
+- **Left rail** — primary nav (Canvases, Gallery, and Admin for admins) + account.
+  (Templates / Shared / Trash are aspirational — not shipped as their own sections.)
 - **Center** — the working library: **gallery-first**, cards are the hero, metadata
   secondary; a stat strip, search, segmented filters, filter chips above the grid.
 - **Right detail rail** — the selected canvas as a living object: cover, status, primary
@@ -166,7 +167,7 @@ own the patterns so a concept changes in one place:
   `Toggle`, `SegmentedControl`, `TabNav`, `DataTable`, `Tag`, `CodeBox`, `Dialog`,
   `ActionMenu` — one shared `Variant`/`Tone` + `Size` vocabulary; ARIA baked in once
   (`aria-pressed` on segments, `aria-current`/`activeProps` on tabs).
-- **Layout scaffolds:** `AppShell` (three-panel), `DetailPanel` (right rail),
+- **Layout scaffolds:** `AppLayout` (the three-panel shell, `apps/dashboard/src/app-layout.tsx`), `DetailPanel` (right rail),
   `CanvasCard` (the hero card), the `Surface` family (`PageHeader`/`Panel`/`Section`).
 - **Empty states** teach the next action (icon + one line + a verb). **Loading** uses
   skeletons matched to the real layout, never a centered spinner mid-content.

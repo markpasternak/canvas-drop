@@ -47,8 +47,11 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** A fetch mock that knows the canvas by its id + slug; unknown ids/slugs 404. */
-function mockFetch(knownSlug: string | null) {
+/** A fetch mock that knows the canvas by its id + one-or-more slugs; unknown
+ *  ids/slugs 404. Pass a single slug or a list — every listed slug resolves to
+ *  CANVAS_ID. */
+function mockFetch(known: string | string[] | null) {
+  const knownSlugs = known === null ? [] : Array.isArray(known) ? known : [known];
   const calls: { method: string; url: string }[] = [];
   vi.stubGlobal(
     "fetch",
@@ -60,7 +63,7 @@ function mockFetch(knownSlug: string | null) {
       if (path === `/api/canvases/${CANVAS_ID}/versions`) return json({ versions: [] });
       if (path.startsWith("/api/canvases/by-slug/")) {
         const slug = decodeURIComponent(path.slice("/api/canvases/by-slug/".length));
-        if (knownSlug && slug === knownSlug) return json({ id: CANVAS_ID });
+        if (knownSlugs.includes(slug)) return json({ id: CANVAS_ID });
         return json({ error: "not_found" }, 404);
       }
       // Any getCanvas by a non-id (slug) path 404s, as the server would.
@@ -121,6 +124,30 @@ describe("slug-aware canvas lookup (U17)", () => {
     expect(await screen.findByText("Canvas not found")).toBeInTheDocument();
     // Never navigated away from the bad slug URL.
     expect(router.state.location.pathname).toBe("/canvases/no-such-slug");
+  });
+
+  it("redirects again on a SECOND slug navigation within one mount", async () => {
+    // Both cosmetic slugs resolve to the same canonical canvas. The first slug
+    // redirects to the id; navigating to a second slug (same CanvasLayout mount,
+    // param changes) must re-arm the redirect latch — a stale boolean latch would
+    // strand the user on the not-found skeleton at /canvases/second-slug.
+    mockFetch(["quiet-otter", "brave-otter"]);
+    const router = renderAt("/canvases/quiet-otter");
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/canvases/${CANVAS_ID}`);
+    });
+
+    // Navigate to a different cosmetic slug without remounting the route.
+    await router.navigate({ to: "/canvases/$id", params: { id: "brave-otter" } });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/canvases/${CANVAS_ID}`);
+    });
+    // The second slug actually resolved (not just left on the first id), and the
+    // canonical canvas is on screen — not the "Canvas not found" empty state.
+    expect((await screen.findAllByText("My Canvas")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Canvas not found")).not.toBeInTheDocument();
   });
 
   it("does not attempt a slug lookup for a uuid-shaped id", async () => {

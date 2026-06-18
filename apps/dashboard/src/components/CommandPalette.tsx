@@ -82,6 +82,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const listId = useId();
@@ -232,6 +233,19 @@ export function CommandPalette() {
     setActive((a) => (results.length === 0 ? 0 : Math.min(a, results.length - 1)));
   }, [results.length]);
 
+  // Keep the active row visible: the "Jump to a canvas…" results can exceed the
+  // height-capped listbox, so arrow-key movement past the visible window must
+  // scroll the highlighted option into view. Optional-chained for jsdom (which
+  // doesn't implement scrollIntoView), mirroring TabNav.
+  const resultCount = results.length;
+  useEffect(() => {
+    if (resultCount === 0) return;
+    // Index into the rendered options (they mirror `results` order) — avoids
+    // escaping the composite useId()-derived option id in a selector.
+    const el = listRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[active];
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [active, resultCount]);
+
   const runAt = (index: number) => {
     const cmd = results[index];
     if (!cmd) return;
@@ -313,6 +327,7 @@ export function CommandPalette() {
           />
         </div>
         <ul
+          ref={listRef}
           id={listId}
           // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the combobox/listbox pattern requires a listbox role on the options container
           role="listbox"

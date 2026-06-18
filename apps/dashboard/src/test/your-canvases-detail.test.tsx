@@ -278,7 +278,11 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
     // the focus (?selected / data-selected-canvas) is cleared.
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(selectedAttr()).toBeNull());
-    expect(document.querySelector('[aria-label="Canvas details"]')).toBeNull();
+    // The drawer animates OUT before it unmounts (useExitTransition), so it lingers
+    // briefly after the selection clears — wait for the dialog to fully detach.
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Canvas details" })).toBeNull(),
+    );
   });
 
   it("drawer (narrow): the close button clears the selection", async () => {

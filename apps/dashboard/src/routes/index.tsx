@@ -781,7 +781,16 @@ export default function CanvasList() {
                         />
                         Select all
                       </label>
-                      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      <ul
+                        className={cn(
+                          "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3",
+                          // When the inline detail rail is showing at xl (alongside
+                          // the 15rem left nav), a 4-col grid crushes cards to ~140px
+                          // on 1280–1440px. Cap at 3 cols while the rail occupies the
+                          // row; only go to 4 when the library spans full width.
+                          !showRail && "xl:grid-cols-4",
+                        )}
+                      >
                         {items.map((c) =>
                           archivedView ? (
                             <ArchivedRow

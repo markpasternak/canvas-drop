@@ -5,7 +5,7 @@ import type { CanvasListItem } from "../lib/api.js";
 import { fullTime, relativeTime } from "../lib/format.js";
 import { AccessBadge, accessRungLabel, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
-import { canvasTitle } from "./CanvasList.js";
+import { canvasTitle, lastActivity, visibilityLabel } from "./CanvasList.js";
 
 const PUBLICATION_LABEL: Record<CanvasListItem["publicationState"], string> = {
   draft: "Draft",
@@ -14,20 +14,6 @@ const PUBLICATION_LABEL: Record<CanvasListItem["publicationState"], string> = {
   disabled: "Disabled",
   deleted: "Deleted",
 };
-
-/** Short visibility line for the Details list — leads with the access rung and
- *  flags a password gate (the same two facts the row's meta line carries, kept
- *  local so the panel doesn't reach into row internals). */
-function visibilityLabel(canvas: CanvasListItem): string {
-  const base = accessRungLabel(canvas.access);
-  return canvas.hasPassword ? `${base} · Protected` : base;
-}
-
-/** Most recent activity epoch: the later of the last edit and the last publish.
- *  (A small local mirror of the row's helper — not exported from CanvasList.) */
-function lastActivity(canvas: CanvasListItem): number {
-  return Math.max(canvas.updatedAt, canvas.lastDeploy?.createdAt ?? 0);
-}
 
 const actionClass =
   "inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border " +

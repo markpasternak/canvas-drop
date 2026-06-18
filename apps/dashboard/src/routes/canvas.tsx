@@ -38,10 +38,14 @@ function useSlugRedirect(param: string): { resolving: boolean } {
   // sub-route current without making it a redirect trigger.
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
-  const redirectedRef = useRef(false);
+  // Latch on the *param we last redirected for*, not a bare boolean. A boolean
+  // never resets within one CanvasLayout mount, so a second cosmetic-slug nav
+  // (slug A → id → slug B) would early-return on the stale latch and strand the
+  // user on the not-found skeleton. Keying off the param re-arms per slug.
+  const redirectedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!resolvedId || redirectedRef.current) return;
-    redirectedRef.current = true;
+    if (!resolvedId || redirectedForRef.current === param) return;
+    redirectedForRef.current = param;
     // Preserve the sub-route (e.g. /editor, /share) when swapping slug → id.
     const rest = pathnameRef.current.slice(`/canvases/${param}`.length);
     void navigate({ to: `/canvases/${resolvedId}${rest}`, replace: true });

@@ -5,7 +5,7 @@ import type { CanvasListItem } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row-styles.js";
-import { AccessBadge, Badge, PublicationBadge } from "./Badge.js";
+import { AccessBadge, accessRungLabel, Badge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
 import { Skeleton } from "./Skeleton.js";
@@ -99,9 +99,18 @@ function visibility(canvas: CanvasListItem): { primary: string; secondary: strin
 }
 
 /** Most recent activity on a canvas: the later of its last edit (settings/deploy
- *  bump `updatedAt`) and its last publish. Drives the "Edited …" row hint. */
-function lastActivity(canvas: CanvasListItem): number {
+ *  bump `updatedAt`) and its last publish. Drives the "Edited …" row hint. Exported
+ *  so the detail rail (DetailPanel) shares the exact same recency logic. */
+export function lastActivity(canvas: CanvasListItem): number {
   return Math.max(canvas.updatedAt, canvas.lastDeploy?.createdAt ?? 0);
+}
+
+/** Short visibility line — leads with the access rung and flags a password gate.
+ *  Exported (canonical) so the detail rail renders the same label as the list and
+ *  the two never drift. */
+export function visibilityLabel(canvas: CanvasListItem): string {
+  const base = accessRungLabel(canvas.access);
+  return canvas.hasPassword ? `${base} · Protected` : base;
 }
 
 /** Quiet, dot-separated identity line — who can see it and when it last changed.

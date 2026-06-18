@@ -1,5 +1,6 @@
 import { X } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useRef } from "react";
+import { useExitTransition } from "../lib/use-exit-transition.js";
 
 /**
  * Right-side slide-in drawer for the detail rail below the `xl` breakpoint (U3).
@@ -24,6 +25,15 @@ export function DetailDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  // Two-phase mount so the sheet animates OUT (slide back to the right) before it
+  // unmounts, the way Dialog/CommandPalette do — the focus-trap/Escape/restore
+  // effect stays keyed on the live `open`, not on `mounted`.
+  const { mounted, state } = useExitTransition(open);
+  // The parent clears its selection on close, so `children` go to the empty state
+  // the instant `open` flips false. Hold the last open content through the exit so
+  // the sheet slides out showing what it had, not a flash of "select a canvas".
+  const childrenRef = useRef<ReactNode>(children);
+  if (open) childrenRef.current = children;
   // Keep onClose out of the effect deps (a fresh arrow each render would tear down
   // and re-run the focus trap), mirroring Dialog.tsx.
   const onCloseRef = useRef(onClose);
@@ -65,7 +75,7 @@ export function DetailDrawer({
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: scrim click-to-dismiss; keyboard users dismiss via Escape (handled in the keydown effect)
@@ -78,6 +88,7 @@ export function DetailDrawer({
     >
       <div
         className="cd-anim-scrim absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
+        data-state={state}
         aria-hidden
       />
       <div
@@ -86,6 +97,7 @@ export function DetailDrawer({
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
+        data-state={state}
         className="cd-anim-sheet relative flex h-full w-full max-w-sm flex-col overflow-y-auto border-border border-l bg-surface shadow-[var(--shadow-popover)] outline-none"
       >
         <div className="flex justify-end p-2">
@@ -99,7 +111,7 @@ export function DetailDrawer({
             <X size={18} weight="bold" aria-hidden />
           </button>
         </div>
-        <div className="flex-1 px-3 pb-3">{children}</div>
+        <div className="flex-1 px-3 pb-3">{open ? children : childrenRef.current}</div>
       </div>
     </div>
   );

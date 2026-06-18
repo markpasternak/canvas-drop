@@ -156,6 +156,11 @@
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translateY(8px); }
 }
+@keyframes cd-sheet-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(16px); }
+}
 .cd-anim-scrim[data-state="closed"] { animation: cd-fade-out 130ms var(--ease-in, ease-in) forwards; }
 .cd-anim-pop[data-state="closed"] { animation: cd-pop-out 130ms var(--ease-in, ease-in) forwards; }
 .cd-anim-toast[data-state="closed"] { animation: cd-toast-out 150ms var(--ease-in, ease-in) forwards; }
+.cd-anim-sheet[data-state="closed"] { animation: cd-sheet-out 130ms var(--ease-in, ease-in) forwards; }
