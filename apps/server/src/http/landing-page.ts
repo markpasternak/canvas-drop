@@ -442,22 +442,15 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .foot-links a:hover { color: var(--fg); }
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
 
-/* product tour carousel — native CSS scroll-snap (the browser positions the
-   slides; JS only drives autoplay + the dot/arrow controls). No transform math. */
+/* product tour carousel — Embla (embla-carousel + autoplay), bundled at
+   /docs/assets/landing-carousel.js. Embla translates the container; viewport just
+   clips. JS (the bundle) wires the arrows/dots/autoplay. */
 .carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
-.viewport {
-  display: flex;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: none;            /* Firefox — hide the scrollbar */
-  -ms-overflow-style: none;
-}
-.viewport::-webkit-scrollbar { display: none; }
-/* Each slide is exactly the viewport width and a snap target. margin:0 resets the
-   UA default figure margin-inline (40px), which would otherwise offset the slide. */
-.slide { flex: 0 0 100%; min-width: 0; margin: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.viewport { overflow: hidden; }
+.embla-container { display: flex; touch-action: pan-y pinch-zoom; }
+/* Each slide is exactly the viewport width. margin:0 resets the UA default figure
+   margin-inline (40px), which would otherwise offset the slide. */
+.slide { flex: 0 0 100%; min-width: 0; margin: 0; }
 .slide .shot { box-shadow: var(--shadow-lg); }
 .slide figcaption { margin: 1.1rem auto 0; max-width: 54ch; text-align: center; color: var(--muted); font-size: 1.02rem; }
 .slide figcaption strong { color: var(--fg); font-weight: 600; }
@@ -624,14 +617,16 @@ ${head(origin)}
       <p class="kicker reveal">A guided tour</p>
       <h2 class="s-head reveal">See it across the whole workflow.</h2>
       <p class="s-sub reveal">Create, edit, share, and govern. Every surface of canvas-drop, in one place.</p>
-      <div class="carousel reveal" data-carousel aria-roledescription="carousel" aria-label="Product tour">
-        <div class="viewport">
+      <div class="carousel reveal" data-embla aria-roledescription="carousel" aria-label="Product tour">
+        <div class="viewport" data-embla-viewport>
+          <div class="embla-container">
 ${TOUR.map(tourSlide).join("\n")}
+          </div>
         </div>
-        <button class="car-btn car-prev" type="button" aria-label="Previous screen">${arrowLeft}</button>
-        <button class="car-btn car-next" type="button" aria-label="Next screen">${arrow}</button>
+        <button class="car-btn car-prev" type="button" data-embla-prev aria-label="Previous screen">${arrowLeft}</button>
+        <button class="car-btn car-next" type="button" data-embla-next aria-label="Next screen">${arrow}</button>
         <div class="dots" role="tablist" aria-label="Choose screen">
-${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
+${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" data-embla-dot aria-label="${escapeHtml(t.label)}"${i === 0 ? ' aria-current="true"' : ""}></button>`).join("\n")}
         </div>
       </div>
     </div>
@@ -726,49 +721,9 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
   }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 })();
-// Product-tour carousel — native CSS scroll-snap. JS only scrolls the viewport
-// for the arrows/dots/autoplay and reflects the current slide in the dots. The
-// browser owns positioning, so there's no transform math to get wrong.
-(function () {
-  document.querySelectorAll('[data-carousel]').forEach(function (car) {
-    var vp = car.querySelector('.viewport');
-    var slides = car.querySelectorAll('.slide');
-    var dots = car.querySelectorAll('.dot');
-    var timer = null, scrollT = null;
-    function index() { return Math.round(vp.scrollLeft / vp.clientWidth); }
-    function goTo(n) {
-      var from = index();
-      var i = (n + slides.length) % slides.length;
-      // Wrapping (a multi-step jump) snaps instantly; a single step animates.
-      vp.scrollTo({ left: i * vp.clientWidth, behavior: (REDUCE || Math.abs(i - from) > 1) ? 'auto' : 'smooth' });
-    }
-    function syncDots() {
-      var i = index();
-      dots.forEach(function (d, k) { d.setAttribute('aria-current', k === i ? 'true' : 'false'); });
-    }
-    var prev = car.querySelector('.car-prev');
-    var next = car.querySelector('.car-next');
-    if (prev) prev.addEventListener('click', function () { goTo(index() - 1); restart(); });
-    if (next) next.addEventListener('click', function () { goTo(index() + 1); restart(); });
-    dots.forEach(function (d, k) { d.addEventListener('click', function () { goTo(k); restart(); }); });
-    // Any scroll settle — a manual swipe as much as a programmatic goTo — re-syncs the
-    // dots AND re-arms autoplay, so the slide you just landed on gets a full interval
-    // instead of inheriting the previous slide's leftover countdown.
-    vp.addEventListener('scroll', function () { clearTimeout(scrollT); scrollT = setTimeout(function () { syncDots(); restart(); }, 120); }, { passive: true });
-    function stop() { if (timer) { clearInterval(timer); timer = null; } }
-    function start() { stop(); if (!REDUCE) timer = setInterval(function () { goTo(index() + 1); }, 5200); }
-    function restart() { start(); }
-    car.addEventListener('mouseenter', stop);
-    car.addEventListener('mouseleave', start);
-    car.addEventListener('focusin', stop);
-    car.addEventListener('focusout', start);
-    // Pause while a finger is down so the timer can't advance mid-swipe; the scroll
-    // settle above re-arms it once the gesture ends.
-    car.addEventListener('touchstart', stop, { passive: true });
-    syncDots(); start();
-  });
-})();
 </script>
+<!-- Product-tour carousel — Embla + autoplay (bundled, served same-origin). -->
+<script src="/docs/assets/landing-carousel.js" defer></script>
 </body>
 </html>`;
 }

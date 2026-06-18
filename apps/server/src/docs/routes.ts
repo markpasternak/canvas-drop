@@ -127,6 +127,25 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
     return new Response(JSON.stringify(SEARCH_INDEX), { status: 200, headers: h });
   });
 
+  // The landing product-tour carousel bundle (Embla + autoplay), committed by
+  // `pnpm landing:carousel`. Served same-origin so the marketing landing needs no
+  // client bundler. Kept ahead of the webp-only `:file` route below.
+  app.get("/docs/assets/landing-carousel.js", async () => {
+    const h = new Headers();
+    baseSecurityHeaders(h);
+    h.set("Content-Type", "application/javascript; charset=utf-8");
+    h.set("Cache-Control", "public, max-age=86400");
+    try {
+      const bytes = await readFile(join(ASSETS_DIR, "landing-carousel.js"));
+      return new Response(bytes, { status: 200, headers: h });
+    } catch {
+      return new Response("/* carousel bundle missing — run pnpm landing:carousel */", {
+        status: 404,
+        headers: h,
+      });
+    }
+  });
+
   // Optimized screenshot assets. Filenames are allow-listed (no traversal); a
   // missing asset is a plain 404. (Assets are committed by the screenshot pipeline.)
   app.get("/docs/assets/:file", async (c) => {

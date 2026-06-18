@@ -116,7 +116,9 @@ describe("landing page — rendered content", () => {
 
   it("includes the product-tour carousel and the team + privacy sections", () => {
     const html = renderLandingPage();
-    expect(html).toContain("data-carousel");
+    // Embla carousel: the viewport + the bundled controller script.
+    expect(html).toContain("data-embla");
+    expect(html).toContain('src="/docs/assets/landing-carousel.js"');
     expect(html).toContain('src="/docs/assets/tour-editor.webp');
     expect(html).toContain("Built for teams");
     expect(html).toContain("Private by design");

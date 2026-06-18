@@ -41,6 +41,7 @@
     "docs:screenshots": "node scripts/screenshots.mjs",
     "landing:screenshots": "node scripts/screenshots.mjs --landing",
     "og:build": "node scripts/og-card.mjs",
+    "landing:carousel": "esbuild scripts/landing-carousel.src.mjs --bundle --format=iife --minify --target=es2019 --outfile=docs/site/assets/landing-carousel.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",
@@ -49,6 +50,9 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "drizzle-kit": "^0.31.10",
+    "embla-carousel": "^8.6.0",
+    "embla-carousel-autoplay": "^8.6.0",
+    "esbuild": "^0.28.1",
     "highlight.js": "11.11.1",
     "marked": "14.1.4",
     "playwright": "^1.49.0",
