@@ -90,6 +90,39 @@ describe("UserMenu", () => {
     expect(about).toHaveAttribute("href", "/welcome");
   });
 
+  it("opens DOWNWARD by default (top-anchored popover for the mobile top bar)", () => {
+    render(<UserMenu me={makeMe()} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const menu = screen.getByRole("menu");
+    // The default placement anchors the popover below the trigger.
+    expect(menu.className).toContain("top-[calc(100%+0.5rem)]");
+    expect(menu.className).not.toContain("bottom-[calc(100%+0.5rem)]");
+  });
+
+  it("placement='up' opens the popover UPWARD (for the bottom-pinned rail footer)", () => {
+    render(<UserMenu me={makeMe()} placement="up" />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const menu = screen.getByRole("menu");
+    // Bottom-anchored so the menu appears ABOVE a trigger pinned to the viewport
+    // bottom, instead of falling below the fold.
+    expect(menu.className).toContain("bottom-[calc(100%+0.5rem)]");
+    expect(menu.className).not.toContain("top-[calc(100%+0.5rem)]");
+  });
+
+  it("expanded trigger shows the display name as a real row (the rail variant)", () => {
+    render(<UserMenu me={makeMe()} expanded />);
+    // The name is visible on the trigger itself, not only inside the popover.
+    const trigger = screen.getByRole("button", { name: /account/i });
+    expect(trigger).toHaveTextContent("Mark Pasternak");
+  });
+
+  it("compact trigger (default) does not show the name until the menu opens", () => {
+    render(<UserMenu me={makeMe()} />);
+    const trigger = screen.getByRole("button", { name: /account/i });
+    // The accessible name carries the label, but the visible trigger text doesn't.
+    expect(trigger).not.toHaveTextContent("Mark Pasternak");
+  });
+
   it("closes on Escape and on an outside click", () => {
     render(<UserMenu me={makeMe()} />);
     const trigger = screen.getByRole("button", { name: /account/i });

@@ -452,7 +452,7 @@ describe("dashboard app", () => {
     expect(screen.getByText("/missing-dashboard-route")).toBeInTheDocument();
   });
 
-  it("the top bar exposes Docs as a real anchor to the server-served /docs", async () => {
+  it("the rail exposes Docs as a real anchor to the server-served /docs, opening a new tab", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -469,6 +469,9 @@ describe("dashboard app", () => {
     // A plain anchor (server-served), not a client route.
     expect(docs.tagName).toBe("A");
     expect(docs.getAttribute("href")).toBe("/docs");
+    // Docs is a separate server-rendered surface → open in a new tab, with a safe rel.
+    expect(docs.getAttribute("target")).toBe("_blank");
+    expect(docs.getAttribute("rel")).toBe("noreferrer");
   });
 
   it("the SPA defines no /docs route — /docs falls through to the dashboard 404", async () => {

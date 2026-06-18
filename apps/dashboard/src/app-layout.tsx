@@ -1,5 +1,6 @@
 import type { Icon } from "@phosphor-icons/react";
 import {
+  ArrowSquareOut,
   BookOpen,
   Compass,
   List,
@@ -121,30 +122,42 @@ function CreateCanvasButton({
 }
 
 /** Docs anchor. Docs are server-rendered at /docs (outside the SPA), so this is a
- *  plain anchor, NOT a TanStack <Link>. */
+ *  plain anchor, NOT a TanStack <Link>. It's a separate surface, so it opens in a
+ *  new tab — with a subtle external-link affordance when expanded. `block` renders
+ *  it as a full-width row (the rail's expanded footer) rather than a chip. */
 function DocsLink({
   onSelect,
   className,
   collapsed,
+  block,
 }: {
   onSelect?: () => void;
   className?: string;
   collapsed?: boolean;
+  block?: boolean;
 }) {
   return (
     <a
       href="/docs"
+      target="_blank"
+      rel="noreferrer"
       aria-label="Documentation"
-      title="Documentation"
+      title="Documentation (opens in a new tab)"
       onClick={onSelect}
       className={cn(
         "inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface-sunken text-[0.8125rem] font-medium text-muted transition-colors hover:text-fg",
         collapsed ? "w-9 justify-center px-0" : "px-3",
+        block && !collapsed && "w-full",
         className,
       )}
     >
-      <BookOpen size={16} weight="regular" aria-hidden />
-      {!collapsed && <span>Docs</span>}
+      <BookOpen size={16} weight="regular" aria-hidden className="shrink-0" />
+      {!collapsed && (
+        <>
+          <span>Docs</span>
+          <ArrowSquareOut size={13} weight="bold" aria-hidden className="ml-auto text-subtle" />
+        </>
+      )}
     </a>
   );
 }
@@ -293,18 +306,30 @@ export function AppLayout() {
         <nav className="flex flex-col gap-0.5" aria-label="Sections">
           {links.map((l) => renderLink(l, undefined, collapsed))}
         </nav>
-        {/* Footer: docs + theme + account, pinned to the bottom of the rail. */}
-        <div className="mt-auto flex flex-col gap-3 border-border/70 border-t pt-3">
-          <div
-            className={cn(
-              "flex gap-2",
-              collapsed ? "flex-col items-center" : "items-center justify-between",
-            )}
-          >
-            <DocsLink collapsed={collapsed} />
-            <ThemeSwitch vertical={collapsed} />
-          </div>
-          {me.data && <UserMenu me={me.data} />}
+        {/* Footer, pinned to the bottom of the rail: Docs + theme tidily stacked
+            above a full-width account row. When collapsed every control is
+            icon-only and centered. The account menu opens UPWARD here — its
+            trigger sits at the bottom of the viewport, so a downward popover would
+            fall below the fold. */}
+        <div
+          className={cn(
+            "mt-auto flex flex-col border-border/70 border-t pt-3",
+            collapsed ? "items-center gap-2" : "gap-2",
+          )}
+        >
+          <DocsLink collapsed={collapsed} block />
+          {collapsed ? (
+            <ThemeSwitch vertical />
+          ) : (
+            <div className="flex justify-center">
+              <ThemeSwitch />
+            </div>
+          )}
+          {me.data && (
+            <div className={cn(!collapsed && "mt-1 border-border/70 border-t pt-2")}>
+              <UserMenu me={me.data} placement="up" expanded={!collapsed} />
+            </div>
+          )}
         </div>
       </aside>
 
