@@ -112,3 +112,7 @@ Fixed the concrete voice contradictions the findings named (no full literal migr
 Updated app/clone/gallery tests for the new labels.
 
 **Note:** a full `copy/*.ts` module + PRIMITIVES map (centralizing all inline literals) is still open — this slice fixed the contradictions, not the centralization.
+
+### Merged latest main (per Mark) + P4 status  ✅ (gates green: 1533 server / 257 dashboard)
+- Pulled origin/main (4 commits ahead) into the branch. Conflict only in `CanvasList.tsx` (main rewrote the rows + added a **list/grid view switch + CanvasCard**, "Lovable-inspired preview-first rows"). Resolved by taking main's richer version and re-applying the serif title (both the row and grid-card titles). Landing/index auto-merged; verified no violet returned, my P5/a11y/error-copy changes survived, landing docstring updated to teal reality.
+- **P4 impact:** main's `CanvasCard` + `ViewToggle` (`?view=grid`) **already deliver P4's gallery-first card grid.** That half of P4 is effectively done + integrated. Remaining P4 = the **right detail rail** (select-a-canvas → living-object panel), which is a substantial change to the now-more-complex route (list/grid views + multi-select + bulk + pagination, all URL-driven) and is the right next focused step.
