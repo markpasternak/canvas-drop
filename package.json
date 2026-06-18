@@ -42,6 +42,7 @@
     "landing:screenshots": "node scripts/screenshots.mjs --landing",
     "og:build": "node scripts/og-card.mjs",
     "landing:carousel": "esbuild scripts/landing-carousel.src.mjs --bundle --format=iife --minify --target=es2019 --outfile=docs/site/assets/landing-carousel.js",
+    "landing:gif": "node scripts/landing-gif.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome check --write .",

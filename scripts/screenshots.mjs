@@ -142,6 +142,13 @@ async function main() {
   }
 
   await browser.close();
+
+  // Landing mode: rebuild the animated product-tour loop from the fresh frames, so
+  // the README's tour.webp refreshes whenever the preview images do.
+  if (LANDING) {
+    const { buildTourLoop } = await import("./landing-gif.mjs");
+    await buildTourLoop();
+  }
 }
 
 main();
