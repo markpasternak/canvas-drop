@@ -72,6 +72,14 @@ there is no cross-owner access and no existence leak.
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
 
+**If an admin has disabled a canvas** (a moderation takedown), it goes **read-only**:
+the read tools (`get_canvas`, `list_versions`, `get_canvas_usage`, `get_draft`, …) keep
+working, but every mutation tool — settings/sharing via `update_canvas`, capabilities,
+slug, preview, access/guest tools, deploy / publish / rollback, archive / unpublish,
+`delete_canvas`, and the draft-edit tools — fails with `DISABLED: <reason>` (the same
+contract as the management API's `409 { code: "DISABLED" }`). The owner can still read
+the canvas and the admin's takedown reason; only an admin can re-enable it.
+
 **Every deploy publishes immediately.** There is no draft step over MCP: `deploy_canvas`
 and `finalize_deploy` make the uploaded files the new **live** version at once (kept as
 an immutable version you can roll back to). A new canvas starts **private** (owner-only);

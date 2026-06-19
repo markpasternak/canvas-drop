@@ -47,7 +47,13 @@ client registration) and then get identity-scoped tools across every canvas you 
 `publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
 anything an owner can do in the UI, an agent can do here. The full table is in the
 [MCP server](/docs/agents/mcp) reference. A tool only touches canvases you own. Typical
-flow: `create_canvas` then `deploy_canvas`. Every deploy **publishes immediately** (no
+flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `query`
+(matches title + description + tags + slug, case/accent/whitespace-insensitive, multi-word
+AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)
+and the canvas's unified `tags` (max 20, ≤50 chars each — one set used for both owner-list
+filtering and public gallery display, no separate "gallery summary"/"gallery tags").
+If an admin has disabled a canvas it becomes **read-only**: reads keep working but every
+mutation tool fails with `DISABLED: <reason>`. Every deploy **publishes immediately** (no
 draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
 deploy by fetching it — an unauthenticated GET returns a login page. Verify through the
 server: the returned `{version, fileCount}`, `list_versions`, or `get_canvas_file`

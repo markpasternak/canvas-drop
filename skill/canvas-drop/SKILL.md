@@ -62,7 +62,9 @@ account and the canvases you own:
   staged URLs, `readback`, and a copy-paste `curl` command with the key embedded). Use
   these verbatim — do not probe for the API host. `get_canvas` returns the same endpoints
   (with a `$CANVAS_KEY` placeholder) for an existing canvas.
-- `list_canvases` — the canvases you own.
+- `list_canvases` — the canvases you own. Optional `query` (a forgiving text search
+  over title, description, tags, and slug — case/accent/whitespace-insensitive, multi-word
+  AND) and `tags` (any-match — canvases carrying any of the given tags) filters.
 - `get_canvas` / `list_versions` — current state and version history.
 - `deploy_canvas` — publish static files (a base64 ZIP, or a `files` array) directly to
   live in one call. Best for a **first publish of a small canvas**.
@@ -83,8 +85,12 @@ account and the canvases you own:
 - `archive_canvas` / `unarchive_canvas` — take a canvas offline (reversible); restore it.
 - `delete_canvas` — soft-delete a canvas (not reversible from MCP; a canvas an admin has
   DISABLED can't be deleted).
-- `update_canvas` — settings + sharing (Settings/Share tabs): title, description, access
-  rung, password (or clear), share expiry, SPA fallback, gallery listing/metadata.
+- `update_canvas` — settings + sharing (Settings/Share tabs): title, the single
+  `description` (max 2000 chars, shown in Overview, the gallery, and grid cards), access
+  rung, password (or clear), share expiry, SPA fallback, `previewMode`, gallery listing,
+  and `tags` — one unified tag set per canvas (max 20, ≤50 chars each) that powers both
+  owner-list filtering and public gallery display (there is no separate "gallery summary"
+  or "gallery tags").
 - `list_access` / `grant_access` / `resend_guest_invite` / `revoke_access` — the
   per-canvas allowlist for the `specific_people` rung: list members + guests, add a member
   or email-invite a guest, re-send, or remove.
@@ -99,6 +105,9 @@ sharing, gallery, capabilities, clone, usage, and the full draft/publish editor 
 tool acts only on canvases you own (`clone_canvas` also reaches a shared gallery template);
 a canvas you don't own reads as **canvas not found** (no existence leak).
 Typical flow: `create_canvas` → `deploy_canvas` with your files, all in one session.
+If an admin has disabled a canvas (moderation takedown) it goes **read-only**: reads
+still work, but every mutation tool fails with `DISABLED: <reason>` until an admin
+re-enables it.
 
 **Every deploy publishes immediately** — there is no draft step over MCP; the files go
 **live** at once (kept as an immutable version). The live URL is **access-controlled**

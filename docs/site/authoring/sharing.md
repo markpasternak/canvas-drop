@@ -95,19 +95,34 @@ up to 50 characters each**. Agents set the same field with `update_canvas` (the
 
 ## Listing in the gallery
 
-The Share tab also has an opt-in **gallery** listing (a summary, the canvas's
-tags, and an optional *use as template* toggle). A canvas can only be listed when
-it has a shared access rung, a published version, and **no password** set.
+The Share tab also has an opt-in **gallery** listing (the canvas's **description**,
+its **tags**, and an optional *use as template* toggle). A canvas can only be listed
+when it has a shared access rung, a published version, and **no password** set. The
+**description** is a single field (max 2000 characters) used everywhere the canvas is
+shown — the Overview tab, the gallery, and grid cards — there is no separate "gallery
+summary". Agents set it with `update_canvas` (the `description` parameter).
 
 ## Finding canvases (search)
 
 Both **Your canvases** and the **gallery** share one forgiving search. A query
-matches across a canvas's **title, summary, tags, and slug**, and matching is
-**case-, accent-, and partial-insensitive** — `café`, `Cafe`, and `caf` all find
+matches across a canvas's **title, description, tags, and slug**, and matching is
+**case-, accent-, and whitespace-insensitive** — `café`, `Cafe`, and `caf` all find
 "Café Menu". A multi-word query is AND-matched: every word must appear somewhere
 in those fields (the words can live in different fields — e.g. a word in the
 title and another in a tag). The same forgiving search backs the MCP
-`list_canvases` `q` filter.
+`list_canvases` `query` filter; that tool also takes a `tags` filter that matches
+any canvas carrying any of the given tags.
+
+## When an admin disables a canvas
+
+An admin can take a canvas down for moderation (the *disable* action in the
+all-canvases list). A disabled canvas becomes **read-only to its owner**: every
+owner mutation — settings, sharing, tags, capabilities, slug, preview, deploy /
+publish / rollback, archive / unpublish, and draft edits — is refused with a
+`DISABLED` error (HTTP 409 over the management API, a `DISABLED: …` failure over
+MCP). Reads still work, so you can still open the canvas, see its versions and
+usage, and read the **takedown reason** the admin left. An admin can re-enable or
+restore it; you cannot delete a disabled canvas while it's down.
 
 ## Revoking
 
