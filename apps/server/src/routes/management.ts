@@ -216,6 +216,10 @@ const boolFlag = z
  */
 const ownerListQuerySchema = z.object({
   q: z.string().trim().min(1).optional(),
+  // Multi-tag any-match (2026-06-19): repeated `?tag=a&tag=b`, read off
+  // `c.req.queries("tag")` into a string[] (URL-shareable). Each tag trimmed; empties
+  // dropped. An empty list adds no tag filter — same semantics as the gallery.
+  tag: z.array(z.string().trim().min(1)).optional(),
   // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
   // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
   access: z
@@ -409,11 +413,18 @@ export function managementRoutes(deps: ManagementDeps) {
   // and every param ANDs onto the owner-scope base in the repo — it can only shrink
   // the caller's own set.
   app.get("/", async (c) => {
-    const parsed = ownerListQuerySchema.safeParse(c.req.query());
+    // `c.req.query()` flattens repeated params; read `tag` via `queries("tag")` so
+    // `?tag=a&tag=b` round-trips as an array (multi-tag any-match).
+    const tags = c.req.queries("tag");
+    const parsed = ownerListQuerySchema.safeParse({
+      ...c.req.query(),
+      tag: tags && tags.length > 0 ? tags : undefined,
+    });
     const data = parsed.success
       ? parsed.data
       : {
           q: undefined,
+          tag: undefined,
           access: undefined,
           shared: false,
           protected: false,
@@ -438,6 +449,7 @@ export function managementRoutes(deps: ManagementDeps) {
       deps.canvases.listByOwnerFiltered({
         ownerId: userId,
         q: data.q,
+        tag: data.tag,
         access: data.access,
         shared: data.shared,
         protected: data.protected,

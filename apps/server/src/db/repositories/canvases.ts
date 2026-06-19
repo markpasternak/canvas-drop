@@ -97,12 +97,15 @@ export interface CanvasSettingsPatch {
 }
 
 /**
- * Gallery sort axes (plan 004). `published` is the default and matches the legacy
- * fixed order (most-recently-published first). `updated` orders by last change;
- * `title` is case-insensitive A–Z. An unknown value falls back to `published` at
- * the route, so the repo only ever receives one of these three.
+ * Gallery sort axes (plan 004; `featured`/`trending` added 2026-06-19). `published`
+ * is the default and matches the legacy fixed order (most-recently-published first);
+ * `recent` is an alias for it. `updated` orders by last change; `title` is
+ * case-insensitive A–Z. `featured` puts admin-featured canvases first then falls back
+ * to recent; `trending` ranks by recent views (a net-new bounded usage aggregate). An
+ * unknown value falls back to `published` at the route, so the repo only ever receives
+ * one of these.
  */
-export type GallerySort = "published" | "updated" | "title";
+export type GallerySort = "published" | "recent" | "updated" | "title" | "featured" | "trending";
 
 /**
  * Options for the opt-in gallery listing (plan 008 / M8; filters + sort plan 004).
@@ -114,13 +117,20 @@ export type GallerySort = "published" | "updated" | "title";
 export interface GalleryListOptions {
   now: number;
   q?: string;
-  tag?: string;
+  /** Tag filter (single→multi 2026-06-19): any-match — a canvas matches if it carries
+   *  ANY of the given tags. Empty/omitted adds no tag filter. */
+  tag?: string[];
   /** Filter to a single owner by opaque user id (plan 004). */
   owner?: string;
   /** When true, return only canvases a non-owner may clone (plan 004). */
   templatable?: boolean;
+  /** When true, return only admin-featured canvases (2026-06-19). */
+  featured?: boolean;
   /** Sort axis; defaults to `published` when omitted (plan 004). */
   sort?: GallerySort;
+  /** Lower bound (epoch ms) for the `trending` sort's recent-views window; ignored by
+   *  every other sort. Defaults to now − {@link POPULAR_WINDOW_MS} when omitted. */
+  trendingSinceMs?: number;
   limit: number;
   offset: number;
 }
@@ -135,6 +145,10 @@ export interface GalleryRow {
   ownerId: string;
   ownerName: string;
   ownerAvatarUrl: string | null;
+  /** Trending views over the recent window (2026-06-19) — surfaced on every gallery
+   *  row so a card can show the count and `sort=trending` orders by it. Always present
+   *  (0 when the canvas has no views in the window). */
+  recentViews: number;
 }
 
 /** Distinct owners + tags across the currently-visible gallery (plan 004 facets). */
@@ -164,6 +178,10 @@ export const POPULAR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export interface OwnerListOptions {
   ownerId: string;
   q?: string;
+  /** Multi-tag filter (2026-06-19): any-match — a canvas matches if it carries ANY of
+   *  the given tags. Empty/omitted adds no tag filter. Same per-tag membership predicate
+   *  as the gallery, so the two surfaces' tag semantics can't drift. */
+  tag?: string[];
   /** Access/gallery-state filters — each maps to one canvas column. */
   access?: AccessRung;
   shared?: boolean;
@@ -262,6 +280,18 @@ export function canvasesRepository(client: DbClient) {
    * row so the blob reflects the merged final state — the patch alone can't, since
    * it may omit fields the blob still depends on. A no-op if the row vanished.
    */
+  /**
+   * One JSON-array-membership clause: "the `tags` column contains `tag`". The single
+   * genuinely dialect-divergent query in this repo (json_each on sqlite, `@>` on pg),
+   * shared by {@link listGallery} and {@link listByOwnerFiltered} so the gallery's
+   * multi-tag any-match and the owner list's multi-tag any-match generate the SAME
+   * per-tag predicate and can never drift.
+   */
+  const tagMembershipFilter = (tag: string): SQL =>
+    client.dialect === "sqlite"
+      ? sql`exists (select 1 from json_each(${t.tags}) where value = ${tag})`
+      : sql`${t.tags} @> ${JSON.stringify([tag])}::jsonb`;
+
   const recomputeSearchText = async (id: string): Promise<void> => {
     const rows = (await db
       .select({
@@ -394,6 +424,13 @@ export function canvasesRepository(client: DbClient) {
       // (plan 2026-06-19 KTD1) — the SAME predicate the gallery uses, so the owner
       // list and gallery search title + summary + tags + slug identically.
       filters.push(searchTextPredicate(opts.q));
+
+      // Multi-tag any-match (2026-06-19): one JSON-array-membership clause per tag,
+      // OR-ed — a canvas matches if it carries ANY selected tag. Same per-tag predicate
+      // the gallery uses (tagMembershipFilter), so the two surfaces can't drift.
+      if (opts.tag && opts.tag.length > 0) {
+        filters.push(or(...opts.tag.map(tagMembershipFilter)));
+      }
 
       // Column-based state filters (plan 005 KTD3). `protected` keys off a set
       // password hash; `neverDeployed` off the absence of a published version.
@@ -574,6 +611,20 @@ export function canvasesRepository(client: DbClient) {
         // match on galleryListed alone). Mirrors archive/unpublish.
         .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.ownerId, ownerId), eq(t.access, "public_link")));
+    },
+
+    /**
+     * Set the admin-curated `galleryFeatured` editorial flag (2026-06-19). A
+     * cross-owner admin action (not on the per-account MCP surface) — the data-layer
+     * setter the admin canvases route calls. Display/sort-only; never an authz input.
+     */
+    async setFeatured(id: string, featured: boolean): Promise<Canvas> {
+      const rows = await db
+        .update(t)
+        .set({ galleryFeatured: featured, updatedAt: Date.now() })
+        .where(eq(t.id, id))
+        .returning();
+      return rows[0] as Canvas;
     },
 
     /** Set the access rung directly (D4 ladder). Used by the settings route and the
@@ -934,36 +985,101 @@ export function canvasesRepository(client: DbClient) {
       // metacharacters in the user's text are escaped (ESCAPE '\').
       filters.push(searchTextPredicate(opts.q));
 
-      if (opts.tag) {
-        // JSON-array membership is the one genuinely dialect-divergent query.
-        filters.push(
-          client.dialect === "sqlite"
-            ? sql`exists (select 1 from json_each(${t.tags}) where value = ${opts.tag})`
-            : sql`${t.tags} @> ${JSON.stringify([opts.tag])}::jsonb`,
-        );
+      // Multi-tag any-match (single→multi 2026-06-19): one JSON-array-membership
+      // clause per tag, OR-ed, so a canvas matches if it carries ANY selected tag.
+      // JSON-array membership is the one genuinely dialect-divergent query; the same
+      // per-tag predicate is reused for the owner list (tagMembershipFilter).
+      if (opts.tag && opts.tag.length > 0) {
+        filters.push(or(...opts.tag.map(tagMembershipFilter)));
       }
 
       // Filters AND onto the visibility predicate — they never widen it (§12). An
-      // owner/templatable filter can only ever shrink the already-visible set.
+      // owner/templatable/featured filter can only ever shrink the already-visible set.
       if (opts.owner) {
         filters.push(eq(t.ownerId, opts.owner));
       }
       if (opts.templatable) {
         filters.push(eq(t.galleryTemplatable, true));
       }
+      if (opts.featured) {
+        filters.push(eq(t.galleryFeatured, true));
+      }
 
       const where = and(...filters);
 
+      // `trending` is net-new (plan 2026-06-19): rank the WHOLE visible set by recent
+      // views then paginate, mirroring listByOwnerFiltered's `popular` path. Kept off
+      // the SQL-sort path on purpose — only this opt-in sort pays the usage aggregate.
+      if (opts.sort === "trending") {
+        const sinceMs = opts.trendingSinceMs ?? opts.now - POPULAR_WINDOW_MS;
+        const idRows = (await db
+          .select({ id: t.id, galleryPublishedAt: t.galleryPublishedAt })
+          .from(t)
+          .where(where)) as Array<{ id: string; galleryPublishedAt: number | null }>;
+        const total = idRows.length;
+        if (total === 0) return { items: [], total: 0 };
+
+        const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+        const countRows = (await db
+          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
+          .from(ue)
+          .where(
+            and(
+              eq(ue.type, "view"),
+              gte(ue.createdAt, sinceMs),
+              inArray(
+                ue.canvasId,
+                idRows.map((r) => r.id),
+              ),
+            ),
+          )
+          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
+        const views = new Map(countRows.map((r) => [r.canvasId, Number(r.c)]));
+
+        // (recent views desc, galleryPublishedAt desc, id desc) — same id tiebreak as
+        // the SQL sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
+        const pageIds = idRows
+          .map((r) => ({
+            id: r.id,
+            publishedAt: Number(r.galleryPublishedAt ?? 0),
+            v: views.get(r.id) ?? 0,
+          }))
+          .sort((a, b) => b.v - a.v || b.publishedAt - a.publishedAt || (a.id < b.id ? 1 : -1))
+          .slice(opts.offset, opts.offset + opts.limit)
+          .map((r) => r.id);
+        if (pageIds.length === 0) return { items: [], total };
+
+        const pageRows = (await db
+          .select({
+            canvas: t,
+            ownerId: usersT.id,
+            ownerName: usersT.name,
+            ownerAvatarUrl: usersT.avatarUrl,
+          })
+          .from(t)
+          .innerJoin(usersT, eq(t.ownerId, usersT.id))
+          .where(inArray(t.id, pageIds))) as Array<Omit<GalleryRow, "recentViews">>;
+        const byId = new Map(pageRows.map((row) => [row.canvas.id, row]));
+        const items = pageIds
+          .map((id) => byId.get(id))
+          .filter((row): row is Omit<GalleryRow, "recentViews"> => row !== undefined)
+          .map((row) => ({ ...row, recentViews: views.get(row.canvas.id) ?? 0 }));
+        return { items, total };
+      }
+
       // Default order is most-recently-published with a stable `id` tiebreak
-      // (uuidv7 monotonic). `updated` and `title` are the plan-004 alternatives;
-      // `title` is case-insensitive A–Z. Every axis keeps the `id` tiebreak so
-      // pages don't shuffle within an equal sort key.
+      // (uuidv7 monotonic). `published`/`recent` are the same axis. `updated`/`title`
+      // are the plan-004 alternatives; `title` is case-insensitive A–Z. `featured`
+      // puts admin-featured first then falls back to recent. Every axis keeps the `id`
+      // tiebreak so pages don't shuffle within an equal sort key.
       const orderBy =
         opts.sort === "updated"
           ? [desc(t.updatedAt), desc(t.id)]
           : opts.sort === "title"
             ? [sql`lower(${t.title}) asc`, desc(t.id)]
-            : [desc(t.galleryPublishedAt), desc(t.id)];
+            : opts.sort === "featured"
+              ? [desc(t.galleryFeatured), desc(t.galleryPublishedAt), desc(t.id)]
+              : [desc(t.galleryPublishedAt), desc(t.id)];
 
       const rows = (await db
         .select({
@@ -977,13 +1093,31 @@ export function canvasesRepository(client: DbClient) {
         .where(where)
         .orderBy(...orderBy)
         .limit(opts.limit)
-        .offset(opts.offset)) as GalleryRow[];
+        .offset(opts.offset)) as Array<Omit<GalleryRow, "recentViews">>;
 
       const totalRows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
         value: number;
       }>;
 
-      return { items: rows, total: totalRows[0]?.value ?? 0 };
+      // Hydrate the page's recent-view counts in one bounded aggregate (same window the
+      // `trending` sort ranks by) so every gallery row carries `recentViews`.
+      const sinceMs = opts.trendingSinceMs ?? opts.now - POPULAR_WINDOW_MS;
+      const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+      const pageIds = rows.map((row) => row.canvas.id);
+      const views = new Map<string, number>();
+      if (pageIds.length > 0) {
+        const countRows = (await db
+          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
+          .from(ue)
+          .where(
+            and(eq(ue.type, "view"), gte(ue.createdAt, sinceMs), inArray(ue.canvasId, pageIds)),
+          )
+          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
+        for (const r of countRows) views.set(r.canvasId, Number(r.c));
+      }
+      const items = rows.map((row) => ({ ...row, recentViews: views.get(row.canvas.id) ?? 0 }));
+
+      return { items, total: totalRows[0]?.value ?? 0 };
     },
 
     /**

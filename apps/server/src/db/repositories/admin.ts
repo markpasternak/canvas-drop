@@ -63,6 +63,10 @@ export interface AdminUserRow {
 /** Platform overview aggregates (§6.10.6 — AI spend deferred to M9). */
 export interface PlatformStats {
   canvasCountByStatus: Record<string, number>;
+  /** Active canvases published as a static public link (access='public_link') — the
+   *  governance count of how much is exposed beyond the org (2026-06-19). Scoped to
+   *  `active` only, like the other "live" overview signals. */
+  publicLinkCount: number;
   userCount: number;
   /** Total stored file bytes across every canvas (deployed-version bytes show per-canvas). */
   totalFileBytes: number;
@@ -255,6 +259,7 @@ export function adminRepository(client: DbClient) {
       const recentCutoff = now - RECENT_WINDOW_DAYS * DAY_MS;
       const [
         statusRows,
+        publicLinkRows,
         userRows,
         byteRows,
         opsRows,
@@ -269,6 +274,12 @@ export function adminRepository(client: DbClient) {
           .select({ status: canvasesT.status, count: sql<number>`count(*)` })
           .from(canvasesT)
           .groupBy(canvasesT.status),
+        // Active public-link canvases (governance: what's exposed beyond the org).
+        // Scoped to `active` so it aligns with the live-canvas overview signals.
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(canvasesT)
+          .where(and(eq(canvasesT.status, "active"), eq(canvasesT.access, "public_link"))),
         db.select({ count: sql<number>`count(*)` }).from(usersT),
         db.select({ total: sql<number>`coalesce(sum(${filesT.sizeBytes}), 0)` }).from(filesT),
         db.select({ count: sql<number>`count(*)` }).from(usageT),
@@ -311,6 +322,7 @@ export function adminRepository(client: DbClient) {
       const oldest = (deletedRows as Array<{ oldest: number | null }>)[0]?.oldest ?? null;
       return {
         canvasCountByStatus,
+        publicLinkCount: Number((publicLinkRows as Array<{ count: number }>)[0]?.count ?? 0),
         userCount: Number((userRows as Array<{ count: number }>)[0]?.count ?? 0),
         totalFileBytes: Number((byteRows as Array<{ total: number }>)[0]?.total ?? 0),
         totalOps: Number((opsRows as Array<{ count: number }>)[0]?.count ?? 0),

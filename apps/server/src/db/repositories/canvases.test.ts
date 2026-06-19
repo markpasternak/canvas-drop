@@ -585,6 +585,32 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     );
   });
 
+  it("listByOwnerFiltered ?tag=a&tag=b is any-match (a canvas matches any selected tag)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const charts = await repo.create({ ownerId: me, slug: "charts", apiKeyHash: "k-c" });
+    const games = await repo.create({ ownerId: me, slug: "games", apiKeyHash: "k-g" });
+    const tables = await repo.create({ ownerId: me, slug: "tables", apiKeyHash: "k-t" });
+    const both = await repo.create({ ownerId: me, slug: "both", apiKeyHash: "k-b" });
+    await repo.updateSettings(charts.id, { tags: ["charts"] });
+    await repo.updateSettings(games.id, { tags: ["games"] });
+    await repo.updateSettings(tables.id, { tags: ["tables"] });
+    await repo.updateSettings(both.id, { tags: ["charts", "games"] });
+
+    const ids = async (tag: string[]) =>
+      (await repo.listByOwnerFiltered({ ownerId: me, tag, limit: 50, offset: 0 })).items
+        .map((c) => c.id)
+        .sort();
+
+    // any-match: ["charts","games"] returns charts, games, AND the canvas carrying both.
+    expect(await ids(["charts", "games"])).toEqual([charts.id, games.id, both.id].sort());
+    // single tag still works (and the "both" canvas matches on its `charts` membership).
+    expect(await ids(["charts"])).toEqual([charts.id, both.id].sort());
+    // a tag nobody carries returns nothing.
+    expect(await ids(["nonexistent"])).toEqual([]);
+  });
+
   it("ownerSummary counts only the caller's current inventory facets", async () => {
     client = await makeTestDb(dialect);
     const me = await seedOwner(client, "me");

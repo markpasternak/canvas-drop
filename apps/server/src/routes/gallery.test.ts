@@ -28,6 +28,8 @@ const ITEM_KEYS = [
   "tags",
   "templatable",
   "publishedAt",
+  "galleryFeatured",
+  "recentViews",
   "hasPreview",
   "owner",
 ].sort();
@@ -207,6 +209,38 @@ describe("galleryRoutes", () => {
 
     const both = await get(client, "/api/gallery?q=revenue&tag=games");
     expect(both.body.items).toHaveLength(0);
+  });
+
+  it("multi-tag ?tag=a&tag=b is URL-shareable and any-match", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const charts = await seedListed(client, owner.id, { title: "Charts", tags: ["charts"] });
+    const games = await seedListed(client, owner.id, { title: "Games", tags: ["games"] });
+    await seedListed(client, owner.id, { title: "Tables", tags: ["tables"] });
+
+    // Repeated tag params round-trip as an array (shareable URL) and any-match.
+    const res = await get(client, "/api/gallery?tag=charts&tag=games");
+    expect(res.body.total).toBe(2);
+    expect(new Set(res.body.items.map((i) => i.id))).toEqual(new Set([charts, games]));
+  });
+
+  it("filters featured-only and exposes galleryFeatured + recentViews on each item", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const featured = await seedListed(client, owner.id, { title: "Featured" });
+    await seedListed(client, owner.id, { title: "Plain" });
+    await repo.setFeatured(featured, true);
+
+    const all = await get(client, "/api/gallery");
+    for (const item of all.body.items) {
+      expect(typeof item.galleryFeatured).toBe("boolean");
+      expect(typeof item.recentViews).toBe("number");
+    }
+    expect(all.body.items.find((i) => i.id === featured)?.galleryFeatured).toBe(true);
+
+    const onlyFeatured = await get(client, "/api/gallery?featured=1");
+    expect(onlyFeatured.body.items.map((i) => i.id)).toEqual([featured]);
   });
 
   it("excludes a password-protected canvas (plan 002: protected canvases are not listable)", async () => {

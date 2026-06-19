@@ -24,6 +24,8 @@ const templatableItem: GalleryItem = {
   tags: [],
   templatable: true,
   publishedAt: 1,
+  galleryFeatured: false,
+  recentViews: 0,
   hasPreview: false,
   owner: { id: "u-alice", name: "alice", avatarUrl: null },
 };

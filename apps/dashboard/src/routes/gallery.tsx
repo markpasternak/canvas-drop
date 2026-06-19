@@ -173,7 +173,9 @@ export default function Gallery() {
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useGallery({
     q,
-    tag,
+    // The query surface is multi-tag any-match (U3); the single-tag URL param maps to a
+    // one-element array. The multi-select TagFilter UI lands in a later unit.
+    tag: tag ? [tag] : undefined,
     owner,
     templatable,
     sort,

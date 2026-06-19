@@ -265,6 +265,12 @@ export interface GalleryItem {
   /** Whether a non-owner may clone this canvas as a template (plan 002). */
   templatable: boolean;
   publishedAt: number | null;
+  /** Admin-curated editorial flag (2026-06-19) — drives the Featured badge and the
+   *  `featured` sort/filter. Display-only. */
+  galleryFeatured: boolean;
+  /** Trending views over the recent window (2026-06-19) — the count behind the
+   *  `trending` sort, present on every card (0 when none in-window). */
+  recentViews: number;
   /** A captured preview exists (plan 004) — gates the gallery cover so a card with no
    *  preview shows GenerativeCover without firing a wasted probe. */
   hasPreview: boolean;
@@ -281,8 +287,10 @@ export interface GalleryPage {
   offset: number;
 }
 
-/** Gallery sort axes (plan 004). `published` (default) = most-recently-published. */
-export type GallerySort = "published" | "updated" | "title";
+/** Gallery sort axes (plan 004; `featured`/`trending` added 2026-06-19). `published`
+ *  (default) = most-recently-published; `recent` is its alias. `featured` puts
+ *  admin-featured canvases first; `trending` ranks by recent views. */
+export type GallerySort = "published" | "recent" | "updated" | "title" | "featured" | "trending";
 
 /** A page of Your-canvases results (plan 005). `total`/`limit`/`offset` are echoed
  *  by the server so the view derives "showing X–Y of N" from authoritative values. */
@@ -307,6 +315,9 @@ export interface CanvasesQuery {
   protected?: boolean;
   listed?: boolean;
   template?: boolean;
+  /** Multi-tag any-match (2026-06-19): a canvas matches if it carries ANY of these
+   *  tags. Serialized as repeated `?tag=a&tag=b`. */
+  tag?: string[];
   /** Never-deployed (no published version) — the URL param is `undeployed`. */
   undeployed?: boolean;
   /** Lifecycle scope: omit/`active` for the live set, `archived` for the archive. */
@@ -318,11 +329,15 @@ export interface CanvasesQuery {
 
 export interface GalleryQuery {
   q?: string;
-  tag?: string;
+  /** Multi-tag any-match (single→multi 2026-06-19): a canvas matches if it carries ANY
+   *  of these tags. Serialized as repeated `?tag=a&tag=b` (URL-shareable). */
+  tag?: string[];
   /** Filter to a single owner by opaque user id (plan 004). */
   owner?: string;
   /** Only canvases a non-owner may clone (plan 004). */
   templatable?: boolean;
+  /** Only admin-featured canvases (2026-06-19). */
+  featured?: boolean;
   /** Sort axis; the server defaults to `published` when omitted (plan 004). */
   sort?: GallerySort;
   limit?: number;
@@ -633,6 +648,9 @@ export const ADMIN_PAGE_SIZE = 50;
 
 export interface AdminOverview {
   canvasCountByStatus: Record<string, number>;
+  /** Active canvases published as a static public link (access='public_link') — how
+   *  much is exposed beyond the org (2026-06-19). */
+  publicLinkCount: number;
   userCount: number;
   totalFileBytes: number;
   /** Total recorded primitive ops across the platform (all time). */
@@ -710,9 +728,12 @@ export const api = {
   listGallery: (query: GalleryQuery = {}) => {
     const sp = new URLSearchParams();
     if (query.q) sp.set("q", query.q);
-    if (query.tag) sp.set("tag", query.tag);
+    // Multi-tag any-match (2026-06-19): one `tag=` param per tag, so the gallery URL
+    // stays shareable (`?tag=a&tag=b`).
+    for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.owner) sp.set("owner", query.owner);
     if (query.templatable) sp.set("templatable", "1");
+    if (query.featured) sp.set("featured", "1");
     if (query.sort && query.sort !== "published") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));
@@ -733,6 +754,8 @@ export const api = {
     if (query.protected) sp.set("protected", "1");
     if (query.listed) sp.set("listed", "1");
     if (query.template) sp.set("template", "1");
+    // Multi-tag any-match (2026-06-19): one `tag=` param per tag (URL-shareable).
+    for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.undeployed) sp.set("undeployed", "1");
     if (query.scope === "archived") sp.set("scope", "archived");
     if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);

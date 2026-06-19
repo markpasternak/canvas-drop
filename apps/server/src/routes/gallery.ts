@@ -28,16 +28,25 @@ const DEFAULT_LIMIT = 48;
  */
 const querySchema = z.object({
   q: z.string().trim().min(1).optional(),
-  tag: z.string().trim().min(1).optional(),
-  // Owner filter is an opaque user id (plan 004). Templatable coerces the string
-  // query value to a boolean ("1"/"true" → true). Sort falls back to the default
-  // axis on any unknown value, so a junk `sort` never 400s the browse.
+  // Multi-tag any-match (single→multi 2026-06-19): repeated `?tag=a&tag=b` is read
+  // off `c.req.queries("tag")` into a string[], so the gallery URL stays shareable.
+  // Each tag is trimmed; empties are dropped. An empty list adds no tag filter.
+  tag: z.array(z.string().trim().min(1)).optional(),
+  // Owner filter is an opaque user id (plan 004). Templatable/featured coerce the
+  // string query value to a boolean ("1"/"true" → true). Sort falls back to the
+  // default axis on any unknown value, so a junk `sort` never 400s the browse.
   owner: z.string().trim().min(1).optional(),
   templatable: z
     .string()
     .optional()
     .transform((v) => v === "1" || v === "true"),
-  sort: z.enum(["published", "updated", "title"]).catch("published"),
+  featured: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  sort: z
+    .enum(["published", "recent", "updated", "title", "featured", "trending"])
+    .catch("published"),
   limit: z.coerce.number().int().catch(DEFAULT_LIMIT),
   offset: z.coerce.number().int().catch(0),
 });
@@ -54,6 +63,12 @@ export interface GalleryItemDto {
    *  canvases are always unprotected now, so `hasPassword` is gone from this DTO. */
   templatable: boolean;
   publishedAt: number | null;
+  /** Admin-curated editorial flag (2026-06-19) — drives the Featured badge + the
+   *  `featured` sort/filter. Display-only; the client never asserts it. */
+  galleryFeatured: boolean;
+  /** Trending views over the recent window (2026-06-19) — the count behind the
+   *  `trending` sort, surfaced on every card. */
+  recentViews: number;
   /** A captured screenshot preview exists for this canvas (plan 004) — drives the gallery
    *  cover the same way the owner dashboard does. False whenever the pipeline is off, so
    *  the gallery shows GenerativeCover and fires no wasted preview probe. */
@@ -97,6 +112,8 @@ function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): Gall
     tags,
     templatable: cv.galleryTemplatable,
     publishedAt: cv.galleryPublishedAt,
+    galleryFeatured: cv.galleryFeatured,
+    recentViews: row.recentViews,
     hasPreview,
     owner: { id: row.ownerId, name: row.ownerName, avatarUrl: row.ownerAvatarUrl },
   };
@@ -113,7 +130,13 @@ export function galleryRoutes(deps: GalleryDeps) {
   const app = new Hono<AppEnv>();
 
   app.get("/", async (c) => {
-    const parsed = querySchema.safeParse(c.req.query());
+    // `c.req.query()` flattens repeated params to the first value; read `tag` via
+    // `queries("tag")` so `?tag=a&tag=b` round-trips as an array (multi-tag any-match).
+    const tags = c.req.queries("tag");
+    const parsed = querySchema.safeParse({
+      ...c.req.query(),
+      tag: tags && tags.length > 0 ? tags : undefined,
+    });
     // safeParse only fails on a non-coercible shape; fall back to all-defaults so a
     // browse never errors on a malformed query string.
     const data = parsed.success
@@ -123,6 +146,7 @@ export function galleryRoutes(deps: GalleryDeps) {
           tag: undefined,
           owner: undefined,
           templatable: false,
+          featured: false,
           sort: "published" as const,
           limit: DEFAULT_LIMIT,
           offset: 0,
@@ -136,6 +160,7 @@ export function galleryRoutes(deps: GalleryDeps) {
       tag: data.tag,
       owner: data.owner,
       templatable: data.templatable,
+      featured: data.featured,
       sort: data.sort,
       limit,
       offset,

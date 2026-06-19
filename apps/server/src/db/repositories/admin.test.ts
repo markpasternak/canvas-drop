@@ -226,6 +226,32 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(stats.oldestDeletedAt).toBeNull(); // c2 is disabled, not deleted
   });
 
+  it("platformStats: publicLinkCount equals the manual count of ACTIVE public-link canvases", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const a = await seedUser(client, "alice");
+
+    // Two active public-link canvases (the count target).
+    const p1 = await canvases.create({ ownerId: a.id, slug: "pub-1111-2222", apiKeyHash: "hp1" });
+    const p2 = await canvases.create({ ownerId: a.id, slug: "pub-3333-4444", apiKeyHash: "hp2" });
+    await canvases.setAccess(p1.id, "public_link");
+    await canvases.setAccess(p2.id, "public_link");
+    // A whole_org canvas must NOT count (only public_link).
+    const org = await canvases.create({ ownerId: a.id, slug: "org-1111-2222", apiKeyHash: "ho" });
+    await canvases.setAccess(org.id, "whole_org");
+    // An ARCHIVED public-link canvas must NOT count (active-only scope). archive()
+    // clears access, so set public_link AFTER... but archive clears it — instead set a
+    // disabled public-link row, which archive/disable would clear access on. Use a
+    // deleted row to prove the active-only scope: set public_link then soft-delete.
+    const gone = await canvases.create({ ownerId: a.id, slug: "del-1111-2222", apiKeyHash: "hd" });
+    await canvases.setAccess(gone.id, "public_link");
+    await canvases.setStatus(gone.id, "deleted");
+
+    const stats = await adminRepository(client).platformStats(5);
+    // Manual count: only p1 + p2 are active AND public_link.
+    expect(stats.publicLinkCount).toBe(2);
+  });
+
   it("platformStats: counts views, unique viewers, and READY deploys (not pending) — both dialects", async () => {
     client = await makeTestDb(dialect);
     const canvases = canvasesRepository(client);

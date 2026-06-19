@@ -186,6 +186,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     });
     return c.json({
       canvasCountByStatus: stats.canvasCountByStatus,
+      publicLinkCount: stats.publicLinkCount,
       userCount: stats.userCount,
       totalFileBytes: stats.totalFileBytes,
       totalOps: stats.totalOps,
