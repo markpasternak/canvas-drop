@@ -1,5 +1,5 @@
-import { ArrowSquareOut } from "@phosphor-icons/react";
-import { useParams } from "@tanstack/react-router";
+import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
+import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
@@ -11,12 +11,12 @@ import { PasswordField } from "../components/PasswordField.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
-import { InlineNotice } from "../components/Surface.js";
+import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { type AccessRung, type AllowlistEntry, ApiError, api } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
-import { useUpdateSettings } from "../lib/mutations.js";
+import { usePublishDraft, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
 import { useCanvas, useMe } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
@@ -88,9 +88,6 @@ export default function Share() {
     }
   };
 
-  const shareBlocker =
-    canvas.publicationState === "published" ? null : "Publish this canvas before sharing it.";
-
   const listBlocker = !canvas.shared
     ? "Choose a shared access level before listing this canvas in the gallery."
     : canvas.currentVersionId === null
@@ -111,6 +108,18 @@ export default function Share() {
     }
   }
 
+  // U13 — Guided share dependency flow. Sharing depends on the canvas being live, so
+  // when it isn't published we explain that ONE time in a single locked panel (with a
+  // Publish / Open-draft CTA) instead of repeating "publish first" beneath every
+  // disabled rung and control. `shareBlocker`/`listBlocker` stay the gating source of
+  // truth; this just collapses the unpublished view into one coherent explanation.
+  // Publishing from the CTA invalidates the canvas-detail query (usePublishDraft), so
+  // `publicationState` flips and this component re-renders with the full ladder in
+  // place — no navigation, no manual reload.
+  if (canvas.publicationState !== "published") {
+    return <ShareLocked canvasId={canvas.id} />;
+  }
+
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav
@@ -125,11 +134,6 @@ export default function Share() {
           title="Share link"
           description="Copy the URL people will use once this canvas is open to them."
         >
-          {shareBlocker && (
-            <InlineNotice tone="neutral" className="py-2 text-xs">
-              {shareBlocker}
-            </InlineNotice>
-          )}
           <Row
             title="Canvas URL"
             description={<span className="block truncate font-mono">{canvas.url}</span>}
@@ -148,15 +152,9 @@ export default function Share() {
         >
           <AccessLadder
             value={canvas.access}
-            disabled={shareBlocker !== null}
             allowPublic={me?.canPublishPublic ?? false}
             onChange={(access) => save({ access })}
           />
-          {shareBlocker && (
-            <InlineNotice tone="neutral" className="py-2 text-xs">
-              {shareBlocker}
-            </InlineNotice>
-          )}
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
               audiences the URL itself is no longer a secret — lean on the access controls,
               not obscurity. Informational, never a blocker. */}
@@ -364,6 +362,67 @@ export default function Share() {
   );
 }
 
+/**
+ * U13 — the single locked panel shown while a canvas isn't published yet. It states
+ * the dependency ONCE (sharing unlocks after the canvas is live) instead of repeating
+ * a "publish first" notice beneath every disabled access rung, lock, and gallery
+ * control. The Publish CTA fires `usePublishDraft`, which invalidates the canvas-detail
+ * query on success; `publicationState` flips to "published" and the parent re-renders
+ * with the full access ladder / people / locks / gallery sections revealed in place —
+ * no navigation, no manual reload. Open draft routes to the editor for those who want
+ * to keep working before going live.
+ */
+function ShareLocked({ canvasId }: { canvasId: string }) {
+  const toast = useToast();
+  const publish = usePublishDraft(canvasId);
+
+  async function onPublish() {
+    try {
+      await publish.mutateAsync();
+      toast("Published — sharing is unlocked");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't publish this canvas", "error");
+    }
+  }
+
+  return (
+    <TabContentFrame>
+      <Panel className="max-w-xl" aria-labelledby="share-locked-heading">
+        <div className="flex items-start gap-4">
+          <span
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-muted"
+            aria-hidden
+          >
+            <LockKey size={20} weight="duotone" />
+          </span>
+          <div className="min-w-0 space-y-2">
+            <h2 id="share-locked-heading" className="text-base font-semibold text-fg">
+              Sharing unlocks after you publish
+            </h2>
+            <p className="text-sm leading-relaxed text-muted">
+              This canvas is still a draft, so it has no live URL yet. Access levels, people,
+              passwords, and the gallery all describe a canvas people can open — publish it to put
+              it live, then the full set of sharing controls appears here.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <Button variant="primary" size="sm" loading={publish.isPending} onClick={onPublish}>
+            Publish
+          </Button>
+          <Link
+            to="/canvases/$id/editor"
+            params={{ id: canvasId }}
+            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border-strong bg-surface-raised px-3 text-[0.8125rem] font-medium text-fg shadow-[var(--shadow-xs)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover"
+          >
+            Open draft
+          </Link>
+        </div>
+      </Panel>
+    </TabContentFrame>
+  );
+}
+
 type SettableRung = "private" | "specific_people" | "whole_org" | "public_link";
 const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: boolean }[] = [
   { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
@@ -387,12 +446,10 @@ const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: bo
 
 function AccessLadder({
   value,
-  disabled,
   allowPublic,
   onChange,
 }: {
   value: AccessRung;
-  disabled: boolean;
   allowPublic: boolean;
   onChange: (rung: SettableRung) => void;
 }) {
@@ -401,20 +458,18 @@ function AccessLadder({
     <fieldset className="space-y-2">
       <legend className="sr-only">Who can access this canvas</legend>
       {rungs.map((r) => {
-        const blocked = disabled && r.value !== "private";
         return (
           <label
             key={r.value}
             className={`flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 ${
               value === r.value ? "border-accent bg-surface-sunken" : ""
-            } ${blocked ? "cursor-not-allowed opacity-50" : ""}`}
+            }`}
           >
             <input
               type="radio"
               name="access-rung"
               className="mt-1"
               checked={value === r.value}
-              disabled={blocked}
               onChange={() => onChange(r.value)}
             />
             <span>
