@@ -14,7 +14,7 @@ import {
   type AdminCanvasSort,
   type AdminCanvasStatus,
 } from "../lib/api.js";
-import { useAdminCanvases } from "../lib/queries.js";
+import { useAdminCanvases, useMe } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { usePagination } from "../lib/use-pagination.js";
 import type { AdminCanvasesSearch } from "../router.js";
@@ -38,6 +38,7 @@ const ADMIN_SORT_OPTIONS = [
 export default function AdminCanvases() {
   const search = useSearch({ strict: false }) as AdminCanvasesSearch;
   const navigate = useNavigate();
+  const { data: me } = useMe();
 
   const status = search.status;
   const access = search.access;
@@ -254,7 +255,11 @@ export default function AdminCanvases() {
       )}
       {rows.length > 0 && (
         <div className="space-y-3">
-          <AdminCanvasTable canvases={rows} onOwnerClick={(ownerRow) => setOwner(ownerRow.id)} />
+          <AdminCanvasTable
+            canvases={rows}
+            viewerId={me?.id}
+            onOwnerClick={(ownerRow) => setOwner(ownerRow.id)}
+          />
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-subtle">
               Showing {from}–{to} of {total}

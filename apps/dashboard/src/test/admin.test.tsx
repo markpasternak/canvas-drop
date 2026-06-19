@@ -1019,10 +1019,11 @@ describe("admin dashboard", () => {
       );
     });
 
-    it("the Open action targets the canvas public URL in a new tab", async () => {
+    it("the Open action targets the canvas public URL in a new tab (whole_org → viewable)", async () => {
+      const orgRow = { ...ROW, access: "whole_org" };
       mockFetch({
         "GET /api/me": () => json(ADMIN_ME),
-        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "GET /api/admin/canvases": () => canvasPage([orgRow]),
       });
       renderAt("/admin/canvases");
       const open = await screen.findByRole("link", {
@@ -1031,6 +1032,78 @@ describe("admin dashboard", () => {
       expect(open).toHaveAttribute("href", "http://x/c/happy-otter");
       expect(open).toHaveAttribute("target", "_blank");
       expect(open).toHaveAttribute("rel", "noreferrer");
+    });
+
+    it("offers Open for a public_link canvas and for a canvas the admin owns", async () => {
+      const publicRow = { ...ROW, id: "cp", title: "Public One", access: "public_link" };
+      const ownRow = {
+        ...ROW,
+        id: "co",
+        title: "My Own",
+        access: "private",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([publicRow, ownRow]),
+      });
+      renderAt("/admin/canvases");
+      expect(
+        await screen.findByRole("link", { name: "Open Public One in a new tab" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open My Own in a new tab" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's private canvas (admin can't view it), keeping the kebab", async () => {
+      // ROW is private and owned by u1; ADMIN_ME is the admin (id "admin"), so Open
+      // would lead to a gate/404 — it must be absent, while governance actions remain.
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      // The governance kebab is still present for the row.
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's specific_people canvas (not knowable client-side)", async () => {
+      const specific = { ...ROW, access: "specific_people" };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([specific]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides Open for a disabled canvas even when the admin owns it (it serves a disabled page)", async () => {
+      // Whole_org + owned by the admin would normally be viewable, but a disabled
+      // canvas shows the "disabled" page to everyone, so Open must not appear.
+      const disabledOwned = {
+        ...ROW,
+        status: "disabled",
+        access: "whole_org",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+        disabledReason: "policy",
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([disabledOwned]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      // Governance kebab stays available (Enable, etc.).
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
     });
 
     it("shows a Template badge on a templatable row (owner-list badge vocabulary)", async () => {

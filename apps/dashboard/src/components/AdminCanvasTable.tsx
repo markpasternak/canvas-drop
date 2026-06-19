@@ -192,13 +192,32 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   );
 }
 
-/** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity. */
+/** Can the current admin actually VIEW this canvas as a normal user? The admin's
+ *  governance powers don't grant view access to another owner's restricted canvas,
+ *  so "Open" (which loads the public URL as a user, access enforced server-side)
+ *  would just hit a gate/404 for those. Viewable when the canvas is reachable by any
+ *  org member (whole_org / public_link) or the admin owns it. A specific_people grant
+ *  to the admin isn't knowable client-side, so we err toward hiding Open there.
+ *  Only active canvases serve real content: a disabled / archived / deleted canvas
+ *  shows a status page (or 404) to everyone — including its owner — so Open is hidden
+ *  regardless of access or ownership. */
+function adminCanView(canvas: AdminCanvasRow, viewerId: string | undefined): boolean {
+  if (canvas.status !== "active") return false;
+  if (canvas.access === "whole_org" || canvas.access === "public_link") return true;
+  return Boolean(viewerId && canvas.owner?.id === viewerId);
+}
+
+/** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity.
+ *  `viewerId` is the current admin's user id, used to decide whether to offer the
+ *  per-row "Open" action (see {@link adminCanView}). */
 export function AdminCanvasTable({
   canvases,
   onOwnerClick,
+  viewerId,
 }: {
   canvases: AdminCanvasRow[];
   onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
+  viewerId?: string;
 }) {
   const navigate = useNavigate();
   const openCanvas = (id: string) => navigate({ to: "/canvases/$id", params: { id } });
@@ -284,19 +303,23 @@ export function AdminCanvasTable({
           <td className="px-3 py-2 text-muted">{relativeTime(c.lastActivityAt)}</td>
           <td className="px-3 py-2">
             {/* Open the canvas's public URL in a new tab — the admin views it as a
-                normal user; access is enforced server-side at view time, so we just
-                offer the link. Mirrors the owner row's primary action + overflow menu. */}
+                normal user; access is enforced server-side at view time. Only offered
+                for canvases the admin can actually reach (see adminCanView): another
+                owner's private/specific-people canvas would just hit a gate/404, so we
+                hide Open there and keep only the governance kebab. */}
             <div className="flex items-center justify-end gap-1.5">
-              <a
-                href={c.url}
-                target="_blank"
-                rel="noreferrer"
-                className={rowPrimaryActionClass}
-                aria-label={`Open ${c.title || c.slug} in a new tab`}
-              >
-                <ArrowSquareOut size={14} aria-hidden />
-                Open
-              </a>
+              {adminCanView(c, viewerId) && (
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={rowPrimaryActionClass}
+                  aria-label={`Open ${c.title || c.slug} in a new tab`}
+                >
+                  <ArrowSquareOut size={14} aria-hidden />
+                  Open
+                </a>
+              )}
               <RowActions canvas={c} />
             </div>
           </td>

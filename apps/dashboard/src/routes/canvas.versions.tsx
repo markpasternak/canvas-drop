@@ -11,6 +11,7 @@ import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
+import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
@@ -99,21 +100,28 @@ export default function Versions() {
             : " Unarchive to publish or change the current version."
         }`}
       >
-        <ul className="divide-y divide-border border-t border-border">
+        <ul className="space-y-2">
           {versions.map((v) => (
-            <li key={v.number} className="flex items-center gap-4 py-3.5 first:pt-0">
-              <div className="min-w-0 flex-1 space-y-1.5">
+            <li
+              key={v.number}
+              className={cn(
+                "flex items-center gap-4 rounded-lg border px-4 py-3 transition-colors",
+                v.current ? "border-border-strong bg-surface-raised" : "border-border bg-surface",
+              )}
+            >
+              <div className="min-w-0 flex-1 space-y-1">
+                {/* Primary line: version identity + status, baseline-aligned on one row. */}
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="font-mono text-sm font-semibold leading-none text-fg">
-                    v{v.number}
-                  </span>
+                  <span className="font-mono text-sm font-semibold text-fg">v{v.number}</span>
                   {v.current && <Badge tone="accent">Current</Badge>}
-                  <Badge tone="neutral">{sourceLabel(v.source)}</Badge>
                 </div>
+                {/* Secondary line: calm source + meta as a single muted run. */}
                 <div
-                  className="flex flex-wrap items-center gap-x-2 text-xs leading-none text-subtle"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-subtle"
                   title={fullTime(v.createdAt)}
                 >
+                  <span className="font-medium text-muted">{sourceLabel(v.source)}</span>
+                  <span aria-hidden>·</span>
                   <span>{relativeTime(v.createdAt)}</span>
                   <span aria-hidden>·</span>
                   <span>
