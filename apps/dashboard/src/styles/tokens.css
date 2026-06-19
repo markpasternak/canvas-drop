@@ -77,18 +77,6 @@
   --shadow-focus: 0 0 0 3px oklch(0.49 0.105 200 / 0.32);
 }
 
-/* Full-bleed card overlay — dark-mode override (cooler hue, cleaner, a touch less see-through). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
-    --card-overlay-border: oklch(1 0 0 / 0.12);
-  }
-}
-[data-theme="dark"] {
-  --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
-  --card-overlay-border: oklch(1 0 0 / 0.12);
-}
-
 /* --- Semantic palette: DARK (deep navy; system, unless overridden) --- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -130,6 +118,8 @@
     --logo-frame: oklch(0.965 0.004 265);
     --logo-drop: oklch(0.78 0.105 195);
     --scrim: oklch(0.04 0.01 266 / 0.66);
+    --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+    --card-overlay-border: oklch(1 0 0 / 0.12);
 
     --shadow-color: 265 60% 2%;
     --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);
@@ -182,6 +172,8 @@
   --logo-frame: oklch(0.965 0.004 265);
   --logo-drop: oklch(0.78 0.105 195);
   --scrim: oklch(0.04 0.01 266 / 0.66);
+  --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+  --card-overlay-border: oklch(1 0 0 / 0.12);
 
   --shadow-color: 265 60% 2%;
   --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);
