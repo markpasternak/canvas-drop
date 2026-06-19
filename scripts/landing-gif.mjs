@@ -1,4 +1,4 @@
-// Build the animated product-tour loop (animated WebP) from the committed dark
+// Build the animated product-tour loop (animated WebP) from the committed light
 // landing/tour screenshots in docs/site/assets/. Output: docs/site/assets/tour.webp
 // embedded near the top of the README. Animated WebP (not GIF): GitHub renders it
 // inline, it loops, and it stays true-colour and sharp (a GIF's 256-colour palette

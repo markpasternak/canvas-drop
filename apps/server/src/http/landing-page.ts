@@ -106,13 +106,14 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
 ];
 
-/** Product-tour carousel slides → committed dark screenshots at /docs/assets.
+/** Product-tour carousel slides → committed light screenshots at /docs/assets.
  *  Refresh with `pnpm landing:screenshots` (after `pnpm seed:canvases`). */
 const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   {
     img: "landing-dashboard",
     label: "Your dashboard",
-    caption: "Every canvas your org has built, with versions, sharing, and status in one place.",
+    caption:
+      "Every canvas your org has built — filter by tag, search by name or content, and see versions, sharing, and status at a glance.",
   },
   {
     img: "tour-editor",
@@ -123,7 +124,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "landing-gallery",
     label: "Shared gallery",
     caption:
-      "Browse, search, and clone what the team has made — each canvas with a real preview cover, not screenshots buried in a DM.",
+      "Browse, filter by tag, search, and clone what the team has made — featured picks up top, each with a real preview cover, not screenshots buried in a DM.",
   },
   {
     img: "tour-preview",

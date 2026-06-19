@@ -39,6 +39,11 @@ export default defineConfig({
       "/docs": { target: API_TARGET, changeOrigin: false },
       "/llms.txt": { target: API_TARGET, changeOrigin: false },
       "/skill.zip": { target: API_TARGET, changeOrigin: false },
+      // The signed-out landing/marketing page + its OG card are server-rendered by
+      // Hono too (not SPA routes), so the sign-out redirect and the "view landing"
+      // link resolve in dev instead of hitting the SPA's catch-all 404.
+      "/welcome": { target: API_TARGET, changeOrigin: false },
+      "/og.png": { target: API_TARGET, changeOrigin: false },
     },
   },
 });

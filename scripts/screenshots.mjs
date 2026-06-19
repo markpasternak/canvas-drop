@@ -2,13 +2,13 @@
 // (Playwright) against a RUNNING dev dashboard in dev auth mode (auto-login),
 // then resizing + re-encoding to WebP with sharp into docs/site/assets/.
 //
-// Two modes (the only differences are color scheme, settle time, and which
-// screens map to which asset names):
+// Two modes (the only differences are settle time, populated-vs-empty data, and
+// which screens map to which asset names — both capture in LIGHT theme):
 //
-//   pnpm docs:screenshots       # docs shots: LIGHT, org-agnostic EMPTY screens
-//   pnpm landing:screenshots    # landing shots: DARK, populated product tour
+//   pnpm docs:screenshots       # docs shots: org-agnostic EMPTY screens
+//   pnpm landing:screenshots    # landing shots: populated product tour
 //
-// The landing shots are the dark, populated product imagery the marketing page
+// The landing shots are the light, populated product imagery the marketing page
 // (apps/server/src/http/landing-page.ts) embeds — hero + the product-tour
 // carousel (dashboard, editor, gallery, sharing, capabilities, admin, usage).
 // Seed generic demo data first so they aren't empty: `pnpm seed:canvases`
@@ -32,7 +32,9 @@ const MAX_WIDTH = 1600;
 const BASE = process.env.CANVAS_DROP_DASHBOARD_URL ?? "http://localhost:5173";
 
 const LANDING = process.argv.includes("--landing");
-const COLOR_SCHEME = LANDING ? "dark" : "light";
+// Both docs and landing shots capture in LIGHT theme — the marketing/landing
+// imagery reads soft + editorial in light mode (owner preference, 2026-06-19).
+const COLOR_SCHEME = "light";
 const WEBP_QUALITY = LANDING ? 82 : 80;
 // The canvas list / gallery / admin views load data after first paint; networkidle
 // can fire before rows render, so the landing (populated) shots wait a beat.
@@ -68,7 +70,10 @@ async function resolveShots(page) {
   }
   const shots = [
     { path: "/", name: "landing-dashboard.webp" },
-    { path: "/gallery", name: "landing-gallery.webp" },
+    // Filter the gallery to the demo apps' unique "showcase" tag (seed-demo-apps)
+    // so the hero shot is exactly the 12 real-cover demo apps — no generic seed
+    // canvases in frame.
+    { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
   ];
   // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides — its
