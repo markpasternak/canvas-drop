@@ -71,8 +71,8 @@ describe("Clone from the gallery (plan 002 U7)", () => {
 
     renderGallery();
 
-    // Card action opens the confirm dialog.
-    await userEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+    // Card action opens the confirm dialog (the gallery template affordance).
+    await userEvent.click(await screen.findByRole("button", { name: "Use template" }));
     // The dialog's own "Duplicate canvas" button fires the clone (scope to the dialog
     // to disambiguate from the card's button).
     const dialog = await screen.findByRole("dialog");

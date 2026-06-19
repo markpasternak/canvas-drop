@@ -1,139 +1,216 @@
-import { ArrowSquareOut, Copy, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, Rows, SquaresFour, X } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
-import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
+import { previewCoverUrl } from "../components/CanvasCover.js";
+import { CanvasGridCard, cardNameLinkClass } from "../components/CanvasGridCard.js";
+import { CanvasListRow } from "../components/CanvasListRow.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { coverType } from "../components/GenerativeCover.js";
 import { SearchInput } from "../components/SearchInput.js";
+import { SegmentedControl } from "../components/SegmentedControl.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { Tag } from "../components/Tag.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
+import { type GalleryView, persistGalleryView, resolveGalleryView } from "../lib/gallery-view.js";
 import { useGallery, useGalleryFacets } from "../lib/queries.js";
-import { cardHoverClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { usePagination } from "../lib/use-pagination.js";
 import type { GallerySearch } from "../router.js";
 
+const galleryTitle = (item: GalleryItem) => item.title || "Untitled canvas";
+
+/** Open the live canvas in a new tab — the gallery's whole-card/row navigation. */
+function openLive(item: GalleryItem) {
+  window.open(item.url, "_blank", "noopener,noreferrer");
+}
+
+/** The template ("Use template") + overflow cluster — the ONLY owner-vs-gallery
+ *  differentiator. Shared by the gallery grid card and list row so they match. */
+function GalleryActions({
+  item,
+  onClone,
+  copy,
+}: {
+  item: GalleryItem;
+  onClone: () => void;
+  copy: (value: string, message: string) => void;
+}) {
+  return (
+    <>
+      {item.templatable && (
+        <Button size="sm" variant="secondary" onClick={onClone}>
+          Use template
+          <Copy size={14} weight="bold" aria-hidden />
+        </Button>
+      )}
+      <ActionMenu label={`More actions for ${galleryTitle(item)}`}>
+        <ActionMenuItem
+          href={item.url}
+          target="_blank"
+          rel="noreferrer"
+          icon={<ArrowSquareOut size={15} aria-hidden />}
+        >
+          Open in new tab
+        </ActionMenuItem>
+        <ActionMenuItem
+          icon={<Copy size={15} aria-hidden />}
+          onSelect={() => copy(item.url, "Link copied")}
+        >
+          Copy link
+        </ActionMenuItem>
+      </ActionMenu>
+    </>
+  );
+}
+
+/** The owner avatar + name strip — the gallery-only footer that surfaces who shared
+ *  the canvas (the owner cards surface lifecycle actions instead). */
+function OwnerStrip({ item }: { item: GalleryItem }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      {item.owner.avatarUrl ? (
+        <img
+          src={item.owner.avatarUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="size-5 shrink-0 rounded-full bg-surface-sunken"
+        />
+      ) : (
+        <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
+      )}
+      <span className="truncate text-xs text-white/85">{item.owner.name}</span>
+    </div>
+  );
+}
+
+/** Clickable tag-filter pills for the list row (merge with any active search). */
+function GalleryRowTags({ item, onTag }: { item: GalleryItem; onTag: (tag: string) => void }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {item.tags.map((tag) => (
+        <Tag key={tag} size="xs" onClick={() => onTag(tag)}>
+          {tag}
+        </Tag>
+      ))}
+    </span>
+  );
+}
+
+/** Gallery grid card — the SAME shared {@link CanvasGridCard} the owner grid uses.
+ *  Only the slots differ: a Template/Use-template action + owner footer (vs the
+ *  owner card's lifecycle actions + bulk-select). */
 function GalleryCard({ item }: { item: GalleryItem }) {
   const navigate = useNavigate();
   const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
+  const onTag = (tag: string) =>
+    navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }) });
+
   return (
-    <li
-      className={`group relative flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)] ${cardHoverClass}`}
-    >
-      {/* Generative cover hero in a fixed aspect-ratio region (plan 004). A real
-          screenshot will later render into this same box with no layout change.
-          Decorative (not a link) so the title below stays the single open
-          affordance — no duplicate link for screen readers. */}
-      <div className="aspect-[3/2] w-full overflow-hidden">
-        <CanvasCover
-          seed={item.id}
-          title={item.title}
-          // Gallery items are always listed + published; a templatable one reads as a Template.
-          type={coverType({ templatable: item.templatable, listed: true })}
-          status="published"
-          previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
+    <>
+      <CanvasGridCard
+        seed={item.id}
+        title={galleryTitle(item)}
+        // Gallery items are always listed + published; a templatable one reads as a Template.
+        coverType={coverType({ templatable: item.templatable, listed: true })}
+        status="published"
+        previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
+        onActivate={() => openLive(item)}
+        nameLink={
+          <a href={item.url} target="_blank" rel="noreferrer" className={cardNameLinkClass}>
+            {galleryTitle(item)}
+          </a>
+        }
+        badges={item.templatable ? <Badge tone="accent">Template</Badge> : undefined}
+        tags={item.tags}
+        onTagClick={onTag}
+        description={item.description}
+        footer={<OwnerStrip item={item} />}
+        actions={<GalleryActions item={item} onClone={() => setCloneOpen(true)} copy={copy} />}
+      />
+      {item.templatable && (
+        <CloneDialog
+          open={cloneOpen}
+          onClose={() => setCloneOpen(false)}
+          sourceId={item.id}
+          sourceTitle={item.title}
         />
-      </div>
-      <div className="flex flex-1 flex-col gap-2.5 p-3.5">
-        <div className="flex items-start justify-between gap-2">
-          {/* The title IS the open affordance — a direct external link to the live
-            canvas. Its ::after stretches over the whole card so clicking anywhere
-            (except the raised tag/action controls below) opens the canvas, while
-            screen readers still get one labelled link. */}
+      )}
+    </>
+  );
+}
+
+/** Gallery list row — the SAME shared {@link CanvasListRow} the owner list uses.
+ *  Only the slots differ: a Template badge + Use-template action + owner meta. */
+function GalleryRow({ item }: { item: GalleryItem }) {
+  const navigate = useNavigate();
+  const copy = useClipboardCopy();
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const onTag = (tag: string) =>
+    navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }) });
+
+  return (
+    <>
+      <CanvasListRow
+        seed={item.id}
+        previewUrl={item.hasPreview ? previewCoverUrl(item.url, "thumb") : undefined}
+        coverType={coverType({ templatable: item.templatable, listed: true })}
+        onActivate={() => openLive(item)}
+        nameLink={
           <a
             href={item.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate font-serif text-[0.95rem] font-medium text-fg after:absolute after:inset-0 after:rounded-xl after:content-[''] hover:text-accent"
+            className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
           >
-            {item.title || "Untitled canvas"}
+            {galleryTitle(item)}
           </a>
-          {item.templatable && <Badge tone="accent">Template</Badge>}
-        </div>
+        }
+        badges={item.templatable ? <Badge tone="accent">Template</Badge> : undefined}
+        meta={<span className="truncate">by {item.owner.name}</span>}
+        description={item.description}
+        tags={item.tags.length > 0 ? <GalleryRowTags item={item} onTag={onTag} /> : undefined}
+        actions={<GalleryActions item={item} onClone={() => setCloneOpen(true)} copy={copy} />}
+      />
+      {item.templatable && (
+        <CloneDialog
+          open={cloneOpen}
+          onClose={() => setCloneOpen(false)}
+          sourceId={item.id}
+          sourceTitle={item.title}
+        />
+      )}
+    </>
+  );
+}
 
-        {item.description && <p className="line-clamp-2 text-sm text-muted">{item.description}</p>}
-
-        {item.tags.length > 0 && (
-          <div className="relative z-10 flex flex-wrap gap-1.5">
-            {item.tags.map((tag) => (
-              <Tag
-                key={tag}
-                size="sm"
-                onClick={() =>
-                  navigate({
-                    to: "/gallery",
-                    // Merge, not replace — keep any active search when filtering by tag.
-                    search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }),
-                  })
-                }
-              >
-                {tag}
-              </Tag>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-          <div className="flex min-w-0 items-center gap-2">
-            {item.owner.avatarUrl ? (
-              <img
-                src={item.owner.avatarUrl}
-                alt=""
-                referrerPolicy="no-referrer"
-                className="size-5 shrink-0 rounded-full bg-surface-sunken"
-              />
-            ) : (
-              <span className="size-5 shrink-0 rounded-full bg-surface-sunken" aria-hidden />
-            )}
-            <span className="truncate text-xs text-subtle">{item.owner.name}</span>
-          </div>
-          {/* Raised above the title's stretched ::after so these stay clickable
-              while the rest of the card opens the canvas. Templatable cards keep a
-              visible "Make a copy" primary; the kebab carries the rest. */}
-          <div className="relative z-10 flex shrink-0 items-center gap-1">
-            {item.templatable && (
-              <Button size="sm" variant="secondary" onClick={() => setCloneOpen(true)}>
-                Duplicate
-                <Copy size={14} weight="bold" aria-hidden />
-              </Button>
-            )}
-            <ActionMenu label={`More actions for ${item.title || "this canvas"}`}>
-              <ActionMenuItem
-                href={item.url}
-                target="_blank"
-                rel="noreferrer"
-                icon={<ArrowSquareOut size={15} aria-hidden />}
-              >
-                Open in new tab
-              </ActionMenuItem>
-              <ActionMenuItem
-                icon={<Copy size={15} aria-hidden />}
-                onSelect={() => copy(item.url, "Link copied")}
-              >
-                Copy link
-              </ActionMenuItem>
-            </ActionMenu>
-          </div>
-        </div>
-        {item.templatable && (
-          <CloneDialog
-            open={cloneOpen}
-            onClose={() => setCloneOpen(false)}
-            sourceId={item.id}
-            sourceTitle={item.title}
-          />
-        )}
-      </div>
-    </li>
+/** Grid ⇄ list layout switch for the gallery — mirrors the owner list's ViewToggle
+ *  (U8) so the two surfaces behave identically. */
+function GalleryViewToggle({
+  value,
+  onChange,
+}: {
+  value: GalleryView;
+  onChange: (v: GalleryView) => void;
+}) {
+  return (
+    <SegmentedControl
+      aria-label="Gallery layout"
+      iconOnly
+      value={value}
+      onChange={onChange}
+      items={[
+        { value: "list", label: "List view", icon: Rows },
+        { value: "grid", label: "Grid view", icon: SquaresFour },
+      ]}
+    />
   );
 }
 
@@ -170,6 +247,9 @@ export default function Gallery() {
   const owner = search.owner?.trim() || undefined;
   const templatable = search.templatable === true;
   const sort = search.sort ?? "published";
+  // View-mode precedence mirrors the owner list (U8): URL `?view=` > localStorage >
+  // default("grid"). Read synchronously in render so the layout paints right first.
+  const view: GalleryView = resolveGalleryView(search.view);
   const page = Math.max(1, Math.floor(search.page ?? 1));
   const offset = (page - 1) * GALLERY_PAGE_SIZE;
 
@@ -251,6 +331,12 @@ export default function Gallery() {
       }),
     });
   }
+  function setView(next: GalleryView) {
+    // Persist the per-device choice and reflect it in `?view=` for this visit
+    // (shareable). Layout is a pure view concern — preserve filters/sort/page.
+    persistGalleryView(next);
+    navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, view: next }) });
+  }
 
   const ownerOptions = [{ value: "", label: "All owners" }];
   for (const o of facets.data?.owners ?? []) ownerOptions.push({ value: o.id, label: o.name });
@@ -285,6 +371,7 @@ export default function Gallery() {
           value={sort}
           onValueChange={setSort}
         />
+        <GalleryViewToggle value={view} onChange={setView} />
       </div>
 
       <FilterBar>
@@ -364,11 +451,19 @@ export default function Gallery() {
 
       {items.length > 0 && (
         <>
-          <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {items.map((item) => (
-              <GalleryCard key={item.id} item={item} />
-            ))}
-          </ul>
+          {view === "grid" ? (
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {items.map((item) => (
+                <GalleryCard key={item.id} item={item} />
+              ))}
+            </ul>
+          ) : (
+            <ul className="space-y-2 lg:space-y-0 lg:divide-y lg:divide-border">
+              {items.map((item) => (
+                <GalleryRow key={item.id} item={item} />
+              ))}
+            </ul>
+          )}
 
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-subtle">

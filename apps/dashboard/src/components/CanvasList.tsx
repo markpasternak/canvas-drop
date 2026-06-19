@@ -2,11 +2,12 @@ import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
-import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
-import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row-styles.js";
+import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { AccessBadge, accessRungLabel, ConceptBadge, PublicationBadge } from "./Badge.js";
-import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
+import { previewCoverUrl } from "./CanvasCover.js";
+import { CanvasGridCard, cardNameLinkClass } from "./CanvasGridCard.js";
+import { CanvasListRow } from "./CanvasListRow.js";
 import { CopyButton } from "./CopyButton.js";
 import { coverType } from "./GenerativeCover.js";
 import { Skeleton } from "./Skeleton.js";
@@ -24,12 +25,6 @@ function canvasTags(canvas: CanvasListItem): string[] {
   return Array.isArray(canvas.tags)
     ? canvas.tags.filter((t): t is string => typeof t === "string")
     : [];
-}
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  return target instanceof Element
-    ? Boolean(target.closest("a, button, input, select, textarea, summary, [role='button']"))
-    : false;
 }
 
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
@@ -263,7 +258,6 @@ export function CanvasRow({
   const deploy = canvas.lastDeploy;
   // The canvas's unified description (the field the overview edits, also shown in the
   // gallery — U21) so the line on the row matches what populates when you open it.
-  const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const views = viewsSummary(canvas);
   const navigate = useNavigate();
@@ -273,35 +267,38 @@ export function CanvasRow({
   const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
-    // Keyboard access to the canvas is the focusable title <Link> below (and the inner
-    // Open/copy/menu controls). The whole-row single-click — and keyboard Enter/Space —
-    // navigates to the canvas detail page (`/canvases/$id`); the row's "Details" button
-    // opens the inline detail rail instead (via onActivate). There is no double-click
-    // behaviour (single-click already navigates). The <li> stays non-interactive (no
-    // role/tabIndex) because biome's a11y rules disallow an interactive role on <li>
-    // and a tab stop here would only duplicate the title link; keyboard users navigate
-    // via the title link (single-click equivalent). onKeyDown is retained to satisfy
-    // useKeyWithClickEvents.
-    <li
-      data-canvas-item
-      className={cn(
-        "cursor-pointer rounded-xl border border-border bg-surface px-4 py-4 shadow-[var(--shadow-panel)] lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:hover:bg-surface-raised",
-        rowHoverClass,
-        selected && "bg-accent-subtle lg:bg-accent-subtle",
-      )}
-      onClick={(event) => {
-        if (isInteractiveTarget(event.target)) return;
-        openDetail();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        if (isInteractiveTarget(event.target)) return;
-        event.preventDefault();
-        openDetail();
-      }}
-    >
-      <div className="flex items-center gap-3 sm:gap-4">
-        {selectable && (
+    <CanvasListRow
+      seed={canvas.id}
+      previewUrl={
+        canvas.hasPreview
+          ? `${previewCoverUrl(canvas.url, "thumb")}&v=${canvas.updatedAt}`
+          : undefined
+      }
+      selected={selected}
+      onActivate={openDetail}
+      nameLink={
+        <Link
+          to="/canvases/$id"
+          params={{ id: canvas.id }}
+          className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+          aria-label={`View details for ${title}`}
+        >
+          {title}
+        </Link>
+      }
+      badges={<RowBadges canvas={canvas} />}
+      meta={
+        <>
+          <span className="block truncate font-mono text-subtle">{canvas.slug}</span>
+          <span className="mt-0.5 block truncate" title={fullTime(lastActivity(canvas))}>
+            {metaLine(canvas)}
+          </span>
+        </>
+      }
+      description={canvas.description}
+      tags={tags.length > 0 ? <RowTags tags={tags} /> : undefined}
+      leading={
+        selectable ? (
           <input
             type="checkbox"
             checked={selected}
@@ -309,55 +306,10 @@ export function CanvasRow({
             aria-label={`Select ${title}`}
             className="size-4 shrink-0 cursor-pointer accent-accent"
           />
-        )}
-        {/* Hero thumbnail (plan 004 cover, enlarged): real preview when captured, else
-            the deterministic generative art — decorative, the title is the affordance. */}
-        <div className="aspect-[3/2] w-24 shrink-0 overflow-hidden rounded-md border border-border/60 sm:w-28">
-          {/* The list-row thumbnail is too small (~96px) to legibly overlay a 2-line
-              title, so the row keeps the plain seeded mesh — the title sits right
-              beside it. The content-aware overlay is reserved for the large covers
-              (grid card, gallery, detail) where it actually aids recognition. */}
-          <CanvasCover
-            seed={canvas.id}
-            previewUrl={
-              canvas.hasPreview
-                ? `${previewCoverUrl(canvas.url, "thumb")}&v=${canvas.updatedAt}`
-                : undefined
-            }
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <Link
-              to="/canvases/$id"
-              params={{ id: canvas.id }}
-              className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
-              aria-label={`View details for ${title}`}
-            >
-              {title}
-            </Link>
-            <span className="flex shrink-0 flex-wrap items-center gap-1">
-              <RowBadges canvas={canvas} />
-            </span>
-          </div>
-          <div className="mt-0.5 truncate font-mono text-xs text-subtle">{canvas.slug}</div>
-          <div
-            className="mt-0.5 truncate text-xs text-subtle"
-            title={fullTime(lastActivity(canvas))}
-          >
-            {metaLine(canvas)}
-          </div>
-          {description && <div className="mt-1 truncate text-xs text-muted">{description}</div>}
-          {tags.length > 0 && (
-            <div className="mt-1.5">
-              <RowTags tags={tags} />
-            </div>
-          )}
-        </div>
-
-        {/* Wide-screen gutter: the publish footprint + age that the dense column grid
-            used to carry, now as airy right-aligned stats instead of five columns. */}
-        <div className="hidden shrink-0 items-center gap-8 lg:flex">
+        ) : undefined
+      }
+      stats={
+        <>
           <StatCol
             label={deploy ? "Published" : "Status"}
             primary={deploy ? `v${deploy.version}` : "Not deployed"}
@@ -374,13 +326,10 @@ export function CanvasRow({
             primary={relativeTime(canvas.createdAt)}
             title={fullTime(canvas.createdAt)}
           />
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          {actions ?? <DefaultRowActions canvas={canvas} />}
-        </div>
-      </div>
-    </li>
+        </>
+      }
+      actions={actions ?? <DefaultRowActions canvas={canvas} />}
+    />
   );
 }
 
@@ -405,9 +354,12 @@ export function ListSkeleton() {
   );
 }
 
-/** Grid card — the cover-forward presentation behind the list/grid toggle. Same data
- *  and same `actions` as {@link CanvasRow}, just composed as a card: cover on top with
- *  the publication pill overlaid, title + badges + meta below, actions in a footer. */
+/** Grid card — the cover-fills-card presentation behind the list/grid toggle, built
+ *  on the shared {@link CanvasGridCard} so the owner grid and the public gallery read
+ *  the same. Same data + same `actions` slot as {@link CanvasRow}; the cover fills the
+ *  whole tile and the name/status/tags/description overlay it on a persistent scrim,
+ *  with the actions in a raised top-right cluster. The ONLY owner-vs-gallery
+ *  difference is which slots get filled (here: lifecycle actions + bulk-select). */
 export function CanvasCard({
   canvas,
   actions,
@@ -425,93 +377,66 @@ export function CanvasCard({
    *  in the `actions` slot, not to the body. */
 }) {
   const title = canvasTitle(canvas);
-  const cardViews = viewsSummary(canvas);
   const navigate = useNavigate();
   // Body click / Enter navigates to the canvas detail page (`/canvases/$id`); the
   // "Details" button in the actions slot opens the inline rail instead.
   const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
 
   return (
-    <li
-      data-canvas-item
-      className={cn(
-        "group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
-        cardHoverClass,
-        selected && "border-accent ring-1 ring-accent",
-      )}
-      onClick={(event) => {
-        if (isInteractiveTarget(event.target)) return;
-        openDetail();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        if (isInteractiveTarget(event.target)) return;
-        event.preventDefault();
-        openDetail();
-      }}
-    >
-      <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">
-        <CanvasCover
-          seed={canvas.id}
-          title={title}
-          type={coverType({
-            templatable: canvas.galleryTemplatable,
-            listed: canvas.galleryListed,
-            protectedByPassword: canvas.hasPassword,
-          })}
-          status={canvas.publicationState}
-          previewUrl={
-            canvas.hasPreview
-              ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`
-              : undefined
-          }
-        />
-        {selectable && (
+    <CanvasGridCard
+      seed={canvas.id}
+      title={title}
+      previewUrl={
+        canvas.hasPreview
+          ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`
+          : undefined
+      }
+      coverType={coverType({
+        templatable: canvas.galleryTemplatable,
+        listed: canvas.galleryListed,
+        protectedByPassword: canvas.hasPassword,
+      })}
+      status={canvas.publicationState}
+      selected={selected}
+      onActivate={openDetail}
+      nameLink={
+        <Link
+          to="/canvases/$id"
+          params={{ id: canvas.id }}
+          className={cardNameLinkClass}
+          aria-label={`View details for ${title}`}
+        >
+          {title}
+        </Link>
+      }
+      badges={
+        <>
+          <PublicationBadge state={canvas.publicationState} />
+          {canvas.access === "public_link" && <AccessBadge access="public_link" />}
+          {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
+          {canvas.hasPassword && (
+            <ConceptBadge concept="protected">
+              <LockSimple size={12} weight="bold" aria-hidden />
+              Protected
+            </ConceptBadge>
+          )}
+        </>
+      }
+      tags={canvasTags(canvas)}
+      description={canvas.description}
+      topLeft={
+        selectable ? (
           <input
             type="checkbox"
             checked={selected}
             onChange={(event) => onSelectChange?.(event.target.checked)}
             aria-label={`Select ${title}`}
-            className="absolute top-2 left-2 size-4 cursor-pointer rounded accent-accent shadow-[var(--shadow-sm)]"
+            className="size-4 cursor-pointer rounded accent-accent shadow-[var(--shadow-sm)]"
           />
-        )}
-        <span className="absolute bottom-2 left-2">
-          <PublicationBadge state={canvas.publicationState} />
-        </span>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <Link
-            to="/canvases/$id"
-            params={{ id: canvas.id }}
-            className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
-            aria-label={`View details for ${title}`}
-          >
-            {title}
-          </Link>
-          <span className="flex shrink-0 flex-wrap items-center gap-1">
-            {canvas.access === "public_link" && <AccessBadge access="public_link" />}
-            {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
-            {canvas.hasPassword && (
-              <ConceptBadge concept="protected">
-                <LockSimple size={12} weight="bold" aria-hidden />
-                Protected
-              </ConceptBadge>
-            )}
-          </span>
-        </div>
-        <div className="truncate text-xs text-subtle" title={fullTime(lastActivity(canvas))}>
-          {metaLine(canvas)}
-        </div>
-        <div className="truncate text-xs text-subtle" title={cardViews.title}>
-          {`${cardViews.count} ${cardViews.count === 1 ? "view" : "views"}`}
-          {cardViews.lastViewed ? ` · ${cardViews.lastViewed}` : ""}
-        </div>
-        <div className="mt-auto flex items-center justify-end gap-1 pt-2">
-          {actions ?? <DefaultRowActions canvas={canvas} />}
-        </div>
-      </div>
-    </li>
+        ) : undefined
+      }
+      actions={actions ?? <DefaultRowActions canvas={canvas} />}
+    />
   );
 }
 

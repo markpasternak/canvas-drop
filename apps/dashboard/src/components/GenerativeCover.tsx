@@ -11,11 +11,17 @@ import { type Concept, conceptColor, conceptIcon } from "./concept-colors.js";
  * renders into the SAME fixed aspect-ratio region, so swapping it in needs no layout
  * change.
  *
- * Content-aware (U6): on the seeded mesh background we overlay the canvas **title**
+ * Content-aware (U6): on the seeded mesh background we can overlay the canvas **title**
  * (clamped to 2 lines) plus a small **type/status marker** so a wall of fallbacks aids
  * recognition instead of reading as undifferentiated noise. The whole region stays
  * `aria-hidden` — the surrounding card/list carries the real, labelled title affordance,
  * so we never duplicate the title into the a11y tree.
+ *
+ * Pure-background mode (UX-sweep, `plain`): the full-bleed grid card owns its own
+ * overlay (name + status + tags + description on a protected scrim), so it renders the
+ * cover as a PURE seeded mesh — no baked-in title/type/status — to avoid printing the
+ * title twice. The content-aware overlay stays the default and is used by the
+ * detail/settings preview (a standalone cover with no surrounding card chrome).
  *
  * Pure CSS (a layered OKLCH mesh gradient) — no runtime dependency, no canvas/WebGL.
  *
@@ -142,6 +148,10 @@ export interface CoverContent {
   type?: CoverType;
   /** Derived publication lifecycle, shown as a small status marker. */
   status?: PublicationState;
+  /** Pure-background mode: render ONLY the seeded mesh — no baked-in title/type/status
+   *  overlay and no internal scrim. The carded contexts (the full-bleed grid card) own
+   *  their own overlay, so the cover must stay text-free to avoid duplicating the title. */
+  plain?: boolean;
 }
 
 /**
@@ -159,9 +169,21 @@ export function GenerativeCover({
   title,
   type = "canvas",
   status,
+  plain = false,
 }: { seed: string; className?: string } & CoverContent) {
   const TypeIcon = typeIcon(type);
   const typeTint = type === "canvas" ? undefined : conceptColor(type as Concept);
+  // Pure-background mode (carded contexts): just the seeded mesh, no baked-in text.
+  if (plain) {
+    return (
+      <div
+        aria-hidden
+        data-cover-plain
+        className={cn("size-full overflow-hidden", className)}
+        style={coverStyle(seed)}
+      />
+    );
+  }
   return (
     <div
       aria-hidden

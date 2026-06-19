@@ -104,3 +104,28 @@ describe("GenerativeCover content-aware fallback (UX-sweep U6)", () => {
     expect(container.firstElementChild?.getAttribute("aria-hidden")).not.toBeNull();
   });
 });
+
+describe("GenerativeCover pure-background mode (UX-sweep `plain`)", () => {
+  it("suppresses ALL baked-in text/markers — just the seeded mesh", () => {
+    const { container, queryByText } = render(
+      <GenerativeCover seed="cv1" title="Quarterly Report" type="listed" status="draft" plain />,
+    );
+    // No title, no type marker, no status marker baked into the cover.
+    expect(queryByText("Quarterly Report")).toBeNull();
+    expect(container.querySelector("[data-cover-type]")).toBeNull();
+    expect(container.querySelector("[data-cover-status]")).toBeNull();
+    // It IS the pure-background variant, and the seeded mesh is preserved.
+    const root = container.firstElementChild;
+    expect(root?.getAttribute("data-cover-plain")).not.toBeNull();
+    expect(root?.getAttribute("style")).toContain("radial-gradient");
+    expect(root?.getAttribute("aria-hidden")).not.toBeNull();
+  });
+
+  it("keeps the same seeded mesh as the content-aware mode (plain only drops the overlay)", () => {
+    const plain = render(<GenerativeCover seed="fixed" plain />);
+    const aware = render(<GenerativeCover seed="fixed" title="X" type="templates" />);
+    const plainStyle = plain.container.firstElementChild?.getAttribute("style");
+    const awareStyle = aware.container.firstElementChild?.getAttribute("style");
+    expect(plainStyle).toBe(awareStyle);
+  });
+});

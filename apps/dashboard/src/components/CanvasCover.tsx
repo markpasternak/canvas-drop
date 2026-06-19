@@ -16,7 +16,10 @@ import { type CoverContent, GenerativeCover } from "./GenerativeCover.js";
  *
  * The `title`/`type`/`status` content props are passed straight to the fallback; they
  * are unused on the screenshot path (the real preview needs no overlay) and stay
- * `aria-hidden` either way.
+ * `aria-hidden` either way. `plain` forwards to the fallback's pure-background mode —
+ * the full-bleed grid card sets it so the seeded mesh carries NO baked-in title/marker
+ * (the card overlay owns the text); the standalone detail/settings preview leaves it off
+ * so the content-aware overlay still aids recognition when no screenshot exists.
  */
 const PREVIEW_PATH = "__canvasdrop_preview";
 
@@ -35,6 +38,7 @@ export function CanvasCover({
   title,
   type,
   status,
+  plain,
 }: {
   /** Stable seed for the generative fallback (the canvas id). */
   seed: string;
@@ -51,6 +55,7 @@ export function CanvasCover({
         title={title}
         type={type}
         status={status}
+        plain={plain}
       />
     );
   return (

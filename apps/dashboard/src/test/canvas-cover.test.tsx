@@ -35,6 +35,23 @@ describe("CanvasCover (plan 004 / U8)", () => {
     expect(container.querySelector("div[aria-hidden]")).not.toBeNull();
   });
 
+  it("forwards `plain` to the fallback — the carded cover is pure background (no baked text)", () => {
+    const { container, queryByText } = render(
+      <CanvasCover
+        seed="cv1"
+        title="My Live Dashboard"
+        type="templates"
+        status="published"
+        plain
+      />,
+    );
+    // No preview URL → generative fallback, but in pure-background mode: no overlay text.
+    expect(queryByText("My Live Dashboard")).toBeNull();
+    expect(container.querySelector("[data-cover-type]")).toBeNull();
+    expect(container.querySelector("[data-cover-status]")).toBeNull();
+    expect(container.querySelector("[data-cover-plain]")).not.toBeNull();
+  });
+
   it("falls back to the CONTENT-AWARE generative cover (title + marker) on image error", () => {
     const { container, getByText } = render(
       <CanvasCover

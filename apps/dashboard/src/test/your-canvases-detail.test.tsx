@@ -149,14 +149,17 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a card body navigates to /canvases/$id (grid view)", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/?view=grid");
-    // Grid cards overlay the title on the content-aware cover too (U6); query the
-    // real title link to avoid the decorative duplicate.
-    await screen.findByRole("link", { name: "View details for Alpha canvas" });
+    // The full-bleed card renders its cover in pure-background mode (no baked-in title),
+    // so the title is printed once — in the overlay name link. Query that real link.
+    const titleLink = await screen.findByRole("link", { name: "View details for Alpha canvas" });
     expect(selectedAttr()).toBeNull();
 
-    // The card body is the title's parent <li>; click an area that is not an
-    // interactive child (the meta line).
-    await userEvent.click(screen.getByText(/Edited/));
+    // The unified card (UX-sweep R2) is cover-fills-card: the title overlays a scrim
+    // and there's no separate "Edited" meta line. The card body is the title link's
+    // ancestor <li data-canvas-item>; click the <li> itself (a non-interactive region).
+    const card = titleLink.closest("li[data-canvas-item]");
+    if (!card) throw new Error("card <li> not found");
+    await userEvent.click(card);
 
     // Navigates to the canvas detail/overview page — not the inline rail.
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/alpha"));

@@ -19,6 +19,9 @@ const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
 const AdminRoute = lazy(() => import("./routes/admin.js"));
+// Dev-only acceptance harness for the full-bleed preview card (UX-sweep). Mounted only
+// under import.meta.env.DEV, so it never ships in a production build.
+const CardDemoRoute = lazy(() => import("./routes/card-demo.js"));
 const AdminCanvasesRoute = lazy(() => import("./routes/admin.canvases.js"));
 const AdminUsersRoute = lazy(() => import("./routes/admin.users.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
@@ -87,6 +90,8 @@ export interface GallerySearch {
   owner?: string;
   templatable?: boolean;
   sort?: GallerySortParam;
+  /** Layout for the visit (grid|list); the view resolves URL > localStorage > grid. */
+  view?: "grid" | "list";
   page?: number;
 }
 const galleryRoute = createRoute({
@@ -99,6 +104,7 @@ const galleryRoute = createRoute({
     // Only the literal `true` flips it on, so a junk value just means "off".
     templatable: s.templatable === true || s.templatable === "true" || undefined,
     sort: s.sort === "updated" || s.sort === "title" || s.sort === "published" ? s.sort : undefined,
+    view: s.view === "grid" || s.view === "list" ? s.view : undefined,
     page: typeof s.page === "number" ? s.page : Number(s.page) || undefined,
   }),
   component: GalleryRoute,
@@ -200,12 +206,21 @@ const usageRoute = createRoute({
   component: UsageRoute,
 });
 
+// Dev-only: the card readability harness lives at /__card-demo. Defined unconditionally
+// (so its types resolve) but only added to the tree under import.meta.env.DEV.
+const cardDemoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/__card-demo",
+  component: CardDemoRoute,
+});
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   archivedRoute,
   galleryRoute,
   newRoute,
   onboardingRoute,
+  ...(import.meta.env.DEV ? [cardDemoRoute] : []),
   adminRoute,
   adminCanvasesRoute,
   adminUsersRoute,

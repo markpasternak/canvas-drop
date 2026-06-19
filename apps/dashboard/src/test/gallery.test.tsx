@@ -105,7 +105,7 @@ describe("Gallery view", () => {
     // appear on both the card badge and the decorative cover marker — assert the badge
     // exists (≥1) rather than a single match.
     expect((await screen.findAllByText("Template")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use template" })).toBeInTheDocument();
   });
 
   it("hides the clone action for non-templatable items", async () => {
@@ -114,7 +114,7 @@ describe("Gallery view", () => {
     await screen.findByRole("link", { name: "Budget chart" });
     // A non-templatable gallery item carries no "Template" marker on badge or cover.
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Duplicate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use template" })).not.toBeInTheDocument();
   });
 
   it("shows the no-canvases-yet empty state (no filters) with a link back", async () => {
