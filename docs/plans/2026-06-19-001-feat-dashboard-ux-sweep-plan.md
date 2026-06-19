@@ -457,3 +457,25 @@ In scope: all 13 brainstorm items, the additive backend listed, MCP/doc parity f
 ## Execution Posture
 
 Default posture, with backend units gating UI units. For U1/U2/U4 (schema, search, auth-shaped admin/MCP), prefer writing the dual-dialect / authorization tests alongside the change. Run `pnpm lint && pnpm typecheck && pnpm test` per unit; `/ce-code-review` before the PR (fix P0/P1 + high-value P2 with regression tests); merge only on a green CI matrix.
+
+---
+
+## Revision R2 — 2026-06-19 (mid-build, after U1–U8)
+
+Owner steering during the build (autonomous round **paused before push**; building the rest with these folded in, then a full browser-QA + thing-by-thing review). U1–U8 are committed; the items below revise the not-yet-built units and add new ones.
+
+**Data model — unify on name/tags/description:**
+- **Drop `gallerySummary`; introduce a single `description` field.** The fields that matter are **name, tags, description** — one `description` used in canvas overview, the gallery, AND grid cards. No separate "gallery summary" concept. → **New unit U21**: rename/replace `gallerySummary`→`description` (both dialects, data loss acceptable per operating mode), recompose `searchText` to use `description` instead of summary, sweep all consumers (types, settings/overview, MCP `update_canvas`, gallery, share/editor, tests, docs). Build U21 **before** the card/gallery UI units (it gates what they render).
+
+**Card & view unification (revises U6 / U9 / U10 / U17):**
+- **One grid card component, shared by the owner list and the gallery** — they should look ~the same. The **cover image fills the entire card**; **name + tags + description + actions overlay** it with a legibility scrim and clear, accessible affordances (hover/focus reveal or persistent, decided during build + screenshot validation). Description **truncates with a tooltip** on overflow. This extends U6's cover work into a full cover-fills-card surface.
+- **Gallery gains a list mode** (grid/list toggle like the owner list, U8-style, persisted). **Owner-list and gallery list rows are shared / near-identical** — the only gallery-specific differentiator is the **template** (clone-as-template) affordance.
+- Description appears in **canvas-mode grid cards** too (name + tags + description), truncated + tooltip.
+- **Screenshot-validate** the unified card + both list modes during the build to confirm information architecture and surface UX problems (run the worktree dashboard on an alt port to avoid the `5173` clash with the main checkout).
+
+**New scope items:**
+- **U19** — marketing/landing images captured with the site in **light mode** (force light theme in the capture path).
+- **U20** — bring the **onboarding** and **create-canvas** pages **on-brand** (rounded corners / boxed panels / tokens) to match the dashboard's editorial system.
+- **Docs refresh** ("document workflow update") — after the feature build, run `docs-refresh`/`docs-fact-refresh` to update `/docs`, `llms.txt`, READMEs, and marketing copy for unified tags, forgiving search, admin featured, and the `description` change.
+
+**Revised build order from here:** U21 (description rename, foundational) → unified card + shared row (folds into U9/U10) → U11 (sparse strip) → U12/U13/U14/U15/U16 → U17 (gallery: unified card + list mode + featured/recent/sort) → U18 (admin lane) → U20 (onboarding/create brand) → U19 (marketing light mode) → docs refresh → browser-QA + thing-by-thing review → (await owner feedback before push).
