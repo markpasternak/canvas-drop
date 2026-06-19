@@ -81,11 +81,33 @@ never touch your org's spend or stored data. It's a guarded capability: an
 rung only appears in your Share tab once you hold it. For everyone except the
 owner, a public-link canvas is always static-only.
 
+## Tags
+
+Every canvas has one set of **tags** — short labels you add on the canvas detail
+page (Enter or comma confirms each; tags are trimmed and lowercased). They serve
+double duty: in **Your canvases** they power the tag filter so you can narrow a
+large library, and once a canvas is **listed in the gallery** the same tags show
+publicly and drive the gallery's tag shortcuts. There is one tag set per canvas —
+not a separate "gallery tags" — so a tag you add for your own filtering is the
+same tag your colleagues see when the canvas is listed. The limit is **20 tags,
+up to 50 characters each**. Agents set the same field with `update_canvas` (the
+`tags` parameter) over MCP.
+
 ## Listing in the gallery
 
-The Share tab also has an opt-in **gallery** listing (summary, tags, and an
-optional *use as template* toggle). A canvas can only be listed when it has a
-shared access rung, a published version, and **no password** set.
+The Share tab also has an opt-in **gallery** listing (a summary, the canvas's
+tags, and an optional *use as template* toggle). A canvas can only be listed when
+it has a shared access rung, a published version, and **no password** set.
+
+## Finding canvases (search)
+
+Both **Your canvases** and the **gallery** share one forgiving search. A query
+matches across a canvas's **title, summary, tags, and slug**, and matching is
+**case-, accent-, and partial-insensitive** — `café`, `Cafe`, and `caf` all find
+"Café Menu". A multi-word query is AND-matched: every word must appear somewhere
+in those fields (the words can live in different fields — e.g. a word in the
+title and another in a tag). The same forgiving search backs the MCP
+`list_canvases` `q` filter.
 
 ## Revoking
 

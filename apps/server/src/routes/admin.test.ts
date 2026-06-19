@@ -93,6 +93,12 @@ describe("admin routes", () => {
     }
     const dis = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
     expect(dis.status).toBe(404);
+    // The cross-owner feature toggle is gated by the same admin router (no existence leak).
+    const feat = await app.request(
+      `/api/admin/canvases/${cv.id}/feature`,
+      post({ featured: true }),
+    );
+    expect(feat.status).toBe(404);
     // Every user-mutation route is gated too — not just /block (no existence leak).
     for (const action of ["block", "unblock", "promote", "demote"] as const) {
       const res = await app.request(`/api/admin/users/${owner.id}/${action}`, post());
@@ -157,6 +163,65 @@ describe("admin routes", () => {
     expect((await canvases.findById(cv.id))?.status).toBe("active");
     // already active → 409
     expect((await app.request(`/api/admin/canvases/${cv.id}/restore`, post())).status).toBe(409);
+  });
+
+  it("admin sets then unsets galleryFeatured (audited as canvas_feature with actor+target+meta)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "admin",
+      isAdmin: true,
+    });
+    const { app, audit, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+
+    const on = await app.request(`/api/admin/canvases/${cv.id}/feature`, post({ featured: true }));
+    expect(on.status).toBe(200);
+    expect((await canvases.findById(cv.id))?.galleryFeatured).toBe(true);
+
+    const off = await app.request(
+      `/api/admin/canvases/${cv.id}/feature`,
+      post({ featured: false }),
+    );
+    expect(off.status).toBe(200);
+    expect((await canvases.findById(cv.id))?.galleryFeatured).toBe(false);
+
+    await audit.flush();
+    const rows = (await auditRepository(client).recent(50)) as Array<{
+      action: string;
+      actorId: string;
+      targetId: string | null;
+      meta: { featured?: boolean } | null;
+    }>;
+    const featureRows = rows.filter((r) => r.action === "canvas_feature");
+    expect(featureRows.length).toBe(2);
+    expect(featureRows.every((r) => r.actorId === admin.id && r.targetId === cv.id)).toBe(true);
+    expect(featureRows.map((r) => r.meta?.featured).sort()).toEqual([false, true]);
+  });
+
+  it("feature on a non-existent canvas id → 404 (existence-404 admin semantics)", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const res = await app.request(
+      "/api/admin/canvases/does-not-exist/feature",
+      post({ featured: true }),
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toBe("not_found");
+  });
+
+  it("feature with an invalid body → 400", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+    const res = await app.request(
+      `/api/admin/canvases/${cv.id}/feature`,
+      post({ featured: "yes" }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("lists canvases across owners with status filter + enrichment", async () => {

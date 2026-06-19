@@ -199,6 +199,54 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(restricted.warning).toMatch(/CDN/);
   });
 
+  it("update_canvas sets the unified tags under the owner check and refreshes searchText (U4)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, tags: ["Alpha", "beta"] },
+      }),
+    );
+    // The owner-facing tags round-trip through update_canvas (agent-native parity).
+    expect(updated.tags).toEqual(["Alpha", "beta"]);
+
+    // The tag write recomputes the forgiving-search blob (integration with U2): the
+    // owner-list query finds the canvas by a tag substring it had no other source for.
+    const found = await canvasesRepository(client).listByOwnerFiltered({
+      ownerId: userId,
+      q: "alph",
+      limit: 50,
+      offset: 0,
+    });
+    expect(found.items.map((c) => c.id)).toContain(created.id);
+  });
+
+  it("update_canvas tags on a non-owned canvas reads as not-found (requireOwned)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@example.com");
+    const otherId = await seedUser(client, "other@example.com");
+    // Owner creates the canvas; a different account connects and tries to tag it.
+    const ownerMcp = await connect(client, { userId: ownerId });
+    const created = payload(await ownerMcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const otherMcp = await connect(client, { userId: otherId });
+    expect(
+      isError(
+        await otherMcp.callTool({
+          name: "update_canvas",
+          arguments: { id: created.id, tags: ["x"] },
+        }),
+      ),
+    ).toBe(true);
+    // The owner's tags were never touched by the non-owner's call.
+    const cv = await canvasesRepository(client).findById(created.id);
+    expect(cv?.tags ?? []).toEqual([]);
+  });
+
   it("get_canvas_file reads back the live version — listing and content — for verification", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

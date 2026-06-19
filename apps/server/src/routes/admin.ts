@@ -55,6 +55,7 @@ const userListQuery = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 const disableBody = z.object({ reason: z.string().trim().min(1).max(500) });
+const featureBody = z.object({ featured: z.boolean() });
 const modelsBody = z.object({ models: z.array(z.string().min(1)).min(1) });
 const quotasBody = z.object({
   quotas: z.record(z.string(), z.number().finite().positive()),
@@ -279,6 +280,25 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       action: "canvas_restore",
       actorId: c.get("user").id,
       targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  // --- Gallery curation (plan 2026-06-19 KTD3): set/unset the admin-curated
+  //     `galleryFeatured` editorial flag. A cross-owner action (NOT the per-account
+  //     owner check / MCP surface) — existence-404 like disable/enable/restore.
+  //     Display/sort-only; never an authorization input. ---
+  app.post("/canvases/:id/feature", sameOrigin, async (c) => {
+    const cv = await loadCanvas(deps, c.req.param("id"));
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = featureBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    await deps.canvases.setFeatured(cv.id, body.data.featured);
+    deps.audit.recordAudit({
+      action: "canvas_feature",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { featured: body.data.featured },
     });
     return c.json({ ok: true });
   });
