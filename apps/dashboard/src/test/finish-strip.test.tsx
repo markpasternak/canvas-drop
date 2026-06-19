@@ -93,7 +93,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         if (q && !c.title.toLowerCase().includes(q)) return false;
         return true;
       });
-      const limit = Number(sp.get("limit") ?? 48);
+      const limit = Number(sp.get("limit") ?? 30);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
         canvases: matched.slice(offset, offset + limit),

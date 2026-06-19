@@ -124,7 +124,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         sp.get("sort") === "popular"
           ? [...matched].sort((a, b) => (b.recentViews ?? 0) - (a.recentViews ?? 0))
           : matched;
-      const limit = Number(sp.get("limit") ?? 48);
+      const limit = Number(sp.get("limit") ?? 30);
       const offset = Number(sp.get("offset") ?? 0);
       return json({
         canvases: ordered.slice(offset, offset + limit),
@@ -512,16 +512,16 @@ describe("Your canvases — server-side filters (plan 005)", () => {
   });
 
   it("paginates: shows the page window and a working Next control", async () => {
-    // 49 canvases → page size 48 → page 1 shows 48, Next reveals the 49th.
+    // 49 canvases → page size 30 → page 1 shows 30, Next reveals the rest.
     const many = Array.from({ length: 49 }, (_, i) =>
       canvas({ id: `c${i}`, slug: `s${i}`, title: `Canvas ${String(i).padStart(2, "0")}` }),
     );
     stub(many);
     renderAt("/?sort=title");
-    expect(await screen.findAllByText("Showing 1–48 of 49")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 1–30 of 49")).toHaveLength(2);
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findAllByText("Showing 49–49 of 49")).toHaveLength(2);
+    expect(await screen.findAllByText("Showing 31–49 of 49")).toHaveLength(2);
   });
 
   it("Most popular sort ranks by trending views and shows the per-row view count (plan 004)", async () => {

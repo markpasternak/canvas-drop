@@ -2253,7 +2253,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     }>(res);
     expect(body.total).toBe(2);
     expect(body.canvases).toHaveLength(2);
-    expect(body.limit).toBe(48);
+    expect(body.limit).toBe(30);
     expect(body.offset).toBe(0);
     expect(body.summary).toMatchObject({
       active: 2,
@@ -2325,7 +2325,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       "/api/canvases?limit=abc",
     );
     expect(junk.status).toBe(200);
-    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(48);
+    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(30);
   });
 
   it("GET / never returns another user's canvas, even with permissive params", async () => {

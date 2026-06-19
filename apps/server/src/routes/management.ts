@@ -197,7 +197,7 @@ function ownerCanvasView(
   };
 }
 
-const CANVASES_PAGE_SIZE = 48;
+const CANVASES_PAGE_SIZE = 30;
 const CANVASES_MAX_LIMIT = 100;
 
 /** Coerce an optional query flag ("1"/"true" → true; absent/anything else → false). */

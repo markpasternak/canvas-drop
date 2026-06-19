@@ -18,12 +18,12 @@ export interface GalleryDeps extends PreviewHintDeps {
 }
 
 const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 48;
+const DEFAULT_LIMIT = 30;
 
 /**
  * Browse-query schema. A gallery URL with a junk param should still render the
  * page, so invalid/absent values clamp to sane defaults rather than 400ing:
- * `limit` coerces + clamps to [1, 100] (default 48), `offset` clamps to >= 0
+ * `limit` coerces + clamps to [1, 100] (default 30), `offset` clamps to >= 0
  * (default 0). `q` / `tag` are optional free text.
  */
 const querySchema = z.object({

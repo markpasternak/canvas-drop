@@ -265,7 +265,7 @@ describe("galleryRoutes", () => {
 
     const junk = await get(client, "/api/gallery?limit=abc&offset=-5");
     expect(junk.status).toBe(200);
-    expect(junk.body.limit).toBe(48); // default
+    expect(junk.body.limit).toBe(30); // default
     expect(junk.body.offset).toBe(0); // clamped
   });
 

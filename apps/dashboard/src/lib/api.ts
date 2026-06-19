@@ -349,16 +349,13 @@ export interface GalleryFacets {
 }
 
 /** Gallery page size: the client's `limit` AND the page→offset divisor. One
- *  constant so the page math can never desync from the requested page size. 48 is
- *  divisible by 2/3/4 — the responsive card grid's column counts — so a full page
- *  never leaves an orphan partial row, and it's large enough that typical accounts
- *  rarely paginate. */
-export const GALLERY_PAGE_SIZE = 48;
+ *  constant so the page math can never desync from the requested page size.
+ *  30 per page — a calmer page than the old 48. */
+export const GALLERY_PAGE_SIZE = 30;
 
-/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor. 48
- *  is divisible by 2/3/4 (the grid's column counts, incl. with the detail rail
- *  open), so a full page never leaves an orphan partial row. */
-export const CANVASES_PAGE_SIZE = 48;
+/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor.
+ *  30 per page — a calmer page than the old 48. */
+export const CANVASES_PAGE_SIZE = 30;
 
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {

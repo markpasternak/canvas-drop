@@ -43,7 +43,7 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
 const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPage => ({
   items,
   total: items.length,
-  limit: 48,
+  limit: 30,
   offset: 0,
   ...over,
 });
