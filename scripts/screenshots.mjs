@@ -69,10 +69,10 @@ async function resolveShots(page) {
     ];
   }
   const shots = [
-    { path: "/", name: "landing-dashboard.webp" },
-    // Filter the gallery to the demo apps' unique "showcase" tag (seed-demo-apps)
-    // so the hero shot is exactly the 12 real-cover demo apps — no generic seed
-    // canvases in frame.
+    // Filter BOTH the dashboard and the gallery to the demo apps' unique "showcase"
+    // tag (seed-demo-apps) so the hero shots are exactly the 12 real-cover demo apps —
+    // no generic seed canvases (generative covers) in frame.
+    { path: "/?tag=showcase", name: "landing-dashboard.webp" },
     { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
   ];
