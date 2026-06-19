@@ -1,4 +1,4 @@
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, Circle } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
 import { CopyButton } from "./CopyButton.js";
@@ -21,6 +21,7 @@ export function CanvasDetailChrome({
   id,
   title,
   url,
+  draft,
   isLoading,
   actions,
   badge,
@@ -28,6 +29,9 @@ export function CanvasDetailChrome({
   id: string;
   title?: ReactNode;
   url?: string;
+  /** True when the canvas is an unpublished draft — the header reframes around
+   *  "Draft — not live yet" and stops presenting the URL as a live, reachable link. */
+  draft?: boolean;
   isLoading?: boolean;
   actions?: ReactNode;
   /** Optional status pill rendered next to the title (e.g. gallery/template state). */
@@ -48,7 +52,19 @@ export function CanvasDetailChrome({
             </div>
           )}
 
-          {isLoading || !url ? (
+          {isLoading ? (
+            <Skeleton className="h-5 w-72" />
+          ) : draft ? (
+            // A draft has no reachable page — don't dangle the public URL as if it's
+            // live. State the lifecycle plainly; the header actions (Open draft /
+            // Publish) carry the way forward.
+            <p className="flex items-center gap-1.5 text-sm text-muted">
+              <Circle size={9} weight="fill" className="text-warning" aria-hidden />
+              <span className="font-medium text-fg">Draft</span>
+              <span aria-hidden>·</span>
+              <span>not live yet — publish to make the URL reachable</span>
+            </p>
+          ) : !url ? (
             <Skeleton className="h-5 w-72" />
           ) : (
             <div className="flex min-w-0 items-center gap-1.5">

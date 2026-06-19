@@ -256,6 +256,59 @@ describe("canvas Overview tab", () => {
     expect(screen.getAllByText("Private").length).toBeGreaterThan(0);
   });
 
+  it("reframes the draft header around 'not live yet' with Open draft + Publish primaries", async () => {
+    mockStatus(
+      {
+        ...CANVAS,
+        access: "private",
+        currentVersionId: null,
+        shared: false,
+        publicationState: "draft",
+      },
+      [],
+    );
+    renderStatus();
+
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+
+    // The draft framing dominates the header: "Draft — not live yet", not a live URL.
+    // ("Draft" also appears in the publication badge, so assert on the lifecycle note.)
+    expect(within(header).getByText(/not live yet/i)).toBeInTheDocument();
+
+    // The two ways forward are the primaries.
+    expect(within(header).getByRole("link", { name: "Open draft" })).toHaveAttribute(
+      "href",
+      "/canvases/c1/editor",
+    );
+    expect(within(header).getByRole("button", { name: "Publish" })).toBeInTheDocument();
+
+    // A draft does NOT present the public URL as a live, reachable link, nor the
+    // "New version" / "Open live canvas" live affordances.
+    expect(within(header).queryByRole("link", { name: "Open live canvas" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "New version" })).toBeNull();
+    expect(within(header).queryByRole("link", { name: CANVAS.url })).toBeNull();
+  });
+
+  it("keeps the published header unchanged (live URL + New version, no draft framing)", async () => {
+    mockStatus();
+    renderStatus();
+
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+
+    // Published: the live URL + its open affordance and the "New version" upload
+    // remain; no draft "not live yet" framing.
+    expect(within(header).getByRole("link", { name: "Open live canvas" })).toHaveAttribute(
+      "href",
+      CANVAS.url,
+    );
+    expect(within(header).getByRole("button", { name: "New version" })).toBeInTheDocument();
+    expect(within(header).queryByText(/not live yet/i)).toBeNull();
+    expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Publish" })).toBeNull();
+  });
+
   it("keeps the disabled state explicit", async () => {
     mockStatus({
       ...CANVAS,
@@ -267,6 +320,9 @@ describe("canvas Overview tab", () => {
 
     expect(await screen.findByText("Canvas disabled")).toBeInTheDocument();
     expect(screen.getByText("Terms of service violation")).toBeInTheDocument();
+    // Disabled is NOT a draft: no draft reframing, no Open draft / Publish primaries.
+    expect(screen.queryByText(/not live yet/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open draft" })).toBeNull();
   });
 
   it("keeps the archived state explicit", async () => {
@@ -276,5 +332,10 @@ describe("canvas Overview tab", () => {
     expect(await screen.findByText("Canvas archived")).toBeInTheDocument();
     expect(screen.getByText(/Unarchive it to bring the same URL back/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unarchive" })).toBeInTheDocument();
+    // Archived gets Unarchive, never the draft reframing.
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+    expect(within(header).queryByText(/not live yet/i)).toBeNull();
+    expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
   });
 });

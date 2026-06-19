@@ -88,11 +88,33 @@ export default function CanvasLayout() {
   }
 
   const title = canvas?.title?.trim() || canvas?.slug;
+  // A live, active canvas is one that has actually been published (a current version
+  // exists). An active canvas with no published version is a draft — not reachable at
+  // its URL yet — so the header reframes around finishing it. Archived/disabled/deleted
+  // keep their existing chrome and never get the draft treatment.
+  const isDraft =
+    canvas?.status === "active" &&
+    (canvas.publicationState !== "published" || canvas.currentVersionId === null);
   const actions =
     canvas?.status === "active" ? (
-      // Global "upload a new version" affordance — shown on every tab, distinct
-      // from the Editor tab's own "Publish" (which publishes the draft).
-      <DeployButton canvasId={id} size="sm" label="New version" />
+      isDraft ? (
+        // Draft: the two ways forward dominate — open the draft to keep editing, or
+        // publish it live. No "New version" (there is no live version to replace yet).
+        <>
+          <Link
+            to="/canvases/$id/editor"
+            params={{ id }}
+            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border-strong bg-surface-raised px-3 text-[0.8125rem] font-medium text-fg shadow-[var(--shadow-xs)] transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover"
+          >
+            Open draft
+          </Link>
+          <DeployButton canvasId={id} size="sm" label="Publish" />
+        </>
+      ) : (
+        // Published: global "upload a new version" affordance — shown on every tab,
+        // distinct from the Editor tab's own "Publish" (which publishes the draft).
+        <DeployButton canvasId={id} size="sm" label="New version" />
+      )
     ) : canvas?.status === "archived" ? (
       <Button
         size="sm"
@@ -128,6 +150,7 @@ export default function CanvasLayout() {
         id={id}
         title={title}
         url={canvas?.url}
+        draft={isDraft}
         isLoading={isLoading}
         actions={actions}
         badge={
