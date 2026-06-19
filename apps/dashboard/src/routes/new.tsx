@@ -204,59 +204,56 @@ export default function CreateCanvas() {
 
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
 
-      {/* Capability toggle from the canvas-capabilities foundation (origin/main, #14):
-          start static or backend-enabled; changeable later in the Backend tab. */}
-      <Panel className="p-5">
-        <Toggle
-          label="Enable backend"
-          description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in the Backend tab."
-          checked={backendEnabled}
-          onChange={setBackendEnabled}
-        />
-      </Panel>
-
+      {/* Source-first create flow (plan U16): the source/method choice leads, then
+          name/slug, then the clearly-optional backend toggle, then create/publish.
+          The backend toggle deliberately no longer precedes the source choice. */}
       <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <section
-          className="grid gap-1.5 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-panel)] sm:grid-cols-2 lg:grid-cols-1"
+          className="space-y-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)] sm:p-5"
           aria-label="Creation method"
         >
-          {METHODS.map((m) => {
-            const MethodIcon = m.icon;
-            const active = method === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  setMethod(m.id);
-                  setError(null);
-                  setApiResult(null);
-                }}
-                className={cn(
-                  "group flex min-h-16 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px",
-                  active
-                    ? "border-accent/45 bg-accent-subtle/75 text-fg shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
-                    : "border-transparent bg-transparent text-muted hover:bg-surface-hover hover:text-fg",
-                )}
-              >
-                <span
+          <h2 className="text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
+            Source
+          </h2>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            {METHODS.map((m) => {
+              const MethodIcon = m.icon;
+              const active = method === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setMethod(m.id);
+                    setError(null);
+                    setApiResult(null);
+                  }}
                   className={cn(
-                    "grid size-9 shrink-0 place-items-center rounded-lg border transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+                    "group flex min-h-16 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px",
                     active
-                      ? "border-accent/30 bg-surface text-accent"
-                      : "border-border bg-surface-sunken text-subtle group-hover:text-accent",
+                      ? "border-accent/45 bg-accent-subtle/75 text-fg shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
+                      : "border-border bg-surface-raised text-muted shadow-xs hover:border-border-strong hover:bg-surface-hover hover:text-fg",
                   )}
                 >
-                  <MethodIcon size={18} weight="duotone" aria-hidden />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-fg">{m.label}</span>
-                  <span className="mt-0.5 block text-xs leading-snug text-muted">{m.blurb}</span>
-                </span>
-              </button>
-            );
-          })}
+                  <span
+                    className={cn(
+                      "grid size-9 shrink-0 place-items-center rounded-lg border transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
+                      active
+                        ? "border-accent/30 bg-surface text-accent"
+                        : "border-border bg-surface-sunken text-subtle group-hover:text-accent",
+                    )}
+                  >
+                    <MethodIcon size={18} weight="duotone" aria-hidden />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-fg">{m.label}</span>
+                    <span className="mt-0.5 block text-xs leading-snug text-muted">{m.blurb}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         <Panel className="space-y-5">
@@ -275,6 +272,7 @@ export default function CreateCanvas() {
           </div>
 
           <div className="space-y-5">
+            {/* Step 2 — name & slug (after the source choice). */}
             <Field
               label="Title"
               hint="optional"
@@ -289,6 +287,18 @@ export default function CreateCanvas() {
               onResolved={setSlug}
             />
 
+            {/* Step 3 — optional backend capability. Deliberately after the source
+                choice + naming so it reads as an optional add-on, not a gate. */}
+            <div className="rounded-xl border border-border bg-surface-sunken p-4">
+              <Toggle
+                label="Enable backend (optional)"
+                description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in the Backend tab."
+                checked={backendEnabled}
+                onChange={setBackendEnabled}
+              />
+            </div>
+
+            {/* Step 4 — create/publish (the source-specific action). */}
             {method === "paste" && (
               <div className="space-y-4">
                 <TextareaField
@@ -330,17 +340,13 @@ export default function CreateCanvas() {
               (apiResult ? (
                 <ApiSnippet result={apiResult} onDone={() => finish(apiResult.id, false)} />
               ) : (
-                <div className="space-y-4 rounded-xl border border-border bg-surface-sunken p-4">
-                  <p className="text-sm leading-relaxed text-muted">
-                    Creates an empty canvas and shows a secret key once. Deploy to it with{" "}
-                    <code className="font-mono text-xs">PUT /v1/canvases/:id/deploy</code> or an AI
-                    agent.
-                  </p>
-                  <Button onClick={createApiOnly} loading={busy} disabled={slugBlocked}>
-                    <Key size={16} weight="bold" aria-hidden />
-                    Create key
-                  </Button>
-                </div>
+                <ApiPathIntro
+                  me={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
+                  slug={slug.slug}
+                  onCreate={createApiOnly}
+                  busy={busy}
+                  disabled={slugBlocked}
+                />
               ))}
           </div>
         </Panel>
@@ -353,6 +359,56 @@ export default function CreateCanvas() {
           onClose={() => finish(revealed.id, revealed.deployed)}
         />
       )}
+    </div>
+  );
+}
+
+/** The "Use the API" path, surfaced as a distinct agent/script flow. Before the
+ *  canvas exists we can't show a real key, so we preview the deploy shape (a
+ *  placeholder id/key against the instance origin) so an agent/script author can
+ *  see exactly what they'll get; creating then reveals the real one-time key. */
+function ApiPathIntro({
+  me,
+  slug,
+  onCreate,
+  busy,
+  disabled,
+}: {
+  me?: { urlMode: "path" | "subdomain"; baseUrl: string };
+  slug: string;
+  onCreate: () => void;
+  busy: boolean;
+  disabled: boolean;
+}) {
+  const origin = me ? new URL(me.baseUrl).origin : "https://your-instance.example";
+  const previewUrl = `${origin}/c/${slug || "<id>"}`;
+  const preview = deployCurl({ url: previewUrl, id: "<canvas-id>", apiKey: "<secret-key>" });
+  return (
+    <div className="space-y-4 rounded-xl border border-border bg-surface-sunken p-4">
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-fg">The agent &amp; script path</p>
+        <p className="text-sm leading-relaxed text-muted">
+          Creates an empty canvas and shows a secret key <strong>once</strong>. Deploy to it from
+          CI, a script, or an AI agent with{" "}
+          <code className="font-mono text-xs">PUT /v1/canvases/:id/deploy</code>.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
+            What you'll run
+          </p>
+          <CopyButton value={preview} label="Copy" toastMessage="Snippet copied" />
+        </div>
+        <CodeBox value={preview} variant="block" />
+        <p className="text-xs text-muted">
+          Your real canvas id and one-time key are filled in after you create the key below.
+        </p>
+      </div>
+      <Button onClick={onCreate} loading={busy} disabled={disabled}>
+        <Key size={16} weight="bold" aria-hidden />
+        Create key
+      </Button>
     </div>
   );
 }

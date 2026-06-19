@@ -6,7 +6,7 @@ import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
 import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
-import { requireOwnedCanvas } from "../canvas/owner-guard.js";
+import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -77,6 +77,22 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   // since the editor/draft/preview surface exposes canvas content.
   const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
 
+  /** Owner-and-mutable gate (mirrors management.ts): a disabled (admin-taken-down) canvas
+   *  is read-only to its owner, so every draft EDIT rejects with the shared `DISABLED`
+   *  contract while the draft READS (get/file/preview) keep using `ownedCanvas`. Returns
+   *  the canvas, or a Response the handler returns as-is (404 not-owned / 409 disabled). */
+  const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
+    const outcome = classifyMutability(await ownedCanvas(c));
+    switch (outcome.kind) {
+      case "not-found":
+        return c.json({ error: "not_found" }, 404);
+      case "disabled":
+        return c.json(disabledError(outcome.canvas), 409);
+      case "ok":
+        return outcome.canvas;
+    }
+  };
+
   async function viewOf(c: Context<AppEnv>, cv: Canvas, draft: Draft): Promise<Response> {
     const live = await liveManifest(deps.versions, cv.currentVersionId);
     return c.json(draftView(draft, live?.manifest ?? null));
@@ -110,8 +126,8 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   // Write/replace a draft file (raw body bytes — works for text and binary).
   app.put("/:id/draft/file", sameOrigin, blobBodyLimit, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
     // Optimistic-concurrency (opt-in): a best-effort writer — the editor's unmount flush —
@@ -146,8 +162,8 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   });
 
   app.delete("/:id/draft/file", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
     try {
@@ -159,8 +175,8 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   });
 
   app.post("/:id/draft/rename", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = z
       .object({ from: z.string().min(1), to: z.string().min(1) })
       .safeParse(await c.req.json().catch(() => ({})));
@@ -175,8 +191,10 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   // Publish the draft as a new immutable version + swap the live pointer (R12).
   app.post("/:id/publish", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    // A disabled canvas rejects with the shared DISABLED contract; an archived one keeps
+    // the NOT_ACTIVE "unarchive first" message (mutableCanvas only catches disabled).
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.status !== "active") {
       return c.json(
         { code: "NOT_ACTIVE", message: "Unarchive this canvas before publishing." },
@@ -245,8 +263,8 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   // Restore a published version into the draft (R14).
   app.post("/:id/restore", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = z
       .object({ version: z.number().int().positive() })
       .safeParse(await c.req.json().catch(() => ({})));

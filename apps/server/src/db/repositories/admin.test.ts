@@ -158,6 +158,51 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(byCreated.items.map((c) => c.id)).toEqual([apple.id, zebra.id]);
   });
 
+  it("filters by gallery facets: templatable and listed", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const a = await seedUser(client, "alice");
+    // A plain canvas (neither listed nor templatable).
+    const plain = await canvases.create({ ownerId: a.id, slug: "p-1111-2222", apiKeyHash: "h1" });
+    // Listed only.
+    const listed = await canvases.create({ ownerId: a.id, slug: "l-1111-2222", apiKeyHash: "h2" });
+    await canvases.updateSettings(listed.id, { access: "whole_org", galleryListed: true });
+    // Listed + templatable.
+    const tmpl = await canvases.create({ ownerId: a.id, slug: "t-1111-2222", apiKeyHash: "h3" });
+    await canvases.updateSettings(tmpl.id, {
+      access: "whole_org",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+
+    const admin = adminRepository(client);
+
+    const onlyTemplates = await admin.listAllCanvasesFiltered({
+      limit: 50,
+      offset: 0,
+      templatable: true,
+    });
+    expect(onlyTemplates.items.map((c) => c.id)).toEqual([tmpl.id]);
+    expect(onlyTemplates.total).toBe(1);
+
+    const onlyListed = await admin.listAllCanvasesFiltered({ limit: 50, offset: 0, listed: true });
+    const listedIds = new Set(onlyListed.items.map((c) => c.id));
+    // Listed filter catches both the listed-only and the templatable (template implies listed).
+    expect(listedIds.has(listed.id)).toBe(true);
+    expect(listedIds.has(tmpl.id)).toBe(true);
+    expect(listedIds.has(plain.id)).toBe(false);
+    expect(onlyListed.total).toBe(2);
+
+    // Both facets combine (templatable AND listed) → just the template.
+    const both = await admin.listAllCanvasesFiltered({
+      limit: 50,
+      offset: 0,
+      templatable: true,
+      listed: true,
+    });
+    expect(both.items.map((c) => c.id)).toEqual([tmpl.id]);
+  });
+
   it("listUsers returns per-user canvas counts (excluding deleted), with search + sort", async () => {
     client = await makeTestDb(dialect);
     const canvases = canvasesRepository(client);
@@ -224,6 +269,32 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(stats.newUsers).toBe(2);
     expect(stats.recentWindowDays).toBe(7);
     expect(stats.oldestDeletedAt).toBeNull(); // c2 is disabled, not deleted
+  });
+
+  it("platformStats: publicLinkCount equals the manual count of ACTIVE public-link canvases", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const a = await seedUser(client, "alice");
+
+    // Two active public-link canvases (the count target).
+    const p1 = await canvases.create({ ownerId: a.id, slug: "pub-1111-2222", apiKeyHash: "hp1" });
+    const p2 = await canvases.create({ ownerId: a.id, slug: "pub-3333-4444", apiKeyHash: "hp2" });
+    await canvases.setAccess(p1.id, "public_link");
+    await canvases.setAccess(p2.id, "public_link");
+    // A whole_org canvas must NOT count (only public_link).
+    const org = await canvases.create({ ownerId: a.id, slug: "org-1111-2222", apiKeyHash: "ho" });
+    await canvases.setAccess(org.id, "whole_org");
+    // An ARCHIVED public-link canvas must NOT count (active-only scope). archive()
+    // clears access, so set public_link AFTER... but archive clears it — instead set a
+    // disabled public-link row, which archive/disable would clear access on. Use a
+    // deleted row to prove the active-only scope: set public_link then soft-delete.
+    const gone = await canvases.create({ ownerId: a.id, slug: "del-1111-2222", apiKeyHash: "hd" });
+    await canvases.setAccess(gone.id, "public_link");
+    await canvases.setStatus(gone.id, "deleted");
+
+    const stats = await adminRepository(client).platformStats(5);
+    // Manual count: only p1 + p2 are active AND public_link.
+    expect(stats.publicLinkCount).toBe(2);
   });
 
   it("platformStats: counts views, unique viewers, and READY deploys (not pending) — both dialects", async () => {

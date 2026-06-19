@@ -20,10 +20,12 @@ const templatableItem: GalleryItem = {
   slug: "src-slug",
   url: "http://x/c/src-slug",
   title: "Starter kit",
-  summary: null,
+  description: null,
   tags: [],
   templatable: true,
   publishedAt: 1,
+  galleryFeatured: false,
+  recentViews: 0,
   hasPreview: false,
   owner: { id: "u-alice", name: "alice", avatarUrl: null },
 };
@@ -56,6 +58,13 @@ describe("Clone from the gallery (plan 002 U7)", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         const u = new URL(url, "http://localhost");
         if (u.pathname === "/api/gallery") {
+          // The U17 discovery strips (Featured / Recently published) fire their own
+          // `?featured=1` / `?sort=recent` requests; resolve those to an empty page so
+          // the source card (and its single "Use template" button) appears only once.
+          const p = u.searchParams;
+          if (p.get("featured") === "1" || p.get("sort") === "recent") {
+            return json({ items: [], total: 0, limit: 24, offset: 0 });
+          }
           return json({ items: [templatableItem], total: 1, limit: 24, offset: 0 });
         }
         if (u.pathname === "/api/canvases/src-1/clone" && init?.method === "POST") {
@@ -69,8 +78,8 @@ describe("Clone from the gallery (plan 002 U7)", () => {
 
     renderGallery();
 
-    // Card action opens the confirm dialog.
-    await userEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+    // Card action opens the confirm dialog (the gallery template affordance).
+    await userEvent.click(await screen.findByRole("button", { name: "Use template" }));
     // The dialog's own "Duplicate canvas" button fires the clone (scope to the dialog
     // to disambiguate from the card's button).
     const dialog = await screen.findByRole("dialog");

@@ -19,6 +19,9 @@ const SettingsRoute = lazy(() => import("./routes/canvas.settings.js"));
 const CapabilitiesRoute = lazy(() => import("./routes/canvas.capabilities.js"));
 const UsageRoute = lazy(() => import("./routes/canvas.usage.js"));
 const AdminRoute = lazy(() => import("./routes/admin.js"));
+// Dev-only acceptance harness for the full-bleed preview card (UX-sweep). Mounted only
+// under import.meta.env.DEV, so it never ships in a production build.
+const CardDemoRoute = lazy(() => import("./routes/card-demo.js"));
 const AdminCanvasesRoute = lazy(() => import("./routes/admin.canvases.js"));
 const AdminUsersRoute = lazy(() => import("./routes/admin.users.js"));
 const AdminSettingsRoute = lazy(() => import("./routes/admin.settings.js"));
@@ -47,11 +50,17 @@ export interface CanvasesSearch {
   listed?: boolean;
   template?: boolean;
   undeployed?: boolean;
+  /** Multi-tag any-match filter (UX sweep U9). Serialized as repeated `?tag=a&tag=b`
+   *  so the filtered view is shareable. A single `?tag=a` arrives as a string from
+   *  TanStack's loose parser, so the index view coerces it to an array itself. */
+  tag?: string[];
   /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
    *  archived view (replaces the standalone /archived route). */
   scope?: "archived";
-  /** Display mode: absent = list (default); `grid` = the cover-forward card gallery. */
-  view?: "grid";
+  /** Display mode override for the visit. Absent = fall back to the per-device
+   *  stored choice, then the `grid` default. `grid`|`list` pins the layout for a
+   *  shareable/deep-link visit and wins over the stored preference. */
+  view?: "grid" | "list";
   /** 1-based page for server-side pagination (plan 005). */
   page?: number;
   /** The single "focused" canvas for the detail rail (plan rebrand P4). Distinct
@@ -78,13 +87,35 @@ const archivedRoute = createRoute({
 });
 /** Gallery browse search params (shared with the gallery view). Filters + sort
  *  (plan 004) live here too so a filtered view is shareable and back-button-able. */
-export type GallerySortParam = "published" | "updated" | "title";
+/** Mirrors `GallerySort` in `lib/api.ts` (the backend-supported axes). `featured`/
+ *  `trending`/`recent` were added in the UX sweep (U3 backend, U17 dropdown). */
+export type GallerySortParam =
+  | "published"
+  | "recent"
+  | "updated"
+  | "title"
+  | "featured"
+  | "trending";
+const GALLERY_SORTS: readonly GallerySortParam[] = [
+  "published",
+  "recent",
+  "updated",
+  "title",
+  "featured",
+  "trending",
+];
 export interface GallerySearch {
   q?: string;
-  tag?: string;
+  /** Multi-tag any-match filter. Serialized as repeated `?tag=a&tag=b` so a filtered
+   *  view is shareable. `validateSearch` normalizes both shapes (a single bare-string
+   *  `?tag=a` and a repeated array) to a clean `string[]`, so the view consumes it
+   *  directly (mirrors `CanvasesSearch.tag`). */
+  tag?: string[];
   owner?: string;
   templatable?: boolean;
   sort?: GallerySortParam;
+  /** Layout for the visit (grid|list); the view resolves URL > localStorage > grid. */
+  view?: "grid" | "list";
   page?: number;
 }
 const galleryRoute = createRoute({
@@ -92,11 +123,21 @@ const galleryRoute = createRoute({
   path: "/gallery",
   validateSearch: (s: Record<string, unknown>): GallerySearch => ({
     q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
-    tag: typeof s.tag === "string" && s.tag.length > 0 ? s.tag : undefined,
+    // Repeated `?tag=` arrives as an array; a single `?tag=a` as a bare string.
+    // Normalize BOTH to a clean string[] (drop blanks) so the view always reads an
+    // array — mirrors CanvasesSearch.tag. Empty → undefined (keeps a bare URL).
+    tag: ((): string[] | undefined => {
+      const list = Array.isArray(s.tag) ? s.tag : typeof s.tag === "string" ? [s.tag] : [];
+      const clean = list.filter((t): t is string => typeof t === "string" && t.length > 0);
+      return clean.length > 0 ? clean : undefined;
+    })(),
     owner: typeof s.owner === "string" && s.owner.length > 0 ? s.owner : undefined,
     // Only the literal `true` flips it on, so a junk value just means "off".
     templatable: s.templatable === true || s.templatable === "true" || undefined,
-    sort: s.sort === "updated" || s.sort === "title" || s.sort === "published" ? s.sort : undefined,
+    sort: GALLERY_SORTS.includes(s.sort as GallerySortParam)
+      ? (s.sort as GallerySortParam)
+      : undefined,
+    view: s.view === "grid" || s.view === "list" ? s.view : undefined,
     page: typeof s.page === "number" ? s.page : Number(s.page) || undefined,
   }),
   component: GalleryRoute,
@@ -123,6 +164,10 @@ export interface AdminCanvasesSearch {
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */
   access?: AccessRung;
+  /** Gallery facet: only clone-able templates. */
+  templatable?: boolean;
+  /** Gallery facet: only gallery-listed canvases. */
+  listed?: boolean;
   q?: string;
   sort?: AdminCanvasSort;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */
@@ -198,12 +243,21 @@ const usageRoute = createRoute({
   component: UsageRoute,
 });
 
+// Dev-only: the card readability harness lives at /__card-demo. Defined unconditionally
+// (so its types resolve) but only added to the tree under import.meta.env.DEV.
+const cardDemoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/__card-demo",
+  component: CardDemoRoute,
+});
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   archivedRoute,
   galleryRoute,
   newRoute,
   onboardingRoute,
+  ...(import.meta.env.DEV ? [cardDemoRoute] : []),
   adminRoute,
   adminCanvasesRoute,
   adminUsersRoute,

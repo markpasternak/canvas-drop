@@ -11,6 +11,11 @@ import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { filesRepository } from "../db/repositories/files.js";
+import {
+  seedListed,
+  seedPublishedCanvas,
+  seedUndeployedCanvas,
+} from "../db/repositories/gallery-test-helpers.js";
 import { settingsRepository } from "../db/repositories/settings.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -93,6 +98,12 @@ describe("admin routes", () => {
     }
     const dis = await app.request(`/api/admin/canvases/${cv.id}/disable`, post({ reason: "x" }));
     expect(dis.status).toBe(404);
+    // The cross-owner feature toggle is gated by the same admin router (no existence leak).
+    const feat = await app.request(
+      `/api/admin/canvases/${cv.id}/feature`,
+      post({ featured: true }),
+    );
+    expect(feat.status).toBe(404);
     // Every user-mutation route is gated too — not just /block (no existence leak).
     for (const action of ["block", "unblock", "promote", "demote"] as const) {
       const res = await app.request(`/api/admin/users/${owner.id}/${action}`, post());
@@ -159,6 +170,142 @@ describe("admin routes", () => {
     expect((await app.request(`/api/admin/canvases/${cv.id}/restore`, post())).status).toBe(409);
   });
 
+  it("admin sets then unsets galleryFeatured (audited as canvas_feature with actor+target+meta)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "admin",
+      isAdmin: true,
+    });
+    const { app, audit, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    // Featuring requires the canvas to be gallery-listed + published.
+    const cvId = await seedListed(client, owner.id);
+
+    const on = await app.request(`/api/admin/canvases/${cvId}/feature`, post({ featured: true }));
+    expect(on.status).toBe(200);
+    expect((await canvases.findById(cvId))?.galleryFeatured).toBe(true);
+
+    const off = await app.request(`/api/admin/canvases/${cvId}/feature`, post({ featured: false }));
+    expect(off.status).toBe(200);
+    expect((await canvases.findById(cvId))?.galleryFeatured).toBe(false);
+
+    await audit.flush();
+    const rows = (await auditRepository(client).recent(50)) as Array<{
+      action: string;
+      actorId: string;
+      targetId: string | null;
+      meta: { featured?: boolean } | null;
+    }>;
+    const featureRows = rows.filter((r) => r.action === "canvas_feature");
+    expect(featureRows.length).toBe(2);
+    expect(featureRows.every((r) => r.actorId === admin.id && r.targetId === cvId)).toBe(true);
+    expect(featureRows.map((r) => r.meta?.featured).sort()).toEqual([false, true]);
+  });
+
+  it("feature=true on a NON-listed canvas → 409 not_listed (only listed can be featured)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    // Published but NOT gallery-listed.
+    const publishedId = await seedPublishedCanvas(client, owner.id);
+    const res = await app.request(
+      `/api/admin/canvases/${publishedId}/feature`,
+      post({ featured: true }),
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("not_listed");
+    expect((await canvases.findById(publishedId))?.galleryFeatured).toBe(false);
+  });
+
+  it("feature=true on an UNPUBLISHED canvas → 409 not_listed", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    // Never deployed (no current version) — can't be featured even if it were listed.
+    const undeployedId = await seedUndeployedCanvas(client, owner.id);
+    const res = await app.request(
+      `/api/admin/canvases/${undeployedId}/feature`,
+      post({ featured: true }),
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("not_listed");
+  });
+
+  it("feature=false (unfeature) is ALWAYS allowed, even on a non-listed canvas", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    // Feature a listed canvas, then un-list it (leaving a stale featured flag), then
+    // unfeature — the unfeature must still succeed so the stale flag can be cleared.
+    const cvId = await seedListed(client, owner.id);
+    expect(
+      (await app.request(`/api/admin/canvases/${cvId}/feature`, post({ featured: true }))).status,
+    ).toBe(200);
+    await canvases.updateSettings(cvId, { galleryListed: false });
+    const off = await app.request(`/api/admin/canvases/${cvId}/feature`, post({ featured: false }));
+    expect(off.status).toBe(200);
+    expect((await canvases.findById(cvId))?.galleryFeatured).toBe(false);
+  });
+
+  it("GET /canvases filters by ?templatable=true and ?listed=true, projecting galleryTemplatable", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    // A plain published canvas, a listed-only canvas, and a listed+templatable one.
+    const plainId = await seedPublishedCanvas(client, owner.id);
+    const listedId = await seedListed(client, owner.id);
+    const tmplId = await seedListed(client, owner.id);
+    await canvases.updateSettings(tmplId, { galleryListed: true, galleryTemplatable: true });
+
+    type Row = { id: string; galleryListed: boolean; galleryTemplatable: boolean };
+    type Page = { canvases: Row[]; total: number };
+
+    // Template facet → only the templatable canvas, and the projection carries the flag.
+    const tmplRes = await app.request("/api/admin/canvases?templatable=true");
+    expect(tmplRes.status).toBe(200);
+    const tmplPage = (await tmplRes.json()) as Page;
+    expect(tmplPage.canvases.map((r) => r.id)).toEqual([tmplId]);
+    expect(tmplPage.canvases[0]?.galleryTemplatable).toBe(true);
+
+    // Listed facet → both listed canvases (template implies listed), not the plain one.
+    const listedRes = await app.request("/api/admin/canvases?listed=true");
+    const listedPage = (await listedRes.json()) as Page;
+    const ids = new Set(listedPage.canvases.map((r) => r.id));
+    expect(ids.has(listedId)).toBe(true);
+    expect(ids.has(tmplId)).toBe(true);
+    expect(ids.has(plainId)).toBe(false);
+
+    // Absent flags → no facet narrowing (all three present), and a "false" reads as off.
+    const allRes = await app.request("/api/admin/canvases?templatable=false&listed=false");
+    const allPage = (await allRes.json()) as Page;
+    expect(allPage.total).toBe(3);
+  });
+
+  it("feature on a non-existent canvas id → 404 (existence-404 admin semantics)", async () => {
+    client = await makeTestDb("sqlite");
+    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const res = await app.request(
+      "/api/admin/canvases/does-not-exist/feature",
+      post({ featured: true }),
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toBe("not_found");
+  });
+
+  it("feature with an invalid body → 400", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
+    const res = await app.request(
+      `/api/admin/canvases/${cv.id}/feature`,
+      post({ featured: "yes" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("lists canvases across owners with status filter + enrichment", async () => {
     client = await makeTestDb("sqlite");
     const a = await seedUser(client, "alice");
@@ -171,11 +318,21 @@ describe("admin routes", () => {
     const all = await app.request("/api/admin/canvases");
     expect(all.status).toBe(200);
     const body = (await all.json()) as {
-      canvases: Array<{ owner: { email: string }; disabledReason: string | null }>;
+      canvases: Array<{
+        owner: { email: string };
+        disabledReason: string | null;
+        galleryFeatured: boolean;
+        galleryListed: boolean;
+      }>;
     };
     expect(body.canvases.length).toBe(2);
     const owners = new Set(body.canvases.map((c) => c.owner.email));
     expect(owners).toEqual(new Set(["alice@example.com", "bob@example.com"]));
+    // Each admin row carries the gallery curation flags (drives the Feature toggle).
+    for (const row of body.canvases) {
+      expect(typeof row.galleryFeatured).toBe("boolean");
+      expect(typeof row.galleryListed).toBe("boolean");
+    }
 
     const disabled = (await (await app.request("/api/admin/canvases?status=disabled")).json()) as {
       canvases: Array<{
@@ -226,6 +383,7 @@ describe("admin routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       canvasCountByStatus: Record<string, number>;
+      publicLinkCount: number;
       userCount: number;
       totalOps: number;
       totalViews: number;
@@ -241,6 +399,8 @@ describe("admin routes", () => {
       aiCalls: number;
     };
     expect(body.canvasCountByStatus.active).toBe(1);
+    // Public-link rollup rides the overview (no public-link canvas seeded → 0).
+    expect(body.publicLinkCount).toBe(0);
     expect(body.userCount).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.topCanvases)).toBe(true);
     // Expanded overview fields (§6.10.6).

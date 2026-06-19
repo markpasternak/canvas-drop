@@ -60,7 +60,14 @@ const ROW = {
   url: "http://x/c/happy-otter",
   title: "Happy Otter",
   status: "active",
+  access: "private",
+  publicationState: "published",
+  galleryListed: true,
+  galleryTemplatable: false,
+  galleryFeatured: false,
   disabledReason: null,
+  hasPassword: false,
+  sharedExpiresAt: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
   sizeBytes: 2048,
   usageOps: 1280,
@@ -71,6 +78,7 @@ const ROW = {
 
 const OVERVIEW = {
   canvasCountByStatus: { active: 3, disabled: 1, archived: 2, deleted: 4 },
+  publicLinkCount: 2,
   userCount: 7,
   totalFileBytes: 4096,
   totalOps: 9001,
@@ -242,9 +250,14 @@ describe("admin dashboard", () => {
     expect(screen.getByText("Unique viewers")).toBeInTheDocument();
     expect(screen.getByText("Deploys")).toBeInTheDocument();
     expect(screen.getByText("27")).toBeInTheDocument(); // deploys
-    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
+    // "Happy Otter" appears in the Top-canvases section (and the attention lane).
+    expect(screen.getAllByText("Happy Otter").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("happy-otter")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Happy Otter/ })).not.toBeInTheDocument();
+    // No link opens another owner's canvas detail (admins 404 there). The
+    // attention lane links to the filtered /admin/canvases table, never /canvases/$id.
+    for (const link of screen.queryAllByRole("link")) {
+      expect(link.getAttribute("href") ?? "").not.toMatch(/\/canvases\/[^/?]+$/);
+    }
     const adminNav = screen.getByRole("navigation", { name: "Admin sections" });
     expect(within(adminNav).getByRole("link", { name: "Overview" })).toHaveAttribute(
       "aria-current",
@@ -365,7 +378,8 @@ describe("admin dashboard", () => {
     expect(screen.queryByText("AI spend by user")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /AI usage/i }));
     expect(await screen.findByText("AI spend by canvas")).toBeVisible();
-    expect(screen.getByText("$4.00")).toBeInTheDocument();
+    // $4.00 shows in the AI-spend panel (and the attention lane's top-spender row).
+    expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(1);
     // Spend is attributed to the canvas's owner (object fact).
     expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
   });
@@ -381,18 +395,21 @@ describe("admin dashboard", () => {
     mockFetch(handlers);
     const first = renderAt("/admin");
     const user = userEvent.setup();
-    // "Top canvases by usage" is open by default; collapse it.
+    // "Top canvases by usage" is open by default; collapse it. "1,280 ops" also
+    // appears in the always-visible attention lane, so scope to the ranked list item.
     const toggle = await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(screen.getByText("1,280 ops")).toBeVisible();
+    const opsInList = () =>
+      screen.getAllByText("1,280 ops").find((el) => el.closest("li") !== null) as HTMLElement;
+    expect(opsInList()).toBeVisible();
     await user.click(toggle);
-    expect(screen.getByText("1,280 ops")).not.toBeVisible();
+    expect(opsInList()).not.toBeVisible();
     first.unmount();
 
     // Remount: the collapsed state was persisted, so the list stays hidden.
     mockFetch(handlers);
     renderAt("/admin");
     await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(await screen.findByText("1,280 ops")).not.toBeVisible();
+    await waitFor(() => expect(opsInList()).not.toBeVisible());
   });
 
   it("paginates with Previous/Next (offset) and shows the X–Y of N range", async () => {
@@ -711,6 +728,470 @@ describe("admin dashboard", () => {
       );
       expect(call).toBeTruthy();
       expect(JSON.parse(call?.body ?? "{}").value).toBe("sk-ant-secret-1234");
+    });
+  });
+
+  describe("needs-attention lane (U18)", () => {
+    function overviewHandlers(overviewBody: unknown, aiBody: unknown = AI_USAGE) {
+      return {
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/overview": () => json(overviewBody),
+        "GET /api/admin/ai-usage": () => json(aiBody),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "GET /api/admin/canvases?access=public_link&limit=50&offset=0": () => canvasPage([ROW]),
+        "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([]),
+        "GET /api/admin/canvases?status=disabled&limit=50&offset=0": () => canvasPage([]),
+      };
+    }
+
+    it("renders each derivable signal with its count (public links, purge, disabled, spend, usage)", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      // Public-link exposure (publicLinkCount=2) — scope the count to its row.
+      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
+      expect(publicRow).not.toBeNull();
+      expect(within(publicRow as HTMLElement).getByText("2")).toBeInTheDocument();
+      // Purge backlog (deleted=4, oldest 12d ago).
+      expect(screen.getByText("Awaiting purge")).toBeInTheDocument();
+      expect(screen.getByText(/Oldest deleted 12d ago/)).toBeInTheDocument();
+      // Disabled (1).
+      expect(screen.getByText("Disabled canvases")).toBeInTheDocument();
+      // Top AI spender ($4.00 from AI_USAGE).
+      expect(screen.getByText("Top AI spender")).toBeInTheDocument();
+      // Most active canvas (1,280 ops, from topCanvases).
+      expect(screen.getByText("Most active canvas")).toBeInTheDocument();
+    });
+
+    it("links each signal to its filtered admin canvases view", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
+      expect(publicRow).toHaveAttribute("href", expect.stringContaining("access=public_link"));
+      const purgeRow = screen.getByText("Awaiting purge").closest("a");
+      expect(purgeRow).toHaveAttribute("href", expect.stringContaining("status=deleted"));
+      const disabledRow = screen.getByText("Disabled canvases").closest("a");
+      expect(disabledRow).toHaveAttribute("href", expect.stringContaining("status=disabled"));
+    });
+
+    it("clicking the public-link signal navigates to the access=public_link table view", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      const user = userEvent.setup();
+      await user.click(await screen.findByText("Public-link canvases"));
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?access=public_link&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("hides individual signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
+      const clean = {
+        ...OVERVIEW,
+        canvasCountByStatus: { active: 5 },
+        publicLinkCount: 0,
+        oldestDeletedAt: null,
+        topCanvases: [],
+      };
+      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+      renderAt("/admin");
+      expect(await screen.findByText("Total views")).toBeInTheDocument();
+      // No signals → none of the signal rows render.
+      expect(screen.queryByText("Public-link canvases")).not.toBeInTheDocument();
+      expect(screen.queryByText("Awaiting purge")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disabled canvases")).not.toBeInTheDocument();
+    });
+
+    it("renders an all-clear state (lane stays visible) when nothing is flagged", async () => {
+      const clean = {
+        ...OVERVIEW,
+        canvasCountByStatus: { active: 5 },
+        publicLinkCount: 0,
+        oldestDeletedAt: null,
+        topCanvases: [],
+      };
+      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+      renderAt("/admin");
+      // The lane itself is ALWAYS shown — the section header + a calm all-clear message
+      // explaining what it watches, never vanishing on a clean instance.
+      expect(await screen.findByRole("button", { name: /Needs attention/i })).toBeInTheDocument();
+      expect(screen.getByText("Nothing needs attention right now")).toBeInTheDocument();
+      expect(screen.getByText(/public-link exposure/i)).toBeInTheDocument();
+    });
+
+    it("has no trend-delta or screenshot-failure UI", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      await screen.findByText("Public-link canvases");
+      expect(screen.queryByText(/week over week/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/vs\.? last/i)).not.toBeInTheDocument();
+    });
+
+    it("renders the URGENT (amber) purge treatment when the oldest deleted canvas is >30 days old", async () => {
+      // 31-day-old oldest-deleted crosses the PURGE_URGENT_DAYS=30 threshold, so the
+      // "Awaiting purge" row reads as urgent (amber accent + warning-toned count),
+      // not the routine info treatment.
+      const urgentPurge = { ...OVERVIEW, oldestDeletedAt: Date.now() - 31 * 86400000 };
+      mockFetch(overviewHandlers(urgentPurge));
+      renderAt("/admin");
+
+      const detail = await screen.findByText(/Oldest deleted 31d ago/);
+      const row = detail.closest("a") as HTMLElement;
+      // The whole row carries the amber urgent accent…
+      expect(row.className).toMatch(/warning/);
+      // …and the count is rendered in the warning tone (not the calm fg tone).
+      const count = within(row).getByText("4");
+      expect(count.className).toMatch(/text-warning/);
+    });
+  });
+
+  describe("admin featured toggle (U18)", () => {
+    it("featured rows show a Featured badge in the table", async () => {
+      const featured = { ...ROW, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featured]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(screen.getByText("Featured")).toBeInTheDocument();
+    });
+
+    it("the Feature action POSTs galleryFeatured=true for an unfeatured canvas", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Feature in gallery" }));
+      await waitFor(() => {
+        const call = calls.find((c) => c.path === "/api/admin/canvases/c1/feature");
+        expect(call).toBeTruthy();
+        expect(JSON.parse(call?.body ?? "{}").featured).toBe(true);
+      });
+    });
+
+    it("offers Feature only for a gallery-listed + published row", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toBeInTheDocument();
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("disables Feature for a NON-listed row with an explanatory hint", async () => {
+      const notListed = { ...ROW, galleryListed: false };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([notListed]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAttribute("title", "Only gallery-listed canvases can be featured");
+    });
+
+    it("disables Feature for a listed-but-DRAFT (unpublished) row", async () => {
+      const draft = { ...ROW, galleryListed: true, publicationState: "draft" as const };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([draft]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("a featured row shows Unfeature (enabled) even when no longer gallery-listed", async () => {
+      // Stale featured flag on a since-unlisted canvas → Unfeature must stay available.
+      const featuredNotListed = { ...ROW, galleryListed: false, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featuredNotListed]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Unfeature" });
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("a featured canvas shows Unfeature and POSTs galleryFeatured=false", async () => {
+      const featured = { ...ROW, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featured]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Unfeature" }));
+      await waitFor(() => {
+        const call = calls.find((c) => c.path === "/api/admin/canvases/c1/feature");
+        expect(call).toBeTruthy();
+        expect(JSON.parse(call?.body ?? "{}").featured).toBe(false);
+      });
+    });
+
+    it("surfaces an error toast when the feature POST fails (doFeature catch)", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "POST /api/admin/canvases/c1/feature": () =>
+          json({ message: "Could not feature this canvas." }, 500),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Feature in gallery" }));
+      // The doFeature catch surfaces the failure instead of leaving the click silent.
+      expect(await screen.findByText(/could not feature this canvas/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("admin canvases ↔ owner-list parity (template + gallery filters, Open, scope)", () => {
+    it("makes the admin scope unmistakable: an Admin · All owners eyebrow + the owner column", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
+      // The cross-owner scope eyebrow distinguishes this from the owner "Your canvases".
+      expect(screen.getByText("Admin · All owners")).toBeInTheDocument();
+      // The owner column stays visible (admin sees who owns each).
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
+    });
+
+    it("filters by Template via ?templatable=true", async () => {
+      const tmpl = {
+        ...ROW,
+        id: "ct",
+        slug: "starter-kit",
+        title: "Starter Kit",
+        galleryTemplatable: true,
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases?templatable=true&limit=50&offset=0": () => canvasPage([tmpl]),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Template" }));
+      expect(await screen.findByText("Starter Kit")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?templatable=true&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("filters by Gallery (listed) via ?listed=true", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases?listed=true&limit=50&offset=0": () => canvasPage([ROW]),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Gallery" }));
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?listed=true&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("the Open action targets the canvas public URL in a new tab (whole_org → viewable)", async () => {
+      const orgRow = { ...ROW, access: "whole_org" };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([orgRow]),
+      });
+      renderAt("/admin/canvases");
+      const open = await screen.findByRole("link", {
+        name: "Open Happy Otter in a new tab",
+      });
+      expect(open).toHaveAttribute("href", "http://x/c/happy-otter");
+      expect(open).toHaveAttribute("target", "_blank");
+      expect(open).toHaveAttribute("rel", "noreferrer");
+    });
+
+    it("offers Open for a public_link canvas and for a canvas the admin owns", async () => {
+      const publicRow = { ...ROW, id: "cp", title: "Public One", access: "public_link" };
+      const ownRow = {
+        ...ROW,
+        id: "co",
+        title: "My Own",
+        access: "private",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([publicRow, ownRow]),
+      });
+      renderAt("/admin/canvases");
+      expect(
+        await screen.findByRole("link", { name: "Open Public One in a new tab" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open My Own in a new tab" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's private canvas (admin can't view it), keeping the kebab", async () => {
+      // ROW is private and owned by u1; ADMIN_ME is the admin (id "admin"), so Open
+      // would lead to a gate/404 — it must be absent, while governance actions remain.
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      // The governance kebab is still present for the row.
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's specific_people canvas (not knowable client-side)", async () => {
+      const specific = { ...ROW, access: "specific_people" };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([specific]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides Open for a disabled canvas even when the admin owns it (it serves a disabled page)", async () => {
+      // Whole_org + owned by the admin would normally be viewable, but a disabled
+      // canvas shows the "disabled" page to everyone, so Open must not appear.
+      const disabledOwned = {
+        ...ROW,
+        status: "disabled",
+        access: "whole_org",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+        disabledReason: "policy",
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([disabledOwned]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      // Governance kebab stays available (Enable, etc.).
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for an ARCHIVED canvas even when the admin owns it (status guard)", async () => {
+      // The status guard fires before any access/ownership check: an archived canvas
+      // is offline and serves a status page to everyone, including its owner.
+      const archivedOwned = {
+        ...ROW,
+        status: "archived",
+        access: "whole_org",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([archivedOwned]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's PASSWORD-protected whole_org canvas (hits the unlock gate)", async () => {
+      // whole_org would normally be admin-viewable, but a password gate stands between
+      // any non-owner and the content — so Open would just land on the unlock screen.
+      const passworded = { ...ROW, access: "whole_org", hasPassword: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([passworded]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's EXPIRED public_link canvas (serves the expired page)", async () => {
+      // public_link with a share window that has already lapsed serves the expired
+      // page to everyone but the owner — Open must not appear for the admin.
+      const expired = {
+        ...ROW,
+        access: "public_link",
+        sharedExpiresAt: Date.now() - 60_000,
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([expired]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("offers Open for an active, no-password, unexpired whole_org canvas", async () => {
+      // The positive case: reachable by any org member, no gate, no expiry → Open shows.
+      const openable = { ...ROW, access: "whole_org", hasPassword: false, sharedExpiresAt: null };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([openable]),
+      });
+      renderAt("/admin/canvases");
+      expect(
+        await screen.findByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).toBeInTheDocument();
+    });
+
+    it("shows a Template badge on a templatable row (owner-list badge vocabulary)", async () => {
+      const tmpl = { ...ROW, galleryTemplatable: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([tmpl]),
+      });
+      renderAt("/admin/canvases");
+      const title = await screen.findByText("Happy Otter");
+      // "Template" also names the filter chip (a button); the row badge is the SPAN
+      // inside this canvas's row — scope to the row and exclude the chip.
+      const row = title.closest("tr") as HTMLElement;
+      const badge = within(row).getByText("Template");
+      expect(badge.tagName).not.toBe("BUTTON");
+      expect(badge).toBeInTheDocument();
     });
   });
 });

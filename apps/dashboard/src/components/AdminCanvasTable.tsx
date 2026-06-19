@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   Prohibit,
+  Star,
 } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,9 +16,11 @@ import {
   useAdminDisableCanvas,
   useAdminEnableCanvas,
   useAdminRestoreCanvas,
+  useSetFeatured,
 } from "../lib/mutations.js";
+import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
-import { AccessBadge, StatusBadge } from "./Badge.js";
+import { AccessBadge, Badge, ConceptBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { DataTable } from "./DataTable.js";
 import { Dialog } from "./Dialog.js";
@@ -93,8 +96,23 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   const [takedownOpen, setTakedownOpen] = useState(false);
   const enable = useAdminEnableCanvas();
   const restore = useAdminRestoreCanvas();
+  const setFeatured = useSetFeatured();
   const copy = useClipboardCopy();
   const toast = useToast();
+
+  // A canvas can only be featured while it's gallery-listed AND published — the gallery
+  // featured row only shows such canvases. (Unfeature stays available regardless.)
+  const canFeature = canvas.galleryListed && canvas.publicationState === "published";
+
+  async function doFeature() {
+    const next = !canvas.galleryFeatured;
+    try {
+      await setFeatured.mutateAsync({ id: canvas.id, featured: next });
+      toast(next ? "Canvas featured in the gallery" : "Removed from featured");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update featured", "error");
+    }
+  }
 
   async function doEnable() {
     try {
@@ -118,18 +136,33 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
     <>
       <ActionMenu label={`Actions for ${canvas.title || canvas.slug}`}>
         <ActionMenuItem
-          href={canvas.url}
-          target="_blank"
-          rel="noreferrer"
-          icon={<ArrowSquareOut size={MENU_ICON} aria-hidden />}
-        >
-          Open in new tab
-        </ActionMenuItem>
-        <ActionMenuItem
           icon={<Copy size={MENU_ICON} aria-hidden />}
           onSelect={() => copy(canvas.url, "Link copied")}
         >
           Copy link
+        </ActionMenuItem>
+        {/* Admin-curated gallery feature (KTD3) — a cross-owner editorial toggle.
+            Label by current state so a single item both features and unfeatures.
+            Featuring requires the canvas to be gallery-listed + published (the gallery
+            featured row only shows such canvases; the server enforces the same), so the
+            Feature action is disabled with a hint otherwise. Unfeature is always live. */}
+        <ActionMenuItem
+          icon={
+            <Star
+              size={MENU_ICON}
+              weight={canvas.galleryFeatured ? "fill" : "regular"}
+              aria-hidden
+            />
+          }
+          onSelect={doFeature}
+          disabled={!canvas.galleryFeatured && !canFeature}
+          title={
+            !canvas.galleryFeatured && !canFeature
+              ? "Only gallery-listed canvases can be featured"
+              : undefined
+          }
+        >
+          {canvas.galleryFeatured ? "Unfeature" : "Feature in gallery"}
         </ActionMenuItem>
         {canvas.status === "active" && (
           <ActionMenuItem
@@ -159,13 +192,44 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   );
 }
 
-/** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity. */
+/** Can the current admin actually VIEW this canvas as a normal user? The admin's
+ *  governance powers don't grant view access to another owner's restricted canvas,
+ *  so "Open" (which loads the public URL as a user, access enforced server-side)
+ *  would just hit a gate/404 for those. We only offer Open for a canvas the admin
+ *  can genuinely open as a regular user:
+ *
+ *    - Only active canvases serve real content: a disabled / archived / deleted
+ *      canvas shows a status page (or 404) to everyone — including its owner — so
+ *      Open is hidden regardless of access or ownership.
+ *    - The admin's OWN active canvas is always openable (they hold the grant).
+ *    - For another owner's canvas, Open shows only when any org member could reach
+ *      it: whole_org / public_link, AND it isn't password-gated, AND its share window
+ *      hasn't expired. private / specific_people aren't knowable-reachable
+ *      client-side (a specific_people grant to the admin isn't visible here), a
+ *      password would just hit the unlock gate, and an expired share serves the
+ *      expired page — so we hide Open in all of those and keep only the kebab. */
+function adminCanView(canvas: AdminCanvasRow, viewerId: string | undefined): boolean {
+  if (canvas.status !== "active") return false;
+  // The admin's own active canvas is always openable.
+  if (viewerId && canvas.owner?.id === viewerId) return true;
+  // Another owner's canvas: must be org-reachable, unlocked, and unexpired.
+  if (canvas.access !== "whole_org" && canvas.access !== "public_link") return false;
+  if (canvas.hasPassword) return false;
+  if (canvas.sharedExpiresAt != null && canvas.sharedExpiresAt < Date.now()) return false;
+  return true;
+}
+
+/** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity.
+ *  `viewerId` is the current admin's user id, used to decide whether to offer the
+ *  per-row "Open" action (see {@link adminCanView}). */
 export function AdminCanvasTable({
   canvases,
   onOwnerClick,
+  viewerId,
 }: {
   canvases: AdminCanvasRow[];
   onOwnerClick?: (owner: NonNullable<AdminCanvasRow["owner"]>) => void;
+  viewerId?: string;
 }) {
   const navigate = useNavigate();
   const openCanvas = (id: string) => navigate({ to: "/canvases/$id", params: { id } });
@@ -185,14 +249,29 @@ export function AdminCanvasTable({
       {canvases.map((c) => (
         <tr key={c.id} className="align-middle">
           <td className="px-3 py-2">
-            <button
-              type="button"
-              onClick={() => openCanvas(c.id)}
-              className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
-              aria-label={`Open ${c.title || c.slug}`}
-            >
-              {c.title || c.slug}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openCanvas(c.id)}
+                className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
+                aria-label={`Open ${c.title || c.slug}`}
+              >
+                {c.title || c.slug}
+              </button>
+              {c.galleryFeatured && (
+                <Badge tone="accent">
+                  <Star size={11} weight="fill" aria-hidden />
+                  Featured
+                </Badge>
+              )}
+              {/* Gallery state, same badge vocabulary as the owner Your-canvases rows:
+                  Template implies listed, so they're mutually exclusive here. */}
+              {c.galleryTemplatable ? (
+                <ConceptBadge concept="templates">Template</ConceptBadge>
+              ) : c.galleryListed ? (
+                <ConceptBadge concept="listed">Listed</ConceptBadge>
+              ) : null}
+            </div>
             <div className="font-mono text-xs text-muted">{c.slug}</div>
             {c.disabledReason && (
               <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>
@@ -234,8 +313,27 @@ export function AdminCanvasTable({
             {c.usageOps.toLocaleString()}
           </td>
           <td className="px-3 py-2 text-muted">{relativeTime(c.lastActivityAt)}</td>
-          <td className="px-3 py-2 text-right">
-            <RowActions canvas={c} />
+          <td className="px-3 py-2">
+            {/* Open the canvas's public URL in a new tab — the admin views it as a
+                normal user; access is enforced server-side at view time. Only offered
+                for canvases the admin can actually reach (see adminCanView): another
+                owner's private/specific-people canvas would just hit a gate/404, so we
+                hide Open there and keep only the governance kebab. */}
+            <div className="flex items-center justify-end gap-1.5">
+              {adminCanView(c, viewerId) && (
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={rowPrimaryActionClass}
+                  aria-label={`Open ${c.title || c.slug} in a new tab`}
+                >
+                  <ArrowSquareOut size={14} aria-hidden />
+                  Open
+                </a>
+              )}
+              <RowActions canvas={c} />
+            </div>
           </td>
         </tr>
       ))}

@@ -169,6 +169,53 @@ describe("managementRoutes", () => {
     expect(body.canvases.find((cv) => cv.id === cold.id)?.recentViews).toBe(0);
   });
 
+  it("GET /?tag= filters the owner list (single match, multi-tag any-match)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const charts = await repo.create({ ownerId: owner.id, slug: "charts", apiKeyHash: "kc" });
+    const finance = await repo.create({ ownerId: owner.id, slug: "finance", apiKeyHash: "kf" });
+    await repo.updateSettings(charts.id, { tags: ["charts"] });
+    await repo.updateSettings(finance.id, { tags: ["finance"] });
+
+    const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+
+    // A single tag returns only the matching canvas.
+    const one = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app().request("/api/canvases?tag=charts"),
+    );
+    expect(one.canvases.map((cv) => cv.id)).toEqual([charts.id]);
+
+    // Repeated ?tag=a&tag=b is any-match → both canvases.
+    const both = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app().request("/api/canvases?tag=charts&tag=finance"),
+    );
+    expect(new Set(both.canvases.map((cv) => cv.id))).toEqual(new Set([charts.id, finance.id]));
+  });
+
+  it("GET /tags returns the owner's distinct tags (deduped, sorted), owner-scoped", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const repo = canvasesRepository(client);
+    const a = await repo.create({ ownerId: owner.id, slug: "a", apiKeyHash: "ka" });
+    const b = await repo.create({ ownerId: owner.id, slug: "b", apiKeyHash: "kb" });
+    const stranger = await repo.create({ ownerId: other.id, slug: "s", apiKeyHash: "ks" });
+    // Overlap across the owner's own canvases dedupes; "zebra" sorts after "charts".
+    await repo.updateSettings(a.id, { tags: ["zebra", "charts"] });
+    await repo.updateSettings(b.id, { tags: ["charts", "finance"] });
+    // A different owner's tag must NOT leak into the caller's vocabulary (§12).
+    await repo.updateSettings(stranger.id, { tags: ["secret-other-owner-tag"] });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases/tags",
+    );
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ tags: string[] }>(res);
+    // Distinct + sorted; no duplicate "charts"; no other owner's tag.
+    expect(body.tags).toEqual(["charts", "finance", "zebra"]);
+  });
+
   it("GET /:id returns the canvas to its owner, 404 to a different user", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
@@ -494,6 +541,93 @@ describe("managementRoutes", () => {
     );
     expect(asAdmin.status).toBe(404);
     expect((await canvasesRepository(client).findById(created.id))?.status).toBe("disabled");
+  });
+
+  describe("a disabled canvas is READ-ONLY to its owner (admin takedown)", () => {
+    async function seedDisabled(reason = "policy violation") {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const created = await jsonOf<{ id: string }>(
+        await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+          body: "{}",
+        }),
+      );
+      await canvasesRepository(client).setDisabled(created.id, reason);
+      return { owner, id: created.id };
+    }
+    const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+    it("rejects every owner MUTATION with a consistent DISABLED 409 carrying the reason", async () => {
+      const { owner, id } = await seedDisabled("policy violation");
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      // [method, path, body?] for each owner-mutation route.
+      const cases: Array<[string, string, unknown?]> = [
+        ["PATCH", `/api/canvases/${id}/settings`, { title: "new" }],
+        ["PATCH", `/api/canvases/${id}/capabilities`, { kv: false }],
+        ["POST", `/api/canvases/${id}/regenerate-slug`, {}],
+        ["POST", `/api/canvases/${id}/regenerate-key`, {}],
+        ["POST", `/api/canvases/${id}/allowlist`, { email: "guest@example.com" }],
+        ["DELETE", `/api/canvases/${id}/preview`, undefined],
+        ["POST", `/api/canvases/${id}/archive`, {}],
+        ["POST", `/api/canvases/${id}/unarchive`, {}],
+        ["POST", `/api/canvases/${id}/unpublish`, {}],
+        ["POST", `/api/canvases/${id}/rollback`, { version: 1 }],
+        ["DELETE", `/api/canvases/${id}`, undefined],
+      ];
+      for (const [method, path, body] of cases) {
+        const res = await app().request(path, {
+          method,
+          headers: so,
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        expect(res.status, `${method} ${path}`).toBe(409);
+        const j = await jsonOf<{ code: string; message: string }>(res);
+        expect(j.code, `${method} ${path}`).toBe("DISABLED");
+        expect(j.message).toMatch(/disabled by an administrator/i);
+        expect(j.message).toContain("policy violation"); // the reason is surfaced
+      }
+      // The canvas was never mutated — still disabled, title unchanged.
+      expect((await canvasesRepository(client).findById(id))?.status).toBe("disabled");
+    });
+
+    it("still allows READS so the owner can see the canvas + takedown reason", async () => {
+      const { owner, id } = await seedDisabled("internal review");
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      const detail = await app().request(`/api/canvases/${id}`);
+      expect(detail.status).toBe(200);
+      expect((await jsonOf<{ disabledReason: string }>(detail)).disabledReason).toBe(
+        "internal review",
+      );
+      expect((await app().request(`/api/canvases/${id}/versions`)).status).toBe(200);
+      expect((await app().request(`/api/canvases/${id}/usage`)).status).toBe(200);
+      expect((await app().request(`/api/canvases/${id}/allowlist`)).status).toBe(200);
+      expect((await app().request("/api/canvases")).status).toBe(200);
+    });
+
+    it("does NOT gate an ARCHIVED canvas — owner edits still work (regression guard)", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner.id, slug: "arch", apiKeyHash: "kh" });
+      await repo.archive(cv.id);
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      // Settings + capabilities succeed on an archived canvas (200, not 409 DISABLED).
+      const settings = await app().request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify({ title: "renamed while archived" }),
+      });
+      expect(settings.status).toBe(200);
+      const caps = await app().request(`/api/canvases/${cv.id}/capabilities`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify({ kv: false }),
+      });
+      expect(caps.status).toBe(200);
+      expect((await repo.findById(cv.id))?.title).toBe("renamed while archived");
+    });
   });
 
   it("a disabled canvas's reason reaches the OWNER but never a non-owner (M7, §12.0 #3)", async () => {
@@ -2179,22 +2313,22 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       shared: true,
       galleryListed: true,
       galleryTemplatable: true,
-      gallerySummary: "a handy starter",
-      galleryTags: ["starter"],
+      description: "a handy starter",
+      tags: ["starter"],
     });
 
     const res = await patch(app, id, { shared: false });
     const body = await jsonOf<{
       galleryListed: boolean;
       galleryTemplatable: boolean;
-      gallerySummary: string | null;
-      galleryTags: string[] | null;
+      description: string | null;
+      tags: string[] | null;
     }>(res);
     expect(body.galleryListed).toBe(false);
     expect(body.galleryTemplatable).toBe(false);
     // Metadata is retained so re-sharing restores it without re-typing.
-    expect(body.gallerySummary).toBe("a handy starter");
-    expect(body.galleryTags).toEqual(["starter"]);
+    expect(body.description).toBe("a handy starter");
+    expect(body.tags).toEqual(["starter"]);
   });
 
   it("rejects {shared:false, galleryListed:true} in one PATCH (NOT_SHARED)", async () => {
@@ -2253,7 +2387,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     }>(res);
     expect(body.total).toBe(2);
     expect(body.canvases).toHaveLength(2);
-    expect(body.limit).toBe(48);
+    expect(body.limit).toBe(30);
     expect(body.offset).toBe(0);
     expect(body.summary).toMatchObject({
       active: 2,
@@ -2325,7 +2459,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       "/api/canvases?limit=abc",
     );
     expect(junk.status).toBe(200);
-    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(48);
+    expect((await jsonOf<{ limit: number }>(junk)).limit).toBe(30);
   });
 
   it("GET / never returns another user's canvas, even with permissive params", async () => {

@@ -10,6 +10,7 @@ import {
   seedUser,
 } from "../db/repositories/gallery-test-helpers.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import type { GalleryPageDto } from "./gallery.js";
@@ -24,10 +25,12 @@ const ITEM_KEYS = [
   "slug",
   "url",
   "title",
-  "summary",
+  "description",
   "tags",
   "templatable",
   "publishedAt",
+  "galleryFeatured",
+  "recentViews",
   "hasPreview",
   "owner",
 ].sort();
@@ -195,9 +198,9 @@ describe("galleryRoutes", () => {
     const owner = await seedUser(client, "owner");
     const revenue = await seedListed(client, owner.id, {
       title: "Revenue chart",
-      galleryTags: ["finance"],
+      tags: ["finance"],
     });
-    await seedListed(client, owner.id, { title: "Game", galleryTags: ["games"] });
+    await seedListed(client, owner.id, { title: "Game", tags: ["games"] });
 
     const byQ = await get(client, "/api/gallery?q=revenue");
     expect(byQ.body.items.map((i) => i.id)).toEqual([revenue]);
@@ -207,6 +210,57 @@ describe("galleryRoutes", () => {
 
     const both = await get(client, "/api/gallery?q=revenue&tag=games");
     expect(both.body.items).toHaveLength(0);
+  });
+
+  it("multi-tag ?tag=a&tag=b is URL-shareable and any-match", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const charts = await seedListed(client, owner.id, { title: "Charts", tags: ["charts"] });
+    const games = await seedListed(client, owner.id, { title: "Games", tags: ["games"] });
+    await seedListed(client, owner.id, { title: "Tables", tags: ["tables"] });
+
+    // Repeated tag params round-trip as an array (shareable URL) and any-match.
+    const res = await get(client, "/api/gallery?tag=charts&tag=games");
+    expect(res.body.total).toBe(2);
+    expect(new Set(res.body.items.map((i) => i.id))).toEqual(new Set([charts, games]));
+  });
+
+  it("sort=trending ranks the visible set by recent views", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const hot = await seedListed(client, owner.id, { title: "Hot" });
+    const cold = await seedListed(client, owner.id, { title: "Cold" });
+
+    // hot: two distinct recent viewers; cold: one — so trending orders hot before cold.
+    const usage = usageEventsRepository(client);
+    const now = Date.now();
+    await usage.recordView({ canvasId: hot, userId: "v1", windowMs: 60_000, now });
+    await usage.recordView({ canvasId: hot, userId: "v2", windowMs: 60_000, now: now + 1 });
+    await usage.recordView({ canvasId: cold, userId: "v1", windowMs: 60_000, now: now + 2 });
+
+    const res = await get(client, "/api/gallery?sort=trending");
+    expect(res.body.items.map((i) => i.id)).toEqual([hot, cold]);
+    expect(res.body.items.find((i) => i.id === hot)?.recentViews).toBe(2);
+    expect(res.body.items.find((i) => i.id === cold)?.recentViews).toBe(1);
+  });
+
+  it("filters featured-only and exposes galleryFeatured + recentViews on each item", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const featured = await seedListed(client, owner.id, { title: "Featured" });
+    await seedListed(client, owner.id, { title: "Plain" });
+    await repo.setFeatured(featured, true);
+
+    const all = await get(client, "/api/gallery");
+    for (const item of all.body.items) {
+      expect(typeof item.galleryFeatured).toBe("boolean");
+      expect(typeof item.recentViews).toBe("number");
+    }
+    expect(all.body.items.find((i) => i.id === featured)?.galleryFeatured).toBe(true);
+
+    const onlyFeatured = await get(client, "/api/gallery?featured=1");
+    expect(onlyFeatured.body.items.map((i) => i.id)).toEqual([featured]);
   });
 
   it("excludes a password-protected canvas (plan 002: protected canvases are not listable)", async () => {
@@ -231,7 +285,7 @@ describe("galleryRoutes", () => {
 
     const junk = await get(client, "/api/gallery?limit=abc&offset=-5");
     expect(junk.status).toBe(200);
-    expect(junk.body.limit).toBe(48); // default
+    expect(junk.body.limit).toBe(30); // default
     expect(junk.body.offset).toBe(0); // clamped
   });
 
@@ -281,8 +335,8 @@ describe("galleryRoutes", () => {
     client = await makeTestDb("sqlite");
     const alice = await seedUser(client, "alice");
     const bob = await seedUser(client, "bob");
-    await seedListed(client, alice.id, { galleryTags: ["charts"] });
-    await seedListed(client, bob.id, { galleryTags: ["games", "charts"] });
+    await seedListed(client, alice.id, { tags: ["charts"] });
+    await seedListed(client, bob.id, { tags: ["games", "charts"] });
 
     const res = await buildApp(client).request("/api/gallery/facets");
     expect(res.status).toBe(200);

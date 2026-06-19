@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "../components/ErrorState.js";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -50,9 +50,21 @@ function renderTestRouter(router: unknown) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  // The rail collapse choice persists in localStorage; clear it so tests don't bleed.
+  // The rail collapse + owner-view choices persist in localStorage; clear so tests don't bleed.
   try {
     localStorage.removeItem("canvas-drop-nav-collapsed");
+    localStorage.removeItem("canvas-drop:owner-view");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
+});
+
+// The owner list now defaults to grid; these cases predate that and read list-row
+// affordances (the grid default is covered by owner-view.test.tsx). Pin the stored
+// layout to list so the legacy assertions hold (a `?view=` test still overrides it).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
   } catch {
     /* jsdom always has localStorage; guard anyway */
   }
@@ -155,8 +167,7 @@ describe("dashboard app", () => {
                   spaFallback: false,
                   previewMode: "auto",
                   galleryListed: false,
-                  gallerySummary: null,
-                  galleryTags: null,
+                  tags: null,
                   status: "active",
                   publicationState: "published",
                   disabledReason: null,
@@ -175,7 +186,9 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    expect(await screen.findByText("My Canvas")).toBeInTheDocument();
+    // "My Canvas" also appears in the U11 finish-this strip above the list; assert the
+    // row rendered via the (unique) slug rather than the now-duplicated title.
+    expect((await screen.findAllByText("My Canvas")).length).toBeGreaterThan(0);
     expect(screen.getByText("quiet-otter")).toBeInTheDocument();
   });
 
@@ -433,8 +446,7 @@ describe("dashboard app", () => {
       spaFallback: false,
       previewMode: "auto",
       galleryListed: false,
-      gallerySummary: null,
-      galleryTags: null,
+      tags: null,
       status: "active",
       publicationState: "published",
       disabledReason: null,

@@ -36,7 +36,7 @@ there is no cross-owner access and no existence leak.
 | Tool | What it does |
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). |
-| `list_canvases` | The canvases you own. Optional `query` filter, `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
+| `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). |
 | `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
 | `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`). |
@@ -53,7 +53,7 @@ there is no cross-owner access and no existence leak.
 | `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes guest grants. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
 | `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
-| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, guest-AI. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), guest-AI. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
 | `list_access` | List the canvas's allowlist — named org members + email-invited guests (each with an `id` for `revoke_access`). |
 | `grant_access` | Give a person access by email: an org member is added to the allowlist directly; an outside email gets a guest magic-link invite (oidc/dev + configured email only). Takes effect on the `specific_people` rung. |
@@ -71,6 +71,14 @@ there is no cross-owner access and no existence leak.
 
 A typical session is `create_canvas` followed by `deploy_canvas` with your files — the
 canvas is live in one round trip, and no per-canvas key is ever handled by the agent.
+
+**If an admin has disabled a canvas** (a moderation takedown), it goes **read-only**:
+the read tools (`get_canvas`, `list_versions`, `get_canvas_usage`, `get_draft`, …) keep
+working, but every mutation tool — settings/sharing via `update_canvas`, capabilities,
+slug, preview, access/guest tools, deploy / publish / rollback, archive / unpublish,
+`delete_canvas`, and the draft-edit tools — fails with `DISABLED: <reason>` (the same
+contract as the management API's `409 { code: "DISABLED" }`). The owner can still read
+the canvas and the admin's takedown reason; only an admin can re-enable it.
 
 **Every deploy publishes immediately.** There is no draft step over MCP: `deploy_canvas`
 and `finalize_deploy` make the uploaded files the new **live** version at once (kept as

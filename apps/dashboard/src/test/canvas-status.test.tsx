@@ -21,8 +21,7 @@ const CANVAS = {
   previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
-  gallerySummary: null,
-  galleryTags: null,
+  tags: null as string[] | null,
   clonedFromCanvasId: null,
   backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },
@@ -257,6 +256,59 @@ describe("canvas Overview tab", () => {
     expect(screen.getAllByText("Private").length).toBeGreaterThan(0);
   });
 
+  it("reframes the draft header around 'not live yet' with Open draft + Publish primaries", async () => {
+    mockStatus(
+      {
+        ...CANVAS,
+        access: "private",
+        currentVersionId: null,
+        shared: false,
+        publicationState: "draft",
+      },
+      [],
+    );
+    renderStatus();
+
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+
+    // The draft framing dominates the header: "Draft — not live yet", not a live URL.
+    // ("Draft" also appears in the publication badge, so assert on the lifecycle note.)
+    expect(within(header).getByText(/not live yet/i)).toBeInTheDocument();
+
+    // The two ways forward are the primaries.
+    expect(within(header).getByRole("link", { name: "Open draft" })).toHaveAttribute(
+      "href",
+      "/canvases/c1/editor",
+    );
+    expect(within(header).getByRole("button", { name: "Publish" })).toBeInTheDocument();
+
+    // A draft does NOT present the public URL as a live, reachable link, nor the
+    // "New version" / "Open live canvas" live affordances.
+    expect(within(header).queryByRole("link", { name: "Open live canvas" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "New version" })).toBeNull();
+    expect(within(header).queryByRole("link", { name: CANVAS.url })).toBeNull();
+  });
+
+  it("keeps the published header unchanged (live URL + New version, no draft framing)", async () => {
+    mockStatus();
+    renderStatus();
+
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+
+    // Published: the live URL + its open affordance and the "New version" upload
+    // remain; no draft "not live yet" framing.
+    expect(within(header).getByRole("link", { name: "Open live canvas" })).toHaveAttribute(
+      "href",
+      CANVAS.url,
+    );
+    expect(within(header).getByRole("button", { name: "New version" })).toBeInTheDocument();
+    expect(within(header).queryByText(/not live yet/i)).toBeNull();
+    expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Publish" })).toBeNull();
+  });
+
   it("keeps the disabled state explicit", async () => {
     mockStatus({
       ...CANVAS,
@@ -267,7 +319,11 @@ describe("canvas Overview tab", () => {
     renderStatus();
 
     expect(await screen.findByText("Canvas disabled")).toBeInTheDocument();
-    expect(screen.getByText("Terms of service violation")).toBeInTheDocument();
+    // The takedown reason appears on the overview card AND the shell read-only banner.
+    expect(screen.getAllByText("Terms of service violation").length).toBeGreaterThan(0);
+    // Disabled is NOT a draft: no draft reframing, no Open draft / Publish primaries.
+    expect(screen.queryByText(/not live yet/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open draft" })).toBeNull();
   });
 
   it("keeps the archived state explicit", async () => {
@@ -277,5 +333,80 @@ describe("canvas Overview tab", () => {
     expect(await screen.findByText("Canvas archived")).toBeInTheDocument();
     expect(screen.getByText(/Unarchive it to bring the same URL back/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unarchive" })).toBeInTheDocument();
+    // Archived gets Unarchive, never the draft reframing.
+    const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
+    const header = title.closest("header") as HTMLElement;
+    expect(within(header).queryByText(/not live yet/i)).toBeNull();
+    expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
+  });
+
+  describe("unified tags editor (U14)", () => {
+    it("persists tags through the settings mutation when adding via Enter", async () => {
+      const calls = mockStatus({ ...CANVAS, tags: [] });
+      const user = userEvent.setup();
+      renderStatus();
+
+      await user.type(await screen.findByLabelText("Tags"), "Roadshow{Enter}");
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(patch?.body).toBeTruthy();
+        // Trimmed + lowercased on confirm, persisted as a `tags` array.
+        const body = JSON.parse(patch?.body ?? "{}");
+        expect(body.tags).toEqual(["roadshow"]);
+      });
+    });
+
+    it("is editable on a DRAFT canvas (not publish-gated)", async () => {
+      // A draft: not published, no current version. Tags must still be editable.
+      const calls = mockStatus({
+        ...CANVAS,
+        publicationState: "draft",
+        currentVersionId: null,
+        tags: [],
+      });
+      const user = userEvent.setup();
+      renderStatus();
+
+      const input = await screen.findByLabelText("Tags");
+      expect(input).toBeEnabled();
+      await user.type(input, "wip,");
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(JSON.parse(patch?.body ?? "{}").tags).toEqual(["wip"]);
+      });
+    });
+
+    it("renders existing tags as shared Tag pills and removes one via ×", async () => {
+      const calls = mockStatus({ ...CANVAS, tags: ["alpha", "beta"] });
+      const user = userEvent.setup();
+      renderStatus();
+
+      expect(await screen.findByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Remove tag alpha" }));
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(JSON.parse(patch?.body ?? "{}").tags).toEqual(["beta"]);
+      });
+    });
+
+    it("explains tags are public in the gallery once listed", async () => {
+      mockStatus({ ...CANVAS, tags: [] });
+      renderStatus();
+
+      expect(
+        await screen.findByText(/appear publicly in the gallery once this canvas is listed/i),
+      ).toBeInTheDocument();
+    });
   });
 });

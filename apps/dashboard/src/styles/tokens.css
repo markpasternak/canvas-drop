@@ -60,6 +60,12 @@
   --logo-drop: oklch(0.49 0.105 200);
   --scrim: oklch(0.21 0.02 80 / 0.5);
 
+  /* Full-bleed card overlay (frosted safe-zone over an arbitrary preview). Stays a
+     dark translucent glass with light text in BOTH themes for readability; light mode
+     is warmer (hue 70) + more see-through, for a soft editorial feel. */
+  --card-overlay-fill: oklch(0.24 0.03 70 / 0.40);
+  --card-overlay-border: oklch(1 0 0 / 0.16);
+
   /* Elevation — soft, warm-tinted, two-layer. */
   --shadow-color: 40 30% 38%;
   --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.08);
@@ -112,6 +118,8 @@
     --logo-frame: oklch(0.965 0.004 265);
     --logo-drop: oklch(0.78 0.105 195);
     --scrim: oklch(0.04 0.01 266 / 0.66);
+    --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+    --card-overlay-border: oklch(1 0 0 / 0.12);
 
     --shadow-color: 265 60% 2%;
     --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);
@@ -164,6 +172,8 @@
   --logo-frame: oklch(0.965 0.004 265);
   --logo-drop: oklch(0.78 0.105 195);
   --scrim: oklch(0.04 0.01 266 / 0.66);
+  --card-overlay-fill: oklch(0.15 0.018 265 / 0.44);
+  --card-overlay-border: oklch(1 0 0 / 0.12);
 
   --shadow-color: 265 60% 2%;
   --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -34,8 +34,7 @@ const CANVAS = {
   spaFallback: false,
   previewMode: "auto",
   galleryListed: false,
-  gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   status: "active",
   publicationState: "published",
   disabledReason: null,
@@ -107,6 +106,39 @@ function renderVersions() {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Versions route — redesigned rows + make current", () => {
+  it("renders a balanced bordered row (current flagged) and still switches the current version", async () => {
+    const v1 = { ...VERSION, number: 1, current: true };
+    const v2 = { ...VERSION, number: 2, current: false };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      // Newest first: v2 (current candidate) then v1 (current now).
+      "GET /api/canvases/c1/versions": () => json({ versions: [v2, v1] }),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>hi</h1>", { status: 200 }),
+      "POST /api/canvases/c1/rollback": () => json({ ok: true }),
+    });
+    renderVersions();
+
+    // Redesigned rows: each version is a bordered list-row carrying its identity,
+    // the current one flagged with the Current badge on its primary line.
+    const v1Label = await screen.findByText("v1");
+    const row = v1Label.closest("li") as HTMLElement;
+    expect(row.className).toMatch(/border/);
+    expect(row.className).toMatch(/rounded-lg/);
+    expect(within(row).getByText("Current")).toBeInTheDocument();
+
+    // Make-current on the non-current version still drives the rollback flow:
+    // the row button opens the confirm dialog, whose action issues the rollback.
+    await userEvent.click(screen.getByRole("button", { name: "Make current" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Make current" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/rollback"))).toBe(true),
+    );
+  });
+});
 
 describe("Versions route — restore to draft", () => {
   it("restores directly (no confirm) when the draft is clean", async () => {

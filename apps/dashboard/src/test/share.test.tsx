@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -23,8 +23,7 @@ const CANVAS = {
   previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
-  gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   clonedFromCanvasId: null,
   status: "active",
   publicationState: "draft",
@@ -95,9 +94,10 @@ afterEach(() => {
 
 describe("share route", () => {
   it("sets a password via PATCH", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
     const calls = mockFetch({
-      "GET /api/canvases/c1": () => json(CANVAS),
-      "PATCH /api/canvases/c1/settings": () => json({ ...CANVAS, hasPassword: true }),
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () => json({ ...published, hasPassword: true }),
     });
     const user = userEvent.setup();
     renderShare();
@@ -115,10 +115,15 @@ describe("share route", () => {
   });
 
   it("surfaces the server's CDN staleness warning as a toast (password path)", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
     mockFetch({
-      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1": () => json(published),
       "PATCH /api/canvases/c1/settings": () =>
-        json({ ...CANVAS, hasPassword: true, warning: "CDN edge may keep showing this canvas." }),
+        json({
+          ...published,
+          hasPassword: true,
+          warning: "CDN edge may keep showing this canvas.",
+        }),
     });
     const user = userEvent.setup();
     renderShare();
@@ -165,7 +170,10 @@ describe("share route", () => {
   });
 
   it("Generate fills a strong password and reveals it for copying", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+    });
     const user = userEvent.setup();
     renderShare();
 
@@ -178,14 +186,61 @@ describe("share route", () => {
     expect(input.type).toBe("text");
   });
 
-  it("disables the non-private access rungs until the canvas is published", async () => {
+  it("unpublished: shows ONE locked-panel explanation, not live access controls", async () => {
     mockFetch({ "GET /api/canvases/c1": () => json(CANVAS) });
     renderShare();
 
-    expect(await screen.findByRole("radio", { name: /private/i })).not.toBeDisabled();
-    expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: /specific people/i })).toBeDisabled();
-    expect(screen.getAllByText(/publish this canvas before sharing it/i).length).toBeGreaterThan(0);
+    // A single coherent explanation of the dependency — not a notice repeated under
+    // every section.
+    expect(await screen.findByText(/sharing unlocks after you publish/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/sharing unlocks after you publish/i)).toHaveLength(1);
+
+    // The access ladder / gallery controls are NOT shown as live affordances.
+    expect(screen.queryByRole("radio", { name: /whole org/i })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /list in the gallery/i })).toBeNull();
+
+    // The CTA offers both ways forward (scoped to the locked panel, not the header).
+    const panel = screen.getByRole("region", { name: /sharing unlocks after you publish/i });
+    expect(within(panel).getByRole("button", { name: /^publish$/i })).toBeEnabled();
+    expect(within(panel).getByRole("link", { name: /open draft/i })).toBeInTheDocument();
+  });
+
+  it("unpublished: Publish CTA fires the publish mutation and reveals the ladder in place", async () => {
+    let published = false;
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        published
+          ? json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" })
+          : json(CANVAS),
+      "POST /api/canvases/c1/publish": () => {
+        published = true;
+        return json({ version: 1 });
+      },
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    const panel = await screen.findByRole("region", {
+      name: /sharing unlocks after you publish/i,
+    });
+    await user.click(within(panel).getByRole("button", { name: /^publish$/i }));
+
+    // After publishing, the canvas-detail query is invalidated/refetched; the tab
+    // re-renders with the access ladder revealed in place (no navigation).
+    expect(await screen.findByRole("radio", { name: /whole org/i })).toBeEnabled();
+    expect(screen.queryByText(/sharing unlocks after you publish/i)).toBeNull();
+  });
+
+  it("published: shows the live access ladder (rungs are enabled)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+    });
+    renderShare();
+
+    expect(await screen.findByRole("radio", { name: /private/i })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: /whole org/i })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: /specific people/i })).toBeEnabled();
   });
 
   it("shows the human-guessable heads-up for a custom slug on a link-reachable rung", async () => {
@@ -337,7 +392,12 @@ describe("share route", () => {
   });
 
   it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
-    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, shared: false }) });
+    // Published but still private: sharing is unlocked, so the gallery control is
+    // visible, but listBlocker (needs a shared access level) keeps it disabled.
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1", shared: false }),
+    });
     renderShare();
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
@@ -356,15 +416,17 @@ describe("share route", () => {
     expect(toggle).toBeEnabled();
   });
 
-  it("gallery-listing is blocked for a shared-but-unpublished canvas", async () => {
+  it("an unpublished canvas shows the locked panel, not the gallery-listing control", async () => {
+    // The publish dependency is collapsed into the single locked panel (U13), so the
+    // gallery section — and its listBlocker "publish first" notice — is not reachable
+    // while the canvas is a draft. listBlocker still gates the published path below.
     mockFetch({
       "GET /api/canvases/c1": () => json({ ...CANVAS, shared: true, currentVersionId: null }),
     });
     renderShare();
 
-    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/publish this canvas before listing/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sharing unlocks after you publish/i)).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /list in the gallery/i })).toBeNull();
   });
 
   it("gallery-listing is blocked for a password-protected canvas", async () => {
@@ -388,7 +450,13 @@ describe("share route", () => {
   it("shows the template toggle once listed, and warns before a password unlists", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          galleryListed: true,
+        }),
       "PATCH /api/canvases/c1/settings": () =>
         json({
           ...CANVAS,
@@ -418,10 +486,41 @@ describe("share route", () => {
     });
   });
 
+  it("gallery section has no editable tags input — it points to Overview instead", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          galleryListed: true,
+        }),
+    });
+    renderShare();
+
+    // The redundant gallery-tags input is gone (tags are a first-class Overview property).
+    await screen.findByRole("switch", { name: /allow others to use as a template/i });
+    expect(screen.queryByLabelText("Tags")).toBeNull();
+    // A read-only note points the owner to the unified editor.
+    const note = screen.getByText(/tags are set in/i);
+    expect(note).toBeInTheDocument();
+    expect(within(note).getByRole("link", { name: /overview/i })).toHaveAttribute(
+      "href",
+      "/canvases/c1",
+    );
+  });
+
   it("surfaces a gallery-toggle server rejection as an error toast", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, shared: true, currentVersionId: "v1", galleryListed: true }),
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          galleryListed: true,
+        }),
       "PATCH /api/canvases/c1/settings": () =>
         json({ code: "NOT_PUBLISHED", message: "Publish this canvas before listing it." }, 409),
     });

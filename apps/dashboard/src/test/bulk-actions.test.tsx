@@ -3,7 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { useBulkArchive, useBulkDelete } from "../lib/mutations.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -23,8 +23,7 @@ function canvas(over: Record<string, unknown> = {}) {
     previewMode: "auto",
     galleryListed: false,
     galleryTemplatable: false,
-    gallerySummary: null,
-    galleryTags: null,
+    tags: null,
     status: "active",
     publicationState: "published",
     disabledReason: null,
@@ -90,6 +89,22 @@ function recordingFetch(canvases: ReturnType<typeof canvas>[], fail: Set<string>
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.removeItem("canvas-drop:owner-view");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
+});
+
+// The owner list now defaults to grid; these cases predate that and read list-row
+// affordances (the grid default is covered by owner-view.test.tsx). Pin the stored
+// layout to list so the legacy assertions hold (a `?view=` test still overrides it).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
 });
 
 describe("bulk lifecycle mutations", () => {
@@ -150,7 +165,7 @@ describe("Your-canvases bulk selection", () => {
       canvas({ id: "a", slug: "sa", title: "Alpha" }),
       canvas({ id: "b", slug: "sb", title: "Beta" }),
     ]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(screen.getByRole("checkbox", { name: "Select Beta" }));
@@ -170,7 +185,7 @@ describe("Your-canvases bulk selection", () => {
       canvas({ id: "a", slug: "sa", title: "Alpha" }),
       canvas({ id: "b", slug: "sb", title: "Beta" }),
     ]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select all canvases on this page" }));
     expect(screen.getByText("2 canvases selected")).toBeInTheDocument();
@@ -182,7 +197,7 @@ describe("Your-canvases bulk selection", () => {
   it("gates bulk delete behind a hold-to-confirm dialog", async () => {
     const user = userEvent.setup();
     const calls = renderHome([canvas({ id: "a", slug: "sa", title: "Alpha" })]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));

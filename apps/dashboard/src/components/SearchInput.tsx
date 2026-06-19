@@ -8,6 +8,8 @@ export interface SearchInputProps {
   /** Accessible name for the input (required — there's no visible label). */
   "aria-label": string;
   placeholder?: string;
+  /** Optional native tooltip / hover help (e.g. describing forgiving search). */
+  title?: string;
   /** Extra classes on the wrapper (e.g. the call site's `min-w`/`flex-1` sizing). */
   className?: string;
   disabled?: boolean;
@@ -25,6 +27,7 @@ export function SearchInput({
   placeholder,
   className,
   disabled,
+  title,
   "aria-label": ariaLabel,
 }: SearchInputProps) {
   return (
@@ -40,6 +43,7 @@ export function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        title={title}
         disabled={disabled}
         className={searchInput}
       />

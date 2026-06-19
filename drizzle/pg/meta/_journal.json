@@ -169,6 +169,20 @@
       "when": 1781822296836,
       "tag": "0023_canvas_allowlist_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781858876981,
+      "tag": "0024_tags_rename_featured_searchtext",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781864728859,
+      "tag": "0025_drop_gallery_summary",
+      "breakpoints": true
     }
   ]
 }

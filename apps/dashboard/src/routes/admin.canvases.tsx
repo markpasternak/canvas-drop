@@ -4,6 +4,7 @@ import { AdminCanvasTable } from "../components/AdminCanvasTable.js";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { ACCESS_FILTER_OPTIONS } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
+import { conceptColor } from "../components/concept-colors.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
@@ -13,7 +14,7 @@ import {
   type AdminCanvasSort,
   type AdminCanvasStatus,
 } from "../lib/api.js";
-import { useAdminCanvases } from "../lib/queries.js";
+import { useAdminCanvases, useMe } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { usePagination } from "../lib/use-pagination.js";
 import type { AdminCanvasesSearch } from "../router.js";
@@ -37,9 +38,12 @@ const ADMIN_SORT_OPTIONS = [
 export default function AdminCanvases() {
   const search = useSearch({ strict: false }) as AdminCanvasesSearch;
   const navigate = useNavigate();
+  const { data: me } = useMe();
 
   const status = search.status;
   const access = search.access;
+  const templatable = search.templatable === true;
+  const listed = search.listed === true;
   const owner = search.owner;
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "recent";
@@ -48,11 +52,13 @@ export default function AdminCanvases() {
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q || status || access || owner);
+  const filtering = Boolean(q || status || access || templatable || listed || owner);
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
     status,
     access,
+    templatable: templatable || undefined,
+    listed: listed || undefined,
     q,
     owner,
     sort,
@@ -98,6 +104,20 @@ export default function AdminCanvases() {
   function setOwner(next: string) {
     navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, owner: next, page: 1 }) });
   }
+  // Boolean gallery facets: a chip toggles its flag on/off. Off clears the key from
+  // the URL (undefined) so a clean view keeps a bare URL, like the member list.
+  function toggleTemplatable() {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({ ...prev, templatable: templatable ? undefined : true, page: 1 }),
+    });
+  }
+  function toggleListed() {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({ ...prev, listed: listed ? undefined : true, page: 1 }),
+    });
+  }
   function clearFilters() {
     setText("");
     navigate({ to: "/admin/canvases", search: {} });
@@ -123,8 +143,9 @@ export default function AdminCanvases() {
   return (
     <div className="space-y-6">
       <AdminHeader
+        eyebrow="Admin · All owners"
         title="Canvases"
-        description="Search, filter, and govern every canvas on the platform."
+        description="Every canvas on the platform, across all owners. Search, filter, and govern."
       />
 
       {/* Owner drill-down banner — set when arriving from the user table or owner links. */}
@@ -165,7 +186,8 @@ export default function AdminCanvases() {
         />
       </div>
 
-      {/* Status facets (single-select chips). */}
+      {/* Facet chips, same vocabulary as Your canvases: single-select status tabs,
+          then the boolean gallery toggles (Template / Listed) set off by a hairline. */}
       <FilterBar>
         {STATUS_CHIPS.map((chip) => (
           <FilterChip
@@ -176,6 +198,21 @@ export default function AdminCanvases() {
             {chip.label}
           </FilterChip>
         ))}
+        <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+        <FilterChip
+          active={templatable}
+          onClick={toggleTemplatable}
+          dotClassName={conceptColor("templates").dot}
+        >
+          Template
+        </FilterChip>
+        <FilterChip
+          active={listed}
+          onClick={toggleListed}
+          dotClassName={conceptColor("listed").dot}
+        >
+          Gallery
+        </FilterChip>
         {filtering && (
           <button
             type="button"
@@ -218,7 +255,11 @@ export default function AdminCanvases() {
       )}
       {rows.length > 0 && (
         <div className="space-y-3">
-          <AdminCanvasTable canvases={rows} onOwnerClick={(ownerRow) => setOwner(ownerRow.id)} />
+          <AdminCanvasTable
+            canvases={rows}
+            viewerId={me?.id}
+            onOwnerClick={(ownerRow) => setOwner(ownerRow.id)}
+          />
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-subtle">
               Showing {from}–{to} of {total}

@@ -426,7 +426,11 @@ export default function Editor() {
     return (
       <TabEmptyState
         title="Editing is paused"
-        description="Unarchive this canvas to edit and publish its draft."
+        description={
+          canvas.status === "disabled"
+            ? "An administrator disabled this canvas, so it's read-only. Editing and publishing are turned off until it's restored."
+            : "Unarchive this canvas to edit and publish its draft."
+        }
       />
     );
   }

@@ -199,6 +199,80 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(restricted.warning).toMatch(/CDN/);
   });
 
+  it("update_canvas sets the unified tags under the owner check and refreshes searchText (U4)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, tags: ["Alpha", "beta"] },
+      }),
+    );
+    // The owner-facing tags round-trip through update_canvas (agent-native parity).
+    expect(updated.tags).toEqual(["Alpha", "beta"]);
+
+    // The tag write recomputes the forgiving-search blob (integration with U2): the
+    // owner-list query finds the canvas by a tag substring it had no other source for.
+    const found = await canvasesRepository(client).listByOwnerFiltered({
+      ownerId: userId,
+      q: "alph",
+      limit: 50,
+      offset: 0,
+    });
+    expect(found.items.map((c) => c.id)).toContain(created.id);
+  });
+
+  it("update_canvas sets the unified description under the owner check and refreshes searchText (U21)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, description: "Quarterly pipeline forecast" },
+      }),
+    );
+    // The unified description round-trips through update_canvas (agent-native parity, U21).
+    expect(updated.description).toBe("Quarterly pipeline forecast");
+
+    // The description write recomputes the forgiving-search blob (integration with U2):
+    // the owner-list query finds the canvas by a description substring.
+    const found = await canvasesRepository(client).listByOwnerFiltered({
+      ownerId: userId,
+      q: "pipeline",
+      limit: 50,
+      offset: 0,
+    });
+    expect(found.items.map((c) => c.id)).toContain(created.id);
+  });
+
+  it("update_canvas tags on a non-owned canvas reads as not-found (requireOwned)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@example.com");
+    const otherId = await seedUser(client, "other@example.com");
+    // Owner creates the canvas; a different account connects and tries to tag it.
+    const ownerMcp = await connect(client, { userId: ownerId });
+    const created = payload(await ownerMcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const otherMcp = await connect(client, { userId: otherId });
+    expect(
+      isError(
+        await otherMcp.callTool({
+          name: "update_canvas",
+          arguments: { id: created.id, tags: ["x"] },
+        }),
+      ),
+    ).toBe(true);
+    // The owner's tags were never touched by the non-owner's call.
+    const cv = await canvasesRepository(client).findById(created.id);
+    expect(cv?.tags ?? []).toEqual([]);
+  });
+
   it("get_canvas_file reads back the live version — listing and content — for verification", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -319,6 +393,100 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(
       isError(await mcp.callTool({ name: "set_capabilities", arguments: { id: cv.id } })),
     ).toBe(false);
+  });
+
+  it("a disabled canvas is read-only over MCP: mutations reject DISABLED, reads still work", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { slug: "disme" } }));
+    await canvasesRepository(client).setDisabled(cv.id, "policy violation");
+
+    // Every owner-mutation tool rejects with the shared DISABLED contract (incl. reason).
+    const mutations: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: "update_canvas", args: { id: cv.id, title: "new" } },
+      { name: "set_capabilities", args: { id: cv.id, kv: false } },
+      { name: "set_canvas_slug", args: { id: cv.id, slug: "renamed" } },
+      { name: "set_canvas_preview", args: { id: cv.id } },
+      { name: "regenerate_deploy_key", args: { id: cv.id } },
+      { name: "grant_access", args: { id: cv.id, email: "guest@example.com" } },
+      { name: "archive_canvas", args: { id: cv.id } },
+      { name: "unarchive_canvas", args: { id: cv.id } },
+      { name: "unpublish_canvas", args: { id: cv.id } },
+      { name: "delete_canvas", args: { id: cv.id } },
+      {
+        name: "deploy_canvas",
+        args: { id: cv.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+      },
+      // Staged-upload + rollback lifecycle mutations also go through requireMutable, so the
+      // DISABLED gate fires before any uploadId/version is consulted (dummy values are fine).
+      {
+        name: "begin_deploy",
+        args: { id: cv.id, manifest: [{ path: "index.html", hash: sha("x"), size: 1 }] },
+      },
+      {
+        name: "add_files",
+        args: { id: cv.id, uploadId: "nope", files: [{ path: "index.html", content: "x" }] },
+      },
+      { name: "finalize_deploy", args: { id: cv.id, uploadId: "nope" } },
+      { name: "rollback_canvas", args: { id: cv.id, version: 1 } },
+      // Draft EDIT tools share the same gate.
+      { name: "write_draft_file", args: { id: cv.id, path: "a.html", content: "x" } },
+      { name: "delete_draft_file", args: { id: cv.id, path: "a.html" } },
+      { name: "rename_draft_file", args: { id: cv.id, from: "a.html", to: "b.html" } },
+      { name: "restore_draft", args: { id: cv.id, version: 1 } },
+      { name: "publish_draft", args: { id: cv.id } },
+    ];
+    for (const m of mutations) {
+      const res = await mcp.callTool({ name: m.name, arguments: m.args });
+      expect(isError(res), m.name).toBe(true);
+      expect(text(res), m.name).toContain("DISABLED");
+      expect(text(res), m.name).toContain("policy violation"); // the reason is surfaced
+    }
+    // The canvas was never mutated.
+    expect((await canvasesRepository(client).findById(cv.id))?.status).toBe("disabled");
+
+    // Reads still succeed.
+    expect(isError(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+  });
+
+  it("a NON-OWNER mutating a DISABLED canvas reads as not-found, NEVER DISABLED (ownership before state)", async () => {
+    // Locks the gate ordering: requireMutable checks OWNERSHIP first, so a non-owner of a
+    // disabled canvas gets the opaque not-found (no existence leak, §12.0) — surfacing the
+    // DISABLED 409 would reveal the row exists. The MCP surface is per-account (no admin
+    // path), so a non-owner admin is just another non-owner here.
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@example.com");
+    const otherId = await seedUser(client, "other@example.com");
+    const ownerMcp = await connect(client, { userId: ownerId });
+    const cv = payload(await ownerMcp.callTool({ name: "create_canvas", arguments: {} }));
+    await canvasesRepository(client).setDisabled(cv.id, "policy violation");
+
+    const otherMcp = await connect(client, { userId: otherId });
+    const res = await otherMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "hijacked" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("not found");
+    // The non-owner must NOT see the disabled state or its reason.
+    expect(text(res)).not.toContain("DISABLED");
+    expect(text(res)).not.toContain("policy violation");
+    // The canvas was never touched.
+    const after = await canvasesRepository(client).findById(cv.id);
+    expect(after?.title).toBe("");
+    expect(after?.status).toBe("disabled");
   });
 
   it("set_canvas_slug changes the URL; the old slug frees up, a taken slug is rejected", async () => {
@@ -653,6 +821,74 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(list.canvases).toHaveLength(2);
   });
 
+  it("list_canvases query inherits the forgiving search (matches a tag, case/accent-insensitive)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const tagged = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Café Report" } }),
+    );
+    await mcp.callTool({ name: "create_canvas", arguments: { title: "Unrelated" } });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: tagged.id, tags: ["finance"] },
+    });
+
+    // Tag substring (not in title/slug) — proves the search blob, not just title/slug.
+    const byTag = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { query: "finance" } }),
+    );
+    expect(byTag.total).toBe(1);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(byTag.canvases.map((cv: any) => cv.id)).toEqual([tagged.id]);
+
+    // Case + accent forgiving on the title.
+    const byTitle = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { query: "CAFE" } }),
+    );
+    expect(byTitle.total).toBe(1);
+  });
+
+  it("list_canvases tags filters to canvases carrying any of the given tags (any-match parity)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const charts = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Charts" } }),
+    );
+    const other = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Other" } }),
+    );
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: charts.id, tags: ["charts"] },
+    });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: other.id, tags: ["finance"] },
+    });
+
+    const onlyCharts = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { tags: ["charts"] } }),
+    );
+    expect(onlyCharts.total).toBe(1);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(onlyCharts.canvases.map((cv: any) => cv.id)).toEqual([charts.id]);
+
+    // Any-match: passing both tags returns both canvases.
+    const both = payload(
+      await mcp.callTool({
+        name: "list_canvases",
+        arguments: { tags: ["charts", "finance"] },
+      }),
+    );
+    expect(both.total).toBe(2);
+    expect(
+      // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+      both.canvases.map((cv: any) => cv.id).sort(),
+    ).toEqual([charts.id, other.id].sort());
+  });
+
   it("list_canvases sort=popular ranks by recent views and reports view rollups (plan 004)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -939,6 +1175,17 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     });
     expect(isError(rollbackRes)).toBe(true);
     expect(text(rollbackRes)).toContain("NOT_ACTIVE");
+
+    // publish_draft on an ARCHIVED (not disabled) canvas keeps the NOT_ACTIVE
+    // ("unarchive first") message — it must NOT collapse into the DISABLED contract,
+    // since archive is owner-reversible while disable is an admin takedown.
+    const publishRes = await mcp.callTool({
+      name: "publish_draft",
+      arguments: { id: made.id },
+    });
+    expect(isError(publishRes)).toBe(true);
+    expect(text(publishRes)).toContain("NOT_ACTIVE");
+    expect(text(publishRes)).not.toContain("DISABLED");
   });
 
   it("finalize_deploy refuses an archived canvas with NOT_ACTIVE", async () => {

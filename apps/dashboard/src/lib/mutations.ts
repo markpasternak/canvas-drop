@@ -30,6 +30,7 @@ export function useUpdateSettings(id: string) {
         const optimistic: Canvas = { ...prev };
         if (patch.title !== undefined) optimistic.title = patch.title;
         if (patch.description !== undefined) optimistic.description = patch.description;
+        if (patch.tags !== undefined) optimistic.tags = patch.tags;
         if (patch.shared !== undefined) optimistic.shared = patch.shared;
         if (patch.sharedExpiresAt !== undefined) optimistic.sharedExpiresAt = patch.sharedExpiresAt;
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
@@ -461,6 +462,27 @@ export function useAdminRestoreCanvas() {
   return useMutation({
     mutationFn: (id: string) => api.admin.restoreCanvas(id),
     onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+/** Set/unset the admin-curated `galleryFeatured` flag (KTD3). Admin-only on the
+ *  server; await-then-invalidate so the table + overview reflect the new state. */
+export function useSetFeatured() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, featured }: { id: string; featured: boolean }) =>
+      api.admin.setFeatured(id, featured),
+    onSuccess: async () => {
+      // Await both invalidations so the refetch is queued before the mutation's
+      // loading state clears (the table + gallery resolve to fresh data, not stale).
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin"] }),
+        // The featured flag drives the gallery's Featured row + `?sort=featured` — an
+        // open gallery must reflect the change, so invalidate that tree too (the
+        // ["gallery"] prefix covers every parameterized gallery query + the facets).
+        qc.invalidateQueries({ queryKey: ["gallery"] }),
+      ]);
+    },
   });
 }
 

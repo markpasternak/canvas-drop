@@ -8,6 +8,7 @@ import {
   seedUndeployedCanvas,
   seedUser,
 } from "./gallery-test-helpers.js";
+import { usageEventsRepository } from "./usage-events.js";
 
 describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
   let client: DbClient;
@@ -31,8 +32,8 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(item.canvas.id).toBe(id);
     expect(item.ownerName).toBe("owner");
     expect(item.ownerAvatarUrl).toBe("https://avatars.example/owner.png");
-    expect(item.canvas.gallerySummary).toBe("A useful canvas");
-    expect(item.canvas.galleryTags).toEqual(["charts"]);
+    expect(item.canvas.description).toBe("A useful canvas");
+    expect(item.canvas.tags).toEqual(["charts"]);
   });
 
   it("excludes a canvas for each missing visibility condition", async () => {
@@ -151,7 +152,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     const repo = canvasesRepository(client);
 
     const titled = await seedListed(client, owner.id, { title: "Quarterly Revenue" });
-    await seedListed(client, owner.id, { title: "Other", gallerySummary: "team Dashboard here" });
+    await seedListed(client, owner.id, { title: "Other", description: "team Dashboard here" });
     // A literal percent in the title must only match a literal-percent query.
     const percent = await seedListed(client, owner.id, { title: "100% coverage" });
     // A literal underscore must match literally, not as a single-char wildcard.
@@ -179,15 +180,20 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
 
-    const charts = await seedListed(client, owner.id, { galleryTags: ["charts", "finance"] });
-    await seedListed(client, owner.id, { galleryTags: ["games"] });
+    const charts = await seedListed(client, owner.id, { tags: ["charts", "finance"] });
+    await seedListed(client, owner.id, { tags: ["games"] });
     // substring of a real tag must NOT match (exact membership only)
-    await seedListed(client, owner.id, { galleryTags: ["chart"] });
+    await seedListed(client, owner.id, { tags: ["chart"] });
 
-    const byTag = await repo.listGallery({ now: NOW, tag: "charts", limit: 24, offset: 0 });
+    const byTag = await repo.listGallery({ now: NOW, tag: ["charts"], limit: 24, offset: 0 });
     expect(byTag.items.map((i) => i.canvas.id)).toEqual([charts]);
 
-    const missing = await repo.listGallery({ now: NOW, tag: "nonexistent", limit: 24, offset: 0 });
+    const missing = await repo.listGallery({
+      now: NOW,
+      tag: ["nonexistent"],
+      limit: 24,
+      offset: 0,
+    });
     expect(missing.items).toHaveLength(0);
   });
 
@@ -198,15 +204,15 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
 
     const match = await seedListed(client, owner.id, {
       title: "Budget chart",
-      galleryTags: ["charts"],
+      tags: ["charts"],
     });
-    await seedListed(client, owner.id, { title: "Budget table", galleryTags: ["tables"] });
-    await seedListed(client, owner.id, { title: "Game", galleryTags: ["charts"] });
+    await seedListed(client, owner.id, { title: "Budget table", tags: ["tables"] });
+    await seedListed(client, owner.id, { title: "Game", tags: ["charts"] });
 
     const { items, total } = await repo.listGallery({
       now: NOW,
       q: "budget",
-      tag: "charts",
+      tag: ["charts"],
       limit: 24,
       offset: 0,
     });
@@ -327,13 +333,164 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     // Re-touch `first` after a real clock gap so its updated_at is strictly newest
     // while its published order stays oldest — proving `updated` ≠ `published`.
     await new Promise((r) => setTimeout(r, 5));
-    await repo.updateSettings(first, { gallerySummary: "touched" });
+    await repo.updateSettings(first, { description: "touched" });
 
     const published = await repo.listGallery({ now: NOW, sort: "published", limit: 24, offset: 0 });
     expect(published.items.map((i) => i.canvas.id)).toEqual([third, second, first]);
 
     const updated = await repo.listGallery({ now: NOW, sort: "updated", limit: 24, offset: 0 });
     expect(updated.items[0]?.canvas.id).toBe(first);
+  });
+
+  // --- 2026-06-19: multi-tag any-match, featured field/filter/sort, trending ---
+
+  it("multi-tag is any-match and URL-shareable (?tag=a&tag=b)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+
+    const charts = await seedListed(client, owner.id, { tags: ["charts"] });
+    const games = await seedListed(client, owner.id, { tags: ["games"] });
+    await seedListed(client, owner.id, { tags: ["tables"] });
+
+    // ANY-match: a canvas matches if it carries EITHER selected tag.
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      tag: ["charts", "games"],
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(2);
+    expect(new Set(items.map((i) => i.canvas.id))).toEqual(new Set([charts, games]));
+  });
+
+  it("exposes galleryFeatured on every row and filters to featured-only (published+listed)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const featured = await seedListed(client, owner.id, { title: "Featured one" });
+    const plain = await seedListed(client, owner.id, { title: "Plain one" });
+    await repo.setFeatured(featured, true);
+
+    // galleryFeatured is present on every gallery row (display flag for the badge).
+    const all = await repo.listGallery({ now: NOW, limit: 24, offset: 0 });
+    const byId = new Map(all.items.map((i) => [i.canvas.id, i.canvas.galleryFeatured]));
+    expect(byId.get(featured)).toBe(true);
+    expect(byId.get(plain)).toBe(false);
+
+    // The featured filter returns ONLY listed+published+featured canvases.
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      featured: true,
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(1);
+    expect(items.map((i) => i.canvas.id)).toEqual([featured]);
+  });
+
+  it("sort=featured puts admin-featured canvases first, then recent", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const first = await seedListed(client, owner.id);
+    const second = await seedListed(client, owner.id);
+    const third = await seedListed(client, owner.id);
+    // Feature the OLDEST-published one — featured must still float to the top.
+    await repo.setFeatured(first, true);
+
+    const { items } = await repo.listGallery({ now: NOW, sort: "featured", limit: 24, offset: 0 });
+    // featured first; the rest fall back to recent (published desc): third, second.
+    expect(items.map((i) => i.canvas.id)).toEqual([first, third, second]);
+  });
+
+  it("a stale galleryFeatured never surfaces a non-visible canvas (featured filter + sort=featured AND the visibility predicate)", async () => {
+    // §12: galleryFeatured is a display/ordering flag, NOT a visibility grant. A canvas
+    // that was listed+published+featured and then UNLISTED keeps galleryFeatured=true
+    // (stale), but the gallery visibility predicate (gallery_listed) must still exclude it.
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+
+    // Visible: listed + published + featured → DOES appear.
+    const visible = await seedListed(client, owner.id, { title: "Visible featured" });
+    await repo.setFeatured(visible, true);
+
+    // Stale: featured, but then unlisted (galleryFeatured stays true). MUST NOT appear.
+    const stale = await seedListed(client, owner.id, { title: "Stale featured" });
+    await repo.setFeatured(stale, true);
+    await repo.updateSettings(stale, { galleryListed: false });
+
+    // The featured FILTER returns only the still-visible featured canvas.
+    const filtered = await repo.listGallery({ now: NOW, featured: true, limit: 24, offset: 0 });
+    expect(filtered.total).toBe(1);
+    expect(filtered.items.map((i) => i.canvas.id)).toEqual([visible]);
+
+    // sort=featured floats featured to the top but can never surface a non-visible row.
+    const sorted = await repo.listGallery({ now: NOW, sort: "featured", limit: 24, offset: 0 });
+    expect(sorted.items.map((i) => i.canvas.id)).toEqual([visible]);
+  });
+
+  it("sort=recent matches sort=published (publishedAt desc)", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const first = await seedListed(client, owner.id);
+    const second = await seedListed(client, owner.id);
+    const third = await seedListed(client, owner.id);
+
+    const recent = await repo.listGallery({ now: NOW, sort: "recent", limit: 24, offset: 0 });
+    expect(recent.items.map((i) => i.canvas.id)).toEqual([third, second, first]);
+  });
+
+  it("sort=trending orders by recent views and hydrates recentViews on every row", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const cold = await seedListed(client, owner.id);
+    const warm = await seedListed(client, owner.id);
+    const hot = await seedListed(client, owner.id);
+
+    // Distinct viewers (the 30-min dedup is per-viewer) so each view counts.
+    const viewN = async (canvasId: string, n: number) => {
+      for (let i = 0; i < n; i++) {
+        await usage.recordView({ canvasId, userId: `viewer-${i}`, windowMs: 60_000, now: NOW });
+      }
+    };
+    await viewN(hot, 3);
+    await viewN(warm, 1);
+    // cold: zero views
+
+    const trendingSinceMs = NOW - 1_000;
+    const { items, total } = await repo.listGallery({
+      now: NOW,
+      sort: "trending",
+      trendingSinceMs,
+      limit: 24,
+      offset: 0,
+    });
+    expect(total).toBe(3);
+    expect(items.map((i) => i.canvas.id)).toEqual([hot, warm, cold]);
+    expect(items.map((i) => i.recentViews)).toEqual([3, 1, 0]);
+  });
+
+  it("hydrates recentViews on the default (published) sort too", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const usage = usageEventsRepository(client);
+    const id = await seedListed(client, owner.id);
+    await usage.recordView({ canvasId: id, userId: "viewer-a", windowMs: 60_000, now: NOW });
+    await usage.recordView({ canvasId: id, userId: "viewer-b", windowMs: 60_000, now: NOW });
+
+    const { items } = await repo.listGallery({
+      now: NOW,
+      trendingSinceMs: NOW - 1_000,
+      limit: 24,
+      offset: 0,
+    });
+    expect(items[0]?.recentViews).toBe(2);
   });
 });
 
@@ -372,12 +529,12 @@ describe.each(DIALECTS)("canvasesRepository.listGalleryFacets [%s]", (dialect) =
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
 
-    await seedListed(client, owner.id, { galleryTags: ["charts", "finance"] });
-    await seedListed(client, owner.id, { galleryTags: ["charts", "games"] });
+    await seedListed(client, owner.id, { tags: ["charts", "finance"] });
+    await seedListed(client, owner.id, { tags: ["charts", "games"] });
     // A non-visible (unlisted) canvas's tag must NOT leak into the facets.
     await repo.updateSettings(await seedPublishedCanvas(client, owner.id), {
       access: "whole_org",
-      galleryTags: ["secret"],
+      tags: ["secret"],
     });
 
     const { tags } = await repo.listGalleryFacets(NOW);

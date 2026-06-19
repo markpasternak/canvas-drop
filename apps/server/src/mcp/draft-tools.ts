@@ -6,7 +6,7 @@ import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { isTextContentType, mimeFor } from "../canvas/mime.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DraftService } from "../draft/service.js";
-import type { McpCaller } from "./server.js";
+import type { McpCaller, RequireMutable } from "./server.js";
 import { fail, failDeploy, ok } from "./tool-kit.js";
 
 interface DraftToolDeps {
@@ -19,13 +19,17 @@ interface DraftToolDeps {
  * DRAFT, publish it as a version, or restore a published version into it. Split out of
  * `server.ts` to keep the tool registry under the file-size bar; each tool still wraps
  * the same DraftService the `/api/canvases/:id/draft*` routes use, gated by the shared
- * `requireOwned` owner check (no existence leak, §12.0).
+ * `requireOwned` owner check (no existence leak, §12.0). Draft READS (get/read) use
+ * `requireOwned`; draft EDITS (write/delete/rename/publish/restore) use `requireMutable`,
+ * so a disabled (admin-taken-down) canvas is read-only to its owner here too — exactly
+ * as on the HTTP draft routes (the shared DISABLED contract).
  */
 export function registerDraftTools(
   server: McpServer,
   deps: DraftToolDeps,
   caller: McpCaller,
   requireOwned: (id: string) => Promise<Canvas | null>,
+  requireMutable: RequireMutable,
 ): void {
   /** Serialize a draft like the editor's draftView (file list + dirty/stale state). */
   async function draftViewFor(
@@ -109,8 +113,9 @@ export function registerDraftTools(
       },
     },
     async ({ id, path, content, encoding, create }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const bytes = new Uint8Array(Buffer.from(content, encoding === "base64" ? "base64" : "utf8"));
       try {
         const draft = await deps.drafts.writeFile(cv, path, bytes, {
@@ -134,8 +139,9 @@ export function registerDraftTools(
       },
     },
     async ({ id, path }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       try {
         return ok(await draftViewFor(cv, await deps.drafts.deleteFile(cv, path)));
       } catch (e) {
@@ -156,8 +162,9 @@ export function registerDraftTools(
       },
     },
     async ({ id, from, to }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       try {
         return ok(await draftViewFor(cv, await deps.drafts.renameFile(cv, from, to)));
       } catch (e) {
@@ -171,12 +178,16 @@ export function registerDraftTools(
     {
       description:
         "Publish the DRAFT of a canvas you own as a new live version (the editor's Publish button). " +
-        "Fails NOT_ACTIVE if the canvas is archived/disabled. Returns the new version's details.",
+        "Fails DISABLED if an admin has taken down the canvas, or NOT_ACTIVE if it is archived. " +
+        "Returns the new version details.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      // A disabled canvas rejects with the shared DISABLED contract; an archived one keeps
+      // the NOT_ACTIVE "unarchive first" message (requireMutable only catches disabled).
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (cv.status !== "active")
         return fail("NOT_ACTIVE: unarchive this canvas before publishing");
       try {
@@ -203,8 +214,9 @@ export function registerDraftTools(
       },
     },
     async ({ id, version }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       try {
         return ok(await draftViewFor(cv, await deps.drafts.restore(cv, version)));
       } catch (e) {

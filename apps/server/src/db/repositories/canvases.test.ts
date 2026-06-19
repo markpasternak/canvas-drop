@@ -585,6 +585,32 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     );
   });
 
+  it("listByOwnerFiltered ?tag=a&tag=b is any-match (a canvas matches any selected tag)", async () => {
+    client = await makeTestDb(dialect);
+    const me = await seedOwner(client, "me");
+    const repo = canvasesRepository(client);
+    const charts = await repo.create({ ownerId: me, slug: "charts", apiKeyHash: "k-c" });
+    const games = await repo.create({ ownerId: me, slug: "games", apiKeyHash: "k-g" });
+    const tables = await repo.create({ ownerId: me, slug: "tables", apiKeyHash: "k-t" });
+    const both = await repo.create({ ownerId: me, slug: "both", apiKeyHash: "k-b" });
+    await repo.updateSettings(charts.id, { tags: ["charts"] });
+    await repo.updateSettings(games.id, { tags: ["games"] });
+    await repo.updateSettings(tables.id, { tags: ["tables"] });
+    await repo.updateSettings(both.id, { tags: ["charts", "games"] });
+
+    const ids = async (tag: string[]) =>
+      (await repo.listByOwnerFiltered({ ownerId: me, tag, limit: 50, offset: 0 })).items
+        .map((c) => c.id)
+        .sort();
+
+    // any-match: ["charts","games"] returns charts, games, AND the canvas carrying both.
+    expect(await ids(["charts", "games"])).toEqual([charts.id, games.id, both.id].sort());
+    // single tag still works (and the "both" canvas matches on its `charts` membership).
+    expect(await ids(["charts"])).toEqual([charts.id, both.id].sort());
+    // a tag nobody carries returns nothing.
+    expect(await ids(["nonexistent"])).toEqual([]);
+  });
+
   it("ownerSummary counts only the caller's current inventory facets", async () => {
     client = await makeTestDb(dialect);
     const me = await seedOwner(client, "me");
@@ -849,5 +875,168 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     // Scoped per canvas: a different canvas's allowlist never grants.
     const other = await repo.create({ ownerId: owner, slug: "e", apiKeyHash: "h2" });
     expect(await repo.isPrincipalAllowed(other.id, { userId: member })).toBe(false);
+  });
+
+  // --- Forgiving search via searchText (plan 2026-06-19 U2, KTD1) ---------------
+
+  /** List owner-visible ids matching `?q=`, for terse search assertions. */
+  async function ownerSearchIds(
+    repo: ReturnType<typeof canvasesRepository>,
+    ownerId: string,
+    q: string,
+  ): Promise<string[]> {
+    const { items } = await repo.listByOwnerFiltered({ ownerId, q, limit: 100, offset: 0 });
+    return items.map((c) => c.id);
+  }
+
+  it("searches across title, summary, tags, and slug via searchText", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId,
+      slug: "aurora-dashboard",
+      apiKeyHash: "h",
+      title: "Quarterly Revenue",
+    });
+    await repo.updateSettings(cv.id, {
+      description: "Pipeline forecast for the board",
+      tags: ["finance", "leadership"],
+    });
+
+    // A substring of each indexed field finds it.
+    expect(await ownerSearchIds(repo, ownerId, "revenue")).toEqual([cv.id]); // title
+    expect(await ownerSearchIds(repo, ownerId, "forecast")).toEqual([cv.id]); // summary
+    expect(await ownerSearchIds(repo, ownerId, "leader")).toEqual([cv.id]); // tag (substring)
+    expect(await ownerSearchIds(repo, ownerId, "aurora")).toEqual([cv.id]); // slug
+    // A token in nothing matches nothing.
+    expect(await ownerSearchIds(repo, ownerId, "zzz")).toEqual([]);
+  });
+
+  it("is forgiving to case, whitespace, and accent differences", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h", title: "Café RÉSUMÉ" });
+
+    expect(await ownerSearchIds(repo, ownerId, "café résumé")).toEqual([cv.id]);
+    expect(await ownerSearchIds(repo, ownerId, "CAFE")).toEqual([cv.id]); // case + accent
+    expect(await ownerSearchIds(repo, ownerId, "  resume  ")).toEqual([cv.id]); // whitespace + accent
+  });
+
+  it("token-ANDs: a two-word query matches across different fields", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h", title: "Sales Report" });
+    await repo.updateSettings(cv.id, { tags: ["europe"] });
+    const other = await repo.create({
+      ownerId,
+      slug: "o",
+      apiKeyHash: "h2",
+      title: "Sales Report",
+    });
+
+    // "sales" (title) AND "europe" (tag) — only the canvas with both matches.
+    expect(await ownerSearchIds(repo, ownerId, "sales europe")).toEqual([cv.id]);
+    expect((await ownerSearchIds(repo, ownerId, "sales europe")).includes(other.id)).toBe(false);
+    // A non-matching token short-circuits the whole query to nothing.
+    expect(await ownerSearchIds(repo, ownerId, "sales nope")).toEqual([]);
+  });
+
+  it("treats literal % and _ in the query as literal characters (escaping)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const hit = await repo.create({ ownerId, slug: "s", apiKeyHash: "h", title: "50%_off sale" });
+    const miss = await repo.create({ ownerId, slug: "o", apiKeyHash: "h2", title: "5099 off" });
+
+    // Were % / _ unescaped they would wildcard-match `miss`; escaping keeps it literal.
+    const ids = await ownerSearchIds(repo, ownerId, "50%_off");
+    expect(ids).toEqual([hit.id]);
+    expect(ids.includes(miss.id)).toBe(false);
+  });
+
+  it("keeps search correct across a slug rename", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "old-slug", apiKeyHash: "h", title: "Thing" });
+    expect(await ownerSearchIds(repo, ownerId, "old-slug")).toEqual([cv.id]);
+
+    await repo.regenerateSlug(cv.id, "new-slug", true);
+    expect(await ownerSearchIds(repo, ownerId, "new-slug")).toEqual([cv.id]); // new slug finds it
+    expect(await ownerSearchIds(repo, ownerId, "old-slug")).toEqual([]); // old slug no longer does
+  });
+
+  it("recomputes searchText when title or tags are edited", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "s", apiKeyHash: "h", title: "Before" });
+    expect(await ownerSearchIds(repo, ownerId, "before")).toEqual([cv.id]);
+
+    await repo.updateSettings(cv.id, { title: "After", tags: ["renamed"] });
+    expect(await ownerSearchIds(repo, ownerId, "before")).toEqual([]); // stale term gone
+    expect(await ownerSearchIds(repo, ownerId, "after")).toEqual([cv.id]); // new title
+    expect(await ownerSearchIds(repo, ownerId, "renamed")).toEqual([cv.id]); // new tag
+  });
+
+  it("the gallery search converges on the same searchText predicate", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({
+      ownerId,
+      slug: "gallery-one",
+      apiKeyHash: "h",
+      title: "Gallery Title",
+    });
+    // Make it gallery-visible: publish, then list it with a summary + tags.
+    await deploy(client, cv.id, ownerId);
+    await repo.updateSettings(cv.id, {
+      access: "whole_org",
+      galleryListed: true,
+      description: "shared in the gallery",
+      tags: ["showcase"],
+    });
+
+    const now = Date.now();
+    const ids = async (q: string) =>
+      (await repo.listGallery({ now, q, limit: 100, offset: 0 })).items.map((r) => r.canvas.id);
+
+    // Tag + slug are NOT title/summary — the legacy gallery search couldn't find them;
+    // converging on searchText means it now does, identically to the owner list.
+    expect(await ids("showcase")).toEqual([cv.id]); // tag
+    expect(await ids("gallery-one")).toEqual([cv.id]); // slug
+    expect(await ids("GALLERY")).toEqual([cv.id]); // case-insensitive title
+    expect(await ids("nomatch")).toEqual([]);
+  });
+
+  it("owner search never crosses the owner boundary (the ownerId filter ANDs ahead of searchText, §12)", async () => {
+    // §12 owner-scope: ?q= can match a distinctive token across title/summary/tags/slug,
+    // but the ownerId filter ANDs first — owner B can never search up owner A's canvas,
+    // even with the exact token. A non-owned id reads as "not found".
+    client = await makeTestDb(dialect);
+    const ownerA = await seedOwner(client, "owner-a");
+    const ownerB = await seedOwner(client, "owner-b");
+    const repo = canvasesRepository(client);
+
+    // Owner A's canvas carries the token "zzsecret" in every searchable field.
+    const aCanvas = await repo.create({
+      ownerId: ownerA,
+      slug: "zzsecret-app",
+      apiKeyHash: "k-a",
+      title: "zzsecret report",
+    });
+    await repo.updateSettings(aCanvas.id, {
+      description: "the zzsecret pipeline",
+      tags: ["zzsecret"],
+    });
+
+    // Owner B searching the token gets ZERO results — the owner filter ANDs first.
+    expect(await ownerSearchIds(repo, ownerB, "zzsecret")).toEqual([]);
+    // Sanity: owner A searching the same token DOES find their own canvas.
+    expect(await ownerSearchIds(repo, ownerA, "zzsecret")).toEqual([aCanvas.id]);
   });
 });

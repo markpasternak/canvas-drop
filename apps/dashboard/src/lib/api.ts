@@ -99,8 +99,7 @@ export interface Canvas {
   galleryListed: boolean;
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
-  gallerySummary: string | null;
-  galleryTags: string[] | null;
+  tags: string[] | null;
   /** Lineage: the canvas this one was cloned from, or null (plan 002). */
   clonedFromCanvasId: string | null;
   /** Backend-group master switch (plan 006). */
@@ -240,8 +239,7 @@ export interface CanvasSettings {
   previewMode?: "auto" | "off";
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
-  gallerySummary?: string | null;
-  galleryTags?: string[];
+  tags?: string[];
 }
 
 /** One canvas-allowlist entry (D4 `specific_people`, U4). Members carry their org
@@ -260,11 +258,17 @@ export interface GalleryItem {
   slug: string;
   url: string;
   title: string;
-  summary: string | null;
+  description: string | null;
   tags: string[];
   /** Whether a non-owner may clone this canvas as a template (plan 002). */
   templatable: boolean;
   publishedAt: number | null;
+  /** Admin-curated editorial flag (2026-06-19) — drives the Featured badge and the
+   *  `featured` sort/filter. Display-only. */
+  galleryFeatured: boolean;
+  /** Trending views over the recent window (2026-06-19) — the count behind the
+   *  `trending` sort, present on every card (0 when none in-window). */
+  recentViews: number;
   /** A captured preview exists (plan 004) — gates the gallery cover so a card with no
    *  preview shows GenerativeCover without firing a wasted probe. */
   hasPreview: boolean;
@@ -281,8 +285,10 @@ export interface GalleryPage {
   offset: number;
 }
 
-/** Gallery sort axes (plan 004). `published` (default) = most-recently-published. */
-export type GallerySort = "published" | "updated" | "title";
+/** Gallery sort axes (plan 004; `featured`/`trending` added 2026-06-19). `published`
+ *  (default) = most-recently-published; `recent` is its alias. `featured` puts
+ *  admin-featured canvases first; `trending` ranks by recent views. */
+export type GallerySort = "published" | "recent" | "updated" | "title" | "featured" | "trending";
 
 /** A page of Your-canvases results (plan 005). `total`/`limit`/`offset` are echoed
  *  by the server so the view derives "showing X–Y of N" from authoritative values. */
@@ -307,6 +313,9 @@ export interface CanvasesQuery {
   protected?: boolean;
   listed?: boolean;
   template?: boolean;
+  /** Multi-tag any-match (2026-06-19): a canvas matches if it carries ANY of these
+   *  tags. Serialized as repeated `?tag=a&tag=b`. */
+  tag?: string[];
   /** Never-deployed (no published version) — the URL param is `undeployed`. */
   undeployed?: boolean;
   /** Lifecycle scope: omit/`active` for the live set, `archived` for the archive. */
@@ -318,11 +327,15 @@ export interface CanvasesQuery {
 
 export interface GalleryQuery {
   q?: string;
-  tag?: string;
+  /** Multi-tag any-match (single→multi 2026-06-19): a canvas matches if it carries ANY
+   *  of these tags. Serialized as repeated `?tag=a&tag=b` (URL-shareable). */
+  tag?: string[];
   /** Filter to a single owner by opaque user id (plan 004). */
   owner?: string;
   /** Only canvases a non-owner may clone (plan 004). */
   templatable?: boolean;
+  /** Only admin-featured canvases (2026-06-19). */
+  featured?: boolean;
   /** Sort axis; the server defaults to `published` when omitted (plan 004). */
   sort?: GallerySort;
   limit?: number;
@@ -336,16 +349,13 @@ export interface GalleryFacets {
 }
 
 /** Gallery page size: the client's `limit` AND the page→offset divisor. One
- *  constant so the page math can never desync from the requested page size. 48 is
- *  divisible by 2/3/4 — the responsive card grid's column counts — so a full page
- *  never leaves an orphan partial row, and it's large enough that typical accounts
- *  rarely paginate. */
-export const GALLERY_PAGE_SIZE = 48;
+ *  constant so the page math can never desync from the requested page size.
+ *  30 per page — a calmer page than the old 48. */
+export const GALLERY_PAGE_SIZE = 30;
 
-/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor. 48
- *  is divisible by 2/3/4 (the grid's column counts, incl. with the detail rail
- *  open), so a full page never leaves an orphan partial row. */
-export const CANVASES_PAGE_SIZE = 48;
+/** Your-canvases page size (plan 005): the `limit` AND the page→offset divisor.
+ *  30 per page — a calmer page than the old 48. */
+export const CANVASES_PAGE_SIZE = 30;
 
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {
@@ -552,7 +562,22 @@ export interface AdminCanvasRow {
   publicationState: PublicationState;
   /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
   access: AccessRung;
+  /** Whether the canvas is listed in the gallery. Only a listed + published canvas
+   *  can be featured (the server enforces this on the feature route), so the table
+   *  only offers "Feature in gallery" for such rows. */
+  galleryListed: boolean;
+  /** Whether the canvas is offered as a clone-able gallery template. Drives the
+   *  Template badge + the admin Template filter. */
+  galleryTemplatable: boolean;
+  /** Admin-curated editorial flag (KTD3) — reflected in the table; the Feature
+   *  toggle flips it via the admin set-featured route. */
+  galleryFeatured: boolean;
   disabledReason: string | null;
+  /** Whether a password is set on the canvas (boolean only — the hash never leaves the
+   *  server). Lets the admin Open gate warn before following a password-protected link. */
+  hasPassword: boolean;
+  /** Share-link expiry (epoch ms), or null when no expiry is set. Feeds the same gate. */
+  sharedExpiresAt: number | null;
   owner: { id: string; email: string; name: string } | null;
   sizeBytes: number;
   usageOps: number;
@@ -578,6 +603,10 @@ export type AdminCanvasSort = "recent" | "created" | "title";
 export interface AdminCanvasesQuery {
   status?: AdminCanvasStatus;
   access?: AccessRung;
+  /** Gallery facet: only clone-able templates. */
+  templatable?: boolean;
+  /** Gallery facet: only gallery-listed canvases. */
+  listed?: boolean;
   q?: string;
   owner?: string;
   sort?: AdminCanvasSort;
@@ -633,6 +662,9 @@ export const ADMIN_PAGE_SIZE = 50;
 
 export interface AdminOverview {
   canvasCountByStatus: Record<string, number>;
+  /** Active canvases published as a static public link (access='public_link') — how
+   *  much is exposed beyond the org (2026-06-19). */
+  publicLinkCount: number;
   userCount: number;
   totalFileBytes: number;
   /** Total recorded primitive ops across the platform (all time). */
@@ -710,9 +742,12 @@ export const api = {
   listGallery: (query: GalleryQuery = {}) => {
     const sp = new URLSearchParams();
     if (query.q) sp.set("q", query.q);
-    if (query.tag) sp.set("tag", query.tag);
+    // Multi-tag any-match (2026-06-19): one `tag=` param per tag, so the gallery URL
+    // stays shareable (`?tag=a&tag=b`).
+    for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.owner) sp.set("owner", query.owner);
     if (query.templatable) sp.set("templatable", "1");
+    if (query.featured) sp.set("featured", "1");
     if (query.sort && query.sort !== "published") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));
@@ -722,6 +757,11 @@ export const api = {
 
   /** Pickable owner/tag lists for the gallery filter UI (plan 004). */
   listGalleryFacets: () => request<GalleryFacets>("/api/gallery/facets"),
+
+  /** The owner's complete tag vocabulary for the Your-canvases TagFilter
+   *  (plan 2026-06-19) — distinct tags across all their non-deleted canvases,
+   *  symmetric to {@link listGalleryFacets}. Owner-scoped server-side. */
+  listCanvasTags: () => request<{ tags: string[] }>("/api/canvases/tags"),
 
   /** Your canvases (plan 005): server-side filter/search/sort + offset paging.
    *  Empty/default params are omitted so a clean view has a bare URL. */
@@ -733,6 +773,8 @@ export const api = {
     if (query.protected) sp.set("protected", "1");
     if (query.listed) sp.set("listed", "1");
     if (query.template) sp.set("template", "1");
+    // Multi-tag any-match (2026-06-19): one `tag=` param per tag (URL-shareable).
+    for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.undeployed) sp.set("undeployed", "1");
     if (query.scope === "archived") sp.set("scope", "archived");
     if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
@@ -933,6 +975,8 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
       if (query.access) sp.set("access", query.access);
+      if (query.templatable) sp.set("templatable", "true");
+      if (query.listed) sp.set("listed", "true");
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
       if (query.sort && query.sort !== "recent") sp.set("sort", query.sort);
@@ -987,6 +1031,11 @@ export const api = {
     // Un-soft-delete (distinct from the draft revert-to-version `restoreToDraft`).
     restoreCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/restore`, { method: "POST" }),
+
+    /** Admin-curated gallery feature flag (KTD3) — set/unset `galleryFeatured`.
+     *  Cross-owner editorial action; admin-only on the server. */
+    setFeatured: (id: string, featured: boolean) =>
+      request<{ ok: true }>(`/api/admin/canvases/${id}/feature`, jsonBody({ featured })),
 
     /** The unified Configuration view: every setting with value/source/secret-mask. */
     getConfig: () =>

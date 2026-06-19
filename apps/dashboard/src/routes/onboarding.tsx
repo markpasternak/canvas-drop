@@ -37,9 +37,9 @@ function PathCard({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-32 flex-col items-start gap-2.5 rounded-lg border border-transparent p-4 text-left transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:border-border hover:bg-surface-hover active:translate-y-px"
+      className="group flex min-h-32 flex-col items-start gap-2.5 rounded-lg border border-border bg-surface-raised p-4 text-left shadow-xs transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:border-border-strong hover:bg-surface-hover hover:shadow-sm active:translate-y-px"
     >
-      <span className="grid size-9 place-items-center rounded-lg border border-border bg-surface-sunken text-subtle group-hover:text-accent">
+      <span className="grid size-9 place-items-center rounded-lg border border-border bg-surface-sunken text-subtle transition-colors duration-100 [transition-timing-function:var(--ease-out)] group-hover:text-accent">
         {icon}
       </span>
       <span className="text-xs font-medium text-subtle">{label}</span>
@@ -87,41 +87,53 @@ export default function Onboarding() {
 
       <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <section
-          className="grid gap-1.5 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-panel)] sm:grid-cols-3 lg:grid-cols-1"
+          className="space-y-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)] sm:p-5"
           aria-label="Creation paths"
         >
-          <PathCard
-            icon={<FileHtml size={18} weight="duotone" aria-hidden />}
-            label="Fastest path"
-            title="Paste HTML"
-            body="Paste a snippet and get a live URL in seconds."
-            cta="Paste"
-            onClick={() => go("paste")}
-          />
-          <PathCard
-            icon={<FolderOpen size={18} weight="duotone" aria-hidden />}
-            label="Static files"
-            title="Files, folder, or ZIP"
-            body="Drag in files or a whole folder, exactly as they are."
-            cta="Upload"
-            onClick={() => go("folder")}
-          />
-          <PathCard
-            icon={<Code size={18} weight="duotone" aria-hidden />}
-            label="Programmatic"
-            title="Use the API"
-            body="Get a key and deploy programmatically or with an AI agent."
-            cta="Get a key"
-            onClick={() => go("api")}
-          />
+          <h2 className="text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
+            Pick a path
+          </h2>
+          <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-1">
+            <PathCard
+              icon={<FileHtml size={18} weight="duotone" aria-hidden />}
+              label="Fastest path"
+              title="Paste HTML"
+              body="Paste a snippet and get a live URL in seconds."
+              cta="Paste"
+              onClick={() => go("paste")}
+            />
+            <PathCard
+              icon={<FolderOpen size={18} weight="duotone" aria-hidden />}
+              label="Static files"
+              title="Files, folder, or ZIP"
+              body="Drag in files or a whole folder, exactly as they are."
+              cta="Upload"
+              onClick={() => go("folder")}
+            />
+            <PathCard
+              icon={<Code size={18} weight="duotone" aria-hidden />}
+              label="Programmatic"
+              title="Use the API"
+              body="Get a key and deploy programmatically or with an AI agent."
+              cta="Get a key"
+              onClick={() => go("api")}
+            />
+          </div>
         </section>
 
-        <Panel className="min-w-0 space-y-3">
+        <Panel className="min-w-0 space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold">Build with an AI agent</h2>
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-base font-semibold tracking-tight text-fg">
+                Build with an AI agent
+              </h2>
+              <p className="text-sm text-muted">
+                Point your agent or script at this deploy recipe to ship a canvas hands-free.
+              </p>
+            </div>
             <CopyButton value={AGENT_SNIPPET} label="Copy snippet" toastMessage="Snippet copied" />
           </div>
-          <pre className="overflow-x-auto rounded-lg bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-muted">
+          <pre className="overflow-x-auto rounded-lg border border-border bg-surface-sunken p-4 font-mono text-xs leading-relaxed text-muted">
             {AGENT_SNIPPET}
           </pre>
         </Panel>

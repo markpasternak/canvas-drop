@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -52,7 +52,7 @@ describe("create flow — backend choice", () => {
   it("defaults the backend toggle to off", async () => {
     mockFetch({});
     renderNew();
-    expect(await screen.findByRole("switch", { name: "Enable backend" })).toHaveAttribute(
+    expect(await screen.findByRole("switch", { name: /enable backend/i })).toHaveAttribute(
       "aria-checked",
       "false",
     );
@@ -66,7 +66,7 @@ describe("create flow — backend choice", () => {
     const user = userEvent.setup();
     renderNew();
 
-    await user.click(await screen.findByRole("switch", { name: "Enable backend" }));
+    await user.click(await screen.findByRole("switch", { name: /enable backend/i }));
     await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
     await user.click(screen.getByRole("button", { name: /create and publish/i }));
 
@@ -84,7 +84,7 @@ describe("create flow — backend choice", () => {
     const user = userEvent.setup();
     renderNew();
 
-    await user.click(await screen.findByRole("switch", { name: "Enable backend" }));
+    await user.click(await screen.findByRole("switch", { name: /enable backend/i }));
     await user.click(screen.getByRole("button", { name: /use the api/i }));
     await user.click(screen.getByRole("button", { name: /create key/i }));
 
@@ -110,5 +110,92 @@ describe("create flow — backend choice", () => {
       const post = calls.find((c) => c.url === "/api/canvases/paste");
       expect(post?.body).toContain('"backendEnabled":false');
     });
+  });
+});
+
+describe("create flow — source-first ordering (U16)", () => {
+  it("renders the source/method choice before the backend toggle", async () => {
+    mockFetch({});
+    renderNew();
+
+    // The source/method picker (the four methods) is present.
+    const methodRegion = await screen.findByRole("region", { name: /creation method/i });
+    const pasteButton = within(methodRegion).getByRole("button", { name: /paste html/i });
+    const backendSwitch = await screen.findByRole("switch", { name: /enable backend/i });
+
+    // DOM order: the source choice precedes the backend toggle.
+    const position = pasteButton.compareDocumentPosition(backendSwitch);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders the source picker inside a boxed panel (brand structure, U20)", async () => {
+    mockFetch({});
+    renderNew();
+    // The method picker is a labeled region rendered as an on-brand boxed panel
+    // (rounded border + surface + panel shadow), not a loose list.
+    const methodRegion = await screen.findByRole("region", { name: /creation method/i });
+    expect(methodRegion.className).toMatch(/rounded-xl/);
+    expect(methodRegion.className).toMatch(/border-border/);
+    expect(methodRegion.className).toMatch(/bg-surface/);
+  });
+
+  it("frames the backend toggle as optional", async () => {
+    mockFetch({});
+    renderNew();
+    expect(
+      await screen.findByRole("switch", { name: /enable backend \(optional\)/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("the API path surfaces a deploy curl snippet before creating, then the one-time key after", async () => {
+    const calls = mockFetch({
+      "POST /api/canvases": () =>
+        json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_one_time_key" }),
+    });
+    const user = userEvent.setup();
+    renderNew();
+
+    // Choose the agent/script path.
+    await user.click(await screen.findByRole("button", { name: /use the api/i }));
+
+    // The curl deploy snippet is surfaced up front (before any key exists).
+    expect(await screen.findByText(/what you'll run/i)).toBeInTheDocument();
+    const preCreate = document.body.textContent ?? "";
+    expect(preCreate).toContain("/v1/canvases/");
+    expect(preCreate).toContain("deploy");
+
+    // Creating reveals the real one-time key + a working curl snippet.
+    await user.click(screen.getByRole("button", { name: /create key/i }));
+    expect(await screen.findByText("cd_one_time_key")).toBeInTheDocument();
+    await vi.waitFor(() => {
+      const postCreate = document.body.textContent ?? "";
+      expect(postCreate).toContain("c1");
+      expect(postCreate).toContain("/v1/canvases/c1/deploy");
+    });
+    expect(calls.find((c) => c.url === "/api/canvases")?.method).toBe("POST");
+  });
+
+  it("an unavailable slug blocks creation (slug validation still gates submit)", async () => {
+    const calls = mockFetch({
+      // Slug availability check returns unavailable.
+      "GET /api/canvases/slug-available": () => json({ available: false }),
+      "POST /api/canvases/paste": () =>
+        json({ id: "c1", slug: "s", url: "http://x/c/s", apiKey: "cd_k", deploy: { version: 1 } }),
+    });
+    const user = userEvent.setup();
+    renderNew();
+
+    await user.type(await screen.findByLabelText("HTML"), "<h1>hi</h1>");
+    const slugInput = await screen.findByLabelText(/custom slug|slug/i);
+    await user.type(slugInput, "taken-slug");
+
+    // Wait for the availability check to resolve as unavailable, which blocks submit.
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: /create and publish/i })).toBeDisabled();
+    });
+
+    await user.click(screen.getByRole("button", { name: /create and publish/i }));
+    // No create call fired while the slug is unavailable.
+    expect(calls.find((c) => c.url === "/api/canvases/paste")).toBeUndefined();
   });
 });

@@ -31,3 +31,21 @@ export const cardHoverClass =
 export const rowHoverClass =
   "transition-colors duration-100 [transition-timing-function:var(--ease-out)] " +
   "hover:border-border-strong hover:bg-surface-raised";
+
+/**
+ * Does a click/keydown event originate from an interactive control inside a
+ * whole-card / whole-row click target — so the card/row must NOT also navigate?
+ *
+ * Shared by {@link CanvasGridCard} and {@link CanvasListRow} (they had diverging
+ * local copies — one included `summary`, the other didn't). This is the SUPERSET
+ * selector: a `<summary>` (a `<details>` disclosure) is interactive and must shield
+ * the card click in both surfaces.
+ */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest("a, button, input, select, textarea, summary, [role='button'], [role='menu']"),
+    )
+  );
+}

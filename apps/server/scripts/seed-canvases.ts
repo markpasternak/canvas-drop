@@ -285,8 +285,8 @@ async function main() {
       access: p.shared ? "whole_org" : "private",
       galleryListed: p.listed,
       galleryTemplatable: p.templatable,
-      gallerySummary: summary,
-      galleryTags: tags,
+      description: summary,
+      tags,
     });
     if (p.protectedCanvas) {
       await canvases.setPassword(canvas.id, "$seed$dev-only-placeholder-hash");

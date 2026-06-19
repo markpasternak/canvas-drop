@@ -21,10 +21,12 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
     slug: "s1",
     url: "http://x/c/s1",
     title: "Budget chart",
-    summary: "A handy budget chart",
+    description: "A handy budget chart",
     tags: ["charts"],
     templatable: false,
     publishedAt: 1,
+    galleryFeatured: false,
+    recentViews: 0,
     hasPreview: false,
     owner: { id: "u-alice", name: "alice", avatarUrl: null },
     ...over,
@@ -36,11 +38,23 @@ type Facets = {
   tags: string[];
 };
 
+/** Is this gallery request one of the U17 discovery-strip slices (Featured /
+ *  Recently published) rather than the main paginated browse? */
+function isDiscoveryCall(p: URLSearchParams): boolean {
+  return p.get("featured") === "1" || p.get("sort") === "recent";
+}
+
 /** Stub /api/gallery (browse) and /api/gallery/facets. `handler` receives the parsed
- *  browse query; `facets` seeds the owner/tag picker lists (plan 004). */
+ *  browse query; `facets` seeds the owner/tag picker lists (plan 004).
+ *
+ *  The U17 discovery rows fire their own `?featured=1` / `?sort=recent` gallery
+ *  requests. By default those resolve to an empty page (so existing main-grid
+ *  assertions see exactly one copy of each item); pass `discovery` to opt a test
+ *  into populated rows. The returned `calls` array records ALL gallery requests. */
 function stubGallery(
   handler: (params: URLSearchParams) => GalleryPage | Response,
   facets: Facets = { owners: [], tags: [] },
+  discovery?: (params: URLSearchParams) => GalleryPage | Response,
 ) {
   const calls: URLSearchParams[] = [];
   const fn = vi.fn(async (url: string) => {
@@ -48,6 +62,10 @@ function stubGallery(
     if (u.pathname === "/api/gallery/facets") return json(facets);
     if (u.pathname !== "/api/gallery") return json({ error: "not_mocked" }, 500);
     calls.push(u.searchParams);
+    if (isDiscoveryCall(u.searchParams)) {
+      const d = discovery ? discovery(u.searchParams) : page([]);
+      return d instanceof Response ? d : json(d);
+    }
     const out = handler(u.searchParams);
     return out instanceof Response ? out : json(out);
   });
@@ -76,7 +94,7 @@ function renderGallery(initial = "/gallery") {
 const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPage => ({
   items,
   total: items.length,
-  limit: 48,
+  limit: 30,
   offset: 0,
   ...over,
 });
@@ -84,8 +102,8 @@ const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPag
 afterEach(() => vi.restoreAllMocks());
 
 describe("Gallery view", () => {
-  it("renders a card grid: title links externally, summary, tags, owner", async () => {
-    stubGallery(() => page([item({ title: "Budget chart", summary: "Quarterly budget" })]));
+  it("renders a card grid: title links externally, description, tags, owner", async () => {
+    stubGallery(() => page([item({ title: "Budget chart", description: "Quarterly budget" })]));
     renderGallery();
 
     const title = await screen.findByRole("link", { name: "Budget chart" });
@@ -99,16 +117,20 @@ describe("Gallery view", () => {
   it("shows a Template badge and a 'Make a copy' action only for templatable items", async () => {
     stubGallery(() => page([item({ id: "t1", templatable: true })]));
     renderGallery();
-    expect(await screen.findByText("Template")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
+    // The content-aware fallback cover (U6) also marks the type, so "Template" can
+    // appear on both the card badge and the decorative cover marker — assert the badge
+    // exists (≥1) rather than a single match.
+    expect((await screen.findAllByText("Template")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Use template" })).toBeInTheDocument();
   });
 
   it("hides the clone action for non-templatable items", async () => {
     stubGallery(() => page([item({ id: "n1", templatable: false })]));
     renderGallery();
-    await screen.findByText("Budget chart");
+    await screen.findByRole("link", { name: "Budget chart" });
+    // A non-templatable gallery item carries no "Template" marker on badge or cover.
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Duplicate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use template" })).not.toBeInTheDocument();
   });
 
   it("shows the no-canvases-yet empty state (no filters) with a link back", async () => {
@@ -122,7 +144,7 @@ describe("Gallery view", () => {
     const calls = stubGallery((p) => (p.get("q") ? page([]) : page([item()])));
     renderGallery("/gallery?q=zzz");
 
-    expect(await screen.findByText("No canvases match your search")).toBeInTheDocument();
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
     // After clearing, the query has no q and the full listing renders.
@@ -154,17 +176,22 @@ describe("Gallery view", () => {
     await screen.findByRole("link", { name: "Everything" });
   });
 
-  it("filters by a tag chip and clears it via the X affordance", async () => {
-    const calls = stubGallery((p) =>
-      page([item({ title: p.get("tag") ? "Filtered" : "All", tags: ["charts"] })]),
+  it("filters by a card tag pill and clears it via the TagFilter chip", async () => {
+    const calls = stubGallery(
+      (p) => page([item({ title: p.get("tag") ? "Filtered" : "All", tags: ["charts"] })]),
+      // The TagFilter (which renders the removable chip) only mounts when the gallery
+      // facets carry tags — so seed the facet tag list.
+      { owners: [], tags: ["charts"] },
     );
     renderGallery();
     await screen.findByRole("link", { name: "All" });
 
+    // The card's tag pill adds the tag to the multi-tag `?tag=` selection.
     await userEvent.click(screen.getByRole("button", { name: "charts" }));
     await waitFor(() => expect(calls.some((c) => c.get("tag") === "charts")).toBe(true));
 
-    await userEvent.click(await screen.findByRole("button", { name: "Remove tag filter" }));
+    // The TagFilter control surfaces the active tag as a removable chip.
+    await userEvent.click(await screen.findByRole("button", { name: "Remove tag charts" }));
     await waitFor(() => expect(calls.some((c) => !c.get("tag"))).toBe(true));
   });
 
@@ -186,13 +213,13 @@ describe("Gallery view", () => {
     const calls = stubGallery((p) =>
       page([item({ title: p.get("q") ? "Filtered" : "Page two" })], {
         total: 80,
-        limit: 48,
+        limit: 30,
         offset: Number(p.get("offset") ?? 0),
       }),
     );
     renderGallery("/gallery?page=2");
     await screen.findByRole("link", { name: "Page two" });
-    expect(calls.some((c) => c.get("offset") === "48")).toBe(true);
+    expect(calls.some((c) => c.get("offset") === "30")).toBe(true);
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search the gallery" }), "revenue");
     // The search request goes out at offset 0, not the stale page-2 offset.
@@ -204,33 +231,33 @@ describe("Gallery view", () => {
   });
 
   it("paginates: derives range from the response and advances offset", async () => {
-    const items = Array.from({ length: 48 }, (_, i) => item({ id: `c${i}`, title: `Canvas ${i}` }));
+    const items = Array.from({ length: 30 }, (_, i) => item({ id: `c${i}`, title: `Canvas ${i}` }));
     const calls = stubGallery((p) => {
       const offset = Number(p.get("offset") ?? 0);
       return offset === 0
-        ? page(items, { total: 60, limit: 48, offset: 0 })
-        : page([item({ id: "x", title: "Last page item" })], { total: 60, limit: 48, offset: 48 });
+        ? page(items, { total: 60, limit: 30, offset: 0 })
+        : page([item({ id: "x", title: "Last page item" })], { total: 60, limit: 30, offset: 30 });
     });
     renderGallery();
 
     await screen.findByRole("link", { name: "Canvas 0" });
-    expect(screen.getByText("Showing 1–48 of 60")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1–30 of 60")).toBeInTheDocument();
     const prev = screen.getByRole("button", { name: "Previous" });
     expect(prev).toBeDisabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(calls.some((c) => c.get("offset") === "48")).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.get("offset") === "30")).toBe(true));
     await screen.findByRole("link", { name: "Last page item" });
-    expect(screen.getByText("Showing 49–49 of 60")).toBeInTheDocument();
+    expect(screen.getByText("Showing 31–31 of 60")).toBeInTheDocument();
   });
 
   it("snaps back to page 1 when the offset exceeds total after a refetch", async () => {
     const calls = stubGallery((p) => {
       const offset = Number(p.get("offset") ?? 0);
       // Page 2 requested but only 3 items exist now → out of range.
-      return offset >= 48
-        ? page([], { total: 3, limit: 48, offset })
-        : page([item({ title: "Reset to first" })], { total: 3, limit: 48, offset: 0 });
+      return offset >= 30
+        ? page([], { total: 3, limit: 30, offset })
+        : page([item({ title: "Reset to first" })], { total: 3, limit: 30, offset: 0 });
     });
     renderGallery("/gallery?page=2");
 
@@ -310,11 +337,132 @@ describe("Gallery view", () => {
       tags: ["charts"],
     });
     renderGallery("/gallery?owner=u-bob&templatable=true");
-    expect(await screen.findByText("No canvases match your search")).toBeInTheDocument();
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
     await screen.findByRole("link", { name: "Budget chart" });
     expect(calls.some((c) => !c.get("owner") && !c.get("templatable") && !c.get("tag"))).toBe(true);
+  });
+
+  it("renders the Featured discovery row (admin-curated, capped at 6)", async () => {
+    // 8 featured items come back; the row must cap at 6 and silently drop the rest.
+    const featured = Array.from({ length: 8 }, (_, i) =>
+      item({ id: `f${i}`, title: `Featured ${i}`, galleryFeatured: true }),
+    );
+    stubGallery(
+      () => page([item({ id: "grid1", title: "Grid only" })]),
+      { owners: [], tags: [] },
+      (p) => (p.get("featured") === "1" ? page(featured) : page([])),
+    );
+    renderGallery();
+
+    expect(await screen.findByRole("heading", { name: "Featured" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Featured 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Featured 5" })).toBeInTheDocument();
+    // Beyond the cap is dropped.
+    expect(screen.queryByRole("link", { name: "Featured 6" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Featured 7" })).not.toBeInTheDocument();
+  });
+
+  it("hides the Featured row entirely when no canvases are featured", async () => {
+    // Discovery defaults to empty pages, so no featured items come back.
+    stubGallery(() => page([item({ id: "g", title: "Grid only" })]));
+    renderGallery();
+    await screen.findByRole("link", { name: "Grid only" });
+    expect(screen.queryByRole("heading", { name: "Featured" })).not.toBeInTheDocument();
+  });
+
+  it("renders the Recently published discovery strip above the grid", async () => {
+    stubGallery(
+      () => page([item({ id: "grid1", title: "Grid only" })]),
+      { owners: [], tags: [] },
+      (p) =>
+        p.get("sort") === "recent" ? page([item({ id: "r1", title: "Fresh canvas" })]) : page([]),
+    );
+    renderGallery();
+    expect(await screen.findByRole("heading", { name: "Recently published" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fresh canvas" })).toBeInTheDocument();
+  });
+
+  it("top-tag shortcut chips filter the gallery via ?tag=", async () => {
+    const calls = stubGallery((p) => page([item({ title: p.get("tag") ? "Filtered" : "All" })]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    // The chip carries the "#tag" label; clicking it applies ?tag=.
+    await userEvent.click(screen.getByRole("button", { name: "#maps" }));
+    await waitFor(() => expect(calls.some((c) => c.get("tag") === "maps")).toBe(true));
+  });
+
+  it("renders the TagFilter control and selecting a tag filters via ?tag= (shareable)", async () => {
+    const calls = stubGallery((p) => page([item({ title: p.get("tag") ? "Filtered" : "All" })]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    // Open the multi-select control (sourced from the gallery-wide facet tags) and
+    // pick a tag — the gallery query then carries it as ?tag=.
+    await userEvent.click(screen.getByRole("button", { name: "Filter by tag" }));
+    await userEvent.click(await screen.findByRole("option", { name: "games" }));
+    await waitFor(() => expect(calls.some((c) => c.get("tag") === "games")).toBe(true));
+  });
+
+  it("supports multi-tag any-match: two tags serialize as repeated ?tag= (shareable)", async () => {
+    const calls = stubGallery(() => page([item()]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    // A pre-shared two-tag URL hydrates both into the query (any-match).
+    renderGallery("/gallery?tag=charts&tag=maps");
+    await screen.findByRole("link", { name: "Budget chart" });
+    await waitFor(() =>
+      expect(calls.some((c) => c.getAll("tag").sort().join(",") === "charts,maps")).toBe(true),
+    );
+  });
+
+  it("the TagFilter control hides itself when the gallery has no tags", async () => {
+    stubGallery(() => page([item()]), { owners: [], tags: [] });
+    renderGallery();
+    await screen.findByRole("link", { name: "Budget chart" });
+    expect(screen.queryByRole("button", { name: "Filter by tag" })).not.toBeInTheDocument();
+  });
+
+  it("the sort dropdown offers Featured/Trending/Recent/Title and reorders via ?sort=", async () => {
+    const calls = stubGallery(() => page([item()]));
+    renderGallery();
+    await screen.findByRole("link", { name: "Budget chart" });
+
+    const select = screen.getByRole("combobox", { name: "Sort canvases" });
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(labels).toEqual(["Featured", "Trending", "Recent", "Title A–Z"]);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Sort canvases" }),
+      "trending",
+    );
+    await waitFor(() => expect(calls.some((c) => c.get("sort") === "trending")).toBe(true));
+  });
+
+  it("the filtered empty state offers Clear filters and Browse docs", async () => {
+    stubGallery((p) => (p.get("q") ? page([]) : page([item()])));
+    renderGallery("/gallery?q=zzz");
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse docs" })).toBeInTheDocument();
+  });
+
+  it("makes Use template prominent on templatable cards (visible button, not buried)", async () => {
+    stubGallery(() => page([item({ id: "t1", templatable: true })]));
+    renderGallery();
+    const btn = await screen.findByRole("button", { name: "Use template" });
+    expect(btn).toBeVisible();
   });
 
   it("the card copy affordance carries the canvas url", async () => {

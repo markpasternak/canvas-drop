@@ -15,6 +15,10 @@ export const keys = {
   // Per-filter/page list key (plan 005). Prefixed under `canvases` so the existing
   // invalidations still hit it.
   canvasesList: (query: CanvasesQuery) => ["canvases", "list", query] as const,
+  // The owner's complete tag vocabulary for the Your-canvases TagFilter (plan
+  // 2026-06-19). Prefixed under `canvases` so the existing invalidations refresh it
+  // when a settings edit adds/removes a tag.
+  canvasTags: ["canvases", "tags"] as const,
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
@@ -115,4 +119,11 @@ export function useGallery(query: GalleryQuery) {
  *  the lists change rarely relative to a browse session. */
 export function useGalleryFacets() {
   return useQuery({ queryKey: keys.galleryFacets, queryFn: api.listGalleryFacets });
+}
+
+/** The owner's complete tag vocabulary for the Your-canvases TagFilter (plan
+ *  2026-06-19), symmetric to {@link useGalleryFacets}. Prefixed under `canvases` so a
+ *  settings edit that touches tags invalidates and refetches it. */
+export function useCanvasTags() {
+  return useQuery({ queryKey: keys.canvasTags, queryFn: api.listCanvasTags });
 }

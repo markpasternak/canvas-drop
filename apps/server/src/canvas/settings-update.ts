@@ -19,8 +19,7 @@ export interface CanvasSettingsInput {
   previewMode?: "auto" | "off";
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
-  gallerySummary?: string | null;
-  galleryTags?: string[];
+  tags?: string[];
 }
 
 export type SettingsResolution =
@@ -127,8 +126,10 @@ export function resolveSettingsUpdate(
 
   const patch: CanvasSettingsPatch = { ...rest };
   if (targetAccess !== undefined) patch.access = targetAccess;
-  // Dropping to private un-lists but KEEPS the gallery summary/tags (re-sharing restores
-  // them); a newly-set password un-lists AND clears the gallery metadata (R10).
+  // Dropping to private un-lists but KEEPS the tags (re-sharing restores listing);
+  // a newly-set password un-lists AND clears the gallery tags (R10). The unified
+  // `description` (U21) is the canvas's own overview field — NOT gallery-only — so it
+  // is never cleared here; only the gallery listing + tags are reset.
   if (targetAccess === "private") {
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
@@ -136,8 +137,7 @@ export function resolveSettingsUpdate(
   if (typeof password === "string") {
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
-    patch.gallerySummary = null;
-    patch.galleryTags = null;
+    patch.tags = null;
   }
 
   // CDN staleness advisory: if this change moves the canvas OFF the anonymously-public

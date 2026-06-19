@@ -52,6 +52,15 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 `REQUEST_FAILED` carries status `0` — it's the fallback when a request fails
 without a more specific code.
 
+> **`DISABLED` has two surfaces.** On the **runtime API** (viewers, the browser SDK)
+> a canvas an admin has taken down returns `DISABLED` with status **403** — the row
+> above. On the **owner management API + MCP**, the same takedown makes the canvas
+> **read-only to its owner**: reads succeed, but every owner mutation (settings,
+> sharing, tags, capabilities, slug, preview, deploy / publish / rollback, archive /
+> unpublish, draft edits) is refused with `DISABLED` and HTTP **409**
+> (`{ code: "DISABLED", message }`; the admin's reason is appended to the message).
+> Over MCP the same mutation fails with `DISABLED: <reason>`.
+
 ## Typed SDK errors
 
 The SDK exports four `CanvasdropError` subclasses. Any code without a dedicated

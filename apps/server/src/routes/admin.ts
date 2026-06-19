@@ -38,9 +38,17 @@ export interface AdminRoutesDeps {
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
 const ACCESS_RUNGS = ["private", "specific_people", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
+// `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
+// presence-style flags in the URL (?templatable=true), mirroring the member list.
+const boolFlag = z
+  .union([z.literal("true"), z.literal("false")])
+  .optional()
+  .transform((v) => v === "true");
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
   access: z.enum(ACCESS_RUNGS).optional(),
+  templatable: boolFlag,
+  listed: boolFlag,
   q: z.string().trim().max(200).optional(),
   owner: z.string().trim().max(100).optional(),
   sort: z.enum(CANVAS_SORTS).optional().default("recent"),
@@ -55,6 +63,7 @@ const userListQuery = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 const disableBody = z.object({ reason: z.string().trim().min(1).max(500) });
+const featureBody = z.object({ featured: z.boolean() });
 const modelsBody = z.object({ models: z.array(z.string().min(1)).min(1) });
 const quotasBody = z.object({
   quotas: z.record(z.string(), z.number().finite().positive()),
@@ -102,6 +111,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const q = listQuery.safeParse({
       status: c.req.query("status"),
       access: c.req.query("access"),
+      templatable: c.req.query("templatable"),
+      listed: c.req.query("listed"),
       q: c.req.query("q"),
       owner: c.req.query("owner"),
       sort: c.req.query("sort"),
@@ -113,6 +124,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const { items: rows, total } = await deps.admin.listAllCanvasesFiltered({
       status: q.data.status as AdminCanvasStatus | undefined,
       access: q.data.access,
+      templatable: q.data.templatable,
+      listed: q.data.listed,
       q: q.data.q,
       owner: q.data.owner,
       sort: q.data.sort,
@@ -146,7 +159,19 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         status: cv.status,
         access: cv.access,
         publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
+        // Gallery-listed flag — the client only offers "Feature in gallery" for a
+        // listed+published row (the server enforces the same on the feature route).
+        galleryListed: cv.galleryListed,
+        // Clone-as-template flag — surfaced so the table shows + filters by template.
+        galleryTemplatable: cv.galleryTemplatable,
+        // Admin-curated editorial flag (KTD3) — surfaced so the table reflects the
+        // featured state and the Feature toggle can flip it in place.
+        galleryFeatured: cv.galleryFeatured,
         disabledReason: cv.disabledReason,
+        // Open-gate inputs for the dashboard (boolean only — never the hash itself):
+        // whether a password is set, and the share-link expiry (null = no expiry).
+        hasPassword: cv.passwordHash !== null,
+        sharedExpiresAt: cv.sharedExpiresAt,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         // Size = deployed version bytes + uploaded file bytes (§6.10.1).
         sizeBytes: deployedBytes + (fileBytes.get(cv.id) ?? 0),
@@ -186,6 +211,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     });
     return c.json({
       canvasCountByStatus: stats.canvasCountByStatus,
+      publicLinkCount: stats.publicLinkCount,
       userCount: stats.userCount,
       totalFileBytes: stats.totalFileBytes,
       totalOps: stats.totalOps,
@@ -278,6 +304,43 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       action: "canvas_restore",
       actorId: c.get("user").id,
       targetId: id,
+    });
+    return c.json({ ok: true });
+  });
+
+  // --- Gallery curation (plan 2026-06-19 KTD3): set/unset the admin-curated
+  //     `galleryFeatured` editorial flag. A cross-owner action (NOT the per-account
+  //     owner check / MCP surface) — existence-404 like disable/enable/restore.
+  //     Display/sort-only; never an authorization input. ---
+  app.post("/canvases/:id/feature", sameOrigin, async (c) => {
+    const cv = await loadCanvas(deps, c.req.param("id"));
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = featureBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    // Only a gallery-listed + published canvas can be FEATURED: the gallery's featured
+    // row only ever shows listed+published+live canvases (the visibility predicate
+    // filters the rest), so featuring anything else is a no-op the admin can't see.
+    // Unfeaturing (featured=false) is ALWAYS allowed — it can never widen exposure and
+    // must work to clear a stale flag left on a since-unlisted canvas.
+    if (body.data.featured) {
+      const published =
+        publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null) === "published";
+      if (!cv.galleryListed || !published) {
+        return c.json(
+          {
+            error: "not_listed",
+            message: "Only gallery-listed canvases can be featured",
+          },
+          409,
+        );
+      }
+    }
+    await deps.canvases.setFeatured(cv.id, body.data.featured);
+    deps.audit.recordAudit({
+      action: "canvas_feature",
+      actorId: c.get("user").id,
+      targetId: cv.id,
+      meta: { featured: body.data.featured },
     });
     return c.json({ ok: true });
   });

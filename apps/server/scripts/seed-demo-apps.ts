@@ -510,8 +510,8 @@ async function main() {
       access: "whole_org",
       galleryListed: true,
       galleryTemplatable: app.templatable,
-      gallerySummary: app.summary,
-      galleryTags: app.tags,
+      description: app.summary,
+      tags: app.tags,
     });
     // Newest timestamps (minutes apart) so the demo apps top the dashboard + gallery —
     // exactly the rows the marketing shots frame.

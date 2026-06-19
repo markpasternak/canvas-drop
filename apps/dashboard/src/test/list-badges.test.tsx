@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -14,8 +14,7 @@ const base = {
   spaFallback: false,
   previewMode: "auto",
   galleryListed: false,
-  gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   status: "active",
   publicationState: "draft",
   disabledReason: null,
@@ -96,6 +95,22 @@ function renderListWith(canvases: unknown[], initialPath = "/") {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.removeItem("canvas-drop:owner-view");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
+});
+
+// These cases assert list-row badge/meta structure; the owner list now defaults to
+// grid (covered by owner-view.test.tsx). Pin the stored layout to list so they read
+// the list row (a `?view=` test would still override it).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
 });
 
 describe("list row badges", () => {
@@ -120,7 +135,7 @@ describe("list row badges", () => {
         hasPassword: true,
       }),
     ]);
-    await screen.findByText("Private one"); // list rendered
+    await screen.findAllByText("Private one"); // list rendered
 
     // Visibility now rides the quiet meta line (the access "primary"), not a dedicated
     // column. The protected-on-org primary is unique to the row (not a filter option).
@@ -175,10 +190,10 @@ describe("list row badges", () => {
         id: "tagged",
         slug: "tagged",
         title: "Tagged one",
-        galleryTags: ["alpha", "beta", "gamma", "delta", "epsilon"],
+        tags: ["alpha", "beta", "gamma", "delta", "epsilon"],
       }),
     ]);
-    await screen.findByText("Tagged one");
+    await screen.findAllByText("Tagged one");
     // First MAX_ROW_TAGS (3) render as pills; the remaining two collapse to +2.
     expect(screen.getByText("alpha")).toBeInTheDocument();
     expect(screen.getByText("beta")).toBeInTheDocument();
@@ -194,17 +209,17 @@ describe("list row badges", () => {
         slug: "listed",
         title: "Listed one",
         galleryListed: true,
-        galleryTags: ["docs"],
+        tags: ["docs"],
       }),
       canvas({
         id: "unlisted",
         slug: "unlisted",
         title: "Unlisted one",
         galleryListed: false,
-        galleryTags: ["internal"],
+        tags: ["internal"],
       }),
     ]);
-    await screen.findByText("Listed one");
+    await screen.findAllByText("Listed one");
 
     // Listing state is a near-title badge now (no dedicated Gallery column). "Listed"
     // also appears as a filter chip, so it shows more than once.
@@ -228,7 +243,7 @@ describe("list row badges", () => {
 
   it("shows no tag pills for an untagged canvas", async () => {
     renderListWith([canvas({ id: "u", slug: "untagged", title: "Untagged one" })]);
-    await screen.findByText("Untagged one");
+    await screen.findAllByText("Untagged one");
     // Untagged rows simply omit the tag row now — no "No tags" placeholder, no +N pill.
     expect(screen.queryByText("No tags")).toBeNull();
     expect(screen.queryByText(/^\+\d+$/)).toBeNull();
@@ -247,10 +262,12 @@ describe("list row badges", () => {
       ],
       "/?view=grid",
     );
-    await screen.findByText("Gridded one");
+    await screen.findByRole("link", { name: "View details for Gridded one" });
     // Cards overlay the publication state on the cover (shown for every state, unlike
-    // the list row which only badges the non-happy-path states).
-    expect(screen.getByText("Published")).toBeInTheDocument();
+    // the list row which only badges the non-happy-path states). The content-aware
+    // fallback cover (U6) also carries a status marker, so "Published" can appear more
+    // than once — assert at least one.
+    expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     // ...but the grid drops the list's right-aligned "Created" stat column.
     expect(screen.queryByText("Created")).toBeNull();
     // Bulk selection still works in the grid (per-card checkbox + the select-all control).

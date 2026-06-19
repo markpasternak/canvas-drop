@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -24,8 +24,7 @@ function canvas(over: Record<string, unknown> = {}) {
     previewMode: "auto",
     galleryListed: false,
     galleryTemplatable: false,
-    gallerySummary: null,
-    galleryTags: null,
+    tags: null,
     status: "active",
     publicationState: "published",
     disabledReason: null,
@@ -127,18 +126,40 @@ afterEach(() => {
   }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.clear();
+  } catch {
+    /* jsdom always has localStorage; defensive */
+  }
+});
+
+// These cases were authored against the historical list default and assert
+// list-row affordances (the new grid default is covered by owner-view.test.tsx).
+// Pin the per-device stored layout to list so the legacy assertions hold; a
+// `?view=grid` test still overrides it (URL wins over localStorage).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; defensive */
+  }
 });
 
 describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a card body navigates to /canvases/$id (grid view)", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/?view=grid");
-    await screen.findByText("Alpha canvas");
+    // The full-bleed card renders its cover in pure-background mode (no baked-in title),
+    // so the title is printed once — in the overlay name link. Query that real link.
+    const titleLink = await screen.findByRole("link", { name: "View details for Alpha canvas" });
     expect(selectedAttr()).toBeNull();
 
-    // The card body is the title's parent <li>; click an area that is not an
-    // interactive child (the meta line).
-    await userEvent.click(screen.getByText(/Edited/));
+    // The unified card (UX-sweep R2) is cover-fills-card: the title overlays a scrim
+    // and there's no separate "Edited" meta line. The card body is the title link's
+    // ancestor <li data-canvas-item>; click the <li> itself (a non-interactive region).
+    const card = titleLink.closest("li[data-canvas-item]");
+    if (!card) throw new Error("card <li> not found");
+    await userEvent.click(card);
 
     // Navigates to the canvas detail/overview page — not the inline rail.
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/alpha"));
@@ -148,7 +169,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a row body navigates to /canvases/$id (list view)", async () => {
     stub([canvas({ id: "row1", slug: "row1", title: "Row canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Row canvas");
+    await screen.findAllByText("Row canvas");
 
     // The slug line in the row is a non-interactive body region.
     await userEvent.click(screen.getByText("row1"));
@@ -160,7 +181,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a never-deployed row body also opens its detail page", async () => {
     stub([canvas({ id: "nd1", slug: "nd1", title: "Draft canvas", lastDeploy: null })]);
     const router = renderAt("/");
-    await screen.findByText("Draft canvas");
+    await screen.findAllByText("Draft canvas");
 
     await userEvent.click(screen.getByText("nd1"));
 
@@ -170,7 +191,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("Enter on the row body navigates to /canvases/$id", async () => {
     stub([canvas({ id: "kb", slug: "kb", title: "Keyboard canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Keyboard canvas");
+    await screen.findAllByText("Keyboard canvas");
 
     // Fire Enter from a non-interactive body element inside the row.
     const body = screen.getByText("kb");
@@ -184,7 +205,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking Open / checkbox / kebab does NOT navigate and does NOT focus", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
 
     // Open link (interactive child) targets the live URL in a new tab — it must not
     // navigate the dashboard to the detail page nor set ?selected.
@@ -206,7 +227,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("ignores an invalid / unknown ?selected", async () => {
     stub([canvas({ id: "real", slug: "real", title: "Real canvas" })]);
     renderAt("/?selected=does-not-exist");
-    await screen.findByText("Real canvas");
+    await screen.findAllByText("Real canvas");
 
     // Unknown id is not on the visible page → not reflected as a focus.
     expect(selectedAttr()).toBeNull();
@@ -217,7 +238,7 @@ describe("Your canvases — the Details button opens the inline rail (?selected)
   it("clicking Details sets ?selected without leaving the list", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
     expect(selectedAttr()).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));
@@ -235,7 +256,7 @@ describe("Your canvases — the Details button opens the inline rail (?selected)
       canvas({ id: "two", slug: "two", title: "Second canvas" }),
     ]);
     renderAt("/");
-    await screen.findByText("First canvas");
+    await screen.findAllByText("First canvas");
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for First canvas" }));
     await waitFor(() => expect(selectedAttr()).toBe("one"));
@@ -270,7 +291,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   it("renders no detail rail when nothing is focused", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
 
     expect(selectedAttr()).toBeNull();
     // The full-width library: no canvas-details region in the DOM.
@@ -280,7 +301,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   it("selecting a canvas opens the rail; clearing it removes the rail", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
     expect(detailRegion()).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));

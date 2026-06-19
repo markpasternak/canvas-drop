@@ -1,0 +1,1 @@
+ALTER TABLE `canvases` DROP COLUMN `gallery_summary`;
