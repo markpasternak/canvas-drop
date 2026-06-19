@@ -38,13 +38,13 @@ describe("isVitestProcess", () => {
 });
 
 describe("test-runner worker budget", () => {
-  it("uses roughly half the machine for one active run", () => {
-    expect(computeWorkerBudget({ cores: 10, activeRuns: 1 })).toBe("5");
+  it("uses the whole machine for one active run", () => {
+    expect(computeWorkerBudget({ cores: 10, activeRuns: 1 })).toBe("10");
   });
 
-  it("splits the shared worker pool across active runs", () => {
-    expect(computeWorkerBudget({ cores: 10, activeRuns: 2 })).toBe("2");
-    expect(computeWorkerBudget({ cores: 10, activeRuns: 3 })).toBe("1");
+  it("splits the worker pool evenly across active runs", () => {
+    expect(computeWorkerBudget({ cores: 10, activeRuns: 2 })).toBe("5");
+    expect(computeWorkerBudget({ cores: 10, activeRuns: 3 })).toBe("3");
   });
 
   it("never drops below one worker", () => {

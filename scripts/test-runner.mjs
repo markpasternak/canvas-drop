@@ -61,8 +61,14 @@ export function computeWorkerBudget({ cores, activeRuns, override } = {}) {
   if (override?.trim()) return override.trim();
   const safeCores = Number.isInteger(cores) && cores > 0 ? cores : 1;
   const safeRuns = Number.isInteger(activeRuns) && activeRuns > 0 ? activeRuns : 1;
-  const sharedPool = Math.max(1, Math.floor(safeCores / 2));
-  return String(Math.max(1, Math.floor(sharedPool / safeRuns)));
+  // A solo run gets the whole machine: empirically, full-core forks finish the
+  // suite materially faster on every leg (sqlite ~38% / pglite ~26% / dashboard
+  // ~33% vs the old half-core cap) and stay green — the in-process pglite legs
+  // are CPU-bound, so they peak at one worker per core (oversubscribing past
+  // core count buys nothing) and the 20s testTimeout absorbs any contention
+  // spike. Concurrent runs (two agents sharing one checkout) still split the
+  // machine evenly, so total worker threads never exceed the core count.
+  return String(Math.max(1, Math.floor(safeCores / safeRuns)));
 }
 
 export function vitestWorkerValue(raw, fallback = "50%") {

@@ -17,12 +17,13 @@ export default defineConfig({
     // failing a genuine hang. makeTestDb runs in the test body, so testTimeout covers it.
     testTimeout: 20_000,
     hookTimeout: 20_000,
-    // Cap worker threads at half the cores. Two wins: fewer processes spun up on a
-    // local run, and — more importantly — less CPU contention for the in-process
-    // pglite legs, which is the documented cause of the flaky resource timeouts
-    // above (so this reinforces the 20s ceiling rather than fighting it). Override
-    // with CANVAS_DROP_TEST_MAX_WORKERS or `--maxWorkers` when a machine has
-    // headroom to spare.
+    // Run on every core. The test-runner sets CANVAS_DROP_TEST_MAX_WORKERS to a
+    // full-core budget for a solo run (and splits it across concurrent runs); a
+    // bare `vitest` falls back to 100%. The in-process pglite legs are CPU-bound,
+    // so one worker per core is the sweet spot — it's measurably faster than the
+    // old half-core cap on every leg and stays green, with the 20s ceiling above
+    // absorbing the occasional contention spike rather than the cap fighting it.
+    // Override with CANVAS_DROP_TEST_MAX_WORKERS or `--maxWorkers` to throttle.
     maxWorkers: workerSetting(),
   },
 });
