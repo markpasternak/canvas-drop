@@ -14,16 +14,21 @@
 
 /**
  * Vitest `maxWorkers` from `CANVAS_DROP_TEST_MAX_WORKERS`: a positive integer or
- * a `<n>%` string, else the 50% default.
+ * a `<n>%` string. The test-runner always sets this env to a concrete per-run
+ * budget (full cores for a solo run, split across concurrent runs), so this is
+ * the value Vitest honours in CI and `pnpm test`. The `100%` fallback only
+ * applies to a bare `vitest` invocation (e.g. `pnpm test:watch`), where running
+ * on every core is the fastest default; cap it with `--maxWorkers` if an
+ * interactive machine needs headroom.
  *
  * @returns {number | `${number}%`}
  */
 export function workerSetting() {
   const raw = process.env.CANVAS_DROP_TEST_MAX_WORKERS?.trim();
-  if (!raw) return "50%";
+  if (!raw) return "100%";
   if (/^[1-9]\d*%$/.test(raw)) return /** @type {`${number}%`} */ (raw);
   const n = Number(raw);
-  return Number.isInteger(n) && n >= 1 ? n : "50%";
+  return Number.isInteger(n) && n >= 1 ? n : "100%";
 }
 
 /**
