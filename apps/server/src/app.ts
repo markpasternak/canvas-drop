@@ -15,7 +15,6 @@ import { authRoutes } from "./auth/routes.js";
 import { SESSION_COOKIE, type SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
 import { canvasAccess } from "./canvas/authorization.js";
-import { cloneService } from "./canvas/clone-service.js";
 import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
@@ -23,25 +22,18 @@ import { canvasUrl } from "./canvas/url.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
-import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import {
   type AllowedEmailsRepository,
   allowedEmailsRepository,
 } from "./db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
-import { filesRepository } from "./db/repositories/files.js";
 import { kvRepository } from "./db/repositories/kv.js";
-import { oauthRepository } from "./db/repositories/oauth.js";
-import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
-import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
-import { usageEventsRepository } from "./db/repositories/usage-events.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
 import { docsRoutes } from "./docs/routes.js";
-import { draftService } from "./draft/service.js";
 import type { Mailer } from "./email/mailer.js";
 import { checkHealth } from "./health.js";
 import { brandAssetRoutes } from "./http/brand-assets.js";
@@ -74,9 +66,8 @@ import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
 import { PREVIEW_ASSET_PATH, servePreview } from "./screenshots/serve.js";
-import { screenshotTrigger } from "./screenshots/trigger.js";
 import type { StorageDriver } from "./storage/driver.js";
-import { uploadService } from "./upload/service.js";
+import { composeServices } from "./wiring.js";
 
 export interface BuildAppDeps {
   config: Config;
@@ -285,15 +276,25 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     );
   }
 
-  // Two-channel staging upload service (plan 003) — shared by the Bearer-key
-  // deploy API and the MCP surface, over one content-addressed core.
-  const upload = uploadService({
+  // ── Shared service graph (composition root, §9.1) ─────────────────────────
+  // Repositories and services used by MORE THAN ONE route mount are constructed
+  // ONCE, in composeServices(), and shared below. Centralizing the graph is what
+  // keeps the MCP control plane and the dashboard HTTP routes wrapping the SAME
+  // service instances (the agent-native parity rule) — see wiring.ts. (Repos used
+  // by exactly one mount — kv, admin, settings, allowedEmails — stay inline at
+  // their use site; promote them here if a second consumer appears.)
+  const { usage, screenshots, files, aiUsage, oauth, upload, clone, drafts } = composeServices({
     config: deps.config,
-    canvases: deps.canvases,
+    db: deps.db,
+    log: deps.rootLogger,
     users: deps.users,
-    uploadSessions: uploadSessionsRepository(deps.db),
+    canvases: deps.canvases,
+    versions: deps.versions,
+    draftsRepo: deps.drafts,
     storage: deps.storage,
     engine: deps.engine,
+    audit: deps.audit,
+    settings: settingsSvc,
   });
 
   // Bearer-key deploy API — its own auth, BEFORE the session gateway.
@@ -324,7 +325,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         strategy: deps.strategy,
         users: deps.users,
         allowedEmails,
-        oauth: oauthRepository(deps.db),
+        oauth,
         canvases: deps.canvases,
         versions: deps.versions,
         engine: deps.engine,
@@ -332,24 +333,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         storage: deps.storage,
         guests: deps.guests,
         mailer: deps.mailer,
-        clone: cloneService({
-          canvases: deps.canvases,
-          versions: deps.versions,
-          drafts: deps.drafts,
-          storage: deps.storage,
-        }),
-        drafts: draftService({
-          config: deps.config,
-          canvases: deps.canvases,
-          versions: deps.versions,
-          drafts: deps.drafts,
-          storage: deps.storage,
-          audit: deps.audit,
-          log: deps.rootLogger,
-        }),
-        usage: usageEventsRepository(deps.db),
-        files: filesRepository(deps.db),
-        aiUsage: aiUsageRepository(deps.db),
+        clone,
+        drafts,
+        usage,
+        files,
+        aiUsage,
         audit: deps.audit,
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {
@@ -364,7 +352,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         rateLimitStore: rlStore,
         hub: deps.hub,
         screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
-        screenshots: screenshotsRepository(deps.db),
+        screenshots,
       }),
     );
   }
@@ -412,7 +400,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // consulted on the anonymous card). Only when enabled AND a preview is captured;
       // cache-bust by the captured version. Else null → branded /og.png.
       if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
-      const job = await screenshotsRepository(deps.db).findByCanvas(canvas.id);
+      const job = await screenshots.findByCanvas(canvas.id);
       if (job?.status !== "done") return null;
       return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
     }),
@@ -463,14 +451,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       canvases: deps.canvases,
       kv: kvRepository(deps.db),
       files: filesService({
-        files: filesRepository(deps.db),
+        files,
         storage: deps.storage,
         quota: settingsSvc.effectiveQuota,
       }),
-      usage: usageEventsRepository(deps.db),
+      usage,
       audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
-      aiUsage: aiUsageRepository(deps.db),
+      aiUsage,
       // Tests inject a ready provider; production builds one per request from the
       // EFFECTIVE key (admin DB override ?? env) via the factory + settings service.
       aiProvider: deps.aiProvider,
@@ -503,7 +491,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       config: deps.config,
       canvases: deps.canvases,
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
-      screenshots: screenshotsRepository(deps.db),
+      screenshots,
     }),
   );
 
@@ -515,18 +503,13 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       canvases: deps.canvases,
       users: deps.users,
       versions: deps.versions,
-      clone: cloneService({
-        canvases: deps.canvases,
-        versions: deps.versions,
-        drafts: deps.drafts,
-        storage: deps.storage,
-      }),
+      clone,
       audit: deps.audit,
       engine: deps.engine,
       storage: deps.storage,
-      usage: usageEventsRepository(deps.db),
-      files: filesRepository(deps.db),
-      aiUsage: aiUsageRepository(deps.db),
+      usage,
+      files,
+      aiUsage,
       hub: deps.hub,
       guests: deps.guests,
       mailer: deps.mailer,
@@ -535,7 +518,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
       // Screenshot preview support (plan 004) for the dashboard `hasPreview` cover hint.
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
-      screenshots: screenshotsRepository(deps.db),
+      screenshots,
     }),
   );
 
@@ -549,16 +532,18 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       canvases: deps.canvases,
       versions: deps.versions,
       users: deps.users,
-      files: filesRepository(deps.db),
-      aiUsage: aiUsageRepository(deps.db),
+      files,
+      aiUsage,
       settings: settingsSvc,
       allowedEmails,
       audit: deps.audit,
-      revokeMcpTokensForUser: (id) => oauthRepository(deps.db).tokens.revokeAllForUser(id),
+      revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
     }),
   );
 
-  // In-browser editor / draft API (M5) — same base, distinct paths.
+  // In-browser editor / draft API (M5) — same base, distinct paths. Shares the
+  // one `drafts` service built above, so the editor and the MCP `publish_draft`
+  // tool drive the identical publish path (incl. screenshot capture).
   app.route(
     "/api/canvases",
     draftApiRoutes({
@@ -566,24 +551,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       canvases: deps.canvases,
       versions: deps.versions,
       storage: deps.storage,
-      drafts: draftService({
-        config: deps.config,
-        canvases: deps.canvases,
-        versions: deps.versions,
-        drafts: deps.drafts,
-        storage: deps.storage,
-        audit: deps.audit,
-        log: deps.rootLogger,
-        // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
-        // them. Only wired when the pipeline is enabled.
-        // Effective-gated, best-effort capture trigger (plan 004 / U12). Always wired —
-        // it self-gates on env-available AND admin-enabled, so when off it's a no-op.
-        screenshots: screenshotTrigger({
-          enabled: () => settingsSvc.effectiveScreenshotsEnabled(),
-          repo: screenshotsRepository(deps.db),
-          log: deps.rootLogger,
-        }),
-      }),
+      drafts,
     }),
   );
 
@@ -617,7 +585,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         config: deps.config,
         versions: deps.versions,
         storage: deps.storage,
-        usage: usageEventsRepository(deps.db),
+        usage,
         log: deps.rootLogger,
       }),
     ),
