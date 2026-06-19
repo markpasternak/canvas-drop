@@ -50,7 +50,7 @@ const MAX_CARD_TAGS = 3;
  *  cover — bright, dark, busy — without per-image analysis. The same surface language
  *  the bottom safe-zone panel uses, scaled down for a control row. */
 const overlaySurfaceClass =
-  "rounded-lg border border-white/12 bg-[oklch(0.16_0.02_265_/_0.55)] p-0.5 shadow-[var(--shadow-sm)] backdrop-blur-md backdrop-saturate-150";
+  "rounded-md border border-[var(--card-overlay-border)] bg-[var(--card-overlay-fill)] p-0.5 shadow-[var(--shadow-sm)] backdrop-blur-md backdrop-saturate-150";
 
 /** Re-export so a single import covers building the `coverType` prop. */
 export { coverType };
@@ -146,7 +146,7 @@ export function CanvasGridCard({
     <li
       data-canvas-item
       className={cn(
-        "group relative flex aspect-[3/2] cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
+        "group relative flex aspect-[3/2] cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
         cardHoverClass,
         selected && "border-accent ring-1 ring-accent",
       )}
@@ -175,7 +175,7 @@ export function CanvasGridCard({
         aria-hidden
         style={{
           backgroundImage:
-            "linear-gradient(to top, oklch(0.14 0.02 265 / 0.72) 0%, oklch(0.14 0.02 265 / 0.34) 34%, oklch(0.14 0.02 265 / 0.06) 58%, transparent 80%)",
+            "linear-gradient(to top, oklch(0.14 0.02 265 / 0.56) 0%, oklch(0.14 0.02 265 / 0.24) 34%, oklch(0.14 0.02 265 / 0.04) 58%, transparent 80%)",
         }}
       />
 
@@ -205,7 +205,7 @@ export function CanvasGridCard({
           description and footer. The local surface (not luck) guarantees legibility on
           any preview; the scrim above blends it into the cover. */}
       <div className="relative z-10 mt-auto p-2.5">
-        <div className="flex flex-col gap-1.5 rounded-lg border border-white/12 bg-[oklch(0.16_0.02_265_/_0.62)] p-2.5 shadow-[var(--shadow-sm)] backdrop-blur-md backdrop-saturate-150">
+        <div className="flex flex-col gap-1.5 rounded-md border border-[var(--card-overlay-border)] bg-[var(--card-overlay-fill)] p-2.5 shadow-[var(--shadow-sm)] backdrop-blur-md backdrop-saturate-150">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {nameLink}
             {badges && (
