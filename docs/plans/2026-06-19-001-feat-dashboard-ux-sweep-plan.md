@@ -443,6 +443,13 @@ In scope: all 13 brainstorm items, the additive backend listed, MCP/doc parity f
 
 - Update `/docs` content + `llms.txt` (and developer/marketing docs as applicable) for unified canvas tags and forgiving search (U4). The `docs-refresh` / `docs-fact-refresh` skills can verify claims against code after the sweep.
 
+### Deploy runbook — `search_text` backfill
+
+- **`search_text` is auto-backfilled at boot.** After migrations run at startup, the server populates `search_text` for any canvas row where it is still `NULL` (rows that predate the column), reusing the same `computeSearchText()` the live write paths use. This is **idempotent and NULL-only** — once populated, a normal restart pays only a cheap "any NULL rows?" count and does no rewrite. It is also **best-effort**: a backfill error is logged and does not block the server from starting (search just degrades for un-backfilled rows until the next attempt). Updates are applied in chunked transactions (~500 rows), so a partial failure can't leave the column half-populated. **No manual step is required on a normal deploy.**
+- **Manual full recompute (rare).** Only needed after a change to the pinned `normalize()` / composition contract (which makes existing blobs stale). Run from the repo root against the target DB:
+  - `pnpm backfill:search-text` — populate only NULL rows (same as the boot backfill).
+  - `pnpm backfill:search-text --all` — **recompute every row** (use after a `normalize()` change). The boot path never does a full recompute, so this is the only way to refresh already-populated rows.
+
 ---
 
 ## Sources & Research

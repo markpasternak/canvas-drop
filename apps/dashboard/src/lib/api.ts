@@ -746,6 +746,11 @@ export const api = {
   /** Pickable owner/tag lists for the gallery filter UI (plan 004). */
   listGalleryFacets: () => request<GalleryFacets>("/api/gallery/facets"),
 
+  /** The owner's complete tag vocabulary for the Your-canvases TagFilter
+   *  (plan 2026-06-19) — distinct tags across all their non-deleted canvases,
+   *  symmetric to {@link listGalleryFacets}. Owner-scoped server-side. */
+  listCanvasTags: () => request<{ tags: string[] }>("/api/canvases/tags"),
+
   /** Your canvases (plan 005): server-side filter/search/sort + offset paging.
    *  Empty/default params are omitted so a clean view has a bare URL. */
   listCanvases: (query: CanvasesQuery = {}) => {

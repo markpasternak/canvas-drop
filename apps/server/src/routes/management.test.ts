@@ -193,6 +193,29 @@ describe("managementRoutes", () => {
     expect(new Set(both.canvases.map((cv) => cv.id))).toEqual(new Set([charts.id, finance.id]));
   });
 
+  it("GET /tags returns the owner's distinct tags (deduped, sorted), owner-scoped", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const repo = canvasesRepository(client);
+    const a = await repo.create({ ownerId: owner.id, slug: "a", apiKeyHash: "ka" });
+    const b = await repo.create({ ownerId: owner.id, slug: "b", apiKeyHash: "kb" });
+    const stranger = await repo.create({ ownerId: other.id, slug: "s", apiKeyHash: "ks" });
+    // Overlap across the owner's own canvases dedupes; "zebra" sorts after "charts".
+    await repo.updateSettings(a.id, { tags: ["zebra", "charts"] });
+    await repo.updateSettings(b.id, { tags: ["charts", "finance"] });
+    // A different owner's tag must NOT leak into the caller's vocabulary (§12).
+    await repo.updateSettings(stranger.id, { tags: ["secret-other-owner-tag"] });
+
+    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      "/api/canvases/tags",
+    );
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ tags: string[] }>(res);
+    // Distinct + sorted; no duplicate "charts"; no other owner's tag.
+    expect(body.tags).toEqual(["charts", "finance", "zebra"]);
+  });
+
   it("GET /:id returns the canvas to its owner, 404 to a different user", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

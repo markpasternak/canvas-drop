@@ -273,13 +273,6 @@ export function canvasesRepository(client: DbClient) {
   };
 
   /**
-   * Recompute + persist the denormalized `search_text` for one canvas from its
-   * current title/summary/tags/slug (plan 2026-06-19 KTD1). Invoked AFTER any write
-   * that touches those fields (updateSettings, regenerateSlug). Reads the post-write
-   * row so the blob reflects the merged final state — the patch alone can't, since
-   * it may omit fields the blob still depends on. A no-op if the row vanished.
-   */
-  /**
    * One JSON-array-membership clause: "the `tags` column contains `tag`". The single
    * genuinely dialect-divergent query in this repo (json_each on sqlite, `@>` on pg),
    * shared by {@link listGallery} and {@link listByOwnerFiltered} so the gallery's
@@ -291,14 +284,41 @@ export function canvasesRepository(client: DbClient) {
       ? sql`exists (select 1 from json_each(${t.tags}) where value = ${tag})`
       : sql`${t.tags} @> ${JSON.stringify([tag])}::jsonb`;
 
-  const recomputeSearchText = async (id: string): Promise<void> => {
+  /**
+   * The denormalized `search_text` blob for a row, computed from the MERGED
+   * post-write state (plan 2026-06-19 KTD1): each blob input is taken from the patch
+   * when present, else from the current row. The caller folds the result into the
+   * SAME `UPDATE … RETURNING` that applies the patch, so the blob is written
+   * atomically with the fields it derives from — no second round-trip, no window in
+   * which a search hits stale text. `tags` may legitimately be patched to `null` (the
+   * password-set path clears them); `computeSearchText` treats null/non-array as no
+   * tags. Reuses the single `computeSearchText` source of truth.
+   */
+  const mergedSearchText = (
+    current: { title: string; description: string | null; tags: unknown; slug: string },
+    patch: {
+      title?: string;
+      description?: string | null;
+      tags?: Json | undefined;
+      slug?: string;
+    },
+  ): string => {
+    const tags = patch.tags !== undefined ? patch.tags : current.tags;
+    return computeSearchText({
+      title: patch.title !== undefined ? patch.title : current.title,
+      description: patch.description !== undefined ? patch.description : current.description,
+      tags: Array.isArray(tags) ? (tags as string[]) : null,
+      slug: patch.slug !== undefined ? patch.slug : current.slug,
+    });
+  };
+
+  /** The blob-input columns of one row, for {@link mergedSearchText}. Returns null
+   *  when the row is absent so callers fall back to the bare UPDATE (no row to write). */
+  const searchTextInputs = async (
+    id: string,
+  ): Promise<{ title: string; description: string | null; tags: unknown; slug: string } | null> => {
     const rows = (await db
-      .select({
-        title: t.title,
-        description: t.description,
-        tags: t.tags,
-        slug: t.slug,
-      })
+      .select({ title: t.title, description: t.description, tags: t.tags, slug: t.slug })
       .from(t)
       .where(eq(t.id, id))
       .limit(1)) as Array<{
@@ -307,15 +327,88 @@ export function canvasesRepository(client: DbClient) {
       tags: unknown;
       slug: string;
     }>;
-    const row = rows[0];
-    if (!row) return;
-    const searchText = computeSearchText({
-      title: row.title,
-      description: row.description,
-      tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
-      slug: row.slug,
-    });
-    await db.update(t).set({ searchText }).where(eq(t.id, id));
+    return rows[0] ?? null;
+  };
+
+  /**
+   * Recent `view` counts for a set of canvases over `[sinceMs, ∞)`, as a
+   * `canvasId → count` map (absent ⇒ 0). One bounded grouped aggregate riding
+   * `usage_events(canvasId, createdAt)`. Shared by both gallery query paths
+   * ({@link listGalleryTrending}'s ranking and {@link listGallery}'s per-row
+   * hydration) so the order and the displayed counts derive from the same source.
+   */
+  const hydrateRecentViews = async (
+    canvasIds: readonly string[],
+    sinceMs: number,
+  ): Promise<Map<string, number>> => {
+    const views = new Map<string, number>();
+    if (canvasIds.length === 0) return views;
+    const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
+    const countRows = (await db
+      .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
+      .from(ue)
+      .where(
+        and(eq(ue.type, "view"), gte(ue.createdAt, sinceMs), inArray(ue.canvasId, [...canvasIds])),
+      )
+      .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
+    for (const r of countRows) views.set(r.canvasId, Number(r.c));
+    return views;
+  };
+
+  /**
+   * The `trending` gallery sort (plan 2026-06-19), extracted from {@link listGallery}
+   * to keep the two query paths from co-locating. Ranks the WHOLE visible set
+   * (`where`, already the §12 visibility predicate + filters) by recent views, then
+   * paginates and hydrates only the page — mirroring listByOwnerFiltered's `popular`
+   * path. Kept off the SQL-sort path on purpose: only this opt-in sort pays the usage
+   * aggregate. Behaviour is identical to the prior inline branch.
+   */
+  const listGalleryTrending = async (
+    opts: GalleryListOptions,
+    where: SQL | undefined,
+  ): Promise<{ items: GalleryRow[]; total: number }> => {
+    const sinceMs = opts.trendingSinceMs ?? opts.now - POPULAR_WINDOW_MS;
+    const idRows = (await db
+      .select({ id: t.id, galleryPublishedAt: t.galleryPublishedAt })
+      .from(t)
+      .where(where)) as Array<{ id: string; galleryPublishedAt: number | null }>;
+    const total = idRows.length;
+    if (total === 0) return { items: [], total: 0 };
+
+    const views = await hydrateRecentViews(
+      idRows.map((r) => r.id),
+      sinceMs,
+    );
+
+    // (recent views desc, galleryPublishedAt desc, id desc) — same id tiebreak as
+    // the SQL sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
+    const pageIds = idRows
+      .map((r) => ({
+        id: r.id,
+        publishedAt: Number(r.galleryPublishedAt ?? 0),
+        v: views.get(r.id) ?? 0,
+      }))
+      .sort((a, b) => b.v - a.v || b.publishedAt - a.publishedAt || (a.id < b.id ? 1 : -1))
+      .slice(opts.offset, opts.offset + opts.limit)
+      .map((r) => r.id);
+    if (pageIds.length === 0) return { items: [], total };
+
+    const pageRows = (await db
+      .select({
+        canvas: t,
+        ownerId: usersT.id,
+        ownerName: usersT.name,
+        ownerAvatarUrl: usersT.avatarUrl,
+      })
+      .from(t)
+      .innerJoin(usersT, eq(t.ownerId, usersT.id))
+      .where(inArray(t.id, pageIds))) as Array<Omit<GalleryRow, "recentViews">>;
+    const byId = new Map(pageRows.map((row) => [row.canvas.id, row]));
+    const items = pageIds
+      .map((id) => byId.get(id))
+      .filter((row): row is Omit<GalleryRow, "recentViews"> => row !== undefined)
+      .map((row) => ({ ...row, recentViews: views.get(row.canvas.id) ?? 0 }));
+    return { items, total };
   };
 
   return {
@@ -583,19 +676,25 @@ export function canvasesRepository(client: DbClient) {
       if (patch.access !== undefined) set.access = patch.access;
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
       if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
-      const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
-      // Recompute the search blob when this patch touched any of its inputs
-      // (title/description/tags — slug is owned by regenerateSlug). Reads the merged
-      // post-write state so omitted-but-depended-on fields stay correct.
+      // Fold the search blob into the SAME write when this patch touches any of its
+      // inputs (title/description/tags — slug is owned by regenerateSlug). Compute it
+      // from the MERGED post-write state (current row + patch) so omitted-but-depended-on
+      // fields stay correct, and write it in the one UPDATE — atomic, no second round-trip.
       if (
         patch.title !== undefined ||
         patch.description !== undefined ||
         patch.tags !== undefined
       ) {
-        await recomputeSearchText(id);
-        const refreshed = (await db.select().from(t).where(eq(t.id, id)).limit(1)) as Canvas[];
-        return (refreshed[0] ?? rows[0]) as Canvas;
+        const current = await searchTextInputs(id);
+        if (current) {
+          set.searchText = mergedSearchText(current, {
+            title: patch.title,
+            description: patch.description,
+            tags: patch.tags,
+          });
+        }
       }
+      const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       return rows[0] as Canvas;
     },
 
@@ -760,16 +859,18 @@ export function canvasesRepository(client: DbClient) {
     },
 
     async regenerateSlug(id: string, newSlug: string, custom = false): Promise<Canvas> {
-      const rows = (await db
-        .update(t)
-        .set({ slug: newSlug, slugCustom: custom, updatedAt: Date.now() })
-        .where(eq(t.id, id))
-        .returning()) as Canvas[];
-      // The slug is part of the search blob — recompute it so search-by-new-slug
-      // hits and the old slug no longer does, then return the refreshed row.
-      await recomputeSearchText(id);
-      const refreshed = (await db.select().from(t).where(eq(t.id, id)).limit(1)) as Canvas[];
-      return (refreshed[0] ?? rows[0]) as Canvas;
+      // The slug is part of the search blob — recompute it from the merged post-write
+      // state (current title/description/tags + the NEW slug) and write it in the SAME
+      // UPDATE, so search-by-new-slug hits and the old slug no longer does, atomically.
+      const set: Record<string, unknown> = {
+        slug: newSlug,
+        slugCustom: custom,
+        updatedAt: Date.now(),
+      };
+      const current = await searchTextInputs(id);
+      if (current) set.searchText = mergedSearchText(current, { slug: newSlug });
+      const rows = (await db.update(t).set(set).where(eq(t.id, id)).returning()) as Canvas[];
+      return rows[0] as Canvas;
     },
 
     async regenerateApiKey(id: string, apiKeyHash: string): Promise<Canvas> {
@@ -1007,63 +1108,10 @@ export function canvasesRepository(client: DbClient) {
       const where = and(...filters);
 
       // `trending` is net-new (plan 2026-06-19): rank the WHOLE visible set by recent
-      // views then paginate, mirroring listByOwnerFiltered's `popular` path. Kept off
-      // the SQL-sort path on purpose — only this opt-in sort pays the usage aggregate.
+      // views then paginate. Lives in its own helper to keep the two gallery query
+      // paths from co-locating (behaviour identical to the prior inline branch).
       if (opts.sort === "trending") {
-        const sinceMs = opts.trendingSinceMs ?? opts.now - POPULAR_WINDOW_MS;
-        const idRows = (await db
-          .select({ id: t.id, galleryPublishedAt: t.galleryPublishedAt })
-          .from(t)
-          .where(where)) as Array<{ id: string; galleryPublishedAt: number | null }>;
-        const total = idRows.length;
-        if (total === 0) return { items: [], total: 0 };
-
-        const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
-        const countRows = (await db
-          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
-          .from(ue)
-          .where(
-            and(
-              eq(ue.type, "view"),
-              gte(ue.createdAt, sinceMs),
-              inArray(
-                ue.canvasId,
-                idRows.map((r) => r.id),
-              ),
-            ),
-          )
-          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
-        const views = new Map(countRows.map((r) => [r.canvasId, Number(r.c)]));
-
-        // (recent views desc, galleryPublishedAt desc, id desc) — same id tiebreak as
-        // the SQL sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
-        const pageIds = idRows
-          .map((r) => ({
-            id: r.id,
-            publishedAt: Number(r.galleryPublishedAt ?? 0),
-            v: views.get(r.id) ?? 0,
-          }))
-          .sort((a, b) => b.v - a.v || b.publishedAt - a.publishedAt || (a.id < b.id ? 1 : -1))
-          .slice(opts.offset, opts.offset + opts.limit)
-          .map((r) => r.id);
-        if (pageIds.length === 0) return { items: [], total };
-
-        const pageRows = (await db
-          .select({
-            canvas: t,
-            ownerId: usersT.id,
-            ownerName: usersT.name,
-            ownerAvatarUrl: usersT.avatarUrl,
-          })
-          .from(t)
-          .innerJoin(usersT, eq(t.ownerId, usersT.id))
-          .where(inArray(t.id, pageIds))) as Array<Omit<GalleryRow, "recentViews">>;
-        const byId = new Map(pageRows.map((row) => [row.canvas.id, row]));
-        const items = pageIds
-          .map((id) => byId.get(id))
-          .filter((row): row is Omit<GalleryRow, "recentViews"> => row !== undefined)
-          .map((row) => ({ ...row, recentViews: views.get(row.canvas.id) ?? 0 }));
-        return { items, total };
+        return listGalleryTrending(opts, where);
       }
 
       // Default order is most-recently-published with a stable `id` tiebreak
@@ -1101,19 +1149,10 @@ export function canvasesRepository(client: DbClient) {
       // Hydrate the page's recent-view counts in one bounded aggregate (same window the
       // `trending` sort ranks by) so every gallery row carries `recentViews`.
       const sinceMs = opts.trendingSinceMs ?? opts.now - POPULAR_WINDOW_MS;
-      const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
-      const pageIds = rows.map((row) => row.canvas.id);
-      const views = new Map<string, number>();
-      if (pageIds.length > 0) {
-        const countRows = (await db
-          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
-          .from(ue)
-          .where(
-            and(eq(ue.type, "view"), gte(ue.createdAt, sinceMs), inArray(ue.canvasId, pageIds)),
-          )
-          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
-        for (const r of countRows) views.set(r.canvasId, Number(r.c));
-      }
+      const views = await hydrateRecentViews(
+        rows.map((row) => row.canvas.id),
+        sinceMs,
+      );
       const items = rows.map((row) => ({ ...row, recentViews: views.get(row.canvas.id) ?? 0 }));
 
       return { items, total: totalRows[0]?.value ?? 0 };
@@ -1151,6 +1190,32 @@ export function canvasesRepository(client: DbClient) {
       }
 
       return { owners, tags: [...tagSet].sort() };
+    },
+
+    /**
+     * The owner's distinct tags across ALL their non-deleted canvases (plan
+     * 2026-06-19 dashboard UX sweep) — the complete vocabulary the Your-canvases
+     * TagFilter offers, symmetric to {@link listGalleryFacets}'s gallery-wide tag
+     * list. Owner-scoped (`ownerId = me`, status ≠ deleted) so the filter can offer
+     * a tag whether the canvas is currently active or archived; it never reveals
+     * another owner's tags (§12 owner-scope). Tags are flattened + deduped in JS
+     * (the JSON column is dialect-divergent to unnest in SQL), sorted, like the
+     * gallery facets.
+     */
+    async listOwnerTagFacets(ownerId: string): Promise<string[]> {
+      const tagRows = (await db
+        .select({ tags: t.tags })
+        .from(t)
+        .where(and(eq(t.ownerId, ownerId), ne(t.status, "deleted")))) as Array<{ tags: unknown }>;
+      const tagSet = new Set<string>();
+      for (const row of tagRows) {
+        if (Array.isArray(row.tags)) {
+          for (const tag of row.tags) {
+            if (typeof tag === "string") tagSet.add(tag);
+          }
+        }
+      }
+      return [...tagSet].sort();
     },
 
     /**

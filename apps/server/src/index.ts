@@ -7,6 +7,7 @@ import { createAuditLog } from "./audit/audit-log.js";
 import { setupAuth } from "./auth/factory.js";
 import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
 import { canvasUrl } from "./canvas/url.js";
+import { backfillSearchText, countMissingSearchText } from "./db/backfill-search-text.js";
 import { makeDb } from "./db/factory.js";
 import { runMigrations } from "./db/migrate.js";
 import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
@@ -47,6 +48,21 @@ async function main() {
   // 2. Drivers (DB, storage, auth) — all behind config-selected factories.
   const db = makeDb(config);
   await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
+  // Idempotent boot-time `search_text` backfill (plan 2026-06-19, KTD1): the column
+  // is maintained on every write, but rows that predate it carry NULL and would be
+  // invisible to `?q=` until next edited. Populate any NULL rows once, reusing the
+  // SAME shared core the manual `pnpm backfill:search-text` uses. NULL-only and chunked
+  // in transactions, so the steady state pays only a cheap count and a partial failure
+  // can't half-apply. Best-effort: a backfill error must not block the server starting
+  // (search degrades for un-backfilled rows; everything else works).
+  try {
+    if ((await countMissingSearchText(db)) > 0) {
+      const filled = await backfillSearchText(db);
+      rootLogger.info({ filled }, "search_text backfill: populated NULL rows at boot");
+    }
+  } catch (err) {
+    rootLogger.error({ err }, "search_text backfill failed at boot (continuing)");
+  }
   const storage = makeStorage(config);
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);

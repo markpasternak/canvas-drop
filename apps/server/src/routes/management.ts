@@ -482,6 +482,18 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json(taken ? { available: false, reason: "taken" } : { available: true });
   });
 
+  // Owner tag vocabulary for the Your-canvases TagFilter (plan 2026-06-19). Symmetric
+  // to the gallery's `/api/gallery/facets`: returns the owner's distinct tags across
+  // ALL their non-deleted canvases, so the filter offers the complete vocabulary
+  // instead of just the tags on the loaded page. Static path segment, so registered
+  // BEFORE `/:id` (Hono would otherwise capture it as `:id="tags"`). Read GET, no
+  // sameOrigin (that guards mutations); authenticated via the gateway. Owner-scoped in
+  // the repo — only the caller's own tags, never another owner's (§12).
+  app.get("/tags", async (c) => {
+    const tags = await deps.canvases.listOwnerTagFacets(c.get("user").id);
+    return c.json({ tags });
+  });
+
   // Owner-scoped slug → id resolution (rebrand U17). When the owner pastes a canvas's
   // cosmetic slug URL (`/canvases/<slug>`) the dashboard resolves it here, then
   // redirects to the canonical id route. Static path segment, so it's registered
