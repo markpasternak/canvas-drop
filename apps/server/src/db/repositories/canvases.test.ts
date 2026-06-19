@@ -1012,4 +1012,31 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     expect(await ids("GALLERY")).toEqual([cv.id]); // case-insensitive title
     expect(await ids("nomatch")).toEqual([]);
   });
+
+  it("owner search never crosses the owner boundary (the ownerId filter ANDs ahead of searchText, §12)", async () => {
+    // §12 owner-scope: ?q= can match a distinctive token across title/summary/tags/slug,
+    // but the ownerId filter ANDs first — owner B can never search up owner A's canvas,
+    // even with the exact token. A non-owned id reads as "not found".
+    client = await makeTestDb(dialect);
+    const ownerA = await seedOwner(client, "owner-a");
+    const ownerB = await seedOwner(client, "owner-b");
+    const repo = canvasesRepository(client);
+
+    // Owner A's canvas carries the token "zzsecret" in every searchable field.
+    const aCanvas = await repo.create({
+      ownerId: ownerA,
+      slug: "zzsecret-app",
+      apiKeyHash: "k-a",
+      title: "zzsecret report",
+    });
+    await repo.updateSettings(aCanvas.id, {
+      description: "the zzsecret pipeline",
+      tags: ["zzsecret"],
+    });
+
+    // Owner B searching the token gets ZERO results — the owner filter ANDs first.
+    expect(await ownerSearchIds(repo, ownerB, "zzsecret")).toEqual([]);
+    // Sanity: owner A searching the same token DOES find their own canvas.
+    expect(await ownerSearchIds(repo, ownerA, "zzsecret")).toEqual([aCanvas.id]);
+  });
 });

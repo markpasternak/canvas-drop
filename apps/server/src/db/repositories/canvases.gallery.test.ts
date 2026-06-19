@@ -404,6 +404,33 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(items.map((i) => i.canvas.id)).toEqual([first, third, second]);
   });
 
+  it("a stale galleryFeatured never surfaces a non-visible canvas (featured filter + sort=featured AND the visibility predicate)", async () => {
+    // §12: galleryFeatured is a display/ordering flag, NOT a visibility grant. A canvas
+    // that was listed+published+featured and then UNLISTED keeps galleryFeatured=true
+    // (stale), but the gallery visibility predicate (gallery_listed) must still exclude it.
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+
+    // Visible: listed + published + featured → DOES appear.
+    const visible = await seedListed(client, owner.id, { title: "Visible featured" });
+    await repo.setFeatured(visible, true);
+
+    // Stale: featured, but then unlisted (galleryFeatured stays true). MUST NOT appear.
+    const stale = await seedListed(client, owner.id, { title: "Stale featured" });
+    await repo.setFeatured(stale, true);
+    await repo.updateSettings(stale, { galleryListed: false });
+
+    // The featured FILTER returns only the still-visible featured canvas.
+    const filtered = await repo.listGallery({ now: NOW, featured: true, limit: 24, offset: 0 });
+    expect(filtered.total).toBe(1);
+    expect(filtered.items.map((i) => i.canvas.id)).toEqual([visible]);
+
+    // sort=featured floats featured to the top but can never surface a non-visible row.
+    const sorted = await repo.listGallery({ now: NOW, sort: "featured", limit: 24, offset: 0 });
+    expect(sorted.items.map((i) => i.canvas.id)).toEqual([visible]);
+  });
+
   it("sort=recent matches sort=published (publishedAt desc)", async () => {
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "owner");
