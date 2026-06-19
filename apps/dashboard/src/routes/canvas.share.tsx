@@ -47,7 +47,7 @@ export default function Share() {
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [gallerySummary, setGallerySummary] = useState("");
-  const [galleryTags, setGalleryTags] = useState("");
+  const [tags, setTags] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
 
   const sections = canvas?.access === "specific_people" ? PEOPLE_SECTIONS : BASE_SECTIONS;
@@ -60,7 +60,7 @@ export default function Share() {
   useEffect(() => {
     if (!canvas) return;
     setGallerySummary(canvas.gallerySummary ?? "");
-    setGalleryTags((canvas.galleryTags ?? []).join(", "));
+    setTags((canvas.tags ?? []).join(", "));
   }, [canvas?.id]);
 
   if (isLoading || !canvas) {
@@ -322,11 +322,11 @@ export default function Share() {
               <Field
                 label="Tags"
                 hint="comma-separated"
-                value={galleryTags}
-                onChange={(e) => setGalleryTags(e.target.value)}
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
                 onBlur={() =>
                   save({
-                    galleryTags: galleryTags
+                    tags: tags
                       .split(",")
                       .map((t) => t.trim())
                       .filter(Boolean),

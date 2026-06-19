@@ -2180,7 +2180,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       galleryListed: true,
       galleryTemplatable: true,
       gallerySummary: "a handy starter",
-      galleryTags: ["starter"],
+      tags: ["starter"],
     });
 
     const res = await patch(app, id, { shared: false });
@@ -2188,13 +2188,13 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       galleryListed: boolean;
       galleryTemplatable: boolean;
       gallerySummary: string | null;
-      galleryTags: string[] | null;
+      tags: string[] | null;
     }>(res);
     expect(body.galleryListed).toBe(false);
     expect(body.galleryTemplatable).toBe(false);
     // Metadata is retained so re-sharing restores it without re-typing.
     expect(body.gallerySummary).toBe("a handy starter");
-    expect(body.galleryTags).toEqual(["starter"]);
+    expect(body.tags).toEqual(["starter"]);
   });
 
   it("rejects {shared:false, galleryListed:true} in one PATCH (NOT_SHARED)", async () => {

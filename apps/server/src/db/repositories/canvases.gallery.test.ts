@@ -32,7 +32,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(item.ownerName).toBe("owner");
     expect(item.ownerAvatarUrl).toBe("https://avatars.example/owner.png");
     expect(item.canvas.gallerySummary).toBe("A useful canvas");
-    expect(item.canvas.galleryTags).toEqual(["charts"]);
+    expect(item.canvas.tags).toEqual(["charts"]);
   });
 
   it("excludes a canvas for each missing visibility condition", async () => {
@@ -179,10 +179,10 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
 
-    const charts = await seedListed(client, owner.id, { galleryTags: ["charts", "finance"] });
-    await seedListed(client, owner.id, { galleryTags: ["games"] });
+    const charts = await seedListed(client, owner.id, { tags: ["charts", "finance"] });
+    await seedListed(client, owner.id, { tags: ["games"] });
     // substring of a real tag must NOT match (exact membership only)
-    await seedListed(client, owner.id, { galleryTags: ["chart"] });
+    await seedListed(client, owner.id, { tags: ["chart"] });
 
     const byTag = await repo.listGallery({ now: NOW, tag: "charts", limit: 24, offset: 0 });
     expect(byTag.items.map((i) => i.canvas.id)).toEqual([charts]);
@@ -198,10 +198,10 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
 
     const match = await seedListed(client, owner.id, {
       title: "Budget chart",
-      galleryTags: ["charts"],
+      tags: ["charts"],
     });
-    await seedListed(client, owner.id, { title: "Budget table", galleryTags: ["tables"] });
-    await seedListed(client, owner.id, { title: "Game", galleryTags: ["charts"] });
+    await seedListed(client, owner.id, { title: "Budget table", tags: ["tables"] });
+    await seedListed(client, owner.id, { title: "Game", tags: ["charts"] });
 
     const { items, total } = await repo.listGallery({
       now: NOW,
@@ -372,12 +372,12 @@ describe.each(DIALECTS)("canvasesRepository.listGalleryFacets [%s]", (dialect) =
     const owner = await seedUser(client, "owner");
     const repo = canvasesRepository(client);
 
-    await seedListed(client, owner.id, { galleryTags: ["charts", "finance"] });
-    await seedListed(client, owner.id, { galleryTags: ["charts", "games"] });
+    await seedListed(client, owner.id, { tags: ["charts", "finance"] });
+    await seedListed(client, owner.id, { tags: ["charts", "games"] });
     // A non-visible (unlisted) canvas's tag must NOT leak into the facets.
     await repo.updateSettings(await seedPublishedCanvas(client, owner.id), {
       access: "whole_org",
-      galleryTags: ["secret"],
+      tags: ["secret"],
     });
 
     const { tags } = await repo.listGalleryFacets(NOW);

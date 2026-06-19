@@ -31,7 +31,7 @@ const base: CanvasListItem = {
   galleryListed: false,
   galleryTemplatable: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   clonedFromCanvasId: null,
   backendEnabled: false,
   capabilities: { kv: false, files: false, ai: false, realtime: false },

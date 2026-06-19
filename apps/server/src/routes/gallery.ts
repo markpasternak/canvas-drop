@@ -82,11 +82,11 @@ export interface GalleryFacetsDto {
  *  flags can never leak (§12.0 #1). */
 function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): GalleryItemDto {
   const cv = row.canvas;
-  // gallery_tags is a JSON column; it is only ever written via the settings route
+  // `tags` is a JSON column; it is only ever written via the settings route
   // (validated as string[]), but project defensively so the string[] contract holds
   // even against legacy/hand-edited data.
-  const tags = Array.isArray(cv.galleryTags)
-    ? cv.galleryTags.filter((t): t is string => typeof t === "string")
+  const tags = Array.isArray(cv.tags)
+    ? cv.tags.filter((t): t is string => typeof t === "string")
     : [];
   return {
     id: cv.id,

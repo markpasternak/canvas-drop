@@ -64,7 +64,7 @@ export async function seedListed(
     access: "whole_org",
     galleryListed: true,
     gallerySummary: "A useful canvas",
-    galleryTags: ["charts"],
+    tags: ["charts"],
     ...patch,
   });
   return id;

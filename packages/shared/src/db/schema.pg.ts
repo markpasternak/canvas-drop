@@ -165,7 +165,14 @@ export const canvases = pgTable(
     // this in the same write (plan 002 KTD6).
     galleryTemplatable: c.bool("gallery_templatable").notNull().default(false),
     gallerySummary: c.text("gallery_summary"),
-    galleryTags: c.json("gallery_tags"),
+    tags: c.json("tags"),
+    // Admin-curated editorial flag (cross-owner action; not on the per-account MCP
+    // surface). Set only via the admin canvases route; surfaces in the public gallery.
+    galleryFeatured: c.bool("gallery_featured").notNull().default(false),
+    // Denormalized, normalized search blob = normalize(title + summary + tags + slug),
+    // recomputed in the service layer on every write touching those fields. Nullable;
+    // existing rows are populated by a one-time TS backfill, not a SQL migration step.
+    searchText: c.text("search_text"),
     galleryPublishedAt: c.epochMs("gallery_published_at"),
     passwordHash: c.text("password_hash"),
     // bumped on every password set/clear so outstanding gate cookies invalidate (U16)

@@ -100,7 +100,7 @@ export interface Canvas {
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
   gallerySummary: string | null;
-  galleryTags: string[] | null;
+  tags: string[] | null;
   /** Lineage: the canvas this one was cloned from, or null (plan 002). */
   clonedFromCanvasId: string | null;
   /** Backend-group master switch (plan 006). */
@@ -241,7 +241,7 @@ export interface CanvasSettings {
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
-  galleryTags?: string[];
+  tags?: string[];
 }
 
 /** One canvas-allowlist entry (D4 `specific_people`, U4). Members carry their org

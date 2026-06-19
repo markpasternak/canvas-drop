@@ -286,7 +286,7 @@ async function main() {
       galleryListed: p.listed,
       galleryTemplatable: p.templatable,
       gallerySummary: summary,
-      galleryTags: tags,
+      tags,
     });
     if (p.protectedCanvas) {
       await canvases.setPassword(canvas.id, "$seed$dev-only-placeholder-hash");

@@ -195,9 +195,9 @@ describe("galleryRoutes", () => {
     const owner = await seedUser(client, "owner");
     const revenue = await seedListed(client, owner.id, {
       title: "Revenue chart",
-      galleryTags: ["finance"],
+      tags: ["finance"],
     });
-    await seedListed(client, owner.id, { title: "Game", galleryTags: ["games"] });
+    await seedListed(client, owner.id, { title: "Game", tags: ["games"] });
 
     const byQ = await get(client, "/api/gallery?q=revenue");
     expect(byQ.body.items.map((i) => i.id)).toEqual([revenue]);
@@ -281,8 +281,8 @@ describe("galleryRoutes", () => {
     client = await makeTestDb("sqlite");
     const alice = await seedUser(client, "alice");
     const bob = await seedUser(client, "bob");
-    await seedListed(client, alice.id, { galleryTags: ["charts"] });
-    await seedListed(client, bob.id, { galleryTags: ["games", "charts"] });
+    await seedListed(client, alice.id, { tags: ["charts"] });
+    await seedListed(client, bob.id, { tags: ["games", "charts"] });
 
     const res = await buildApp(client).request("/api/gallery/facets");
     expect(res.status).toBe(200);

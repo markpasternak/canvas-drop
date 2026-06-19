@@ -24,7 +24,7 @@ const CANVAS = {
   galleryListed: false,
   galleryTemplatable: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   clonedFromCanvasId: null,
   status: "active",
   publicationState: "draft",

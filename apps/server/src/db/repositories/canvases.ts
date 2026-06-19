@@ -92,7 +92,7 @@ export interface CanvasSettingsPatch {
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
-  galleryTags?: Json;
+  tags?: Json;
 }
 
 /**
@@ -486,7 +486,7 @@ export function canvasesRepository(client: DbClient) {
       // clears templatable, overriding any templatable=true in the same call.
       if (patch.galleryListed === false) set.galleryTemplatable = false;
       if (patch.gallerySummary !== undefined) set.gallerySummary = patch.gallerySummary;
-      if (patch.galleryTags !== undefined) set.galleryTags = patch.galleryTags;
+      if (patch.tags !== undefined) set.tags = patch.tags;
       if (patch.access !== undefined) set.access = patch.access;
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
       if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
@@ -873,8 +873,8 @@ export function canvasesRepository(client: DbClient) {
         // JSON-array membership is the one genuinely dialect-divergent query.
         filters.push(
           client.dialect === "sqlite"
-            ? sql`exists (select 1 from json_each(${t.galleryTags}) where value = ${opts.tag})`
-            : sql`${t.galleryTags} @> ${JSON.stringify([opts.tag])}::jsonb`,
+            ? sql`exists (select 1 from json_each(${t.tags}) where value = ${opts.tag})`
+            : sql`${t.tags} @> ${JSON.stringify([opts.tag])}::jsonb`,
         );
       }
 
@@ -940,7 +940,7 @@ export function canvasesRepository(client: DbClient) {
         .where(where)
         .orderBy(usersT.name)) as GalleryFacets["owners"];
 
-      const tagRows = (await db.select({ tags: t.galleryTags }).from(t).where(where)) as Array<{
+      const tagRows = (await db.select({ tags: t.tags }).from(t).where(where)) as Array<{
         tags: unknown;
       }>;
       const tagSet = new Set<string>();

@@ -20,7 +20,7 @@ const BASE = {
   previewMode: "auto",
   galleryListed: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   status: "active",
   publicationState: "draft",
   disabledReason: null,

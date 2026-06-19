@@ -24,7 +24,7 @@ function canvas(over: Record<string, unknown> = {}) {
     galleryListed: false,
     galleryTemplatable: false,
     gallerySummary: null,
-    galleryTags: null,
+    tags: null,
     status: "active",
     publicationState: "published",
     disabledReason: null,

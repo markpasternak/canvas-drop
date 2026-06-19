@@ -127,7 +127,7 @@ const settingsSchema = z.object({
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
   gallerySummary: z.string().max(500).nullable().optional(),
-  galleryTags: z.array(z.string().max(50)).max(20).optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
 });
 
 /**
@@ -170,8 +170,8 @@ function ownerCanvasView(
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
     gallerySummary: cv.gallerySummary,
-    // galleryTags is stored as JSON (Json | null); the API contract is string[] | null.
-    galleryTags: cv.galleryTags as string[] | null,
+    // tags is stored as JSON (Json | null); the API contract is string[] | null.
+    tags: cv.tags as string[] | null,
     // Lineage (plan 002): the canvas this one was cloned from, for "Cloned from …".
     clonedFromCanvasId: cv.clonedFromCanvasId,
     // Capability model (plan 006): the master switch, the raw stored feature flags,

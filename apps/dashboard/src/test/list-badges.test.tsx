@@ -15,7 +15,7 @@ const base = {
   previewMode: "auto",
   galleryListed: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   status: "active",
   publicationState: "draft",
   disabledReason: null,
@@ -175,7 +175,7 @@ describe("list row badges", () => {
         id: "tagged",
         slug: "tagged",
         title: "Tagged one",
-        galleryTags: ["alpha", "beta", "gamma", "delta", "epsilon"],
+        tags: ["alpha", "beta", "gamma", "delta", "epsilon"],
       }),
     ]);
     await screen.findByText("Tagged one");
@@ -194,14 +194,14 @@ describe("list row badges", () => {
         slug: "listed",
         title: "Listed one",
         galleryListed: true,
-        galleryTags: ["docs"],
+        tags: ["docs"],
       }),
       canvas({
         id: "unlisted",
         slug: "unlisted",
         title: "Unlisted one",
         galleryListed: false,
-        galleryTags: ["internal"],
+        tags: ["internal"],
       }),
     ]);
     await screen.findByText("Listed one");

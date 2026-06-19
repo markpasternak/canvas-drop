@@ -27,7 +27,9 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     galleryListed: false,
     galleryTemplatable: false,
     gallerySummary: null,
-    galleryTags: null,
+    tags: null,
+    galleryFeatured: false,
+    searchText: null,
     galleryPublishedAt: null,
     passwordHash: null,
     passwordVersion: 0,
@@ -135,19 +137,19 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
   });
 
   it("setting a password un-lists AND clears the gallery metadata", () => {
-    const cv = canvas({ galleryListed: true, gallerySummary: "s", galleryTags: ["a"] });
+    const cv = canvas({ galleryListed: true, gallerySummary: "s", tags: ["a"] });
     const r = resolve(cv, { password: "hunter2" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.patch.galleryListed).toBe(false);
       expect(r.patch.galleryTemplatable).toBe(false);
       expect(r.patch.gallerySummary).toBeNull();
-      expect(r.patch.galleryTags).toBeNull();
+      expect(r.patch.tags).toBeNull();
     }
   });
 
   it("going private un-lists but KEEPS the gallery summary/tags (re-sharing restores them)", () => {
-    const cv = canvas({ galleryListed: true, gallerySummary: "s", galleryTags: ["a"] });
+    const cv = canvas({ galleryListed: true, gallerySummary: "s", tags: ["a"] });
     const r = resolve(cv, { access: "private" });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -155,7 +157,7 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
       expect(r.patch.galleryTemplatable).toBe(false);
       // Summary/tags are NOT cleared on going-private (only on setting a password).
       expect(r.patch.gallerySummary).toBeUndefined();
-      expect(r.patch.galleryTags).toBeUndefined();
+      expect(r.patch.tags).toBeUndefined();
       expect(r.targetAccess).toBe("private");
     }
   });

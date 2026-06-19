@@ -31,7 +31,7 @@ const CANVAS: Canvas = {
   galleryListed: false,
   galleryTemplatable: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   clonedFromCanvasId: null,
   backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },

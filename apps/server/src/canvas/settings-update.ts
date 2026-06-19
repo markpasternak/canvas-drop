@@ -20,7 +20,7 @@ export interface CanvasSettingsInput {
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   gallerySummary?: string | null;
-  galleryTags?: string[];
+  tags?: string[];
 }
 
 export type SettingsResolution =
@@ -137,7 +137,7 @@ export function resolveSettingsUpdate(
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
     patch.gallerySummary = null;
-    patch.galleryTags = null;
+    patch.tags = null;
   }
 
   // CDN staleness advisory: if this change moves the canvas OFF the anonymously-public

@@ -20,8 +20,8 @@ export function canvasTitle(canvas: CanvasListItem): string {
 }
 
 function canvasTags(canvas: CanvasListItem): string[] {
-  return Array.isArray(canvas.galleryTags)
-    ? canvas.galleryTags.filter((t): t is string => typeof t === "string")
+  return Array.isArray(canvas.tags)
+    ? canvas.tags.filter((t): t is string => typeof t === "string")
     : [];
 }
 

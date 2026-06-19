@@ -511,7 +511,7 @@ async function main() {
       galleryListed: true,
       galleryTemplatable: app.templatable,
       gallerySummary: app.summary,
-      galleryTags: app.tags,
+      tags: app.tags,
     });
     // Newest timestamps (minutes apart) so the demo apps top the dashboard + gallery —
     // exactly the rows the marketing shots frame.

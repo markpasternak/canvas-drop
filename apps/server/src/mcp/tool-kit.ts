@@ -55,7 +55,7 @@ export function canvasView(
     galleryListed?: boolean;
     galleryTemplatable?: boolean;
     gallerySummary?: string | null;
-    galleryTags?: unknown;
+    tags?: unknown;
     guestAiEnabled?: boolean;
     guestAiCap?: number;
     viewCount: number;
@@ -87,7 +87,7 @@ export function canvasView(
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
     gallerySummary: cv.gallerySummary ?? null,
-    galleryTags: cv.galleryTags,
+    tags: cv.tags,
     guestAiEnabled: cv.guestAiEnabled,
     guestAiCap: cv.guestAiCap,
     // Preview policy (plan 004): auto/off/custom — so an agent can read the current

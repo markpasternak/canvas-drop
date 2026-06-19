@@ -19,7 +19,7 @@ const BASE = {
   previewMode: "auto",
   galleryListed: false,
   gallerySummary: null,
-  galleryTags: null,
+  tags: null,
   backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },
   effective: { identity: false, kv: false, files: false, ai: false, realtime: false },

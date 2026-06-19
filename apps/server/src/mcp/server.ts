@@ -822,7 +822,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         galleryListed: z.boolean().optional(),
         galleryTemplatable: z.boolean().optional(),
         gallerySummary: z.string().max(500).nullable().optional(),
-        galleryTags: z.array(z.string().max(50)).max(20).optional(),
+        tags: z.array(z.string().max(50)).max(20).optional(),
       },
     },
     async ({ id, ...input }) => {
