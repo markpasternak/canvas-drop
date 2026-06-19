@@ -123,7 +123,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         'sort="popular" to rank by trending views over the last 30 days. Each item ' +
         "carries `recentViews` (trending count) plus lifetime `viewCount` and `lastViewedAt`.",
       inputSchema: {
-        query: z.string().optional().describe("Optional text filter on title/slug."),
+        query: z
+          .string()
+          .optional()
+          .describe(
+            "Optional forgiving text filter over title, summary, tags, and slug " +
+              "(case/accent/whitespace-insensitive; multiple words are AND-ed).",
+          ),
         sort: z
           .enum(["updated", "created", "title", "popular"])
           .optional()

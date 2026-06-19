@@ -1,3 +1,4 @@
+import { computeSearchText, searchTextPatterns } from "@canvas-drop/shared";
 import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
   type AccessRung,
@@ -233,17 +234,81 @@ export function canvasesRepository(client: DbClient) {
     isNull(t.passwordHash),
   ];
 
+  /**
+   * The forgiving `?q=` predicate (plan 2026-06-19 KTD1), shared by
+   * {@link listByOwnerFiltered} and {@link listGallery} so the owner list and the
+   * public gallery search the SAME normalized blob with the SAME semantics. Each
+   * whitespace-separated token of `normalize(q)` is matched with an escaped
+   * `LIKE '%token%' ESCAPE '\'` against `search_text`, AND-ed together (a row must
+   * contain every token). Returns `undefined` for an empty/all-whitespace query so
+   * the caller adds no filter. `search_text` is nullable; `lower(coalesce(...,''))`
+   * keeps an un-backfilled NULL row out of every match rather than throwing.
+   */
+  const searchTextPredicate = (rawQuery: string | undefined): SQL | undefined => {
+    if (!rawQuery) return undefined;
+    const patterns = searchTextPatterns(rawQuery);
+    if (patterns.length === 0) return undefined;
+    return and(
+      ...patterns.map(
+        (pattern) => sql`lower(coalesce(${t.searchText}, '')) like ${pattern} escape '\\'`,
+      ),
+    );
+  };
+
+  /**
+   * Recompute + persist the denormalized `search_text` for one canvas from its
+   * current title/summary/tags/slug (plan 2026-06-19 KTD1). Invoked AFTER any write
+   * that touches those fields (updateSettings, regenerateSlug). Reads the post-write
+   * row so the blob reflects the merged final state — the patch alone can't, since
+   * it may omit fields the blob still depends on. A no-op if the row vanished.
+   */
+  const recomputeSearchText = async (id: string): Promise<void> => {
+    const rows = (await db
+      .select({
+        title: t.title,
+        gallerySummary: t.gallerySummary,
+        tags: t.tags,
+        slug: t.slug,
+      })
+      .from(t)
+      .where(eq(t.id, id))
+      .limit(1)) as Array<{
+      title: string;
+      gallerySummary: string | null;
+      tags: unknown;
+      slug: string;
+    }>;
+    const row = rows[0];
+    if (!row) return;
+    const searchText = computeSearchText({
+      title: row.title,
+      gallerySummary: row.gallerySummary,
+      tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
+      slug: row.slug,
+    });
+    await db.update(t).set({ searchText }).where(eq(t.id, id));
+  };
+
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
       const now = Date.now();
+      const title = input.title ?? "";
       const rows = await db
         .insert(t)
         .values({
           id: uuidv7(),
           slug: input.slug,
           slugCustom: input.slugCustom ?? false,
-          title: input.title ?? "",
+          title,
           description: input.description ?? null,
+          // Seed the search blob from the create-time fields (no summary/tags yet);
+          // recomputed on every later write that touches title/summary/tags/slug.
+          searchText: computeSearchText({
+            title,
+            gallerySummary: null,
+            tags: null,
+            slug: input.slug,
+          }),
           ownerId: input.ownerId,
           access: "private",
           galleryListed: false,
@@ -325,18 +390,10 @@ export function canvasesRepository(client: DbClient) {
         opts.archived ? eq(t.status, "archived") : notInArray(t.status, ["deleted", "archived"]),
       ];
 
-      const q = opts.q?.trim().toLowerCase();
-      if (q) {
-        // Same portable, metacharacter-escaped LIKE as listGallery — search the
-        // owner-facing identifiers (title + slug) rather than the gallery summary.
-        const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
-        filters.push(
-          or(
-            sql`lower(${t.title}) like ${pattern} escape '\\'`,
-            sql`lower(${t.slug}) like ${pattern} escape '\\'`,
-          ),
-        );
-      }
+      // Forgiving normalized-substring search over the shared `search_text` blob
+      // (plan 2026-06-19 KTD1) — the SAME predicate the gallery uses, so the owner
+      // list and gallery search title + summary + tags + slug identically.
+      filters.push(searchTextPredicate(opts.q));
 
       // Column-based state filters (plan 005 KTD3). `protected` keys off a set
       // password hash; `neverDeployed` off the absence of a published version.
@@ -491,6 +548,18 @@ export function canvasesRepository(client: DbClient) {
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
       if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
+      // Recompute the search blob when this patch touched any of its inputs
+      // (title/summary/tags — slug is owned by regenerateSlug). Reads the merged
+      // post-write state so omitted-but-depended-on fields stay correct.
+      if (
+        patch.title !== undefined ||
+        patch.gallerySummary !== undefined ||
+        patch.tags !== undefined
+      ) {
+        await recomputeSearchText(id);
+        const refreshed = (await db.select().from(t).where(eq(t.id, id)).limit(1)) as Canvas[];
+        return (refreshed[0] ?? rows[0]) as Canvas;
+      }
       return rows[0] as Canvas;
     },
 
@@ -641,12 +710,16 @@ export function canvasesRepository(client: DbClient) {
     },
 
     async regenerateSlug(id: string, newSlug: string, custom = false): Promise<Canvas> {
-      const rows = await db
+      const rows = (await db
         .update(t)
         .set({ slug: newSlug, slugCustom: custom, updatedAt: Date.now() })
         .where(eq(t.id, id))
-        .returning();
-      return rows[0] as Canvas;
+        .returning()) as Canvas[];
+      // The slug is part of the search blob — recompute it so search-by-new-slug
+      // hits and the old slug no longer does, then return the refreshed row.
+      await recomputeSearchText(id);
+      const refreshed = (await db.select().from(t).where(eq(t.id, id)).limit(1)) as Canvas[];
+      return (refreshed[0] ?? rows[0]) as Canvas;
     },
 
     async regenerateApiKey(id: string, apiKeyHash: string): Promise<Canvas> {
@@ -855,19 +928,11 @@ export function canvasesRepository(client: DbClient) {
     async listGallery(opts: GalleryListOptions): Promise<{ items: GalleryRow[]; total: number }> {
       const filters = galleryVisibilityFilters(opts.now);
 
-      const q = opts.q?.trim().toLowerCase();
-      if (q) {
-        // Portable case-insensitive substring match. LIKE metacharacters in the
-        // user's text are escaped (ESCAPE '\') so a literal % / _ doesn't widen
-        // the search — an accident-class concern, right-sized per the trust model.
-        const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
-        filters.push(
-          or(
-            sql`lower(${t.title}) like ${pattern} escape '\\'`,
-            sql`lower(${t.gallerySummary}) like ${pattern} escape '\\'`,
-          ),
-        );
-      }
+      // Forgiving normalized-substring search over the shared `search_text` blob
+      // (plan 2026-06-19 KTD1) — the SAME predicate the owner list uses, so both
+      // surfaces search title + summary + tags + slug identically. LIKE
+      // metacharacters in the user's text are escaped (ESCAPE '\').
+      filters.push(searchTextPredicate(opts.q));
 
       if (opts.tag) {
         // JSON-array membership is the one genuinely dialect-divergent query.

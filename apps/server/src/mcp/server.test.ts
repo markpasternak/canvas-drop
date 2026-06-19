@@ -653,6 +653,34 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(list.canvases).toHaveLength(2);
   });
 
+  it("list_canvases query inherits the forgiving search (matches a tag, case/accent-insensitive)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const tagged = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Café Report" } }),
+    );
+    await mcp.callTool({ name: "create_canvas", arguments: { title: "Unrelated" } });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: tagged.id, tags: ["finance"] },
+    });
+
+    // Tag substring (not in title/slug) — proves the search blob, not just title/slug.
+    const byTag = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { query: "finance" } }),
+    );
+    expect(byTag.total).toBe(1);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(byTag.canvases.map((cv: any) => cv.id)).toEqual([tagged.id]);
+
+    // Case + accent forgiving on the title.
+    const byTitle = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { query: "CAFE" } }),
+    );
+    expect(byTitle.total).toBe(1);
+  });
+
   it("list_canvases sort=popular ranks by recent views and reports view rollups (plan 004)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
