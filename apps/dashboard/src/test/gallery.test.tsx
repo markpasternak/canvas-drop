@@ -38,11 +38,23 @@ type Facets = {
   tags: string[];
 };
 
+/** Is this gallery request one of the U17 discovery-strip slices (Featured /
+ *  Recently published) rather than the main paginated browse? */
+function isDiscoveryCall(p: URLSearchParams): boolean {
+  return p.get("featured") === "1" || p.get("sort") === "recent";
+}
+
 /** Stub /api/gallery (browse) and /api/gallery/facets. `handler` receives the parsed
- *  browse query; `facets` seeds the owner/tag picker lists (plan 004). */
+ *  browse query; `facets` seeds the owner/tag picker lists (plan 004).
+ *
+ *  The U17 discovery rows fire their own `?featured=1` / `?sort=recent` gallery
+ *  requests. By default those resolve to an empty page (so existing main-grid
+ *  assertions see exactly one copy of each item); pass `discovery` to opt a test
+ *  into populated rows. The returned `calls` array records ALL gallery requests. */
 function stubGallery(
   handler: (params: URLSearchParams) => GalleryPage | Response,
   facets: Facets = { owners: [], tags: [] },
+  discovery?: (params: URLSearchParams) => GalleryPage | Response,
 ) {
   const calls: URLSearchParams[] = [];
   const fn = vi.fn(async (url: string) => {
@@ -50,6 +62,10 @@ function stubGallery(
     if (u.pathname === "/api/gallery/facets") return json(facets);
     if (u.pathname !== "/api/gallery") return json({ error: "not_mocked" }, 500);
     calls.push(u.searchParams);
+    if (isDiscoveryCall(u.searchParams)) {
+      const d = discovery ? discovery(u.searchParams) : page([]);
+      return d instanceof Response ? d : json(d);
+    }
     const out = handler(u.searchParams);
     return out instanceof Response ? out : json(out);
   });
@@ -128,7 +144,7 @@ describe("Gallery view", () => {
     const calls = stubGallery((p) => (p.get("q") ? page([]) : page([item()])));
     renderGallery("/gallery?q=zzz");
 
-    expect(await screen.findByText("No canvases match your search")).toBeInTheDocument();
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
     // After clearing, the query has no q and the full listing renders.
@@ -316,11 +332,97 @@ describe("Gallery view", () => {
       tags: ["charts"],
     });
     renderGallery("/gallery?owner=u-bob&templatable=true");
-    expect(await screen.findByText("No canvases match your search")).toBeInTheDocument();
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
     await screen.findByRole("link", { name: "Budget chart" });
     expect(calls.some((c) => !c.get("owner") && !c.get("templatable") && !c.get("tag"))).toBe(true);
+  });
+
+  it("renders the Featured discovery row (admin-curated, capped at 6)", async () => {
+    // 8 featured items come back; the row must cap at 6 and silently drop the rest.
+    const featured = Array.from({ length: 8 }, (_, i) =>
+      item({ id: `f${i}`, title: `Featured ${i}`, galleryFeatured: true }),
+    );
+    stubGallery(
+      () => page([item({ id: "grid1", title: "Grid only" })]),
+      { owners: [], tags: [] },
+      (p) => (p.get("featured") === "1" ? page(featured) : page([])),
+    );
+    renderGallery();
+
+    expect(await screen.findByRole("heading", { name: "Featured" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Featured 0" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Featured 5" })).toBeInTheDocument();
+    // Beyond the cap is dropped.
+    expect(screen.queryByRole("link", { name: "Featured 6" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Featured 7" })).not.toBeInTheDocument();
+  });
+
+  it("hides the Featured row entirely when no canvases are featured", async () => {
+    // Discovery defaults to empty pages, so no featured items come back.
+    stubGallery(() => page([item({ id: "g", title: "Grid only" })]));
+    renderGallery();
+    await screen.findByRole("link", { name: "Grid only" });
+    expect(screen.queryByRole("heading", { name: "Featured" })).not.toBeInTheDocument();
+  });
+
+  it("renders the Recently published discovery strip above the grid", async () => {
+    stubGallery(
+      () => page([item({ id: "grid1", title: "Grid only" })]),
+      { owners: [], tags: [] },
+      (p) =>
+        p.get("sort") === "recent" ? page([item({ id: "r1", title: "Fresh canvas" })]) : page([]),
+    );
+    renderGallery();
+    expect(await screen.findByRole("heading", { name: "Recently published" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fresh canvas" })).toBeInTheDocument();
+  });
+
+  it("top-tag shortcut chips filter the gallery via ?tag=", async () => {
+    const calls = stubGallery((p) => page([item({ title: p.get("tag") ? "Filtered" : "All" })]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    // The chip carries the "#tag" label; clicking it applies ?tag=.
+    await userEvent.click(screen.getByRole("button", { name: "#maps" }));
+    await waitFor(() => expect(calls.some((c) => c.get("tag") === "maps")).toBe(true));
+  });
+
+  it("the sort dropdown offers Featured/Trending/Recent/Title and reorders via ?sort=", async () => {
+    const calls = stubGallery(() => page([item()]));
+    renderGallery();
+    await screen.findByRole("link", { name: "Budget chart" });
+
+    const select = screen.getByRole("combobox", { name: "Sort canvases" });
+    const labels = within(select)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(labels).toEqual(["Featured", "Trending", "Recent", "Title A–Z"]);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Sort canvases" }),
+      "trending",
+    );
+    await waitFor(() => expect(calls.some((c) => c.get("sort") === "trending")).toBe(true));
+  });
+
+  it("the filtered empty state offers Clear filters and Browse docs", async () => {
+    stubGallery((p) => (p.get("q") ? page([]) : page([item()])));
+    renderGallery("/gallery?q=zzz");
+    expect(await screen.findByText("No gallery canvases match your filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse docs" })).toBeInTheDocument();
+  });
+
+  it("makes Use template prominent on templatable cards (visible button, not buried)", async () => {
+    stubGallery(() => page([item({ id: "t1", templatable: true })]));
+    renderGallery();
+    const btn = await screen.findByRole("button", { name: "Use template" });
+    expect(btn).toBeVisible();
   });
 
   it("the card copy affordance carries the canvas url", async () => {

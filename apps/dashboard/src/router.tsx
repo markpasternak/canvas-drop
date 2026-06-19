@@ -87,7 +87,23 @@ const archivedRoute = createRoute({
 });
 /** Gallery browse search params (shared with the gallery view). Filters + sort
  *  (plan 004) live here too so a filtered view is shareable and back-button-able. */
-export type GallerySortParam = "published" | "updated" | "title";
+/** Mirrors `GallerySort` in `lib/api.ts` (the backend-supported axes). `featured`/
+ *  `trending`/`recent` were added in the UX sweep (U3 backend, U17 dropdown). */
+export type GallerySortParam =
+  | "published"
+  | "recent"
+  | "updated"
+  | "title"
+  | "featured"
+  | "trending";
+const GALLERY_SORTS: readonly GallerySortParam[] = [
+  "published",
+  "recent",
+  "updated",
+  "title",
+  "featured",
+  "trending",
+];
 export interface GallerySearch {
   q?: string;
   tag?: string;
@@ -107,7 +123,9 @@ const galleryRoute = createRoute({
     owner: typeof s.owner === "string" && s.owner.length > 0 ? s.owner : undefined,
     // Only the literal `true` flips it on, so a junk value just means "off".
     templatable: s.templatable === true || s.templatable === "true" || undefined,
-    sort: s.sort === "updated" || s.sort === "title" || s.sort === "published" ? s.sort : undefined,
+    sort: GALLERY_SORTS.includes(s.sort as GallerySortParam)
+      ? (s.sort as GallerySortParam)
+      : undefined,
     view: s.view === "grid" || s.view === "list" ? s.view : undefined,
     page: typeof s.page === "number" ? s.page : Number(s.page) || undefined,
   }),

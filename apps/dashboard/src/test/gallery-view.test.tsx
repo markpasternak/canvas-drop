@@ -55,6 +55,12 @@ function stubGallery(items: GalleryItem[]) {
       const u = new URL(url, "http://localhost");
       if (u.pathname === "/api/gallery/facets") return json({ owners: [], tags: [] });
       if (u.pathname !== "/api/gallery") return json({ error: "not_mocked" }, 500);
+      // The U17 discovery strips (Featured / Recently published) fire their own
+      // `?featured=1` / `?sort=recent` requests. Resolve those to an empty page so the
+      // main grid is the only place each item appears (these view-toggle tests assert
+      // on a single "Alpha" link / the single `ul.grid`).
+      const p = u.searchParams;
+      if (p.get("featured") === "1" || p.get("sort") === "recent") return json(page([]));
       return json(page(items));
     }),
   );

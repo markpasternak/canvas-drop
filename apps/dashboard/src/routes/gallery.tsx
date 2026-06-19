@@ -8,7 +8,7 @@ import { previewCoverUrl } from "../components/CanvasCover.js";
 import { CanvasGridCard, cardNameLinkClass } from "../components/CanvasGridCard.js";
 import { CanvasListRow } from "../components/CanvasListRow.js";
 import { CloneDialog } from "../components/CloneDialog.js";
-import { EmptyState } from "../components/EmptyState.js";
+import { EmptyState, galleryEmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { coverType } from "../components/GenerativeCover.js";
 import { SearchInput } from "../components/SearchInput.js";
@@ -235,6 +235,76 @@ function CardSkeletonGrid() {
   );
 }
 
+/** Cap for the admin-curated Featured row (U17). Beyond 6 is silently dropped; the
+ *  "see all featured" overflow view is the deferred follow-up. */
+const FEATURED_CAP = 6;
+/** How many of the most-recently-published canvases the discovery strip surfaces. */
+const RECENT_CAP = 6;
+/** How many top-tag shortcut chips to surface above the grid. */
+const TOP_TAG_CAP = 8;
+
+/** A horizontal discovery strip (Featured / Recently published) above the main
+ *  paginated grid. A heading + a row of the SAME unified gallery cards, wrapping on
+ *  wider viewports and scrolling-free on narrow ones. Renders nothing when empty so a
+ *  barren gallery never shows a hollow heading. */
+function DiscoveryStrip({
+  heading,
+  description,
+  items,
+}: {
+  heading: string;
+  description?: string;
+  items: GalleryItem[];
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section aria-label={heading} className="space-y-3">
+      <div className="space-y-0.5">
+        <h2 className="font-serif text-sm font-medium text-fg">{heading}</h2>
+        {description && <p className="text-xs text-subtle">{description}</p>}
+      </div>
+      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {items.map((item) => (
+          <GalleryCard key={item.id} item={item} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Top-tag shortcut chips: the most common gallery tags as one-click `?tag=` filters,
+ *  complementing the richer multi-select control. Sourced from the gallery facets
+ *  (the authoritative distinct-tag list across all currently-visible canvases) so the
+ *  chips reflect the whole gallery, not just the loaded page. Hidden when no tags
+ *  exist or all top tags are already active. */
+function TopTagChips({
+  tags,
+  active,
+  onToggle,
+}: {
+  tags: string[];
+  active: string;
+  onToggle: (tag: string) => void;
+}) {
+  const top = tags.slice(0, TOP_TAG_CAP);
+  if (top.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-medium text-subtle">Popular tags</span>
+      {top.map((tag) => (
+        <Tag
+          key={tag}
+          size="sm"
+          className={active === tag ? "border-accent/40 text-accent" : undefined}
+          onClick={() => onToggle(tag)}
+        >
+          #{tag}
+        </Tag>
+      ))}
+    </div>
+  );
+}
+
 /** Opt-in gallery browse (§6.9 #11, M8). Lists canvases other members explicitly
  * shared AND opted into the gallery. Search + tag filter + pagination live in the
  * route's search params so views are shareable and back-button-able. */
@@ -268,6 +338,25 @@ export default function Gallery() {
     offset,
   });
   const facets = useGalleryFacets();
+
+  // Discovery rows above the main grid (U17). They are a curated/recency *slice* of
+  // the gallery — distinct from the paginated grid and its sort — so they're only a
+  // scanning aid on the default, unfiltered, grid view. Suppressed while filtering or
+  // in list mode so they never duplicate or fight the focused result set.
+  const showDiscovery = view === "grid" && !q && !tag && !owner && !templatable;
+  const featuredQuery = useGallery({
+    featured: true,
+    sort: "featured",
+    limit: FEATURED_CAP,
+    offset: 0,
+  });
+  const recentQuery = useGallery({ sort: "recent", limit: RECENT_CAP, offset: 0 });
+  // Admin-curation can leave a stale-true flag on a now-unlisted canvas; the gallery
+  // visibility predicate already filters those at query time, so the row only ever
+  // carries live+listed+published+featured items. Cap defensively in case the server
+  // returns more than the requested limit.
+  const featuredItems = (featuredQuery.data?.items ?? []).slice(0, FEATURED_CAP);
+  const recentItems = (recentQuery.data?.items ?? []).slice(0, RECENT_CAP);
 
   // A fresh refetch that drops below the current page (e.g. an item was un-listed
   // while on the last page) snaps back to page 1 rather than showing an empty page.
@@ -345,11 +434,27 @@ export default function Gallery() {
   if (owner && !ownerOptions.some((o) => o.value === owner)) {
     ownerOptions.push({ value: owner, label: "Selected owner" });
   }
+  // Featured / Trending / Recent / Title (U17), wired to the backend `?sort=` axes.
+  // `published` is the default ("recent" is its alias) so omitting it keeps a bare URL.
   const sortOptions = [
-    { value: "published", label: "Newest" },
-    { value: "updated", label: "Recently updated" },
+    { value: "featured", label: "Featured" },
+    { value: "trending", label: "Trending" },
+    { value: "published", label: "Recent" },
     { value: "title", label: "Title A–Z" },
   ];
+
+  /** One-click top-tag chip: toggles a single `?tag=` filter (replacing any current
+   *  single tag), resetting to page 1. Mirrors the card tag-click contract. */
+  function toggleTopTag(next: string) {
+    navigate({
+      to: "/gallery",
+      search: (prev: GallerySearch) => ({
+        ...prev,
+        tag: prev.tag === next ? undefined : next,
+        page: 1,
+      }),
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -411,6 +516,29 @@ export default function Gallery() {
         )}
       </FilterBar>
 
+      {/* Top-tag shortcut chips — quick one-click filters from the gallery-wide tag
+          facets, complementing the multi-select FilterChip/tag UI above. */}
+      {!tag && (facets.data?.tags?.length ?? 0) > 0 && (
+        <TopTagChips tags={facets.data?.tags ?? []} active={tag ?? ""} onToggle={toggleTopTag} />
+      )}
+
+      {/* Discovery rows (Featured, Recently published) — a curated/recency slice above
+          the main grid, only on the default unfiltered grid view. */}
+      {showDiscovery && (
+        <>
+          <DiscoveryStrip
+            heading="Featured"
+            description="Hand-picked by your admins."
+            items={featuredItems}
+          />
+          <DiscoveryStrip
+            heading="Recently published"
+            description="The latest canvases shared with your org."
+            items={recentItems}
+          />
+        </>
+      )}
+
       {isLoading && <CardSkeletonGrid />}
 
       {isError && (
@@ -439,18 +567,27 @@ export default function Gallery() {
 
       {data && items.length === 0 && filtering && (
         <EmptyState
-          title="No canvases match your search"
-          description="Try a different term, or clear the filters to see everything in the gallery."
-          action={
-            <Button variant="secondary" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          }
+          {...galleryEmptyState({
+            onClearFilters: clearFilters,
+            docsLink: (
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-medium text-accent transition-colors hover:text-accent-hover"
+              >
+                Browse docs
+              </a>
+            ),
+          })}
         />
       )}
 
       {items.length > 0 && (
-        <>
+        <section aria-label="All gallery canvases" className="space-y-4">
+          {showDiscovery && (featuredItems.length > 0 || recentItems.length > 0) && (
+            <h2 className="font-serif text-sm font-medium text-fg">Browse all</h2>
+          )}
           {view === "grid" ? (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {items.map((item) => (
@@ -488,7 +625,7 @@ export default function Gallery() {
               </Button>
             </div>
           </div>
-        </>
+        </section>
       )}
     </div>
   );

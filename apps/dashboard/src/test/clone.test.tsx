@@ -58,6 +58,13 @@ describe("Clone from the gallery (plan 002 U7)", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         const u = new URL(url, "http://localhost");
         if (u.pathname === "/api/gallery") {
+          // The U17 discovery strips (Featured / Recently published) fire their own
+          // `?featured=1` / `?sort=recent` requests; resolve those to an empty page so
+          // the source card (and its single "Use template" button) appears only once.
+          const p = u.searchParams;
+          if (p.get("featured") === "1" || p.get("sort") === "recent") {
+            return json({ items: [], total: 0, limit: 24, offset: 0 });
+          }
           return json({ items: [templatableItem], total: 1, limit: 24, offset: 0 });
         }
         if (u.pathname === "/api/canvases/src-1/clone" && init?.method === "POST") {
