@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -90,15 +90,6 @@ function renderListWith(canvases: unknown[], initialPath = "/") {
       </QueryClientProvider>
     </ThemeProvider>,
   );
-}
-
-/** The list rows live in the page's only <ul>; the U11 "finish this" strip rides
- *  above it and duplicates one canvas's title. Scope row/title assertions here so a
- *  draft-heavy fixture (which now also surfaces the strip) reads the ROW, not the strip. */
-function rows(): HTMLElement {
-  const list = document.querySelector("ul");
-  if (!list) throw new Error("no row list rendered");
-  return list as HTMLElement;
 }
 
 afterEach(() => {
