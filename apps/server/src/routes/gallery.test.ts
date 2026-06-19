@@ -10,6 +10,7 @@ import {
   seedUser,
 } from "../db/repositories/gallery-test-helpers.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
 import type { GalleryPageDto } from "./gallery.js";
@@ -222,6 +223,25 @@ describe("galleryRoutes", () => {
     const res = await get(client, "/api/gallery?tag=charts&tag=games");
     expect(res.body.total).toBe(2);
     expect(new Set(res.body.items.map((i) => i.id))).toEqual(new Set([charts, games]));
+  });
+
+  it("sort=trending ranks the visible set by recent views", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const hot = await seedListed(client, owner.id, { title: "Hot" });
+    const cold = await seedListed(client, owner.id, { title: "Cold" });
+
+    // hot: two distinct recent viewers; cold: one — so trending orders hot before cold.
+    const usage = usageEventsRepository(client);
+    const now = Date.now();
+    await usage.recordView({ canvasId: hot, userId: "v1", windowMs: 60_000, now });
+    await usage.recordView({ canvasId: hot, userId: "v2", windowMs: 60_000, now: now + 1 });
+    await usage.recordView({ canvasId: cold, userId: "v1", windowMs: 60_000, now: now + 2 });
+
+    const res = await get(client, "/api/gallery?sort=trending");
+    expect(res.body.items.map((i) => i.id)).toEqual([hot, cold]);
+    expect(res.body.items.find((i) => i.id === hot)?.recentViews).toBe(2);
+    expect(res.body.items.find((i) => i.id === cold)?.recentViews).toBe(1);
   });
 
   it("filters featured-only and exposes galleryFeatured + recentViews on each item", async () => {

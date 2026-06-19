@@ -755,6 +755,46 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(byTitle.total).toBe(1);
   });
 
+  it("list_canvases tags filters to canvases carrying any of the given tags (any-match parity)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const charts = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Charts" } }),
+    );
+    const other = payload(
+      await mcp.callTool({ name: "create_canvas", arguments: { title: "Other" } }),
+    );
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: charts.id, tags: ["charts"] },
+    });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: other.id, tags: ["finance"] },
+    });
+
+    const onlyCharts = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { tags: ["charts"] } }),
+    );
+    expect(onlyCharts.total).toBe(1);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+    expect(onlyCharts.canvases.map((cv: any) => cv.id)).toEqual([charts.id]);
+
+    // Any-match: passing both tags returns both canvases.
+    const both = payload(
+      await mcp.callTool({
+        name: "list_canvases",
+        arguments: { tags: ["charts", "finance"] },
+      }),
+    );
+    expect(both.total).toBe(2);
+    expect(
+      // biome-ignore lint/suspicious/noExplicitAny: test payload is untyped JSON
+      both.canvases.map((cv: any) => cv.id).sort(),
+    ).toEqual([charts.id, other.id].sort());
+  });
+
   it("list_canvases sort=popular ranks by recent views and reports view rollups (plan 004)", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

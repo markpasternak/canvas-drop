@@ -284,11 +284,21 @@ describe("admin routes", () => {
     const all = await app.request("/api/admin/canvases");
     expect(all.status).toBe(200);
     const body = (await all.json()) as {
-      canvases: Array<{ owner: { email: string }; disabledReason: string | null }>;
+      canvases: Array<{
+        owner: { email: string };
+        disabledReason: string | null;
+        galleryFeatured: boolean;
+        galleryListed: boolean;
+      }>;
     };
     expect(body.canvases.length).toBe(2);
     const owners = new Set(body.canvases.map((c) => c.owner.email));
     expect(owners).toEqual(new Set(["alice@example.com", "bob@example.com"]));
+    // Each admin row carries the gallery curation flags (drives the Feature toggle).
+    for (const row of body.canvases) {
+      expect(typeof row.galleryFeatured).toBe("boolean");
+      expect(typeof row.galleryListed).toBe("boolean");
+    }
 
     const disabled = (await (await app.request("/api/admin/canvases?status=disabled")).json()) as {
       canvases: Array<{
@@ -339,6 +349,7 @@ describe("admin routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       canvasCountByStatus: Record<string, number>;
+      publicLinkCount: number;
       userCount: number;
       totalOps: number;
       totalViews: number;
@@ -354,6 +365,8 @@ describe("admin routes", () => {
       aiCalls: number;
     };
     expect(body.canvasCountByStatus.active).toBe(1);
+    // Public-link rollup rides the overview (no public-link canvas seeded → 0).
+    expect(body.publicLinkCount).toBe(0);
     expect(body.userCount).toBeGreaterThanOrEqual(1);
     expect(Array.isArray(body.topCanvases)).toBe(true);
     // Expanded overview fields (§6.10.6).

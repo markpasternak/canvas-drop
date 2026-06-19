@@ -169,6 +169,30 @@ describe("managementRoutes", () => {
     expect(body.canvases.find((cv) => cv.id === cold.id)?.recentViews).toBe(0);
   });
 
+  it("GET /?tag= filters the owner list (single match, multi-tag any-match)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const repo = canvasesRepository(client);
+    const charts = await repo.create({ ownerId: owner.id, slug: "charts", apiKeyHash: "kc" });
+    const finance = await repo.create({ ownerId: owner.id, slug: "finance", apiKeyHash: "kf" });
+    await repo.updateSettings(charts.id, { tags: ["charts"] });
+    await repo.updateSettings(finance.id, { tags: ["finance"] });
+
+    const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+
+    // A single tag returns only the matching canvas.
+    const one = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app().request("/api/canvases?tag=charts"),
+    );
+    expect(one.canvases.map((cv) => cv.id)).toEqual([charts.id]);
+
+    // Repeated ?tag=a&tag=b is any-match → both canvases.
+    const both = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app().request("/api/canvases?tag=charts&tag=finance"),
+    );
+    expect(new Set(both.canvases.map((cv) => cv.id))).toEqual(new Set([charts.id, finance.id]));
+  });
+
   it("GET /:id returns the canvas to its owner, 404 to a different user", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

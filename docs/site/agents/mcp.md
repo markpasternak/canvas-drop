@@ -36,7 +36,7 @@ there is no cross-owner access and no existence leak.
 | Tool | What it does |
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). |
-| `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, summary, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
+| `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). |
 | `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
 | `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`). |

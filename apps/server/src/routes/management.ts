@@ -199,6 +199,8 @@ function ownerCanvasView(
 
 const CANVASES_PAGE_SIZE = 30;
 const CANVASES_MAX_LIMIT = 100;
+/** A canvas carries at most 20 tags, so a tag filter past 20 adds cost with no new matches. */
+const CANVASES_MAX_TAGS = 20;
 
 /** Coerce an optional query flag ("1"/"true" → true; absent/anything else → false). */
 const boolFlag = z
@@ -412,8 +414,9 @@ export function managementRoutes(deps: ManagementDeps) {
   // the caller's own set.
   app.get("/", async (c) => {
     // `c.req.query()` flattens repeated params; read `tag` via `queries("tag")` so
-    // `?tag=a&tag=b` round-trips as an array (multi-tag any-match).
-    const tags = c.req.queries("tag");
+    // `?tag=a&tag=b` round-trips as an array (multi-tag any-match). Cap at 20: a canvas
+    // carries at most 20 tags, so extra selections add cost, not matches.
+    const tags = c.req.queries("tag")?.slice(0, CANVASES_MAX_TAGS);
     const parsed = ownerListQuerySchema.safeParse({
       ...c.req.query(),
       tag: tags && tags.length > 0 ? tags : undefined,

@@ -127,9 +127,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .string()
           .optional()
           .describe(
-            "Optional forgiving text filter over title, summary, tags, and slug " +
+            "Optional forgiving text filter over title, description, tags, and slug " +
               "(case/accent/whitespace-insensitive; multiple words are AND-ed).",
           ),
+        tags: z
+          .array(z.string())
+          .optional()
+          .describe("Filter to canvases carrying any of these tags."),
         sort: z
           .enum(["updated", "created", "title", "popular"])
           .optional()
@@ -137,7 +141,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ query, sort, limit }) => {
+    async ({ query, tags, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const {
         items,
@@ -146,6 +150,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       } = await deps.canvases.listByOwnerFiltered({
         ownerId: caller.userId,
         q: query,
+        tag: tags,
         sort,
         popularSinceMs: recentSinceMs,
         limit: limit ?? 50,
