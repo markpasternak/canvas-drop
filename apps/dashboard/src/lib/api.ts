@@ -573,6 +573,11 @@ export interface AdminCanvasRow {
    *  toggle flips it via the admin set-featured route. */
   galleryFeatured: boolean;
   disabledReason: string | null;
+  /** Whether a password is set on the canvas (boolean only — the hash never leaves the
+   *  server). Lets the admin Open gate warn before following a password-protected link. */
+  hasPassword: boolean;
+  /** Share-link expiry (epoch ms), or null when no expiry is set. Feeds the same gate. */
+  sharedExpiresAt: number | null;
   owner: { id: string; email: string; name: string } | null;
   sizeBytes: number;
   usageOps: number;

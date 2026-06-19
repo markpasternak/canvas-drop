@@ -226,6 +226,65 @@ describe("draftApiRoutes", () => {
     expect((await jsonOf<{ code: string }>(res)).code).toBe("EMPTY_DEPLOY");
   });
 
+  it("publishing an ARCHIVED canvas returns NOT_ACTIVE (409), not DISABLED", async () => {
+    // Archive is owner-reversible, so publish keeps the NOT_ACTIVE "unarchive first"
+    // contract — it must NOT collapse into the admin-takedown DISABLED 409.
+    const { appAs, owner, canvas, canvases } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>x</h1>"),
+    });
+    await canvases.archive(canvas.id);
+    const res = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf<{ code: string }>(res);
+    expect(body.code).toBe("NOT_ACTIVE");
+    expect(body.code).not.toBe("DISABLED");
+  });
+
+  it("publishing a DISABLED canvas (owner) returns the DISABLED 409 with the reason", async () => {
+    const { appAs, owner, canvas, canvases } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>x</h1>"),
+    });
+    await canvases.setDisabled(canvas.id, "policy violation");
+    const res = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf<{ code: string; message: string }>(res);
+    expect(body.code).toBe("DISABLED");
+    expect(body.message).toContain("policy violation");
+  });
+
+  it("a NON-OWNER (incl. admin) mutating a DISABLED canvas gets 404, NEVER the DISABLED 409", async () => {
+    // Gate ordering lock: ownership is checked BEFORE the disabled state, so a non-owner
+    // — even an admin — of a disabled canvas reads as not-found. Surfacing the 409 would
+    // leak that the row exists (§12.0). The reason must never reach a non-owner.
+    const { appAs, other, canvas, canvases } = await setup();
+    await canvases.setDisabled(canvas.id, "policy violation");
+    for (const isAdmin of [false, true]) {
+      const res = await appAs(other.id, isAdmin).request(`/api/canvases/${canvas.id}/publish`, {
+        method: "POST",
+        headers: SO,
+      });
+      expect(res.status, `admin=${isAdmin}`).toBe(404);
+      const body = await jsonOf<{ error?: string; code?: string; message?: string }>(res);
+      expect(body.error).toBe("not_found");
+      expect(body.code).not.toBe("DISABLED");
+      expect(JSON.stringify(body)).not.toContain("policy violation");
+    }
+  });
+
   it("POST /restore loads a prior version into the draft", async () => {
     const { appAs, owner, canvas } = await setup();
     const app = appAs(owner.id);

@@ -60,3 +60,32 @@ export function disabledError(cv: Pick<Canvas, "disabledReason">): {
 } {
   return { code: DISABLED_CODE, message: disabledMessage(cv) };
 }
+
+/**
+ * The owner-mutation gate POLICY, in one place: classify the {@link requireOwnedCanvas}
+ * result into a discriminated outcome so every owner-mutation surface applies the SAME
+ * ordering and meaning, and only the *response shape* lives in the caller.
+ *
+ * - `not-found` — not owned / missing / deleted (the `cv === null` case). Maps to a 404
+ *   with no existence leak (§12.0): ownership is checked BEFORE state, so a non-owner
+ *   (incl. a non-owner admin) of a disabled canvas still reads as not-found, never the
+ *   409 — which would leak that the row exists.
+ * - `disabled` — owned, but an admin has taken it down (`status === "disabled"`). Maps to
+ *   the shared 409 `DISABLED` refusal; carries the canvas so the caller can build the body
+ *   (the owner-facing reason).
+ * - `ok` — owned and mutable. Carries the canvas.
+ *
+ * The HTTP management + draft routes both run `requireOwnedCanvas` then this classifier so
+ * the gate can't drift between them; each route turns the outcome into its own `Response`.
+ */
+export type MutabilityOutcome =
+  | { kind: "not-found" }
+  | { kind: "disabled"; canvas: Canvas }
+  | { kind: "ok"; canvas: Canvas };
+
+/** Apply the owner-mutation policy to a {@link requireOwnedCanvas} result. */
+export function classifyMutability(cv: Canvas | null): MutabilityOutcome {
+  if (!cv) return { kind: "not-found" };
+  if (cv.status === "disabled") return { kind: "disabled", canvas: cv };
+  return { kind: "ok", canvas: cv };
+}

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
 import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
-import { disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
+import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -82,10 +82,15 @@ export function draftApiRoutes(deps: DraftApiDeps) {
    *  contract while the draft READS (get/file/preview) keep using `ownedCanvas`. Returns
    *  the canvas, or a Response the handler returns as-is (404 not-owned / 409 disabled). */
   const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
-    if (cv.status === "disabled") return c.json(disabledError(cv), 409);
-    return cv;
+    const outcome = classifyMutability(await ownedCanvas(c));
+    switch (outcome.kind) {
+      case "not-found":
+        return c.json({ error: "not_found" }, 404);
+      case "disabled":
+        return c.json(disabledError(outcome.canvas), 409);
+      case "ok":
+        return outcome.canvas;
+    }
   };
 
   async function viewOf(c: Context<AppEnv>, cv: Canvas, draft: Draft): Promise<Response> {

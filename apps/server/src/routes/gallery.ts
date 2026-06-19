@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { CANVAS_MAX_TAGS, type Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { canvasUrl } from "../canvas/url.js";
@@ -19,8 +19,6 @@ export interface GalleryDeps extends PreviewHintDeps {
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 30;
-/** A canvas carries at most 20 tags, so a tag filter past 20 adds cost with no new matches. */
-const MAX_TAGS = 20;
 
 /**
  * Browse-query schema. A gallery URL with a junk param should still render the
@@ -135,7 +133,7 @@ export function galleryRoutes(deps: GalleryDeps) {
     // `c.req.query()` flattens repeated params to the first value; read `tag` via
     // `queries("tag")` so `?tag=a&tag=b` round-trips as an array (multi-tag any-match).
     // Cap at 20: a canvas carries at most 20 tags, so extra selections add cost, not matches.
-    const tags = c.req.queries("tag")?.slice(0, MAX_TAGS);
+    const tags = c.req.queries("tag")?.slice(0, CANVAS_MAX_TAGS);
     const parsed = querySchema.safeParse({
       ...c.req.query(),
       tag: tags && tags.length > 0 ? tags : undefined,

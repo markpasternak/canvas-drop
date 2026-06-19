@@ -168,6 +168,10 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         // featured state and the Feature toggle can flip it in place.
         galleryFeatured: cv.galleryFeatured,
         disabledReason: cv.disabledReason,
+        // Open-gate inputs for the dashboard (boolean only — never the hash itself):
+        // whether a password is set, and the share-link expiry (null = no expiry).
+        hasPassword: cv.passwordHash !== null,
+        sharedExpiresAt: cv.sharedExpiresAt,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         // Size = deployed version bytes + uploaded file bytes (§6.10.1).
         sizeBytes: deployedBytes + (fileBytes.get(cv.id) ?? 0),

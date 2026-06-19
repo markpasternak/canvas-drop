@@ -178,7 +178,8 @@ export function registerDraftTools(
     {
       description:
         "Publish the DRAFT of a canvas you own as a new live version (the editor's Publish button). " +
-        "Fails NOT_ACTIVE if the canvas is archived/disabled. Returns the new version's details.",
+        "Fails DISABLED if an admin has taken down the canvas, or NOT_ACTIVE if it is archived. " +
+        "Returns the new version details.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {

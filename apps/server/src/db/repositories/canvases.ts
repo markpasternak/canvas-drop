@@ -46,6 +46,26 @@ export const CLEARED_PUBLICATION_FIELDS = {
   galleryPublishedAt: null,
 } as const;
 
+/**
+ * Flatten + dedupe the string tags across a set of `{ tags }` rows, sorted. Shared by
+ * the gallery and owner tag-facet queries so the two surfaces flatten the JSON `tags`
+ * column the same way. Done in JS (not SQL) because unnesting the JSON array is
+ * dialect-divergent (json_each on sqlite, jsonb on pg); at gallery/owner scale (dozens
+ * of rows) that is simplest and keeps the queries dual-dialect-trivial. Non-array /
+ * non-string entries are ignored.
+ */
+function flattenTags(rows: ReadonlyArray<{ tags: unknown }>): string[] {
+  const tagSet = new Set<string>();
+  for (const row of rows) {
+    if (Array.isArray(row.tags)) {
+      for (const tag of row.tags) {
+        if (typeof tag === "string") tagSet.add(tag);
+      }
+    }
+  }
+  return [...tagSet].sort();
+}
+
 export interface CreateCanvasInput {
   ownerId: string;
   slug: string;
@@ -313,11 +333,15 @@ export function canvasesRepository(client: DbClient) {
   };
 
   /** The blob-input columns of one row, for {@link mergedSearchText}. Returns null
-   *  when the row is absent so callers fall back to the bare UPDATE (no row to write). */
+   *  when the row is absent so callers fall back to the bare UPDATE (no row to write).
+   *  Takes the executor (`db` or a transaction `tx`) so the read can be done inside the
+   *  SAME transaction as the UPDATE that consumes it — closing the read-merge-write
+   *  TOCTOU window in {@link updateSettings}/{@link regenerateSlug}. */
   const searchTextInputs = async (
     id: string,
+    exec: typeof db = db,
   ): Promise<{ title: string; description: string | null; tags: unknown; slug: string } | null> => {
-    const rows = (await db
+    const rows = (await exec
       .select({ title: t.title, description: t.description, tags: t.tags, slug: t.slug })
       .from(t)
       .where(eq(t.id, id))
@@ -329,6 +353,17 @@ export function canvasesRepository(client: DbClient) {
     }>;
     return rows[0] ?? null;
   };
+
+  /**
+   * Run `fn` against a transactional executor so a read-merge-write pair is atomic.
+   * Postgres (real concurrency) gets a genuine `db.transaction`. better-sqlite3 is
+   * synchronous and single-writer, and drizzle's sqlite `transaction()` rejects an
+   * async callback ("Transaction function cannot return a promise"); there is no
+   * interleaving between an awaited SELECT and the following UPDATE on one connection,
+   * so the bare `db` already gives the same atomicity there — we just call `fn(db)`.
+   */
+  const inTransaction = <T>(fn: (exec: typeof db) => Promise<T>): Promise<T> =>
+    client.dialect === "sqlite" ? fn(db) : db.transaction(fn);
 
   /**
    * Recent `view` counts for a set of canvases over `[sinceMs, ∞)`, as a
@@ -551,22 +586,12 @@ export function canvasesRepository(client: DbClient) {
         const total = idRows.length;
         if (total === 0) return { items: [], total: 0, recentViews: new Map() };
 
-        const ue = client.dialect === "sqlite" ? sqliteSchema.usageEvents : pgSchema.usageEvents;
-        const countRows = (await db
-          .select({ canvasId: ue.canvasId, c: sql<number>`count(*)` })
-          .from(ue)
-          .where(
-            and(
-              eq(ue.type, "view"),
-              gte(ue.createdAt, sinceMs),
-              inArray(
-                ue.canvasId,
-                idRows.map((r) => r.id),
-              ),
-            ),
-          )
-          .groupBy(ue.canvasId)) as Array<{ canvasId: string; c: number }>;
-        const views = new Map(countRows.map((r) => [r.canvasId, Number(r.c)]));
+        // Same (type=view, gte sinceMs, inArray ids, groupBy canvasId) aggregate the
+        // gallery's trending path uses — one shared implementation (hydrateRecentViews).
+        const views = await hydrateRecentViews(
+          idRows.map((r) => r.id),
+          sinceMs,
+        );
 
         // (recent views desc, updatedAt desc, id desc) — same id tiebreak as the SQL
         // sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
@@ -680,22 +705,27 @@ export function canvasesRepository(client: DbClient) {
       // inputs (title/description/tags — slug is owned by regenerateSlug). Compute it
       // from the MERGED post-write state (current row + patch) so omitted-but-depended-on
       // fields stay correct, and write it in the one UPDATE — atomic, no second round-trip.
-      if (
-        patch.title !== undefined ||
-        patch.description !== undefined ||
-        patch.tags !== undefined
-      ) {
-        const current = await searchTextInputs(id);
-        if (current) {
-          set.searchText = mergedSearchText(current, {
-            title: patch.title,
-            description: patch.description,
-            tags: patch.tags,
-          });
+      const touchesSearchBlob =
+        patch.title !== undefined || patch.description !== undefined || patch.tags !== undefined;
+      // When the patch touches a search-blob input, the merge READS the current row and
+      // the patch UPDATEs it; run both in ONE transaction so a concurrent write can't
+      // slip between the read and the write and leave search_text reflecting pre-patch
+      // text (TOCTOU). The plain (non-blob) patch keeps the single UPDATE.
+      const apply = async (exec: typeof db): Promise<Canvas> => {
+        if (touchesSearchBlob) {
+          const current = await searchTextInputs(id, exec);
+          if (current) {
+            set.searchText = mergedSearchText(current, {
+              title: patch.title,
+              description: patch.description,
+              tags: patch.tags,
+            });
+          }
         }
-      }
-      const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
-      return rows[0] as Canvas;
+        const rows = await exec.update(t).set(set).where(eq(t.id, id)).returning();
+        return rows[0] as Canvas;
+      };
+      return touchesSearchBlob ? inTransaction(apply) : apply(db);
     },
 
     /** Revoke-sweep (U10): flip an owner's public_link canvases back to private when
@@ -867,10 +897,14 @@ export function canvasesRepository(client: DbClient) {
         slugCustom: custom,
         updatedAt: Date.now(),
       };
-      const current = await searchTextInputs(id);
-      if (current) set.searchText = mergedSearchText(current, { slug: newSlug });
-      const rows = (await db.update(t).set(set).where(eq(t.id, id)).returning()) as Canvas[];
-      return rows[0] as Canvas;
+      // Read-merge-write atomically so the blob can't reflect a row a concurrent write
+      // changed between the SELECT and the UPDATE (TOCTOU); mirrors updateSettings.
+      return inTransaction(async (exec) => {
+        const current = await searchTextInputs(id, exec);
+        if (current) set.searchText = mergedSearchText(current, { slug: newSlug });
+        const rows = (await exec.update(t).set(set).where(eq(t.id, id)).returning()) as Canvas[];
+        return rows[0] as Canvas;
+      });
     },
 
     async regenerateApiKey(id: string, apiKeyHash: string): Promise<Canvas> {
@@ -1180,16 +1214,8 @@ export function canvasesRepository(client: DbClient) {
       const tagRows = (await db.select({ tags: t.tags }).from(t).where(where)) as Array<{
         tags: unknown;
       }>;
-      const tagSet = new Set<string>();
-      for (const row of tagRows) {
-        if (Array.isArray(row.tags)) {
-          for (const tag of row.tags) {
-            if (typeof tag === "string") tagSet.add(tag);
-          }
-        }
-      }
 
-      return { owners, tags: [...tagSet].sort() };
+      return { owners, tags: flattenTags(tagRows) };
     },
 
     /**
@@ -1207,15 +1233,7 @@ export function canvasesRepository(client: DbClient) {
         .select({ tags: t.tags })
         .from(t)
         .where(and(eq(t.ownerId, ownerId), ne(t.status, "deleted")))) as Array<{ tags: unknown }>;
-      const tagSet = new Set<string>();
-      for (const row of tagRows) {
-        if (Array.isArray(row.tags)) {
-          for (const tag of row.tags) {
-            if (typeof tag === "string") tagSet.add(tag);
-          }
-        }
-      }
-      return [...tagSet].sort();
+      return flattenTags(tagRows);
     },
 
     /**

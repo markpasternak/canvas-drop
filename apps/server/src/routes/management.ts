@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
 import {
+  CANVAS_MAX_TAG_LENGTH,
+  CANVAS_MAX_TAGS,
   type CapabilityGlobals,
   type Config,
   effectiveCapabilities,
@@ -18,7 +20,7 @@ import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { rootEntry } from "../canvas/manifest.js";
-import { disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
+import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -126,7 +128,7 @@ const settingsSchema = z.object({
   previewMode: z.enum(["auto", "off"]).optional(),
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
-  tags: z.array(z.string().max(50)).max(20).optional(),
+  tags: z.array(z.string().max(CANVAS_MAX_TAG_LENGTH)).max(CANVAS_MAX_TAGS).optional(),
 });
 
 /**
@@ -199,8 +201,6 @@ function ownerCanvasView(
 
 const CANVASES_PAGE_SIZE = 30;
 const CANVASES_MAX_LIMIT = 100;
-/** A canvas carries at most 20 tags, so a tag filter past 20 adds cost with no new matches. */
-const CANVASES_MAX_TAGS = 20;
 
 /** Coerce an optional query flag ("1"/"true" → true; absent/anything else → false). */
 const boolFlag = z
@@ -281,10 +281,15 @@ export function managementRoutes(deps: ManagementDeps) {
    *  A disabled canvas is read-only to its owner: every owner MUTATION goes through this,
    *  while reads keep using `ownedCanvas` so the owner can still see the canvas + reason. */
   const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
-    if (cv.status === "disabled") return c.json(disabledError(cv), 409);
-    return cv;
+    const outcome = classifyMutability(await ownedCanvas(c));
+    switch (outcome.kind) {
+      case "not-found":
+        return c.json({ error: "not_found" }, 404);
+      case "disabled":
+        return c.json(disabledError(outcome.canvas), 409);
+      case "ok":
+        return outcome.canvas;
+    }
   };
 
   /** Fire-and-forget realtime revalidation with a LOGGED swallow — a persistent
@@ -429,7 +434,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // `c.req.query()` flattens repeated params; read `tag` via `queries("tag")` so
     // `?tag=a&tag=b` round-trips as an array (multi-tag any-match). Cap at 20: a canvas
     // carries at most 20 tags, so extra selections add cost, not matches.
-    const tags = c.req.queries("tag")?.slice(0, CANVASES_MAX_TAGS);
+    const tags = c.req.queries("tag")?.slice(0, CANVAS_MAX_TAGS);
     const parsed = ownerListQuerySchema.safeParse({
       ...c.req.query(),
       tag: tags && tags.length > 0 ? tags : undefined,

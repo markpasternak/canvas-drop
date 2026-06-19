@@ -58,23 +58,33 @@ export async function backfillSearchText(
     .from(t)
     .where(all ? undefined : isNull(t.searchText))) as SearchTextRow[];
 
+  // Apply one chunk's updates against an executor (`db` or a transaction `tx`).
+  const applyChunk = async (exec: typeof db, chunk: SearchTextRow[]): Promise<void> => {
+    for (const row of chunk) {
+      const searchText = computeSearchText({
+        title: row.title,
+        description: row.description,
+        tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
+        slug: row.slug,
+      });
+      await exec.update(t).set({ searchText }).where(eq(t.id, row.id));
+    }
+  };
+
   let updated = 0;
   for (let i = 0; i < rows.length; i += BACKFILL_CHUNK_SIZE) {
     const chunk = rows.slice(i, i + BACKFILL_CHUNK_SIZE);
-    // One transaction per chunk: if any update in the chunk throws, the whole chunk
-    // rolls back and the error propagates — already-committed chunks survive, and a
-    // re-run (NULL-only) picks up exactly the rows left unpopulated.
-    await db.transaction(async (tx: typeof db) => {
-      for (const row of chunk) {
-        const searchText = computeSearchText({
-          title: row.title,
-          description: row.description,
-          tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
-          slug: row.slug,
-        });
-        await tx.update(t).set({ searchText }).where(eq(t.id, row.id));
-      }
-    });
+    // One transaction per chunk on Postgres: if any update throws, the whole chunk rolls
+    // back and the error propagates — already-committed chunks survive, and a re-run
+    // (NULL-only) picks up exactly the rows left unpopulated. better-sqlite3 is
+    // synchronous and single-writer, and drizzle's sqlite transaction() rejects an async
+    // callback; the chunk's awaited updates already run without interleaving, so we apply
+    // them against the bare `db` there.
+    if (client.dialect === "sqlite") {
+      await applyChunk(db, chunk);
+    } else {
+      await db.transaction((tx: typeof db) => applyChunk(tx, chunk));
+    }
     updated += chunk.length;
   }
   return updated;

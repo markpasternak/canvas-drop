@@ -418,7 +418,23 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
         name: "deploy_canvas",
         args: { id: cv.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
       },
+      // Staged-upload + rollback lifecycle mutations also go through requireMutable, so the
+      // DISABLED gate fires before any uploadId/version is consulted (dummy values are fine).
+      {
+        name: "begin_deploy",
+        args: { id: cv.id, manifest: [{ path: "index.html", hash: sha("x"), size: 1 }] },
+      },
+      {
+        name: "add_files",
+        args: { id: cv.id, uploadId: "nope", files: [{ path: "index.html", content: "x" }] },
+      },
+      { name: "finalize_deploy", args: { id: cv.id, uploadId: "nope" } },
+      { name: "rollback_canvas", args: { id: cv.id, version: 1 } },
+      // Draft EDIT tools share the same gate.
       { name: "write_draft_file", args: { id: cv.id, path: "a.html", content: "x" } },
+      { name: "delete_draft_file", args: { id: cv.id, path: "a.html" } },
+      { name: "rename_draft_file", args: { id: cv.id, from: "a.html", to: "b.html" } },
+      { name: "restore_draft", args: { id: cv.id, version: 1 } },
       { name: "publish_draft", args: { id: cv.id } },
     ];
     for (const m of mutations) {
@@ -443,6 +459,34 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(isError(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }))).toBe(
       false,
     );
+  });
+
+  it("a NON-OWNER mutating a DISABLED canvas reads as not-found, NEVER DISABLED (ownership before state)", async () => {
+    // Locks the gate ordering: requireMutable checks OWNERSHIP first, so a non-owner of a
+    // disabled canvas gets the opaque not-found (no existence leak, §12.0) — surfacing the
+    // DISABLED 409 would reveal the row exists. The MCP surface is per-account (no admin
+    // path), so a non-owner admin is just another non-owner here.
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@example.com");
+    const otherId = await seedUser(client, "other@example.com");
+    const ownerMcp = await connect(client, { userId: ownerId });
+    const cv = payload(await ownerMcp.callTool({ name: "create_canvas", arguments: {} }));
+    await canvasesRepository(client).setDisabled(cv.id, "policy violation");
+
+    const otherMcp = await connect(client, { userId: otherId });
+    const res = await otherMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "hijacked" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("not found");
+    // The non-owner must NOT see the disabled state or its reason.
+    expect(text(res)).not.toContain("DISABLED");
+    expect(text(res)).not.toContain("policy violation");
+    // The canvas was never touched.
+    const after = await canvasesRepository(client).findById(cv.id);
+    expect(after?.title).toBe("");
+    expect(after?.status).toBe("disabled");
   });
 
   it("set_canvas_slug changes the URL; the old slug frees up, a taken slug is rejected", async () => {
@@ -1131,6 +1175,17 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     });
     expect(isError(rollbackRes)).toBe(true);
     expect(text(rollbackRes)).toContain("NOT_ACTIVE");
+
+    // publish_draft on an ARCHIVED (not disabled) canvas keeps the NOT_ACTIVE
+    // ("unarchive first") message — it must NOT collapse into the DISABLED contract,
+    // since archive is owner-reversible while disable is an admin takedown.
+    const publishRes = await mcp.callTool({
+      name: "publish_draft",
+      arguments: { id: made.id },
+    });
+    expect(isError(publishRes)).toBe(true);
+    expect(text(publishRes)).toContain("NOT_ACTIVE");
+    expect(text(publishRes)).not.toContain("DISABLED");
   });
 
   it("finalize_deploy refuses an archived canvas with NOT_ACTIVE", async () => {

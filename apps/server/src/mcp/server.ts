@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { Config } from "@canvas-drop/shared";
+import { CANVAS_MAX_TAG_LENGTH, CANVAS_MAX_TAGS, type Config } from "@canvas-drop/shared";
 import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -873,7 +873,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         guestAiCap: z.number().min(0).optional(),
         galleryListed: z.boolean().optional(),
         galleryTemplatable: z.boolean().optional(),
-        tags: z.array(z.string().max(50)).max(20).optional(),
+        tags: z.array(z.string().max(CANVAS_MAX_TAG_LENGTH)).max(CANVAS_MAX_TAGS).optional(),
       },
     },
     async ({ id, ...input }) => {

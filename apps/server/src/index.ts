@@ -48,21 +48,6 @@ async function main() {
   // 2. Drivers (DB, storage, auth) — all behind config-selected factories.
   const db = makeDb(config);
   await runMigrations(db); // dev convenience; ops run migrations explicitly in prod
-  // Idempotent boot-time `search_text` backfill (plan 2026-06-19, KTD1): the column
-  // is maintained on every write, but rows that predate it carry NULL and would be
-  // invisible to `?q=` until next edited. Populate any NULL rows once, reusing the
-  // SAME shared core the manual `pnpm backfill:search-text` uses. NULL-only and chunked
-  // in transactions, so the steady state pays only a cheap count and a partial failure
-  // can't half-apply. Best-effort: a backfill error must not block the server starting
-  // (search degrades for un-backfilled rows; everything else works).
-  try {
-    if ((await countMissingSearchText(db)) > 0) {
-      const filled = await backfillSearchText(db);
-      rootLogger.info({ filled }, "search_text backfill: populated NULL rows at boot");
-    }
-  } catch (err) {
-    rootLogger.error({ err }, "search_text backfill failed at boot (continuing)");
-  }
   const storage = makeStorage(config);
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);
@@ -183,6 +168,26 @@ async function main() {
   // Attach the WebSocket upgrade handler to the underlying http.Server (realtime
   // primitive). MUST run after serve() returns the server.
   injectWebSocket?.(server);
+
+  // Idempotent boot-time `search_text` backfill (plan 2026-06-19, KTD1): the column
+  // is maintained on every write, but rows that predate it carry NULL and would be
+  // invisible to `?q=` until next edited. Populate any NULL rows once, reusing the
+  // SAME shared core the manual `pnpm backfill:search-text` uses. NULL-only and chunked
+  // in transactions, so the steady state pays only a cheap count and a partial failure
+  // can't half-apply. Fired AFTER the listener is serving (and in the background) so a
+  // large first-deploy backfill can't delay readiness — best-effort: an error must not
+  // affect the running server (search degrades for un-backfilled rows; everything else
+  // works), and the NULL-only guard keeps a re-run on the next boot idempotent.
+  void (async () => {
+    try {
+      if ((await countMissingSearchText(db)) > 0) {
+        const filled = await backfillSearchText(db);
+        rootLogger.info({ filled }, "search_text backfill: populated NULL rows after boot");
+      }
+    } catch (err) {
+      rootLogger.error({ err }, "search_text backfill failed after boot (continuing)");
+    }
+  })();
 
   // Screenshot worker (plan 004). Only starts when the env makes capture AVAILABLE
   // (Chromium present); even then it stays idle until an admin enables the runtime
