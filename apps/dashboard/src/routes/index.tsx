@@ -42,6 +42,7 @@ import {
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { cn } from "../lib/cn.js";
 import { useArchiveCanvas, useDeleteCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
+import { type CanvasView, persistOwnerView, resolveOwnerView } from "../lib/owner-view.js";
 import { useCanvases } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
@@ -84,8 +85,6 @@ const CANVASES_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
   { value: "popular", label: "Most popular" },
 ];
-
-type CanvasView = "list" | "grid";
 
 interface RowSelectionProps {
   selected: boolean;
@@ -476,7 +475,10 @@ export default function CanvasList() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
-  const view: CanvasView = search.view === "grid" ? "grid" : "list";
+  // View-mode precedence: URL `?view=` > localStorage > default("grid"). The
+  // localStorage read happens here in render (not a post-mount effect), so the
+  // resolved layout paints first — no grid↔list flash on a pure client SPA.
+  const view: CanvasView = resolveOwnerView(search.view);
   // Lifecycle scope: the active list (default) or the archived set. The attribute
   // chips (Shared/Listed/…) are active-only, so the archived view drops them.
   const archivedView = search.scope === "archived";
@@ -575,10 +577,14 @@ export default function CanvasList() {
     });
   }
   function setView(next: CanvasView) {
-    // Layout is a pure view concern — preserve filters/scope/page, just flip `view`.
+    // An explicit toggle persists the per-device choice (grid is the default,
+    // so the choice can't be encoded by URL-absence anymore). Also set `?view=`
+    // for the current visit so the layout reflects immediately and the URL stays
+    // shareable. Layout is a pure view concern — preserve filters/scope/page.
+    persistOwnerView(next);
     navigate({
       to: "/",
-      search: (prev) => ({ ...prev, view: next === "grid" ? "grid" : undefined }),
+      search: (prev) => ({ ...prev, view: next }),
     });
   }
   function setAccess(next: string) {

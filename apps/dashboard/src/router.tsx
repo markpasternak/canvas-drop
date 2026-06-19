@@ -50,8 +50,10 @@ export interface CanvasesSearch {
   /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
    *  archived view (replaces the standalone /archived route). */
   scope?: "archived";
-  /** Display mode: absent = list (default); `grid` = the cover-forward card gallery. */
-  view?: "grid";
+  /** Display mode override for the visit. Absent = fall back to the per-device
+   *  stored choice, then the `grid` default. `grid`|`list` pins the layout for a
+   *  shareable/deep-link visit and wins over the stored preference. */
+  view?: "grid" | "list";
   /** 1-based page for server-side pagination (plan 005). */
   page?: number;
   /** The single "focused" canvas for the detail rail (plan rebrand P4). Distinct

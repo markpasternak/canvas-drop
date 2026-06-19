@@ -3,7 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { useBulkArchive, useBulkDelete } from "../lib/mutations.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -90,6 +90,22 @@ function recordingFetch(canvases: ReturnType<typeof canvas>[], fail: Set<string>
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.removeItem("canvas-drop:owner-view");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
+});
+
+// The owner list now defaults to grid; these cases predate that and read list-row
+// affordances (the grid default is covered by owner-view.test.tsx). Pin the stored
+// layout to list so the legacy assertions hold (a `?view=` test still overrides it).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
 });
 
 describe("bulk lifecycle mutations", () => {

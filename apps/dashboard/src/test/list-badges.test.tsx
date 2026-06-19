@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -96,6 +96,22 @@ function renderListWith(canvases: unknown[], initialPath = "/") {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.removeItem("canvas-drop:owner-view");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
+});
+
+// These cases assert list-row badge/meta structure; the owner list now defaults to
+// grid (covered by owner-view.test.tsx). Pin the stored layout to list so they read
+// the list row (a `?view=` test would still override it).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; guard anyway */
+  }
 });
 
 describe("list row badges", () => {

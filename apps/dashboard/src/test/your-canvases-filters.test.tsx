@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
 import { routeTree } from "../router.js";
@@ -148,6 +148,23 @@ afterEach(() => {
   }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  try {
+    localStorage.clear();
+  } catch {
+    /* jsdom always has localStorage; defensive */
+  }
+});
+
+// These cases predate the grid default and assert list-view structure/affordances
+// (the new grid default + persistence are covered by owner-view.test.tsx). Pin the
+// per-device stored layout to list so the legacy assertions hold; any `?view=` test
+// still overrides it (URL wins over localStorage).
+beforeEach(() => {
+  try {
+    localStorage.setItem("canvas-drop:owner-view", "list");
+  } catch {
+    /* jsdom always has localStorage; defensive */
+  }
 });
 
 describe("Your canvases — server-side filters (plan 005)", () => {
