@@ -431,6 +431,124 @@ ${[
 </div>`,
     ),
   },
+  {
+    title: "Team Directory",
+    tags: ["people", "tool"],
+    summary: "Who's who on the team — names, roles, and who owns what, in one place.",
+    templatable: true,
+    html: page(
+      "Team Directory",
+      "#7c3aed",
+      "#faf5ff",
+      `<header style="margin-bottom:18px"><h1>Team Directory</h1><p class="muted">platform org · 6 people</p></header>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+${(
+  [
+    ["AR", "Alex Rivera", "Eng lead", "#7c3aed"],
+    ["PN", "Priya Nair", "Design", "#db2777"],
+    ["DO", "Dana Okafor", "Product", "#0891b2"],
+    ["LW", "Liam Walsh", "Backend", "#16a34a"],
+    ["SR", "Sofia Rossi", "Frontend", "#ea580c"],
+    ["NK", "Noah Kim", "Data", "#475569"],
+  ] as Array<[string, string, string, string]>
+)
+  .map(
+    ([ini, name, role, color]) =>
+      `<div class="card" style="text-align:center"><div style="width:46px;height:46px;border-radius:999px;background:${color};color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 9px">${ini}</div><div style="font-weight:600">${name}</div><div class="muted" style="font-size:13px">${role}</div></div>`,
+  )
+  .join("")}
+</div>`,
+    ),
+  },
+  {
+    title: "Service Status",
+    tags: ["ops", "status"],
+    summary: "A status board for the services your team runs — green until something isn't.",
+    templatable: true,
+    html: page(
+      "Service Status",
+      "#16a34a",
+      "#f0fdf4",
+      `<header style="margin-bottom:18px"><h1>Service Status</h1><p class="muted">all systems · updated just now</p></header>
+<div class="card" style="padding:6px 18px">
+${(
+  [
+    ["API gateway", "Operational", "#16a34a"],
+    ["Dashboard", "Operational", "#16a34a"],
+    ["Realtime hub", "Operational", "#16a34a"],
+    ["Deploy worker", "Degraded", "#d97706"],
+    ["AI proxy", "Operational", "#16a34a"],
+  ] as Array<[string, string, string]>
+)
+  .map(
+    ([svc, state, color]) =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:13px 0;border-bottom:1px solid #f1f5f9"><span style="font-weight:600">${svc}</span><span style="display:inline-flex;align-items:center;gap:7px;font-size:13px;color:${color}"><span style="width:8px;height:8px;border-radius:999px;background:${color}"></span>${state}</span></div>`,
+  )
+  .join("")}
+</div>`,
+    ),
+  },
+  {
+    title: "Expense Splitter",
+    tags: ["tool", "finance"],
+    summary: "Split a shared bill across the team and see who owes what at a glance.",
+    templatable: true,
+    html: page(
+      "Expense Splitter",
+      "#ea580c",
+      "#fff7ed",
+      `<header style="margin-bottom:18px"><h1>Team Lunch</h1><p class="muted">4 people · split evenly</p></header>
+<div class="row">
+<div class="card col">
+${(
+  [
+    ["Tacos", "$48.00"],
+    ["Drinks", "$22.50"],
+    ["Tip", "$14.00"],
+  ] as Array<[string, string]>
+)
+  .map(
+    ([item, amt]) =>
+      `<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f1f5f9"><span>${item}</span><span class="muted">${amt}</span></div>`,
+  )
+  .join("")}
+<div style="display:flex;justify-content:space-between;padding:12px 0 0;font-weight:700"><span>Total</span><span>$84.50</span></div>
+</div>
+<div class="card col" style="background:linear-gradient(160deg,#ea580c,#c2410c);color:#fff;border:none">
+<div style="font-size:13px;opacity:.85">Each person owes</div>
+<div style="font-size:40px;font-weight:800;letter-spacing:-.03em;margin:6px 0">$21.13</div>
+<div style="font-size:13px;opacity:.85">Alex · Priya · Dana · Noah</div>
+</div>
+</div>`,
+    ),
+  },
+  {
+    title: "KPI Scorecard",
+    tags: ["dashboard", "data-viz"],
+    summary: "This quarter's targets vs. actuals, one tile per metric — no spreadsheet needed.",
+    templatable: true,
+    html: page(
+      "KPI Scorecard",
+      "#0d9488",
+      "#f0fdfa",
+      `<header style="margin-bottom:18px"><h1>Q3 Scorecard</h1><p class="muted">targets vs. actuals · 4 metrics</p></header>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+${(
+  [
+    ["Active users", "8,420", "+12%", 82],
+    ["Revenue", "$1.12M", "+8%", 68],
+    ["NPS", "54", "+6", 74],
+    ["Churn", "2.1%", "-0.4", 90],
+  ] as Array<[string, string, string, number]>
+)
+  .map(
+    ([metric, value, delta, pct]) =>
+      `<div class="card"><div class="muted" style="font-size:13px">${metric}</div><div style="font-size:30px;font-weight:800;letter-spacing:-.02em;margin:4px 0">${value}</div><div style="font-size:13px;color:#16a34a;margin-bottom:10px">${delta} vs target</div><div class="bar"><span style="width:${pct}%"></span></div></div>`,
+  )
+  .join("")}
+</div>`,
+    ),
+  },
 ];
 
 function kebab(s: string): string {
@@ -511,7 +629,10 @@ async function main() {
       galleryListed: true,
       galleryTemplatable: app.templatable,
       description: app.summary,
-      tags: app.tags,
+      // Tag every demo app with a unique "showcase" tag (not in the seed-canvases
+      // pool) so the landing gallery shot can isolate exactly these 12 real-cover
+      // apps via ?tag=showcase — no generic seed canvases bleed into the frame.
+      tags: [...app.tags, "showcase"],
     });
     // Newest timestamps (minutes apart) so the demo apps top the dashboard + gallery —
     // exactly the rows the marketing shots frame.

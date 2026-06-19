@@ -70,7 +70,10 @@ async function resolveShots(page) {
   }
   const shots = [
     { path: "/", name: "landing-dashboard.webp" },
-    { path: "/gallery", name: "landing-gallery.webp" },
+    // Filter the gallery to the demo apps' unique "showcase" tag (seed-demo-apps)
+    // so the hero shot is exactly the 12 real-cover demo apps — no generic seed
+    // canvases in frame.
+    { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
   ];
   // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides — its
