@@ -87,31 +87,41 @@ export function CanvasListRow({
         onActivate();
       }}
     >
-      <div className="flex items-center gap-3 sm:gap-4">
-        {leading}
-        {/* Hero thumbnail (decorative; the name is the affordance). The row thumb is
-            too small to legibly overlay a title, so it stays the plain seeded mesh —
-            pure background, no baked-in text — the row's own columns carry the labels. */}
-        <div className="aspect-[3/2] w-24 shrink-0 overflow-hidden rounded-md border border-border/60 sm:w-28">
-          <CanvasCover seed={seed} previewUrl={previewUrl} type={type} plain />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {nameLink}
-            {badges && <span className="flex shrink-0 flex-wrap items-center gap-1">{badges}</span>}
+      {/* The row wraps below `lg` (where it presents as a card): the cover+text block
+          takes the full width so the trailing actions drop onto their own line instead
+          of crushing the title down to a few characters on a phone. At `lg` the block
+          shares the row (basis-0 + grow) and the actions sit inline at the end. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-3 sm:gap-x-4">
+        <div className="flex min-w-0 grow basis-full items-center gap-3 sm:gap-4 lg:basis-0">
+          {leading}
+          {/* Hero thumbnail (decorative; the name is the affordance). The row thumb is
+              too small to legibly overlay a title, so it stays the plain seeded mesh —
+              pure background, no baked-in text — the row's own columns carry the labels. */}
+          <div className="aspect-[3/2] w-24 shrink-0 overflow-hidden rounded-md border border-border/60 sm:w-28">
+            <CanvasCover seed={seed} previewUrl={previewUrl} type={type} plain />
           </div>
-          {meta && <div className="mt-0.5 truncate text-xs text-subtle">{meta}</div>}
-          {desc && (
-            <div className="mt-1 truncate text-xs text-muted" title={desc}>
-              {desc}
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {nameLink}
+              {badges && (
+                <span className="flex shrink-0 flex-wrap items-center gap-1">{badges}</span>
+              )}
             </div>
-          )}
-          {tags && <div className="mt-1.5">{tags}</div>}
+            {meta && <div className="mt-0.5 truncate text-xs text-subtle">{meta}</div>}
+            {desc && (
+              <div className="mt-1 truncate text-xs text-muted" title={desc}>
+                {desc}
+              </div>
+            )}
+            {tags && <div className="mt-1.5">{tags}</div>}
+          </div>
         </div>
 
         {stats && <div className="hidden shrink-0 items-center gap-8 lg:flex">{stats}</div>}
 
-        {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
+        {actions && (
+          <div className="flex shrink-0 items-center gap-1 max-lg:ml-auto">{actions}</div>
+        )}
       </div>
     </li>
   );

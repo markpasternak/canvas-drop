@@ -70,6 +70,33 @@
     font-family: inherit;
   }
 
+  /* Form controls inherit the app font so a select/textarea doesn't fall back to
+     the UA default. */
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  /* iOS Safari auto-zooms the page whenever a focused input/select/textarea has a
+     computed font-size below 16px. Our controls render at text-sm (14px) for a
+     denser desktop UI, so on a phone every field — text, search, AND the native
+     date/time pickers (which iOS also sizes from the font, making an empty
+     `datetime-local` render oddly tall) — triggers that zoom-and-pan on focus.
+     Below the `sm` breakpoint, pin the control font to 16px so focusing a field
+     never zooms and the native date/time controls size consistently with text
+     inputs. Desktop keeps the denser 14px. Checkbox/radio/range/color have no
+     text and are excluded so their box sizing is untouched. */
+  @media (max-width: 639px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
   /* Always-visible, accent focus ring — never removed (§14.3, a11y). The outline
      follows each control's own border-radius (no forced 2px square). */
   :focus-visible {
