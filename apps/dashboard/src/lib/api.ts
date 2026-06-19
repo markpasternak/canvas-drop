@@ -562,6 +562,9 @@ export interface AdminCanvasRow {
   publicationState: PublicationState;
   /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
   access: AccessRung;
+  /** Admin-curated editorial flag (KTD3) — reflected in the table; the Feature
+   *  toggle flips it via the admin set-featured route. */
+  galleryFeatured: boolean;
   disabledReason: string | null;
   owner: { id: string; email: string; name: string } | null;
   sizeBytes: number;
@@ -1005,6 +1008,11 @@ export const api = {
     // Un-soft-delete (distinct from the draft revert-to-version `restoreToDraft`).
     restoreCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/restore`, { method: "POST" }),
+
+    /** Admin-curated gallery feature flag (KTD3) — set/unset `galleryFeatured`.
+     *  Cross-owner editorial action; admin-only on the server. */
+    setFeatured: (id: string, featured: boolean) =>
+      request<{ ok: true }>(`/api/admin/canvases/${id}/feature`, jsonBody({ featured })),
 
     /** The unified Configuration view: every setting with value/source/secret-mask. */
     getConfig: () =>

@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   Prohibit,
+  Star,
 } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,9 +16,10 @@ import {
   useAdminDisableCanvas,
   useAdminEnableCanvas,
   useAdminRestoreCanvas,
+  useSetFeatured,
 } from "../lib/mutations.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
-import { AccessBadge, StatusBadge } from "./Badge.js";
+import { AccessBadge, Badge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { DataTable } from "./DataTable.js";
 import { Dialog } from "./Dialog.js";
@@ -93,8 +95,19 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   const [takedownOpen, setTakedownOpen] = useState(false);
   const enable = useAdminEnableCanvas();
   const restore = useAdminRestoreCanvas();
+  const setFeatured = useSetFeatured();
   const copy = useClipboardCopy();
   const toast = useToast();
+
+  async function doFeature() {
+    const next = !canvas.galleryFeatured;
+    try {
+      await setFeatured.mutateAsync({ id: canvas.id, featured: next });
+      toast(next ? "Canvas featured in the gallery" : "Removed from featured");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't update featured", "error");
+    }
+  }
 
   async function doEnable() {
     try {
@@ -130,6 +143,20 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
           onSelect={() => copy(canvas.url, "Link copied")}
         >
           Copy link
+        </ActionMenuItem>
+        {/* Admin-curated gallery feature (KTD3) — a cross-owner editorial toggle.
+            Label by current state so a single item both features and unfeatures. */}
+        <ActionMenuItem
+          icon={
+            <Star
+              size={MENU_ICON}
+              weight={canvas.galleryFeatured ? "fill" : "regular"}
+              aria-hidden
+            />
+          }
+          onSelect={doFeature}
+        >
+          {canvas.galleryFeatured ? "Unfeature" : "Feature in gallery"}
         </ActionMenuItem>
         {canvas.status === "active" && (
           <ActionMenuItem
@@ -185,14 +212,22 @@ export function AdminCanvasTable({
       {canvases.map((c) => (
         <tr key={c.id} className="align-middle">
           <td className="px-3 py-2">
-            <button
-              type="button"
-              onClick={() => openCanvas(c.id)}
-              className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
-              aria-label={`Open ${c.title || c.slug}`}
-            >
-              {c.title || c.slug}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openCanvas(c.id)}
+                className="rounded-sm text-left font-medium text-fg underline-offset-2 transition-colors hover:text-accent hover:underline"
+                aria-label={`Open ${c.title || c.slug}`}
+              >
+                {c.title || c.slug}
+              </button>
+              {c.galleryFeatured && (
+                <Badge tone="accent">
+                  <Star size={11} weight="fill" aria-hidden />
+                  Featured
+                </Badge>
+              )}
+            </div>
             <div className="font-mono text-xs text-muted">{c.slug}</div>
             {c.disabledReason && (
               <div className="mt-0.5 text-xs text-danger">{c.disabledReason}</div>

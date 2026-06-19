@@ -147,6 +147,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         status: cv.status,
         access: cv.access,
         publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
+        // Admin-curated editorial flag (KTD3) — surfaced so the table reflects the
+        // featured state and the Feature toggle can flip it in place.
+        galleryFeatured: cv.galleryFeatured,
         disabledReason: cv.disabledReason,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
         // Size = deployed version bytes + uploaded file bytes (§6.10.1).

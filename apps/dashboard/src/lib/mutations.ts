@@ -465,6 +465,17 @@ export function useAdminRestoreCanvas() {
   });
 }
 
+/** Set/unset the admin-curated `galleryFeatured` flag (KTD3). Admin-only on the
+ *  server; await-then-invalidate so the table + overview reflect the new state. */
+export function useSetFeatured() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, featured }: { id: string; featured: boolean }) =>
+      api.admin.setFeatured(id, featured),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
 // --- Admin user management (plan 006). Block/unblock + promote/demote; each
 //     invalidates the admin tree (the user list + overview counts). The server
 //     enforces self-protection + last-admin guards — the UI just surfaces them. ---

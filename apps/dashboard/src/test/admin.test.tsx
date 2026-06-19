@@ -60,6 +60,9 @@ const ROW = {
   url: "http://x/c/happy-otter",
   title: "Happy Otter",
   status: "active",
+  access: "private",
+  publicationState: "published",
+  galleryFeatured: false,
   disabledReason: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
   sizeBytes: 2048,
@@ -71,6 +74,7 @@ const ROW = {
 
 const OVERVIEW = {
   canvasCountByStatus: { active: 3, disabled: 1, archived: 2, deleted: 4 },
+  publicLinkCount: 2,
   userCount: 7,
   totalFileBytes: 4096,
   totalOps: 9001,
@@ -242,9 +246,14 @@ describe("admin dashboard", () => {
     expect(screen.getByText("Unique viewers")).toBeInTheDocument();
     expect(screen.getByText("Deploys")).toBeInTheDocument();
     expect(screen.getByText("27")).toBeInTheDocument(); // deploys
-    expect(screen.getByText("Happy Otter")).toBeInTheDocument();
+    // "Happy Otter" appears in the Top-canvases section (and the attention lane).
+    expect(screen.getAllByText("Happy Otter").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("happy-otter")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Happy Otter/ })).not.toBeInTheDocument();
+    // No link opens another owner's canvas detail (admins 404 there). The
+    // attention lane links to the filtered /admin/canvases table, never /canvases/$id.
+    for (const link of screen.queryAllByRole("link")) {
+      expect(link.getAttribute("href") ?? "").not.toMatch(/\/canvases\/[^/?]+$/);
+    }
     const adminNav = screen.getByRole("navigation", { name: "Admin sections" });
     expect(within(adminNav).getByRole("link", { name: "Overview" })).toHaveAttribute(
       "aria-current",
@@ -365,7 +374,8 @@ describe("admin dashboard", () => {
     expect(screen.queryByText("AI spend by user")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /AI usage/i }));
     expect(await screen.findByText("AI spend by canvas")).toBeVisible();
-    expect(screen.getByText("$4.00")).toBeInTheDocument();
+    // $4.00 shows in the AI-spend panel (and the attention lane's top-spender row).
+    expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(1);
     // Spend is attributed to the canvas's owner (object fact).
     expect(screen.getAllByText("alice@example.com").length).toBeGreaterThanOrEqual(1);
   });
@@ -381,18 +391,21 @@ describe("admin dashboard", () => {
     mockFetch(handlers);
     const first = renderAt("/admin");
     const user = userEvent.setup();
-    // "Top canvases by usage" is open by default; collapse it.
+    // "Top canvases by usage" is open by default; collapse it. "1,280 ops" also
+    // appears in the always-visible attention lane, so scope to the ranked list item.
     const toggle = await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(screen.getByText("1,280 ops")).toBeVisible();
+    const opsInList = () =>
+      screen.getAllByText("1,280 ops").find((el) => el.closest("li") !== null) as HTMLElement;
+    expect(opsInList()).toBeVisible();
     await user.click(toggle);
-    expect(screen.getByText("1,280 ops")).not.toBeVisible();
+    expect(opsInList()).not.toBeVisible();
     first.unmount();
 
     // Remount: the collapsed state was persisted, so the list stays hidden.
     mockFetch(handlers);
     renderAt("/admin");
     await screen.findByRole("button", { name: /Top canvases by usage/i });
-    expect(await screen.findByText("1,280 ops")).not.toBeVisible();
+    await waitFor(() => expect(opsInList()).not.toBeVisible());
   });
 
   it("paginates with Previous/Next (offset) and shows the X–Y of N range", async () => {
@@ -711,6 +724,136 @@ describe("admin dashboard", () => {
       );
       expect(call).toBeTruthy();
       expect(JSON.parse(call?.body ?? "{}").value).toBe("sk-ant-secret-1234");
+    });
+  });
+
+  describe("needs-attention lane (U18)", () => {
+    function overviewHandlers(overviewBody: unknown, aiBody: unknown = AI_USAGE) {
+      return {
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/overview": () => json(overviewBody),
+        "GET /api/admin/ai-usage": () => json(aiBody),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "GET /api/admin/canvases?access=public_link&limit=50&offset=0": () => canvasPage([ROW]),
+        "GET /api/admin/canvases?status=deleted&limit=50&offset=0": () => canvasPage([]),
+        "GET /api/admin/canvases?status=disabled&limit=50&offset=0": () => canvasPage([]),
+      };
+    }
+
+    it("renders each derivable signal with its count (public links, purge, disabled, spend, usage)", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      // Public-link exposure (publicLinkCount=2) — scope the count to its row.
+      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
+      expect(publicRow).not.toBeNull();
+      expect(within(publicRow as HTMLElement).getByText("2")).toBeInTheDocument();
+      // Purge backlog (deleted=4, oldest 12d ago).
+      expect(screen.getByText("Awaiting purge")).toBeInTheDocument();
+      expect(screen.getByText(/Oldest deleted 12d ago/)).toBeInTheDocument();
+      // Disabled (1).
+      expect(screen.getByText("Disabled canvases")).toBeInTheDocument();
+      // Top AI spender ($4.00 from AI_USAGE).
+      expect(screen.getByText("Top AI spender")).toBeInTheDocument();
+      // Most active canvas (1,280 ops, from topCanvases).
+      expect(screen.getByText("Most active canvas")).toBeInTheDocument();
+    });
+
+    it("links each signal to its filtered admin canvases view", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      const publicRow = (await screen.findByText("Public-link canvases")).closest("a");
+      expect(publicRow).toHaveAttribute("href", expect.stringContaining("access=public_link"));
+      const purgeRow = screen.getByText("Awaiting purge").closest("a");
+      expect(purgeRow).toHaveAttribute("href", expect.stringContaining("status=deleted"));
+      const disabledRow = screen.getByText("Disabled canvases").closest("a");
+      expect(disabledRow).toHaveAttribute("href", expect.stringContaining("status=disabled"));
+    });
+
+    it("clicking the public-link signal navigates to the access=public_link table view", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      const user = userEvent.setup();
+      await user.click(await screen.findByText("Public-link canvases"));
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?access=public_link&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("hides signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
+      const clean = {
+        ...OVERVIEW,
+        canvasCountByStatus: { active: 5 },
+        publicLinkCount: 0,
+        oldestDeletedAt: null,
+        topCanvases: [],
+      };
+      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+      renderAt("/admin");
+      expect(await screen.findByText("Total views")).toBeInTheDocument();
+      // No signals → the whole lane is absent.
+      expect(screen.queryByText("Public-link canvases")).not.toBeInTheDocument();
+      expect(screen.queryByText("Awaiting purge")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disabled canvases")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Needs attention/i })).not.toBeInTheDocument();
+    });
+
+    it("has no trend-delta or screenshot-failure UI", async () => {
+      mockFetch(overviewHandlers(OVERVIEW));
+      renderAt("/admin");
+      await screen.findByText("Public-link canvases");
+      expect(screen.queryByText(/week over week/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/vs\.? last/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("admin featured toggle (U18)", () => {
+    it("featured rows show a Featured badge in the table", async () => {
+      const featured = { ...ROW, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featured]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(screen.getByText("Featured")).toBeInTheDocument();
+    });
+
+    it("the Feature action POSTs galleryFeatured=true for an unfeatured canvas", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Feature in gallery" }));
+      await waitFor(() => {
+        const call = calls.find((c) => c.path === "/api/admin/canvases/c1/feature");
+        expect(call).toBeTruthy();
+        expect(JSON.parse(call?.body ?? "{}").featured).toBe(true);
+      });
+    });
+
+    it("a featured canvas shows Unfeature and POSTs galleryFeatured=false", async () => {
+      const featured = { ...ROW, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featured]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Unfeature" }));
+      await waitFor(() => {
+        const call = calls.find((c) => c.path === "/api/admin/canvases/c1/feature");
+        expect(call).toBeTruthy();
+        expect(JSON.parse(call?.body ?? "{}").featured).toBe(false);
+      });
     });
   });
 });

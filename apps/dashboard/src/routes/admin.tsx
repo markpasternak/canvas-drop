@@ -1,12 +1,18 @@
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { ArrowRight, CurrencyDollar, Globe, Prohibit, Trash, TrendUp } from "@phosphor-icons/react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Button } from "../components/Button.js";
 import { CollapsibleSection } from "../components/CollapsibleSection.js";
 import { EmptyState } from "../components/EmptyState.js";
+import type { AdminOverview as AdminOverviewData } from "../lib/api.js";
 import { daysSince, formatBytes, formatUsd } from "../lib/format.js";
 import { useAdminAiUsage, useAdminOverview } from "../lib/queries.js";
 import type { AdminCanvasesSearch } from "../router.js";
+
+/** Purge-backlog age (days) past which the deleted lane reads as urgent vs routine. */
+const PURGE_URGENT_DAYS = 30;
 
 /**
  * A labelled metric. `strip` (default) is a bordered instrument-panel cell — cells
@@ -93,6 +99,172 @@ function SpendPanel({
   );
 }
 
+/**
+ * One operational signal in the "Needs attention" lane. A whole-row link to the
+ * matching filtered admin table view. Urgency drives prominence — `urgent` rows
+ * carry an amber accent + bolder count so they out-read the routine `info` rows;
+ * we don't render every signal as an identical metric tile. Each row is built
+ * from already-derivable data (no new backend).
+ */
+function AttentionRow({
+  icon,
+  label,
+  detail,
+  count,
+  urgent = false,
+  search,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  count: ReactNode;
+  urgent?: boolean;
+  search: AdminCanvasesSearch;
+}) {
+  return (
+    <Link
+      to="/admin/canvases"
+      // Reset to page 1 with only the targeted filter (the route reads search
+      // loosely; no validateSearch — mirror AdminUserTable's reducer form).
+      search={() => ({ ...search, page: 1 })}
+      className={
+        urgent
+          ? "group flex items-center gap-3 border-warning/40 border-l-2 bg-warning-subtle/30 px-4 py-3 transition-colors hover:bg-warning-subtle/50"
+          : "group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-raised"
+      }
+    >
+      <span className={urgent ? "shrink-0 text-warning" : "shrink-0 text-subtle"} aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-fg">{label}</span>
+        {detail && <span className="block truncate text-xs text-subtle">{detail}</span>}
+      </span>
+      <span
+        className={
+          urgent
+            ? "shrink-0 font-semibold text-base text-warning tabular-nums"
+            : "shrink-0 font-semibold text-base text-fg tabular-nums"
+        }
+      >
+        {count}
+      </span>
+      <ArrowRight
+        size={15}
+        className="shrink-0 text-subtle transition-transform group-hover:translate-x-0.5"
+        aria-hidden
+      />
+    </Link>
+  );
+}
+
+/**
+ * Operational "needs attention" lane (plan U18). Assembled from derivable
+ * signals — each links to the matching filtered admin canvases view. No trend
+ * deltas, no screenshot-failure tracking (no backing data). When nothing needs
+ * attention, the lane is absent rather than a row of zeroes.
+ */
+function NeedsAttention({
+  overview,
+  topSpender,
+}: {
+  overview: AdminOverviewData;
+  topSpender: { title: string; ownerEmail: string | null; costUsd: number } | null;
+}) {
+  const byStatus = overview.canvasCountByStatus;
+  const disabled = byStatus.disabled ?? 0;
+  const deleted = byStatus.deleted ?? 0;
+  const oldestDeletedDays =
+    overview.oldestDeletedAt !== null ? daysSince(overview.oldestDeletedAt) : null;
+  const topUsage = overview.topCanvases[0] ?? null;
+
+  // Build only the rows that actually have something to surface.
+  const rows: ReactNode[] = [];
+
+  if (overview.publicLinkCount > 0) {
+    rows.push(
+      <AttentionRow
+        key="public"
+        icon={<Globe size={18} />}
+        label="Public-link canvases"
+        detail="Exposed beyond the org — review access"
+        count={overview.publicLinkCount}
+        urgent
+        search={{ access: "public_link" }}
+      />,
+    );
+  }
+
+  if (deleted > 0) {
+    const purgeUrgent = oldestDeletedDays !== null && oldestDeletedDays >= PURGE_URGENT_DAYS;
+    rows.push(
+      <AttentionRow
+        key="deleted"
+        icon={<Trash size={18} />}
+        label="Awaiting purge"
+        detail={
+          oldestDeletedDays !== null
+            ? `Oldest deleted ${oldestDeletedDays}d ago`
+            : "Soft-deleted canvases"
+        }
+        count={deleted}
+        urgent={purgeUrgent}
+        search={{ status: "deleted" }}
+      />,
+    );
+  }
+
+  if (disabled > 0) {
+    rows.push(
+      <AttentionRow
+        key="disabled"
+        icon={<Prohibit size={18} />}
+        label="Disabled canvases"
+        detail="Taken down — showing a disabled page"
+        count={disabled}
+        search={{ status: "disabled" }}
+      />,
+    );
+  }
+
+  if (topSpender && topSpender.costUsd > 0) {
+    rows.push(
+      <AttentionRow
+        key="spender"
+        icon={<CurrencyDollar size={18} />}
+        label="Top AI spender"
+        detail={`${topSpender.title}${topSpender.ownerEmail ? ` · ${topSpender.ownerEmail}` : ""}`}
+        count={formatUsd(topSpender.costUsd)}
+        // Admins can't open other owners' detail pages (404); jump to the table
+        // row by searching the title instead.
+        search={{ q: topSpender.title }}
+      />,
+    );
+  }
+
+  if (topUsage) {
+    rows.push(
+      <AttentionRow
+        key="usage"
+        icon={<TrendUp size={18} />}
+        label="Most active canvas"
+        detail={topUsage.title || topUsage.slug || topUsage.canvasId}
+        count={`${topUsage.ops.toLocaleString()} ops`}
+        // Search by title/slug so the click lands on this canvas's table row.
+        search={{ q: topUsage.title || topUsage.slug || topUsage.canvasId }}
+      />,
+    );
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <CollapsibleSection title="Needs attention" storageKey="admin:section:attention" flush>
+      <div className="divide-y divide-border bg-surface">{rows}</div>
+    </CollapsibleSection>
+  );
+}
+
 const CANVAS_SEARCH_KEYS: Array<keyof AdminCanvasesSearch> = [
   "owner",
   "status",
@@ -117,6 +289,27 @@ function AdminOverview() {
         title="Administration"
         description="Platform-wide visibility and governance health at a glance."
       />
+
+      {/* Needs attention (plan U18) — operational lane from derivable signals,
+          each linking to its filtered canvases view. Above the overview so the
+          actionable things lead; absent when nothing is flagged. */}
+      {ov && (
+        <NeedsAttention
+          overview={ov}
+          topSpender={
+            aiUsage.data?.byCanvas[0]
+              ? {
+                  title:
+                    aiUsage.data.byCanvas[0].title ||
+                    aiUsage.data.byCanvas[0].slug ||
+                    aiUsage.data.byCanvas[0].canvasId,
+                  ownerEmail: aiUsage.data.byCanvas[0].ownerEmail,
+                  costUsd: aiUsage.data.byCanvas[0].costUsd,
+                }
+              : null
+          }
+        />
+      )}
 
       {/* Platform overview (§6.10.6) — collapsible, state remembered in localStorage.
           All aggregates (no per-user behavioral data): scale + engagement (row 1),
