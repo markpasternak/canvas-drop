@@ -137,6 +137,19 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
   );
 }
 
+/** Row list scope: the U11 "finish this" strip rides above the list on the sparse
+ *  (≤3 / draft-led) first page these fixtures use, duplicating one canvas's title +
+ *  an action. Scope row/title/action assertions here so they read the ROW, not the
+ *  strip. The strip is a labelled <section>; the rows live in the page's <ul>. */
+function rows(): HTMLElement {
+  // The canvas rows live in a <ul> whose items carry [data-canvas-item]; scope to it
+  // explicitly so an unrelated <ul> (e.g. the open tag-filter listbox) isn't picked up.
+  const item = document.querySelector("[data-canvas-item]");
+  const list = item?.closest("ul");
+  if (!list) throw new Error("no row list rendered");
+  return list as HTMLElement;
+}
+
 function renderAt(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
@@ -203,12 +216,12 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", title: "Private one", shared: false }),
     ]);
     renderAt("/");
-    await screen.findByText("Shared one");
-    expect(screen.getByText("Private one")).toBeInTheDocument();
+    await screen.findByText("Private one");
+    expect(within(rows()).getByText("Shared one")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Shared" }));
-    expect(await screen.findByText("Shared one")).toBeInTheDocument();
-    expect(screen.queryByText("Private one")).toBeNull();
+    expect(await within(rows()).findByText("Shared one")).toBeInTheDocument();
+    expect(within(rows()).queryByText("Private one")).toBeNull();
   });
 
   it("shows owner inventory counts on summary metrics and filter chips", async () => {
@@ -225,7 +238,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     ]);
     renderAt("/");
 
-    await screen.findByText("Shared one");
+    await screen.findByText("Protected one");
     expectMetric("Active", "3");
     expectMetric("Templates", "1");
     expectMetric("Never deployed", "1");
@@ -280,7 +293,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     stub([canvas({ id: "copy", title: "Copyable one" })]);
     renderAt("/");
 
-    await screen.findByText("Copyable one");
+    await screen.findAllByText("Copyable one");
     const menu = screen.getByRole("button", { name: "More actions for Copyable one" });
     await userEvent.click(menu);
     const copy = await screen.findByRole("menuitem", { name: "Copy link" });
@@ -296,7 +309,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     stub([canvas({ id: "outside", title: "Outside one" })]);
     renderAt("/");
 
-    await screen.findByText("Outside one");
+    await screen.findAllByText("Outside one");
     const menu = screen.getByRole("button", { name: "More actions for Outside one" });
     await userEvent.click(menu);
     expect(menu).toHaveAttribute("aria-expanded", "true");
@@ -316,13 +329,13 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", title: "Team poll" }),
     ]);
     renderAt("/");
-    await screen.findByText("Quarterly revenue");
+    await screen.findByText("Team poll");
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search your canvases" }), "poll");
     // "Team poll" is in both states, so wait on the non-match disappearing — that's
     // the signal the debounced server refetch landed.
     await waitFor(() => expect(screen.queryByText("Quarterly revenue")).toBeNull());
-    expect(screen.getByText("Team poll")).toBeInTheDocument();
+    expect(within(rows()).getByText("Team poll")).toBeInTheDocument();
   });
 
   it("composes filters and shows the filtered-empty state with Clear all filters", async () => {
@@ -336,14 +349,14 @@ describe("Your canvases — server-side filters (plan 005)", () => {
 
     // U7 filtered variant: the single action is "Clear all filters".
     await userEvent.click(screen.getByRole("button", { name: "Clear all filters" }));
-    expect(await screen.findByText("Shared template")).toBeInTheDocument();
-    expect(screen.getByText("Plain shared")).toBeInTheDocument();
+    expect(await within(rows()).findByText("Shared template")).toBeInTheDocument();
+    expect(within(rows()).getByText("Plain shared")).toBeInTheDocument();
   });
 
   it("does not offer an unpublished-changes filter (deferred — KTD6)", async () => {
     stub([canvas({ id: "a", title: "Only one" })]);
     renderAt("/");
-    await screen.findByText("Only one");
+    await screen.findAllByText("Only one");
     expect(screen.queryByRole("button", { name: /unpublished/i })).toBeNull();
   });
 
@@ -361,7 +374,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "arc", slug: "arc", title: "Archived one", status: "archived" }),
     ]);
     renderAt("/");
-    await screen.findByText("Active one");
+    await screen.findAllByText("Active one");
     // The archived canvas is not in the default (active) scope.
     expect(screen.queryByText("Archived one")).toBeNull();
 
@@ -386,7 +399,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       }),
     ]);
     renderAt("/");
-    await screen.findByText("Listed template");
+    await screen.findAllByText("Listed template");
 
     // Stat strip: each stat carries its concept on a data attribute (the dot rides it).
     // Scope to the <dt> (the stat label) — "Active"/"Archived" also appear in the
@@ -440,7 +453,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
   it("renders the list view flat — no boxy card around the rows, a hairline column header", async () => {
     stub([canvas({ id: "a", slug: "sa", title: "Alpha" })]);
     renderAt("/");
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     // The flat (Lovable-style) list has a quiet "Canvas" column header carrying the
     // select-all checkbox. Its wrapper is a hairline divider underneath — a bottom
@@ -473,7 +486,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", slug: "sb", title: "Beta" }),
     ]);
     renderAt("/");
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     const selectAll = screen.getByRole("checkbox", {
       name: "Select all canvases on this page",
@@ -518,8 +531,9 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     ]);
     // Selecting "Most popular" requests sort=popular; the stub returns trending order.
     renderAt("/?sort=popular");
-    const hot = await screen.findByText("Hot canvas");
-    const warm = screen.getByText("Warm canvas");
+    await screen.findAllByText("Hot canvas");
+    const hot = within(rows()).getByText("Hot canvas");
+    const warm = within(rows()).getByText("Warm canvas");
     // Hot (9) ranks above Warm (3) — DOM order reflects the server ranking.
     expect(hot.compareDocumentPosition(warm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The per-row trending count is rendered (list-view "Views" stat).
@@ -532,7 +546,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
   it("hides the tag filter when no tags are available", async () => {
     stub([canvas({ id: "a", title: "Untagged", tags: null })]);
     renderAt("/");
-    await screen.findByText("Untagged");
+    await screen.findAllByText("Untagged");
     // TagFilter renders nothing when availableTags is empty.
     expect(screen.queryByRole("button", { name: "Filter by tag" })).toBeNull();
   });
@@ -543,14 +557,14 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", title: "Forms one", tags: ["forms"] }),
     ]);
     const router = renderAt("/");
-    await screen.findByText("Charts one");
+    await screen.findAllByText("Charts one");
 
     await userEvent.click(screen.getByRole("button", { name: "Filter by tag" }));
     await userEvent.click(await screen.findByRole("option", { name: /charts/i }));
 
     // Only the charts canvas remains, and the URL carries the shareable tag param.
-    await waitFor(() => expect(screen.queryByText("Forms one")).toBeNull());
-    expect(screen.getByText("Charts one")).toBeInTheDocument();
+    await waitFor(() => expect(within(rows()).queryByText("Forms one")).toBeNull());
+    expect(within(rows()).getByText("Charts one")).toBeInTheDocument();
     await waitFor(() =>
       expect((router.state.location.search as { tag?: unknown }).tag).toEqual(["charts"]),
     );
@@ -583,14 +597,14 @@ describe("Your canvases — server-side filters (plan 005)", () => {
       canvas({ id: "b", title: "Team poll", tags: ["hr"] }),
     ]);
     renderAt("/");
-    await screen.findByText("Quarterly revenue");
+    await screen.findAllByText("Quarterly revenue");
     // "finance" is only a TAG of the first canvas — forgiving search matches it.
     await userEvent.type(
       screen.getByRole("searchbox", { name: "Search your canvases" }),
       "finance",
     );
-    await waitFor(() => expect(screen.queryByText("Team poll")).toBeNull());
-    expect(screen.getByText("Quarterly revenue")).toBeInTheDocument();
+    await waitFor(() => expect(within(rows()).queryByText("Team poll")).toBeNull());
+    expect(within(rows()).getByText("Quarterly revenue")).toBeInTheDocument();
   });
 
   it("zero-result-with-search shows the search empty; Clear search preserves other filters", async () => {

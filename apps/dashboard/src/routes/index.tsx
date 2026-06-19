@@ -33,6 +33,7 @@ import {
   searchEmptyState,
 } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { FinishStrip, pickFinishCanvas } from "../components/FinishStrip.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { SegmentedControl } from "../components/SegmentedControl.js";
 import { PageHeader } from "../components/Surface.js";
@@ -674,6 +675,14 @@ export default function CanvasList() {
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
   const summary = data?.summary ?? EMPTY_SUMMARY;
+  // U11 task-first sparse strip: surface ONE unfinished/most-recent canvas above the
+  // list when the library is sparse. Only on the active scope's first, unfiltered page
+  // — a filtered/searched/paged/archived view is a deliberate query, not the "what
+  // should I finish?" home. The picker decides sparseness + which canvas; null hides it.
+  // The zero-state is handled separately (pristineEmpty → Onboarding), so the strip
+  // never competes with onboarding.
+  const finishCanvas =
+    !archivedView && !filtering && page === 1 ? pickFinishCanvas(items, summary.active) : null;
   // Distinct tags to offer in the TagFilter. LIMITATION (first cut): derived from the
   // CURRENT page's items, not a server-side distinct-tags facet for the whole owner
   // library — there's no owner distinct-tags endpoint today (GalleryFacets is gallery-
@@ -805,6 +814,10 @@ export default function CanvasList() {
             <EmptyHome archivedCount={summary.archived} />
           ) : (
             <>
+              {/* U11 — additive task-first strip above the stats + filters + list.
+                  Condition-driven (no dismiss); absent on a dense or filtered view. */}
+              {finishCanvas && <FinishStrip canvas={finishCanvas} />}
+
               <SummaryStrip summary={summary} archivedView={archivedView} />
 
               <div className="flex flex-wrap items-center gap-3">

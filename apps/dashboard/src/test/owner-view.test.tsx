@@ -180,7 +180,8 @@ describe("Owner list — default view + persisted preference (U8)", () => {
     localStorage.setItem(VIEW_KEY, "list");
     stub([canvas()]);
     renderAt("/");
-    await screen.findByText("Alpha canvas");
+    // "Alpha canvas" also shows in the U11 finish-this strip; wait on any match.
+    await screen.findAllByText("Alpha canvas");
     expect(isListRendered()).toBe(true);
   });
 

@@ -169,7 +169,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a row body navigates to /canvases/$id (list view)", async () => {
     stub([canvas({ id: "row1", slug: "row1", title: "Row canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Row canvas");
+    await screen.findAllByText("Row canvas");
 
     // The slug line in the row is a non-interactive body region.
     await userEvent.click(screen.getByText("row1"));
@@ -181,7 +181,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a never-deployed row body also opens its detail page", async () => {
     stub([canvas({ id: "nd1", slug: "nd1", title: "Draft canvas", lastDeploy: null })]);
     const router = renderAt("/");
-    await screen.findByText("Draft canvas");
+    await screen.findAllByText("Draft canvas");
 
     await userEvent.click(screen.getByText("nd1"));
 
@@ -191,7 +191,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("Enter on the row body navigates to /canvases/$id", async () => {
     stub([canvas({ id: "kb", slug: "kb", title: "Keyboard canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Keyboard canvas");
+    await screen.findAllByText("Keyboard canvas");
 
     // Fire Enter from a non-interactive body element inside the row.
     const body = screen.getByText("kb");
@@ -205,7 +205,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking Open / checkbox / kebab does NOT navigate and does NOT focus", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
 
     // Open link (interactive child) targets the live URL in a new tab — it must not
     // navigate the dashboard to the detail page nor set ?selected.
@@ -227,7 +227,7 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("ignores an invalid / unknown ?selected", async () => {
     stub([canvas({ id: "real", slug: "real", title: "Real canvas" })]);
     renderAt("/?selected=does-not-exist");
-    await screen.findByText("Real canvas");
+    await screen.findAllByText("Real canvas");
 
     // Unknown id is not on the visible page → not reflected as a focus.
     expect(selectedAttr()).toBeNull();
@@ -238,7 +238,7 @@ describe("Your canvases — the Details button opens the inline rail (?selected)
   it("clicking Details sets ?selected without leaving the list", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
     expect(selectedAttr()).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));
@@ -256,7 +256,7 @@ describe("Your canvases — the Details button opens the inline rail (?selected)
       canvas({ id: "two", slug: "two", title: "Second canvas" }),
     ]);
     renderAt("/");
-    await screen.findByText("First canvas");
+    await screen.findAllByText("First canvas");
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for First canvas" }));
     await waitFor(() => expect(selectedAttr()).toBe("one"));
@@ -291,7 +291,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   it("renders no detail rail when nothing is focused", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
 
     expect(selectedAttr()).toBeNull();
     // The full-width library: no canvas-details region in the DOM.
@@ -301,7 +301,7 @@ describe("Your canvases — detail rail (two-pane / drawer)", () => {
   it("selecting a canvas opens the rail; clearing it removes the rail", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/");
-    await screen.findByText("Alpha canvas");
+    await screen.findAllByText("Alpha canvas");
     expect(detailRegion()).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Show details for Alpha canvas" }));

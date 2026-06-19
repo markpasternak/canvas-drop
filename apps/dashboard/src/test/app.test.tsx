@@ -186,7 +186,9 @@ describe("dashboard app", () => {
       ),
     );
     renderApp("/");
-    expect(await screen.findByText("My Canvas")).toBeInTheDocument();
+    // "My Canvas" also appears in the U11 finish-this strip above the list; assert the
+    // row rendered via the (unique) slug rather than the now-duplicated title.
+    expect((await screen.findAllByText("My Canvas")).length).toBeGreaterThan(0);
     expect(screen.getByText("quiet-otter")).toBeInTheDocument();
   });
 

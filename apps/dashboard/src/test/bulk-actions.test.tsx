@@ -165,7 +165,7 @@ describe("Your-canvases bulk selection", () => {
       canvas({ id: "a", slug: "sa", title: "Alpha" }),
       canvas({ id: "b", slug: "sb", title: "Beta" }),
     ]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(screen.getByRole("checkbox", { name: "Select Beta" }));
@@ -185,7 +185,7 @@ describe("Your-canvases bulk selection", () => {
       canvas({ id: "a", slug: "sa", title: "Alpha" }),
       canvas({ id: "b", slug: "sb", title: "Beta" }),
     ]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select all canvases on this page" }));
     expect(screen.getByText("2 canvases selected")).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe("Your-canvases bulk selection", () => {
   it("gates bulk delete behind a hold-to-confirm dialog", async () => {
     const user = userEvent.setup();
     const calls = renderHome([canvas({ id: "a", slug: "sa", title: "Alpha" })]);
-    await screen.findByText("Alpha");
+    await screen.findAllByText("Alpha");
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));

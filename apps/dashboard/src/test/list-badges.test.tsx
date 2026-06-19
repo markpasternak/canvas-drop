@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import { ThemeProvider } from "../lib/theme.js";
@@ -92,6 +92,15 @@ function renderListWith(canvases: unknown[], initialPath = "/") {
   );
 }
 
+/** The list rows live in the page's only <ul>; the U11 "finish this" strip rides
+ *  above it and duplicates one canvas's title. Scope row/title assertions here so a
+ *  draft-heavy fixture (which now also surfaces the strip) reads the ROW, not the strip. */
+function rows(): HTMLElement {
+  const list = document.querySelector("ul");
+  if (!list) throw new Error("no row list rendered");
+  return list as HTMLElement;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -135,7 +144,7 @@ describe("list row badges", () => {
         hasPassword: true,
       }),
     ]);
-    await screen.findByText("Private one"); // list rendered
+    await screen.findAllByText("Private one"); // list rendered
 
     // Visibility now rides the quiet meta line (the access "primary"), not a dedicated
     // column. The protected-on-org primary is unique to the row (not a filter option).
@@ -193,7 +202,7 @@ describe("list row badges", () => {
         tags: ["alpha", "beta", "gamma", "delta", "epsilon"],
       }),
     ]);
-    await screen.findByText("Tagged one");
+    await screen.findAllByText("Tagged one");
     // First MAX_ROW_TAGS (3) render as pills; the remaining two collapse to +2.
     expect(screen.getByText("alpha")).toBeInTheDocument();
     expect(screen.getByText("beta")).toBeInTheDocument();
@@ -219,7 +228,7 @@ describe("list row badges", () => {
         tags: ["internal"],
       }),
     ]);
-    await screen.findByText("Listed one");
+    await screen.findAllByText("Listed one");
 
     // Listing state is a near-title badge now (no dedicated Gallery column). "Listed"
     // also appears as a filter chip, so it shows more than once.
@@ -243,7 +252,7 @@ describe("list row badges", () => {
 
   it("shows no tag pills for an untagged canvas", async () => {
     renderListWith([canvas({ id: "u", slug: "untagged", title: "Untagged one" })]);
-    await screen.findByText("Untagged one");
+    await screen.findAllByText("Untagged one");
     // Untagged rows simply omit the tag row now — no "No tags" placeholder, no +N pill.
     expect(screen.queryByText("No tags")).toBeNull();
     expect(screen.queryByText(/^\+\d+$/)).toBeNull();
