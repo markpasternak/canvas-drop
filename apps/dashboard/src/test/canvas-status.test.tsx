@@ -21,7 +21,7 @@ const CANVAS = {
   previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
-  tags: null,
+  tags: null as string[] | null,
   clonedFromCanvasId: null,
   backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },
@@ -337,5 +337,75 @@ describe("canvas Overview tab", () => {
     const header = title.closest("header") as HTMLElement;
     expect(within(header).queryByText(/not live yet/i)).toBeNull();
     expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
+  });
+
+  describe("unified tags editor (U14)", () => {
+    it("persists tags through the settings mutation when adding via Enter", async () => {
+      const calls = mockStatus({ ...CANVAS, tags: [] });
+      const user = userEvent.setup();
+      renderStatus();
+
+      await user.type(await screen.findByLabelText("Tags"), "Roadshow{Enter}");
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(patch?.body).toBeTruthy();
+        // Trimmed + lowercased on confirm, persisted as a `tags` array.
+        const body = JSON.parse(patch?.body ?? "{}");
+        expect(body.tags).toEqual(["roadshow"]);
+      });
+    });
+
+    it("is editable on a DRAFT canvas (not publish-gated)", async () => {
+      // A draft: not published, no current version. Tags must still be editable.
+      const calls = mockStatus({
+        ...CANVAS,
+        publicationState: "draft",
+        currentVersionId: null,
+        tags: [],
+      });
+      const user = userEvent.setup();
+      renderStatus();
+
+      const input = await screen.findByLabelText("Tags");
+      expect(input).toBeEnabled();
+      await user.type(input, "wip,");
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(JSON.parse(patch?.body ?? "{}").tags).toEqual(["wip"]);
+      });
+    });
+
+    it("renders existing tags as shared Tag pills and removes one via ×", async () => {
+      const calls = mockStatus({ ...CANVAS, tags: ["alpha", "beta"] });
+      const user = userEvent.setup();
+      renderStatus();
+
+      expect(await screen.findByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Remove tag alpha" }));
+
+      await vi.waitFor(() => {
+        const patch = calls.find(
+          (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+        );
+        expect(JSON.parse(patch?.body ?? "{}").tags).toEqual(["beta"]);
+      });
+    });
+
+    it("explains tags are public in the gallery once listed", async () => {
+      mockStatus({ ...CANVAS, tags: [] });
+      renderStatus();
+
+      expect(
+        await screen.findByText(/appear publicly in the gallery once this canvas is listed/i),
+      ).toBeInTheDocument();
+    });
   });
 });

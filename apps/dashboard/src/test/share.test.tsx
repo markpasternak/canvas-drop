@@ -486,6 +486,31 @@ describe("share route", () => {
     });
   });
 
+  it("gallery section has no editable tags input — it points to Overview instead", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          shared: true,
+          currentVersionId: "v1",
+          galleryListed: true,
+        }),
+    });
+    renderShare();
+
+    // The redundant gallery-tags input is gone (tags are a first-class Overview property).
+    await screen.findByRole("switch", { name: /allow others to use as a template/i });
+    expect(screen.queryByLabelText("Tags")).toBeNull();
+    // A read-only note points the owner to the unified editor.
+    const note = screen.getByText(/tags are set in/i);
+    expect(note).toBeInTheDocument();
+    expect(within(note).getByRole("link", { name: /overview/i })).toHaveAttribute(
+      "href",
+      "/canvases/c1",
+    );
+  });
+
   it("surfaces a gallery-toggle server rejection as an error toast", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>

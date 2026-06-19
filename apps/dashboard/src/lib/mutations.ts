@@ -30,6 +30,7 @@ export function useUpdateSettings(id: string) {
         const optimistic: Canvas = { ...prev };
         if (patch.title !== undefined) optimistic.title = patch.title;
         if (patch.description !== undefined) optimistic.description = patch.description;
+        if (patch.tags !== undefined) optimistic.tags = patch.tags;
         if (patch.shared !== undefined) optimistic.shared = patch.shared;
         if (patch.sharedExpiresAt !== undefined) optimistic.sharedExpiresAt = patch.sharedExpiresAt;
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;

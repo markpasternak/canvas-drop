@@ -10,6 +10,7 @@ import { IconLink } from "../components/IconButton.js";
 import { flatBandClass, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
+import { TagsEditor } from "../components/TagsEditor.js";
 import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
@@ -227,6 +228,7 @@ export default function Overview() {
   const update = useUpdateSettings(id);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const current = versions?.find((v) => v.current);
   // Total disk footprint = every kept (ready) version's bytes, not just the live one.
   const totalBytes = versions?.reduce((sum, v) => sum + v.totalBytes, 0) ?? 0;
@@ -240,6 +242,7 @@ export default function Overview() {
     if (!canvas) return;
     setTitle(canvas.title);
     setDescription(canvas.description ?? "");
+    setTags(canvas.tags ?? []);
   }, [canvas?.id]);
 
   if (isLoading || !canvas) {
@@ -286,6 +289,15 @@ export default function Overview() {
             save({ description: description || null })
           }
           maxLength={2000}
+        />
+        <TagsEditor
+          value={tags}
+          onChange={(next) => {
+            setTags(next);
+            save({ tags: next });
+          }}
+          hint="Enter or comma to add"
+          description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."
         />
       </Section>
 

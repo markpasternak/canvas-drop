@@ -47,7 +47,6 @@ export default function Share() {
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [description, setDescription] = useState("");
-  const [tags, setTags] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
 
   const sections = canvas?.access === "specific_people" ? PEOPLE_SECTIONS : BASE_SECTIONS;
@@ -60,7 +59,6 @@ export default function Share() {
   useEffect(() => {
     if (!canvas) return;
     setDescription(canvas.description ?? "");
-    setTags((canvas.tags ?? []).join(", "));
   }, [canvas?.id]);
 
   if (isLoading || !canvas) {
@@ -318,20 +316,17 @@ export default function Share() {
                 onBlur={() => save({ description: description || null })}
                 maxLength={2000}
               />
-              <Field
-                label="Tags"
-                hint="comma-separated"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                onBlur={() =>
-                  save({
-                    tags: tags
-                      .split(",")
-                      .map((t) => t.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
+              <InlineNotice tone="neutral" className="py-2 text-xs">
+                Tags are set in{" "}
+                <Link
+                  to="/canvases/$id"
+                  params={{ id: canvas.id }}
+                  className="text-accent hover:underline"
+                >
+                  Overview
+                </Link>
+                . They show here publicly once this canvas is listed.
+              </InlineNotice>
               <Toggle
                 label="Allow others to use as a template"
                 description="Let colleagues clone this canvas as a starting point for their own. They get an editable copy; your canvas is untouched."
