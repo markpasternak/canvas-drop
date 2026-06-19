@@ -50,6 +50,10 @@ export interface CanvasesSearch {
   listed?: boolean;
   template?: boolean;
   undeployed?: boolean;
+  /** Multi-tag any-match filter (UX sweep U9). Serialized as repeated `?tag=a&tag=b`
+   *  so the filtered view is shareable. A single `?tag=a` arrives as a string from
+   *  TanStack's loose parser, so the index view coerces it to an array itself. */
+  tag?: string[];
   /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
    *  archived view (replaces the standalone /archived route). */
   scope?: "archived";

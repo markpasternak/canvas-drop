@@ -26,11 +26,17 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { type Concept, conceptColor, conceptIcon } from "../components/concept-colors.js";
 import { DetailDrawer } from "../components/DetailDrawer.js";
 import { DetailPanel } from "../components/DetailPanel.js";
-import { EmptyState } from "../components/EmptyState.js";
+import {
+  archivedEmptyState,
+  EmptyState,
+  filteredEmptyState,
+  searchEmptyState,
+} from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { SegmentedControl } from "../components/SegmentedControl.js";
 import { PageHeader } from "../components/Surface.js";
+import { TagFilter } from "../components/TagFilter.js";
 import { useToast } from "../components/Toast.js";
 import {
   type AccessRung,
@@ -475,6 +481,12 @@ export default function CanvasList() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "updated";
+  // Tag filter (U9): repeated `?tag=` serializes to an array, but TanStack's loose
+  // parser hands a single `?tag=a` back as a bare string — normalize both shapes to
+  // a clean string[] (drop blanks).
+  const selectedTags = (
+    Array.isArray(search.tag) ? search.tag : search.tag ? [search.tag] : []
+  ).filter((t): t is string => typeof t === "string" && t.length > 0);
   // View-mode precedence: URL `?view=` > localStorage > default("grid"). The
   // localStorage read happens here in render (not a post-mount effect), so the
   // resolved layout paints first — no grid↔list flash on a pure client SPA.
@@ -484,23 +496,28 @@ export default function CanvasList() {
   const archivedView = search.scope === "archived";
   // The access-rung filter, like the attribute chips, applies to the live set only.
   const access = archivedView ? undefined : search.access;
+  // Tags, like the attribute chips + access filter, apply to the live set only.
+  const tags = archivedView ? [] : selectedTags;
   // This route intentionally has no validateSearch (see router.tsx), so `page` can
   // arrive as a non-numeric string from a hand-edited/stale URL. Coerce defensively
   // — a junk `?page=` falls back to 1 rather than letting NaN wedge the pager.
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * CANVASES_PAGE_SIZE;
-  const filtering = archivedView
-    ? Boolean(q)
+  // Active NON-search filters (tags/access/state chips) — separate from `q` so the
+  // empty-state selector can tell a search-empty from a filter-empty.
+  const hasNonSearchFilters = archivedView
+    ? false
     : Boolean(
-        q ||
-          access ||
+        access ||
+          tags.length > 0 ||
           search.shared ||
           search.protected ||
           search.listed ||
           search.template ||
           search.undeployed,
       );
+  const filtering = Boolean(q) || hasNonSearchFilters;
 
   // Search box ⇆ URL `q`, debounced (shared with the admin canvases/users lists).
   const [text, setText] = useDebouncedUrlSearch(q, "/");
@@ -508,6 +525,7 @@ export default function CanvasList() {
   const { data, isLoading, isError, isPlaceholderData, refetch } = useCanvases({
     q,
     access,
+    tag: tags.length > 0 ? tags : undefined,
     shared: archivedView ? undefined : search.shared,
     protected: archivedView ? undefined : search.protected,
     listed: archivedView ? undefined : search.listed,
@@ -542,6 +560,9 @@ export default function CanvasList() {
     page,
     q,
     access,
+    // Joined into a stable string so a tag add/remove resets selection without an
+    // array-identity dependency.
+    tags.join(","),
     sort,
     search.shared,
     search.protected,
@@ -597,6 +618,18 @@ export default function CanvasList() {
       }),
     });
   }
+  function setTags(next: string[]) {
+    navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, tag: next.length > 0 ? next : undefined, page: 1 }),
+    });
+  }
+  // The search-empty action clears ONLY `q`, preserving every other active filter
+  // (tags/access/state chips/scope). setText("") fires the immediate-clear path in
+  // useDebouncedUrlSearch, which patches `q: undefined` while keeping the rest.
+  function clearSearch() {
+    setText("");
+  }
   function clearFilters() {
     setText("");
     // Stay in the current scope when clearing attribute/search filters.
@@ -641,6 +674,17 @@ export default function CanvasList() {
   const total = data?.total ?? 0;
   const items = data?.canvases ?? [];
   const summary = data?.summary ?? EMPTY_SUMMARY;
+  // Distinct tags to offer in the TagFilter. LIMITATION (first cut): derived from the
+  // CURRENT page's items, not a server-side distinct-tags facet for the whole owner
+  // library — there's no owner distinct-tags endpoint today (GalleryFacets is gallery-
+  // scoped/public). So a tag that only exists on a canvas off the current page/filter
+  // won't be offered until that canvas is visible. Union in the already-selected tags
+  // so an active selection always stays listed (and removable) even when its filter
+  // narrows the page down to no carriers. If a whole-library facet lands later, swap
+  // this derivation for it without touching the control.
+  const availableTags = [
+    ...new Set([...items.flatMap((c) => (Array.isArray(c.tags) ? c.tags : [])), ...selectedTags]),
+  ].sort((a, b) => a.localeCompare(b));
   // The focused canvas for the detail rail (U3 consumes this). Validate against the
   // visible page so a stale/unknown `?selected=` is simply ignored rather than
   // pointing the rail at a canvas that isn't here.
@@ -767,8 +811,9 @@ export default function CanvasList() {
                 <SearchInput
                   value={text}
                   onChange={setText}
-                  placeholder="Search your canvases"
+                  placeholder="Search name, description, tags, or slug"
                   aria-label="Search your canvases"
+                  title="Search is forgiving — it matches names, descriptions, tags, and slugs (case-, accent-, and spacing-insensitive)."
                 />
                 <ScopeToggle
                   value={archivedView ? "archived" : "active"}
@@ -782,6 +827,13 @@ export default function CanvasList() {
                     value={access ?? "all"}
                     onValueChange={setAccess}
                   />
+                )}
+                {/* Tag filter (U9) — multi-select, any-match, URL-driven (`?tag=`).
+                    Hidden entirely when no tags are available (the control returns
+                    null). Tags apply to the live set only, so it's absent in the
+                    archived view. */}
+                {!archivedView && (
+                  <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
                 )}
                 <FilterSelect
                   label="Sort your canvases"
@@ -851,26 +903,32 @@ export default function CanvasList() {
                 />
               )}
 
-              {data && items.length === 0 && filtering && (
-                <EmptyState
-                  title={
-                    archivedView ? "No archived canvases match" : "No canvases match these filters"
-                  }
-                  description="Try removing a filter, or clear them all to see everything."
-                  action={
-                    <Button variant="secondary" size="sm" onClick={clearFilters}>
-                      Clear filters
-                    </Button>
-                  }
-                />
-              )}
-
-              {archivedView && data && items.length === 0 && !filtering && (
-                <EmptyState
-                  title="No archived canvases"
-                  description="When you archive a canvas it lands here — offline but kept (files, settings, and its reserved URL) until you restore or delete it."
-                />
-              )}
+              {/* Per-state empty (U9, U7 variants). A pristine no-canvas list never
+                  reaches here (it short-circuits to EmptyHome/Onboarding above). The
+                  variant is chosen by context, search before non-search filters so
+                  "Clear search" preserves any other active filters:
+                    • a search term present  → searchEmptyState   (clears only `q`)
+                    • active non-search filters → filteredEmptyState (clears all)
+                    • archived scope, nothing  → archivedEmptyState  (→ active list) */}
+              {data &&
+                items.length === 0 &&
+                (q ? (
+                  <EmptyState {...searchEmptyState({ term: q, onClearSearch: clearSearch })} />
+                ) : hasNonSearchFilters ? (
+                  <EmptyState {...filteredEmptyState({ onClearFilters: clearFilters })} />
+                ) : archivedView ? (
+                  <EmptyState
+                    {...archivedEmptyState({
+                      action: (
+                        <Link to="/" search={{}}>
+                          <Button variant="secondary" size="sm">
+                            View active canvases
+                          </Button>
+                        </Link>
+                      ),
+                    })}
+                  />
+                ) : null)}
 
               {items.length > 0 && (
                 <>
