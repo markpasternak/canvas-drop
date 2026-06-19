@@ -195,16 +195,28 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
 /** Can the current admin actually VIEW this canvas as a normal user? The admin's
  *  governance powers don't grant view access to another owner's restricted canvas,
  *  so "Open" (which loads the public URL as a user, access enforced server-side)
- *  would just hit a gate/404 for those. Viewable when the canvas is reachable by any
- *  org member (whole_org / public_link) or the admin owns it. A specific_people grant
- *  to the admin isn't knowable client-side, so we err toward hiding Open there.
- *  Only active canvases serve real content: a disabled / archived / deleted canvas
- *  shows a status page (or 404) to everyone — including its owner — so Open is hidden
- *  regardless of access or ownership. */
+ *  would just hit a gate/404 for those. We only offer Open for a canvas the admin
+ *  can genuinely open as a regular user:
+ *
+ *    - Only active canvases serve real content: a disabled / archived / deleted
+ *      canvas shows a status page (or 404) to everyone — including its owner — so
+ *      Open is hidden regardless of access or ownership.
+ *    - The admin's OWN active canvas is always openable (they hold the grant).
+ *    - For another owner's canvas, Open shows only when any org member could reach
+ *      it: whole_org / public_link, AND it isn't password-gated, AND its share window
+ *      hasn't expired. private / specific_people aren't knowable-reachable
+ *      client-side (a specific_people grant to the admin isn't visible here), a
+ *      password would just hit the unlock gate, and an expired share serves the
+ *      expired page — so we hide Open in all of those and keep only the kebab. */
 function adminCanView(canvas: AdminCanvasRow, viewerId: string | undefined): boolean {
   if (canvas.status !== "active") return false;
-  if (canvas.access === "whole_org" || canvas.access === "public_link") return true;
-  return Boolean(viewerId && canvas.owner?.id === viewerId);
+  // The admin's own active canvas is always openable.
+  if (viewerId && canvas.owner?.id === viewerId) return true;
+  // Another owner's canvas: must be org-reachable, unlocked, and unexpired.
+  if (canvas.access !== "whole_org" && canvas.access !== "public_link") return false;
+  if (canvas.hasPassword) return false;
+  if (canvas.sharedExpiresAt != null && canvas.sharedExpiresAt < Date.now()) return false;
+  return true;
 }
 
 /** All-canvases table (§6.10.1) — owner / status / size / usage / last-activity.

@@ -66,6 +66,8 @@ const ROW = {
   galleryTemplatable: false,
   galleryFeatured: false,
   disabledReason: null,
+  hasPassword: false,
+  sharedExpiresAt: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
   sizeBytes: 2048,
   usageOps: 1280,
@@ -1104,6 +1106,76 @@ describe("admin dashboard", () => {
       ).not.toBeInTheDocument();
       // Governance kebab stays available (Enable, etc.).
       expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for an ARCHIVED canvas even when the admin owns it (status guard)", async () => {
+      // The status guard fires before any access/ownership check: an archived canvas
+      // is offline and serves a status page to everyone, including its owner.
+      const archivedOwned = {
+        ...ROW,
+        status: "archived",
+        access: "whole_org",
+        owner: { id: "admin", email: "admin@example.com", name: "Admin" },
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([archivedOwned]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's PASSWORD-protected whole_org canvas (hits the unlock gate)", async () => {
+      // whole_org would normally be admin-viewable, but a password gate stands between
+      // any non-owner and the content — so Open would just land on the unlock screen.
+      const passworded = { ...ROW, access: "whole_org", hasPassword: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([passworded]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("hides Open for another owner's EXPIRED public_link canvas (serves the expired page)", async () => {
+      // public_link with a share window that has already lapsed serves the expired
+      // page to everyone but the owner — Open must not appear for the admin.
+      const expired = {
+        ...ROW,
+        access: "public_link",
+        sharedExpiresAt: Date.now() - 60_000,
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([expired]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Actions for Happy Otter" })).toBeInTheDocument();
+    });
+
+    it("offers Open for an active, no-password, unexpired whole_org canvas", async () => {
+      // The positive case: reachable by any org member, no gate, no expiry → Open shows.
+      const openable = { ...ROW, access: "whole_org", hasPassword: false, sharedExpiresAt: null };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([openable]),
+      });
+      renderAt("/admin/canvases");
+      expect(
+        await screen.findByRole("link", { name: "Open Happy Otter in a new tab" }),
+      ).toBeInTheDocument();
     });
 
     it("shows a Template badge on a templatable row (owner-list badge vocabulary)", async () => {

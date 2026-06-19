@@ -156,4 +156,27 @@ describe("Overview Basics save — optimistic-divergence recovery", () => {
       expect(within(list).getByText("alpha")).toBeInTheDocument();
     });
   });
+
+  it("reverts the Description field AND shows an error toast when the PATCH fails", async () => {
+    mockFetch({
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ code: "VALIDATION", message: "That description is not allowed." }, 422),
+    });
+    const user = userEvent.setup();
+    renderOverview();
+
+    const description = (await screen.findByLabelText("Description")) as HTMLTextAreaElement;
+    expect(description.value).toBe("Server description");
+
+    // Edit then blur to trigger the save; the server rejects it.
+    await user.clear(description);
+    await user.type(description, "Rejected description");
+    expect(description.value).toBe("Rejected description");
+    description.blur();
+
+    // The save surfaces the failure as an error toast (no silent swallow)...
+    expect(await screen.findByText(/that description is not allowed/i)).toBeInTheDocument();
+    // ...and the local field snaps back to the server-truth value (not the rejected edit).
+    await vi.waitFor(() => expect(description.value).toBe("Server description"));
+  });
 });
