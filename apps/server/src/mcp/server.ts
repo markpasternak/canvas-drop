@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import type { Config } from "@canvas-drop/shared";
-import type { Manifest } from "@canvas-drop/shared/db";
+import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
@@ -11,6 +11,7 @@ import type { CloneService } from "../canvas/clone-service.js";
 import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
+import { DISABLED_CODE, disabledMessage } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -41,7 +42,7 @@ import {
 import type { StorageDriver } from "../storage/driver.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
-import { canvasView, fail, failDeploy, ok } from "./tool-kit.js";
+import { canvasView, fail, failDeploy, ok, type ToolResult } from "./tool-kit.js";
 
 /** Preview hint (plan 004) — agent-native parity with the dashboard. Optional via
  *  PreviewHintDeps; omitted → `hasPreview` false / no `previewUrl`, like pipeline-off. */
@@ -84,6 +85,11 @@ export interface McpCaller {
   userId: string;
 }
 
+/** The owner-and-mutable gate: resolves to the owned canvas, or a `ToolResult` the tool
+ *  must return as-is (404-shape not-found, or the shared DISABLED refusal). Passed to
+ *  `registerDraftTools` so the draft EDIT tools share the management surface's gate. */
+export type RequireMutable = (id: string) => Promise<{ canvas: Canvas } | { error: ToolResult }>;
+
 /**
  * The MCP tool surface (U5). A fresh server is built per request, bound to the
  * caller resolved from the verified OAuth token. Every tool wraps the SAME service
@@ -100,6 +106,21 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     if (!cv || cv.status === "deleted" || cv.ownerId !== caller.userId) return null;
     return cv;
   }
+
+  /** Owner-and-mutable gate (parity with management.ts `mutableCanvas`): a disabled
+   *  (admin-taken-down) canvas is read-only to its owner, so every owner MUTATION tool
+   *  rejects with the shared `DISABLED` contract while the read tools keep using
+   *  `requireOwned`. Returns the canvas, or a `ToolResult` the tool returns as-is —
+   *  `fail("canvas not found")` when not owned/missing (no existence leak, §12.0), or
+   *  `fail("DISABLED: …")` (mirroring the HTTP 409 `{ code: "DISABLED", message }`). */
+  const requireMutable: RequireMutable = async (id) => {
+    const cv = await requireOwned(id);
+    if (!cv) return { error: fail("canvas not found") };
+    if (cv.status === "disabled") {
+      return { error: fail(`${DISABLED_CODE}: ${disabledMessage(cv)}`) };
+    }
+    return { canvas: cv };
+  };
 
   /** Captured-preview hint for the owned canvases in hand — see {@link resolvePreviewIds}
    *  (shared gate + degrade with the management and gallery surfaces). */
@@ -320,11 +341,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, zipBase64, files }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
       // Mirror publish_draft + the HTTP deploy routes: a deploy on an archived/disabled
       // canvas would silently pre-position content that goes live the moment it's
-      // restored, defeating the admin freeze. Refuse it up front.
+      // restored, defeating the admin freeze. A disabled canvas rejects with the shared
+      // DISABLED contract; an archived one keeps the NOT_ACTIVE "unarchive first" message.
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (cv.status !== "active") {
         return fail(
           "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
@@ -388,8 +411,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, manifest }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (cv.status !== "active") {
         return fail(
           "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
@@ -429,8 +453,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, uploadId, files }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       try {
         await deps.upload.stageFiles(uploadId, caller.userId, cv.id, files);
         return ok({ staged: files.length });
@@ -455,8 +480,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, uploadId }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (cv.status !== "active") {
         return fail(
           "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
@@ -556,8 +582,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, version }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (cv.status !== "active") {
         return fail(
           "NOT_ACTIVE: unarchive this canvas before deploying or changing its live version",
@@ -589,8 +616,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (!(await deps.canvases.unpublish(cv.id)))
         return fail("CANNOT_UNPUBLISH: this canvas isn't published");
       deps.audit.recordAudit({
@@ -636,8 +664,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, ...patch }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
       if (Object.keys(fields).length === 0) return ok(canvasView(deps.config, cv));
       const updated = await deps.canvases.updateCapabilities(cv.id, fields);
@@ -668,8 +697,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, slug }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const resolved = await resolveCreateSlug(slug, (s) => deps.canvases.slugTaken(s));
       if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
       let updated: typeof cv;
@@ -700,8 +730,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const apiKey = generateApiKey();
       await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
       deps.audit.recordAudit({ action: "key_regen", actorId: caller.userId, targetId: cv.id });
@@ -718,8 +749,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (!(await deps.canvases.archive(cv.id))) return fail("canvas not found");
       deps.audit.recordAudit({ action: "canvas_archive", actorId: caller.userId, targetId: cv.id });
       if (deps.hub)
@@ -743,8 +775,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (!(await deps.canvases.unarchive(cv.id)))
         return fail("NOT_ARCHIVED: canvas is not archived");
       deps.audit.recordAudit({
@@ -766,11 +799,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
-      if (cv.status === "disabled") {
-        return fail("DISABLED: this canvas was disabled by an administrator");
-      }
+      // requireMutable enforces the "a DISABLED canvas can't be deleted" rule with the
+      // shared DISABLED contract (deleting then admin-restoring would launder the takedown).
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       await deps.canvases.setStatus(cv.id, "deleted");
       deps.audit.recordAudit({ action: "canvas_delete", actorId: caller.userId, targetId: cv.id });
       if (deps.hub)
@@ -844,8 +877,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, ...input }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const user = await deps.users.findById(caller.userId);
       const resolution = resolveSettingsUpdate(cv, input, {
         canPublishPublic: user?.canPublishPublic ?? false,
@@ -916,8 +950,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, image }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       if (image === undefined) {
         // Clear is custom-only — never delete a legitimately auto-captured screenshot.
         if (cv.previewMode !== "custom") return ok(canvasView(deps.config, cv));
@@ -1001,8 +1036,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, email: rawEmail }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const email = rawEmail.trim().toLowerCase();
       const user = await deps.users.findByEmail(email);
       if (user) {
@@ -1042,8 +1078,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, entryId }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
       if (entry?.principalKind !== "guest" || !entry.email) return fail("guest invite not found");
       const inviter = await deps.users.findById(caller.userId);
@@ -1070,8 +1107,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, entryId }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
       if (entry?.principalKind === "guest" && entry.email && deps.guests) {
         await deps.guests.revokeInvite(cv.id, entry.email);
@@ -1140,7 +1178,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
 
   // Draft / editor-loop tools (get/read/write/delete/rename/publish/restore) — split
   // into their own module to keep this registry under the file-size bar.
-  registerDraftTools(server, deps, caller, requireOwned);
+  registerDraftTools(server, deps, caller, requireOwned, requireMutable);
 
   return server;
 }

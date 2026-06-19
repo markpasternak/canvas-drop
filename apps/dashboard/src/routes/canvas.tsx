@@ -88,6 +88,10 @@ export default function CanvasLayout() {
   }
 
   const title = canvas?.title?.trim() || canvas?.slug;
+  // An admin takedown makes the canvas READ-ONLY to its owner: every owner mutation
+  // (editor, settings, share, tags, deploy) is rejected server-side with a DISABLED 409.
+  // Surface that up front, on every tab, so the owner understands why their edits bounce.
+  const disabled = canvas?.status === "disabled";
   // A live, active canvas is one that has actually been published (a current version
   // exists). An active canvas with no published version is a draft — not reachable at
   // its URL yet — so the header reframes around finishing it. Archived/disabled/deleted
@@ -163,6 +167,27 @@ export default function CanvasLayout() {
           ) : null
         }
       />
+
+      {/* Admin takedown → a shell-level read-only banner on EVERY tab. The owner can still
+          read the canvas + see the reason; any edit is rejected with the DISABLED error. */}
+      {disabled ? (
+        <div
+          role="status"
+          className="flex flex-col gap-1 rounded-lg border border-danger/30 bg-danger-subtle/40 px-4 py-3 text-sm text-fg"
+        >
+          <span className="font-medium">This canvas has been disabled by an administrator.</span>
+          <span className="text-subtle">
+            It is read-only — its public URL is offline and editing, settings, sharing, and
+            publishing are turned off until an administrator restores it.
+            {canvas?.disabledReason ? (
+              <>
+                {" "}
+                Reason: <span className="font-medium text-fg">{canvas.disabledReason}</span>.
+              </>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
 
       {/* Every tab's content runs the full width of the shell (consistent across tabs). */}
       <Outlet />

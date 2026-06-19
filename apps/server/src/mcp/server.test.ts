@@ -395,6 +395,56 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     ).toBe(false);
   });
 
+  it("a disabled canvas is read-only over MCP: mutations reject DISABLED, reads still work", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { slug: "disme" } }));
+    await canvasesRepository(client).setDisabled(cv.id, "policy violation");
+
+    // Every owner-mutation tool rejects with the shared DISABLED contract (incl. reason).
+    const mutations: Array<{ name: string; args: Record<string, unknown> }> = [
+      { name: "update_canvas", args: { id: cv.id, title: "new" } },
+      { name: "set_capabilities", args: { id: cv.id, kv: false } },
+      { name: "set_canvas_slug", args: { id: cv.id, slug: "renamed" } },
+      { name: "set_canvas_preview", args: { id: cv.id } },
+      { name: "regenerate_deploy_key", args: { id: cv.id } },
+      { name: "grant_access", args: { id: cv.id, email: "guest@example.com" } },
+      { name: "archive_canvas", args: { id: cv.id } },
+      { name: "unarchive_canvas", args: { id: cv.id } },
+      { name: "unpublish_canvas", args: { id: cv.id } },
+      { name: "delete_canvas", args: { id: cv.id } },
+      {
+        name: "deploy_canvas",
+        args: { id: cv.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+      },
+      { name: "write_draft_file", args: { id: cv.id, path: "a.html", content: "x" } },
+      { name: "publish_draft", args: { id: cv.id } },
+    ];
+    for (const m of mutations) {
+      const res = await mcp.callTool({ name: m.name, arguments: m.args });
+      expect(isError(res), m.name).toBe(true);
+      expect(text(res), m.name).toContain("DISABLED");
+      expect(text(res), m.name).toContain("policy violation"); // the reason is surfaced
+    }
+    // The canvas was never mutated.
+    expect((await canvasesRepository(client).findById(cv.id))?.status).toBe("disabled");
+
+    // Reads still succeed.
+    expect(isError(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    expect(isError(await mcp.callTool({ name: "get_draft", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+  });
+
   it("set_canvas_slug changes the URL; the old slug frees up, a taken slug is rejected", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");

@@ -48,11 +48,11 @@ function mockFetch(handlers: Record<string, () => Response>) {
   );
 }
 
-function renderOverview() {
+function renderAt(initialPath = "/canvases/c1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/canvases/c1"] }),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   render(
     <ThemeProvider>
@@ -75,9 +75,9 @@ describe("owner sees takedown reason (R3)", () => {
         json({ ...BASE, status: "disabled", disabledReason: "Terms of service violation" }),
       "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    renderOverview();
+    renderAt();
     expect(await screen.findByText(/an administrator disabled this canvas/i)).toBeInTheDocument();
-    expect(screen.getByText("Terms of service violation")).toBeInTheDocument();
+    expect(screen.getAllByText("Terms of service violation").length).toBeGreaterThan(0);
   });
 
   it("shows no takedown notice on an active canvas", async () => {
@@ -85,8 +85,39 @@ describe("owner sees takedown reason (R3)", () => {
       "GET /api/canvases/c1": () => json(BASE),
       "GET /api/canvases/c1/versions": () => json({ versions: [] }),
     });
-    renderOverview();
+    renderAt();
     await screen.findByText(/overview/i);
     expect(screen.queryByText(/an administrator disabled/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the shell-level read-only takedown banner on the canvas detail (every tab)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...BASE, status: "disabled", disabledReason: "Abuse report" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
+    });
+    renderAt();
+    // The shell banner names the takedown and explains the read-only state + reason.
+    expect(
+      await screen.findByText(/this canvas has been disabled by an administrator/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/it is read-only/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Abuse report").length).toBeGreaterThan(0);
+  });
+
+  it("the editor tab is read-only on a disabled canvas (editing paused, no publish)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...BASE, status: "disabled", disabledReason: "Abuse report" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [] }),
+      "GET /api/canvases/c1/draft": () =>
+        json({ files: [], stale: false, dirty: false, baseVersionId: null, updatedAt: 0 }),
+    });
+    renderAt("/canvases/c1/editor");
+    // The editor refuses to load its surface and explains it's read-only (status-aware copy).
+    expect(await screen.findByText(/editing is paused/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/an administrator disabled this canvas, so it's read-only/i),
+    ).toBeInTheDocument();
   });
 });

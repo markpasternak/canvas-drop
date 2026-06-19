@@ -543,6 +543,93 @@ describe("managementRoutes", () => {
     expect((await canvasesRepository(client).findById(created.id))?.status).toBe("disabled");
   });
 
+  describe("a disabled canvas is READ-ONLY to its owner (admin takedown)", () => {
+    async function seedDisabled(reason = "policy violation") {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const created = await jsonOf<{ id: string }>(
+        await buildApp(client, { id: owner.id, isAdmin: false }).request("/api/canvases", {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+          body: "{}",
+        }),
+      );
+      await canvasesRepository(client).setDisabled(created.id, reason);
+      return { owner, id: created.id };
+    }
+    const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+    it("rejects every owner MUTATION with a consistent DISABLED 409 carrying the reason", async () => {
+      const { owner, id } = await seedDisabled("policy violation");
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      // [method, path, body?] for each owner-mutation route.
+      const cases: Array<[string, string, unknown?]> = [
+        ["PATCH", `/api/canvases/${id}/settings`, { title: "new" }],
+        ["PATCH", `/api/canvases/${id}/capabilities`, { kv: false }],
+        ["POST", `/api/canvases/${id}/regenerate-slug`, {}],
+        ["POST", `/api/canvases/${id}/regenerate-key`, {}],
+        ["POST", `/api/canvases/${id}/allowlist`, { email: "guest@example.com" }],
+        ["DELETE", `/api/canvases/${id}/preview`, undefined],
+        ["POST", `/api/canvases/${id}/archive`, {}],
+        ["POST", `/api/canvases/${id}/unarchive`, {}],
+        ["POST", `/api/canvases/${id}/unpublish`, {}],
+        ["POST", `/api/canvases/${id}/rollback`, { version: 1 }],
+        ["DELETE", `/api/canvases/${id}`, undefined],
+      ];
+      for (const [method, path, body] of cases) {
+        const res = await app().request(path, {
+          method,
+          headers: so,
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        expect(res.status, `${method} ${path}`).toBe(409);
+        const j = await jsonOf<{ code: string; message: string }>(res);
+        expect(j.code, `${method} ${path}`).toBe("DISABLED");
+        expect(j.message).toMatch(/disabled by an administrator/i);
+        expect(j.message).toContain("policy violation"); // the reason is surfaced
+      }
+      // The canvas was never mutated — still disabled, title unchanged.
+      expect((await canvasesRepository(client).findById(id))?.status).toBe("disabled");
+    });
+
+    it("still allows READS so the owner can see the canvas + takedown reason", async () => {
+      const { owner, id } = await seedDisabled("internal review");
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      const detail = await app().request(`/api/canvases/${id}`);
+      expect(detail.status).toBe(200);
+      expect((await jsonOf<{ disabledReason: string }>(detail)).disabledReason).toBe(
+        "internal review",
+      );
+      expect((await app().request(`/api/canvases/${id}/versions`)).status).toBe(200);
+      expect((await app().request(`/api/canvases/${id}/usage`)).status).toBe(200);
+      expect((await app().request(`/api/canvases/${id}/allowlist`)).status).toBe(200);
+      expect((await app().request("/api/canvases")).status).toBe(200);
+    });
+
+    it("does NOT gate an ARCHIVED canvas — owner edits still work (regression guard)", async () => {
+      client = await makeTestDb("sqlite");
+      const owner = await seedUser(client, "owner");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner.id, slug: "arch", apiKeyHash: "kh" });
+      await repo.archive(cv.id);
+      const app = () => buildApp(client, { id: owner.id, isAdmin: false });
+      // Settings + capabilities succeed on an archived canvas (200, not 409 DISABLED).
+      const settings = await app().request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify({ title: "renamed while archived" }),
+      });
+      expect(settings.status).toBe(200);
+      const caps = await app().request(`/api/canvases/${cv.id}/capabilities`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify({ kv: false }),
+      });
+      expect(caps.status).toBe(200);
+      expect((await repo.findById(cv.id))?.title).toBe("renamed while archived");
+    });
+  });
+
   it("a disabled canvas's reason reaches the OWNER but never a non-owner (M7, §12.0 #3)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");

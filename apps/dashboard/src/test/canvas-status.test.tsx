@@ -319,7 +319,8 @@ describe("canvas Overview tab", () => {
     renderStatus();
 
     expect(await screen.findByText("Canvas disabled")).toBeInTheDocument();
-    expect(screen.getByText("Terms of service violation")).toBeInTheDocument();
+    // The takedown reason appears on the overview card AND the shell read-only banner.
+    expect(screen.getAllByText("Terms of service violation").length).toBeGreaterThan(0);
     // Disabled is NOT a draft: no draft reframing, no Open draft / Publish primaries.
     expect(screen.queryByText(/not live yet/i)).toBeNull();
     expect(screen.queryByRole("link", { name: "Open draft" })).toBeNull();

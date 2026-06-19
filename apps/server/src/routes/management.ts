@@ -18,7 +18,7 @@ import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { rootEntry } from "../canvas/manifest.js";
-import { requireOwnedCanvas } from "../canvas/owner-guard.js";
+import { disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -274,6 +274,19 @@ export function managementRoutes(deps: ManagementDeps) {
    *  routes only (list + disable/enable/restore). */
   const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
 
+  /** Load a canvas the caller OWNS *and* may still mutate, else send the refusal.
+   *  Returns the canvas, or a Response the handler must return as-is:
+   *   - 404 (`{ error: "not_found" }`) when not owned / missing / deleted (no existence leak)
+   *   - 409 (`{ code: "DISABLED", … }`) when an admin has taken the canvas down (§12.0 #5).
+   *  A disabled canvas is read-only to its owner: every owner MUTATION goes through this,
+   *  while reads keep using `ownedCanvas` so the owner can still see the canvas + reason. */
+  const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    if (cv.status === "disabled") return c.json(disabledError(cv), 409);
+    return cv;
+  };
+
   /** Fire-and-forget realtime revalidation with a LOGGED swallow — a persistent
    *  hub failure (stale sockets after a settings change) is now observable. */
   const revalidate = async (c: Context<AppEnv>, canvasId: string) => {
@@ -528,8 +541,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.patch("/:id/settings", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     // The share/gallery preconditions + persisted-patch shaping live in the shared
@@ -635,8 +648,8 @@ export function managementRoutes(deps: ManagementDeps) {
   /** Add an org member to the allowlist by email; an outside email becomes an
    *  email-invited guest (R9 — one mechanism for members and guests). */
   app.post("/:id/allowlist", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = await deps.users.findByEmail(body.data.email);
@@ -660,8 +673,8 @@ export function managementRoutes(deps: ManagementDeps) {
 
   /** Re-send a guest invite (fresh token); only valid for a guest entry. */
   app.post("/:id/allowlist/:entryId/resend", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const entry = (await deps.canvases.listAllowlist(cv.id)).find(
       (e) => e.id === c.req.param("entryId"),
     );
@@ -675,8 +688,8 @@ export function managementRoutes(deps: ManagementDeps) {
   /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any
    *  live sockets it no longer permits. */
   app.delete("/:id/allowlist/:entryId", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const entryId = c.req.param("entryId");
     const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
     if (entry?.principalKind === "guest" && entry.email && deps.guests) {
@@ -694,8 +707,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.patch("/:id/capabilities", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = capabilitiesSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const patch = body.data;
@@ -714,8 +727,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.post("/:id/regenerate-slug", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     // Optional custom slug (plan 004): absent/empty → random (existing behavior).
     const body = z
       .object({ slug: z.string().max(63).optional() })
@@ -740,8 +753,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.post("/:id/regenerate-key", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const apiKey = generateApiKey();
     await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
     deps.audit.recordAudit({ action: "key_regen", actorId: c.get("user").id, targetId: cv.id });
@@ -755,8 +768,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // matching the dashboard's own client cap) — not the whole-archive deploy limit — so a
   // non-browser caller can't feed an arbitrarily large bitmap into the sharp decode.
   app.put("/:id/preview", sameOrigin, blobBodyLimit, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     const body = new Uint8Array(await c.req.arrayBuffer());
     if (body.byteLength === 0) return c.json({ code: "EMPTY_IMAGE", message: "empty body" }, 400);
     let renditions: Awaited<ReturnType<typeof encodeRenditions>>;
@@ -785,8 +798,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // `custom` only: on a non-custom canvas this is a no-op, so it can never delete a
   // legitimately auto-captured screenshot (idempotent "ensure no custom cover").
   app.delete("/:id/preview", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.previewMode !== "custom") return c.json(await canvasView(cv));
     await deletePreviewRenditions(deps.storage, cv.id);
     const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
@@ -800,18 +813,13 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.delete("/:id", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
     // A canvas an admin has taken down cannot be deleted (§12.0 #5): deleting then
     // having an admin restore it would launder the takedown into an active canvas. It
     // must be `enable`d (admin route) first. This holds for every owner — there is no
     // admin shortcut, and an admin has no owner access to someone else's canvas anyway.
-    if (cv.status === "disabled") {
-      return c.json(
-        { code: "DISABLED", message: "this canvas was disabled by an administrator" },
-        409,
-      );
-    }
+    // `mutableCanvas` enforces this with the shared `DISABLED` contract.
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
     // Deleted → everyone (incl. owner) loses access; drop their live sockets.
@@ -824,8 +832,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // URL 404s) and moves it to the Archive view. The guarded repo transition
   // returns false only for an already-deleted row, which ownedCanvas already 404s.
   app.post("/:id/archive", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (!(await deps.canvases.archive(cv.id))) return c.json({ error: "not_found" }, 404);
     deps.audit.recordAudit({
       action: "canvas_archive",
@@ -842,8 +850,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // Unarchive — restore an archived canvas to active. A 409 on an invalid
   // transition (the canvas isn't archived) rather than silently flipping status.
   app.post("/:id/unarchive", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (!(await deps.canvases.unarchive(cv.id))) {
       return c.json({ code: "NOT_ARCHIVED", message: "canvas is not archived" }, 409);
     }
@@ -860,8 +868,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // listing (a Draft can't be in the gallery). A 409 when the canvas isn't
   // currently published (Draft/archived/disabled) rather than silently no-opping.
   app.post("/:id/unpublish", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (!(await deps.canvases.unpublish(cv.id))) {
       // Distinct code from the gallery's NOT_PUBLISHED precondition; the message
       // is self-describing so the dashboard surfaces it directly (no HINTS entry).
@@ -906,8 +914,10 @@ export function managementRoutes(deps: ManagementDeps) {
   // One-click rollback (§6.1.12). Mutation → same-origin guard. `findReadyByNumber`
   // is canvas-scoped, so a version number from another canvas cannot resolve.
   app.post("/:id/rollback", sameOrigin, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    // A disabled canvas rejects with the shared DISABLED contract; an archived one keeps
+    // the NOT_ACTIVE "unarchive first" message (mutableCanvas only catches disabled).
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const parsed = z
       .object({ version: z.number().int().positive() })
@@ -1003,8 +1013,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.post("/:id/deploy/zip", sameOrigin, deployBodyLimit, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const buf = Buffer.from(await c.req.arrayBuffer());
     if (buf.byteLength === 0) return c.json({ code: "EMPTY_DEPLOY", message: "empty body" }, 400);
@@ -1012,8 +1022,8 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   app.post("/:id/deploy/folder", sameOrigin, deployBodyLimit, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     // Each multipart file field's KEY is the file's canvas-relative path.
     const form = await c.req.parseBody({ all: true });
@@ -1032,8 +1042,8 @@ export function managementRoutes(deps: ManagementDeps) {
   // Paste a new index.html as the next version of an EXISTING canvas (the
   // same-origin sibling of /paste, which is create-only). Mirrors zip/folder.
   app.post("/:id/deploy/paste", sameOrigin, deployBodyLimit, async (c) => {
-    const cv = await ownedCanvas(c);
-    if (!cv) return c.json({ error: "not_found" }, 404);
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
     if (cv.status !== "active") return c.json(NOT_ACTIVE, 409);
     const body = z
       .object({ html: z.string().min(1) })

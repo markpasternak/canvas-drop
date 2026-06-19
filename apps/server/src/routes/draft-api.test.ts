@@ -353,6 +353,49 @@ describe("draftApiRoutes", () => {
     expect((await jsonOf<{ code: string }>(res)).code).toBe("NOT_ACTIVE");
   });
 
+  it("a disabled canvas is read-only: draft EDITS reject DISABLED 409, READS still work", async () => {
+    const { appAs, owner, canvas, canvases } = await setup();
+    const app = appAs(owner.id);
+    // Seed a draft file while still active, then have an admin take the canvas down.
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>x</h1>"),
+    });
+    await canvases.setDisabled(canvas.id, "policy violation");
+
+    // Reads still succeed (owner can still see + load the draft).
+    expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(200);
+    expect(
+      (await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`)).status,
+    ).toBe(200);
+
+    // Every draft EDIT rejects with the shared DISABLED contract.
+    const write = await app.request(`/api/canvases/${canvas.id}/draft/file?path=b.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("y"),
+    });
+    expect(write.status).toBe(409);
+    const j = await jsonOf<{ code: string; message: string }>(write);
+    expect(j.code).toBe("DISABLED");
+    expect(j.message).toContain("policy violation");
+
+    const del = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "DELETE",
+      headers: SO,
+    });
+    expect(del.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(del)).code).toBe("DISABLED");
+
+    const pub = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(pub.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(pub)).code).toBe("DISABLED");
+  });
+
   it("restoring a non-existent version is rejected (400)", async () => {
     const { appAs, owner, canvas } = await setup();
     const res = await appAs(owner.id).request(`/api/canvases/${canvas.id}/restore`, {
