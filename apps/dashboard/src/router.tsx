@@ -106,7 +106,10 @@ const GALLERY_SORTS: readonly GallerySortParam[] = [
 ];
 export interface GallerySearch {
   q?: string;
-  tag?: string;
+  /** Multi-tag any-match filter. Serialized as repeated `?tag=a&tag=b` so a filtered
+   *  view is shareable. A single `?tag=a` arrives as a string from TanStack's loose
+   *  parser, so the gallery view coerces it to an array itself (mirrors the owner list). */
+  tag?: string | string[];
   owner?: string;
   templatable?: boolean;
   sort?: GallerySortParam;
@@ -119,7 +122,13 @@ const galleryRoute = createRoute({
   path: "/gallery",
   validateSearch: (s: Record<string, unknown>): GallerySearch => ({
     q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
-    tag: typeof s.tag === "string" && s.tag.length > 0 ? s.tag : undefined,
+    // Repeated `?tag=` arrives as an array; a single `?tag=a` as a bare string. Keep
+    // both shapes (drop blanks) — the view normalizes to a clean string[].
+    tag: Array.isArray(s.tag)
+      ? (s.tag.filter((t) => typeof t === "string" && t.length > 0) as string[])
+      : typeof s.tag === "string" && s.tag.length > 0
+        ? s.tag
+        : undefined,
     owner: typeof s.owner === "string" && s.owner.length > 0 ? s.owner : undefined,
     // Only the literal `true` flips it on, so a junk value just means "off".
     templatable: s.templatable === true || s.templatable === "true" || undefined,

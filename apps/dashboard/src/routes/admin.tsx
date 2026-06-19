@@ -1,4 +1,12 @@
-import { ArrowRight, CurrencyDollar, Globe, Prohibit, Trash, TrendUp } from "@phosphor-icons/react";
+import {
+  ArrowRight,
+  CheckCircle,
+  CurrencyDollar,
+  Globe,
+  Prohibit,
+  Trash,
+  TrendUp,
+} from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
@@ -161,8 +169,10 @@ function AttentionRow({
 /**
  * Operational "needs attention" lane (plan U18). Assembled from derivable
  * signals — each links to the matching filtered admin canvases view. No trend
- * deltas, no screenshot-failure tracking (no backing data). When nothing needs
- * attention, the lane is absent rather than a row of zeroes.
+ * deltas, no screenshot-failure tracking (no backing data). The lane is ALWAYS
+ * visible: when nothing is flagged it renders a calm all-clear state (so an admin
+ * with a clean instance still sees the lane and learns what it watches), rather
+ * than a row of zeroes or vanishing entirely.
  */
 function NeedsAttention({
   overview,
@@ -256,11 +266,31 @@ function NeedsAttention({
     );
   }
 
-  if (rows.length === 0) return null;
-
   return (
     <CollapsibleSection title="Needs attention" storageKey="admin:section:attention" flush>
-      <div className="divide-y divide-border bg-surface">{rows}</div>
+      {rows.length > 0 ? (
+        <div className="divide-y divide-border bg-surface">{rows}</div>
+      ) : (
+        // All-clear: the lane is ALWAYS visible so an admin sees it (and learns what it
+        // watches) even on a clean instance, rather than it vanishing entirely. A calm
+        // confirmation + a one-line explainer of the signals it surfaces.
+        <div className="flex items-start gap-3 bg-surface px-4 py-4">
+          <CheckCircle
+            size={20}
+            weight="fill"
+            className="mt-0.5 shrink-0 text-success"
+            aria-hidden
+          />
+          <div className="min-w-0">
+            <p className="font-medium text-fg">Nothing needs attention right now</p>
+            <p className="mt-0.5 text-xs text-subtle">
+              This lane flags public-link exposure, disabled or deleted canvases, the purge backlog,
+              the top AI spender, and the most-active canvas — so you see them the moment there's
+              something to act on.
+            </p>
+          </div>
+        </div>
+      )}
     </CollapsibleSection>
   );
 }
@@ -292,7 +322,8 @@ function AdminOverview() {
 
       {/* Needs attention (plan U18) — operational lane from derivable signals,
           each linking to its filtered canvases view. Above the overview so the
-          actionable things lead; absent when nothing is flagged. */}
+          actionable things lead; always visible (all-clear state when nothing
+          is flagged) so the lane's purpose is always discoverable. */}
       {ov && (
         <NeedsAttention
           overview={ov}

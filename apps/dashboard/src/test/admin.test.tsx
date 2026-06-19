@@ -62,6 +62,7 @@ const ROW = {
   status: "active",
   access: "private",
   publicationState: "published",
+  galleryListed: true,
   galleryFeatured: false,
   disabledReason: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
@@ -781,7 +782,7 @@ describe("admin dashboard", () => {
       );
     });
 
-    it("hides signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
+    it("hides individual signals with nothing to surface (no public links, no deleted, no disabled)", async () => {
       const clean = {
         ...OVERVIEW,
         canvasCountByStatus: { active: 5 },
@@ -792,11 +793,27 @@ describe("admin dashboard", () => {
       mockFetch(overviewHandlers(clean, { byCanvas: [] }));
       renderAt("/admin");
       expect(await screen.findByText("Total views")).toBeInTheDocument();
-      // No signals → the whole lane is absent.
+      // No signals → none of the signal rows render.
       expect(screen.queryByText("Public-link canvases")).not.toBeInTheDocument();
       expect(screen.queryByText("Awaiting purge")).not.toBeInTheDocument();
       expect(screen.queryByText("Disabled canvases")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Needs attention/i })).not.toBeInTheDocument();
+    });
+
+    it("renders an all-clear state (lane stays visible) when nothing is flagged", async () => {
+      const clean = {
+        ...OVERVIEW,
+        canvasCountByStatus: { active: 5 },
+        publicLinkCount: 0,
+        oldestDeletedAt: null,
+        topCanvases: [],
+      };
+      mockFetch(overviewHandlers(clean, { byCanvas: [] }));
+      renderAt("/admin");
+      // The lane itself is ALWAYS shown — the section header + a calm all-clear message
+      // explaining what it watches, never vanishing on a clean instance.
+      expect(await screen.findByRole("button", { name: /Needs attention/i })).toBeInTheDocument();
+      expect(screen.getByText("Nothing needs attention right now")).toBeInTheDocument();
+      expect(screen.getByText(/public-link exposure/i)).toBeInTheDocument();
     });
 
     it("has no trend-delta or screenshot-failure UI", async () => {
@@ -836,6 +853,61 @@ describe("admin dashboard", () => {
         expect(call).toBeTruthy();
         expect(JSON.parse(call?.body ?? "{}").featured).toBe(true);
       });
+    });
+
+    it("offers Feature only for a gallery-listed + published row", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toBeInTheDocument();
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("disables Feature for a NON-listed row with an explanatory hint", async () => {
+      const notListed = { ...ROW, galleryListed: false };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([notListed]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAttribute("title", "Only gallery-listed canvases can be featured");
+    });
+
+    it("disables Feature for a listed-but-DRAFT (unpublished) row", async () => {
+      const draft = { ...ROW, galleryListed: true, publicationState: "draft" as const };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([draft]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Feature in gallery" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("a featured row shows Unfeature (enabled) even when no longer gallery-listed", async () => {
+      // Stale featured flag on a since-unlisted canvas → Unfeature must stay available.
+      const featuredNotListed = { ...ROW, galleryListed: false, galleryFeatured: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([featuredNotListed]),
+        "POST /api/admin/canvases/c1/feature": () => json({ ok: true }),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      const item = await screen.findByRole("menuitem", { name: "Unfeature" });
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
     });
 
     it("a featured canvas shows Unfeature and POSTs galleryFeatured=false", async () => {

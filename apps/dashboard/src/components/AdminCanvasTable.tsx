@@ -99,6 +99,10 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   const copy = useClipboardCopy();
   const toast = useToast();
 
+  // A canvas can only be featured while it's gallery-listed AND published — the gallery
+  // featured row only shows such canvases. (Unfeature stays available regardless.)
+  const canFeature = canvas.galleryListed && canvas.publicationState === "published";
+
   async function doFeature() {
     const next = !canvas.galleryFeatured;
     try {
@@ -145,7 +149,10 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
           Copy link
         </ActionMenuItem>
         {/* Admin-curated gallery feature (KTD3) — a cross-owner editorial toggle.
-            Label by current state so a single item both features and unfeatures. */}
+            Label by current state so a single item both features and unfeatures.
+            Featuring requires the canvas to be gallery-listed + published (the gallery
+            featured row only shows such canvases; the server enforces the same), so the
+            Feature action is disabled with a hint otherwise. Unfeature is always live. */}
         <ActionMenuItem
           icon={
             <Star
@@ -155,6 +162,12 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
             />
           }
           onSelect={doFeature}
+          disabled={!canvas.galleryFeatured && !canFeature}
+          title={
+            !canvas.galleryFeatured && !canFeature
+              ? "Only gallery-listed canvases can be featured"
+              : undefined
+          }
         >
           {canvas.galleryFeatured ? "Unfeature" : "Feature in gallery"}
         </ActionMenuItem>

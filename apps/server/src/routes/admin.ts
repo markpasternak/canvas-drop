@@ -147,6 +147,9 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         status: cv.status,
         access: cv.access,
         publicationState: publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null),
+        // Gallery-listed flag — the client only offers "Feature in gallery" for a
+        // listed+published row (the server enforces the same on the feature route).
+        galleryListed: cv.galleryListed,
         // Admin-curated editorial flag (KTD3) — surfaced so the table reflects the
         // featured state and the Feature toggle can flip it in place.
         galleryFeatured: cv.galleryFeatured,
@@ -296,6 +299,24 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     const body = featureBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    // Only a gallery-listed + published canvas can be FEATURED: the gallery's featured
+    // row only ever shows listed+published+live canvases (the visibility predicate
+    // filters the rest), so featuring anything else is a no-op the admin can't see.
+    // Unfeaturing (featured=false) is ALWAYS allowed — it can never widen exposure and
+    // must work to clear a stale flag left on a since-unlisted canvas.
+    if (body.data.featured) {
+      const published =
+        publicationState(cv.status as CanvasStatus, cv.currentVersionId !== null) === "published";
+      if (!cv.galleryListed || !published) {
+        return c.json(
+          {
+            error: "not_listed",
+            message: "Only gallery-listed canvases can be featured",
+          },
+          409,
+        );
+      }
+    }
     await deps.canvases.setFeatured(cv.id, body.data.featured);
     deps.audit.recordAudit({
       action: "canvas_feature",

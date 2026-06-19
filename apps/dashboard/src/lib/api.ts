@@ -562,6 +562,10 @@ export interface AdminCanvasRow {
   publicationState: PublicationState;
   /** Access rung (D4) — lets admins see/filter exposure, esp. `public_link`. */
   access: AccessRung;
+  /** Whether the canvas is listed in the gallery. Only a listed + published canvas
+   *  can be featured (the server enforces this on the feature route), so the table
+   *  only offers "Feature in gallery" for such rows. */
+  galleryListed: boolean;
   /** Admin-curated editorial flag (KTD3) — reflected in the table; the Feature
    *  toggle flips it via the admin set-featured route. */
   galleryFeatured: boolean;

@@ -176,17 +176,22 @@ describe("Gallery view", () => {
     await screen.findByRole("link", { name: "Everything" });
   });
 
-  it("filters by a tag chip and clears it via the X affordance", async () => {
-    const calls = stubGallery((p) =>
-      page([item({ title: p.get("tag") ? "Filtered" : "All", tags: ["charts"] })]),
+  it("filters by a card tag pill and clears it via the TagFilter chip", async () => {
+    const calls = stubGallery(
+      (p) => page([item({ title: p.get("tag") ? "Filtered" : "All", tags: ["charts"] })]),
+      // The TagFilter (which renders the removable chip) only mounts when the gallery
+      // facets carry tags — so seed the facet tag list.
+      { owners: [], tags: ["charts"] },
     );
     renderGallery();
     await screen.findByRole("link", { name: "All" });
 
+    // The card's tag pill adds the tag to the multi-tag `?tag=` selection.
     await userEvent.click(screen.getByRole("button", { name: "charts" }));
     await waitFor(() => expect(calls.some((c) => c.get("tag") === "charts")).toBe(true));
 
-    await userEvent.click(await screen.findByRole("button", { name: "Remove tag filter" }));
+    // The TagFilter control surfaces the active tag as a removable chip.
+    await userEvent.click(await screen.findByRole("button", { name: "Remove tag charts" }));
     await waitFor(() => expect(calls.some((c) => !c.get("tag"))).toBe(true));
   });
 
@@ -390,6 +395,41 @@ describe("Gallery view", () => {
     // The chip carries the "#tag" label; clicking it applies ?tag=.
     await userEvent.click(screen.getByRole("button", { name: "#maps" }));
     await waitFor(() => expect(calls.some((c) => c.get("tag") === "maps")).toBe(true));
+  });
+
+  it("renders the TagFilter control and selecting a tag filters via ?tag= (shareable)", async () => {
+    const calls = stubGallery((p) => page([item({ title: p.get("tag") ? "Filtered" : "All" })]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    renderGallery();
+    await screen.findByRole("link", { name: "All" });
+
+    // Open the multi-select control (sourced from the gallery-wide facet tags) and
+    // pick a tag — the gallery query then carries it as ?tag=.
+    await userEvent.click(screen.getByRole("button", { name: "Filter by tag" }));
+    await userEvent.click(await screen.findByRole("option", { name: "games" }));
+    await waitFor(() => expect(calls.some((c) => c.get("tag") === "games")).toBe(true));
+  });
+
+  it("supports multi-tag any-match: two tags serialize as repeated ?tag= (shareable)", async () => {
+    const calls = stubGallery(() => page([item()]), {
+      owners: [],
+      tags: ["charts", "maps", "games"],
+    });
+    // A pre-shared two-tag URL hydrates both into the query (any-match).
+    renderGallery("/gallery?tag=charts&tag=maps");
+    await screen.findByRole("link", { name: "Budget chart" });
+    await waitFor(() =>
+      expect(calls.some((c) => c.getAll("tag").sort().join(",") === "charts,maps")).toBe(true),
+    );
+  });
+
+  it("the TagFilter control hides itself when the gallery has no tags", async () => {
+    stubGallery(() => page([item()]), { owners: [], tags: [] });
+    renderGallery();
+    await screen.findByRole("link", { name: "Budget chart" });
+    expect(screen.queryByRole("button", { name: "Filter by tag" })).not.toBeInTheDocument();
   });
 
   it("the sort dropdown offers Featured/Trending/Recent/Title and reorders via ?sort=", async () => {

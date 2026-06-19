@@ -1,4 +1,4 @@
-import { ArrowSquareOut, Copy, Rows, SquaresFour, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, Rows, SquaresFour } from "@phosphor-icons/react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
@@ -16,6 +16,7 @@ import { SegmentedControl } from "../components/SegmentedControl.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
 import { Tag } from "../components/Tag.js";
+import { TagFilter } from "../components/TagFilter.js";
 import { GALLERY_PAGE_SIZE, type GalleryItem } from "../lib/api.js";
 import { useClipboardCopy } from "../lib/clipboard.js";
 import { type GalleryView, persistGalleryView, resolveGalleryView } from "../lib/gallery-view.js";
@@ -25,6 +26,21 @@ import { usePagination } from "../lib/use-pagination.js";
 import type { GallerySearch } from "../router.js";
 
 const galleryTitle = (item: GalleryItem) => item.title || "Untitled canvas";
+
+/** Normalize the `?tag=` param (single string, repeated array, or absent) to a clean
+ *  string[] — the shape the multi-tag query + TagFilter control both consume. */
+function normalizeTags(tag: GallerySearch["tag"]): string[] {
+  const list = Array.isArray(tag) ? tag : tag ? [tag] : [];
+  return list.filter((t): t is string => typeof t === "string" && t.length > 0);
+}
+
+/** Add a single tag to the current `?tag=` selection (no-op if already present),
+ *  resetting to page 1. Shared by the card/row tag pills + the popular-tag chips. */
+function addTagSearch(prev: GallerySearch, next: string): Partial<GallerySearch> {
+  const tags = normalizeTags(prev.tag);
+  const merged = tags.includes(next) ? tags : [...tags, next];
+  return { ...prev, tag: merged, page: 1 };
+}
 
 /** Open the live canvas in a new tab — the gallery's whole-card/row navigation. */
 function openLive(item: GalleryItem) {
@@ -111,7 +127,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
   const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
   const onTag = (tag: string) =>
-    navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }) });
+    navigate({ to: "/gallery", search: (prev: GallerySearch) => addTagSearch(prev, tag) });
 
   return (
     <>
@@ -154,7 +170,7 @@ function GalleryRow({ item }: { item: GalleryItem }) {
   const copy = useClipboardCopy();
   const [cloneOpen, setCloneOpen] = useState(false);
   const onTag = (tag: string) =>
-    navigate({ to: "/gallery", search: (prev: GallerySearch) => ({ ...prev, tag, page: 1 }) });
+    navigate({ to: "/gallery", search: (prev: GallerySearch) => addTagSearch(prev, tag) });
 
   return (
     <>
@@ -283,11 +299,12 @@ function TopTagChips({
   onToggle,
 }: {
   tags: string[];
-  active: string;
+  active: readonly string[];
   onToggle: (tag: string) => void;
 }) {
   const top = tags.slice(0, TOP_TAG_CAP);
   if (top.length === 0) return null;
+  const activeSet = new Set(active);
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-xs font-medium text-subtle">Popular tags</span>
@@ -295,7 +312,7 @@ function TopTagChips({
         <Tag
           key={tag}
           size="sm"
-          className={active === tag ? "border-accent/40 text-accent" : undefined}
+          className={activeSet.has(tag) ? "border-accent/40 text-accent" : undefined}
           onClick={() => onToggle(tag)}
         >
           #{tag}
@@ -313,7 +330,9 @@ export default function Gallery() {
   const navigate = useNavigate();
 
   const q = search.q?.trim() || undefined;
-  const tag = search.tag?.trim() || undefined;
+  // Multi-tag any-match: a repeated `?tag=` is an array, a single `?tag=a` a bare
+  // string — normalize both to a clean string[] (the query + TagFilter shape).
+  const selectedTags = normalizeTags(search.tag);
   const owner = search.owner?.trim() || undefined;
   const templatable = search.templatable === true;
   const sort = search.sort ?? "published";
@@ -328,9 +347,9 @@ export default function Gallery() {
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useGallery({
     q,
-    // The query surface is multi-tag any-match (U3); the single-tag URL param maps to a
-    // one-element array. The multi-select TagFilter UI lands in a later unit.
-    tag: tag ? [tag] : undefined,
+    // Multi-tag any-match: the gallery query takes a tag array (any-match). The
+    // TagFilter control + popular-tag chips both drive this same `?tag=` selection.
+    tag: selectedTags.length > 0 ? selectedTags : undefined,
     owner,
     templatable,
     sort,
@@ -343,7 +362,8 @@ export default function Gallery() {
   // the gallery — distinct from the paginated grid and its sort — so they're only a
   // scanning aid on the default, unfiltered, grid view. Suppressed while filtering or
   // in list mode so they never duplicate or fight the focused result set.
-  const showDiscovery = view === "grid" && !q && !tag && !owner && !templatable;
+  const showDiscovery =
+    view === "grid" && !q && selectedTags.length === 0 && !owner && !templatable;
   const featuredQuery = useGallery({
     featured: true,
     sort: "featured",
@@ -368,10 +388,16 @@ export default function Gallery() {
     }
   }, [data, isPlaceholderData, offset, navigate]);
 
-  function clearTag() {
+  /** Replace the whole `?tag=` selection (empty → drop the param), resetting to
+   *  page 1. The TagFilter control emits its full next selection here. */
+  function setTags(next: string[]) {
     navigate({
       to: "/gallery",
-      search: (prev: GallerySearch) => ({ ...prev, tag: undefined, page: 1 }),
+      search: (prev: GallerySearch) => ({
+        ...prev,
+        tag: next.length > 0 ? next : undefined,
+        page: 1,
+      }),
     });
   }
 
@@ -392,7 +418,7 @@ export default function Gallery() {
     itemCount: items.length,
     page,
   });
-  const filtering = Boolean(q || tag || owner || templatable);
+  const filtering = Boolean(q || selectedTags.length > 0 || owner || templatable);
 
   function setOwner(next: string) {
     navigate({
@@ -443,16 +469,17 @@ export default function Gallery() {
     { value: "title", label: "Title A–Z" },
   ];
 
-  /** One-click top-tag chip: toggles a single `?tag=` filter (replacing any current
-   *  single tag), resetting to page 1. Mirrors the card tag-click contract. */
+  /** One-click top-tag chip: toggles a tag in the multi-tag `?tag=` selection
+   *  (add if absent, remove if present), resetting to page 1. The chips and the
+   *  TagFilter control drive the same selection, so toggling stays in sync. */
   function toggleTopTag(next: string) {
     navigate({
       to: "/gallery",
-      search: (prev: GallerySearch) => ({
-        ...prev,
-        tag: prev.tag === next ? undefined : next,
-        page: 1,
-      }),
+      search: (prev: GallerySearch) => {
+        const tags = normalizeTags(prev.tag);
+        const merged = tags.includes(next) ? tags.filter((t) => t !== next) : [...tags, next];
+        return { ...prev, tag: merged.length > 0 ? merged : undefined, page: 1 };
+      },
     });
   }
 
@@ -480,6 +507,18 @@ export default function Gallery() {
       </div>
 
       <FilterBar>
+        {/* Multi-select tag filter — the shared control (mirrors the owner list), wired
+            to the same multi-value `?tag=` selection the popular-tag chips below drive.
+            Sourced from the gallery-wide distinct tags (facets); hides itself when there
+            are no tags. Leads the row, set off from the owner/template controls. */}
+        <TagFilter
+          availableTags={facets.data?.tags ?? []}
+          selected={selectedTags}
+          onChange={setTags}
+        />
+        {(facets.data?.tags?.length ?? 0) > 0 && (
+          <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+        )}
         <FilterSelect
           label="Filter by owner"
           options={ownerOptions}
@@ -492,19 +531,6 @@ export default function Gallery() {
         <FilterChip active={templatable} onClick={toggleTemplatable}>
           Templates
         </FilterChip>
-        {tag && (
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface-sunken pr-1 pl-2.5 text-xs font-medium text-muted">
-            #{tag}
-            <button
-              type="button"
-              onClick={clearTag}
-              aria-label="Remove tag filter"
-              className="grid size-5 place-items-center rounded text-subtle transition-colors hover:text-fg"
-            >
-              <X size={12} weight="bold" aria-hidden />
-            </button>
-          </span>
-        )}
         {filtering && (
           <button
             type="button"
@@ -517,9 +543,10 @@ export default function Gallery() {
       </FilterBar>
 
       {/* Top-tag shortcut chips — quick one-click filters from the gallery-wide tag
-          facets, complementing the multi-select FilterChip/tag UI above. */}
-      {!tag && (facets.data?.tags?.length ?? 0) > 0 && (
-        <TopTagChips tags={facets.data?.tags ?? []} active={tag ?? ""} onToggle={toggleTopTag} />
+          facets, complementing the multi-select TagFilter control above. Both drive the
+          same `?tag=` selection; an active tag reads as highlighted here too. */}
+      {(facets.data?.tags?.length ?? 0) > 0 && (
+        <TopTagChips tags={facets.data?.tags ?? []} active={selectedTags} onToggle={toggleTopTag} />
       )}
 
       {/* Discovery rows (Featured, Recently published) — a curated/recency slice above
