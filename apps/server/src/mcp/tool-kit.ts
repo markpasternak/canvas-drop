@@ -54,7 +54,6 @@ export function canvasView(
     disabledReason?: string | null;
     galleryListed?: boolean;
     galleryTemplatable?: boolean;
-    gallerySummary?: string | null;
     tags?: unknown;
     guestAiEnabled?: boolean;
     guestAiCap?: number;
@@ -86,7 +85,6 @@ export function canvasView(
     disabledReason: cv.disabledReason ?? null,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
-    gallerySummary: cv.gallerySummary ?? null,
     tags: cv.tags,
     guestAiEnabled: cv.guestAiEnabled,
     guestAiCap: cv.guestAiCap,

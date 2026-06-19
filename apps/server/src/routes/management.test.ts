@@ -2179,7 +2179,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       shared: true,
       galleryListed: true,
       galleryTemplatable: true,
-      gallerySummary: "a handy starter",
+      description: "a handy starter",
       tags: ["starter"],
     });
 
@@ -2187,13 +2187,13 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     const body = await jsonOf<{
       galleryListed: boolean;
       galleryTemplatable: boolean;
-      gallerySummary: string | null;
+      description: string | null;
       tags: string[] | null;
     }>(res);
     expect(body.galleryListed).toBe(false);
     expect(body.galleryTemplatable).toBe(false);
     // Metadata is retained so re-sharing restores it without re-typing.
-    expect(body.gallerySummary).toBe("a handy starter");
+    expect(body.description).toBe("a handy starter");
     expect(body.tags).toEqual(["starter"]);
   });
 

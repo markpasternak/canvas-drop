@@ -34,7 +34,6 @@ const CANVAS = {
   spaFallback: false,
   previewMode: "auto",
   galleryListed: false,
-  gallerySummary: null,
   tags: null,
   status: "active",
   publicationState: "published",

@@ -60,7 +60,7 @@ function GalleryCard({ item }: { item: GalleryItem }) {
           {item.templatable && <Badge tone="accent">Template</Badge>}
         </div>
 
-        {item.summary && <p className="line-clamp-2 text-sm text-muted">{item.summary}</p>}
+        {item.description && <p className="line-clamp-2 text-sm text-muted">{item.description}</p>}
 
         {item.tags.length > 0 && (
           <div className="relative z-10 flex flex-wrap gap-1.5">

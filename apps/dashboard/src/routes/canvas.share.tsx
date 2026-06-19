@@ -46,7 +46,7 @@ export default function Share() {
 
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
-  const [gallerySummary, setGallerySummary] = useState("");
+  const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
 
@@ -59,7 +59,7 @@ export default function Share() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: seed on identity change only
   useEffect(() => {
     if (!canvas) return;
-    setGallerySummary(canvas.gallerySummary ?? "");
+    setDescription(canvas.description ?? "");
     setTags((canvas.tags ?? []).join(", "));
   }, [canvas?.id]);
 
@@ -313,11 +313,12 @@ export default function Share() {
           {canvas.galleryListed && (
             <>
               <Field
-                label="Gallery summary"
-                value={gallerySummary}
-                onChange={(e) => setGallerySummary(e.target.value)}
-                onBlur={() => save({ gallerySummary: gallerySummary || null })}
-                maxLength={500}
+                label="Description"
+                hint="shown publicly in the gallery when this canvas is listed"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onBlur={() => save({ description: description || null })}
+                maxLength={2000}
               />
               <Field
                 label="Tags"

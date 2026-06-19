@@ -18,7 +18,6 @@ const BASE = {
   spaFallback: false,
   previewMode: "auto",
   galleryListed: false,
-  gallerySummary: null,
   tags: null,
   backendEnabled: false,
   capabilities: { kv: true, files: true, ai: true, realtime: true },

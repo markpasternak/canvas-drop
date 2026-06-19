@@ -27,17 +27,17 @@ export function normalize(s: string): string {
 /** The search-relevant fields of a canvas, named to match the stored row. */
 export interface SearchableCanvasFields {
   title: string;
-  /** The gallery summary; null/undefined contributes the empty string. */
-  gallerySummary?: string | null;
+  /** The canvas description; null/undefined contributes the empty string. */
+  description?: string | null;
   /** Tags in stored order; joined with single spaces. */
   tags?: readonly string[] | null;
   slug: string;
 }
 
 /**
- * `searchText = normalize(title + " " + (summary ?? "") + " " + tags.join(" ") + " " + slug)`.
+ * `searchText = normalize(title + " " + (description ?? "") + " " + tags.join(" ") + " " + slug)`.
  *
- * Composition is PINNED (KTD1): a null/absent summary contributes `""`, tags are
+ * Composition is PINNED (KTD1): a null/absent description contributes `""`, tags are
  * joined in stored order with single spaces, fields are separated by single
  * spaces. `normalize()` then collapses any resulting whitespace runs, so empty
  * fields never widen or break a token boundary.
@@ -46,7 +46,7 @@ export function computeSearchText(canvas: SearchableCanvasFields): string {
   const tags = Array.isArray(canvas.tags)
     ? canvas.tags.filter((t): t is string => typeof t === "string")
     : [];
-  const parts = [canvas.title, canvas.gallerySummary ?? "", tags.join(" "), canvas.slug];
+  const parts = [canvas.title, canvas.description ?? "", tags.join(" "), canvas.slug];
   return normalize(parts.join(" "));
 }
 

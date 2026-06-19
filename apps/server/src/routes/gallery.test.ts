@@ -24,7 +24,7 @@ const ITEM_KEYS = [
   "slug",
   "url",
   "title",
-  "summary",
+  "description",
   "tags",
   "templatable",
   "publishedAt",

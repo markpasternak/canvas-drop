@@ -225,6 +225,32 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(found.items.map((c) => c.id)).toContain(created.id);
   });
 
+  it("update_canvas sets the unified description under the owner check and refreshes searchText (U21)", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const created = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const updated = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: created.id, description: "Quarterly pipeline forecast" },
+      }),
+    );
+    // The unified description round-trips through update_canvas (agent-native parity, U21).
+    expect(updated.description).toBe("Quarterly pipeline forecast");
+
+    // The description write recomputes the forgiving-search blob (integration with U2):
+    // the owner-list query finds the canvas by a description substring.
+    const found = await canvasesRepository(client).listByOwnerFiltered({
+      ownerId: userId,
+      q: "pipeline",
+      limit: 50,
+      offset: 0,
+    });
+    expect(found.items.map((c) => c.id)).toContain(created.id);
+  });
+
   it("update_canvas tags on a non-owned canvas reads as not-found (requireOwned)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedUser(client, "owner@example.com");

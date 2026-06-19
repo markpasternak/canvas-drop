@@ -30,7 +30,6 @@ const CANVAS: Canvas = {
   previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
-  gallerySummary: null,
   tags: null,
   clonedFromCanvasId: null,
   backendEnabled: false,

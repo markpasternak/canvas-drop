@@ -126,7 +126,6 @@ const settingsSchema = z.object({
   previewMode: z.enum(["auto", "off"]).optional(),
   galleryListed: z.boolean().optional(),
   galleryTemplatable: z.boolean().optional(),
-  gallerySummary: z.string().max(500).nullable().optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
 });
 
@@ -169,7 +168,6 @@ function ownerCanvasView(
     previewMode: cv.previewMode,
     galleryListed: cv.galleryListed,
     galleryTemplatable: cv.galleryTemplatable,
-    gallerySummary: cv.gallerySummary,
     // tags is stored as JSON (Json | null); the API contract is string[] | null.
     tags: cv.tags as string[] | null,
     // Lineage (plan 002): the canvas this one was cloned from, for "Cloned from …".

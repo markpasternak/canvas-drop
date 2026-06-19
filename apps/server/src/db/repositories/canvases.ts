@@ -92,7 +92,6 @@ export interface CanvasSettingsPatch {
   previewMode?: PreviewMode;
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
-  gallerySummary?: string | null;
   tags?: Json;
 }
 
@@ -296,7 +295,7 @@ export function canvasesRepository(client: DbClient) {
     const rows = (await db
       .select({
         title: t.title,
-        gallerySummary: t.gallerySummary,
+        description: t.description,
         tags: t.tags,
         slug: t.slug,
       })
@@ -304,7 +303,7 @@ export function canvasesRepository(client: DbClient) {
       .where(eq(t.id, id))
       .limit(1)) as Array<{
       title: string;
-      gallerySummary: string | null;
+      description: string | null;
       tags: unknown;
       slug: string;
     }>;
@@ -312,7 +311,7 @@ export function canvasesRepository(client: DbClient) {
     if (!row) return;
     const searchText = computeSearchText({
       title: row.title,
-      gallerySummary: row.gallerySummary,
+      description: row.description,
       tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
       slug: row.slug,
     });
@@ -331,11 +330,12 @@ export function canvasesRepository(client: DbClient) {
           slugCustom: input.slugCustom ?? false,
           title,
           description: input.description ?? null,
-          // Seed the search blob from the create-time fields (no summary/tags yet);
-          // recomputed on every later write that touches title/summary/tags/slug.
+          // Seed the search blob from the create-time fields (description/tags are unset
+          // at create); recomputed on every later write that touches title/description/
+          // tags/slug.
           searchText: computeSearchText({
             title,
-            gallerySummary: null,
+            description: input.description ?? null,
             tags: null,
             slug: input.slug,
           }),
@@ -579,18 +579,17 @@ export function canvasesRepository(client: DbClient) {
       // Invariant (KTD6): templatable ⊆ listed. Un-listing in this same patch always
       // clears templatable, overriding any templatable=true in the same call.
       if (patch.galleryListed === false) set.galleryTemplatable = false;
-      if (patch.gallerySummary !== undefined) set.gallerySummary = patch.gallerySummary;
       if (patch.tags !== undefined) set.tags = patch.tags;
       if (patch.access !== undefined) set.access = patch.access;
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
       if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
       const rows = await db.update(t).set(set).where(eq(t.id, id)).returning();
       // Recompute the search blob when this patch touched any of its inputs
-      // (title/summary/tags — slug is owned by regenerateSlug). Reads the merged
+      // (title/description/tags — slug is owned by regenerateSlug). Reads the merged
       // post-write state so omitted-but-depended-on fields stay correct.
       if (
         patch.title !== undefined ||
-        patch.gallerySummary !== undefined ||
+        patch.description !== undefined ||
         patch.tags !== undefined
       ) {
         await recomputeSearchText(id);

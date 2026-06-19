@@ -500,7 +500,7 @@ sessions         id · user_id → users · token_hash (unique) · created_at ·
 
 canvases         id (text pk) · slug (unique, random) · title · description · owner_id → users
                  shared (bool, default false) · shared_at (nullable) · shared_expires_at (nullable)
-                 gallery_listed (bool, default false) · gallery_summary · gallery_tags (json)
+                 gallery_listed (bool, default false) · gallery_tags (json)
                  gallery_published_at (nullable)
                  password_hash (nullable, argon2id)
                  spa_fallback (bool) · api_key_hash · status (active|disabled|deleted)

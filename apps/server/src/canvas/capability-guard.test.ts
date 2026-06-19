@@ -19,7 +19,6 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     sharedExpiresAt: null,
     galleryListed: false,
     galleryTemplatable: false,
-    gallerySummary: null,
     tags: null,
     galleryFeatured: false,
     searchText: null,

@@ -63,7 +63,7 @@ export async function seedListed(
   await canvasesRepository(client).updateSettings(id, {
     access: "whole_org",
     galleryListed: true,
-    gallerySummary: "A useful canvas",
+    description: "A useful canvas",
     tags: ["charts"],
     ...patch,
   });

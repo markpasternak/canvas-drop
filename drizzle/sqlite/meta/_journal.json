@@ -176,6 +176,13 @@
       "when": 1781858881772,
       "tag": "0024_tags_rename_featured_searchtext",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1781864732995,
+      "tag": "0025_drop_gallery_summary",
+      "breakpoints": true
     }
   ]
 }

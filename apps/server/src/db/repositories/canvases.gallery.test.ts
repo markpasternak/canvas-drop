@@ -32,7 +32,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     expect(item.canvas.id).toBe(id);
     expect(item.ownerName).toBe("owner");
     expect(item.ownerAvatarUrl).toBe("https://avatars.example/owner.png");
-    expect(item.canvas.gallerySummary).toBe("A useful canvas");
+    expect(item.canvas.description).toBe("A useful canvas");
     expect(item.canvas.tags).toEqual(["charts"]);
   });
 
@@ -152,7 +152,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     const repo = canvasesRepository(client);
 
     const titled = await seedListed(client, owner.id, { title: "Quarterly Revenue" });
-    await seedListed(client, owner.id, { title: "Other", gallerySummary: "team Dashboard here" });
+    await seedListed(client, owner.id, { title: "Other", description: "team Dashboard here" });
     // A literal percent in the title must only match a literal-percent query.
     const percent = await seedListed(client, owner.id, { title: "100% coverage" });
     // A literal underscore must match literally, not as a single-char wildcard.
@@ -333,7 +333,7 @@ describe.each(DIALECTS)("canvasesRepository.listGallery [%s]", (dialect) => {
     // Re-touch `first` after a real clock gap so its updated_at is strictly newest
     // while its published order stays oldest — proving `updated` ≠ `published`.
     await new Promise((r) => setTimeout(r, 5));
-    await repo.updateSettings(first, { gallerySummary: "touched" });
+    await repo.updateSettings(first, { description: "touched" });
 
     const published = await repo.listGallery({ now: NOW, sort: "published", limit: 24, offset: 0 });
     expect(published.items.map((i) => i.canvas.id)).toEqual([third, second, first]);

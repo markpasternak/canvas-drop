@@ -57,7 +57,7 @@ export interface GalleryItemDto {
   slug: string;
   url: string;
   title: string;
-  summary: string | null;
+  description: string | null;
   tags: string[];
   /** Whether a non-owner may clone this canvas as a template (plan 002). Listed
    *  canvases are always unprotected now, so `hasPassword` is gone from this DTO. */
@@ -108,7 +108,7 @@ function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): Gall
     slug: cv.slug,
     url: canvasUrl(config, cv.slug),
     title: cv.title,
-    summary: cv.gallerySummary,
+    description: cv.description,
     tags,
     templatable: cv.galleryTemplatable,
     publishedAt: cv.galleryPublishedAt,

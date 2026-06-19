@@ -799,7 +799,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         title: z.string().max(200).optional(),
-        description: z.string().max(2000).nullable().optional(),
+        description: z
+          .string()
+          .max(2000)
+          .nullable()
+          .optional()
+          .describe(
+            "The canvas's description — one field shown in the canvas overview, the gallery, and " +
+              "grid cards (shown publicly when the canvas is listed). null clears it.",
+          ),
         access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
         password: z
           .string()
@@ -827,7 +835,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         guestAiCap: z.number().min(0).optional(),
         galleryListed: z.boolean().optional(),
         galleryTemplatable: z.boolean().optional(),
-        gallerySummary: z.string().max(500).nullable().optional(),
         tags: z.array(z.string().max(50)).max(20).optional(),
       },
     },

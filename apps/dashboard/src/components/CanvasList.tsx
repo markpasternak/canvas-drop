@@ -261,8 +261,8 @@ export function CanvasRow({
   const title = canvasTitle(canvas);
   const tags = canvasTags(canvas);
   const deploy = canvas.lastDeploy;
-  // The owner's Basics description (the field the overview edits) — not the separate
-  // gallery summary — so the line on the row matches what populates when you open it.
+  // The canvas's unified description (the field the overview edits, also shown in the
+  // gallery — U21) so the line on the row matches what populates when you open it.
   const description = canvas.description?.trim();
   const footprint = deployFootprint(canvas);
   const views = viewsSummary(canvas);

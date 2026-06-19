@@ -20,7 +20,7 @@ const templatableItem: GalleryItem = {
   slug: "src-slug",
   url: "http://x/c/src-slug",
   title: "Starter kit",
-  summary: null,
+  description: null,
   tags: [],
   templatable: true,
   publishedAt: 1,

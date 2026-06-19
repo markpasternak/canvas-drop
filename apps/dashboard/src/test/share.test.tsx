@@ -23,7 +23,6 @@ const CANVAS = {
   previewMode: "auto",
   galleryListed: false,
   galleryTemplatable: false,
-  gallerySummary: null,
   tags: null,
   clonedFromCanvasId: null,
   status: "active",

@@ -99,7 +99,6 @@ export interface Canvas {
   galleryListed: boolean;
   /** Opt-in "others may clone this as a template" flag (plan 002); only true when listed. */
   galleryTemplatable: boolean;
-  gallerySummary: string | null;
   tags: string[] | null;
   /** Lineage: the canvas this one was cloned from, or null (plan 002). */
   clonedFromCanvasId: string | null;
@@ -240,7 +239,6 @@ export interface CanvasSettings {
   previewMode?: "auto" | "off";
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
-  gallerySummary?: string | null;
   tags?: string[];
 }
 
@@ -260,7 +258,7 @@ export interface GalleryItem {
   slug: string;
   url: string;
   title: string;
-  summary: string | null;
+  description: string | null;
   tags: string[];
   /** Whether a non-owner may clone this canvas as a template (plan 002). */
   templatable: boolean;

@@ -47,7 +47,7 @@ async function main() {
     .select({
       id: t.id,
       title: t.title,
-      gallerySummary: t.gallerySummary,
+      description: t.description,
       tags: t.tags,
       slug: t.slug,
     })
@@ -55,7 +55,7 @@ async function main() {
     .where(all ? undefined : isNull(t.searchText))) as Array<{
     id: string;
     title: string;
-    gallerySummary: string | null;
+    description: string | null;
     tags: unknown;
     slug: string;
   }>;
@@ -64,7 +64,7 @@ async function main() {
   for (const row of rows) {
     const searchText = computeSearchText({
       title: row.title,
-      gallerySummary: row.gallerySummary,
+      description: row.description,
       tags: Array.isArray(row.tags) ? (row.tags as string[]) : null,
       slug: row.slug,
     });

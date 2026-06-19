@@ -285,7 +285,7 @@ async function main() {
       access: p.shared ? "whole_org" : "private",
       galleryListed: p.listed,
       galleryTemplatable: p.templatable,
-      gallerySummary: summary,
+      description: summary,
       tags,
     });
     if (p.protectedCanvas) {

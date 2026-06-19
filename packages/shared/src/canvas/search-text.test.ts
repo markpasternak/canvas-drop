@@ -19,21 +19,19 @@ describe("normalize", () => {
 });
 
 describe("computeSearchText (pinned composition)", () => {
-  it("joins title + summary + tags(in order) + slug with single spaces", () => {
+  it("joins title + description + tags(in order) + slug with single spaces", () => {
     expect(
       computeSearchText({
         title: "Quarterly Revenue",
-        gallerySummary: "Board forecast",
+        description: "Board forecast",
         tags: ["Finance", "Q3"],
         slug: "quarterly-revenue",
       }),
     ).toBe("quarterly revenue board forecast finance q3 quarterly-revenue");
   });
 
-  it("treats a null/absent summary as the empty string and absent tags as none", () => {
-    expect(computeSearchText({ title: "A", gallerySummary: null, tags: null, slug: "b" })).toBe(
-      "a b",
-    );
+  it("treats a null/absent description as the empty string and absent tags as none", () => {
+    expect(computeSearchText({ title: "A", description: null, tags: null, slug: "b" })).toBe("a b");
     expect(computeSearchText({ title: "A", slug: "b" })).toBe("a b");
   });
 

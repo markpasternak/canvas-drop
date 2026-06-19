@@ -21,7 +21,7 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
     slug: "s1",
     url: "http://x/c/s1",
     title: "Budget chart",
-    summary: "A handy budget chart",
+    description: "A handy budget chart",
     tags: ["charts"],
     templatable: false,
     publishedAt: 1,
@@ -86,8 +86,8 @@ const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPag
 afterEach(() => vi.restoreAllMocks());
 
 describe("Gallery view", () => {
-  it("renders a card grid: title links externally, summary, tags, owner", async () => {
-    stubGallery(() => page([item({ title: "Budget chart", summary: "Quarterly budget" })]));
+  it("renders a card grid: title links externally, description, tags, owner", async () => {
+    stubGallery(() => page([item({ title: "Budget chart", description: "Quarterly budget" })]));
     renderGallery();
 
     const title = await screen.findByRole("link", { name: "Budget chart" });

@@ -148,6 +148,9 @@ export const canvases = sqliteTable(
     // the "public + custom slug is human-guessable" heads-up; never an authz input.
     slugCustom: c.bool("slug_custom").notNull().default(false),
     title: c.text("title").notNull().default(""),
+    // Single unified canvas description (plan 2026-06-19 R2, U21): the one field shown
+    // in the canvas overview/settings, the gallery, and grid cards. Replaces the former
+    // gallery-only summary field. Nullable; shown publicly when the canvas is listed.
     description: c.text("description"),
     ownerId: c
       .text("owner_id")
@@ -162,12 +165,11 @@ export const canvases = sqliteTable(
     // when galleryListed is true — every path that clears galleryListed also clears
     // this in the same write (plan 002 KTD6).
     galleryTemplatable: c.bool("gallery_templatable").notNull().default(false),
-    gallerySummary: c.text("gallery_summary"),
     tags: c.json("tags"),
     // Admin-curated editorial flag (cross-owner action; not on the per-account MCP
     // surface). Set only via the admin canvases route; surfaces in the public gallery.
     galleryFeatured: c.bool("gallery_featured").notNull().default(false),
-    // Denormalized, normalized search blob = normalize(title + summary + tags + slug),
+    // Denormalized, normalized search blob = normalize(title + description + tags + slug),
     // recomputed in the service layer on every write touching those fields. Nullable;
     // existing rows are populated by a one-time TS backfill, not a SQL migration step.
     searchText: c.text("search_text"),

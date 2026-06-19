@@ -900,7 +900,7 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
       title: "Quarterly Revenue",
     });
     await repo.updateSettings(cv.id, {
-      gallerySummary: "Pipeline forecast for the board",
+      description: "Pipeline forecast for the board",
       tags: ["finance", "leadership"],
     });
 
@@ -997,7 +997,7 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     await repo.updateSettings(cv.id, {
       access: "whole_org",
       galleryListed: true,
-      gallerySummary: "shared in the gallery",
+      description: "shared in the gallery",
       tags: ["showcase"],
     });
 
