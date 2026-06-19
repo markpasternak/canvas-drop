@@ -1,7 +1,8 @@
-import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretRight, Warning } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
+import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
@@ -117,7 +118,12 @@ export default function Settings() {
           description="Control the stable URL and how unknown paths resolve."
         >
           <Row
-            title="Canvas URL"
+            title={
+              <span className="flex flex-wrap items-center gap-2">
+                Canvas URL
+                <Badge tone="accent">Changes the link</Badge>
+              </span>
+            }
             description={<span className="block truncate font-mono">{canvas.url}</span>}
           >
             <CopyButton
@@ -205,6 +211,7 @@ export default function Settings() {
                 </>
               ) : (
                 <>
+                  <Badge tone="accent">Changes what others see</Badge>
                   <Toggle
                     label="Generate a preview automatically"
                     description="Capture a screenshot of your canvas each time you publish, and use it as the cover. Turn off to show a generated placeholder instead."
@@ -239,8 +246,13 @@ export default function Settings() {
           description="Use the per-canvas key for scripted deploys. Never put it in canvas files."
         >
           <Row
-            title="Secret API key"
-            description="Regenerating invalidates the old key immediately."
+            title={
+              <span className="flex flex-wrap items-center gap-2">
+                Secret API key
+                <Badge tone="warning">Credential</Badge>
+              </span>
+            }
+            description="Regenerating invalidates the old key immediately — any scripts or agents using the old key will stop deploying until you update them."
           >
             <Button size="sm" variant="secondary" onClick={() => setConfirm("key")}>
               Regenerate key
@@ -323,9 +335,10 @@ export default function Settings() {
           ) : (
             <Row
               title="Archive canvas"
-              description="Takes it offline and moves it to your Archived view. Reversible."
+              description="Takes it offline and moves it to your Archived view — anyone with the link loses access until you unarchive. Reversible."
             >
-              <Button size="sm" variant="secondary" onClick={() => setConfirm("archive")}>
+              <Button size="sm" variant="danger" onClick={() => setConfirm("archive")}>
+                <Warning size={15} weight="bold" aria-hidden />
                 Archive canvas
               </Button>
             </Row>
@@ -338,6 +351,7 @@ export default function Settings() {
             description="Takes it offline and removes it from your list. Recoverable for 30 days, then purged."
           >
             <Button variant="danger" size="sm" onClick={() => setConfirm("delete")}>
+              <Warning size={15} weight="bold" aria-hidden />
               Delete canvas
             </Button>
           </Row>

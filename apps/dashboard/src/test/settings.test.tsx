@@ -223,6 +223,52 @@ describe("settings route", () => {
     );
   });
 
+  it("tiers settings rows: visibility/credential badges and destructive danger buttons", async () => {
+    // Published so both visibility rows + both destructive rows render.
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({ "GET /api/canvases/c1": () => json(published) });
+    renderSettings();
+
+    // Visibility-changing rows (slug + preview) carry a neutral/info-toned affordance badge.
+    expect(await screen.findByText("Changes the link")).toBeInTheDocument();
+    expect(screen.getByText("Changes what others see")).toBeInTheDocument();
+
+    // Credential row (regenerate key) carries a warning badge + consequence helper text.
+    const credBadge = screen.getByText("Credential");
+    expect(credBadge).toHaveClass("text-warning");
+    expect(screen.getByText(/will stop deploying until you update them/i)).toBeInTheDocument();
+
+    // Destructive rows (archive + delete) use the danger Button variant + a warning icon.
+    const archiveBtn = screen.getByRole("button", { name: "Archive canvas" });
+    expect(archiveBtn).toHaveClass("bg-danger");
+    expect(archiveBtn.querySelector("svg")).not.toBeNull();
+    const deleteBtn = screen.getByRole("button", { name: "Delete canvas" });
+    expect(deleteBtn).toHaveClass("bg-danger");
+    expect(deleteBtn.querySelector("svg")).not.toBeNull();
+
+    // Routine row (SPA mode) stays a plain control — no consequence badge in its row.
+    expect(screen.getByRole("switch", { name: /single-page app mode/i })).toBeInTheDocument();
+  });
+
+  it("archive still confirms via the same dialog after the visual re-tiering", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "POST /api/canvases/c1/archive": () => json({ ...CANVAS, status: "archived" }),
+    });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: "Archive canvas" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Archive" }));
+
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/archive")).toBe(
+        true,
+      ),
+    );
+  });
+
   it("delete confirms with a press-and-hold, then DELETEs", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),
