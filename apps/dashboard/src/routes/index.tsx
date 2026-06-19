@@ -841,13 +841,6 @@ export default function CanvasList() {
                     onValueChange={setAccess}
                   />
                 )}
-                {/* Tag filter (U9) — multi-select, any-match, URL-driven (`?tag=`).
-                    Hidden entirely when no tags are available (the control returns
-                    null). Tags apply to the live set only, so it's absent in the
-                    archived view. */}
-                {!archivedView && (
-                  <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
-                )}
                 <FilterSelect
                   label="Sort your canvases"
                   options={CANVASES_SORT_OPTIONS}
@@ -862,6 +855,14 @@ export default function CanvasList() {
                   not wedged between two chips. */}
               {!archivedView && (
                 <FilterBar>
+                  {/* Tag filter (U9) leads the filter row — a richer multi-select that
+                      sits in the same hierarchy as the quick attribute toggles, set off
+                      by a hairline. Hidden when no tags exist; "Clear all" (trailing)
+                      wipes every param incl. ?tag=. */}
+                  <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
+                  {availableTags.length > 0 && (
+                    <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+                  )}
                   {STATE_CHIPS.map((chip) => (
                     <FilterChip
                       key={chip.key}
