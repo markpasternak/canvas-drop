@@ -63,6 +63,7 @@ const ROW = {
   access: "private",
   publicationState: "published",
   galleryListed: true,
+  galleryTemplatable: false,
   galleryFeatured: false,
   disabledReason: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
@@ -958,6 +959,94 @@ describe("admin dashboard", () => {
       await user.click(await screen.findByRole("menuitem", { name: "Feature in gallery" }));
       // The doFeature catch surfaces the failure instead of leaving the click silent.
       expect(await screen.findByText(/could not feature this canvas/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("admin canvases ↔ owner-list parity (template + gallery filters, Open, scope)", () => {
+    it("makes the admin scope unmistakable: an Admin · All owners eyebrow + the owner column", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
+      // The cross-owner scope eyebrow distinguishes this from the owner "Your canvases".
+      expect(screen.getByText("Admin · All owners")).toBeInTheDocument();
+      // The owner column stays visible (admin sees who owns each).
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
+    });
+
+    it("filters by Template via ?templatable=true", async () => {
+      const tmpl = {
+        ...ROW,
+        id: "ct",
+        slug: "starter-kit",
+        title: "Starter Kit",
+        galleryTemplatable: true,
+      };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases?templatable=true&limit=50&offset=0": () => canvasPage([tmpl]),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Template" }));
+      expect(await screen.findByText("Starter Kit")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?templatable=true&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("filters by Gallery (listed) via ?listed=true", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases?listed=true&limit=50&offset=0": () => canvasPage([ROW]),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Gallery" }));
+      await waitFor(() =>
+        expect(
+          calls.some((c) => c.path === "/api/admin/canvases?listed=true&limit=50&offset=0"),
+        ).toBe(true),
+      );
+    });
+
+    it("the Open action targets the canvas public URL in a new tab", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+      });
+      renderAt("/admin/canvases");
+      const open = await screen.findByRole("link", {
+        name: "Open Happy Otter in a new tab",
+      });
+      expect(open).toHaveAttribute("href", "http://x/c/happy-otter");
+      expect(open).toHaveAttribute("target", "_blank");
+      expect(open).toHaveAttribute("rel", "noreferrer");
+    });
+
+    it("shows a Template badge on a templatable row (owner-list badge vocabulary)", async () => {
+      const tmpl = { ...ROW, galleryTemplatable: true };
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([tmpl]),
+      });
+      renderAt("/admin/canvases");
+      const title = await screen.findByText("Happy Otter");
+      // "Template" also names the filter chip (a button); the row badge is the SPAN
+      // inside this canvas's row — scope to the row and exclude the chip.
+      const row = title.closest("tr") as HTMLElement;
+      const badge = within(row).getByText("Template");
+      expect(badge.tagName).not.toBe("BUTTON");
+      expect(badge).toBeInTheDocument();
     });
   });
 });

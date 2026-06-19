@@ -18,8 +18,9 @@ import {
   useAdminRestoreCanvas,
   useSetFeatured,
 } from "../lib/mutations.js";
+import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
-import { AccessBadge, Badge, StatusBadge } from "./Badge.js";
+import { AccessBadge, Badge, ConceptBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { DataTable } from "./DataTable.js";
 import { Dialog } from "./Dialog.js";
@@ -135,14 +136,6 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
     <>
       <ActionMenu label={`Actions for ${canvas.title || canvas.slug}`}>
         <ActionMenuItem
-          href={canvas.url}
-          target="_blank"
-          rel="noreferrer"
-          icon={<ArrowSquareOut size={MENU_ICON} aria-hidden />}
-        >
-          Open in new tab
-        </ActionMenuItem>
-        <ActionMenuItem
           icon={<Copy size={MENU_ICON} aria-hidden />}
           onSelect={() => copy(canvas.url, "Link copied")}
         >
@@ -240,6 +233,13 @@ export function AdminCanvasTable({
                   Featured
                 </Badge>
               )}
+              {/* Gallery state, same badge vocabulary as the owner Your-canvases rows:
+                  Template implies listed, so they're mutually exclusive here. */}
+              {c.galleryTemplatable ? (
+                <ConceptBadge concept="templates">Template</ConceptBadge>
+              ) : c.galleryListed ? (
+                <ConceptBadge concept="listed">Listed</ConceptBadge>
+              ) : null}
             </div>
             <div className="font-mono text-xs text-muted">{c.slug}</div>
             {c.disabledReason && (
@@ -282,8 +282,23 @@ export function AdminCanvasTable({
             {c.usageOps.toLocaleString()}
           </td>
           <td className="px-3 py-2 text-muted">{relativeTime(c.lastActivityAt)}</td>
-          <td className="px-3 py-2 text-right">
-            <RowActions canvas={c} />
+          <td className="px-3 py-2">
+            {/* Open the canvas's public URL in a new tab — the admin views it as a
+                normal user; access is enforced server-side at view time, so we just
+                offer the link. Mirrors the owner row's primary action + overflow menu. */}
+            <div className="flex items-center justify-end gap-1.5">
+              <a
+                href={c.url}
+                target="_blank"
+                rel="noreferrer"
+                className={rowPrimaryActionClass}
+                aria-label={`Open ${c.title || c.slug} in a new tab`}
+              >
+                <ArrowSquareOut size={14} aria-hidden />
+                Open
+              </a>
+              <RowActions canvas={c} />
+            </div>
           </td>
         </tr>
       ))}

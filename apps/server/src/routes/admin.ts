@@ -38,9 +38,17 @@ export interface AdminRoutesDeps {
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
 const ACCESS_RUNGS = ["private", "specific_people", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
+// `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
+// presence-style flags in the URL (?templatable=true), mirroring the member list.
+const boolFlag = z
+  .union([z.literal("true"), z.literal("false")])
+  .optional()
+  .transform((v) => v === "true");
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
   access: z.enum(ACCESS_RUNGS).optional(),
+  templatable: boolFlag,
+  listed: boolFlag,
   q: z.string().trim().max(200).optional(),
   owner: z.string().trim().max(100).optional(),
   sort: z.enum(CANVAS_SORTS).optional().default("recent"),
@@ -103,6 +111,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const q = listQuery.safeParse({
       status: c.req.query("status"),
       access: c.req.query("access"),
+      templatable: c.req.query("templatable"),
+      listed: c.req.query("listed"),
       q: c.req.query("q"),
       owner: c.req.query("owner"),
       sort: c.req.query("sort"),
@@ -114,6 +124,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const { items: rows, total } = await deps.admin.listAllCanvasesFiltered({
       status: q.data.status as AdminCanvasStatus | undefined,
       access: q.data.access,
+      templatable: q.data.templatable,
+      listed: q.data.listed,
       q: q.data.q,
       owner: q.data.owner,
       sort: q.data.sort,
@@ -150,6 +162,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         // Gallery-listed flag — the client only offers "Feature in gallery" for a
         // listed+published row (the server enforces the same on the feature route).
         galleryListed: cv.galleryListed,
+        // Clone-as-template flag — surfaced so the table shows + filters by template.
+        galleryTemplatable: cv.galleryTemplatable,
         // Admin-curated editorial flag (KTD3) — surfaced so the table reflects the
         // featured state and the Feature toggle can flip it in place.
         galleryFeatured: cv.galleryFeatured,

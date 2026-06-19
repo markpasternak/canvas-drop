@@ -298,6 +298,9 @@ function NeedsAttention({
 const CANVAS_SEARCH_KEYS: Array<keyof AdminCanvasesSearch> = [
   "owner",
   "status",
+  "access",
+  "templatable",
+  "listed",
   "q",
   "sort",
   "page",

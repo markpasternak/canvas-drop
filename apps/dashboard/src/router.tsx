@@ -164,6 +164,10 @@ export interface AdminCanvasesSearch {
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */
   access?: AccessRung;
+  /** Gallery facet: only clone-able templates. */
+  templatable?: boolean;
+  /** Gallery facet: only gallery-listed canvases. */
+  listed?: boolean;
   q?: string;
   sort?: AdminCanvasSort;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */

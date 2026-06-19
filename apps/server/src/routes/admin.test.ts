@@ -249,6 +249,40 @@ describe("admin routes", () => {
     expect((await canvases.findById(cvId))?.galleryFeatured).toBe(false);
   });
 
+  it("GET /canvases filters by ?templatable=true and ?listed=true, projecting galleryTemplatable", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "alice");
+    const { app, canvases } = buildAdminApp(client, { id: "admin", isAdmin: true });
+    // A plain published canvas, a listed-only canvas, and a listed+templatable one.
+    const plainId = await seedPublishedCanvas(client, owner.id);
+    const listedId = await seedListed(client, owner.id);
+    const tmplId = await seedListed(client, owner.id);
+    await canvases.updateSettings(tmplId, { galleryListed: true, galleryTemplatable: true });
+
+    type Row = { id: string; galleryListed: boolean; galleryTemplatable: boolean };
+    type Page = { canvases: Row[]; total: number };
+
+    // Template facet → only the templatable canvas, and the projection carries the flag.
+    const tmplRes = await app.request("/api/admin/canvases?templatable=true");
+    expect(tmplRes.status).toBe(200);
+    const tmplPage = (await tmplRes.json()) as Page;
+    expect(tmplPage.canvases.map((r) => r.id)).toEqual([tmplId]);
+    expect(tmplPage.canvases[0]?.galleryTemplatable).toBe(true);
+
+    // Listed facet → both listed canvases (template implies listed), not the plain one.
+    const listedRes = await app.request("/api/admin/canvases?listed=true");
+    const listedPage = (await listedRes.json()) as Page;
+    const ids = new Set(listedPage.canvases.map((r) => r.id));
+    expect(ids.has(listedId)).toBe(true);
+    expect(ids.has(tmplId)).toBe(true);
+    expect(ids.has(plainId)).toBe(false);
+
+    // Absent flags → no facet narrowing (all three present), and a "false" reads as off.
+    const allRes = await app.request("/api/admin/canvases?templatable=false&listed=false");
+    const allPage = (await allRes.json()) as Page;
+    expect(allPage.total).toBe(3);
+  });
+
   it("feature on a non-existent canvas id → 404 (existence-404 admin semantics)", async () => {
     client = await makeTestDb("sqlite");
     const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });

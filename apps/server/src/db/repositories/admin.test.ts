@@ -158,6 +158,51 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
     expect(byCreated.items.map((c) => c.id)).toEqual([apple.id, zebra.id]);
   });
 
+  it("filters by gallery facets: templatable and listed", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const a = await seedUser(client, "alice");
+    // A plain canvas (neither listed nor templatable).
+    const plain = await canvases.create({ ownerId: a.id, slug: "p-1111-2222", apiKeyHash: "h1" });
+    // Listed only.
+    const listed = await canvases.create({ ownerId: a.id, slug: "l-1111-2222", apiKeyHash: "h2" });
+    await canvases.updateSettings(listed.id, { access: "whole_org", galleryListed: true });
+    // Listed + templatable.
+    const tmpl = await canvases.create({ ownerId: a.id, slug: "t-1111-2222", apiKeyHash: "h3" });
+    await canvases.updateSettings(tmpl.id, {
+      access: "whole_org",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+
+    const admin = adminRepository(client);
+
+    const onlyTemplates = await admin.listAllCanvasesFiltered({
+      limit: 50,
+      offset: 0,
+      templatable: true,
+    });
+    expect(onlyTemplates.items.map((c) => c.id)).toEqual([tmpl.id]);
+    expect(onlyTemplates.total).toBe(1);
+
+    const onlyListed = await admin.listAllCanvasesFiltered({ limit: 50, offset: 0, listed: true });
+    const listedIds = new Set(onlyListed.items.map((c) => c.id));
+    // Listed filter catches both the listed-only and the templatable (template implies listed).
+    expect(listedIds.has(listed.id)).toBe(true);
+    expect(listedIds.has(tmpl.id)).toBe(true);
+    expect(listedIds.has(plain.id)).toBe(false);
+    expect(onlyListed.total).toBe(2);
+
+    // Both facets combine (templatable AND listed) → just the template.
+    const both = await admin.listAllCanvasesFiltered({
+      limit: 50,
+      offset: 0,
+      templatable: true,
+      listed: true,
+    });
+    expect(both.items.map((c) => c.id)).toEqual([tmpl.id]);
+  });
+
   it("listUsers returns per-user canvas counts (excluding deleted), with search + sort", async () => {
     client = await makeTestDb(dialect);
     const canvases = canvasesRepository(client);

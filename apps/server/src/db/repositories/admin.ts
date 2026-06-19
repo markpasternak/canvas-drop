@@ -21,6 +21,10 @@ export interface ListAllCanvasesQuery {
   owner?: string;
   /** Governance filter: narrow to one access rung (e.g. find every `public_link`). */
   access?: AccessRung;
+  /** Gallery filter: only canvases offered as clone-able templates (galleryTemplatable). */
+  templatable?: boolean;
+  /** Gallery filter: only canvases listed in the public gallery (galleryListed). */
+  listed?: boolean;
   /** Sort axis; defaults to `recent` (last activity). */
   sort?: AdminCanvasSort;
   limit: number;
@@ -128,6 +132,11 @@ export function adminRepository(client: DbClient) {
       else filters.push(ne(canvasesT.status, "deleted"));
       if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
       if (q.access) filters.push(eq(canvasesT.access, q.access));
+      // Gallery facets — each maps to one boolean canvas column. `templatable`
+      // implies listed at the data level, but they filter independently here so an
+      // admin can isolate either set.
+      if (q.templatable) filters.push(eq(canvasesT.galleryTemplatable, true));
+      if (q.listed) filters.push(eq(canvasesT.galleryListed, true));
 
       const search = q.q?.trim().toLowerCase();
       if (search) {

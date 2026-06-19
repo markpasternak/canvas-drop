@@ -566,6 +566,9 @@ export interface AdminCanvasRow {
    *  can be featured (the server enforces this on the feature route), so the table
    *  only offers "Feature in gallery" for such rows. */
   galleryListed: boolean;
+  /** Whether the canvas is offered as a clone-able gallery template. Drives the
+   *  Template badge + the admin Template filter. */
+  galleryTemplatable: boolean;
   /** Admin-curated editorial flag (KTD3) — reflected in the table; the Feature
    *  toggle flips it via the admin set-featured route. */
   galleryFeatured: boolean;
@@ -595,6 +598,10 @@ export type AdminCanvasSort = "recent" | "created" | "title";
 export interface AdminCanvasesQuery {
   status?: AdminCanvasStatus;
   access?: AccessRung;
+  /** Gallery facet: only clone-able templates. */
+  templatable?: boolean;
+  /** Gallery facet: only gallery-listed canvases. */
+  listed?: boolean;
   q?: string;
   owner?: string;
   sort?: AdminCanvasSort;
@@ -963,6 +970,8 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
       if (query.access) sp.set("access", query.access);
+      if (query.templatable) sp.set("templatable", "true");
+      if (query.listed) sp.set("listed", "true");
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
       if (query.sort && query.sort !== "recent") sp.set("sort", query.sort);

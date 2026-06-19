@@ -101,26 +101,30 @@ export default function Versions() {
       >
         <ul className="divide-y divide-border border-t border-border">
           {versions.map((v) => (
-            <li key={v.number} className="flex items-center gap-4 py-4 first:pt-0">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-medium text-fg">v{v.number}</span>
+            <li key={v.number} className="flex items-center gap-4 py-3.5 first:pt-0">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-mono text-sm font-semibold leading-none text-fg">
+                    v{v.number}
+                  </span>
                   {v.current && <Badge tone="accent">Current</Badge>}
                   <Badge tone="neutral">{sourceLabel(v.source)}</Badge>
                 </div>
                 <div
-                  className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-subtle"
+                  className="flex flex-wrap items-center gap-x-2 text-xs leading-none text-subtle"
                   title={fullTime(v.createdAt)}
                 >
                   <span>{relativeTime(v.createdAt)}</span>
+                  <span aria-hidden>·</span>
                   <span>
                     {v.fileCount} {v.fileCount === 1 ? "file" : "files"}
                   </span>
+                  <span aria-hidden>·</span>
                   <span>{formatBytes(v.totalBytes)}</span>
                 </div>
               </div>
               {v.status === "ready" && isActive && (
-                <div className="flex items-center justify-end gap-1.5">
+                <div className="flex shrink-0 items-center gap-1.5">
                   {!v.current && (
                     <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
                       Make current
