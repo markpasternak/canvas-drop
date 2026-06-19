@@ -591,22 +591,6 @@ async function main() {
     name,
     isAdmin: true,
   });
-  // Colleague owners so the gallery (which excludes the VIEWER's own canvases) shows
-  // real covers too — each app is deployed once for the admin (→ dashboard) and once
-  // for a rotating colleague (→ gallery).
-  const colleagues = await Promise.all(
-    [
-      { name: "Dana Okafor", email: "dana@example.com" },
-      { name: "Priya Nair", email: "priya@example.com" },
-      { name: "Liam Walsh", email: "liam@example.com" },
-      { name: "Sofia Rossi", email: "sofia@example.com" },
-      { name: "Noah Kim", email: "noah@example.com" },
-      { name: "Aisha Bello", email: "aisha@example.com" },
-    ].map((u) =>
-      users.upsert({ providerSub: `dev:${u.email}`, email: u.email, name: u.name, isAdmin: false }),
-    ),
-  );
-
   const now = Date.now();
   let n = 0;
   let count = 0;
@@ -647,19 +631,17 @@ async function main() {
     count++;
   }
 
-  // One distinct canvas per app (the gallery includes the viewer's own canvases, so a
-  // dual-owner deploy would show the same design twice). Owners alternate admin/colleague
-  // so the gallery has varied owners AND the admin's dashboard shows several real covers.
+  // One distinct canvas per app, ALL owned by the dev admin — so the admin's dashboard
+  // (?tag=showcase) shows all 12, and the gallery (which includes the viewer's own
+  // canvases) shows the same 12. Both landing heroes are the full real-cover set.
   for (let i = 0; i < APPS.length; i++) {
     const app = APPS[i] as DemoApp;
-    const owner =
-      i % 2 === 0 ? admin : (colleagues[Math.floor(i / 2) % colleagues.length] as { id: string });
-    await seedOne(app, owner, `${kebab(app.title)}-demo`);
+    await seedOne(app, admin, `${kebab(app.title)}-demo`);
     process.stdout.write(`  ✓ ${app.title}\n`);
   }
 
   process.stdout.write(
-    `\nSeeded ${count} real demo canvases (${APPS.length} apps × admin + colleague) + enabled ` +
+    `\nSeeded ${count} real demo canvases (${APPS.length} apps, owned by the dev admin) + enabled ` +
       `screenshots. Start \`CANVAS_DROP_SCREENSHOTS=on pnpm dev\` and the worker captures covers.\n`,
   );
 }
