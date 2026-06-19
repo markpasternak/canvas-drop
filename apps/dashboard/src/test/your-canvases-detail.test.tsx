@@ -133,7 +133,9 @@ describe("Your canvases — row/card body click opens the detail page", () => {
   it("clicking a card body navigates to /canvases/$id (grid view)", async () => {
     stub([canvas({ id: "alpha", slug: "alpha", title: "Alpha canvas" })]);
     const router = renderAt("/?view=grid");
-    await screen.findByText("Alpha canvas");
+    // Grid cards overlay the title on the content-aware cover too (U6); query the
+    // real title link to avoid the decorative duplicate.
+    await screen.findByRole("link", { name: "View details for Alpha canvas" });
     expect(selectedAttr()).toBeNull();
 
     // The card body is the title's parent <li>; click an area that is not an

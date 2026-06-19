@@ -6,6 +6,7 @@ import { fullTime, relativeTime } from "../lib/format.js";
 import { AccessBadge, accessRungLabel, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { canvasTitle, lastActivity, visibilityLabel } from "./CanvasList.js";
+import { coverType } from "./GenerativeCover.js";
 
 const PUBLICATION_LABEL: Record<CanvasListItem["publicationState"], string> = {
   draft: "Draft",
@@ -81,7 +82,17 @@ export function DetailPanel({
     <aside aria-label="Canvas details" className="flex h-full flex-col gap-4 overflow-y-auto">
       {/* Hero cover */}
       <div className="aspect-[3/2] w-full overflow-hidden rounded-lg border border-border/60 bg-surface-sunken">
-        <CanvasCover seed={canvas.id} previewUrl={previewUrl} />
+        <CanvasCover
+          seed={canvas.id}
+          title={title}
+          type={coverType({
+            templatable: canvas.galleryTemplatable,
+            listed: canvas.galleryListed,
+            protectedByPassword: canvas.hasPassword,
+          })}
+          status={canvas.publicationState}
+          previewUrl={previewUrl}
+        />
       </div>
 
       {/* Title + status */}

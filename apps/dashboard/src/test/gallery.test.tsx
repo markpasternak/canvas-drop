@@ -101,14 +101,18 @@ describe("Gallery view", () => {
   it("shows a Template badge and a 'Make a copy' action only for templatable items", async () => {
     stubGallery(() => page([item({ id: "t1", templatable: true })]));
     renderGallery();
-    expect(await screen.findByText("Template")).toBeInTheDocument();
+    // The content-aware fallback cover (U6) also marks the type, so "Template" can
+    // appear on both the card badge and the decorative cover marker — assert the badge
+    // exists (≥1) rather than a single match.
+    expect((await screen.findAllByText("Template")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Duplicate" })).toBeInTheDocument();
   });
 
   it("hides the clone action for non-templatable items", async () => {
     stubGallery(() => page([item({ id: "n1", templatable: false })]));
     renderGallery();
-    await screen.findByText("Budget chart");
+    await screen.findByRole("link", { name: "Budget chart" });
+    // A non-templatable gallery item carries no "Template" marker on badge or cover.
     expect(screen.queryByText("Template")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Duplicate" })).not.toBeInTheDocument();
   });

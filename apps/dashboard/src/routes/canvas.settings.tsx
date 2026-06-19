@@ -8,6 +8,7 @@ import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { CopyButton } from "../components/CopyButton.js";
+import { coverType } from "../components/GenerativeCover.js";
 import { IconLink } from "../components/IconButton.js";
 import { RenameSlugDialog } from "../components/RenameSlugDialog.js";
 import { SettingsNav } from "../components/SettingsNav.js";
@@ -150,6 +151,13 @@ export default function Settings() {
             <div className="aspect-[3/2] w-full max-w-[14rem] shrink-0 overflow-hidden rounded-xl border border-border">
               <CanvasCover
                 seed={canvas.id}
+                title={canvas.title ?? undefined}
+                type={coverType({
+                  templatable: canvas.galleryTemplatable,
+                  listed: canvas.galleryListed,
+                  protectedByPassword: canvas.hasPassword,
+                })}
+                status={canvas.publicationState}
                 previewUrl={
                   canvas.hasPreview
                     ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`

@@ -34,4 +34,24 @@ describe("CanvasCover (plan 004 / U8)", () => {
     expect(container.querySelector("img")).toBeNull(); // swapped to generative art
     expect(container.querySelector("div[aria-hidden]")).not.toBeNull();
   });
+
+  it("falls back to the CONTENT-AWARE generative cover (title + marker) on image error", () => {
+    const { container, getByText } = render(
+      <CanvasCover
+        seed="cv1"
+        previewUrl="https://x/preview"
+        title="My Live Dashboard"
+        type="templates"
+        status="published"
+      />,
+    );
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    if (img) fireEvent.error(img);
+    expect(container.querySelector("img")).toBeNull();
+    // The fallback overlay carries the threaded title + type/status markers.
+    expect(getByText("My Live Dashboard")).toBeTruthy();
+    expect(container.querySelector("[data-cover-type='templates']")).not.toBeNull();
+    expect(container.querySelector("[data-cover-status='published']")).not.toBeNull();
+  });
 });

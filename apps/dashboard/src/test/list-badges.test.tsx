@@ -247,10 +247,12 @@ describe("list row badges", () => {
       ],
       "/?view=grid",
     );
-    await screen.findByText("Gridded one");
+    await screen.findByRole("link", { name: "View details for Gridded one" });
     // Cards overlay the publication state on the cover (shown for every state, unlike
-    // the list row which only badges the non-happy-path states).
-    expect(screen.getByText("Published")).toBeInTheDocument();
+    // the list row which only badges the non-happy-path states). The content-aware
+    // fallback cover (U6) also carries a status marker, so "Published" can appear more
+    // than once — assert at least one.
+    expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     // ...but the grid drops the list's right-aligned "Created" stat column.
     expect(screen.queryByText("Created")).toBeNull();
     // Bulk selection still works in the grid (per-card checkbox + the select-all control).

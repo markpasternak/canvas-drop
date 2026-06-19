@@ -8,6 +8,7 @@ import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { CloneDialog } from "../components/CloneDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
+import { coverType } from "../components/GenerativeCover.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PageHeader } from "../components/Surface.js";
@@ -35,6 +36,10 @@ function GalleryCard({ item }: { item: GalleryItem }) {
       <div className="aspect-[3/2] w-full overflow-hidden">
         <CanvasCover
           seed={item.id}
+          title={item.title}
+          // Gallery items are always listed + published; a templatable one reads as a Template.
+          type={coverType({ templatable: item.templatable, listed: true })}
+          status="published"
           previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
         />
       </div>

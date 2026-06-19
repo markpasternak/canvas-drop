@@ -8,6 +8,7 @@ import { cardHoverClass, rowHoverClass, rowPrimaryActionClass } from "../lib/row
 import { AccessBadge, accessRungLabel, ConceptBadge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { CopyButton } from "./CopyButton.js";
+import { coverType } from "./GenerativeCover.js";
 import { Skeleton } from "./Skeleton.js";
 import { Tag } from "./Tag.js";
 
@@ -312,6 +313,10 @@ export function CanvasRow({
         {/* Hero thumbnail (plan 004 cover, enlarged): real preview when captured, else
             the deterministic generative art — decorative, the title is the affordance. */}
         <div className="aspect-[3/2] w-24 shrink-0 overflow-hidden rounded-md border border-border/60 sm:w-28">
+          {/* The list-row thumbnail is too small (~96px) to legibly overlay a 2-line
+              title, so the row keeps the plain seeded mesh — the title sits right
+              beside it. The content-aware overlay is reserved for the large covers
+              (grid card, gallery, detail) where it actually aids recognition. */}
           <CanvasCover
             seed={canvas.id}
             previewUrl={
@@ -448,6 +453,13 @@ export function CanvasCard({
       <div className="relative aspect-[3/2] w-full overflow-hidden border-border/60 border-b bg-surface-sunken">
         <CanvasCover
           seed={canvas.id}
+          title={title}
+          type={coverType({
+            templatable: canvas.galleryTemplatable,
+            listed: canvas.galleryListed,
+            protectedByPassword: canvas.hasPassword,
+          })}
+          status={canvas.publicationState}
           previewUrl={
             canvas.hasPreview
               ? `${previewCoverUrl(canvas.url, "card")}&v=${canvas.updatedAt}`

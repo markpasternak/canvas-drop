@@ -1,15 +1,23 @@
 import type { CSSProperties } from "react";
+import type { PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import { type Concept, conceptColor, conceptIcon } from "./concept-colors.js";
 
 /**
- * A deterministic generative cover (plan 004). The same `seed` always produces the
- * same art, so a canvas keeps a stable visual identity across renders and sessions.
- * It is a never-blank *identity* layer — NOT a preview of the canvas content; the
- * later real-screenshot upgrade (origin R13) renders into the SAME fixed
- * aspect-ratio region, so swapping it in needs no layout change.
+ * A deterministic generative cover (plan 004; content-aware in UX-sweep U6). The same
+ * `seed` always produces the same mesh art, so a canvas keeps a stable visual identity
+ * across renders and sessions. It is a never-blank *identity* layer — NOT a preview of
+ * the canvas content; the access-gated real-screenshot path through {@link CanvasCover}
+ * renders into the SAME fixed aspect-ratio region, so swapping it in needs no layout
+ * change.
+ *
+ * Content-aware (U6): on the seeded mesh background we overlay the canvas **title**
+ * (clamped to 2 lines) plus a small **type/status marker** so a wall of fallbacks aids
+ * recognition instead of reading as undifferentiated noise. The whole region stays
+ * `aria-hidden` — the surrounding card/list carries the real, labelled title affordance,
+ * so we never duplicate the title into the a11y tree.
  *
  * Pure CSS (a layered OKLCH mesh gradient) — no runtime dependency, no canvas/WebGL.
- * Decorative: callers mark the region aria-hidden, so it adds no screen-reader noise.
  *
  * On-brand palette (preview-parity U3): the covers stay genuinely colourful and
  * per-canvas distinct, but their hues are drawn from a *curated, brand-anchored*
@@ -82,6 +90,122 @@ export function coverStyle(seed: string): CSSProperties {
   };
 }
 
-export function GenerativeCover({ seed, className }: { seed: string; className?: string }) {
-  return <div aria-hidden className={cn("size-full", className)} style={coverStyle(seed)} />;
+/**
+ * The "type" axis a cover can mark — a subset of the canvas-state {@link Concept}
+ * taxonomy (template / listed / protected). `canvas` is the plain default with no
+ * concept tint. This reuses the SAME concept vocabulary the row/gallery badges use
+ * (see `concept-colors.ts`), so the fallback marker can never drift from the badges.
+ */
+export type CoverType = "canvas" | "templates" | "listed" | "protected";
+
+const TYPE_LABEL: Record<CoverType, string> = {
+  canvas: "Canvas",
+  templates: "Template",
+  listed: "Listed",
+  protected: "Protected",
+};
+
+const STATUS_LABEL: Record<PublicationState, string> = {
+  draft: "Draft",
+  published: "Published",
+  archived: "Archived",
+  disabled: "Disabled",
+  deleted: "Deleted",
+};
+
+/** Phosphor `Stack`-style glyph for the type marker, drawn from the shared concept map. */
+function typeIcon(type: CoverType) {
+  return type === "canvas" ? null : conceptIcon(type as Concept);
+}
+
+/**
+ * Derive the cover "type" from a canvas-like shape using the SAME priority the row
+ * badges use (template > listed > protected > plain canvas). Accepts the partial
+ * flags both `CanvasListItem` (gallery*) and ad-hoc callers carry, so a single
+ * mapping serves every call site.
+ */
+export function coverType(flags: {
+  templatable?: boolean;
+  listed?: boolean;
+  protectedByPassword?: boolean;
+}): CoverType {
+  if (flags.templatable) return "templates";
+  if (flags.listed) return "listed";
+  if (flags.protectedByPassword) return "protected";
+  return "canvas";
+}
+
+export interface CoverContent {
+  /** Canvas title to overlay (clamped to 2 lines). Falls back to a generic label if absent. */
+  title?: string;
+  /** The canvas "type" — reuses the concept taxonomy for its label + tint. */
+  type?: CoverType;
+  /** Derived publication lifecycle, shown as a small status marker. */
+  status?: PublicationState;
+}
+
+/**
+ * The content-aware fallback cover: the deterministic seeded mesh as a background,
+ * with the title + a type/status marker overlaid for recognition. Entirely
+ * `aria-hidden` (decorative — the title is the accessible affordance elsewhere).
+ *
+ * Layout note: the overlay uses absolute positioning inside a `relative` box and a
+ * 2-line clamp, so it never changes the cover's outer aspect-ratio box (callers keep
+ * their fixed `aspect-[3/2]` wrappers).
+ */
+export function GenerativeCover({
+  seed,
+  className,
+  title,
+  type = "canvas",
+  status,
+}: { seed: string; className?: string } & CoverContent) {
+  const TypeIcon = typeIcon(type);
+  const typeTint = type === "canvas" ? undefined : conceptColor(type as Concept);
+  return (
+    <div
+      aria-hidden
+      className={cn("relative size-full overflow-hidden", className)}
+      style={coverStyle(seed)}
+    >
+      {/* Legibility scrim — a bottom-up dark gradient so the overlaid text reads on
+          any seeded hue without changing the mesh itself. */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(to top, oklch(0.18 0.03 240 / 0.78) 0%, oklch(0.18 0.03 240 / 0.32) 38%, transparent 72%)",
+        }}
+      />
+      <div className="absolute inset-0 flex flex-col justify-end gap-1.5 p-3">
+        {/* Title — fixed token-sized font, clamped to 2 lines with ellipsis so long
+            titles never overflow the fixed cover box. */}
+        <span className="line-clamp-2 font-serif font-medium text-sm text-white leading-snug [text-shadow:0_1px_2px_oklch(0_0_0_/_0.5)]">
+          {title?.trim() || "Untitled canvas"}
+        </span>
+        {/* Type/status marker — small chips drawing the type label + tint from the
+            shared concept vocabulary. */}
+        <span className="flex flex-wrap items-center gap-1">
+          <span
+            data-cover-type={type}
+            className={cn(
+              "inline-flex items-center gap-1 rounded border border-white/20 px-1.5 py-0.5 font-medium text-[0.625rem] leading-none",
+              typeTint ? cn(typeTint.bg, typeTint.text) : "bg-white/15 text-white",
+            )}
+          >
+            {TypeIcon && <TypeIcon size={10} weight="bold" aria-hidden />}
+            {TYPE_LABEL[type]}
+          </span>
+          {status && (
+            <span
+              data-cover-status={status}
+              className="inline-flex items-center rounded border border-white/20 bg-black/25 px-1.5 py-0.5 font-medium text-[0.625rem] text-white leading-none"
+            >
+              {STATUS_LABEL[status]}
+            </span>
+          )}
+        </span>
+      </div>
+    </div>
+  );
 }
