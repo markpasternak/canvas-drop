@@ -472,7 +472,13 @@ export function useSetFeatured() {
   return useMutation({
     mutationFn: ({ id, featured }: { id: string; featured: boolean }) =>
       api.admin.setFeatured(id, featured),
-    onSuccess: () => invalidateAdmin(qc),
+    onSuccess: () => {
+      invalidateAdmin(qc);
+      // The featured flag drives the gallery's Featured row + `?sort=featured` — an
+      // open gallery must reflect the change, so invalidate that tree too (the
+      // ["gallery"] prefix covers every parameterized gallery query + the facets).
+      qc.invalidateQueries({ queryKey: ["gallery"] });
+    },
   });
 }
 

@@ -50,7 +50,7 @@ import { useClipboardCopy } from "../lib/clipboard.js";
 import { cn } from "../lib/cn.js";
 import { useArchiveCanvas, useDeleteCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
 import { type CanvasView, persistOwnerView, resolveOwnerView } from "../lib/owner-view.js";
-import { useCanvases } from "../lib/queries.js";
+import { useCanvases, useCanvasTags } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { useMediaQuery } from "../lib/use-media-query.js";
@@ -537,6 +537,9 @@ export default function CanvasList() {
     limit: CANVASES_PAGE_SIZE,
     offset,
   });
+  // The owner's complete tag vocabulary (across ALL their canvases, every page/
+  // filter), for the TagFilter control — symmetric to the gallery's facets.
+  const canvasTags = useCanvasTags();
 
   // A refetch that drops below the current page (e.g. a canvas was archived while
   // on the last page) snaps back to page 1 rather than showing an empty page.
@@ -683,17 +686,15 @@ export default function CanvasList() {
   // never competes with onboarding.
   const finishCanvas =
     !archivedView && !filtering && page === 1 ? pickFinishCanvas(items, summary.active) : null;
-  // Distinct tags to offer in the TagFilter. LIMITATION (first cut): derived from the
-  // CURRENT page's items, not a server-side distinct-tags facet for the whole owner
-  // library — there's no owner distinct-tags endpoint today (GalleryFacets is gallery-
-  // scoped/public). So a tag that only exists on a canvas off the current page/filter
-  // won't be offered until that canvas is visible. Union in the already-selected tags
-  // so an active selection always stays listed (and removable) even when its filter
-  // narrows the page down to no carriers. If a whole-library facet lands later, swap
-  // this derivation for it without touching the control.
-  const availableTags = [
-    ...new Set([...items.flatMap((c) => (Array.isArray(c.tags) ? c.tags : [])), ...selectedTags]),
-  ].sort((a, b) => a.localeCompare(b));
+  // Distinct tags to offer in the TagFilter — the owner's COMPLETE tag vocabulary
+  // across all their canvases (the server-side `/api/canvases/tags` facet via
+  // useCanvasTags), not just the tags on the current page. So a tag on a canvas off
+  // the current page/filter is still offered. Union in the already-selected tags so an
+  // active selection stays listed (and removable) even when its own filter narrows the
+  // page to no carriers, or if the facet hasn't loaded yet.
+  const availableTags = [...new Set([...(canvasTags.data?.tags ?? []), ...selectedTags])].sort(
+    (a, b) => a.localeCompare(b),
+  );
   // The focused canvas for the detail rail (U3 consumes this). Validate against the
   // visible page so a stale/unknown `?selected=` is simply ignored rather than
   // pointing the rail at a canvas that isn't here.

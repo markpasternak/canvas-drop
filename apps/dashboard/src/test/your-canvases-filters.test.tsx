@@ -80,6 +80,14 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
           authMode: "dev",
         });
       }
+      // The owner's complete tag vocabulary (drives the TagFilter control) — distinct
+      // tags across ALL the owner's canvases, mirroring the server facet.
+      if (path === "/api/canvases/tags") {
+        const tags = [
+          ...new Set(all.flatMap((c) => (Array.isArray(c.tags) ? (c.tags as string[]) : []))),
+        ].sort((a, b) => a.localeCompare(b));
+        return json({ tags });
+      }
       // /api/canvases — apply the server-side filter/search the route would.
       const sp = u.searchParams;
       const q = sp.get("q")?.toLowerCase();

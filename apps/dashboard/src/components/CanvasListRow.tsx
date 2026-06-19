@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn.js";
-import { rowHoverClass } from "../lib/row-styles.js";
+import { isInteractiveTarget, rowHoverClass } from "../lib/row-styles.js";
 import { CanvasCover } from "./CanvasCover.js";
 import { type CoverType, coverType } from "./GenerativeCover.js";
 
@@ -19,16 +19,6 @@ import { type CoverType, coverType } from "./GenerativeCover.js";
  */
 
 export { coverType };
-
-/** Does the event originate from an interactive control (so the row must NOT navigate)? */
-function fromControl(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    Boolean(
-      target.closest("a, button, input, select, textarea, summary, [role='button'], [role='menu']"),
-    )
-  );
-}
 
 export interface CanvasListRowProps {
   /** Stable seed for the generative fallback cover (the canvas id). */
@@ -87,12 +77,12 @@ export function CanvasListRow({
         selected && "bg-accent-subtle lg:bg-accent-subtle",
       )}
       onClick={(event) => {
-        if (fromControl(event.target)) return;
+        if (isInteractiveTarget(event.target)) return;
         onActivate();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
-        if (fromControl(event.target)) return;
+        if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
         onActivate();
       }}

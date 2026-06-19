@@ -11,7 +11,8 @@ import { flatBandClass, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { TagsEditor } from "../components/TagsEditor.js";
-import type { Canvas, RootEntry, VersionInfo } from "../lib/api.js";
+import { useToast } from "../components/Toast.js";
+import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
@@ -223,6 +224,7 @@ function Fact({
 export default function Overview() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { live } = useSearch({ strict: false }) as { live?: boolean };
+  const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: versions } = useVersions(id);
   const update = useUpdateSettings(id);
@@ -254,7 +256,21 @@ export default function Overview() {
     );
   }
 
-  const save = (patch: Parameters<typeof update.mutate>[0]) => update.mutate(patch);
+  // Basics save (title/description/tags). The cache rolls back on a server reject
+  // (useUpdateSettings onError), but the local mirrors here would NOT — leaving the
+  // input showing a value the server rejected with no feedback. So await the write,
+  // surface an error toast, and on failure snap the local mirrors back to the
+  // server-truth canvas values (the optimistic UX still holds on success).
+  const save = async (patch: Parameters<typeof update.mutate>[0]) => {
+    try {
+      await update.mutateAsync(patch);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error");
+      setTitle(canvas.title);
+      setDescription(canvas.description ?? "");
+      setTags(canvas.tags ?? []);
+    }
+  };
 
   return (
     <TabContentFrame>
@@ -276,7 +292,9 @@ export default function Overview() {
           label="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => title !== canvas.title && save({ title })}
+          onBlur={() => {
+            if (title !== canvas.title) void save({ title });
+          }}
           maxLength={200}
         />
         <TextareaField
@@ -284,17 +302,18 @@ export default function Overview() {
           value={description}
           rows={3}
           onChange={(e) => setDescription(e.target.value)}
-          onBlur={() =>
-            (description || null) !== canvas.description &&
-            save({ description: description || null })
-          }
+          onBlur={() => {
+            if ((description || null) !== canvas.description) {
+              void save({ description: description || null });
+            }
+          }}
           maxLength={2000}
         />
         <TagsEditor
           value={tags}
           onChange={(next) => {
             setTags(next);
-            save({ tags: next });
+            void save({ tags: next });
           }}
           hint="Enter or comma to add"
           description="Tags help you filter your canvases here, and appear publicly in the gallery once this canvas is listed."

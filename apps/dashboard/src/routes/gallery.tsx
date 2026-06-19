@@ -27,17 +27,11 @@ import type { GallerySearch } from "../router.js";
 
 const galleryTitle = (item: GalleryItem) => item.title || "Untitled canvas";
 
-/** Normalize the `?tag=` param (single string, repeated array, or absent) to a clean
- *  string[] — the shape the multi-tag query + TagFilter control both consume. */
-function normalizeTags(tag: GallerySearch["tag"]): string[] {
-  const list = Array.isArray(tag) ? tag : tag ? [tag] : [];
-  return list.filter((t): t is string => typeof t === "string" && t.length > 0);
-}
-
 /** Add a single tag to the current `?tag=` selection (no-op if already present),
- *  resetting to page 1. Shared by the card/row tag pills + the popular-tag chips. */
+ *  resetting to page 1. Shared by the card/row tag pills + the popular-tag chips.
+ *  `prev.tag` is already a clean string[] (normalized in `validateSearch`). */
 function addTagSearch(prev: GallerySearch, next: string): Partial<GallerySearch> {
-  const tags = normalizeTags(prev.tag);
+  const tags = prev.tag ?? [];
   const merged = tags.includes(next) ? tags : [...tags, next];
   return { ...prev, tag: merged, page: 1 };
 }
@@ -330,9 +324,9 @@ export default function Gallery() {
   const navigate = useNavigate();
 
   const q = search.q?.trim() || undefined;
-  // Multi-tag any-match: a repeated `?tag=` is an array, a single `?tag=a` a bare
-  // string — normalize both to a clean string[] (the query + TagFilter shape).
-  const selectedTags = normalizeTags(search.tag);
+  // Multi-tag any-match: `validateSearch` already normalized `?tag=` (single string or
+  // repeated array) to a clean string[], so read it directly (the query + TagFilter shape).
+  const selectedTags = search.tag ?? [];
   const owner = search.owner?.trim() || undefined;
   const templatable = search.templatable === true;
   const sort = search.sort ?? "published";
@@ -476,7 +470,7 @@ export default function Gallery() {
     navigate({
       to: "/gallery",
       search: (prev: GallerySearch) => {
-        const tags = normalizeTags(prev.tag);
+        const tags = prev.tag ?? [];
         const merged = tags.includes(next) ? tags.filter((t) => t !== next) : [...tags, next];
         return { ...prev, tag: merged.length > 0 ? merged : undefined, page: 1 };
       },

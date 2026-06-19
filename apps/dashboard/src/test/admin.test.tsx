@@ -824,6 +824,23 @@ describe("admin dashboard", () => {
       expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
       expect(screen.queryByText(/vs\.? last/i)).not.toBeInTheDocument();
     });
+
+    it("renders the URGENT (amber) purge treatment when the oldest deleted canvas is >30 days old", async () => {
+      // 31-day-old oldest-deleted crosses the PURGE_URGENT_DAYS=30 threshold, so the
+      // "Awaiting purge" row reads as urgent (amber accent + warning-toned count),
+      // not the routine info treatment.
+      const urgentPurge = { ...OVERVIEW, oldestDeletedAt: Date.now() - 31 * 86400000 };
+      mockFetch(overviewHandlers(urgentPurge));
+      renderAt("/admin");
+
+      const detail = await screen.findByText(/Oldest deleted 31d ago/);
+      const row = detail.closest("a") as HTMLElement;
+      // The whole row carries the amber urgent accent…
+      expect(row.className).toMatch(/warning/);
+      // …and the count is rendered in the warning tone (not the calm fg tone).
+      const count = within(row).getByText("4");
+      expect(count.className).toMatch(/text-warning/);
+    });
   });
 
   describe("admin featured toggle (U18)", () => {
@@ -926,6 +943,21 @@ describe("admin dashboard", () => {
         expect(call).toBeTruthy();
         expect(JSON.parse(call?.body ?? "{}").featured).toBe(false);
       });
+    });
+
+    it("surfaces an error toast when the feature POST fails (doFeature catch)", async () => {
+      mockFetch({
+        "GET /api/me": () => json(ADMIN_ME),
+        "GET /api/admin/canvases": () => canvasPage([ROW]),
+        "POST /api/admin/canvases/c1/feature": () =>
+          json({ message: "Could not feature this canvas." }, 500),
+      });
+      renderAt("/admin/canvases");
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Feature in gallery" }));
+      // The doFeature catch surfaces the failure instead of leaving the click silent.
+      expect(await screen.findByText(/could not feature this canvas/i)).toBeInTheDocument();
     });
   });
 });

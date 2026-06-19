@@ -9,8 +9,11 @@ import {
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
+import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DetailPanel } from "../components/DetailPanel.js";
+import { ToastProvider } from "../components/Toast.js";
 import type { CanvasListItem } from "../lib/api.js";
+import { ThemeProvider } from "../lib/theme.js";
 
 const base: CanvasListItem = {
   id: "cv-1",
@@ -132,5 +135,63 @@ describe("DetailPanel (plan P4 / U2)", () => {
     expect(
       await screen.findByRole("complementary", { name: "Canvas details" }),
     ).toBeInTheDocument();
+  });
+});
+
+/** A minimal router carrying every route the CanvasDetailChrome TabNav links to, so
+ *  the header's `<Link>`s resolve without the full app router. */
+function renderChrome(node: ReactNode) {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const homeRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => <>{node}</>,
+  });
+  const idRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/canvases/$id",
+    component: Outlet,
+  });
+  const tabPaths = ["/", "editor", "share", "versions", "capabilities", "usage", "settings"];
+  const tabRoutes = tabPaths.map((path) =>
+    createRoute({ getParentRoute: () => idRoute, path, component: () => null }),
+  );
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([homeRoute, idRoute.addChildren(tabRoutes)]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  render(
+    <ThemeProvider>
+      <ToastProvider>
+        {/* biome-ignore lint/suspicious/noExplicitAny: test router instance */}
+        <RouterProvider router={router as any} />
+      </ToastProvider>
+    </ThemeProvider>,
+  );
+}
+
+describe("CanvasDetailChrome (draft branch)", () => {
+  it("reframes a draft around 'not live yet' and does NOT present the public URL as a live link", async () => {
+    renderChrome(
+      <CanvasDetailChrome id="cv-1" title="My Draft" url="http://x/c/my-slug" draft={true} />,
+    );
+
+    // The draft lifecycle note is shown…
+    expect(await screen.findByText(/not live yet/i)).toBeInTheDocument();
+    // …and the public URL is NOT dangled as a live, reachable affordance.
+    expect(screen.queryByRole("link", { name: "http://x/c/my-slug" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open live canvas" })).toBeNull();
+  });
+
+  it("a published (non-draft) canvas shows the live URL link and no draft framing", async () => {
+    renderChrome(
+      <CanvasDetailChrome id="cv-1" title="My Canvas" url="http://x/c/my-slug" draft={false} />,
+    );
+
+    expect(await screen.findByRole("link", { name: "Open live canvas" })).toHaveAttribute(
+      "href",
+      "http://x/c/my-slug",
+    );
+    expect(screen.queryByText(/not live yet/i)).toBeNull();
   });
 });

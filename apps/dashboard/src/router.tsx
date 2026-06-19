@@ -107,9 +107,10 @@ const GALLERY_SORTS: readonly GallerySortParam[] = [
 export interface GallerySearch {
   q?: string;
   /** Multi-tag any-match filter. Serialized as repeated `?tag=a&tag=b` so a filtered
-   *  view is shareable. A single `?tag=a` arrives as a string from TanStack's loose
-   *  parser, so the gallery view coerces it to an array itself (mirrors the owner list). */
-  tag?: string | string[];
+   *  view is shareable. `validateSearch` normalizes both shapes (a single bare-string
+   *  `?tag=a` and a repeated array) to a clean `string[]`, so the view consumes it
+   *  directly (mirrors `CanvasesSearch.tag`). */
+  tag?: string[];
   owner?: string;
   templatable?: boolean;
   sort?: GallerySortParam;
@@ -122,13 +123,14 @@ const galleryRoute = createRoute({
   path: "/gallery",
   validateSearch: (s: Record<string, unknown>): GallerySearch => ({
     q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
-    // Repeated `?tag=` arrives as an array; a single `?tag=a` as a bare string. Keep
-    // both shapes (drop blanks) — the view normalizes to a clean string[].
-    tag: Array.isArray(s.tag)
-      ? (s.tag.filter((t) => typeof t === "string" && t.length > 0) as string[])
-      : typeof s.tag === "string" && s.tag.length > 0
-        ? s.tag
-        : undefined,
+    // Repeated `?tag=` arrives as an array; a single `?tag=a` as a bare string.
+    // Normalize BOTH to a clean string[] (drop blanks) so the view always reads an
+    // array — mirrors CanvasesSearch.tag. Empty → undefined (keeps a bare URL).
+    tag: ((): string[] | undefined => {
+      const list = Array.isArray(s.tag) ? s.tag : typeof s.tag === "string" ? [s.tag] : [];
+      const clean = list.filter((t): t is string => typeof t === "string" && t.length > 0);
+      return clean.length > 0 ? clean : undefined;
+    })(),
     owner: typeof s.owner === "string" && s.owner.length > 0 ? s.owner : undefined,
     // Only the literal `true` flips it on, so a junk value just means "off".
     templatable: s.templatable === true || s.templatable === "true" || undefined,

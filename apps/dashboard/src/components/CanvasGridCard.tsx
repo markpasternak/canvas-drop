@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
-import { cardHoverClass } from "../lib/row-styles.js";
+import { cardHoverClass, isInteractiveTarget } from "../lib/row-styles.js";
 import { CanvasCover } from "./CanvasCover.js";
 import { type CoverType, coverType } from "./GenerativeCover.js";
 import { Tag } from "./Tag.js";
@@ -114,14 +114,6 @@ function CardControls({ className, children }: { className?: string; children: R
   );
 }
 
-/** Does the event originate from an interactive control (so the card must NOT navigate)? */
-function fromControl(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    Boolean(target.closest("a, button, input, select, textarea, [role='button'], [role='menu']"))
-  );
-}
-
 export function CanvasGridCard({
   seed,
   previewUrl,
@@ -151,12 +143,12 @@ export function CanvasGridCard({
         selected && "border-accent ring-1 ring-accent",
       )}
       onClick={(event) => {
-        if (fromControl(event.target)) return;
+        if (isInteractiveTarget(event.target)) return;
         onActivate();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
-        if (fromControl(event.target)) return;
+        if (isInteractiveTarget(event.target)) return;
         event.preventDefault();
         onActivate();
       }}
