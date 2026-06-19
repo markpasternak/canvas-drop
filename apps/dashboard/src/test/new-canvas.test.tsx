@@ -128,6 +128,17 @@ describe("create flow — source-first ordering (U16)", () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("renders the source picker inside a boxed panel (brand structure, U20)", async () => {
+    mockFetch({});
+    renderNew();
+    // The method picker is a labeled region rendered as an on-brand boxed panel
+    // (rounded border + surface + panel shadow), not a loose list.
+    const methodRegion = await screen.findByRole("region", { name: /creation method/i });
+    expect(methodRegion.className).toMatch(/rounded-xl/);
+    expect(methodRegion.className).toMatch(/border-border/);
+    expect(methodRegion.className).toMatch(/bg-surface/);
+  });
+
   it("frames the backend toggle as optional", async () => {
     mockFetch({});
     renderNew();
