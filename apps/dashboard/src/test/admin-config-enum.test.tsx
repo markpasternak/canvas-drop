@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
 import type { AdminConfigField } from "../lib/api.js";
 import { EditableRow } from "../routes/admin.settings.js";
@@ -31,6 +32,18 @@ const designSkinField: AdminConfigField = {
 };
 
 describe("admin configuration — enum field (the design-skin flip control)", () => {
+  afterEach(() => document.documentElement.removeAttribute("data-skin"));
+
+  it("previews the skin live across the app on change, and shows the revert hint", async () => {
+    renderRow(designSkinField);
+    expect(screen.getByText(/previews it live/i)).toBeInTheDocument();
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Design skin" }),
+      "workshop",
+    );
+    expect(document.documentElement.getAttribute("data-skin")).toBe("workshop");
+  });
+
   it("renders a <select> with every enum option, defaulted to the current value", () => {
     renderRow(designSkinField);
     const select = screen.getByRole("combobox", { name: "Design skin" }) as HTMLSelectElement;
