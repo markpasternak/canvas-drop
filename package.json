@@ -36,6 +36,7 @@
     "seed:showcase": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-showcase.ts",
     "reset:data": "pnpm --filter @canvas-drop/server exec tsx scripts/reset-data.ts",
     "backfill:search-text": "pnpm --filter @canvas-drop/server exec tsx scripts/backfill-search-text.ts",
+    "tenancy:plan": "pnpm --filter @canvas-drop/server exec tsx scripts/tenancy-plan.ts",
     "seed:canvases": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-canvases.ts",
     "seed:demo-apps": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-demo-apps.ts",
     "seed:usage": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-usage.ts",
