@@ -2,7 +2,7 @@ import { CANVAS_MAX_TAGS, type Config } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { z } from "zod";
 import { canvasUrl } from "../canvas/url.js";
-import type { CanvasesRepository, GalleryRow } from "../db/repositories/canvases.js";
+import type { CanvasesRepository, GalleryRow, GalleryScope } from "../db/repositories/canvases.js";
 import type { AppEnv } from "../http/types.js";
 import {
   type PreviewHintDeps,
@@ -129,6 +129,15 @@ function galleryItem(config: Config, row: GalleryRow, hasPreview: boolean): Gall
 export function galleryRoutes(deps: GalleryDeps) {
   const app = new Hono<AppEnv>();
 
+  // Tenancy gallery scope (plan 002 U5): org-scope whole_org rows when an org is
+  // configured, using the viewer's SERVER-resolved orgIds (never a client value). Inert
+  // (no org) → the legacy org-agnostic gallery. The session gateway has already set
+  // `orgIds` on the context before any gallery handler runs.
+  const galleryScope = (c: import("hono").Context<AppEnv>): GalleryScope => ({
+    tenancyActive: !!deps.config.org.name,
+    viewerOrgIds: c.get("orgIds") ?? new Set<string>(),
+  });
+
   app.get("/", async (c) => {
     // `c.req.query()` flattens repeated params to the first value; read `tag` via
     // `queries("tag")` so `?tag=a&tag=b` round-trips as an array (multi-tag any-match).
@@ -157,6 +166,7 @@ export function galleryRoutes(deps: GalleryDeps) {
 
     const { items, total } = await deps.canvases.listGallery({
       now: Date.now(),
+      scope: galleryScope(c),
       q: data.q,
       tag: data.tag,
       owner: data.owner,
@@ -187,7 +197,7 @@ export function galleryRoutes(deps: GalleryDeps) {
   // {id,name,avatarUrl} only; re-state the explicit shape here so a future repo
   // change can't silently widen what the route returns (§12).
   app.get("/facets", async (c) => {
-    const { owners, tags } = await deps.canvases.listGalleryFacets(Date.now());
+    const { owners, tags } = await deps.canvases.listGalleryFacets(Date.now(), galleryScope(c));
     const dto: GalleryFacetsDto = {
       owners: owners.map((o) => ({ id: o.id, name: o.name, avatarUrl: o.avatarUrl })),
       tags,

@@ -136,8 +136,20 @@ export type GallerySort = "published" | "recent" | "updated" | "title" | "featur
  * `decideCanvasAccess`. `owner`/`templatable`/`sort` are AND-ed onto the fixed
  * visibility predicate — they never widen it (§12).
  */
+/**
+ * Tenancy gallery/clone scope (plan 002 U5). When `tenancyActive` is false the gallery
+ * is org-agnostic (legacy). When true, a `whole_org` row is enumerable/cloneable only by
+ * a member of its home org (`viewerOrgIds`); `public_link` stays universal.
+ */
+export interface GalleryScope {
+  tenancyActive: boolean;
+  viewerOrgIds: Set<string>;
+}
+
 export interface GalleryListOptions {
   now: number;
+  /** Tenancy scope (plan 002 U5). Omitted → inert (legacy org-agnostic gallery). */
+  scope?: GalleryScope;
   q?: string;
   /** Tag filter (single→multi 2026-06-19): any-match — a canvas matches if it carries
    *  ANY of the given tags. Empty/omitted adds no tag filter. */
@@ -264,15 +276,33 @@ export function canvasesRepository(client: DbClient) {
    * protected canvas invisible even if a stale row still has it listed (plan 002
    * R10, reversing the M8 "protected canvases are listed" decision).
    */
-  const galleryVisibilityFilters = (now: number) => [
-    eq(t.status, "active"),
-    // Gallery-eligible = org-visible or public (the former `shared = true`).
-    inArray(t.access, ["whole_org", "public_link"]),
-    eq(t.galleryListed, true),
-    or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
-    isNotNull(t.currentVersionId),
-    isNull(t.passwordHash),
-  ];
+  const galleryVisibilityFilters = (now: number, scope?: GalleryScope) => {
+    const filters: Array<SQL | undefined> = [
+      eq(t.status, "active"),
+      eq(t.galleryListed, true),
+      or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
+      isNotNull(t.currentVersionId),
+      isNull(t.passwordHash),
+    ];
+    // The access tier (plan 002 U5). INERT (no scope / tenancy off): the legacy rule —
+    // whole_org OR public_link, org-agnostic. ACTIVE: public_link stays visible to all,
+    // but a whole_org row is enumerable only by a member of its home org (and a null
+    // org_id is never enumerable). A guest/personal viewer (∅) sees only public_link.
+    if (!scope?.tenancyActive) {
+      filters.push(inArray(t.access, ["whole_org", "public_link"]));
+    } else {
+      const orgIds = [...scope.viewerOrgIds];
+      filters.push(
+        orgIds.length > 0
+          ? or(
+              eq(t.access, "public_link"),
+              and(eq(t.access, "whole_org"), isNotNull(t.orgId), inArray(t.orgId, orgIds)),
+            )
+          : eq(t.access, "public_link"),
+      );
+    }
+    return filters;
+  };
 
   /**
    * The forgiving `?q=` predicate (plan 2026-06-19 KTD1), shared by
@@ -1117,7 +1147,7 @@ export function canvasesRepository(client: DbClient) {
      * under the same predicate for "showing X of N" pagination.
      */
     async listGallery(opts: GalleryListOptions): Promise<{ items: GalleryRow[]; total: number }> {
-      const filters = galleryVisibilityFilters(opts.now);
+      const filters = galleryVisibilityFilters(opts.now, opts.scope);
 
       // Forgiving normalized-substring search over the shared `search_text` blob
       // (plan 2026-06-19 KTD1) — the SAME predicate the owner list uses, so both
@@ -1207,8 +1237,8 @@ export function canvasesRepository(client: DbClient) {
      * rather than via dialect-divergent JSON unnesting; at gallery scale (dozens of
      * rows) that is simplest and keeps the query dual-dialect-trivial.
      */
-    async listGalleryFacets(now: number): Promise<GalleryFacets> {
-      const where = and(...galleryVisibilityFilters(now));
+    async listGalleryFacets(now: number, scope?: GalleryScope): Promise<GalleryFacets> {
+      const where = and(...galleryVisibilityFilters(now, scope));
 
       const owners = (await db
         .selectDistinct({ id: usersT.id, name: usersT.name, avatarUrl: usersT.avatarUrl })
@@ -1248,11 +1278,21 @@ export function canvasesRepository(client: DbClient) {
      * when cloneable, else null — the route 404s opaquely for null so a non-eligible
      * canvas's existence isn't revealed. Owners use their own path (no gate).
      */
-    async findCloneableTemplate(id: string, now: number): Promise<Canvas | null> {
+    async findCloneableTemplate(
+      id: string,
+      now: number,
+      scope?: GalleryScope,
+    ): Promise<Canvas | null> {
       const rows = await db
         .select()
         .from(t)
-        .where(and(eq(t.id, id), eq(t.galleryTemplatable, true), ...galleryVisibilityFilters(now)))
+        .where(
+          and(
+            eq(t.id, id),
+            eq(t.galleryTemplatable, true),
+            ...galleryVisibilityFilters(now, scope),
+          ),
+        )
         .limit(1);
       return (rows[0] as Canvas | undefined) ?? null;
     },

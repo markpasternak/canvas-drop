@@ -371,10 +371,16 @@ export function managementRoutes(deps: ManagementDeps) {
     const source = await deps.canvases.findById(id);
     if (!source || source.status === "deleted") return c.json({ error: "not_found" }, 404);
 
+    // Non-owner clone eligibility runs through the SAME gallery visibility predicate as
+    // browse (plan 002 U5), org-scoped to the caller: an org template is cloneable only by
+    // a member of its org; a personal public_link template (org_id null) stays cloneable.
     const eligible =
       source.ownerId === user.id
         ? source.status === "active"
-        : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+        : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+            tenancyActive: !!deps.config.org.name,
+            viewerOrgIds: c.get("orgIds") ?? new Set<string>(),
+          })) !== null;
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
     const { canvas } = await deps.clone.clone(source, user.id);
