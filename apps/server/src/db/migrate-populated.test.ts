@@ -85,6 +85,32 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
     const kv = client.db.all(sql`SELECT key FROM kv_entries WHERE canvas_id = 'c1'`);
     expect(kv).toHaveLength(1); // child row survived the canvases rebuild
     client.db.all(sql`SELECT 1 FROM allowed_emails`); // 0016 table exists (no throw)
+
+    // 0026 tenancy (plan 002 U1): the canvases recreate added a nullable org_id that
+    // must be NULL for pre-existing rows (the broken drizzle SELECT pulled org_id from
+    // the OLD table — this asserts the hand-fix), the org tables exist, and the access
+    // CHECK now reserves 'team' while still rejecting bogus rungs.
+    const orgScoped = client.db.all<{ org_id: string | null }>(
+      sql`SELECT org_id FROM canvases WHERE id = 'c1'`,
+    );
+    expect(orgScoped[0]?.org_id).toBeNull();
+    client.db.all(sql`SELECT 1 FROM orgs`); // table exists (no throw)
+    client.db.all(sql`SELECT 1 FROM org_domains`); // table exists (no throw)
+    // reserved 'team' value passes the CHECK (decideCanvasAccess rejects it at runtime in P1).
+    expect(() =>
+      client.db.run(
+        sql`INSERT INTO canvases (id, slug, owner_id, api_key_hash, access, created_at, updated_at)
+            VALUES ('c2','slug-2','u1','h2','team',0,0)`,
+      ),
+    ).not.toThrow();
+    // a bogus access value is still rejected by the CHECK.
+    expect(() =>
+      client.db.run(
+        sql`INSERT INTO canvases (id, slug, owner_id, api_key_hash, access, created_at, updated_at)
+            VALUES ('c3','slug-3','u1','h3','nope',0,0)`,
+      ),
+    ).toThrow();
+
     const violations = client.db.all(sql`PRAGMA foreign_key_check`);
     expect(violations).toHaveLength(0);
     await client.close();

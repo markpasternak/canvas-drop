@@ -12,6 +12,8 @@ import type {
   mcpTokens,
   oauthClients,
   oauthCodes,
+  orgDomains,
+  orgs,
   screenshotJobs,
   sessions,
   settings,
@@ -39,6 +41,10 @@ export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
 export type Canvas = typeof canvases.$inferSelect;
 export type NewCanvas = typeof canvases.$inferInsert;
+export type Org = typeof orgs.$inferSelect;
+export type NewOrg = typeof orgs.$inferInsert;
+export type OrgDomain = typeof orgDomains.$inferSelect;
+export type NewOrgDomain = typeof orgDomains.$inferInsert;
 export type Version = typeof versions.$inferSelect;
 export type NewVersion = typeof versions.$inferInsert;
 export type Draft = typeof drafts.$inferSelect;
