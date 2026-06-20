@@ -56,6 +56,9 @@ export interface SkinDef {
   display: DisplayTokens;
   /** `--radius-scale` multiplier (1 = the System radius geometry, unchanged). */
   radiusScale: number;
+  /** `--shadow-strength` multiplier on the elevation alphas (1 = the System shadows;
+   *  workshop flattens for an IDE feel, canvas deepens for a floaty/playful one). */
+  shadowStrength: number;
   light: AccentTokens;
   dark: AccentTokens;
 }
@@ -82,6 +85,7 @@ export const SKINS: Record<SkinName, SkinDef> = {
     description: "The default — calm publishing OS: deep teal, editorial serif, soft paper.",
     display: { family: SERIF, weight: 500, tracking: "-0.02em" },
     radiusScale: 1,
+    shadowStrength: 1,
     light: {
       accent: BRAND_TOKENS.light.accent,
       "accent-hover": BRAND_TOKENS.light["accent-hover"],
@@ -104,6 +108,7 @@ export const SKINS: Record<SkinName, SkinDef> = {
     description: "Warm editorial: terracotta accent over the same serif voice.",
     display: { family: SERIF, weight: 500, tracking: "-0.02em" },
     radiusScale: 1,
+    shadowStrength: 1,
     light: {
       accent: "oklch(0.53 0.15 42)",
       "accent-hover": "oklch(0.47 0.145 42)",
@@ -126,6 +131,7 @@ export const SKINS: Record<SkinName, SkinDef> = {
     description: "Developer/IDE feel: monospace display, green accent, tighter corners.",
     display: { family: MONO, weight: 500, tracking: "-0.01em" },
     radiusScale: 0.62,
+    shadowStrength: 0.5,
     light: {
       accent: "oklch(0.5 0.12 165)",
       "accent-hover": "oklch(0.44 0.115 165)",
@@ -148,6 +154,7 @@ export const SKINS: Record<SkinName, SkinDef> = {
     description: "Playful and bold: heavy sans display, violet accent, rounder corners.",
     display: { family: SANS, weight: 800, tracking: "-0.035em" },
     radiusScale: 1.3,
+    shadowStrength: 1.45,
     light: {
       accent: "oklch(0.52 0.2 292)",
       "accent-hover": "oklch(0.46 0.2 292)",
@@ -225,6 +232,7 @@ export function skinDisplayCssVars(skin: SkinName, indent = "  "): string {
     `${indent}--display-weight: ${d.display.weight};`,
     `${indent}--display-tracking: ${d.display.tracking};`,
     `${indent}--radius-scale: ${d.radiusScale};`,
+    `${indent}--shadow-strength: ${d.shadowStrength};`,
   ].join("\n");
 }
 

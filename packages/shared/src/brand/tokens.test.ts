@@ -117,6 +117,7 @@ describe("design-skin parity", () => {
     expect(roleValue(body, "display-weight")).toBe(String(d.weight));
     expect(roleValue(body, "display-tracking")).toBe(d.tracking);
     expect(roleValue(body, "radius-scale")).toBe(String(SKINS.editorial.radiusScale));
+    expect(roleValue(body, "shadow-strength")).toBe(String(SKINS.editorial.shadowStrength));
   });
 
   for (const skin of NON_DEFAULT) {
@@ -134,6 +135,7 @@ describe("design-skin parity", () => {
       expect(roleValue(lightBody, "display-weight")).toBe(String(d.weight));
       expect(roleValue(lightBody, "display-tracking")).toBe(d.tracking);
       expect(roleValue(lightBody, "radius-scale")).toBe(String(SKINS[skin].radiusScale));
+      expect(roleValue(lightBody, "shadow-strength")).toBe(String(SKINS[skin].shadowStrength));
     });
 
     for (const selector of [

@@ -85,13 +85,17 @@
   --card-overlay-border: oklch(1 0 0 / 0.16);
 
   /* Elevation — soft, warm-tinted, two-layer. */
+  /* --shadow-strength scales every elevation alpha (1 = the System shadows). A skin
+     flattens (workshop) or deepens (canvas) the whole scale by overriding this one var;
+     default 1 keeps editorial mathematically identical (calc(x * 1) = x). */
+  --shadow-strength: 1;
   --shadow-color: 40 30% 38%;
-  --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.08);
-  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.06), 0 4px 10px hsl(var(--shadow-color) / 0.08);
-  --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / 0.05), 0 8px 22px hsl(var(--shadow-color) / 0.09);
-  --shadow-md: 0 2px 4px hsl(var(--shadow-color) / 0.07), 0 16px 38px hsl(var(--shadow-color) / 0.12);
-  --shadow-popover: 0 14px 34px hsl(var(--shadow-color) / 0.14), 0 3px 8px hsl(var(--shadow-color) / 0.08);
-  --shadow-lg: 0 24px 56px hsl(var(--shadow-color) / 0.18), 0 8px 18px hsl(var(--shadow-color) / 0.12);
+  --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
+  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.06 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
+  --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.05 * var(--shadow-strength, 1))), 0 8px 22px hsl(var(--shadow-color) / calc(0.09 * var(--shadow-strength, 1)));
+  --shadow-md: 0 2px 4px hsl(var(--shadow-color) / calc(0.07 * var(--shadow-strength, 1))), 0 16px 38px hsl(var(--shadow-color) / calc(0.12 * var(--shadow-strength, 1)));
+  --shadow-popover: 0 14px 34px hsl(var(--shadow-color) / calc(0.14 * var(--shadow-strength, 1))), 0 3px 8px hsl(var(--shadow-color) / calc(0.08 * var(--shadow-strength, 1)));
+  --shadow-lg: 0 24px 56px hsl(var(--shadow-color) / calc(0.18 * var(--shadow-strength, 1))), 0 8px 18px hsl(var(--shadow-color) / calc(0.12 * var(--shadow-strength, 1)));
   --shadow-focus: 0 0 0 3px oklch(0.49 0.105 200 / 0.32);
 }
 
@@ -150,12 +154,12 @@
     --card-overlay-border: oklch(1 0 0 / 0.12);
 
     --shadow-color: 265 60% 2%;
-    --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);
-    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.4), 0 4px 10px hsl(var(--shadow-color) / 0.45);
-    --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / 0.4), 0 10px 26px hsl(var(--shadow-color) / 0.5);
-    --shadow-md: 0 2px 6px hsl(var(--shadow-color) / 0.5), 0 18px 40px hsl(var(--shadow-color) / 0.6);
-    --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / 0.6), 0 3px 10px hsl(var(--shadow-color) / 0.5);
-    --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / 0.7), 0 8px 20px hsl(var(--shadow-color) / 0.5);
+    --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
+    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
+    --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 10px 26px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
+    --shadow-md: 0 2px 6px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1))), 0 18px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1)));
+    --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1))), 0 3px 10px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
+    --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / calc(0.7 * var(--shadow-strength, 1))), 0 8px 20px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
     --shadow-focus: 0 0 0 3px oklch(0.83 0.09 195 / 0.38);
   }
 }
@@ -214,12 +218,12 @@
   --card-overlay-border: oklch(1 0 0 / 0.12);
 
   --shadow-color: 265 60% 2%;
-  --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.45);
-  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.4), 0 4px 10px hsl(var(--shadow-color) / 0.45);
-  --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / 0.4), 0 10px 26px hsl(var(--shadow-color) / 0.5);
-  --shadow-md: 0 2px 6px hsl(var(--shadow-color) / 0.5), 0 18px 40px hsl(var(--shadow-color) / 0.6);
-  --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / 0.6), 0 3px 10px hsl(var(--shadow-color) / 0.5);
-  --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / 0.7), 0 8px 20px hsl(var(--shadow-color) / 0.5);
+  --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
+  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 4px 10px hsl(var(--shadow-color) / calc(0.45 * var(--shadow-strength, 1)));
+  --shadow-panel: 0 1px 2px hsl(var(--shadow-color) / calc(0.4 * var(--shadow-strength, 1))), 0 10px 26px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
+  --shadow-md: 0 2px 6px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1))), 0 18px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1)));
+  --shadow-popover: 0 16px 40px hsl(var(--shadow-color) / calc(0.6 * var(--shadow-strength, 1))), 0 3px 10px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
+  --shadow-lg: 0 28px 64px hsl(var(--shadow-color) / calc(0.7 * var(--shadow-strength, 1))), 0 8px 20px hsl(var(--shadow-color) / calc(0.5 * var(--shadow-strength, 1)));
   --shadow-focus: 0 0 0 3px oklch(0.83 0.09 195 / 0.38);
 }
 
@@ -334,6 +338,7 @@
   --display-weight: 500;
   --display-tracking: -0.02em;
   --radius-scale: 1;
+  --shadow-strength: 1;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-skin="studio"]:not([data-theme="light"]) {
@@ -363,6 +368,7 @@
   --display-weight: 500;
   --display-tracking: -0.01em;
   --radius-scale: 0.62;
+  --shadow-strength: 0.5;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-skin="workshop"]:not([data-theme="light"]) {
@@ -392,6 +398,7 @@
   --display-weight: 800;
   --display-tracking: -0.035em;
   --radius-scale: 1.3;
+  --shadow-strength: 1.45;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-skin="canvas"]:not([data-theme="light"]) {

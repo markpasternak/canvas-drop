@@ -79,6 +79,7 @@ describe("design skins model", () => {
       expect(def.display.family).toMatch(/serif|sans|mono|Geist|Newsreader/);
       expect(def.display.weight).toBeGreaterThanOrEqual(400);
       expect(def.radiusScale).toBeGreaterThan(0);
+      expect(def.shadowStrength).toBeGreaterThan(0);
     }
   });
 
@@ -90,6 +91,7 @@ describe("design skins model", () => {
     const display = skinDisplayCssVars("canvas", "  ");
     expect(display).toContain(`--display-weight: ${SKINS.canvas.display.weight};`);
     expect(display).toContain(`--radius-scale: ${SKINS.canvas.radiusScale};`);
+    expect(display).toContain(`--shadow-strength: ${SKINS.canvas.shadowStrength};`);
 
     const syn = syntaxCssVars("dark", "  ");
     expect(syn).toContain(`--syn-keyword: ${SYNTAX_TOKENS.dark["syn-keyword"]};`);
