@@ -24,7 +24,9 @@ export function PageHeader({
     >
       <div className="min-w-0 space-y-1">
         {eyebrow && <div className="text-xs font-medium text-subtle">{eyebrow}</div>}
-        <h1 className="truncate font-display text-h1 leading-tight text-fg">{title}</h1>
+        <h1 className="truncate font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg">
+          {title}
+        </h1>
         {description && <p className="max-w-2xl text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}

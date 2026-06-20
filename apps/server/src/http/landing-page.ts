@@ -756,7 +756,7 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
  * the work and emit two `Set-Cookie`s on the hottest authed path. An expired
  * cookie still falls through and the gateway redirects to login — never worse.
  */
-export function landingGate(deps: { config: Config }) {
+export function landingGate(deps: { config: Config; skin?: () => Promise<SkinName> }) {
   return createMiddleware<AppEnv>(async (c, next) => {
     if (deps.config.auth.mode !== "oidc") return next();
     if (c.req.path !== "/") return next();
@@ -774,7 +774,7 @@ export function landingGate(deps: { config: Config }) {
       deps.config,
     );
     if (role === "canvas") return next();
-    return landingResponse(deps.config);
+    return landingResponse(deps.config, deps.skin ? { skin: await deps.skin() } : {});
   });
 }
 
@@ -785,7 +785,10 @@ export function landingGate(deps: { config: Config }) {
  * is `private` + `Vary: Cookie` — a shared/CDN cache must never serve one auth
  * state's page to the other.
  */
-export function landingResponse(config: Config, opts: { signedIn?: boolean } = {}): Response {
+export function landingResponse(
+  config: Config,
+  opts: { signedIn?: boolean; skin?: SkinName } = {},
+): Response {
   const headers = new Headers();
   baseSecurityHeaders(headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
@@ -797,7 +800,12 @@ export function landingResponse(config: Config, opts: { signedIn?: boolean } = {
   headers.set("Cache-Control", "private, max-age=300");
   headers.set("Vary", "Cookie");
   return new Response(
-    renderLandingPage(config.baseUrl, config.auth.mode, opts.signedIn ?? false, config.designSkin),
+    renderLandingPage(
+      config.baseUrl,
+      config.auth.mode,
+      opts.signedIn ?? false,
+      opts.skin ?? config.designSkin,
+    ),
     {
       status: 200,
       headers,

@@ -87,7 +87,7 @@ function buildApp(
       authMode: "dev",
       urlMode: "path",
       baseUrl: "http://localhost:8787",
-      designSkin: "editorial",
+      designSkin: async () => "editorial",
     }),
   );
   app.route(
@@ -1517,7 +1517,7 @@ describe("managementRoutes", () => {
         authMode: "oidc",
         urlMode: "subdomain",
         baseUrl: "https://example.com",
-        designSkin: "workshop",
+        designSkin: async () => "workshop",
       }),
     );
     const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));

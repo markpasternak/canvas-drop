@@ -230,8 +230,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // session-branched by `landingGate` so signed-in members get the dashboard — this
   // path ALWAYS renders the landing, so the in-app "About" link and the post-logout
   // redirect can reach the marketing page regardless of session. Pre-gateway.
-  app.get("/welcome", (c) =>
-    landingResponse(deps.config, { signedIn: !!getCookie(c, SESSION_COOKIE) }),
+  app.get("/welcome", async (c) =>
+    landingResponse(deps.config, {
+      signedIn: !!getCookie(c, SESSION_COOKIE),
+      skin: await settingsSvc.effectiveDesignSkin(),
+    }),
   );
 
   // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
@@ -391,7 +394,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // (oidc mode only). Mounted BEFORE socialPreview so crawlers scrape the real,
   // indexable landing HTML (with its own OG tags) rather than the generic unfurl
   // card. Signed-in visitors and every non-root path fall straight through.
-  app.use("*", landingGate({ config: deps.config }));
+  app.use("*", landingGate({ config: deps.config, skin: () => settingsSvc.effectiveDesignSkin() }));
 
   app.use(
     "*",
@@ -479,7 +482,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       authMode: deps.config.auth.mode,
       urlMode: deps.config.urlMode,
       baseUrl: deps.config.baseUrl,
-      designSkin: deps.config.designSkin,
+      // Effective skin (admin DB override over env/default), resolved per-request so a
+      // runtime flip in Admin → Configuration reaches the SPA without a restart.
+      designSkin: () => settingsSvc.effectiveDesignSkin(),
     }),
   );
 

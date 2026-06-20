@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, isSkinName, type SkinName } from "@canvas-drop/shared";
 import { z } from "zod";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
@@ -15,6 +15,8 @@ const AI_API_KEY = "config.ai.apiKey";
 const REALTIME_KEY = "config.realtime.enabled";
 /** Screenshot pipeline admin runtime toggle (editable; default off — plan 004 / U12). */
 const SCREENSHOTS_KEY = "config.screenshots.enabled";
+/** Design-skin admin runtime override (editable; DB override wins over env/default). */
+const DESIGN_SKIN_KEY = "config.core.designSkin";
 
 const last4 = (s: string) => (s.length <= 4 ? s : s.slice(-4));
 
@@ -197,6 +199,18 @@ export function adminSettingsService(deps: {
      */
     async effectiveRealtimeEnabled(): Promise<boolean> {
       return (await boolOverride(REALTIME_KEY)) ?? config.realtimeEnabled;
+    },
+
+    /**
+     * Effective instance design skin (expression layer). The admin DB override
+     * (`config.core.designSkin`) wins over the env/default boot value, so flipping the
+     * skin in Admin → Configuration takes effect on the next request — no restart.
+     * Consumers: `/api/me` (dashboard + editor) and the landing page. A stored value
+     * that isn't a known skin (e.g. left over from a renamed skin) falls back to config.
+     */
+    async effectiveDesignSkin(): Promise<SkinName> {
+      const v = await strOverride(DESIGN_SKIN_KEY);
+      return v && isSkinName(v) ? v : config.designSkin;
     },
 
     /**

@@ -9,11 +9,15 @@ import { CodeEditor, cdHighlightStyle } from "../components/CodeEditor.js";
  * assert the wiring, not pixels.
  */
 describe("CodeEditor — brand-tokenized highlighting", () => {
-  it("compiles a HighlightStyle from the --syn-* tokens", () => {
-    // HighlightStyle.define throws on an unknown tag; reaching here means every mapped
-    // Lezer tag is valid and the style object built.
-    expect(cdHighlightStyle).toBeTruthy();
-    expect(typeof cdHighlightStyle).toBe("object");
+  it("maps Lezer tags to the --syn-* design tokens (colors resolve from the system)", () => {
+    // Building at all proves every mapped Lezer tag is valid (HighlightStyle.define throws
+    // on an unknown tag). The generated CSS proves the colors are wired to the brand
+    // tokens — not a fixed palette — so they track theme + skin with no JS recompute.
+    const rules = cdHighlightStyle.module?.getRules() ?? "";
+    expect(rules).toContain("var(--syn-keyword)");
+    expect(rules).toContain("var(--syn-string)");
+    expect(rules).toContain("var(--syn-comment)");
+    expect(rules).toContain("var(--syn-tag)");
   });
 
   it("mounts with the highlighting extension and renders the document", () => {

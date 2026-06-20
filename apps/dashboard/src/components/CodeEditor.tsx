@@ -95,7 +95,9 @@ export const cdHighlightStyle = HighlightStyle.define([
   { tag: [t.heading], color: "var(--syn-fn)", fontWeight: "600" },
   { tag: [t.strong], fontWeight: "700" },
   { tag: [t.emphasis], fontStyle: "italic" },
+  { tag: [t.strikethrough], textDecoration: "line-through" },
   { tag: [t.link, t.url], color: "var(--syn-keyword)", textDecoration: "underline" },
+  { tag: [t.escape], color: "var(--syn-keyword)" },
   { tag: [t.invalid], color: "var(--danger)" },
 ]);
 

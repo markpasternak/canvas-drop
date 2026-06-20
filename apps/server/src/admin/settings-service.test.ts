@@ -38,6 +38,38 @@ function svc() {
   return adminSettingsService({ settings: fakeSettings(), config });
 }
 
+describe("adminSettingsService — effectiveDesignSkin (admin runtime flip)", () => {
+  it("returns the env/default skin when no override is stored", async () => {
+    const s = adminSettingsService({
+      settings: fakeSettings(),
+      config: loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_DESIGN_SKIN: "canvas" }),
+    });
+    expect(await s.effectiveDesignSkin()).toBe("canvas");
+  });
+
+  it("lets a DB override win over env/default, and reverts when cleared", async () => {
+    const s = adminSettingsService({
+      settings: fakeSettings(),
+      config: loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" }), // default editorial
+    });
+    expect(await s.effectiveDesignSkin()).toBe("editorial");
+    await s.setConfigOverride("core.designSkin", "workshop");
+    expect(await s.effectiveDesignSkin()).toBe("workshop");
+    await s.clearConfigOverride("core.designSkin");
+    expect(await s.effectiveDesignSkin()).toBe("editorial");
+  });
+
+  it("ignores a stored value that isn't a known skin (falls back to config)", async () => {
+    const settings = fakeSettings();
+    await settings.set("config.core.designSkin", "neon-from-a-removed-skin");
+    const s = adminSettingsService({
+      settings,
+      config: loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_DESIGN_SKIN: "studio" }),
+    });
+    expect(await s.effectiveDesignSkin()).toBe("studio");
+  });
+});
+
 describe("adminSettingsService", () => {
   it("effectiveModels falls back to config.ai.models, then honors an override (plain strings)", async () => {
     const s = svc();

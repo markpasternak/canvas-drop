@@ -34,7 +34,7 @@ export function Section({
       <div className="mb-5 space-y-1">
         <h2
           className={cn(
-            "font-display text-h2 leading-tight",
+            "font-display text-h2 leading-tight tracking-[-0.01em]",
             tone === "danger" ? "text-danger" : "text-fg",
           )}
         >
