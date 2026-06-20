@@ -144,6 +144,25 @@ async function inTransaction(
   return db.transaction(fn);
 }
 
+/** Read + parse one table's NDJSON file. A missing file is corruption (createBackup writes one
+ *  per table, empty ones included), not an empty table; JSON.parse throws loudly on a garbled
+ *  line. Read one table at a time so restore's peak memory is bounded to the largest table. */
+async function readTableRows(srcDir: string, name: string): Promise<Row[]> {
+  let text: string;
+  try {
+    text = await readFile(join(srcDir, "db", `${name}.ndjson`), "utf8");
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") {
+      throw new Error(`restore: backup is missing db/${name}.ndjson — incomplete or corrupt`);
+    }
+    throw err;
+  }
+  return text
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as Row);
+}
+
 /** Recursively yield absolute file paths under `root` (missing root → nothing). */
 async function* walkFiles(root: string): AsyncGenerator<string> {
   let entries: Dirent[];
@@ -237,27 +256,13 @@ export async function restoreBackup(
     );
   }
 
-  // --- Pre-flight: load + count everything and verify it against meta.json BEFORE any
-  // write. createBackup writes a file for EVERY table (empty ones included), so a missing
-  // db/<table>.ndjson is corruption, not an empty table. ---
-  const parsed = new Map<string, Row[]>();
+  // --- Pre-flight: parse + count every table and verify against meta.json BEFORE any write.
+  // Each file is validated here (JSON.parse throws on a garbled line) but the rows are NOT
+  // retained — the write phase re-reads one table at a time, so restore's peak memory is bounded
+  // to the largest single table instead of the whole database (matching createBackup's profile). ---
   const tableRows: Record<string, number> = {};
   for (const name of BACKUP_TABLE_ORDER) {
-    let text: string;
-    try {
-      text = await readFile(join(srcDir, "db", `${name}.ndjson`), "utf8");
-    } catch (err) {
-      if ((err as { code?: string }).code === "ENOENT") {
-        throw new Error(`restore: backup is missing db/${name}.ndjson — incomplete or corrupt`);
-      }
-      throw err;
-    }
-    const rows = text
-      .split("\n")
-      .filter((l) => l.length > 0)
-      .map((l) => JSON.parse(l) as Row);
-    parsed.set(name, rows);
-    tableRows[name] = rows.length;
+    tableRows[name] = (await readTableRows(srcDir, name)).length;
   }
   const rowDrift = BACKUP_TABLE_ORDER.filter((n) => tableRows[n] !== (meta.tableRows?.[n] ?? 0));
   if (rowDrift.length > 0) {
@@ -320,7 +325,7 @@ export async function restoreBackup(
 
   await inTransaction(client, async (db) => {
     for (const name of BACKUP_TABLE_ORDER) {
-      await insertAll(db, requireTable(tables, name), parsed.get(name) ?? []);
+      await insertAll(db, requireTable(tables, name), await readTableRows(srcDir, name));
     }
   });
 

@@ -133,14 +133,16 @@ services:
   #   profiles: [maintenance]
   #   restart: unless-stopped
   #   entrypoint: ["/bin/sh", "-lc"]
-  #   # Supply-chain note: this fetches supercronic at boot for a zero-setup demo. For real
-  #   # production, pin AND verify it — supercronic publishes a SHA1SUM per release — or bake
-  #   # the binary into a derived image at build time, so a tampered or unavailable download
-  #   # can't run (or silently fail) on your data. See docs/ops.md "Scheduled maintenance".
+  #   # Supply-chain hardening: supercronic is pinned by version AND verified by SHA1 before it
+  #   # runs, so a tampered or corrupted download fails closed — sha1sum -c exits non-zero, the
+  #   # && chain stops, and it never executes against your data. To upgrade, bump BOTH the URL
+  #   # version and the SHA1 (from the release's published checksum). Baking the binary into a
+  #   # derived image at build time is the even-stronger option — see docs/ops.md.
   #   command:
   #     - >-
   #       wget -qO /usr/local/bin/supercronic
   #       https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64
+  #       && echo "71b0d58cc53f6bd72cf2f293e09e294b79c666d8  /usr/local/bin/supercronic" | sha1sum -c -
   #       && chmod +x /usr/local/bin/supercronic
   #       && exec /usr/local/bin/supercronic /etc/canvas-drop/maintenance.cron
   #   environment:
