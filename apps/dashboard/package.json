@@ -21,6 +21,7 @@
     "@codemirror/language": "^6.10.8",
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.36.1",
+    "@lezer/highlight": "^1.2.3",
     "@fontsource-variable/geist": "^5.2.5",
     "@fontsource-variable/geist-mono": "^5.2.5",
     "@fontsource-variable/newsreader": "^5.2.5",

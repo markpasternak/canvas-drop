@@ -202,7 +202,7 @@ export function GenerativeCover({
       <div className="absolute inset-0 flex flex-col justify-end gap-1.5 p-3">
         {/* Title — fixed token-sized font, clamped to 2 lines with ellipsis so long
             titles never overflow the fixed cover box. */}
-        <span className="line-clamp-2 font-serif font-medium text-sm text-white leading-snug [text-shadow:0_1px_2px_oklch(0_0_0_/_0.5)]">
+        <span className="line-clamp-2 font-display text-sm text-white leading-snug [text-shadow:0_1px_2px_oklch(0_0_0_/_0.5)]">
           {title?.trim() || "Untitled canvas"}
         </span>
         {/* Type/status marker — small chips drawing the type label + tint from the

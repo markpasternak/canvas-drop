@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Config, MARKETING_ACCENT, rampCssVars } from "@canvas-drop/shared";
+import { type Config, MARKETING_ACCENT, rampCssVars, type SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -10,6 +10,7 @@ import { resolveRequest } from "../routing/resolve-request.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
+import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
@@ -165,6 +166,10 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
     body: "Set global quotas and defaults, and choose which members may publish public links.",
   },
   {
+    title: "Your brand, your look",
+    body: "Flip the whole instance — dashboard, editor, and landing — to one of four design skins from the admin console. No restart, no code.",
+  },
+  {
     title: "Member management",
     body: "See who's in, grant or revoke admin, and block access in a click.",
   },
@@ -226,7 +231,8 @@ ${FAVICON_LINKS}
 <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
-<style>${STYLES}</style>`;
+<style>${STYLES}
+${skinStyleCss()}</style>`;
 }
 
 /**
@@ -255,9 +261,28 @@ const STYLES = `
   font-weight: 200 800;
   src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
 }
+/* Geist (sans, the body + the canvas skin's display) and Geist Mono (the workshop
+   skin's display) — self-hosted too, so every skin renders faithfully with no CDN. */
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
+}
 :root {
 ${rampCssVars("light", "  ")}
   --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  /* Display face defaults to the editorial serif; a [data-skin] re-voices it. */
+  --font-display: var(--font-serif);
+  --radius-scale: 1;
   --amber: ${MARKETING_ACCENT.light.amber};
   --amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};
   --shadow-color: 40 30% 38%;
@@ -281,6 +306,11 @@ ${rampCssVars("dark", "    ")}
     --amber-ink: ${MARKETING_ACCENT.dark["amber-ink"]};
   }
 }
+/* Non-default skins re-voice the marketing accent: any [data-skin] remaps the
+   landing's --amber family to the active skin accent, so the hero — and the rest
+   of the page — follow the admin-chosen skin. Editorial stamps no data-skin and
+   keeps its signature amber. */
+:root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 body {
@@ -294,7 +324,7 @@ body {
 a { color: inherit; text-decoration: none; }
 .wrap { width: min(100%, var(--maxw)); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 2.5rem); }
 .mono { font-family: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; }
-.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
+.serif { font-family: var(--font-display); font-optical-sizing: auto; }
 
 /* --- top bar --- */
 header {
@@ -358,7 +388,7 @@ header {
 .eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: var(--amber); box-shadow: 0 0 0 4px oklch(0.78 0.15 72 / 0.22); }
 h1 {
   margin: 1.1rem 0 0; max-width: 15ch;
-  font-family: var(--font-serif); font-optical-sizing: auto;
+  font-family: var(--font-display); font-optical-sizing: auto;
   font-size: clamp(2.7rem, 7vw, 4.8rem); line-height: 1.0; letter-spacing: -.02em; font-weight: 460;
 }
 h1 .accent { font-style: italic; color: var(--amber); }
@@ -372,6 +402,8 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .kicker { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--amber-ink); font-weight: 600; }
 .s-head { max-width: 34ch; margin: .7rem 0 0; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.06; letter-spacing: -.015em; font-weight: 440; }
 .s-sub { max-width: 52ch; margin: .9rem 0 0; color: var(--muted); font-size: 1.05rem; }
+.skins-figure { margin: clamp(1.5rem, 3.5vw, 2.25rem) 0 0; border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-lg); }
+.skins-figure img { display: block; width: 100%; height: auto; }
 
 /* value band — editorial cards with a coloured top-rule + big serif numeral */
 .values { display: grid; gap: clamp(1.25rem, 3vw, 1.75rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
@@ -563,6 +595,7 @@ export function renderLandingPage(
   origin = "",
   authMode: Config["auth"]["mode"] = "oidc",
   signedIn = false,
+  skin: SkinName = "editorial",
 ): string {
   // Primary CTA target. A signed-in viewer (only possible on the always-public
   // `/welcome` alias — `/` only renders this page when signed out) gets a direct
@@ -581,8 +614,12 @@ export function renderLandingPage(
       `<div class="value reveal"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
   ).join("\n");
 
+  // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
+  // attribute for editorial) — only the alternates stamp data-skin, so there's no surface
+  // divergence and no [data-skin="editorial"] rule is ever needed. The tag + the override
+  // CSS both come from the shared skin-html helper, so the landing can't drift from docs/legal.
   return `<!doctype html>
-<html lang="en">
+${skinnedHtmlTag(skin)}
 <head>
 ${head(origin)}
 </head>
@@ -665,6 +702,17 @@ ${TEAM.map(featItem).join("\n")}
     </div>
   </section>
 
+  <section>
+    <div class="wrap">
+      <p class="kicker reveal">Make it yours</p>
+      <h2 class="s-head reveal">One platform, your look.</h2>
+      <p class="s-sub reveal">Pick a design skin in the admin console and the whole instance re-voices — accent colour, display type, and corner shape — across the dashboard, the editor, and this landing page. Same app, your brand. No restart, no code.</p>
+      <figure class="skins-figure reveal">
+        <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side — Editorial (deep-teal serif) and Canvas (violet, bold) — to show the admin-flippable skin layer." loading="lazy" decoding="async">
+      </figure>
+    </div>
+  </section>
+
   <section class="band-dark">
     <div class="wrap">
       <p class="kicker reveal">Private by design</p>
@@ -744,7 +792,7 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
  * the work and emit two `Set-Cookie`s on the hottest authed path. An expired
  * cookie still falls through and the gateway redirects to login — never worse.
  */
-export function landingGate(deps: { config: Config }) {
+export function landingGate(deps: { config: Config; skin?: () => Promise<SkinName> }) {
   return createMiddleware<AppEnv>(async (c, next) => {
     if (deps.config.auth.mode !== "oidc") return next();
     if (c.req.path !== "/") return next();
@@ -762,7 +810,7 @@ export function landingGate(deps: { config: Config }) {
       deps.config,
     );
     if (role === "canvas") return next();
-    return landingResponse(deps.config);
+    return landingResponse(deps.config, deps.skin ? { skin: await deps.skin() } : {});
   });
 }
 
@@ -773,7 +821,10 @@ export function landingGate(deps: { config: Config }) {
  * is `private` + `Vary: Cookie` — a shared/CDN cache must never serve one auth
  * state's page to the other.
  */
-export function landingResponse(config: Config, opts: { signedIn?: boolean } = {}): Response {
+export function landingResponse(
+  config: Config,
+  opts: { signedIn?: boolean; skin?: SkinName } = {},
+): Response {
   const headers = new Headers();
   baseSecurityHeaders(headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
@@ -784,8 +835,16 @@ export function landingResponse(config: Config, opts: { signedIn?: boolean } = {
   );
   headers.set("Cache-Control", "private, max-age=300");
   headers.set("Vary", "Cookie");
-  return new Response(renderLandingPage(config.baseUrl, config.auth.mode, opts.signedIn ?? false), {
-    status: 200,
-    headers,
-  });
+  return new Response(
+    renderLandingPage(
+      config.baseUrl,
+      config.auth.mode,
+      opts.signedIn ?? false,
+      opts.skin ?? config.designSkin,
+    ),
+    {
+      status: 200,
+      headers,
+    },
+  );
 }

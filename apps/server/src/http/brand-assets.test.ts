@@ -23,10 +23,12 @@ describe("brandAssetRoutes — public favicon / brand icons", () => {
     expect(res.status).toBe(404);
   });
 
-  it("self-hosts the Newsreader woff2 (normal + italic) with the font content-type + long cache", async () => {
+  it("self-hosts the display-face woff2 (Newsreader + Geist + Geist Mono) with the font content-type + long cache", async () => {
     for (const file of [
       "/fonts/newsreader-latin-wght-normal.woff2",
       "/fonts/newsreader-latin-standard-italic.woff2",
+      "/fonts/geist-latin-wght-normal.woff2",
+      "/fonts/geist-mono-latin-wght-normal.woff2",
     ]) {
       const res = await brandAssetRoutes().request(file);
       expect(res.status).toBe(200);

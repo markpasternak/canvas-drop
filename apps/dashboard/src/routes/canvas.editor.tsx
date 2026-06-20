@@ -18,6 +18,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { canvasRelativePath } from "../components/DeployFiles.js";
 import { Dialog } from "../components/Dialog.js";
 import { DraftPreview } from "../components/DraftPreview.js";
+import { EditorStatusBar } from "../components/EditorStatusBar.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
 import { FileTree } from "../components/FileTree.js";
@@ -743,6 +744,9 @@ export default function Editor() {
         {previewPane}
         {onPagePane}
       </div>
+
+      {/* IDE-style status footer — revealed only by the workshop/canvas skins (CSS-gated). */}
+      <EditorStatusBar path={selected} fileCount={draft.files.length} />
 
       {/* Full-screen preview overlay */}
       {previewFullscreen && (

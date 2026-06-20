@@ -141,9 +141,17 @@ export function DraftPreview({
   const header = (
     <PaneHeader
       leading={
-        <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-sunken text-subtle">
-          <Browser size={15} weight="duotone" aria-hidden />
-        </span>
+        <>
+          {/* Playful "browser window" traffic-lights — CSS-revealed by the canvas skin. */}
+          <span className="cd-window-dots items-center gap-1.5" aria-hidden>
+            <span className="size-2 rounded-full bg-danger/70" />
+            <span className="size-2 rounded-full bg-warning/80" />
+            <span className="size-2 rounded-full bg-success/70" />
+          </span>
+          <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-sunken text-subtle">
+            <Browser size={15} weight="duotone" aria-hidden />
+          </span>
+        </>
       }
       title={
         <span className="inline-flex min-w-0 items-center gap-2">
@@ -209,6 +217,36 @@ export function DraftPreview({
     </div>
   );
 
+  // Live-status ribbon (M5 polish): once the draft is actually rendering in the frame,
+  // a footer signals it's live and offers a one-click jump to the full top-level preview
+  // (the only place a scripted/signed-in canvas runs exactly as it ships). The pulsing
+  // ring is decorative — the solid dot + "Live preview" label carry the state under reduced motion.
+  const liveRibbon = showFrame ? (
+    <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface px-3 py-1.5">
+      <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-success">
+        <span className="relative grid size-2 place-items-center" aria-hidden>
+          <span className="absolute inline-flex size-2 animate-ping rounded-full bg-success" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-success" />
+        </span>
+        Live preview
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate font-mono text-[0.6875rem] text-subtle">
+          /api/canvases/{canvasId}/preview/
+        </span>
+        <a
+          href={fullSrc}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex shrink-0 items-center gap-1 text-[0.6875rem] font-medium text-accent transition-colors hover:text-accent-hover"
+        >
+          Open full
+          <ArrowSquareOut size={12} weight="bold" aria-hidden />
+        </a>
+      </span>
+    </div>
+  ) : null;
+
   const body = showFrame ? frame : scriptsNotice;
 
   if (fullscreen) {
@@ -224,6 +262,7 @@ export function DraftPreview({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-popover)]">
           {header}
           <div className="min-h-0 flex-1">{body}</div>
+          {liveRibbon}
         </div>
       </div>
     );
@@ -233,6 +272,7 @@ export function DraftPreview({
     <WorkspacePane className={cn("flex h-full min-w-0 flex-col")}>
       {header}
       <div className="min-h-0 flex-1">{body}</div>
+      {liveRibbon}
     </WorkspacePane>
   );
 }

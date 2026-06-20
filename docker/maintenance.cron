@@ -1,0 +1,15 @@
+# canvas-drop scheduled maintenance — UTC. Used by the optional compose `maintenance`
+# sidecar (supercronic), which shares the app image + the /data and /backups volumes.
+# Enable with: docker compose --profile maintenance up -d. Full runbook: docs/ops.md.
+#
+# `%` is escaped as `\%` (cron treats an unescaped % as a newline). Commands run from the
+# image WORKDIR (/app), so the server binary is apps/server/dist/index.js.
+
+# 03:15 nightly — full backup into /backups, tar it, and keep the last 14 days. The `&&`
+# chain is deliberate: a failed backup (or tar) short-circuits, so the retention `find
+# -delete` only runs after a good new backup exists — a bad night never prunes good backups.
+# A failure logs one line to stderr (supercronic forwards it) so the silence isn't silent.
+15 3 * * * D=/backups/$(date -u +\%Y\%m\%dT\%H\%M\%SZ); { node --conditions=node-dist apps/server/dist/index.js backup "$D" && tar -czf "$D.tar.gz" -C /backups "$(basename "$D")" && rm -rf "$D" && find /backups -name '*.tar.gz' -mtime +14 -delete; } || echo "[canvas-drop] nightly backup FAILED — kept existing backups, skipped retention prune" >&2
+
+# 03:45 Sunday — reclaim canvases soft-deleted 30+ days ago + prune the metering tables.
+45 3 * * 0 node --conditions=node-dist apps/server/dist/index.js purge 30

@@ -10,6 +10,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ToastProvider } from "./components/Toast.js";
 import { queryClient } from "./lib/query.js";
+import { SkinSync } from "./lib/skin.js";
 import { ThemeProvider } from "./lib/theme.js";
 import { router } from "./router.js";
 
@@ -20,6 +21,8 @@ createRoot(el).render(
   <StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
+        {/* Applies the instance design skin from /api/me to <html data-skin>. */}
+        <SkinSync />
         <ToastProvider>
           <RouterProvider router={router} />
         </ToastProvider>

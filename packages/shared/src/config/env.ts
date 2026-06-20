@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SKIN_NAMES } from "../brand/skins.js";
 
 /**
  * Configuration surface for canvas-drop (BUILD_BRIEF.md §8.1).
@@ -137,6 +138,9 @@ const rawSchema = z
     CANVAS_DROP_SESSION_SECRET: z.string().optional(),
     CANVAS_DROP_ADMIN_EMAILS: csv(),
     CANVAS_DROP_REALTIME: z.enum(["on", "off"]).optional().default("on"),
+    // Instance-wide design skin (the expression layer — accent, display type, radii).
+    // Default `editorial` reproduces today's look; admins can flip it at runtime.
+    CANVAS_DROP_DESIGN_SKIN: z.enum(SKIN_NAMES).optional().default("editorial"),
     // Remote MCP server + its OAuth authorization endpoints (the connect-once agent
     // control plane). Default on; an operator disables it to drop the surface entirely
     // (the routes are not mounted, not merely 403'd).
@@ -432,6 +436,8 @@ const rawSchema = z
       isProduction: r.NODE_ENV === "production",
       urlMode: r.CANVAS_DROP_URL_MODE,
       baseUrl: r.CANVAS_DROP_BASE_URL,
+      // Instance-wide design skin (expression layer). Admin-overridable at runtime.
+      designSkin: r.CANVAS_DROP_DESIGN_SKIN,
       // Falls back to baseUrl when no dedicated API host is configured.
       apiBaseUrl: r.CANVAS_DROP_API_BASE_URL ?? r.CANVAS_DROP_BASE_URL,
       port: r.CANVAS_DROP_PORT,

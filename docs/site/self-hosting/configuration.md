@@ -48,6 +48,40 @@ change, never a code change.
 | `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE` | `false` | Must be `true` to boot `path` mode with `proxy`/`oidc` auth (path mode has reduced browser isolation). |
 | `CANVAS_DROP_DASHBOARD_DIST` | (resolved) | Override the built dashboard SPA path; defaults to a location resolved from the server module. |
 | `CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL` | `300` | Seconds a shared cache (a CDN in front) may hold a **public** canvas's HTML (emitted as `s-maxage`; the browser still revalidates each load). Only the `public_link`, no-password rung is ever shared-cacheable — auth-gated canvases stay `private`. Also the window a canvas can stay visible at the edge after access is restricted (the dashboard warns owners with this figure). `0` disables shared caching. See [Behind a CDN](cdn). |
+| `CANVAS_DROP_DESIGN_SKIN` | `editorial` | Instance-wide visual design language: `editorial` \| `studio` \| `workshop` \| `canvas`. An admin can override this at runtime from the console — the DB override wins over this env value. See [Design skins](#design-skins). |
+
+## Design skins
+
+A **design skin** is an instance-wide visual language you can flip for the whole
+deployment — the dashboard, the editor, and the signed-out landing page all
+re-voice together. It's a thin **expression layer** over the brand tokens: a skin
+overrides three things only — the **accent** colour family, a **display-type**
+bundle (font + weight + tracking), and the **corner-radius** scale. It is
+deliberately **token-only**: no skin forks layout or structure, so every surface
+re-skins for free and nothing can visually diverge.
+
+| Skin | Accent | Display type | Feel |
+|------|--------|--------------|------|
+| `editorial` *(default)* | deep teal | Newsreader serif | Today's calm publishing OS — an exact no-op. |
+| `studio` | terracotta | Newsreader serif | Warm editorial. |
+| `workshop` | green | Geist **Mono** | Developer / IDE. |
+| `canvas` | violet | Geist **800** | Playful / bold. |
+
+All four pass WCAG AA contrast for text and controls, in light and dark mode.
+
+**Setting it.** Two ways, with the same effect for everyone on the instance:
+
+- **Admin console** — *Admin → Configuration → Design skin*. Changing the dropdown
+  *previews* the skin in your own session; **Save** writes the override to the
+  database and applies it for all users. It takes effect **at runtime — no
+  restart** (the SPA reads the effective skin from `/api/me` and stamps
+  `<html data-skin>`, with a pre-paint cache so there's no flash on reload).
+- **`CANVAS_DROP_DESIGN_SKIN`** — the boot default. A DB override set in the
+  console always wins over this env value.
+
+The skin is **global and admin-only** — it is not a per-user preference (the
+light/dark theme is the per-user setting). System surfaces stay on the default
+look regardless: error pages keep the canonical appearance.
 
 ## Auth
 
