@@ -151,6 +151,10 @@ export default function Share() {
           <AccessLadder
             value={canvas.access}
             allowPublic={me?.canPublishPublic ?? false}
+            // Offer the "Whole org" rung to everyone EXCEPT a guest (a signed-in user in
+            // no org). `isGuest` is only ever true under active tenancy, so inert
+            // instances keep offering it to all members (plan 002 U6).
+            allowOrg={!me?.isGuest}
             onChange={(access) => save({ access })}
           />
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
@@ -419,7 +423,13 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
 }
 
 type SettableRung = "private" | "specific_people" | "whole_org" | "public_link";
-const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: boolean }[] = [
+const RUNGS: {
+  value: SettableRung;
+  label: string;
+  hint: string;
+  adminGated?: boolean;
+  orgGated?: boolean;
+}[] = [
   { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
   {
     value: "specific_people",
@@ -430,6 +440,9 @@ const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: bo
     value: "whole_org",
     label: "Whole org",
     hint: "Anyone in your org with the link can open and use it.",
+    // Tenancy (plan 002 U6): hidden for a guest (a signed-in user in no org), for whom
+    // sharing "with the org" is meaningless. The server denies it regardless.
+    orgGated: true,
   },
   {
     value: "public_link",
@@ -442,13 +455,19 @@ const RUNGS: { value: SettableRung; label: string; hint: string; adminGated?: bo
 function AccessLadder({
   value,
   allowPublic,
+  allowOrg,
   onChange,
 }: {
   value: AccessRung;
   allowPublic: boolean;
+  allowOrg: boolean;
   onChange: (rung: SettableRung) => void;
 }) {
-  const rungs = RUNGS.filter((r) => !r.adminGated || allowPublic || value === r.value);
+  const rungs = RUNGS.filter(
+    (r) =>
+      (!r.adminGated || allowPublic || value === r.value) &&
+      (!r.orgGated || allowOrg || value === r.value),
+  );
   return (
     <fieldset className="space-y-2">
       <legend className="sr-only">Who can access this canvas</legend>

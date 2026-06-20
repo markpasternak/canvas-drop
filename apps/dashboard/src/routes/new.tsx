@@ -85,6 +85,13 @@ export default function CreateCanvas() {
     status: "idle",
   });
   const slugBlocked = slug.slug !== "" && slug.status !== "available";
+  // Home tenant for the new canvas (plan 002 U6). Personal (null) or one of the caller's
+  // orgs. `undefined` = not explicitly chosen → fall back to the members-default-Org rule.
+  // The server re-validates against the caller's membership regardless (never trusts this).
+  const orgs = me?.orgs ?? [];
+  const [workspace, setWorkspace] = useState<string | null | undefined>(undefined);
+  // Default selection: a member of exactly one org lands in it; everyone else is Personal.
+  const homeOrgId = workspace === undefined ? (orgs.length === 1 ? orgs[0]?.id : null) : workspace;
   // Backend-group master switch chosen at create time (plan 006). Off by default;
   // changeable later in the canvas Backend tab.
   const [backendEnabled, setBackendEnabled] = useState(false);
@@ -124,6 +131,7 @@ export default function CreateCanvas() {
         title: title || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
+        orgId: homeOrgId,
       });
       setRevealed({ apiKey: res.apiKey, id: res.id, deployed: true });
     } catch (err) {
@@ -146,6 +154,7 @@ export default function CreateCanvas() {
         title: title || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
+        orgId: homeOrgId,
       });
       try {
         if (kind === "folder") {
@@ -180,6 +189,7 @@ export default function CreateCanvas() {
         title: title || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
+        orgId: homeOrgId,
       });
       setApiResult({ id: canvas.id, apiKey: canvas.apiKey, url: canvas.url });
       setBusy(false);
@@ -286,6 +296,32 @@ export default function CreateCanvas() {
               instance={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
               onResolved={setSlug}
             />
+
+            {/* Workspace (plan 002 U6): where this canvas lives. Only shown when the caller
+                belongs to an org — a guest/personal-only user never sees it (and the server
+                rejects any org they don't belong to). Drives whether `whole_org` shares it
+                with the org or keeps it personal. */}
+            {orgs.length > 0 && (
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-fg">Workspace</span>
+                <select
+                  value={homeOrgId ?? ""}
+                  onChange={(e) => setWorkspace(e.target.value === "" ? null : e.target.value)}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-xs focus:border-accent focus:outline-none"
+                >
+                  <option value="">Personal</option>
+                  {orgs.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="block text-xs text-muted">
+                  Personal canvases are yours alone; an org workspace lets you share with the whole
+                  org.
+                </span>
+              </label>
+            )}
 
             {/* Step 3 — optional backend capability. Deliberately after the source
                 choice + naming so it reads as an optional add-on, not a gate. */}

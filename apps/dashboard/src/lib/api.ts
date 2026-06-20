@@ -43,6 +43,14 @@ export interface Me {
   /** Active instance-wide design skin (presentation only). Optional on the wire for
    *  resilience; absent ⇒ the default `editorial`. The SPA applies it to <html data-skin>. */
   designSkin?: DesignSkin;
+  /** The caller's orgs (plan 002 U6) for the Personal/Org workspace switcher. Server-
+   *  resolved; empty ⇒ the caller has no org (Personal only). UX state — the server
+   *  re-derives membership on every request, so the active workspace can never widen a
+   *  query. Optional on the wire for resilience (older server ⇒ org-agnostic). */
+  orgs?: Array<{ id: string; name: string }>;
+  /** Signed in but a member of no org (active tenancy only). Guests see no org share
+   *  options or org gallery. */
+  isGuest?: boolean;
 }
 
 /** The four toggleable backend features (plan 006). Identity is implicit (no flag). */
@@ -809,6 +817,9 @@ export const api = {
     description?: string;
     backendEnabled?: boolean;
     slug?: string;
+    /** Home tenant (plan 002 U6): an org id the caller belongs to, or null for Personal.
+     *  Omitted ⇒ the server default (the caller's org if they have exactly one). */
+    orgId?: string | null;
   }) => request<Canvas & { apiKey: string }>("/api/canvases", jsonBody(body)),
 
   /** Check whether a custom slug is usable (plan 004). Read-only; advisory — the
@@ -823,7 +834,13 @@ export const api = {
    *  NOT returned here (no unused secret over the wire). */
   cloneCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}/clone`, { method: "POST" }),
 
-  pasteHtml: (body: { html: string; title?: string; backendEnabled?: boolean; slug?: string }) =>
+  pasteHtml: (body: {
+    html: string;
+    title?: string;
+    backendEnabled?: boolean;
+    slug?: string;
+    orgId?: string | null;
+  }) =>
     request<Canvas & { apiKey: string; deploy: DeployResult }>(
       "/api/canvases/paste",
       jsonBody(body),

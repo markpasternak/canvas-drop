@@ -498,6 +498,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective skin (admin DB override over env/default), resolved per-request so a
       // runtime flip in Admin → Configuration reaches the SPA without a restart.
       designSkin: () => settingsSvc.effectiveDesignSkin(),
+      orgs,
+      tenancyActive: !!deps.config.org.name,
     }),
   );
 

@@ -1,5 +1,6 @@
 import type { AuthMode, SkinName } from "@canvas-drop/shared";
 import { Hono } from "hono";
+import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { AppEnv } from "../http/types.js";
 
 /** Auth mode the instance runs in (§8.1). The SPA reads this to decide whether to
@@ -19,6 +20,11 @@ export interface MeRoutesDeps {
    *  env/default), read per-request so an admin's runtime flip takes effect without a
    *  restart. The SPA applies the result to <html data-skin>. */
   designSkin: () => Promise<SkinName>;
+  /** Tenancy org store (plan 002 U6) — resolves the caller's org ids to {id,name}. */
+  orgs: Pick<OrgsRepository, "findById">;
+  /** Whether tenancy is active (an org is configured). Drives `isGuest`: only meaningful
+   *  when active — inert instances have no member/guest boundary. */
+  tenancyActive: boolean;
 }
 
 /**
@@ -39,12 +45,24 @@ export function meRoutes(deps: MeRoutesDeps) {
 
   app.get("/", async (c) => {
     const u = c.get("user");
+    // The caller's orgs (plan 002 U6): resolve the server-derived orgIds → {id,name} for
+    // the Personal/Org workspace switcher. `isGuest` = signed in but in no org (active
+    // tenancy only). UX state — the server re-derives orgIds on every request, so a
+    // client can never widen its scope by asserting an org.
+    const orgIds = c.get("orgIds") ?? new Set<string>();
+    const orgRows = (await Promise.all([...orgIds].map((id) => deps.orgs.findById(id)))).filter(
+      (o): o is NonNullable<typeof o> => o !== null,
+    );
+    const orgs = orgRows.map((o) => ({ id: o.id, name: o.name }));
     return c.json({
       id: u.id,
       email: u.email,
       name: u.name,
       avatarUrl: u.avatarUrl,
       isAdmin: u.isAdmin,
+      // Tenancy (plan 002 U6) — the member's orgs + whether they're a guest (no org).
+      orgs,
+      isGuest: deps.tenancyActive && orgIds.size === 0,
       // Whether this account may publish public links (U10) — the dashboard offers
       // the public_link rung only when true.
       canPublishPublic: u.canPublishPublic,

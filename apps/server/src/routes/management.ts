@@ -984,10 +984,15 @@ export function managementRoutes(deps: ManagementDeps) {
         title: z.string().max(200).optional(),
         slug: z.string().max(63).optional(),
         backendEnabled: z.boolean().optional(),
+        orgId: z.string().nullable().optional(),
       })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
+    // Home tenant (plan 002 U6), validated against the caller's membership — same rule as
+    // the management create, so the paste create path can't bypass it.
+    const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
+    if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
@@ -1002,6 +1007,7 @@ export function managementRoutes(deps: ManagementDeps) {
         slugCustom: resolved.custom,
         apiKeyHash: hashApiKey(apiKey),
         title: body.data.title,
+        orgId: home.orgId,
         backendEnabled: body.data.backendEnabled,
       });
     } catch (err) {
