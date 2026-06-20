@@ -1,3 +1,4 @@
+import type { SkinName } from "@canvas-drop/shared";
 import {
   DARK_TOKENS,
   escapeHtml,
@@ -5,6 +6,7 @@ import {
   SYSTEM_PAGE_BRAND_INLINE,
   SYSTEM_PAGE_STYLES,
 } from "../http/error-pages.js";
+import { skinnedHtmlTag, skinStyleCss } from "../http/skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "../http/social-meta.js";
 import { DOC_NAV, DOC_PAGES, type DocPage } from "./generated-content.js";
 
@@ -27,6 +29,35 @@ function href(path: string): string {
 }
 
 const DOCS_STYLES = `${SYSTEM_PAGE_STYLES}
+  /* ---- design-skin display faces ----
+     The workshop/canvas skins re-voice --font-display to the mono/sans display
+     stacks, so the docs self-host Geist + Geist Mono too (served same-origin by
+     brandAssetRoutes(), no CDN) — otherwise a skinned heading would fall back to a
+     system face. SYSTEM_PAGE_STYLES already ships the Newsreader @font-face. */
+  @font-face {
+    font-family: "Geist Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+  }
+  @font-face {
+    font-family: "Geist Mono Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
+  }
+  /* Display-face defaults — editorial's serif voice. A [data-skin] block (emitted
+     by skinStyleCss below, from the SAME canonical source as the dashboard) re-voices
+     --font-display / weight / tracking / radius per the active instance skin. */
+  :root {
+    --font-display: var(--font-serif);
+    --display-weight: 500;
+    --display-tracking: -0.02em;
+    --radius-scale: 1;
+    --shadow-strength: 1;
+  }
   /* ---- manual theme override (data-theme) ----
      SYSTEM_PAGE_STYLES themes only via prefers-color-scheme. The docs add a
      switch that sets the same data-theme attribute + canvas-drop-theme key the
@@ -124,7 +155,7 @@ ${LIGHT_TOKENS}
     padding: clamp(2rem, 4vw, 3.5rem) clamp(1.5rem, 4vw, 2.75rem);
   }
   .doc { max-width: 46rem; }
-  .doc h1, .doc h2, .doc h3 { font-family: var(--font-serif); font-optical-sizing: auto; font-weight: 500; }
+  .doc h1, .doc h2, .doc h3 { font-family: var(--font-display); font-optical-sizing: auto; font-weight: var(--display-weight, 500); letter-spacing: var(--display-tracking, -.02em); }
   .doc h1 { margin: 0 0 1rem; font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.1; letter-spacing: -.02em; }
   /* Lede treatment: the page's opening heading reads larger, and the intro
      paragraph that follows it is set as a muted lede with a hairline rule, so each
@@ -175,7 +206,21 @@ ${LIGHT_TOKENS}
   :root[data-theme="dark"] .hljs-keyword, :root[data-theme="dark"] .hljs-built_in, :root[data-theme="dark"] .hljs-literal { color: #d2a8ff; }
   :root[data-theme="dark"] .hljs-string, :root[data-theme="dark"] .hljs-attr { color: #7ee787; }
   :root[data-theme="dark"] .hljs-title, :root[data-theme="dark"] .hljs-section, :root[data-theme="dark"] .hljs-name { color: #79c0ff; }
-  :root[data-theme="dark"] .hljs-number { color: #ffa657; }`;
+  :root[data-theme="dark"] .hljs-number { color: #ffa657; }
+  /* ---- mermaid diagrams ----
+     Rendered client-side by the self-hosted renderer into an <svg> (themed from the
+     live design tokens). Before the script runs (or with JS off) the raw diagram
+     source stays hidden so authors never see DSL text flash. The container is
+     theme-neutral so the on-brand svg fill carries the color. */
+  .doc .mermaid {
+    margin: 1.25rem 0; padding: 1rem; overflow-x: auto;
+    background: var(--surface-sunken); border: 1px solid var(--border); border-radius: .6rem;
+    text-align: center; color: transparent;
+  }
+  .doc .mermaid[data-processed="true"] { color: var(--fg); }
+  .doc .mermaid:not([data-processed="true"]) { font-size: 0; line-height: 0; min-height: 2rem; }
+  .doc .mermaid svg { max-width: 100%; height: auto; font-size: 1rem; }
+${skinStyleCss({ darkToggle: true })}`;
 
 /** The topbar theme switch (System / Light / Dark), mirroring the dashboard's
  *  segmented control. Static markup; /docs/theme.js wires clicks + aria-pressed
@@ -233,14 +278,24 @@ function socialMeta(path: string, title: string, description: string, origin: st
 }
 
 /** Render the full HTML for a doc page, or null if the path is unknown.
- *  `origin` (config.baseUrl) makes the social-card URLs absolute. */
-export function renderDocPage(path: string, origin = ""): string | null {
+ *  `origin` (config.baseUrl) makes the social-card URLs absolute. `skin` is the
+ *  effective instance design skin (resolved per-request, default editorial), stamped
+ *  on <html> via the shared helper exactly like the landing page. Pages with a
+ *  ```mermaid block lazily load the self-hosted /docs/mermaid.js renderer. */
+export function renderDocPage(
+  path: string,
+  origin = "",
+  skin: SkinName = "editorial",
+): string | null {
   const page = byPath.get(path);
   if (!page) return null;
   const title = `${escapeHtml(page.title)} · canvas-drop docs`;
   const description = summarize(page.text) || "Documentation for canvas-drop.";
+  // Only ship the (large) mermaid bundle on pages that actually contain a diagram.
+  const hasMermaid = page.html.includes('class="mermaid"');
+  const mermaidScript = hasMermaid ? '\n  <script src="/docs/mermaid.js" defer></script>' : "";
   return `<!doctype html>
-<html lang="en">
+${skinnedHtmlTag(skin)}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -275,7 +330,7 @@ ${DOCS_STYLES}
       ${renderPrevNext(path)}
     </main>
   </div>
-  <script src="/docs/search.js"></script>
+  <script src="/docs/search.js"></script>${mermaidScript}
 </body>
 </html>`;
 }

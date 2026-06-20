@@ -111,4 +111,25 @@ describe("docs routes", () => {
     expect(body).toContain("canvasdrop");
     expect(body).toContain("/v1/canvases/");
   });
+
+  it("serves the self-hosted mermaid bundle as long-cached javascript", async () => {
+    const res = await app().request("/docs/mermaid.js");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("javascript");
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    const js = await res.text();
+    // The committed esbuild bundle (pnpm docs:mermaid) — non-trivial, and same-origin
+    // so the docs CSP stays script-src 'self' (no CDN, no phone-home).
+    expect(js.length).toBeGreaterThan(10000);
+  });
+
+  it("resolves the instance skin per-request via the supplied resolver", async () => {
+    const skinned = docsRoutes(config, { skin: async () => "canvas" });
+    const html = await (await skinned.request("/docs")).text();
+    expect(html).toContain('data-skin="canvas"');
+    // Default (no resolver) stays editorial — no skin attribute on <html>.
+    const plain = await (await app().request("/docs")).text();
+    expect(plain).toContain('<html lang="en">');
+    expect(plain).not.toContain('data-skin="editorial"');
+  });
 });

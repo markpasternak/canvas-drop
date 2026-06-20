@@ -45,6 +45,7 @@
     "landing:screenshots": "node scripts/screenshots.mjs --landing",
     "og:build": "node scripts/og-card.mjs",
     "landing:carousel": "esbuild scripts/landing-carousel.src.mjs --bundle --format=iife --minify --target=es2019 --outfile=docs/site/assets/landing-carousel.js",
+    "docs:mermaid": "esbuild scripts/docs-mermaid.src.mjs --bundle --format=iife --minify --target=es2020 --outfile=docs/site/assets/mermaid.js",
     "landing:gif": "node scripts/landing-gif.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -64,5 +65,8 @@
     "sharp": "^0.35.1",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "mermaid": "11.15.0"
   }
 }
