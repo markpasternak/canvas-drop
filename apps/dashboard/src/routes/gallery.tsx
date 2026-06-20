@@ -178,7 +178,7 @@ function GalleryRow({ item }: { item: GalleryItem }) {
             href={item.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate rounded-sm font-serif text-[0.95rem] font-medium text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="min-w-0 truncate rounded-sm font-display text-[0.95rem] text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             {galleryTitle(item)}
           </a>
@@ -270,7 +270,7 @@ function DiscoveryStrip({
   return (
     <section aria-label={heading} className="space-y-3">
       <div className="space-y-0.5">
-        <h2 className="font-serif text-sm font-medium text-fg">{heading}</h2>
+        <h2 className="font-display text-sm text-fg">{heading}</h2>
         {description && <p className="text-xs text-subtle">{description}</p>}
       </div>
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -607,7 +607,7 @@ export default function Gallery() {
       {items.length > 0 && (
         <section aria-label="All gallery canvases" className="space-y-4">
           {showDiscovery && (featuredItems.length > 0 || recentItems.length > 0) && (
-            <h2 className="font-serif text-sm font-medium text-fg">Browse all</h2>
+            <h2 className="font-display text-sm text-fg">Browse all</h2>
           )}
           {view === "grid" ? (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

@@ -58,7 +58,7 @@ export { coverType };
 /** The scrim-legible class for the caller's name link (white text + shadow + a
  *  stretched ::after that makes the title the implicit hit area for the whole card). */
 export const cardNameLinkClass =
-  "min-w-0 truncate font-serif font-medium text-[0.95rem] text-white underline-offset-2 " +
+  "min-w-0 truncate font-display text-[0.95rem] text-white underline-offset-2 " +
   "outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline " +
   "[text-shadow:0_1px_3px_oklch(0_0_0_/_0.6)]";
 

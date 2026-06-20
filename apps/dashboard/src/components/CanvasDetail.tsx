@@ -45,7 +45,7 @@ export function CanvasDetailChrome({
             <Skeleton className="h-9 w-56" />
           ) : (
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-              <h1 className="truncate font-serif text-h1 font-medium leading-tight tracking-[-0.02em] text-fg">
+              <h1 className="truncate font-display text-h1 leading-tight text-fg">
                 {title}
               </h1>
               {badge && <span className="shrink-0">{badge}</span>}

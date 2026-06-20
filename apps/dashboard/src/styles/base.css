@@ -5,6 +5,16 @@
 @import "tailwindcss";
 @import "./tokens.css";
 
+/* Display-type utility — the active skin's display face (family + weight + tracking)
+   for app-chrome titles (page / card / section headings). Bare prose headings keep the
+   serif content voice (the h1–h4 base rule below). Defaults reproduce editorial serif;
+   a [data-skin] re-voices every display title at once. */
+@utility font-display {
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--display-tracking);
+}
+
 @layer base {
   *,
   *::before,

@@ -97,7 +97,7 @@ export function DetailPanel({
 
       {/* Title + status */}
       <div className="flex flex-col gap-2">
-        <h2 className="font-serif text-lg font-medium text-fg">{title}</h2>
+        <h2 className="font-display text-lg text-fg">{title}</h2>
         <div className="flex flex-wrap items-center gap-1.5">
           <PublicationBadge state={canvas.publicationState} />
           <AccessBadge access={canvas.access} />
