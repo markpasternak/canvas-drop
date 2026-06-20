@@ -325,11 +325,11 @@
 
 /* Studio — warm editorial: terracotta accent, same serif voice. */
 :root[data-skin="studio"] {
-  --accent: oklch(0.55 0.15 42);
-  --accent-hover: oklch(0.49 0.145 42);
+  --accent: oklch(0.53 0.15 42);
+  --accent-hover: oklch(0.47 0.145 42);
   --accent-fg: oklch(0.99 0.02 60);
-  --accent-subtle: oklch(0.92 0.05 52);
-  --ring: oklch(0.55 0.15 42);
+  --accent-subtle: oklch(0.95 0.04 50);
+  --ring: oklch(0.53 0.15 42);
   --font-display: "Newsreader Variable", Georgia, "Times New Roman", serif;
   --display-weight: 500;
   --display-tracking: -0.02em;
@@ -354,11 +354,11 @@
 
 /* Workshop — developer/IDE: monospace display, green accent, tighter corners. */
 :root[data-skin="workshop"] {
-  --accent: oklch(0.52 0.115 165);
-  --accent-hover: oklch(0.46 0.11 165);
+  --accent: oklch(0.5 0.12 165);
+  --accent-hover: oklch(0.44 0.115 165);
   --accent-fg: oklch(0.99 0.02 165);
-  --accent-subtle: oklch(0.92 0.05 168);
-  --ring: oklch(0.52 0.115 165);
+  --accent-subtle: oklch(0.95 0.045 168);
+  --ring: oklch(0.5 0.12 165);
   --font-display: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
   --display-weight: 500;
   --display-tracking: -0.01em;

@@ -5,6 +5,7 @@
 export const VERSION = "0.0.0";
 
 export * from "./brand/brand.js";
+export * from "./brand/contrast.js";
 export * from "./brand/logo.js";
 export * from "./brand/skins.js";
 export * from "./brand/tokens.js";

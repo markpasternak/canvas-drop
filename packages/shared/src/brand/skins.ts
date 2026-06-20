@@ -105,11 +105,11 @@ export const SKINS: Record<SkinName, SkinDef> = {
     display: { family: SERIF, weight: 500, tracking: "-0.02em" },
     radiusScale: 1,
     light: {
-      accent: "oklch(0.55 0.15 42)",
-      "accent-hover": "oklch(0.49 0.145 42)",
+      accent: "oklch(0.53 0.15 42)",
+      "accent-hover": "oklch(0.47 0.145 42)",
       "accent-fg": "oklch(0.99 0.02 60)",
-      "accent-subtle": "oklch(0.92 0.05 52)",
-      ring: "oklch(0.55 0.15 42)",
+      "accent-subtle": "oklch(0.95 0.04 50)",
+      ring: "oklch(0.53 0.15 42)",
     },
     dark: {
       accent: "oklch(0.72 0.13 48)",
@@ -127,11 +127,11 @@ export const SKINS: Record<SkinName, SkinDef> = {
     display: { family: MONO, weight: 500, tracking: "-0.01em" },
     radiusScale: 0.62,
     light: {
-      accent: "oklch(0.52 0.115 165)",
-      "accent-hover": "oklch(0.46 0.11 165)",
+      accent: "oklch(0.5 0.12 165)",
+      "accent-hover": "oklch(0.44 0.115 165)",
       "accent-fg": "oklch(0.99 0.02 165)",
-      "accent-subtle": "oklch(0.92 0.05 168)",
-      ring: "oklch(0.52 0.115 165)",
+      "accent-subtle": "oklch(0.95 0.045 168)",
+      ring: "oklch(0.5 0.12 165)",
     },
     dark: {
       accent: "oklch(0.78 0.13 168)",
