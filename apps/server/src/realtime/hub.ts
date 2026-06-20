@@ -48,6 +48,10 @@ export interface ConnUser {
   id: string;
   name: string;
   isAdmin: boolean;
+  /** The caller's org membership at handshake (plan 002 U3), server-resolved. Used by
+   *  the re-auth fabrication fallback so a member's live `whole_org` socket keeps the
+   *  correct org scope (not ∅) across heartbeats — never wrongly dropped or kept. */
+  orgIds: Set<string>;
   /** The full principal (U9) so live re-auth re-decides guests/anonymous correctly,
    *  not as a member. Defaults to a member principal for callers that omit it. */
   principal?: Principal;
@@ -346,6 +350,7 @@ export function createHub(deps: HubDeps) {
           kind: "member",
           id: conn.user.id,
           isAdmin: conn.user.isAdmin,
+          orgIds: conn.user.orgIds,
         };
         let isAllowed = false;
         if (canvas.access === "specific_people" && deps.isPrincipalAllowed) {

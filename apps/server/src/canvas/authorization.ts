@@ -27,9 +27,17 @@ export interface AccessContext {
   publicEnabled?: boolean;
 }
 
-/** Build a member principal from the org-resolved user (the normal gateway path). */
-export function memberPrincipal(user: { id: string; isAdmin: boolean }): Principal {
-  return { kind: "member", id: user.id, isAdmin: user.isAdmin };
+/**
+ * Build a member principal from the org-resolved user (the normal gateway path). `orgIds`
+ * is REQUIRED (plan 002 U3) so the compiler forces every fabrication site to supply the
+ * server-resolved membership — there is no default that could silently widen or narrow
+ * the `whole_org` boundary.
+ */
+export function memberPrincipal(
+  user: { id: string; isAdmin: boolean },
+  orgIds: Set<string>,
+): Principal {
+  return { kind: "member", id: user.id, isAdmin: user.isAdmin, orgIds };
 }
 
 /**
@@ -188,19 +196,27 @@ export async function resolveAccessContext(
 }
 
 /** The acting principal for a canvas-facing request: the resolver-set guest/
- *  anonymous principal (U7) if present, else the org member from the gateway. */
-export function requestPrincipal(c: { get: (k: "principal" | "user") => unknown }): Principal {
+ *  anonymous principal (U7) if present, else the org member from the gateway. The
+ *  member's `orgIds` come from the gateway-resolved context var (plan 002 U3) — ∅ when
+ *  absent (a member in no org), never client-derived. */
+export function requestPrincipal(c: {
+  get: (k: "principal" | "user" | "orgIds") => unknown;
+}): Principal {
   const p = c.get("principal") as Principal | undefined;
   if (p) return p;
   const user = c.get("user") as { id: string; isAdmin: boolean } | undefined;
   // In production the content/runtime path always has one or the other; fall back
   // to anonymous defensively rather than dereferencing an absent user.
-  return user ? memberPrincipal(user) : { kind: "anonymous" };
+  if (!user) return { kind: "anonymous" };
+  const orgIds = (c.get("orgIds") as Set<string> | undefined) ?? new Set<string>();
+  return memberPrincipal(user, orgIds);
 }
 
 /** Attribution id for audit/usage on the canvas content path (U9/U11): a member or
  *  guest by principal id, an anonymous public visitor by a stable sentinel. */
-export function principalAttributionId(c: { get: (k: "principal" | "user") => unknown }): string {
+export function principalAttributionId(c: {
+  get: (k: "principal" | "user" | "orgIds") => unknown;
+}): string {
   const p = requestPrincipal(c);
   if (p.kind === "member" || p.kind === "guest") return p.id;
   // `capture` never reaches the content attribution path (it's the internal worker,

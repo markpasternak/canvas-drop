@@ -51,7 +51,12 @@ function fakeCanvas(over: Partial<Canvas> = {}): Canvas {
   } as unknown as Canvas;
 }
 
-const user = (id: string, isAdmin = false): ConnUser => ({ id, name: id, isAdmin });
+const user = (id: string, isAdmin = false, orgIds = new Set<string>()): ConnUser => ({
+  id,
+  name: id,
+  isAdmin,
+  orgIds,
+});
 
 function makeHub(
   canvas: Canvas | null = fakeCanvas(),

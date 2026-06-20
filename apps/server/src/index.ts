@@ -147,6 +147,7 @@ async function main() {
     strategy,
     users,
     allowedEmails,
+    orgs,
     canvases,
     versions,
     drafts,

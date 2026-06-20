@@ -5,6 +5,7 @@ import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
 import { isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
+import type { OrgMembershipResolver } from "./org-membership.js";
 import { loginUrl, requestReturnTo } from "./return-to.js";
 import type { AuthStrategy } from "./strategy.js";
 
@@ -28,6 +29,9 @@ export interface AuthGatewayDeps {
   users: UsersRepository;
   /** Admin-managed individual email allowlist (D14 supplement to the env domains). */
   allowedEmails: Pick<AllowedEmailsRepository, "isAllowed">;
+  /** Resolves the caller's org membership from their verified identity (plan 002 U3).
+   *  Server-derived (email domain → org), never client-asserted. */
+  orgMembership: OrgMembershipResolver;
   audit?: AuthEventSink;
 }
 
@@ -64,8 +68,14 @@ export function authGateway(deps: AuthGatewayDeps) {
       return c.json({ error: "forbidden" }, 403);
     }
 
+    // Resolve org membership server-side (plan 002 U3) and carry it on the context so
+    // `requestPrincipal` can build the member principal synchronously. Derived from the
+    // verified user, never from anything the client sent.
+    const orgIds = await deps.orgMembership(user);
+
     deps.audit?.record({ action: "auth_ok", actorId: user.id, ip });
     c.set("user", user);
+    c.set("orgIds", orgIds);
     await next();
   });
 }

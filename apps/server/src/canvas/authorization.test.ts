@@ -55,9 +55,12 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
   };
 }
 
-const owner: Principal = { kind: "member", id: "owner", isAdmin: false };
-const other: Principal = { kind: "member", id: "other", isAdmin: false };
-const admin: Principal = { kind: "member", id: "admin", isAdmin: true };
+// Inferred (not annotated `: Principal`) so they stay assignable both to `Principal`
+// params and to the `{ id, isAdmin }` shape `appFor` sets as the user. orgIds ∅ — these
+// tests don't exercise org membership (that's U4's truth table).
+const owner = { kind: "member" as const, id: "owner", isAdmin: false, orgIds: new Set<string>() };
+const other = { kind: "member" as const, id: "other", isAdmin: false, orgIds: new Set<string>() };
+const admin = { kind: "member" as const, id: "admin", isAdmin: true, orgIds: new Set<string>() };
 const anon: Principal = { kind: "anonymous" };
 const guest = (canvasId = "cv1", email = "g@x.com"): Principal => ({
   kind: "guest",

@@ -66,7 +66,13 @@ export function canvasRealtimeRoutes(deps: CanvasRealtimeDeps): Hono<AppEnv> {
           }
           conn = deps.hub.connect(
             canvas.id,
-            { id: user.id, name: user.name, isAdmin: user.isAdmin, principal: requestPrincipal(c) },
+            {
+              id: user.id,
+              name: user.name,
+              isAdmin: user.isAdmin,
+              orgIds: c.get("orgIds") ?? new Set<string>(),
+              principal: requestPrincipal(c),
+            },
             socket,
           );
           if (!conn) {
