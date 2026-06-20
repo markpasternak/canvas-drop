@@ -4,6 +4,7 @@ type: feat
 date: 2026-06-20
 origin: docs/brainstorms/2026-06-20-multi-tenant-org-isolation-requirements.md
 status: ready
+reviewed: 2026-06-20
 depth: deep
 phase: 1
 invariant_critical: true
@@ -11,45 +12,48 @@ invariant_critical: true
 
 # feat: Tenancy Phase 1 — Org Boundary (9 units)
 
-> **Target worktree:** `feat/multi-tenant-orgs`, one PR. Paths are repo-relative; line-level
-> detail came from a code scan and is re-verified during implementation.
+> **Target worktree:** `feat/multi-tenant-orgs`, one PR. Paths are repo-relative and were
+> **verified against the code during a 5-lens plan review** (file refs below are confirmed).
 >
-> **Invariant-critical (§12).** This re-scopes the `whole_org` rung of `decideCanvasAccess` — an
-> authorization change on a live access path. A multi-agent `/ce-code-review` (security +
-> adversarial personas at minimum) is a **required gate** before this PR merges; weight findings
+> **Invariant-critical (§12).** This re-scopes the `whole_org` rung — an authorization change on a
+> live access path, across **three** enforcement seams (serve / list / clone). A multi-agent
+> `/ce-code-review` (security + adversarial) is a **required gate** before merge; weight findings
 > against the trust model in `docs/solutions/2026-06-13-auth-invariant-checklist.md`. Test
 > **rejection paths first**.
 >
-> **Operating mode:** there are real users + shares on the live instance, so this is **NOT** a
-> wipe-and-reseed. Migrations are additive + idempotent; the cutover (U8) ships a dry-run report.
+> **Operating mode:** there are real users + shares on the live instance — this is **NOT** a
+> wipe-and-reseed. Migrations are additive + idempotent; the cutover (U8) ships a dry-run + a
+> post-apply verification.
+>
+> **Branch note:** this branch is off `main`; the M10 backup work (`apps/server/src/ops/backup.ts`,
+> `BACKUP_TABLE_ORDER`, `docs/ops.md`) lives on an **unmerged** PR and does **not** exist here —
+> units reference `schema.test.ts` for table-parity and create `docs/tenancy.md` for the runbook.
 
 ## Summary
 
 Introduce the **org boundary** that solves the stated leak: brought-in guests (Gmail / other
 domains) can no longer see content shared "with the org." A canvas gains a **home tenant**
-(`org_id`, null = the owner's personal space); the caller's **org membership** is resolved
-server-side from their verified email domain; and the existing `whole_org` access rung is
-re-scoped from "any signed-in principal" to "**a member of the canvas's home org**" — enforced in
-the one authorization table, `decideCanvasAccess`, with no second seam. The org gallery filters to
-members. The dashboard gains a Personal/Org workspace surface; `/api/me` carries the caller's orgs;
-MCP inherits the scoping through the shared service layer. A dry-run report + an additive,
-idempotent migration auto-scopes existing data.
+(`org_id`, null = personal); the caller's **org membership** is resolved server-side from their
+verified email domain; and `whole_org` is re-scoped from "any signed-in member" to "**a member of
+the canvas's home org**." Because list and clone queries can't run the per-row decision table, the
+re-scope is enforced across **three seams** — `decideCanvasAccess` (serve), the shared
+`galleryVisibilityFilters` predicate (enumerate), and `findCloneableTemplate` (clone) — each
+rejection-tested. The dashboard gains a Personal/Org workspace surface; `/api/me` carries the
+caller's orgs; MCP inherits the scoping through the shared service layer. A dry-run + an additive,
+idempotent backfill + a post-apply verification auto-scope existing data.
 
-Build order: **schema → org config/repo → membership resolver → authorization re-scope → gallery /
-dashboard / MCP → cutover → invariant tests + review.** The schema gates everything; the resolver
-gates the authorization change; the authorization change gates the surfaces.
+Build order: **schema → org config/repo → DI membership resolver → the three-seam re-scope →
+gallery/dashboard/MCP → cutover → invariant tests + review.**
 
 ---
 
 ## Problem Frame
 
-Today `whole_org` resolves to "any principal that passed the org gateway." Once you allowlist a
-Gmail address to collaborate on one canvas, that guest is inside the same pool, so `whole_org`
-shares and the gallery leak to them. There is no per-canvas org scoping and no member/guest
-distinction beyond "can you sign in." This phase draws the boundary with the **smallest** surface
-that is also multi-org-ready: one new column on `canvases`, two small tables, a server-side
-membership resolver, and a one-rung change to the authorization table. See origin brainstorm for
-the full model, the locked decisions (D1–D11), and requirements (R1–R8, R12, R-sec).
+`whole_org` resolves to "any member that passed the gateway," and the gallery + clone-template
+queries take no viewer at all — so an allowlisted Gmail guest sees org content three ways. This
+phase draws the boundary with the smallest multi-org-ready surface: one column on `canvases`, two
+small tables, a DI server-side membership resolver, and the three-seam org-scope. See the origin
+brainstorm for the model, decisions (D1–D11), identity rules, and requirements (R1–R8, R12, R-sec).
 
 ---
 
@@ -57,59 +61,65 @@ the full model, the locked decisions (D1–D11), and requirements (R1–R8, R12,
 
 | Requirement | Units |
 |---|---|
-| R1 Org + domains model | U1, U2 |
-| R2 Canvas home tenant (`org_id`) | U1 |
-| R3 Member/guest classification at login | U3 |
-| R4 Re-scope `whole_org` | U4 |
-| R5 Org-scoped gallery + lists | U5 |
+| R1 Org + domains model (+ boot guards) | U1, U2 |
+| R2 Canvas home tenant + reserved `team` CHECK | U1 |
+| R3 DI member/guest classification | U3 |
+| R4 Re-scope `whole_org` (serve) | U4 |
+| R5 Org-scope all three seams | U4 (serve), U5 (list + clone) |
 | R6 Workspace surface + `/api/me` | U6 |
-| R7 MCP parity | U7 |
+| R7 MCP parity (+ gallery-over-MCP decision) | U7 |
 | R8 Cutover migration (auto-scope) | U8 |
-| R12 Safe cutover tooling (dry-run) | U8 |
-| R-sec Invariant tests (rejection-first) | U3, U4, U9 |
+| R12 Safe cutover tooling (dry-run + post-apply verify) | U8 |
+| R-sec Invariant tests (rejection-first) | U3, U4, U5, U9 |
 
 ---
 
 ## Key Technical Decisions
 
-**KTD1 — Personal space = `org_id IS NULL`.** A first-class workspace in the UI, but needs no
-table: a canvas with no org is personal. Keeps the schema minimal and the "every user has a
-personal space" model (D9) trivially true.
+**KTD1 — Personal space = `org_id IS NULL`** (no tenant table; the *absence* of a tenant, never a
+reserved "personal org" id; per-org features key off non-null `org_id`, personal falls back to
+per-user defaults).
 
-**KTD2 — Membership is DERIVED from domain in Phase 1.** No `org_members` table yet. The resolver
-computes membership = `lower(emailDomain(user.email)) ∈ org_domains`. Always consistent with the
-operator's domain map, no stale-row reconciliation, fewer moving parts. Explicit membership rows
-(needed for teams + future invited cross-domain members) arrive in **Phase 2**; the resolver
-interface is shaped so P2 swaps derivation for a union of (derived ∪ explicit) without touching
-callers.
+**KTD2 — Membership is DERIVED, server-side, domain-only, via a dependency-injected resolver.**
+`resolveOrgMembership(user): Promise<Set<string>>` computes membership = normalized exact domain
+match against `org_domains` — **independent of** `allowed_emails`/`ADMIN_EMAILS` (those grant
+sign-in, not membership; such users become **guests**, surfaced by the cutover). No `org_members`
+table in P1. Inject the resolver so P2 swaps the body for `derived ∪ explicit` with zero caller
+edits, and add `orgIds` to the `Principal` so `memberPrincipal(user, orgIds)` **requires** it —
+the compiler then forces every fabrication site (gateway, `requestPrincipal`, the realtime hub
+re-auth fallback, the MCP caller, screenshot capture) to populate it. Domain normalization:
+lowercase + strip trailing dot + reject/punycode non-ASCII; **exact** match (`u@eng.acme.com` ≠
+`acme.com` — operators enumerate subdomains).
 
-**KTD3 — One authorization seam.** The isolation change lives **only** in `decideCanvasAccess`
-(the §12 default-deny table). `whole_org` gains the predicate `viewer.orgIds.has(canvas.orgId)`;
-personal canvases (`orgId null`) can never satisfy `whole_org`/`team`. **Do not** add a parallel
-"requireTenant" guard — the checklist's lesson is that a second seam drifts from the first. Owner
-editing stays `requireOwnedCanvas` (unchanged); admins remain ordinary members for others'
-canvases.
+**KTD3 — Three enforcement seams, not one** (the review's central correction). The serve path runs
+`decideCanvasAccess`; list/clone queries **cannot** run a per-row function, so they get a shared SQL
+clause. The principle is "**one serve-decision table + one shared list/clone visibility predicate**,"
+both carrying `org_id ∈ viewer.orgIds`, both rejection-tested. Do **not** call this "one seam."
 
-**KTD4 — Config-first org, materialized at boot.** The operator defines the member org via config
+**KTD4 — Config-first org, materialized at boot, exactly one in P1.** Operator config
 (`CANVAS_DROP_ORG_NAME`, `CANVAS_DROP_ORG_DOMAINS` defaulting to `ALLOWED_EMAIL_DOMAINS`) — config
-is the only `process.env` reader (§8.1). A boot step upserts the org + its domains into `orgs` /
-`org_domains` (mirrors how admin emails are reconciled at boot), so config stays the source of
-truth and the DB rows are a materialization. Phase 3 will let DB rows lead for additional orgs.
+is the only `process.env` reader (§8.1). A boot step upserts the org + domains (mirrors admin-email
+reconciliation). **Boot guards:** reject a domain mapped to two orgs, and reject any config naming
+>1 org (P1 supports exactly one; multi-org is Phase 3) — this forecloses active-org ambiguity.
 
-**KTD5 — Additive dual-dialect migration discipline.** New tables + the nullable `canvases.org_id`
-are additive. Generate migrations for **both** dialects (`drizzle/pg/*` + `drizzle/sqlite/*`), keep
-`schema.pg.ts` / `schema.sqlite.ts` in lockstep via shared column helpers, keep the schema-parity
-test + CI matrix green. No destructive rewrite of live data (the production DB is not wiped).
+**KTD5 — Additive dual-dialect migrations; reserve `'team'` in the CHECK now.** New tables + nullable
+`canvases.org_id` are additive. **Also add `'team'` to `canvases_access_chk` in P1** (both dialects)
+even though `decideCanvasAccess` rejects `team` until P2 — this converts P2's otherwise-required
+SQLite **table-recreation** of the CHECK (the migration-0011 incident class; see
+`migrate-populated.test.ts` and `docs/solutions/2026-06-13-dual-dialect-drizzle-seam.md`) into a
+no-op. Generate migrations for both dialects, keep `schema.{pg,sqlite}.ts` in lockstep, keep the
+`schema.test.ts` parity test green. No destructive rewrite of live data.
 
-**KTD6 — Auto-scope is emergent, not a per-row rewrite.** Once `canvases.org_id` is backfilled
-(by owner domain) and `decideCanvasAccess` re-scopes `whole_org`, existing `whole_org` canvases
-become members-only **automatically** — there is no need to rewrite each canvas's `access` value.
-The backfill only sets `org_id`; `specific_people`/`private`/`public_link` rows are untouched.
+**KTD6 — Auto-scope is emergent + clamped.** Once `canvases.org_id` is backfilled (by owner domain)
+and the three seams re-scope, existing `whole_org` canvases become members-only automatically. The
+backfill sets `org_id` only (`WHERE org_id IS NULL`), but **must clamp** any `whole_org` canvas that
+resolves to `org_id NULL` (a guest-owned one) down to `private` — a `whole_org`+null row is an
+explicit-deny everywhere, but leaving it is a latent footgun.
 
-**KTD7 — Sign-in gate unchanged; guests stay invite-only.** A guest is simply a signed-in user
-whose email matches no org domain. The existing gate (`ALLOWED_EMAIL_DOMAINS` + `allowed_emails`
-allowlist) is unchanged; open self-signup is a **deferred toggle** (D8, Phase 4). Proxy mode keeps
-its current posture (external rungs disabled; guest resolver *not mounted*).
+**KTD7 — Sign-in gate unchanged; guests stay invite-only; active workspace is UX-only.** A guest is a
+signed-in user whose domain matches no org. The gate (`ALLOWED_EMAIL_DOMAINS` + `allowed_emails`) is
+unchanged; open signup is deferred (D8, P4). The dashboard's active workspace is a filter hint —
+every endpoint re-derives `orgIds` from the session; a client-asserted org is ignored for authz.
 
 ---
 
@@ -118,162 +128,195 @@ its current posture (external rungs disabled; guest resolver *not mounted*).
 ```mermaid
 graph LR
   subgraph P1A[Schema & resolution]
-    U1[U1 schema: orgs, org_domains,<br/>canvases.org_id + migrations]
-    U2[U2 org config + repo + boot upsert]
-    U3[U3 membership resolver<br/>principal.orgIds, server-side]
+    U1[U1 schema: orgs, org_domains,<br/>canvases.org_id, reserved team CHECK]
+    U2[U2 org config + repo + boot guards/upsert]
+    U3[U3 DI membership resolver<br/>principal.orgIds, server-side]
   end
-  subgraph P1B[Authorization]
-    U4[U4 decideCanvasAccess:<br/>whole_org = member of org_id]
+  subgraph P1B[Three seams]
+    U4[U4 serve: decideCanvasAccess<br/>whole_org = member of org_id]
+    U5[U5 list + clone predicate<br/>galleryVisibilityFilters, findCloneableTemplate]
   end
   subgraph P1C[Surfaces]
-    U5[U5 org-scoped gallery + lists]
     U6[U6 /api/me orgs + workspace switcher]
-    U7[U7 MCP parity]
+    U7[U7 MCP parity + create org_id]
   end
   subgraph P1D[Cutover & gate]
-    U8[U8 dry-run report + backfill migration]
+    U8[U8 dry-run + backfill + post-apply verify]
     U9[U9 rejection-first tests + ce-code-review]
   end
-  U1 --> U2 --> U3 --> U4
-  U4 --> U5 & U6 & U7
-  U4 --> U8 --> U9
-  U5 & U6 & U7 --> U9
+  U1 --> U2 --> U3 --> U4 --> U5
+  U4 --> U6
+  U5 --> U7
+  U4 & U5 --> U8 --> U9
+  U6 & U7 --> U9
 ```
+(U5 → U7: U7 consumes the `viewerOrgIds` parameter U5 adds to `GalleryListOptions`/clone — sequence
+them. U8's dry-run reads only domains + canvases, so it can run during U4 review, before the authz
+change is live.)
 
 ---
 
 ## Implementation Units
 
-### U1. Schema — `orgs`, `org_domains`, `canvases.org_id`
+### U1. Schema — `orgs`, `org_domains`, `canvases.org_id`, reserved `team`
 - **Files:** `packages/shared/src/db/schema.sqlite.ts`, `schema.pg.ts` (shared column helpers);
-  generated `drizzle/sqlite/*` + `drizzle/pg/*`; `BACKUP_TABLE_ORDER` in
-  `apps/server/src/ops/backup.ts` (add the two new tables, FK-ordered: `orgs` before
-  `org_domains`, both before `canvases`); the schema-parity + backup-order tests.
-- **Behavior:** `orgs(id, name, slug unique, created_at)`; `org_domains(id, org_id FK→orgs,
-  domain unique, created_at)`; `canvases.org_id` nullable FK → orgs (null = personal). All additive.
-- **Tests:** schema-parity test green on both dialects; `BACKUP_TABLE_ORDER` parity + FK-order
-  tests include the new tables (note: the backup work added an FK-order assertion — extend it).
-- **Acceptance:** `pnpm test` green both dialects; a generated migration exists for each dialect;
-  applying it on a populated DB is additive (no data loss).
+  generated `drizzle/sqlite/*` + `drizzle/pg/*` (latest is `0025`); the parity test
+  `packages/shared/src/db/schema.test.ts` (add the two tables to its table map). **No `backup.ts` /
+  `BACKUP_TABLE_ORDER` on this branch** — if the backup PR lands first, also extend its
+  `BACKUP_TABLE_ORDER` + FK-order test in a follow-up.
+- **Behavior:** `orgs(id, name, slug unique, created_at)`; `org_domains(id, org_id FK→orgs, domain
+  unique, created_at)` (consider a nullable `verified_at` now — operator rows = trusted — so P4's
+  verification is data, not a migration); `canvases.org_id` nullable FK → orgs. Add `'team'` to
+  `canvases_access_chk` (both dialects) — reserved, rejected by the guard until P2 (KTD5).
+- **Tests:** `schema.test.ts` parity green both dialects; a migration exists per dialect; applying
+  on a populated DB is additive (extend `migrate-populated.test.ts` for the CHECK change).
+- **Acceptance:** `pnpm test` green both dialects; additive migration (no data loss); no child table
+  gains `org_id` (isolation is transitive via `canvas_id`).
 
-### U2. Org config + repository + boot materialization
-- **Files:** `packages/shared/src/config/*` (new `CANVAS_DROP_ORG_NAME`, `CANVAS_DROP_ORG_DOMAINS`
-  → typed config, defaulting domains to `ALLOWED_EMAIL_DOMAINS`); new
-  `apps/server/src/db/repositories/orgs.ts`; boot wiring in `apps/server/src/index.ts` (upsert org
-  + domains, beside the existing admin-email reconciliation).
-- **Behavior:** `orgsRepository`: `findByDomain(domain)`, `ensureOrg({name, domains})` (idempotent
-  upsert), `listDomains(orgId)`. Boot upserts the configured org + domains. Domain matching is
-  case-insensitive and normalized.
-- **Tests:** repo unit tests (both dialects): upsert idempotency, domain lookup, domain
-  normalization; config tests for the new vars + the `ALLOWED_EMAIL_DOMAINS` default.
-- **Acceptance:** booting twice yields exactly one org + the configured domains; an unknown domain
-  resolves to "no org."
+### U2. Org config + repository + boot guards/materialization
+- **Files:** `packages/shared/src/config/env.ts` (new `CANVAS_DROP_ORG_NAME`,
+  `CANVAS_DROP_ORG_DOMAINS` → typed config, defaulting domains to the existing `ALLOWED_EMAIL_DOMAINS`
+  csv at ~line 199); new `apps/server/src/db/repositories/orgs.ts`; boot wiring in
+  `apps/server/src/index.ts` (beside the admin-email reconciliation / the search-text backfill at
+  ~line 181).
+- **Behavior:** `orgsRepository`: `ensureOrg({name, domains})` (idempotent upsert),
+  `findByDomain(normalizedDomain)`, `listDomains(orgId)`. Boot upserts the configured org + domains.
+  **Boot guards:** throw on a domain listed under two orgs; throw on a config naming >1 org (P1).
+- **Tests:** repo unit tests (both dialects) — upsert idempotency, domain lookup, normalization;
+  config tests for the new vars + the default; the two boot guards reject bad config.
+- **Acceptance:** booting twice yields one org + the configured domains; an unknown domain → "no
+  org"; multi-org / duplicate-domain config fails loudly at boot.
 
-### U3. Membership resolver (the classifier) — server-side only
-- **Files:** new `apps/server/src/auth/org-membership.ts`; session/identity resolution in
-  `apps/server/src/auth/*` + the request principal type in `apps/server/src/http/types.ts`
-  (attach `orgIds: Set<string>`); reuse the existing server-side identity (never client input).
-- **Behavior:** given the resolved user, return their org membership set = orgs whose domains
-  contain the user's verified email domain. A guest → empty set. Computed once per request and
-  carried on the principal. **Derivation only** (KTD2), interface ready for P2's explicit union.
-- **Tests (rejection-first):** member domain → correct org; guest domain → empty; **identity/
-  membership never read from a client header/body** (spoof attempt ignored); case/subdomain-of-
-  email edge cases; proxy + oidc + dev modes.
-- **Acceptance:** `c.get(principal).orgIds` is correct and server-derived for every auth mode; no
-  code path lets the client assert membership.
+### U3. DI membership resolver (the classifier) — server-side only
+- **Files:** new `apps/server/src/auth/org-membership.ts` (`resolveOrgMembership`, injected);
+  `apps/server/src/canvas/authorization.ts` (`memberPrincipal` at ~line 31 — add a required
+  `orgIds` param); `apps/server/src/http/types.ts` (~line 12 — add `orgIds: Set<string>` to the
+  member `Principal`, `∅` for guests); every fabrication site: the gateway/`requestPrincipal`
+  (`authorization.ts:192`), the realtime hub fallback (`realtime/hub.ts:345`), the MCP caller
+  (`mcp/server.ts:84`), capture.
+- **Behavior:** given the resolved user, return their org set = orgs whose normalized domains contain
+  the user's normalized verified email domain (exact). Guest → ∅. Computed once per request, carried
+  on the principal. Independent of `allowed_emails`/`ADMIN_EMAILS`.
+- **Tests (rejection-first):** member domain → correct org; guest / allowlisted-Gmail / admin-on-non-
+  org-domain → ∅; `u@eng.acme.com` vs `acme.com` (exact); trailing-dot + non-ASCII normalization;
+  **client-asserted org is ignored**; proxy + oidc + dev modes; the realtime fallback populates
+  `orgIds` (not ∅) so a live `whole_org` socket isn't wrongly dropped or kept.
+- **Acceptance:** `principal.orgIds` is correct + server-derived in every auth mode and on the
+  realtime re-auth path; no code path lets the client assert membership.
 
-### U4. Re-scope `whole_org` in `decideCanvasAccess` + home-tenant on create
-- **Files:** `apps/server/src/canvas/owner-guard.ts` / the `decideCanvasAccess` table (per the
-  grep it lives near `apps/server/src/auth/guest-public-resolver.ts` — confirm); canvas create in
-  `apps/server/src/routes/management.ts` (set `org_id` from the chosen workspace) + the service
-  wrapper; `apps/server/src/db/repositories/canvases.ts` (carry `org_id`).
-- **Behavior:** `whole_org` resolves **allow** only when `viewer.orgIds.has(canvas.org_id)` (and
-  `canvas.org_id` is non-null). A non-member viewing a `whole_org` canvas gets the §12.0 **not
-  found**. `team` is reserved (Phase 2) — until then it is not an accepted `access` value. On
-  create, a member may set `org_id` to an org they belong to (default) or null (personal); a guest
-  may only create personal; the server validates the chosen `org_id` against the caller's
-  membership (never trust the client's org claim).
-- **Tests (rejection-first):** guest → `whole_org` canvas = 404; member of A → `whole_org` canvas
-  of org B = 404; member → own org's `whole_org` = 200; personal `whole_org` is impossible
-  (rejected at write); owner always reaches their own canvas; admin is **not** a cross-org bypass;
-  `specific_people`/`public_link`/`private` behavior unchanged.
-- **Acceptance:** the full `decideCanvasAccess` truth table (principal × access × org-match) is
-  covered, rejection paths first; no second authorization seam introduced.
+### U4. Re-scope `whole_org` in `decideCanvasAccess` (serve seam) + home-tenant on create
+- **Files:** `apps/server/src/canvas/authorization.ts:85` (`decideCanvasAccess`; the `whole_org`
+  branch at ~line 138). NOT `owner-guard.ts` (that's the unrelated `requireOwnedCanvas` mutation
+  seam, unchanged). Canvas create in `apps/server/src/routes/management.ts` (`createSchema` ~line 93
+  + handler — add `org_id`) + the service wrapper; `db/repositories/canvases.ts` (carry `org_id`).
+- **Behavior:** `whole_org` allows iff `canvas.orgId != null && viewer.orgIds.has(canvas.orgId)`;
+  **explicit deny when `org_id` is null** (don't rely on `Set.has(null)`); non-member → §12.0 not
+  found. `team` is a reserved CHECK value but `decideCanvasAccess` **rejects** it (forward-ref guard,
+  Phase 2 implements). On create: a member may set `org_id` to an org they belong to (default per
+  open-item #1) or null; a guest only null; the server validates the chosen `org_id` against the
+  caller's membership (never trust the client).
+- **Tests (rejection-first):** guest → `whole_org` = 404; member of A → `whole_org` of B = 404;
+  member → own org's `whole_org` = 200; `whole_org`+`org_id NULL` = 404 (the row the cutover can
+  create); owner always reaches own; admin **not** a cross-org bypass; promote `specific_people`
+  (with a guest grant) → `whole_org` → back, asserting the guest's allowlist row persists but is
+  denied at `whole_org`; `private`/`public_link` unchanged.
+- **Acceptance:** the full `decideCanvasAccess` truth table (principal × access × org-match × null)
+  is covered, rejection-first; no second authorization seam introduced on the serve path.
 
-### U5. Org-scoped gallery + listings
-- **Files:** gallery + list queries in `apps/server/src/db/repositories/canvases.ts`; gallery
-  route + admin canvases route; dashboard `gallery.tsx` (unchanged contract, org-filtered data).
-- **Behavior:** the gallery (and any `whole_org` listing) returns only canvases whose `org_id` is
-  in the viewer's membership set. Guests/personal-only users get an empty org gallery (their
-  Personal view is separate). Admin cross-org listing stays on the dedicated admin route.
-- **Tests:** member sees only their org's listed canvases; guest sees none; a second org's listed
-  canvas never appears for org-A members; pagination/sort unaffected.
-- **Acceptance:** no cross-org canvas appears in any org-scoped list for a non-member.
+### U5. Org-scope the list + clone seams
+- **Files:** `apps/server/src/db/repositories/canvases.ts` — `galleryVisibilityFilters` (~line 264,
+  the shared closure used by `listGallery` ~1113, facets ~1204, trending ~401) and
+  `findCloneableTemplate` (~line 1245); the `GalleryListOptions` interface (+ `viewerOrgIds`);
+  `apps/server/src/routes/gallery.ts` (~line 158 — must start reading the principal); the clone path
+  in `management.ts` (~line 368).
+- **Behavior:** both the list predicate and `findCloneableTemplate` AND `org_id IS NOT NULL AND
+  org_id ∈ viewer.orgIds`. A guest/personal viewer → empty org gallery and cannot clone an org
+  template. Personal `public_link` templates (org_id null) remain cloneable as today.
+- **Tests (rejection-first):** an org-B member sees zero org-A canvases via browse **and** `/facets`
+  **and** trending; a guest's org gallery is empty; a guest clone of an org template → 404; an org-B
+  member clone of an org-A template → 404.
+- **Acceptance:** no `whole_org` canvas of an org the viewer isn't a member of appears in gallery,
+  facets, owner-list, trending, **or** is cloneable.
 
 ### U6. `/api/me` orgs + dashboard workspace surface
-- **Files:** `apps/server/src/routes/me.ts` (add `orgs: [{id, name, role}]` + `isGuest`);
-  dashboard `lib/api.ts` (restate the shape locally — no `@canvas-drop/shared` import), a workspace
-  switcher (Personal / Org), the create-canvas flow (home-tenant picker, members default Org),
-  list/gallery filtered by the active workspace.
+- **Files:** `apps/server/src/routes/me.ts` (add `orgs: [{id, name}]` + `isGuest`; **no `role` field
+  in P1** — no role model yet); dashboard `lib/api.ts` (restate the shape locally — no
+  `@canvas-drop/shared` import), a Personal/Org switcher, the create flow (home-tenant picker,
+  members default Org), list/gallery filtered by the active workspace.
 - **Behavior:** members see Personal + their org and can switch; guests see only Personal and no
-  org/team scope options in the share UI. The share-scope control offers `whole_org` only for an
-  org-home canvas owned by a member.
-- **Tests:** dashboard tests for the switcher, the guest-restricted share options, the
-  member-default-Org create; `/api/me` server tests (member vs guest shape).
-- **Acceptance:** a guest never sees an "org"/"team" share option or an org gallery; a member can
-  create into Personal or their org and the scope options match the home tenant.
+  org/team scope options in the share UI. The active workspace is **UX state only**; the server
+  re-derives `orgIds` and ignores any client-asserted org for authorization.
+- **Tests:** dashboard tests for the switcher + guest-restricted share options + member-default-Org
+  create; `/api/me` server tests (member vs guest shape); a request asserting `org=B` as an org-A-
+  only member sees only org-A.
+- **Acceptance:** a guest never sees an org/team share option or an org gallery; the active workspace
+  cannot widen a query.
 
 ### U7. MCP parity
-- **Files:** the MCP tool layer (`create_canvas`, `update_canvas`, `list_canvases`, `whoami`, and
-  any gallery/list tool) — wrap the **same** service-layer functions U4–U6 use; same `requireOwned`
-  / membership checks; same audit events.
+- **Files:** the MCP tool layer — `create_canvas` (add `org_id`, validated against membership, wraps
+  `management.ts` `createSchema`), `update_canvas` (re-scoped `whole_org`), `list_canvases`,
+  `whoami` (returns orgs/`isGuest`), `clone_canvas` (the U5 clone gate). Wrap the **same** service
+  functions as U4/U5; same checks; same audit events. **Sequenced after U5** (shared `viewerOrgIds`
+  interface).
 - **Behavior:** an agent can pick a canvas's home tenant on create, set the re-scoped `whole_org`,
-  and list org-scoped canvases — all under the caller's identity + membership, never a parallel
-  path. Cross-org admin actions stay off the per-account MCP surface (admin routes only).
-- **Tests:** MCP tests mirroring U4/U5 rejection paths (an agent acting as a guest can't set or
-  read `whole_org`); parity check that the owner surface == the UI surface.
-- **Acceptance:** anything a member can do in the UI for tenancy, an agent can do over MCP, with
-  identical scoping.
+  and is subject to the same clone gate. **Decision (agent-native parity):** the UI's new org-gallery
+  browse is *not* reachable via the owner-scoped `list_canvases`; either add a scoped `list_gallery`
+  MCP tool (wraps `listGallery` with the caller's `orgIds`) **or** record org-gallery-browse-over-MCP
+  as an explicit P2 deferral. Pick one in this unit — don't let "inherits for free" hide the gap.
+- **Tests:** MCP rejection paths mirroring U4/U5 (an agent acting as a guest can't set/read/clone
+  `whole_org`); parity check.
+- **Acceptance:** anything a member can do in the UI for tenancy, an agent can do over MCP with
+  identical scoping; the org-gallery decision is recorded.
 
-### U8. Cutover — dry-run report + idempotent backfill
-- **Files:** new `apps/server/scripts/tenancy-plan.ts` (dry-run) and the backfill (a migration step
-  or a one-time TS backfill mirroring the `searchText` backfill precedent); `docs/ops.md` (runbook
-  entry).
-- **Behavior:** **dry-run (`pnpm tenancy:plan`)** reports, per user, member-vs-guest classification,
-  and per canvas, the computed `org_id` + the resulting access delta (which current viewers gain/
-  lose visibility) — **no writes**. **Apply** seeds the member org (idempotent, from config) and
-  sets `org_id` on existing canvases by **owner domain** (member-owned → the org; guest-owned →
-  null/personal); `whole_org` becomes members-only automatically (KTD6). Idempotent + additive;
-  re-runnable.
-- **Tests:** dry-run produces the correct deltas on a seeded fixture (member canvas org-scoped;
-  guest canvas personal; a guest who currently sees a `whole_org` canvas is listed as "loses
-  access"); apply is idempotent (second run is a no-op); `specific_people`/`private` untouched.
-- **Acceptance:** the dry-run matches the live apply; running apply twice changes nothing the
-  second time; no canvas's `access` value is rewritten.
+### U8. Cutover — dry-run + idempotent backfill + post-apply verification
+- **Files:** new `apps/server/scripts/tenancy-plan.ts` (dry-run) + the backfill (a one-time TS
+  backfill mirroring the search-text backfill, or a migration step); new `docs/tenancy.md` runbook
+  (`docs/ops.md` is on the unmerged backup PR — don't reference it).
+- **Behavior:** **dry-run (`pnpm tenancy:plan`)** reports, per user, member/guest classification
+  (flagging allowlisted-/admin-on-non-org-domain users now reclassified as guests), and per canvas
+  the computed `org_id` + access delta (who **gains or loses** visibility) — no writes. **Apply**
+  seeds the org (idempotent) and sets `org_id` by **owner domain** with `WHERE org_id IS NULL`
+  (resumes after partial failure; never re-touches a corrected row), and **clamps** any guest-owned
+  `whole_org` → `private`. **Post-apply verify** re-runs the classifier and asserts zero deltas vs
+  the dry-run. Run the dry-run **before every apply**, including config-changed re-applies.
+- **Tests:** dry-run deltas correct on a fixture (member→org, guest→personal, a guest currently
+  seeing a `whole_org` canvas listed as "loses access", an allowlisted user flagged); apply
+  idempotent (second run no-op); backfill sets `org_id` only to the **owner-domain-matching** org
+  (never an arbitrary one); `specific_people`/`private` untouched; post-apply verify catches an
+  injected mismatch.
+- **Acceptance:** dry-run matches the live apply; re-apply changes nothing; no `access` value is
+  rewritten **except** the guest-owned-`whole_org`→`private` clamp.
 
 ### U9. Invariant test pass + mandatory review
-- **Files:** cross-cutting integration tests under `apps/server/src/routes/*.test.ts`; this unit is
-  also the **process gate**.
-- **Behavior:** a focused rejection-first suite covering the U3/U4 matrix end-to-end (HTTP + MCP),
-  plus the §12 checklist items relevant here (membership server-only; admin not a bypass; guest
-  scoped). Then run `/ce-code-review` (security + adversarial + correctness) on the branch and fix
-  every real finding with a regression test before opening the PR.
-- **Tests:** the suite itself; both dialects; green CI matrix.
-- **Acceptance:** rejection paths covered first and green; `/ce-code-review` run and findings
-  resolved; CI matrix green on both dialects.
+- **Files:** cross-cutting integration tests under `apps/server/src/routes/*.test.ts` +
+  `canvas-realtime`/social-preview tests; this unit is also the **process gate**.
+- **Behavior:** a rejection-first suite covering the U3/U4/U5 matrix end-to-end (HTTP + MCP), the
+  realtime re-auth path (a `whole_org` socket: member stays, non-member dropped, hub fallback
+  populates `orgIds`), and the OG/social-preview + `?rendition=og` paths (a `whole_org` canvas emits
+  only the generic card to a crawler/anonymous; the OG image stays `private`-cached). Then run
+  `/ce-code-review` (security + adversarial + correctness) and fix every real finding with a
+  regression test before the PR.
+- **Tests:** the suite; both dialects; green CI matrix.
+- **Acceptance:** rejection paths covered first and green; `/ce-code-review` run + findings resolved;
+  CI matrix green both dialects.
 
 ---
 
 ## Rollout
 
-1. Merge behind the additive schema (orgs/domains/org_id) — inert until config names an org.
-2. Run `pnpm tenancy:plan` against a **restored copy** of production (the backup/restore drill is
-   the perfect vehicle) and review the access-delta report.
+1. Merge behind the additive schema — inert until config names an org.
+2. Run `pnpm tenancy:plan` against a **restored copy** of production and review the access-delta
+   report (gains **and** losses, incl. reclassified allowlist users). The dry-run has no dependency
+   on U4 being deployed, so review it during U4.
 3. Set `CANVAS_DROP_ORG_NAME` (+ confirm `CANVAS_DROP_ORG_DOMAINS`); deploy; the boot upsert
-   materializes the org; run the backfill. `whole_org` becomes members-only; guests retain only
-   `specific_people` grants. Reversible: clearing `org_id` restores the prior (leaky) behavior.
+   materializes the org; run the backfill; the post-apply verify confirms the live state matches the
+   dry-run. `whole_org` becomes members-only; guests retain only `specific_people` grants.
+   Reversible: clearing `org_id` restores the prior behavior.
 
 ## Out of scope (later phases)
 
-Teams + the `team` rung (P2); >1 org + subdomain-per-org + per-org quotas (P3); self-serve signup +
-per-org admin console (P4). No per-org RBAC matrix in P1 (D10).
+Teams + the `team` rung implementation (P2; the CHECK value is reserved here); >1 org +
+subdomain-per-org + host-scoped cookies + per-org quotas (P3); self-serve signup + per-org admin
+console + roles (P4). No per-org RBAC matrix in P1 (D10). The member→guest / owner-leaves lifecycle
+reconciliation (R13) is captured in the brainstorm and planned at depth in P2/P3; P1 only ensures
+the owner-bypass keeps working and the dry-run surfaces the reclassification.

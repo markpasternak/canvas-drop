@@ -41,9 +41,15 @@ self-administration. The data model is ready; the **trust model** is what change
 
 ## Key Technical Decisions (provisional)
 
-- **KTD1 — Verified domain claim.** An org owner proves domain ownership (DNS TXT record or an
-  email challenge to a same-domain address) before the domain → org mapping is trusted. No
-  unverified domain ever grants membership.
+- **KTD1 — Verified domain claim, with confusable defense.** An org owner proves domain ownership
+  (DNS TXT record or an email challenge to a privileged same-domain mailbox) before the domain → org
+  mapping is trusted. No unverified domain ever grants membership. **Proving ownership is not
+  enough:** the claim flow must also reject **homoglyph / confusable / IDN look-alikes** of an
+  already-claimed domain (e.g. Cyrillic `аcme.com` vs `acme.com`) — punycode-fold + a confusable-skeleton
+  check — otherwise an attacker who legitimately owns a look-alike domain claims an org that reads as
+  someone else's. (P1 already normalizes to ASCII; P4 adds the look-alike-collision check.) If P1
+  added the suggested nullable `org_domains.verified_at` (operator-config rows = trusted/non-null),
+  this phase flips semantics by **writing data**, not migrating the live multi-org table.
 - **KTD2 — Signup is a toggle with teeth.** `CANVAS_DROP_ALLOW_SELF_SIGNUP` flips guest self-signup
   on; it ships **with** abuse controls, never before: email verification, IP/account rate limits,
   per-new-account resource caps, and an operator kill-switch. Invite-only remains the default.
