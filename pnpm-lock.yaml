@@ -156,6 +156,12 @@ importers:
       '@canvas-drop/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@fontsource-variable/geist':
+        specifier: ^5.2.5
+        version: 5.2.9
+      '@fontsource-variable/geist-mono':
+        specifier: ^5.2.5
+        version: 5.2.8
       '@fontsource-variable/newsreader':
         specifier: ^5.2.5
         version: 5.2.10

@@ -38,18 +38,28 @@ const PUBLIC_DIR = join(REPO_ROOT, "apps/dashboard/public");
  * one normal, one italic (the hero's italic-accent clause). `format('woff2-variations')`
  * + `font-weight: 200 800` in the page `@font-face` matches the fontsource definitions.
  */
+// Self-hosted display faces for the pre-gateway server surfaces (landing, error,
+// legal). Newsreader is the editorial serif; Geist + Geist Mono are the display faces
+// the `workshop`/`canvas` skins switch to, so a skinned landing renders faithfully
+// without a CDN. Route → the package import spec for the woff2 (resolved below).
 const FONTS: Record<string, string> = {
-  "/fonts/newsreader-latin-wght-normal.woff2": "newsreader-latin-wght-normal.woff2",
-  "/fonts/newsreader-latin-standard-italic.woff2": "newsreader-latin-standard-italic.woff2",
+  "/fonts/newsreader-latin-wght-normal.woff2":
+    "@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2",
+  "/fonts/newsreader-latin-standard-italic.woff2":
+    "@fontsource-variable/newsreader/files/newsreader-latin-standard-italic.woff2",
+  "/fonts/geist-latin-wght-normal.woff2":
+    "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2",
+  "/fonts/geist-mono-latin-wght-normal.woff2":
+    "@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2",
 };
 
-/** Absolute path to a Newsreader woff2 inside the resolved package `files/` dir.
+/** Absolute path to a self-hosted woff2 inside its resolved fontsource package.
  *  Resolved via Node's real module resolver (`createRequire`) so it is correct from
  *  both `src/` and `dist/` and across the pnpm store layout — and unaffected by the
  *  test bundler's `import.meta.resolve` override. */
 const requireFont = createRequire(import.meta.url);
-function fontPath(file: string): string {
-  return requireFont.resolve(`@fontsource-variable/newsreader/files/${file}`);
+function fontPath(spec: string): string {
+  return requireFont.resolve(spec);
 }
 
 const ASSETS: Record<string, { file: string; type: string }> = {

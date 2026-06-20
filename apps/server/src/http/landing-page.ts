@@ -263,6 +263,22 @@ const STYLES = `
   font-weight: 200 800;
   src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
 }
+/* Geist (sans, the body + the canvas skin's display) and Geist Mono (the workshop
+   skin's display) — self-hosted too, so every skin renders faithfully with no CDN. */
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
+}
 :root {
 ${rampCssVars("light", "  ")}
   --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
