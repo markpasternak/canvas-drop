@@ -557,6 +557,12 @@ export function useAdminSetConfig() {
       value: string | number | boolean | string[] | null;
     }) => (value === null ? api.admin.clearConfig(key) : api.admin.setConfig(key, value)),
     // The effective AI key/models also feed the capabilities view; refresh broadly.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin"] });
+      // Re-resolve /api/me so a design-skin Save/Clear converges the live <html data-skin> to
+      // the effective value: Clear has no concrete value to commit eagerly, and any open
+      // session reconciles on its next me refetch. SkinSync re-applies it + refreshes the cache.
+      qc.invalidateQueries({ queryKey: keys.me });
+    },
   });
 }

@@ -5,6 +5,16 @@
 @import "tailwindcss";
 @import "./tokens.css";
 
+/* Display-type utility — the active skin's display face (family + weight) for app-chrome
+   titles (page / card / section headings). Tracking stays per-surface (each title keeps
+   its own letter-spacing; page titles opt into the skin's --display-tracking explicitly)
+   so the editorial default is unchanged. Bare prose headings keep the serif content voice
+   (the h1–h4 base rule below). A [data-skin] re-voices every display title at once. */
+@utility font-display {
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+}
+
 @layer base {
   *,
   *::before,
@@ -191,3 +201,19 @@
 .cd-anim-pop[data-state="closed"] { animation: cd-pop-out 130ms var(--ease-in, ease-in) forwards; }
 .cd-anim-toast[data-state="closed"] { animation: cd-toast-out 150ms var(--ease-in, ease-in) forwards; }
 .cd-anim-sheet[data-state="closed"] { animation: cd-sheet-out 130ms var(--ease-in, ease-in) forwards; }
+
+/*
+ * Opt-in structural chrome (the prototype's per-direction flavour). These elements are
+ * always in the DOM but hidden by default — pure CSS reveals them only for the skins
+ * whose design language calls for them, so there are NO React/layout forks and the
+ * editorial/studio default is untouched. `[data-skin]` lives on <html>, so a descendant
+ * rule (0,2,0) cleanly wins over the base hide (0,1,0).
+ *   · cd-statusbar  — an IDE-style footer (workshop + canvas)
+ *   · cd-window-dots — playful "browser window" traffic-lights (canvas)
+ */
+.cd-statusbar { display: none; }
+:root[data-skin="workshop"] .cd-statusbar,
+:root[data-skin="canvas"] .cd-statusbar { display: flex; }
+
+.cd-window-dots { display: none; }
+:root[data-skin="canvas"] .cd-window-dots { display: inline-flex; }

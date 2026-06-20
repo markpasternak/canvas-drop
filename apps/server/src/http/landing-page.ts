@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Config, MARKETING_ACCENT, rampCssVars } from "@canvas-drop/shared";
+import {
+  type Config,
+  MARKETING_ACCENT,
+  rampCssVars,
+  type SkinName,
+  skinOverridesCss,
+} from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -226,7 +232,9 @@ ${FAVICON_LINKS}
 <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
-<style>${STYLES}</style>`;
+<style>${STYLES}
+/* Design-skin overrides (expression layer) — selected by <html data-skin>. */
+${skinOverridesCss()}</style>`;
 }
 
 /**
@@ -255,9 +263,28 @@ const STYLES = `
   font-weight: 200 800;
   src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
 }
+/* Geist (sans, the body + the canvas skin's display) and Geist Mono (the workshop
+   skin's display) — self-hosted too, so every skin renders faithfully with no CDN. */
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
+}
 :root {
 ${rampCssVars("light", "  ")}
   --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  /* Display face defaults to the editorial serif; a [data-skin] re-voices it. */
+  --font-display: var(--font-serif);
+  --radius-scale: 1;
   --amber: ${MARKETING_ACCENT.light.amber};
   --amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};
   --shadow-color: 40 30% 38%;
@@ -294,7 +321,7 @@ body {
 a { color: inherit; text-decoration: none; }
 .wrap { width: min(100%, var(--maxw)); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 2.5rem); }
 .mono { font-family: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; }
-.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
+.serif { font-family: var(--font-display); font-optical-sizing: auto; }
 
 /* --- top bar --- */
 header {
@@ -563,6 +590,7 @@ export function renderLandingPage(
   origin = "",
   authMode: Config["auth"]["mode"] = "oidc",
   signedIn = false,
+  skin: SkinName = "editorial",
 ): string {
   // Primary CTA target. A signed-in viewer (only possible on the always-public
   // `/welcome` alias — `/` only renders this page when signed out) gets a direct
@@ -581,8 +609,11 @@ export function renderLandingPage(
       `<div class="value reveal"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
   ).join("\n");
 
+  // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
+  // attribute for editorial) — only the alternates stamp data-skin, so there's no surface
+  // divergence and no [data-skin="editorial"] rule is ever needed.
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${skin === "editorial" ? "" : ` data-skin="${skin}"`}>
 <head>
 ${head(origin)}
 </head>
@@ -744,7 +775,7 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
  * the work and emit two `Set-Cookie`s on the hottest authed path. An expired
  * cookie still falls through and the gateway redirects to login — never worse.
  */
-export function landingGate(deps: { config: Config }) {
+export function landingGate(deps: { config: Config; skin?: () => Promise<SkinName> }) {
   return createMiddleware<AppEnv>(async (c, next) => {
     if (deps.config.auth.mode !== "oidc") return next();
     if (c.req.path !== "/") return next();
@@ -762,7 +793,7 @@ export function landingGate(deps: { config: Config }) {
       deps.config,
     );
     if (role === "canvas") return next();
-    return landingResponse(deps.config);
+    return landingResponse(deps.config, deps.skin ? { skin: await deps.skin() } : {});
   });
 }
 
@@ -773,7 +804,10 @@ export function landingGate(deps: { config: Config }) {
  * is `private` + `Vary: Cookie` — a shared/CDN cache must never serve one auth
  * state's page to the other.
  */
-export function landingResponse(config: Config, opts: { signedIn?: boolean } = {}): Response {
+export function landingResponse(
+  config: Config,
+  opts: { signedIn?: boolean; skin?: SkinName } = {},
+): Response {
   const headers = new Headers();
   baseSecurityHeaders(headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
@@ -784,8 +818,16 @@ export function landingResponse(config: Config, opts: { signedIn?: boolean } = {
   );
   headers.set("Cache-Control", "private, max-age=300");
   headers.set("Vary", "Cookie");
-  return new Response(renderLandingPage(config.baseUrl, config.auth.mode, opts.signedIn ?? false), {
-    status: 200,
-    headers,
-  });
+  return new Response(
+    renderLandingPage(
+      config.baseUrl,
+      config.auth.mode,
+      opts.signedIn ?? false,
+      opts.skin ?? config.designSkin,
+    ),
+    {
+      status: 200,
+      headers,
+    },
+  );
 }

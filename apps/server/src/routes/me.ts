@@ -1,4 +1,4 @@
-import type { AuthMode } from "@canvas-drop/shared";
+import type { AuthMode, SkinName } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import type { AppEnv } from "../http/types.js";
 
@@ -15,6 +15,10 @@ export interface MeRoutesDeps {
   /** Instance URL shape (plan 004) — lets the dashboard render a faithful slug URL preview. */
   urlMode: "path" | "subdomain";
   baseUrl: string;
+  /** Resolver for the active design skin — the EFFECTIVE value (admin DB override over
+   *  env/default), read per-request so an admin's runtime flip takes effect without a
+   *  restart. The SPA applies the result to <html data-skin>. */
+  designSkin: () => Promise<SkinName>;
 }
 
 /**
@@ -33,7 +37,7 @@ export interface MeRoutesDeps {
 export function meRoutes(deps: MeRoutesDeps) {
   const app = new Hono<AppEnv>();
 
-  app.get("/", (c) => {
+  app.get("/", async (c) => {
     const u = c.get("user");
     return c.json({
       id: u.id,
@@ -49,6 +53,9 @@ export function meRoutes(deps: MeRoutesDeps) {
       // The dashboard uses these to preview a custom slug's final URL before create.
       urlMode: deps.urlMode,
       baseUrl: deps.baseUrl,
+      // Active design skin (presentation only) — the EFFECTIVE value (admin override
+      // over env/default), resolved per-request. The SPA applies it to <html data-skin>.
+      designSkin: await deps.designSkin(),
     });
   });
 
