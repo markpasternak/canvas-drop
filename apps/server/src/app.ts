@@ -479,6 +479,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       authMode: deps.config.auth.mode,
       urlMode: deps.config.urlMode,
       baseUrl: deps.config.baseUrl,
+      designSkin: deps.config.designSkin,
     }),
   );
 

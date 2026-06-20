@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { BRAND_TOKENS } from "./tokens.js";
 import {
   ACCENT_ROLE_ORDER,
   DEFAULT_SKIN,
   isSkinName,
   SKIN_NAMES,
   SKINS,
-  skinAccentCssVars,
-  skinDisplayCssVars,
   SYNTAX_ROLE_ORDER,
   SYNTAX_TOKENS,
+  skinAccentCssVars,
+  skinDisplayCssVars,
+  skinOverridesCss,
   syntaxCssVars,
 } from "./skins.js";
+import { BRAND_TOKENS } from "./tokens.js";
 
 // hue ~270–279 (indigo-violet), in any oklch form — the SaaS default the rebrand
 // rejected. Also catches a stray 27x digit run. Mirrors the guard in tokens.test.ts.
@@ -92,5 +93,21 @@ describe("design skins model", () => {
 
     const syn = syntaxCssVars("dark", "  ");
     expect(syn).toContain(`--syn-keyword: ${SYNTAX_TOKENS.dark["syn-keyword"]};`);
+  });
+
+  it("skinOverridesCss emits a block per non-default skin (server surfaces)", () => {
+    const css = skinOverridesCss();
+    // editorial is the base :root — no override block.
+    expect(css).not.toContain('data-skin="editorial"');
+    for (const skin of ["studio", "workshop", "canvas"] as const) {
+      expect(css).toContain(`:root[data-skin="${skin}"] {`);
+      expect(css).toContain(SKINS[skin].light.accent);
+      // Dark accents live under the OS @media path by default (no theme toggle).
+      expect(css).toContain(`:root[data-skin="${skin}"]:not([data-theme="light"])`);
+      expect(css).toContain(SKINS[skin].dark.accent);
+    }
+    // No manual [data-theme="dark"] selector unless asked.
+    expect(css).not.toContain('[data-theme="dark"]');
+    expect(skinOverridesCss({ darkToggle: true })).toContain('[data-theme="dark"]');
   });
 });

@@ -25,6 +25,26 @@ const proxy: Config = loadConfig({
   CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.1",
 });
 
+describe("landing page design skin", () => {
+  it("defaults to the editorial skin on <html>", () => {
+    expect(renderLandingPage("https://x.com", "oidc", false)).toContain('data-skin="editorial"');
+  });
+
+  it("stamps the chosen skin on <html> and ships the skin override CSS", () => {
+    const html = renderLandingPage("https://x.com", "oidc", false, "canvas");
+    expect(html).toContain('data-skin="canvas"');
+    // The override block for the chosen skin is present (selected by the attribute).
+    expect(html).toContain(':root[data-skin="canvas"]');
+    expect(html).toContain(':root[data-skin="workshop"]');
+  });
+
+  it("landingResponse stamps the instance's configured skin", async () => {
+    const cfg = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_DESIGN_SKIN: "studio" });
+    const html = await landingResponse(cfg, { signedIn: false }).text();
+    expect(html).toContain('data-skin="studio"');
+  });
+});
+
 /** Mount landingGate ahead of a sentinel that stands in for the gateway + SPA. */
 function app(config: Config) {
   const a = new Hono<AppEnv>();

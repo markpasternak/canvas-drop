@@ -1,4 +1,4 @@
-import type { AuthMode } from "@canvas-drop/shared";
+import type { AuthMode, SkinName } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import type { AppEnv } from "../http/types.js";
 
@@ -15,6 +15,8 @@ export interface MeRoutesDeps {
   /** Instance URL shape (plan 004) — lets the dashboard render a faithful slug URL preview. */
   urlMode: "path" | "subdomain";
   baseUrl: string;
+  /** Active instance-wide design skin (expression layer) — the SPA sets it on <html>. */
+  designSkin: SkinName;
 }
 
 /**
@@ -49,6 +51,8 @@ export function meRoutes(deps: MeRoutesDeps) {
       // The dashboard uses these to preview a custom slug's final URL before create.
       urlMode: deps.urlMode,
       baseUrl: deps.baseUrl,
+      // Active design skin (presentation only) — the SPA applies it to <html data-skin>.
+      designSkin: deps.designSkin,
     });
   });
 

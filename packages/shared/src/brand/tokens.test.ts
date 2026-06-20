@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   ACCENT_ROLE_ORDER,
   SKINS,
+  type SkinName,
   SYNTAX_ROLE_ORDER,
   SYNTAX_TOKENS,
-  type SkinName,
 } from "./skins.js";
 import { BRAND_TOKENS, RAMP_ROLE_ORDER, type ThemeName } from "./tokens.js";
 

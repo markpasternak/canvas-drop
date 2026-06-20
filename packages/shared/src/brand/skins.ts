@@ -233,3 +233,31 @@ export function syntaxCssVars(theme: ThemeName, indent = "  "): string {
   const syn = SYNTAX_TOKENS[theme];
   return SYNTAX_ROLE_ORDER.map((role) => `${indent}--${role}: ${syn[role]};`).join("\n");
 }
+
+/**
+ * Emit the full `[data-skin]` override CSS for every non-default skin — accent family
+ * + display bundle (light) and the accent family under the dark path(s). The default
+ * skin (editorial) is the base `:root`, so it gets no block. Server-rendered surfaces
+ * (landing, etc.) inject this so they re-skin from the SAME source as the dashboard's
+ * hand-authored tokens.css. `darkToggle` adds the manual `[data-theme="dark"]` selector
+ * (surfaces with a theme toggle); OS-only surfaces (the landing) leave it off.
+ */
+export function skinOverridesCss(opts: { darkToggle?: boolean } = {}): string {
+  const { darkToggle = false } = opts;
+  const blocks: string[] = [];
+  for (const skin of SKIN_NAMES) {
+    if (skin === DEFAULT_SKIN) continue;
+    blocks.push(
+      `:root[data-skin="${skin}"] {\n${skinAccentCssVars(skin, "light")}\n${skinDisplayCssVars(skin)}\n}`,
+    );
+    blocks.push(
+      `@media (prefers-color-scheme: dark) {\n  :root[data-skin="${skin}"]:not([data-theme="light"]) {\n${skinAccentCssVars(skin, "dark", "    ")}\n  }\n}`,
+    );
+    if (darkToggle) {
+      blocks.push(
+        `:root[data-skin="${skin}"][data-theme="dark"] {\n${skinAccentCssVars(skin, "dark")}\n}`,
+      );
+    }
+  }
+  return blocks.join("\n");
+}

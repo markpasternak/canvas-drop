@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cdHighlightStyle, CodeEditor } from "../components/CodeEditor.js";
+import { CodeEditor, cdHighlightStyle } from "../components/CodeEditor.js";
 
 /**
  * Guards the brand-tokenized highlighting (R17 polish): the editor must mount with the
@@ -17,9 +17,7 @@ describe("CodeEditor — brand-tokenized highlighting", () => {
   });
 
   it("mounts with the highlighting extension and renders the document", () => {
-    render(
-      <CodeEditor path="script.js" value="const answer = 42;" onChange={vi.fn()} readOnly />,
-    );
+    render(<CodeEditor path="script.js" value="const answer = 42;" onChange={vi.fn()} readOnly />);
     const host = document.querySelector('[data-testid="code-editor"]');
     expect(host).not.toBeNull();
     // CodeMirror renders the doc into .cm-content; the source text must be present.

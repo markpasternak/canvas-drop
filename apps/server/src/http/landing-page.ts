@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Config, MARKETING_ACCENT, rampCssVars } from "@canvas-drop/shared";
+import {
+  type Config,
+  MARKETING_ACCENT,
+  rampCssVars,
+  type SkinName,
+  skinOverridesCss,
+} from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -226,7 +232,9 @@ ${FAVICON_LINKS}
 <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
-<style>${STYLES}</style>`;
+<style>${STYLES}
+/* Design-skin overrides (expression layer) — selected by <html data-skin>. */
+${skinOverridesCss()}</style>`;
 }
 
 /**
@@ -258,6 +266,9 @@ const STYLES = `
 :root {
 ${rampCssVars("light", "  ")}
   --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  /* Display face defaults to the editorial serif; a [data-skin] re-voices it. */
+  --font-display: var(--font-serif);
+  --radius-scale: 1;
   --amber: ${MARKETING_ACCENT.light.amber};
   --amber-ink: ${MARKETING_ACCENT.light["amber-ink"]};
   --shadow-color: 40 30% 38%;
@@ -294,7 +305,7 @@ body {
 a { color: inherit; text-decoration: none; }
 .wrap { width: min(100%, var(--maxw)); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 2.5rem); }
 .mono { font-family: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace; }
-.serif { font-family: var(--font-serif); font-optical-sizing: auto; }
+.serif { font-family: var(--font-display); font-optical-sizing: auto; }
 
 /* --- top bar --- */
 header {
@@ -563,6 +574,7 @@ export function renderLandingPage(
   origin = "",
   authMode: Config["auth"]["mode"] = "oidc",
   signedIn = false,
+  skin: SkinName = "editorial",
 ): string {
   // Primary CTA target. A signed-in viewer (only possible on the always-public
   // `/welcome` alias — `/` only renders this page when signed out) gets a direct
@@ -582,7 +594,7 @@ export function renderLandingPage(
   ).join("\n");
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-skin="${skin}">
 <head>
 ${head(origin)}
 </head>
@@ -784,8 +796,11 @@ export function landingResponse(config: Config, opts: { signedIn?: boolean } = {
   );
   headers.set("Cache-Control", "private, max-age=300");
   headers.set("Vary", "Cookie");
-  return new Response(renderLandingPage(config.baseUrl, config.auth.mode, opts.signedIn ?? false), {
-    status: 200,
-    headers,
-  });
+  return new Response(
+    renderLandingPage(config.baseUrl, config.auth.mode, opts.signedIn ?? false, config.designSkin),
+    {
+      status: 200,
+      headers,
+    },
+  );
 }

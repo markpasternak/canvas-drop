@@ -12,7 +12,6 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { EditorState, type Extension } from "@codemirror/state";
-import { tags as t } from "@lezer/highlight";
 import {
   drawSelection,
   EditorView,
@@ -21,6 +20,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
+import { tags as t } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
 
 /** Pick a CodeMirror language extension from a file path's extension (R17). */
