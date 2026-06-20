@@ -16,8 +16,9 @@
  * Scale note: dumps whole tables into memory per table — correct and simple at the
  * single-org (D13) target. A streaming/cursored variant is a future refinement.
  */
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import { getTableName, is } from "drizzle-orm";
@@ -63,6 +64,11 @@ export const BACKUP_TABLE_ORDER = [
 
 /** Rows per INSERT — bounds the bound-parameter count well under SQLite/Postgres limits. */
 const INSERT_BATCH = 200;
+
+/** A content-addressed blob key — `canvases/{id}/blobs/{sha256-hex}`. Only these carry
+ *  their integrity hash in the key; other storage keys (e.g. `screenshots/…`) don't and
+ *  are copied verbatim without a hash check. Mirrors upload/service.ts's staged check. */
+const CONTENT_ADDRESSED_KEY = /^canvases\/[^/]+\/blobs\/([0-9a-f]{64})$/;
 
 export interface BackupDeps {
   client: DbClient;
@@ -188,8 +194,16 @@ export interface RestoreOptions {
 
 /**
  * Restore a backup produced by {@link createBackup} into the configured DB + storage.
- * Runs migrations first (so the target can be an empty, un-migrated DB), then inserts
- * rows parent-first and re-puts every blob. Refuses a non-empty DB unless `force`.
+ *
+ * **Integrity-first.** It pre-flights the WHOLE backup against `meta.json` (every table's
+ * row count, the blob count + total bytes) and refuses on any mismatch BEFORE writing a
+ * single row — a backup whose `meta.json` survived a partial transfer but whose
+ * `db/*.ndjson` or blobs were dropped/truncated is rejected, never restored silently
+ * short (the worst failure for a recovery tool). It then runs migrations (so the target
+ * can be an empty, un-migrated DB), refuses a non-empty DB unless `force`, inserts rows
+ * parent-first, and re-puts every blob — verifying each content-addressed blob's bytes
+ * against the sha256 in its key, so a corrupted blob can't be restored under a hash it no
+ * longer matches.
  */
 export async function restoreBackup(
   deps: BackupDeps,
@@ -205,6 +219,53 @@ export async function restoreBackup(
     );
   }
 
+  // --- Pre-flight: load + count everything and verify it against meta.json BEFORE any
+  // write. createBackup writes a file for EVERY table (empty ones included), so a missing
+  // db/<table>.ndjson is corruption, not an empty table. ---
+  const parsed = new Map<string, Row[]>();
+  const tableRows: Record<string, number> = {};
+  for (const name of BACKUP_TABLE_ORDER) {
+    let text: string;
+    try {
+      text = await readFile(join(srcDir, "db", `${name}.ndjson`), "utf8");
+    } catch (err) {
+      if ((err as { code?: string }).code === "ENOENT") {
+        throw new Error(`restore: backup is missing db/${name}.ndjson — incomplete or corrupt`);
+      }
+      throw err;
+    }
+    const rows = text
+      .split("\n")
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as Row);
+    parsed.set(name, rows);
+    tableRows[name] = rows.length;
+  }
+  const rowDrift = BACKUP_TABLE_ORDER.filter((n) => tableRows[n] !== (meta.tableRows?.[n] ?? 0));
+  if (rowDrift.length > 0) {
+    const detail = rowDrift.map(
+      (n) => `${n}: have ${tableRows[n]}, meta ${meta.tableRows?.[n] ?? 0}`,
+    );
+    throw new Error(
+      `restore: row counts don't match meta.json (${detail.join("; ")}) — corrupt backup`,
+    );
+  }
+
+  const blobsRoot = join(srcDir, "blobs");
+  const blobKeys: string[] = [];
+  let blobBytes = 0;
+  for await (const file of walkFiles(blobsRoot)) {
+    blobKeys.push(relative(blobsRoot, file).split(sep).join("/"));
+    blobBytes += (await stat(file)).size;
+  }
+  if (blobKeys.length !== meta.blobCount || blobBytes !== meta.blobBytes) {
+    throw new Error(
+      `restore: blob count/size don't match meta.json (have ${blobKeys.length}/${blobBytes}, ` +
+        `meta ${meta.blobCount}/${meta.blobBytes}) — incomplete or corrupt backup`,
+    );
+  }
+
+  // --- Past pre-flight: the backup is complete. Write it into the target. ---
   await runMigrations(client); // create the schema on a fresh target (idempotent)
   const tables = tableMap(client);
 
@@ -220,32 +281,23 @@ export async function restoreBackup(
     }
   }
 
-  const tableRows: Record<string, number> = {};
   for (const name of BACKUP_TABLE_ORDER) {
-    const text = await readFile(join(srcDir, "db", `${name}.ndjson`), "utf8").catch((err) => {
-      if ((err as { code?: string }).code === "ENOENT") return "";
-      throw err;
-    });
-    const rows = text
-      .split("\n")
-      .filter((l) => l.length > 0)
-      .map((l) => JSON.parse(l) as Row);
-    await insertAll(client, requireTable(tables, name), rows);
-    tableRows[name] = rows.length;
+    await insertAll(client, requireTable(tables, name), parsed.get(name) ?? []);
   }
 
-  const blobsRoot = join(srcDir, "blobs");
-  let blobCount = 0;
-  let blobBytes = 0;
-  for await (const file of walkFiles(blobsRoot)) {
-    const key = relative(blobsRoot, file).split(sep).join("/");
-    const bytes = await readFile(file);
+  for (const key of blobKeys) {
+    const bytes = await readFile(join(blobsRoot, key));
+    const hash = key.match(CONTENT_ADDRESSED_KEY);
+    if (hash) {
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== hash[1]) {
+        throw new Error(`restore: blob "${key}" is corrupt (sha256 ${actual} ≠ key hash)`);
+      }
+    }
     await storage.put(key, bytes);
-    blobCount += 1;
-    blobBytes += bytes.byteLength;
   }
 
   const totalRows = Object.values(tableRows).reduce((a, b) => a + b, 0);
-  log.info({ srcDir, totalRows, blobCount, blobBytes }, "restore complete");
-  return { tableRows, blobCount, blobBytes };
+  log.info({ srcDir, totalRows, blobCount: blobKeys.length, blobBytes }, "restore complete");
+  return { tableRows, blobCount: blobKeys.length, blobBytes };
 }

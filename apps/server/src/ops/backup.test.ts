@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
@@ -107,6 +108,56 @@ describe("BACKUP_TABLE_ORDER", () => {
     expect([...BACKUP_TABLE_ORDER].sort()).toEqual(sqliteNames);
     expect(pgNames).toEqual(sqliteNames); // dual-dialect lockstep
     expect(new Set(BACKUP_TABLE_ORDER).size).toBe(BACKUP_TABLE_ORDER.length); // no duplicates
+  });
+});
+
+// Integrity guards are dialect-independent (they read the backup dir + verify it against
+// meta.json BEFORE the DB write), so exercise them on sqlite for speed.
+describe("restore integrity guards", () => {
+  async function backupWith(extraBlob?: { key: string; bytes: Uint8Array }): Promise<string> {
+    const src = await makeTestDb("sqlite");
+    const store = memStorage();
+    await seed(src, store);
+    if (extraBlob) await store.put(extraBlob.key, extraBlob.bytes);
+    const dir = await freshDir();
+    await createBackup({ client: src, storage: store, log }, dir);
+    await src.close();
+    return dir;
+  }
+
+  async function expectRestoreToThrow(dir: string, re: RegExp): Promise<void> {
+    const target = await makeTestDb("sqlite");
+    await expect(
+      restoreBackup({ client: target, storage: memStorage(), log }, dir),
+    ).rejects.toThrow(re);
+    await target.close();
+  }
+
+  it("refuses a backup whose table file was truncated (row-count mismatch vs meta)", async () => {
+    const dir = await backupWith();
+    await writeFile(join(dir, "db", "canvases.ndjson"), ""); // meta says 1 canvas, now 0
+    await expectRestoreToThrow(dir, /row counts don't match|corrupt/i);
+  });
+
+  it("refuses a backup with a missing table file", async () => {
+    const dir = await backupWith();
+    await rm(join(dir, "db", "settings.ndjson"), { force: true });
+    await expectRestoreToThrow(dir, /missing db\/settings|corrupt/i);
+  });
+
+  it("refuses a backup with a dropped blob (count/size mismatch vs meta)", async () => {
+    const dir = await backupWith();
+    await rm(join(dir, "blobs", "canvas"), { recursive: true, force: true }); // drop the seeded blobs
+    await expectRestoreToThrow(dir, /blob count\/size|corrupt/i);
+  });
+
+  it("detects a corrupted content-addressed blob (sha256 ≠ key hash)", async () => {
+    const bytes = new TextEncoder().encode("const x = 42;");
+    const key = `canvases/c-int/blobs/${createHash("sha256").update(bytes).digest("hex")}`;
+    const dir = await backupWith({ key, bytes });
+    // Same byte length so it clears the size pre-flight, different content → hash mismatch.
+    await writeFile(join(dir, "blobs", key), new TextEncoder().encode("const x = 43;"));
+    await expectRestoreToThrow(dir, /is corrupt \(sha256|key hash/i);
   });
 });
 
