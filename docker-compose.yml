@@ -87,6 +87,8 @@ services:
       CANVAS_DROP_STORAGE: local
     volumes:
       - app-data:/data
+      # Backups live on a SEPARATE volume from the data they protect (see docs/ops.md).
+      - backups:/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,7 +121,39 @@ services:
     volumes:
       - minio-data:/data
 
+  # Optional maintenance sidecar — runs the scheduled backup + purge jobs INSIDE the
+  # stack (no host crontab needed). It shares the app image + data/backups volumes and
+  # runs the same `node … index.js {backup,purge}` subcommands on a schedule via
+  # supercronic (a container-friendly cron). Enable with:
+  #     docker compose --profile maintenance up -d
+  # The schedule lives in docker/maintenance.cron (nightly backup + 14-day retention,
+  # weekly purge). See docs/ops.md for the full runbook + a host-crontab alternative.
+  # maintenance:
+  #   image: canvas-drop:dev
+  #   profiles: [maintenance]
+  #   restart: unless-stopped
+  #   entrypoint: ["/bin/sh", "-lc"]
+  #   command:
+  #     - >-
+  #       wget -qO /usr/local/bin/supercronic
+  #       https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64
+  #       && chmod +x /usr/local/bin/supercronic
+  #       && exec /usr/local/bin/supercronic /etc/canvas-drop/maintenance.cron
+  #   environment:
+  #     # Mirror the app's DB + storage config so it acts on the same data.
+  #     CANVAS_DROP_DB: postgres
+  #     CANVAS_DROP_DATABASE_URL: postgres://canvasdrop:canvasdrop@postgres:5432/canvasdrop
+  #     CANVAS_DROP_STORAGE: local
+  #   volumes:
+  #     - app-data:/data
+  #     - backups:/backups
+  #     - ./docker/maintenance.cron:/etc/canvas-drop/maintenance.cron:ro
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
 volumes:
   app-data:
+  backups:
   pg-data:
   minio-data:
