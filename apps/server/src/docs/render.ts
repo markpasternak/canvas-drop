@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SkinName } from "@canvas-drop/shared";
 import {
   DARK_TOKENS,
@@ -9,6 +13,25 @@ import {
 import { skinnedHtmlTag, skinStyleCss } from "../http/skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "../http/social-meta.js";
 import { DOC_NAV, DOC_PAGES, type DocPage } from "./generated-content.js";
+
+// Content hash of the committed mermaid bundle, used to cache-bust the <script
+// src>. The route serves the bundle `immutable, max-age=1y`, so without a version
+// query a returning visitor would keep a STALE renderer forever after any bundle
+// update. Hashing the file makes the URL change exactly when the bytes do — so
+// `immutable` stays correct AND updates land immediately. Computed once at module
+// load; if the bundle is absent we fall back to an unversioned tag.
+const MERMAID_BUNDLE_VERSION = (() => {
+  try {
+    const p = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../..",
+      "docs/site/assets/mermaid.js",
+    );
+    return createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 8);
+  } catch {
+    return "";
+  }
+})();
 
 /**
  * Renders the public docs site. Reuses the shared system-page token palette
@@ -293,7 +316,10 @@ export function renderDocPage(
   const description = summarize(page.text) || "Documentation for canvas-drop.";
   // Only ship the (large) mermaid bundle on pages that actually contain a diagram.
   const hasMermaid = page.html.includes('class="mermaid"');
-  const mermaidScript = hasMermaid ? '\n  <script src="/docs/mermaid.js" defer></script>' : "";
+  const mermaidSrc = MERMAID_BUNDLE_VERSION
+    ? `/docs/mermaid.js?v=${MERMAID_BUNDLE_VERSION}`
+    : "/docs/mermaid.js";
+  const mermaidScript = hasMermaid ? `\n  <script src="${mermaidSrc}" defer></script>` : "";
   return `<!doctype html>
 ${skinnedHtmlTag(skin)}
 <head>

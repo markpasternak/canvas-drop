@@ -94,7 +94,9 @@ describe("docs render — mermaid diagrams", () => {
   it("lazily loads the self-hosted mermaid renderer ONLY on pages with a diagram", () => {
     const withDiagram = renderDocPage("self-hosting/security-model") ?? "";
     const withoutDiagram = renderDocPage("sdk/kv") ?? "";
-    expect(withDiagram).toContain('<script src="/docs/mermaid.js" defer></script>');
-    expect(withoutDiagram).not.toContain('<script src="/docs/mermaid.js"');
+    // The bundle URL carries a content-hash cache-bust (?v=…) so the immutable
+    // cache can't strand a returning visitor on a stale renderer.
+    expect(withDiagram).toMatch(/<script src="\/docs\/mermaid\.js\?v=[0-9a-f]+" defer><\/script>/);
+    expect(withoutDiagram).not.toContain('<script src="/docs/mermaid.js');
   });
 });

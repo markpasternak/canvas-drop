@@ -23,20 +23,35 @@ function cssVar(name, fallback) {
 
 // The design tokens are authored in `oklch()`, which mermaid's color library
 // (khroma) cannot parse — feeding it an oklch string throws "Unsupported color
-// format" out of mermaid.initialize and aborts the (re-)render. So we resolve each
-// token through the browser's own color engine into an `rgb()` string khroma
-// accepts: a hidden probe inherits/normalizes any valid CSS color, and
-// getComputedStyle reports it back as rgb. One probe is reused per rebuild.
+// format" out of mermaid.initialize and aborts the (re-)render. We must hand it a
+// plain rgb string. The catch: current Chrome (149+) preserves the authored
+// `oklch()` color space through BOTH getComputedStyle().color AND a canvas
+// fillStyle setter→getter — neither serializes down to sRGB. The one thing that
+// forces real sRGB bytes is actually RASTERIZING: paint a 1×1 pixel and read it
+// back with getImageData. A hidden probe first resolves var()/inheritance to a
+// concrete color string for the paint.
 function makeColorResolver() {
   const probe = document.createElement("span");
   probe.style.display = "none";
   document.documentElement.appendChild(probe);
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
   const resolve = (name, fallback) => {
     const raw = cssVar(name, fallback);
     probe.style.color = "";
     probe.style.color = raw; // invalid values are ignored, leaving the cleared base
-    const rgb = getComputedStyle(probe).color;
-    return rgb || fallback;
+    const resolved = getComputedStyle(probe).color || raw;
+    try {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = "#000"; // sentinel so an unpaintable value can't leak a prior color
+      ctx.fillStyle = resolved;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+      return a === 255
+        ? `rgb(${r}, ${g}, ${b})`
+        : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+    } catch {
+      return fallback;
+    }
   };
   resolve.done = () => probe.remove();
   return resolve;
