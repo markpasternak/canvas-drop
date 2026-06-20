@@ -141,9 +141,17 @@ export function DraftPreview({
   const header = (
     <PaneHeader
       leading={
-        <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-sunken text-subtle">
-          <Browser size={15} weight="duotone" aria-hidden />
-        </span>
+        <>
+          {/* Playful "browser window" traffic-lights — CSS-revealed by the canvas skin. */}
+          <span className="cd-window-dots items-center gap-1.5" aria-hidden>
+            <span className="size-2 rounded-full bg-danger/70" />
+            <span className="size-2 rounded-full bg-warning/80" />
+            <span className="size-2 rounded-full bg-success/70" />
+          </span>
+          <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-sunken text-subtle">
+            <Browser size={15} weight="duotone" aria-hidden />
+          </span>
+        </>
       }
       title={
         <span className="inline-flex min-w-0 items-center gap-2">

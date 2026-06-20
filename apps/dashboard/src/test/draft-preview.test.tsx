@@ -107,6 +107,19 @@ describe("DraftPreview live-status ribbon", () => {
     expect(openFull).toHaveAttribute("target", "_blank");
   });
 
+  it("includes the canvas-skin window-dots in the header (CSS-gated, present in the DOM)", () => {
+    const { container } = render(
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen={false}
+        onToggleFullscreen={noop}
+      />,
+    );
+    expect(container.querySelector(".cd-window-dots")).not.toBeNull();
+  });
+
   it("has no Live ribbon in the JS-notice state (frame not yet running)", () => {
     render(
       <DraftPreview
