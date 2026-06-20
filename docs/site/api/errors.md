@@ -52,6 +52,17 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 `REQUEST_FAILED` carries status `0` — it's the fallback when a request fails
 without a more specific code.
 
+> **`CAPABILITY_DISABLED` is self-repairing.** Its 403 body carries extra fields
+> beyond `code`, so a caller (or an agent) can fix it without guessing:
+> `capability` (which one), `backendEnabled` (the master switch — **off by default**
+> on a new canvas), `reason` (`backend_off` · `feature_off` · `operator_disabled`),
+> and a human-readable `hint`. The browser SDK surfaces the hint on the thrown
+> `CapabilityDisabledError` (as its message and a `.hint` property). The fix for
+> `backend_off`/`feature_off` is the owner's: turn on the backend and the feature on
+> the canvas's **Backend** tab, via the `set_capabilities` MCP tool, or
+> `PATCH /api/canvases/:id/capabilities`. An `operator_disabled` reason (AI/Realtime
+> only) is a deployment-level setting the owner can't change.
+
 > **`DISABLED` has two surfaces.** On the **runtime API** (viewers, the browser SDK)
 > a canvas an admin has taken down returns `DISABLED` with status **403** — the row
 > above. On the **owner management API + MCP**, the same takedown makes the canvas

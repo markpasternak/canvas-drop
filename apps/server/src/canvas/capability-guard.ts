@@ -1,8 +1,10 @@
 import {
+  type CanvasCapabilityState,
   type Capability,
   type CapabilityGlobals,
   type Config,
   isCapabilityEnabled,
+  storedCapabilities,
 } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { createMiddleware } from "hono/factory";
@@ -20,6 +22,57 @@ import type { AppEnv } from "../http/types.js";
 
 /** Stable error body returned when a capability is disabled (maps to a typed SDK error). */
 export const CAPABILITY_DISABLED = "CAPABILITY_DISABLED" as const;
+
+/** Why a capability is off + how to fix it, so the 403 is self-repairable (D7/§4.5). */
+export interface CapabilityDisabledDetail {
+  capability: Capability;
+  /** The master backend switch (off by default on a new canvas). */
+  backendEnabled: boolean;
+  /** Which gate failed: the backend master, this feature's flag, or a deployment global. */
+  reason: "backend_off" | "feature_off" | "operator_disabled";
+  /** A human/agent-actionable remediation hint. */
+  hint: string;
+}
+
+/**
+ * Diagnose a disabled capability into a stable, actionable detail. Called only
+ * when {@link isCapabilityEnabled} is already false, so exactly one gate failed;
+ * the order mirrors {@link effectiveCapabilities} (backend → feature flag → global).
+ * Identity is on whenever backend is on, so it can only be `backend_off`.
+ */
+export function capabilityDisabledDetail(
+  canvas: CanvasCapabilityState,
+  capability: Capability,
+): CapabilityDisabledDetail {
+  if (!canvas.backendEnabled) {
+    return {
+      capability,
+      backendEnabled: false,
+      reason: "backend_off",
+      hint: 'This canvas\'s backend is off (the master switch, off by default). Turn it on in the dashboard Backend tab, the set_capabilities MCP tool, or PATCH /api/canvases/:id/capabilities {"backendEnabled": true}.',
+    };
+  }
+  if (capability !== "identity" && !storedCapabilities(canvas)[capability]) {
+    return {
+      capability,
+      backendEnabled: true,
+      reason: "feature_off",
+      hint: `The "${capability}" capability is off for this canvas. Enable it in the dashboard Backend tab, the set_capabilities MCP tool, or PATCH /api/canvases/:id/capabilities {"${capability}": true}.`,
+    };
+  }
+  // Flag is on, but the operator-level global is off (ai/realtime only).
+  return {
+    capability,
+    backendEnabled: true,
+    reason: "operator_disabled",
+    hint:
+      capability === "ai"
+        ? "AI is not configured on this deployment (no AI provider key set by the operator)."
+        : capability === "realtime"
+          ? "Realtime is disabled on this deployment (operator setting CANVAS_DROP_REALTIME=off)."
+          : "This capability is disabled at the deployment level by the operator.",
+  };
+}
 
 /** Translate the server Config into the narrow globals the capability rule needs. */
 export function capabilityGlobals(config: Config): CapabilityGlobals {
@@ -72,7 +125,13 @@ export function requireCapability(
     if (overrides?.aiEnabled) globals.aiEnabled = await overrides.aiEnabled();
     if (overrides?.realtimeEnabled) globals.realtimeEnabled = await overrides.realtimeEnabled();
     if (!isCapabilityEnabled(canvas, capability, globals)) {
-      return c.json({ code: CAPABILITY_DISABLED, capability }, 403);
+      // Enrich the 403 so an agent can repair it without prior doc knowledge
+      // (D7/§4.5 — "errors agents can repair from"). `code` stays stable; the
+      // added fields (backendEnabled, reason, hint) are purely additive.
+      return c.json(
+        { code: CAPABILITY_DISABLED, ...capabilityDisabledDetail(canvas, capability) },
+        403,
+      );
     }
     await next();
   });

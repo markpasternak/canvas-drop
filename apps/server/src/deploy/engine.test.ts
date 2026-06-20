@@ -60,6 +60,25 @@ describe("deployEngine", () => {
     expect(history.every((v) => v.status !== "ready")).toBe(true); // nothing went ready
   });
 
+  it("a failed deploy cleans up its pending version row (no orphan, no burnt number)", async () => {
+    const { engine, versions, canvas, ownerId } = await setup();
+    // A zip-slip path fails validation AFTER the pending row + number were allocated.
+    await expect(
+      engine.deploy(
+        canvas,
+        "folder",
+        folder({ "../escape.txt": "x", "index.html": "ok" }),
+        ownerId,
+      ),
+    ).rejects.toThrow();
+    // The pending row is gone — `pruneBeyond` would never have collected it (it only
+    // prunes `ready` rows), so without inline cleanup it would linger and burn number 1.
+    expect(await versions.listByCanvas(canvas.id)).toHaveLength(0);
+    // And the number isn't wasted: the next good deploy is still version 1.
+    const ok = await engine.deploy(canvas, "folder", folder({ "index.html": "ok" }), ownerId);
+    expect(ok.version).toBe(1);
+  });
+
   it("happy path: a 3-file folder deploys as version 1 with a full manifest", async () => {
     const { engine, canvases, versions, storage, canvas, ownerId } = await setup();
     const result = await engine.deploy(
