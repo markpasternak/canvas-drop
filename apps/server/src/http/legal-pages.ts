@@ -1,8 +1,9 @@
-import { type Config, rampCssVars } from "@canvas-drop/shared";
+import { type Config, rampCssVars, type SkinName } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { BRAND_MARK } from "./brand.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
+import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
@@ -31,11 +32,21 @@ const OPERATOR = {
   lastUpdated: "14 June 2026",
 } as const;
 
-export function legalRoutes(config: Config): Hono<AppEnv> {
+/**
+ * `opts.skin` resolves the effective instance design skin per-request (admin DB
+ * override over env/default), threaded in from `app.ts` like the landing + docs
+ * surfaces, so the legal pages wear the active skin too. Default editorial when no
+ * resolver is supplied.
+ */
+export function legalRoutes(
+  config: Config,
+  opts: { skin?: () => Promise<SkinName> } = {},
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const origin = config.baseUrl;
-  app.get("/privacy", () => htmlResponse(renderPrivacyPage(origin)));
-  app.get("/terms", () => htmlResponse(renderTermsPage(origin)));
+  const resolveSkin = opts.skin ?? (async () => "editorial" as const);
+  app.get("/privacy", async () => htmlResponse(renderPrivacyPage(origin, await resolveSkin())));
+  app.get("/terms", async () => htmlResponse(renderTermsPage(origin, await resolveSkin())));
   return app;
 }
 
@@ -65,12 +76,14 @@ function renderLegalPage(opts: {
   body: string;
   path: string;
   origin: string;
+  skin: SkinName;
 }): string {
   // Legal pages are intentionally pinned to dark for now (data-theme="dark"). The
   // light + system styles below are kept intact so flipping to a togglable theme later
-  // is just removing this attribute (or wiring SYSTEM_THEME_INIT back in).
+  // is just removing this attribute (or wiring SYSTEM_THEME_INIT back in). The skin is
+  // stamped on <html> via the shared helper exactly like the landing + docs surfaces.
   return `<!doctype html>
-<html lang="en" data-theme="dark">
+${skinnedHtmlTag(opts.skin, 'data-theme="dark"')}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -85,9 +98,31 @@ ${FAVICON_LINKS}
     font-weight: 200 800;
     src: url(/fonts/newsreader-latin-wght-normal.woff2) format("woff2-variations");
   }
+  /* Geist + Geist Mono — the display faces the workshop/canvas skins switch to, so a
+     skinned legal page renders faithfully same-origin (no CDN). */
+  @font-face {
+    font-family: "Geist Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url(/fonts/geist-latin-wght-normal.woff2) format("woff2-variations");
+  }
+  @font-face {
+    font-family: "Geist Mono Variable";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url(/fonts/geist-mono-latin-wght-normal.woff2) format("woff2-variations");
+  }
   :root {
 ${rampCssVars("light", "    ")}
     --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+    /* Display-face defaults (editorial serif); a [data-skin] block re-voices them. */
+    --font-display: var(--font-serif);
+    --display-weight: 500;
+    --display-tracking: -0.02em;
+    --radius-scale: 1;
+    --shadow-strength: 1;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -132,12 +167,12 @@ ${rampCssVars("light", "    ")}
   .mark { width: 1.85rem; height: 1.85rem; flex: 0 0 auto; }
   h1 {
     margin: 0 0 .35rem;
-    font-family: var(--font-serif);
+    font-family: var(--font-display);
     font-optical-sizing: auto;
-    font-weight: 500;
+    font-weight: var(--display-weight, 500);
     font-size: clamp(1.9rem, 5vw, 2.6rem);
     line-height: 1.1;
-    letter-spacing: -.02em;
+    letter-spacing: var(--display-tracking, -.02em);
   }
   .updated {
     margin: 0 0 1.75rem;
@@ -147,9 +182,9 @@ ${rampCssVars("light", "    ")}
   .intro { margin: 0 0 1.75rem; color: var(--muted); font-size: 1.0625rem; }
   h2 {
     margin: 2.25rem 0 .5rem;
-    font-family: var(--font-serif);
+    font-family: var(--font-display);
     font-optical-sizing: auto;
-    font-weight: 500;
+    font-weight: var(--display-weight, 500);
     font-size: 1.3rem;
     letter-spacing: -.01em;
   }
@@ -167,6 +202,7 @@ ${rampCssVars("light", "    ")}
     font-size: .8125rem;
   }
   .footer a { color: var(--muted); }
+${skinStyleCss({ darkToggle: true })}
 </style>
 </head>
 <body>
@@ -190,7 +226,7 @@ ${rampCssVars("light", "    ")}
 
 const CONTACT_LINK = `<a href="mailto:${escapeAttribute(OPERATOR.contactEmail)}">${escapeHtml(OPERATOR.contactEmail)}</a>`;
 
-export function renderPrivacyPage(origin = ""): string {
+export function renderPrivacyPage(origin = "", skin: SkinName = "editorial"): string {
   const body = `
     <h2>Who we are</h2>
     <p>${escapeHtml(OPERATOR.name)} ("canvas-drop", "we", "us") operates this instance and is the data
@@ -249,10 +285,11 @@ export function renderPrivacyPage(origin = ""): string {
     body,
     path: "/privacy",
     origin,
+    skin,
   });
 }
 
-export function renderTermsPage(origin = ""): string {
+export function renderTermsPage(origin = "", skin: SkinName = "editorial"): string {
   const body = `
     <h2>Acceptance</h2>
     <p>By accessing or using canvas-drop, you agree to these Terms. If you do not agree, do not use
@@ -308,5 +345,6 @@ export function renderTermsPage(origin = ""): string {
     body,
     path: "/terms",
     origin,
+    skin,
   });
 }

@@ -50,6 +50,31 @@ describe("legal pages — rendered content", () => {
   });
 });
 
+describe("legal pages — design skin", () => {
+  it("omits data-skin on <html> for the default editorial skin (stays dark-pinned)", () => {
+    for (const html of [renderPrivacyPage("", "editorial"), renderTermsPage("", "editorial")]) {
+      // editorial is the attribute-free base; the dark pin stays, no skin attribute.
+      expect(html).toContain('<html lang="en" data-theme="dark">');
+      expect(html).not.toContain('data-skin="editorial"');
+    }
+  });
+
+  it("stamps the chosen skin on <html> alongside the dark pin and ships the override CSS", () => {
+    const html = renderPrivacyPage("", "canvas");
+    expect(html).toContain('<html lang="en" data-theme="dark" data-skin="canvas">');
+    // The override blocks come from the canonical shared emitter (same source as the
+    // dashboard tokens.css), incl. the dark-toggle selectors the dark-pinned page needs.
+    expect(html).toContain(':root[data-skin="canvas"]');
+    expect(html).toContain(':root[data-skin="workshop"]');
+    expect(html).toContain(':root[data-skin="canvas"][data-theme="dark"]');
+  });
+
+  it("routes resolve the skin per-request via the supplied resolver", async () => {
+    const res = await legalRoutes(config, { skin: async () => "studio" }).request("/terms");
+    expect(await res.text()).toContain('data-skin="studio"');
+  });
+});
+
 describe("legal pages — routes are self-contained (no auth context needed)", () => {
   it("GET /privacy returns cacheable, frame-locked HTML", async () => {
     const res = await legalRoutes(config).request("/privacy");
