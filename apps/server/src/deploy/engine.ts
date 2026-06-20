@@ -13,7 +13,11 @@ import type { UploadSessionsRepository } from "../db/repositories/upload-session
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { createPendingVersionWithRetry, KEEP_VERSIONS } from "./constants.js";
+import {
+  createPendingVersionWithRetry,
+  KEEP_VERSIONS,
+  PENDING_VERSION_TTL_MS,
+} from "./constants.js";
 import { DeployError, LIMITS } from "./errors.js";
 import type { DeployEntry } from "./ingest.js";
 import { normalizeEntryPath } from "./validate.js";
@@ -161,6 +165,15 @@ export function deployEngine(deps: DeployEngineDeps) {
           { err, canvasId: canvas.id },
           "deploy failed before publish (live unaffected)",
         );
+        // Clean up the `pending` row this failed attempt created. `pruneBeyond`
+        // only collects `ready` rows, so without this an abandoned pending row
+        // lingers forever AND permanently burns its version number. Best-effort:
+        // a cleanup failure must never mask the original deploy error.
+        await deps.versions
+          .deletePending(version.id)
+          .catch((e) =>
+            deps.log.warn({ err: e, canvasId: canvas.id }, "pending version cleanup failed"),
+          );
         throw err;
       }
 
@@ -279,6 +292,12 @@ export function deployEngine(deps: DeployEngineDeps) {
       } catch (err) {
         deps.log.error({ err, canvasId }, "version row prune failed (live version unaffected)");
       }
+      // Safety net for abandoned `pending` rows — a deploy/finalize that never
+      // reached `markReady` (pruneBeyond only collects `ready` rows). Bounded by
+      // age so an in-flight attempt is never swept; best-effort + idempotent.
+      await deps.versions
+        .deletePendingBefore(canvasId, Date.now() - PENDING_VERSION_TTL_MS)
+        .catch((err) => deps.log.error({ err, canvasId }, "stale pending-version prune failed"));
       // Reclaim expired upload-session rows BEFORE the sweep so their (now dead)
       // manifests drop out of the live set and their orphan blobs are reclaimed in
       // this same pass (plan 003 U7). Best-effort; global + idempotent.

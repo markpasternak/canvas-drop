@@ -6,7 +6,7 @@ import {
   sqliteSchema,
   type Version,
 } from "@canvas-drop/shared/db";
-import { and, desc, eq, inArray, isNotNull, max, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, max, notInArray } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -167,6 +167,33 @@ export function versionsRepository(client: DbClient) {
         )
         .returning()) as Version[];
       return deleted;
+    },
+
+    /**
+     * Delete a single still-`pending` version row by id. Status-guarded, so it can
+     * never remove a `ready` (let alone the live current) version even if misused.
+     * Used to clean up the pending row a FAILED deploy left behind, so abandoned
+     * attempts neither accumulate nor permanently burn a version number.
+     */
+    async deletePending(id: string): Promise<void> {
+      await db.delete(t).where(and(eq(t.id, id), eq(t.status, "pending")));
+    },
+
+    /**
+     * Sweep a canvas's `pending` version rows older than `before` (epoch ms) — the
+     * safety net for abandoned/failed deploys that never reached `markReady`
+     * (`pruneBeyond` only collects `ready` rows, so pending rows would otherwise
+     * linger forever). The age cutoff keeps any in-flight deploy/finalize — which
+     * commits within a single request — untouched. A pending row carries a NULL
+     * manifest, so this references no blobs: a pure row cleanup. Returns the count
+     * removed.
+     */
+    async deletePendingBefore(canvasId: string, before: number): Promise<number> {
+      const deleted = (await db
+        .delete(t)
+        .where(and(eq(t.canvasId, canvasId), eq(t.status, "pending"), lt(t.createdAt, before)))
+        .returning()) as Version[];
+      return deleted.length;
     },
   };
 }

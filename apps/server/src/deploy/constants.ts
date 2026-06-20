@@ -10,6 +10,15 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 /** Published versions kept per canvas; older ready versions are pruned (§6.1.11). */
 export const KEEP_VERSIONS = 10;
 
+/**
+ * A `pending` version row older than this (by age) is treated as abandoned by the
+ * per-canvas prune sweep. Any genuine deploy/finalize reaches `markReady` within a
+ * single request (seconds), so an hour is comfortably longer than any in-flight
+ * attempt — the sweep can never race a live one. Failed deploys also delete their
+ * own pending row inline; this is the safety net for the paths that don't.
+ */
+export const PENDING_VERSION_TTL_MS = 60 * 60 * 1000;
+
 /** How many times to re-pick a version number on a (canvas_id, number) collision. */
 const VERSION_NUMBER_ATTEMPTS = 5;
 

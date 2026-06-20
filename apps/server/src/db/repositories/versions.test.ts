@@ -157,4 +157,64 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     const dropped = await repo.pruneBeyond(canvasId, 10);
     expect(dropped.map((v) => v.number).sort((a, b) => a - b)).toEqual([1, 2]);
   });
+
+  it("deletePending removes a pending row by id but never a ready one (status-guarded)", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const pending = await repo.createPending({
+      canvasId,
+      number: 1,
+      createdBy: userId,
+      source: "api",
+    });
+    const readyPending = await repo.createPending({
+      canvasId,
+      number: 2,
+      createdBy: userId,
+      source: "api",
+    });
+    const ready = await repo.markReady(readyPending.id, {
+      fileCount: 1,
+      totalBytes: 1,
+      manifest: MANIFEST,
+    });
+
+    // Removes the pending row…
+    await repo.deletePending(pending.id);
+    expect(await repo.findById(pending.id)).toBeNull();
+    // …but a ready row is untouched even when its id is passed (the status guard).
+    await repo.deletePending(ready.id);
+    expect((await repo.findById(ready.id))?.status).toBe("ready");
+  });
+
+  it("deletePendingBefore sweeps pending rows older than the cutoff, never a ready row", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const pending = await repo.createPending({
+      canvasId,
+      number: 1,
+      createdBy: userId,
+      source: "api",
+    });
+    const readyPending = await repo.createPending({
+      canvasId,
+      number: 2,
+      createdBy: userId,
+      source: "api",
+    });
+    await repo.markReady(readyPending.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+    const createdAt = (await repo.findById(pending.id))?.createdAt ?? 0;
+
+    // A cutoff AT createdAt (strict `<`) spares the row — an in-flight deploy is safe.
+    expect(await repo.deletePendingBefore(canvasId, createdAt)).toBe(0);
+    expect((await repo.findById(pending.id))?.status).toBe("pending");
+
+    // A cutoff past it sweeps the pending row — but never the ready one, even though
+    // the far-future cutoff covers its timestamp too (the status filter spares it).
+    expect(await repo.deletePendingBefore(canvasId, createdAt + 1_000_000)).toBe(1);
+    expect(await repo.findById(pending.id)).toBeNull();
+    expect((await repo.findById(readyPending.id))?.status).toBe("ready");
+  });
 });
