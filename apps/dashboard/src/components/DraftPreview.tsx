@@ -220,7 +220,7 @@ export function DraftPreview({
   // Live-status ribbon (M5 polish): once the draft is actually rendering in the frame,
   // a footer signals it's live and offers a one-click jump to the full top-level preview
   // (the only place a scripted/signed-in canvas runs exactly as it ships). The pulsing
-  // ring is decorative — the solid dot + "Live" label carry the state under reduced motion.
+  // ring is decorative — the solid dot + "Live preview" label carry the state under reduced motion.
   const liveRibbon = showFrame ? (
     <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface px-3 py-1.5">
       <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-success">
@@ -228,7 +228,7 @@ export function DraftPreview({
           <span className="absolute inline-flex size-2 animate-ping rounded-full bg-success" />
           <span className="relative inline-flex size-1.5 rounded-full bg-success" />
         </span>
-        Live
+        Live preview
       </span>
       <span className="flex min-w-0 items-center gap-2">
         <span className="truncate font-mono text-[0.6875rem] text-subtle">

@@ -101,7 +101,7 @@ describe("DraftPreview live-status ribbon", () => {
         onToggleFullscreen={noop}
       />,
     );
-    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByText("Live preview")).toBeInTheDocument();
     const openFull = screen.getByRole("link", { name: "Open full" });
     expect(openFull).toHaveAttribute("href", "/api/canvases/c1/preview/");
     expect(openFull).toHaveAttribute("target", "_blank");
@@ -131,7 +131,7 @@ describe("DraftPreview live-status ribbon", () => {
         usesScripts
       />,
     );
-    expect(screen.queryByText("Live")).toBeNull();
+    expect(screen.queryByText("Live preview")).toBeNull();
   });
 
   it("reveals the Live ribbon once a scripted draft is run", async () => {
@@ -146,9 +146,9 @@ describe("DraftPreview live-status ribbon", () => {
         usesScripts
       />,
     );
-    expect(screen.queryByText("Live")).toBeNull();
+    expect(screen.queryByText("Live preview")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Run preview" }));
-    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByText("Live preview")).toBeInTheDocument();
   });
 });
 
