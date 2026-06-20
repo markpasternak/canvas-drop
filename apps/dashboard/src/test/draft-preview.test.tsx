@@ -90,6 +90,55 @@ describe("DraftPreview script-aware rendering", () => {
   });
 });
 
+describe("DraftPreview live-status ribbon", () => {
+  it("shows a Live ribbon with an Open-full link while the frame is rendering (static draft)", () => {
+    render(
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen={false}
+        onToggleFullscreen={noop}
+      />,
+    );
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    const openFull = screen.getByRole("link", { name: "Open full" });
+    expect(openFull).toHaveAttribute("href", "/api/canvases/c1/preview/");
+    expect(openFull).toHaveAttribute("target", "_blank");
+  });
+
+  it("has no Live ribbon in the JS-notice state (frame not yet running)", () => {
+    render(
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen={false}
+        onToggleFullscreen={noop}
+        usesScripts
+      />,
+    );
+    expect(screen.queryByText("Live")).toBeNull();
+  });
+
+  it("reveals the Live ribbon once a scripted draft is run", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftPreview
+        canvasId="c1"
+        refreshKey={0}
+        onRefresh={noop}
+        fullscreen={false}
+        onToggleFullscreen={noop}
+        usesScripts
+      />,
+    );
+    expect(screen.queryByText("Live")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Run preview" }));
+    expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+});
+
 describe("draftUsesScripts detection", () => {
   it("detects .js files by extension and by MIME", () => {
     expect(draftUsesScripts([{ path: "index.html", mime: "text/html" }])).toBe(false);
