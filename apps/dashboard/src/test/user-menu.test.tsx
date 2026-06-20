@@ -128,6 +128,45 @@ describe("UserMenu", () => {
     expect(menu.className).not.toContain("top-[calc(100%+0.5rem)]");
   });
 
+  it("collapsed rail (compact + placement='up') LEFT-aligns the popover so it stays on-screen", () => {
+    // The collapsed left rail renders the compact trigger with placement="up"
+    // (app-layout: `expanded={!collapsed}` → false, `placement="up"`). Its trigger
+    // is a narrow icon pinned to the LEFT edge of the viewport, so right-aligning a
+    // 240px (w-60) menu to it computes a negative `left` and shoves the labels
+    // off-screen. The menu must left-align here and extend rightward into the content.
+    renderMenu(<UserMenu me={makeMe()} placement="up" />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const menu = screen.getByRole("menu");
+    // Opens upward (rail footer) AND left-aligns (would FAIL against the old `right-0`).
+    expect(menu.className).toContain("bottom-[calc(100%+0.5rem)]");
+    expect(menu.className).toContain("left-0");
+    expect(menu.className).not.toContain("right-0");
+    // Grows from the bottom-left corner, matching the left alignment.
+    expect(menu.className).toContain("origin-bottom-left");
+  });
+
+  it("mobile bar (compact + default 'down') RIGHT-aligns the popover (no regression)", () => {
+    // The mobile top bar uses the compact trigger with the default downward placement;
+    // its trigger sits at the screen's RIGHT, so the menu right-aligns to stay on-screen.
+    renderMenu(<UserMenu me={makeMe()} />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("top-[calc(100%+0.5rem)]");
+    expect(menu.className).toContain("right-0");
+    expect(menu.className).not.toContain("left-0");
+    expect(menu.className).toContain("origin-top-right");
+  });
+
+  it("expanded rail (expanded + placement='up') LEFT-aligns the popover (no regression)", () => {
+    renderMenu(<UserMenu me={makeMe()} placement="up" expanded />);
+    fireEvent.click(screen.getByRole("button", { name: /account/i }));
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("bottom-[calc(100%+0.5rem)]");
+    expect(menu.className).toContain("left-0");
+    expect(menu.className).not.toContain("right-0");
+    expect(menu.className).toContain("origin-bottom-left");
+  });
+
   it("expanded trigger shows the display name as a real row (the rail variant)", () => {
     renderMenu(<UserMenu me={makeMe()} expanded />);
     // The name is visible on the trigger itself, not only inside the popover.

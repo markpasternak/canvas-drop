@@ -162,12 +162,20 @@ export function UserMenu({
           aria-label="Account"
           className={cn(
             "absolute z-40 w-60 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-panel)]",
-            // Open up (rail footer) vs. down (mobile bar). The full-width rail
-            // trigger left-aligns the menu within the rail; the compact trigger
-            // keeps the right edge so the wider menu can't push off-screen.
+            // Open up (rail footer) vs. down (mobile bar). Horizontal alignment is
+            // driven by the trigger's screen position, not just `expanded`:
+            //   - expanded rail (left edge) → left-align, extend rightward.
+            //   - collapsed rail (left edge, opens UP) → also left-align: the trigger
+            //     is a narrow icon at the screen's LEFT, so right-aligning a 240px
+            //     menu to it computes a negative left and shoves it off-screen.
+            //   - mobile bar (right edge, opens DOWN) → right-align so the wider menu
+            //     hugs the right edge and can't push off the right of the viewport.
             openUp ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]",
-            expanded ? "left-0" : "right-0",
-            openUp ? (expanded ? "origin-bottom-left" : "origin-bottom-right") : "origin-top-right",
+            expanded ? "left-0" : openUp ? "left-0" : "right-0",
+            // Both up-opening triggers (expanded + collapsed rail) left-align, so the
+            // grow origin is the bottom-left corner; the down-opening mobile bar
+            // right-aligns and grows from the top-right.
+            openUp ? "origin-bottom-left" : "origin-top-right",
           )}
         >
           <div className="flex items-center gap-3 border-border border-b px-3.5 py-3">
