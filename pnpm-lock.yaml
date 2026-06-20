@@ -83,6 +83,9 @@ importers:
       '@fontsource-variable/newsreader':
         specifier: ^5.2.5
         version: 5.2.10
+      '@lezer/highlight':
+        specifier: ^1.2.3
+        version: 1.2.3
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

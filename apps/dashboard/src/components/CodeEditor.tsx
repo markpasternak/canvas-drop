@@ -6,12 +6,13 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import {
   bracketMatching,
-  defaultHighlightStyle,
   foldGutter,
+  HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
 } from "@codemirror/language";
 import { EditorState, type Extension } from "@codemirror/state";
+import { tags as t } from "@lezer/highlight";
 import {
   drawSelection,
   EditorView,
@@ -49,6 +50,55 @@ function languageFor(path: string): Extension[] {
   }
 }
 
+/**
+ * Brand-tokenized syntax highlighting (R17 polish). Maps Lezer highlight tags to the
+ * `--syn-*` design tokens (tokens.css), so code colours come from the design system and
+ * adapt to light/dark — and to the active skin's surface — with no JS recompute. Replaces
+ * CodeMirror's `defaultHighlightStyle`, whose fixed palette was outside the token system.
+ */
+export const cdHighlightStyle = HighlightStyle.define([
+  {
+    tag: [t.keyword, t.controlKeyword, t.operatorKeyword, t.definitionKeyword, t.moduleKeyword],
+    color: "var(--syn-keyword)",
+  },
+  { tag: [t.string, t.special(t.string), t.regexp, t.attributeValue], color: "var(--syn-string)" },
+  {
+    tag: [t.lineComment, t.blockComment, t.comment, t.docComment, t.meta],
+    color: "var(--syn-comment)",
+    fontStyle: "italic",
+  },
+  { tag: [t.number, t.integer, t.float, t.bool, t.atom], color: "var(--syn-num)" },
+  {
+    tag: [t.function(t.variableName), t.function(t.propertyName), t.labelName],
+    color: "var(--syn-fn)",
+  },
+  { tag: [t.typeName, t.className, t.namespace], color: "var(--syn-fn)" },
+  { tag: [t.tagName], color: "var(--syn-tag)" },
+  { tag: [t.attributeName, t.propertyName], color: "var(--syn-attr)" },
+  {
+    tag: [
+      t.punctuation,
+      t.separator,
+      t.bracket,
+      t.angleBracket,
+      t.squareBracket,
+      t.paren,
+      t.brace,
+      t.derefOperator,
+      t.operator,
+      t.compareOperator,
+      t.arithmeticOperator,
+      t.logicOperator,
+    ],
+    color: "var(--syn-punc)",
+  },
+  { tag: [t.heading], color: "var(--syn-fn)", fontWeight: "600" },
+  { tag: [t.strong], fontWeight: "700" },
+  { tag: [t.emphasis], fontStyle: "italic" },
+  { tag: [t.link, t.url], color: "var(--syn-keyword)", textDecoration: "underline" },
+  { tag: [t.invalid], color: "var(--danger)" },
+]);
+
 const baseExtensions: Extension[] = [
   lineNumbers(),
   foldGutter(),
@@ -60,7 +110,7 @@ const baseExtensions: Extension[] = [
   highlightActiveLine(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
   EditorView.lineWrapping,
-  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  syntaxHighlighting(cdHighlightStyle, { fallback: true }),
   EditorView.theme({
     "&": {
       height: "100%",
