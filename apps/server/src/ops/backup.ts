@@ -18,7 +18,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
 import { getTableName, is } from "drizzle-orm";
@@ -121,10 +121,27 @@ async function selectAll(client: DbClient, table: unknown): Promise<Row[]> {
   return (client.db as AnyQueryDb).select().from(table);
 }
 
-async function insertAll(client: DbClient, table: unknown, rows: Row[]): Promise<void> {
+async function insertAll(db: AnyQueryDb, table: unknown, rows: Row[]): Promise<void> {
   for (let i = 0; i < rows.length; i += INSERT_BATCH) {
-    await (client.db as AnyQueryDb).insert(table).values(rows.slice(i, i + INSERT_BATCH));
+    await db.insert(table).values(rows.slice(i, i + INSERT_BATCH));
   }
+}
+
+/**
+ * Run `fn` against a transactional executor so the multi-table insert is atomic. Postgres
+ * (the production default) gets a real `db.transaction`, so a mid-restore failure rolls the
+ * DB back to empty and a plain retry's empty-guard passes instead of wedging. better-sqlite3's
+ * drizzle `transaction()` rejects an async callback and its single-writer connection
+ * serializes anyway, so sqlite runs `fn(db)` directly (no rollback — docs/ops.md covers the
+ * manual recovery). Mirrors the dialect-safe pattern in db/repositories/canvases.ts.
+ */
+async function inTransaction(
+  client: DbClient,
+  fn: (db: AnyQueryDb) => Promise<void>,
+): Promise<void> {
+  const db = client.db as AnyQueryDb;
+  if (client.dialect === "sqlite") return fn(db);
+  return db.transaction(fn);
 }
 
 /** Recursively yield absolute file paths under `root` (missing root → nothing). */
@@ -195,15 +212,16 @@ export interface RestoreOptions {
 /**
  * Restore a backup produced by {@link createBackup} into the configured DB + storage.
  *
- * **Integrity-first.** It pre-flights the WHOLE backup against `meta.json` (every table's
- * row count, the blob count + total bytes) and refuses on any mismatch BEFORE writing a
- * single row — a backup whose `meta.json` survived a partial transfer but whose
- * `db/*.ndjson` or blobs were dropped/truncated is rejected, never restored silently
- * short (the worst failure for a recovery tool). It then runs migrations (so the target
- * can be an empty, un-migrated DB), refuses a non-empty DB unless `force`, inserts rows
- * parent-first, and re-puts every blob — verifying each content-addressed blob's bytes
- * against the sha256 in its key, so a corrupted blob can't be restored under a hash it no
- * longer matches.
+ * **Integrity-first.** It pre-flights the WHOLE backup against `meta.json` — every table's
+ * row count, the blob count + total bytes, AND the sha256 of every content-addressed blob
+ * against the hash in its key — and refuses on any mismatch BEFORE writing a single row or
+ * blob. A backup whose `meta.json` survived a partial transfer but whose `db/*.ndjson` or
+ * blobs were dropped, truncated, or corrupted (even a same-length byte flip) is rejected,
+ * never restored silently short (the worst failure for a recovery tool). It then runs
+ * migrations (so the target can be an empty, un-migrated DB), refuses a non-empty DB unless
+ * `force`, writes blobs first (idempotent content-addressed puts), then inserts rows
+ * parent-first inside a transaction — so a mid-restore failure on Postgres rolls the DB back
+ * to empty and a plain retry succeeds rather than wedging (docs/ops.md §restore).
  */
 export async function restoreBackup(
   deps: BackupDeps,
@@ -255,8 +273,20 @@ export async function restoreBackup(
   const blobKeys: string[] = [];
   let blobBytes = 0;
   for await (const file of walkFiles(blobsRoot)) {
-    blobKeys.push(relative(blobsRoot, file).split(sep).join("/"));
-    blobBytes += (await stat(file)).size;
+    const key = relative(blobsRoot, file).split(sep).join("/");
+    // Read once to both size AND integrity-check: a content-addressed blob whose bytes no
+    // longer hash to the key is corruption that count+size can't catch (a same-length byte
+    // flip), so verify it HERE — before any write — not while putting it.
+    const bytes = await readFile(file);
+    const hash = key.match(CONTENT_ADDRESSED_KEY);
+    if (hash) {
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== hash[1]) {
+        throw new Error(`restore: blob "${key}" is corrupt (sha256 ${actual} ≠ key hash)`);
+      }
+    }
+    blobKeys.push(key);
+    blobBytes += bytes.byteLength;
   }
   if (blobKeys.length !== meta.blobCount || blobBytes !== meta.blobBytes) {
     throw new Error(
@@ -265,7 +295,10 @@ export async function restoreBackup(
     );
   }
 
-  // --- Past pre-flight: the backup is complete. Write it into the target. ---
+  // --- Past pre-flight: the backup is complete and every content-addressed blob is verified.
+  // Write it into the target in a re-runnable order: blobs first (idempotent content-addressed
+  // puts), then all rows in one transaction. On Postgres a mid-insert failure rolls the DB back
+  // to empty so a plain retry's empty-guard passes; the already-written blobs re-put identically. ---
   await runMigrations(client); // create the schema on a fresh target (idempotent)
   const tables = tableMap(client);
 
@@ -281,21 +314,15 @@ export async function restoreBackup(
     }
   }
 
-  for (const name of BACKUP_TABLE_ORDER) {
-    await insertAll(client, requireTable(tables, name), parsed.get(name) ?? []);
+  for (const key of blobKeys) {
+    await storage.put(key, await readFile(join(blobsRoot, key)));
   }
 
-  for (const key of blobKeys) {
-    const bytes = await readFile(join(blobsRoot, key));
-    const hash = key.match(CONTENT_ADDRESSED_KEY);
-    if (hash) {
-      const actual = createHash("sha256").update(bytes).digest("hex");
-      if (actual !== hash[1]) {
-        throw new Error(`restore: blob "${key}" is corrupt (sha256 ${actual} ≠ key hash)`);
-      }
+  await inTransaction(client, async (db) => {
+    for (const name of BACKUP_TABLE_ORDER) {
+      await insertAll(db, requireTable(tables, name), parsed.get(name) ?? []);
     }
-    await storage.put(key, bytes);
-  }
+  });
 
   const totalRows = Object.values(tableRows).reduce((a, b) => a + b, 0);
   log.info({ srcDir, totalRows, blobCount: blobKeys.length, blobBytes }, "restore complete");

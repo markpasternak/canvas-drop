@@ -15,22 +15,11 @@ import { loadConfig } from "@canvas-drop/shared";
 import { makeDb } from "../src/db/factory.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { createLogger } from "../src/log/logger.js";
-import { runPurge } from "../src/ops/cli.js";
+import { parsePurgeArgs, runPurge } from "../src/ops/cli.js";
 import { makeStorage } from "../src/storage/factory.js";
 
-function parseArgs(argv: string[]): { olderThanDays: number; dryRun: boolean } {
-  const words = argv.filter((a) => !a.startsWith("-"));
-  const dryRun = words.includes("dry-run") || words.includes("dryrun");
-  const daysArg = words.find((w) => w !== "dry-run" && w !== "dryrun") ?? "0";
-  const olderThanDays = Number(daysArg);
-  if (!Number.isInteger(olderThanDays) || olderThanDays < 0) {
-    throw new Error(`days must be a non-negative integer, got "${daysArg}"`);
-  }
-  return { olderThanDays, dryRun };
-}
-
 async function main() {
-  const { olderThanDays, dryRun } = parseArgs(process.argv.slice(2));
+  const { olderThanDays, dryRun } = parsePurgeArgs(process.argv.slice(2));
   const config = loadConfig();
   const log = createLogger(config);
   const db = makeDb(config);

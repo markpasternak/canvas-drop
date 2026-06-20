@@ -133,6 +133,10 @@ services:
   #   profiles: [maintenance]
   #   restart: unless-stopped
   #   entrypoint: ["/bin/sh", "-lc"]
+  #   # Supply-chain note: this fetches supercronic at boot for a zero-setup demo. For real
+  #   # production, pin AND verify it — supercronic publishes a SHA1SUM per release — or bake
+  #   # the binary into a derived image at build time, so a tampered or unavailable download
+  #   # can't run (or silently fail) on your data. See docs/ops.md "Scheduled maintenance".
   #   command:
   #     - >-
   #       wget -qO /usr/local/bin/supercronic

@@ -32,6 +32,14 @@ pnpm backup ./backups/$(date -u +%Y%m%dT%H%M%SZ)
 node --conditions=node-dist apps/server/dist/index.js backup /backups/$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
+> ⚠️ **A backup is sensitive — treat it like the database itself.** It is a cleartext export
+> of credential material (password / API-key hashes, `oauth_clients` secrets, session and
+> MCP-token rows) and PII (`allowed_emails`, `audit_log` actor IPs). Restrict the backup
+> directory to the app user — a `0700` dir on a dedicated volume, not one shared with
+> untrusted workloads — and **encrypt the archive before it leaves the host** (`age` / `gpg`,
+> or rely on bucket-side encryption + locked-down access). The `backups` volume below is
+> deliberately separate from the data volume; keep it just as private.
+
 Compression and off-site copy are yours to own (a backup is a plain directory):
 
 ```bash
@@ -57,6 +65,19 @@ you pass `--force`). It runs migrations first, so the target DB can be brand new
 ```bash
 node --conditions=node-dist apps/server/dist/index.js restore /backups/20260620T031500Z
 ```
+
+Restore is **integrity-first**: it pre-flights the whole backup against `meta.json` (every
+table's row count, the blob count + total bytes, and the sha256 of every content-addressed
+blob) and refuses a truncated or corrupted backup *before* writing anything — so a partial
+transfer can't restore silently short.
+
+> **If a restore fails partway,** don't re-point at the same half-filled target. Restore
+> writes blobs first (idempotent) then all rows in **one transaction**: on **Postgres** a
+> failed insert rolls the database back to empty, so just fix the cause and re-run. On
+> **SQLite** (whose driver can't roll back the batched insert) or if the blob copy itself was
+> interrupted, reset to a clean slate first — drop the target database / delete the DB file
+> and clear the storage directory (or point at a fresh `CANVAS_DROP_DB_PATH` / bucket) — then
+> restore again. A re-run on a complete backup is always safe to repeat.
 
 **Run the drill quarterly** (and after any major upgrade) so the backups are known-good:
 

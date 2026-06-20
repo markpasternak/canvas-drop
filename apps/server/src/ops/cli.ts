@@ -5,7 +5,7 @@
  * subcommand (see docs/ops.md). All three load the same typed config as the server, so
  * they act on whichever DB + storage the instance is wired to.
  */
-import { loadConfig } from "@canvas-drop/shared";
+import { ConfigError, loadConfig } from "@canvas-drop/shared";
 import { purgeDeletedCanvases } from "../canvas/purge.js";
 import type { DbClient } from "../db/factory.js";
 import { makeDb } from "../db/factory.js";
@@ -70,7 +70,10 @@ export async function runPurge(
   );
 }
 
-function parsePurgeArgs(rest: string[]): { olderThanDays: number; dryRun: boolean } {
+/** Parse `[days] [dry-run]` purge args. Shared with `scripts/purge-deleted.ts` so the dev
+ *  `pnpm purge` and the prod `purge` subcommand parse identically (accepts `dry-run` /
+ *  `dryrun` words and the `--dry-run` flag). */
+export function parsePurgeArgs(rest: string[]): { olderThanDays: number; dryRun: boolean } {
   const words = rest.filter((a) => !a.startsWith("-"));
   const dryRun =
     rest.includes("--dry-run") || words.includes("dry-run") || words.includes("dryrun");
@@ -90,7 +93,18 @@ export async function runOpsCli(argv: string[]): Promise<boolean> {
   const [cmd, ...rest] = argv;
   if (!OPS_COMMANDS.includes(cmd as OpsCommand)) return false;
 
-  const config = loadConfig();
+  // Fail loud and readable on a bad env, matching the server's startup handler (index.ts) —
+  // otherwise a mistyped var prints a raw stack trace instead of the one-line config message.
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      process.stderr.write(`${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
   const log = createLogger(config);
   const db = makeDb(config);
   const storage = makeStorage(config);

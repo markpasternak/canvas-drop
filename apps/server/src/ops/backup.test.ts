@@ -109,6 +109,35 @@ describe("BACKUP_TABLE_ORDER", () => {
     expect(pgNames).toEqual(sqliteNames); // dual-dialect lockstep
     expect(new Set(BACKUP_TABLE_ORDER).size).toBe(BACKUP_TABLE_ORDER.length); // no duplicates
   });
+
+  it("orders every table after the tables it references (FK-safe restore order)", () => {
+    // Restore inserts in this order with FK enforcement ON, so a child must never precede a
+    // parent it references. Set-parity (above) can't catch a child-before-parent reordering;
+    // this does. Edges are the schema's foreign keys (child -> referenced parent).
+    const idx = (n: string) => (BACKUP_TABLE_ORDER as readonly string[]).indexOf(n);
+    const fkEdges: ReadonlyArray<readonly [string, string]> = [
+      ["oauth_codes", "oauth_clients"],
+      ["sessions", "users"],
+      ["mcp_tokens", "users"],
+      ["audit_log", "users"],
+      ["canvases", "users"],
+      ["canvas_allowlist", "canvases"],
+      ["guest_invites", "canvases"],
+      ["guest_sessions", "guest_invites"],
+      ["versions", "canvases"],
+      ["upload_sessions", "canvases"],
+      ["drafts", "canvases"],
+      ["usage_events", "canvases"],
+      ["kv_entries", "canvases"],
+      ["files", "canvases"],
+      ["ai_usage", "canvases"],
+      ["screenshot_jobs", "canvases"],
+    ];
+    for (const [child, parent] of fkEdges) {
+      expect(idx(parent)).toBeGreaterThanOrEqual(0);
+      expect(idx(child)).toBeGreaterThan(idx(parent));
+    }
+  });
 });
 
 // Integrity guards are dialect-independent (they read the backup dir + verify it against
@@ -212,6 +241,92 @@ describe.each(DIALECTS)("backup/restore round-trip [%s]", (dialect) => {
     await expect(
       restoreBackup({ client: target, storage: memStorage(), log }, dir),
     ).rejects.toThrow(/not empty/i);
+
+    if (dialect === "sqlite") await target.close();
+    await source.close();
+  });
+});
+
+describe("cross-dialect restore (the driver-migration path)", () => {
+  // The headline feature: a backup taken on one dialect restores losslessly into the OTHER,
+  // with column types intact. The same-dialect round-trip can't catch a cross-dialect encoding
+  // bug — source and target encode identically there — so exercise both crossings explicitly.
+  const PAIRS: ReadonlyArray<readonly [Dialect, Dialect]> = [
+    ["sqlite", "postgres"],
+    ["postgres", "sqlite"],
+  ];
+  it.each(
+    PAIRS,
+  )("restores a %s backup into a fresh %s target with types intact", async (src, tgt) => {
+    const source = src === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
+    const srcStore = memStorage();
+    const { user, canvas } = await seed(source, srcStore);
+
+    const dir = await freshDir();
+    const meta = await createBackup({ client: source, storage: srcStore, log }, dir);
+    expect(meta.dialect).toBe(src);
+
+    const target = tgt === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
+    const tgtStore = memStorage();
+    const summary = await restoreBackup({ client: target, storage: tgtStore, log }, dir);
+    expect(summary.tableRows).toEqual(meta.tableRows);
+
+    // Read back through the typed repositories (the app's real read path) to prove the row
+    // crossed the dialect boundary with its types intact:
+    const restoredUser = await usersRepository(target).findById(user.id);
+    expect(restoredUser?.isAdmin).toBe(true); // boolean: sqlite int 0/1 <-> pg bool
+    expect(restoredUser?.email).toBe("owner@example.com"); // text
+    const restoredCanvas = await canvasesRepository(target).findById(canvas.id);
+    expect(restoredCanvas?.slug).toBe("lucky-yak");
+    expect(restoredCanvas?.title).toBe("Three.js demo");
+    // JSON value fidelity (settings.value is a JSON column):
+    expect(await settingsRepository(target).get("config.core.designSkin")).toBe("workshop");
+    // Blobs serve verbatim on the target driver.
+    const html = await tgtStore.get(`canvas/${canvas.id}/index.html`);
+    expect(new TextDecoder().decode(html ?? new Uint8Array())).toContain("<h1>hi</h1>");
+
+    await target.close();
+    await source.close();
+  });
+});
+
+describe.each(DIALECTS)("restore failure recovery + force [%s]", (dialect) => {
+  it("is re-runnable after a mid-restore storage failure (blobs first, rows in a txn)", async () => {
+    const source = await makeTestDb(dialect);
+    const srcStore = memStorage();
+    const { canvas } = await seed(source, srcStore);
+    const dir = await freshDir();
+    await createBackup({ client: source, storage: srcStore, log }, dir);
+
+    // Restore into a fresh target whose storage fails on the 2nd put (mid blob copy). Blobs
+    // are written BEFORE the row transaction, so the failed run must leave the DB empty.
+    const target = await emptyTarget(dialect);
+    await expect(
+      restoreBackup({ client: target, storage: memStorage(2), log }, dir),
+    ).rejects.toThrow(/storage down/);
+
+    // Because the DB was left empty, a plain (non-force) retry is accepted, not blocked by
+    // the empty-guard — the wedge the transaction + blobs-first ordering is meant to prevent.
+    const summary = await restoreBackup({ client: target, storage: memStorage(), log }, dir);
+    expect(summary.tableRows.canvases).toBe(1);
+    expect((await canvasesRepository(target).findById(canvas.id))?.slug).toBe("lucky-yak");
+
+    if (dialect === "sqlite") await target.close();
+    await source.close();
+  });
+
+  it("force:true restores into an empty target (exercises the guard-bypass path)", async () => {
+    const source = await makeTestDb(dialect);
+    const srcStore = memStorage();
+    await seed(source, srcStore);
+    const dir = await freshDir();
+    const meta = await createBackup({ client: source, storage: srcStore, log }, dir);
+
+    const target = await emptyTarget(dialect);
+    const summary = await restoreBackup({ client: target, storage: memStorage(), log }, dir, {
+      force: true,
+    });
+    expect(summary.tableRows).toEqual(meta.tableRows);
 
     if (dialect === "sqlite") await target.close();
     await source.close();
