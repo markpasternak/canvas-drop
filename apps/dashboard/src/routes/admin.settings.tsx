@@ -29,7 +29,7 @@ function valueLabel(f: AdminConfigField): string {
 }
 
 /** One editable setting: an input pre-filled with the current value + Save/Clear. */
-function EditableRow({ field }: { field: AdminConfigField }) {
+export function EditableRow({ field }: { field: AdminConfigField }) {
   const setConfig = useAdminSetConfig();
   const toast = useToast();
   // Secrets are write-only: the input starts empty (we never receive the value).
@@ -93,15 +93,30 @@ function EditableRow({ field }: { field: AdminConfigField }) {
         </p>
       </div>
       <div className="flex items-center gap-2">
-        <input
-          type={field.secret ? "password" : "text"}
-          aria-label={field.label}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
-          autoComplete={field.secret ? "new-password" : "off"}
-          className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
-        />
+        {field.type === "enum" && field.enumValues ? (
+          <select
+            aria-label={field.label}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+          >
+            {field.enumValues.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type={field.secret ? "password" : "text"}
+            aria-label={field.label}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
+            autoComplete={field.secret ? "new-password" : "off"}
+            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+          />
+        )}
         <Button size="sm" loading={setConfig.isPending} onClick={save}>
           Save
         </Button>
