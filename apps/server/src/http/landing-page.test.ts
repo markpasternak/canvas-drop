@@ -42,6 +42,25 @@ describe("landing page design skin", () => {
     expect(html).toContain(':root[data-skin="workshop"]');
   });
 
+  it("re-voices the hero with the skin: h1 uses --font-display and alternates remap the marketing accent", () => {
+    const html = renderLandingPage("https://x.com", "oidc", false, "workshop");
+    // The hero title follows the skin's display face (editorial keeps the serif
+    // because --font-display defaults to it; workshop/canvas re-voice it).
+    expect(html).toContain("font-family: var(--font-display)");
+    // Any non-default skin remaps the marketing accent (--amber) to the skin
+    // accent, so the hero accent + CTA follow the active skin rather than staying
+    // a fixed amber. Editorial stamps no data-skin, so this rule never fires for it.
+    expect(html).toContain(":root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }");
+  });
+
+  it("keeps the editorial hero on its fixed amber (the remap is scoped to [data-skin])", () => {
+    const html = renderLandingPage("https://x.com", "oidc", false, "editorial");
+    expect(html).not.toContain('data-skin="editorial"');
+    // The hero accent clause still resolves to the marketing amber, not the skin
+    // accent — the [data-skin] remap can't match an attribute-free <html>.
+    expect(html).toContain("h1 .accent { font-style: italic; color: var(--amber); }");
+  });
+
   it("landingResponse stamps the instance's configured skin", async () => {
     const cfg = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_DESIGN_SKIN: "studio" });
     const html = await landingResponse(cfg, { signedIn: false }).text();

@@ -302,6 +302,11 @@ ${rampCssVars("dark", "    ")}
     --amber-ink: ${MARKETING_ACCENT.dark["amber-ink"]};
   }
 }
+/* Non-default skins re-voice the marketing accent: any [data-skin] remaps the
+   landing's --amber family to the active skin accent, so the hero — and the rest
+   of the page — follow the admin-chosen skin. Editorial stamps no data-skin and
+   keeps its signature amber. */
+:root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 body {
@@ -379,7 +384,7 @@ header {
 .eyebrow .dot { width: .42rem; height: .42rem; border-radius: 100px; background: var(--amber); box-shadow: 0 0 0 4px oklch(0.78 0.15 72 / 0.22); }
 h1 {
   margin: 1.1rem 0 0; max-width: 15ch;
-  font-family: var(--font-serif); font-optical-sizing: auto;
+  font-family: var(--font-display); font-optical-sizing: auto;
   font-size: clamp(2.7rem, 7vw, 4.8rem); line-height: 1.0; letter-spacing: -.02em; font-weight: 460;
 }
 h1 .accent { font-style: italic; color: var(--amber); }
