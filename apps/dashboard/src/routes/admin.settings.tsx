@@ -77,6 +77,8 @@ export function EditableRow({ field }: { field: AdminConfigField }) {
       if (field.secret) setDraft("");
       toast(`${field.label} saved`);
     } catch (err) {
+      // A failed save must not leave the live preview on screen — revert to the committed skin.
+      if (isSkinField) restoreSkinFromCache();
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
     }
   }

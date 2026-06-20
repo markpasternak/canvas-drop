@@ -17,6 +17,22 @@ import { BRAND_TOKENS, type ThemeName } from "./tokens.js";
  */
 const THEMES: ThemeName[] = ["light", "dark"];
 
+describe("contrastRatio known answers (anchors the OKLCH→luminance formula)", () => {
+  // The skin pairings below only assert "≥ AA". A luminance bug that shifted every value but
+  // preserved relative ordering would still clear AA and slip through — so pin the formula to
+  // WCAG's defined endpoints, which only a correct OKLCH→linear→luminance pipeline produces.
+  it("white vs black is the 21:1 maximum", () => {
+    expect(contrastRatio("oklch(1 0 0)", "oklch(0 0 0)")).toBeCloseTo(21, 5);
+  });
+  it("a colour against itself is 1:1", () => {
+    expect(contrastRatio("oklch(0.7 0.12 150)", "oklch(0.7 0.12 150)")).toBeCloseTo(1, 5);
+  });
+  it("is symmetric in its arguments", () => {
+    const [x, y] = ["oklch(0.6 0.1 250)", "oklch(0.95 0.02 90)"];
+    expect(contrastRatio(x, y)).toBeCloseTo(contrastRatio(y, x), 10);
+  });
+});
+
 describe("skin accent contrast (WCAG AA)", () => {
   for (const skin of SKIN_NAMES) {
     for (const theme of THEMES) {
