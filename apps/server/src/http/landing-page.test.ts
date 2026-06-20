@@ -26,8 +26,12 @@ const proxy: Config = loadConfig({
 });
 
 describe("landing page design skin", () => {
-  it("defaults to the editorial skin on <html>", () => {
-    expect(renderLandingPage("https://x.com", "oidc", false)).toContain('data-skin="editorial"');
+  it("omits data-skin for the default editorial skin (matches the SPA's attribute-free default)", () => {
+    const html = renderLandingPage("https://x.com", "oidc", false);
+    // The <html> tag carries no skin attribute (editorial is the base :root); the CSS still
+    // ships the alternate [data-skin] override blocks, so assert against the tag specifically.
+    expect(html).toContain('<html lang="en">');
+    expect(html).not.toContain('data-skin="editorial"');
   });
 
   it("stamps the chosen skin on <html> and ships the skin override CSS", () => {

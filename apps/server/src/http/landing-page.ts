@@ -609,8 +609,11 @@ export function renderLandingPage(
       `<div class="value reveal"><span class="num">0${i + 1}</span><h3>${escapeHtml(v.title)}</h3><p>${escapeHtml(v.body)}</p></div>`,
   ).join("\n");
 
+  // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
+  // attribute for editorial) — only the alternates stamp data-skin, so there's no surface
+  // divergence and no [data-skin="editorial"] rule is ever needed.
   return `<!doctype html>
-<html lang="en" data-skin="${skin}">
+<html lang="en"${skin === "editorial" ? "" : ` data-skin="${skin}"`}>
 <head>
 ${head(origin)}
 </head>
