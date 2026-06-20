@@ -21,3 +21,4 @@ export {
   loadConfig,
   presentEnvVars,
 } from "./config/env.js";
+export * from "./tenancy/domain.js";

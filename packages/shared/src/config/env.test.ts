@@ -17,6 +17,32 @@ describe("loadConfig", () => {
     expect(config.log.format).toBe("pretty"); // non-production default
   });
 
+  it("tenancy: org is inert by default (no name) and domains default to allowed-email domains", () => {
+    // No CANVAS_DROP_ORG_NAME → tenancy inert.
+    expect(loadConfig({}).org.name).toBeUndefined();
+
+    // Naming an org turns it on; domains default to the allowed-email domains, lowercased.
+    const def = loadConfig(
+      devEnv({
+        CANVAS_DROP_ORG_NAME: "Acme",
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "Acme.com, Eng.Acme.com",
+      }),
+    );
+    expect(def.org.name).toBe("Acme");
+    expect(def.org.domains).toEqual(["acme.com", "eng.acme.com"]);
+  });
+
+  it("tenancy: CANVAS_DROP_ORG_DOMAINS overrides the allowed-email default", () => {
+    const cfg = loadConfig(
+      devEnv({
+        CANVAS_DROP_ORG_NAME: "Acme",
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "acme.com",
+        CANVAS_DROP_ORG_DOMAINS: "Acme.com, partner.example",
+      }),
+    );
+    expect(cfg.org.domains).toEqual(["acme.com", "partner.example"]);
+  });
+
   it("defaults the design skin to editorial and validates the enum", () => {
     expect(loadConfig({}).designSkin).toBe("editorial");
     expect(loadConfig(devEnv({ CANVAS_DROP_DESIGN_SKIN: "workshop" })).designSkin).toBe("workshop");
