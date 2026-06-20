@@ -2,6 +2,7 @@ import { mcpAuthRouter, StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
@@ -121,11 +122,19 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
     async (c) => {
       const auth = c.get("mcpAuth");
       if (!auth) return c.json({ error: "unauthorized" }, 401);
+      // Resolve the caller's org membership server-side (plan 002 U7) from the verified
+      // user — same DI resolver the gateway uses; never anything the client asserted.
+      const user = await deps.users.findById(auth.userId);
+      const orgIds = user ? await makeOrgMembershipResolver(deps.orgs)(user) : new Set<string>();
       // Fresh transport + server per request (stateless), bound to the verified caller.
       // `McpRoutesDeps extends McpToolDeps`, so structural subtyping lets us pass the
       // deps straight through — no field-by-field reconstruction to drift out of sync.
       const transport = new StreamableHTTPTransport();
-      const server = buildMcpServer(deps, { userId: auth.userId });
+      const server = buildMcpServer(deps, {
+        userId: auth.userId,
+        orgIds,
+        tenancyActive: !!deps.config.org.name,
+      });
       await server.connect(transport);
       try {
         return await transport.handleRequest(c);

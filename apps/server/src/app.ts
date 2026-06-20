@@ -339,6 +339,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         log: deps.rootLogger,
         strategy: deps.strategy,
         users: deps.users,
+        orgs,
         allowedEmails,
         oauth,
         canvases: deps.canvases,

@@ -21,6 +21,7 @@ import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
@@ -30,7 +31,7 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { type DeployEngine, deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
 import type { EmailMessage, Mailer } from "../email/mailer.js";
-import { buildMcpServer, type McpCaller } from "../mcp/server.js";
+import { buildMcpServer } from "../mcp/server.js";
 import { createHub, type RealtimeHub } from "../realtime/hub.js";
 import { memStorage } from "../storage/mem.js";
 import { uploadService } from "../upload/service.js";
@@ -297,12 +298,16 @@ export function scenarioConfig(extra: Record<string, string> = {}): Config {
  * DB + storage + engine so what an agent publishes over MCP is the same canvas
  * the HTTP app serves (the agent-native parity rule). Returns the connected client.
  */
-export async function connectMcp(h: Harness, caller: McpCaller): Promise<McpClient> {
+export async function connectMcp(
+  h: Harness,
+  caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
+): Promise<McpClient> {
   const { config, repos, storage, engine, audit } = h;
   const server = buildMcpServer(
     {
       config,
       users: repos.users,
+      orgs: orgsRepository(h.client),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,
@@ -338,7 +343,11 @@ export async function connectMcp(h: Harness, caller: McpCaller): Promise<McpClie
       screenshots: repos.screenshots,
       screenshotsEnabled: () => Promise.resolve(false),
     },
-    caller,
+    {
+      userId: caller.userId,
+      orgIds: caller.orgIds ?? new Set<string>(),
+      tenancyActive: caller.tenancyActive ?? false,
+    },
   );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);

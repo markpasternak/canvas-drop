@@ -21,6 +21,7 @@ import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -40,6 +41,7 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
 import { canvasView, fail, failDeploy, ok, type ToolResult } from "./tool-kit.js";
@@ -49,6 +51,9 @@ import { canvasView, fail, failDeploy, ok, type ToolResult } from "./tool-kit.js
 export interface McpToolDeps extends PreviewHintDeps {
   config: Config;
   users: UsersRepository;
+  /** Tenancy org store (plan 002 U7): `findById` for whoami names; `findByDomain` for the
+   *  route's membership resolver that derives the caller's orgIds. */
+  orgs: Pick<OrgsRepository, "findById" | "findByDomain">;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;
@@ -80,9 +85,13 @@ export interface McpToolDeps extends PreviewHintDeps {
  *  Bigger files report metadata only — verify those by hash, or fetch over HTTP. */
 const READBACK_MAX_BYTES = 256 * 1024;
 
-/** The acting MCP caller — `userId` comes only from the verified access token (U3). */
+/** The acting MCP caller — `userId` comes only from the verified access token (U3).
+ *  `orgIds` is the caller's SERVER-resolved org membership (plan 002 U7), resolved by the
+ *  MCP route from the user — never client-asserted; `tenancyActive` mirrors config. */
 export interface McpCaller {
   userId: string;
+  orgIds: Set<string>;
+  tenancyActive: boolean;
 }
 
 /** The owner-and-mutable gate: resolves to the owned canvas, or a `ToolResult` the tool
@@ -132,7 +141,18 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async () => {
       const user = await deps.users.findById(caller.userId);
       if (!user) return fail("account not found");
-      return ok({ id: user.id, email: user.email, name: user.name });
+      // Tenancy (plan 002 U7): the caller's orgs + guest flag, mirroring /api/me. Resolved
+      // from the caller's SERVER-derived orgIds — never anything the client asserted.
+      const orgRows = (
+        await Promise.all([...caller.orgIds].map((id) => deps.orgs.findById(id)))
+      ).filter((o): o is NonNullable<typeof o> => o !== null);
+      return ok({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        orgs: orgRows.map((o) => ({ id: o.id, name: o.name })),
+        isGuest: caller.tenancyActive && caller.orgIds.size === 0,
+      });
     },
   );
 
@@ -197,6 +217,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     },
   );
 
+  // Agent-native parity note (plan 002 U7 decision): `list_canvases` is OWNER-scoped (your
+  // own canvases) and is unaffected by tenancy. The dashboard's new org-GALLERY browse
+  // (whole_org canvases of your org that you don't own) is intentionally NOT exposed over
+  // MCP in P1 — org-gallery-browse-over-MCP is an explicit Phase 2 deferral. An agent can
+  // still `clone_canvas` an org template by id (org-scoped above); only discovery-by-browse
+  // is deferred. This is the recorded choice, not an accidental "inherits for free" gap.
   server.registerTool(
     "create_canvas",
     {
@@ -217,9 +243,22 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .max(63)
           .optional()
           .describe("Custom URL slug; omit for a readable-random one. Must be unused and valid."),
+        orgId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            "Home tenant: an org id you belong to (see whoami.orgs), or null for a personal " +
+              "canvas. Omit to default to your org when you have exactly one. Drives whether a " +
+              "later `whole_org` access rung shares it with that org.",
+          ),
       },
     },
-    async ({ title, description, backendEnabled, slug: requestedSlug }) => {
+    async ({ title, description, backendEnabled, slug: requestedSlug, orgId }) => {
+      // Home tenant (plan 002 U7): validated against the caller's server-resolved membership,
+      // the SAME resolveHomeOrg the dashboard/management create uses — never trusts the client.
+      const home = resolveHomeOrg(orgId, caller.orgIds);
+      if ("error" in home) return fail("ORG_FORBIDDEN: you are not a member of that org");
       const resolved = await resolveCreateSlug(requestedSlug, (s) => deps.canvases.slugTaken(s));
       if ("error" in resolved) return fail("INVALID_SLUG: not a valid slug");
       const apiKey = generateApiKey();
@@ -232,6 +271,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           apiKeyHash: hashApiKey(apiKey),
           title,
           description,
+          orgId: home.orgId,
           backendEnabled,
         });
       } catch (err) {
@@ -1144,10 +1184,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const source = await deps.canvases.findById(id);
       if (!source || source.status === "deleted") return fail("canvas not found");
+      // Non-owner clone eligibility runs through the SAME org-scoped gallery predicate as
+      // the dashboard (plan 002 U7): an org template is cloneable only by a member of its
+      // org; a personal public_link template stays cloneable. Scoped to the caller's
+      // server-resolved orgIds.
       const eligible =
         source.ownerId === caller.userId
           ? source.status === "active"
-          : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+          : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+              tenancyActive: caller.tenancyActive,
+              viewerOrgIds: caller.orgIds,
+            })) !== null;
       if (!eligible) return fail("canvas not found");
       const { canvas } = await deps.clone.clone(source, caller.userId);
       deps.audit.recordAudit({
