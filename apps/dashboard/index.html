@@ -25,6 +25,13 @@
           if (t === "light" || t === "dark") {
             document.documentElement.setAttribute("data-theme", t);
           }
+          // Pre-paint design skin: apply the last-known instance skin (cached from
+          // /api/me) before first paint so a non-default skin never flashes editorial.
+          // editorial is the base :root (no attribute), so only the three alternates set it.
+          const skin = localStorage.getItem("canvas-drop-skin");
+          if (skin === "studio" || skin === "workshop" || skin === "canvas") {
+            document.documentElement.setAttribute("data-skin", skin);
+          }
         } catch {
           /* private mode — non-fatal */
         }

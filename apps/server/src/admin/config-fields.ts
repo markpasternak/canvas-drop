@@ -1,4 +1,4 @@
-import type { Config } from "@canvas-drop/shared";
+import { type Config, SKIN_NAMES } from "@canvas-drop/shared";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "../routes/canvas-kv.js";
 
@@ -87,6 +87,19 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     secret: false,
     editable: false,
     fromConfig: (c) => c.baseUrl,
+  },
+  {
+    key: "core.designSkin",
+    env: "CANVAS_DROP_DESIGN_SKIN",
+    group: "Core",
+    label: "Design skin",
+    help: "Instance-wide visual design language. editorial is the default; studio (warm editorial), workshop (developer/IDE), and canvas (playful/bold) are alternates. Applies to the dashboard, editor, and landing page.",
+    type: "enum",
+    enumValues: SKIN_NAMES,
+    secret: false,
+    editable: true,
+    settingKey: "config.core.designSkin",
+    fromConfig: (c) => c.designSkin,
   },
   {
     key: "core.apiBaseUrl",

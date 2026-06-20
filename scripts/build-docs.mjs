@@ -71,6 +71,18 @@ const SANITIZE_OPTS = {
   disallowedTagsMode: "discard",
 };
 
+/** HTML-escape diagram source so it lands as inert text inside <pre class="mermaid">.
+ *  The mermaid client reads textContent (which un-escapes these), so the diagram
+ *  parses correctly while no raw `<`/`&` ever reaches the DOM as markup. */
+function escapeText(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function slugify(text) {
   return text
     .toLowerCase()
@@ -109,6 +121,15 @@ export function renderMarkdown(md) {
         return `<h${depth} id="${id}">${inner}</h${depth}>\n`;
       },
       code({ text, lang }) {
+        // ```mermaid fenced blocks are diagrams, not code: emit a `.mermaid`
+        // container holding the ESCAPED diagram source as text (no hljs). The
+        // served /docs/mermaid.js client renders it in-browser with
+        // securityLevel:'strict'. The text is HTML-escaped here AND survives the
+        // sanitize-html pass below (<pre class="mermaid"> is allow-listed), so no
+        // raw markup ever reaches the DOM before mermaid's own sanitizer runs.
+        if (lang === "mermaid") {
+          return `<pre class="mermaid">${escapeText(text)}</pre>\n`;
+        }
         const language = lang && hljs.getLanguage(lang) ? lang : null;
         const out = language
           ? hljs.highlight(text, { language }).value

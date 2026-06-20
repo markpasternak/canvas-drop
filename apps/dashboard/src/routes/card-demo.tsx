@@ -104,7 +104,7 @@ function ThemePane({ theme }: { theme: "light" | "dark" }) {
       data-theme={theme}
       className="flex-1 rounded-xl border border-border bg-canvas p-5 text-fg"
     >
-      <h2 className="mb-4 font-serif text-lg font-medium capitalize">{theme} mode</h2>
+      <h2 className="mb-4 font-display text-lg capitalize">{theme} mode</h2>
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {CASES.map((c) => (
           <li key={c.key} className="space-y-2">
@@ -125,7 +125,7 @@ export default function CardDemo() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-2xl font-medium">Card readability harness</h1>
+        <h1 className="font-display text-2xl">Card readability harness</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
           The shared full-bleed preview card across four preview cases — bright, dark, busy,
           low-contrast — in light and dark mode side by side. Every card's name, status, tags,

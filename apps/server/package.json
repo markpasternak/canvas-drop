@@ -8,13 +8,17 @@
     "start": "node --conditions=node-dist dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "purge": "tsx scripts/purge-deleted.ts"
+    "purge": "tsx scripts/purge-deleted.ts",
+    "backup": "tsx src/index.ts backup",
+    "restore": "tsx src/index.ts restore"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.84",
     "@aws-sdk/client-s3": "^3.1067.0",
     "@canvas-drop/sdk": "workspace:*",
     "@canvas-drop/shared": "workspace:*",
+    "@fontsource-variable/geist": "^5.2.5",
+    "@fontsource-variable/geist-mono": "^5.2.5",
     "@fontsource-variable/newsreader": "^5.2.5",
     "@hono/mcp": "^0.3.0",
     "@hono/node-server": "^2.0.4",

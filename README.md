@@ -182,7 +182,7 @@ docs/              BUILD_BRIEF, plans, compounding learnings, docs-site source
 
 ## Status
 
-**v1 is feature-complete and hardening toward a public release**, built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. M1 through M9 plus a wave of post-v1 work (the sharing ladder, the MCP server at full dashboard parity, clone-as-template, staged uploads, custom slugs, optional canvas screenshots) have shipped; ops/packaging (M10) is the only milestone still in progress. See [`docs/plans/`](docs/plans/).
+**v1 is feature-complete and hardening toward a public release**, built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. M1 through M9 plus a wave of post-v1 work (the sharing ladder, the MCP server at full dashboard parity, clone-as-template, staged uploads, custom slugs, optional canvas screenshots, and an admin-flippable [design-skin layer](docs/site/self-hosting/configuration.md#design-skins)) have shipped; ops/packaging (M10) is the only milestone still in progress — its Docker image/compose, **backup/restore + scheduled maintenance** ([`docs/ops.md`](docs/ops.md)), and secret-scan are in, with the single-VPS load test and the IAP colleague pilot still deferred. See [`docs/plans/`](docs/plans/).
 
 > **Maturity, honestly:** canvas-drop is **not yet running in production anywhere serious.** It boots, passes a dual-dialect suite, and self-hosts via Docker, but it has not been battle-tested under a real org's load yet. That is exactly what is next. Self-host reports, issues, and PRs are very welcome.
 
@@ -198,9 +198,11 @@ pnpm format       # biome check --write (also sorts imports)
 pnpm typecheck    # tsc --noEmit across server, sdk, dashboard
 pnpm build        # build all workspace packages
 pnpm purge [days] # reclaim storage from soft-deleted canvases (dry-run supported)
+pnpm backup <dir> # full instance backup (DB + storage) → a portable directory
+pnpm restore <dir> # restore a backup into a fresh, empty instance
 ```
 
-Deleting a canvas is a soft-delete (a tombstone row). `pnpm purge` is the maintenance sweep that reclaims the heavy data; it reads the same config as the server.
+Deleting a canvas is a soft-delete (a tombstone row). `pnpm purge` is the maintenance sweep that reclaims the heavy data; it reads the same config as the server. **`backup`/`restore`** capture and recover the whole instance (every table + every content-addressed blob) in a driver-agnostic format — so they also migrate between drivers (SQLite↔Postgres, local↔S3). In production these are subcommands of the server binary (`node … apps/server/dist/index.js {backup,restore,purge}`), so cron runs them with the app image. Full runbook + a recommended backup/purge cron schedule: [`docs/ops.md`](docs/ops.md).
 
 ---
 

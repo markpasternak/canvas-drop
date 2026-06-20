@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Config } from "@canvas-drop/shared";
+import type { Config, SkinName } from "@canvas-drop/shared";
 import { zipSync } from "fflate";
 import { Hono } from "hono";
 import { errorResponse } from "../http/error-pages.js";
@@ -82,10 +82,21 @@ function htmlHeaders(): Headers {
   return h;
 }
 
-export function docsRoutes(config: Config): Hono<AppEnv> {
+/**
+ * Public docs router. `opts.skin` resolves the effective instance design skin
+ * per-request (admin DB override over env/default), threaded in from `app.ts` the
+ * same way the landing page is wired — so the docs "wear" the active skin exactly
+ * like the marketing surface. Default editorial (the attribute-free base) when no
+ * resolver is supplied (tests / mounts that don't care).
+ */
+export function docsRoutes(
+  config: Config,
+  opts: { skin?: () => Promise<SkinName> } = {},
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Public base URL → absolute og:image / og:url (social crawlers require absolute).
   const origin = config.baseUrl;
+  const resolveSkin = opts.skin ?? (async () => "editorial" as const);
 
   // Pre-build the skill zip at mount time so the first /skill.zip request doesn't
   // block the event loop on synchronous readFileSync/readdirSync/zipSync work.
@@ -133,6 +144,26 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
     h.set("Content-Type", "application/json; charset=utf-8");
     h.set("Cache-Control", "public, max-age=3600");
     return new Response(SEARCH_INDEX_JSON, { status: 200, headers: h });
+  });
+
+  // Self-hosted Mermaid renderer (`pnpm docs:mermaid` → docs/site/assets/mermaid.js),
+  // served same-origin so the docs CSP stays `script-src 'self'` (a CDN would violate
+  // it and the no-phone-home rule). Loaded `defer` only on pages with a diagram. The
+  // bundle is ~3MB → long-cache immutable; a missing file is a JS-comment 404.
+  app.get("/docs/mermaid.js", async () => {
+    const h = new Headers();
+    baseSecurityHeaders(h);
+    h.set("Content-Type", "application/javascript; charset=utf-8");
+    h.set("Cache-Control", "public, max-age=31536000, immutable");
+    try {
+      const bytes = await readFile(join(ASSETS_DIR, "mermaid.js"));
+      return new Response(bytes, { status: 200, headers: h });
+    } catch {
+      return new Response("/* mermaid bundle missing — run pnpm docs:mermaid */", {
+        status: 404,
+        headers: h,
+      });
+    }
   });
 
   // The landing product-tour carousel bundle (Embla + autoplay), committed by
@@ -194,15 +225,20 @@ export function docsRoutes(config: Config): Hono<AppEnv> {
   });
 
   // Docs index.
-  app.get("/docs", (c) => docPage(c, "", origin));
+  app.get("/docs", (c) => docPage(c, "", origin, resolveSkin));
   // Any nested doc path (e.g. /docs/sdk/kv). Static routes above take priority.
-  app.get("/docs/:path{.+}", (c) => docPage(c, c.req.param("path"), origin));
+  app.get("/docs/:path{.+}", (c) => docPage(c, c.req.param("path"), origin, resolveSkin));
 
   return app;
 }
 
-function docPage(c: import("hono").Context<AppEnv>, path: string, origin: string): Response {
-  const html = renderDocPage(path, origin);
+async function docPage(
+  c: import("hono").Context<AppEnv>,
+  path: string,
+  origin: string,
+  resolveSkin: () => Promise<SkinName>,
+): Promise<Response> {
+  const html = renderDocPage(path, origin, await resolveSkin());
   if (html === null) {
     return errorResponse(
       c,

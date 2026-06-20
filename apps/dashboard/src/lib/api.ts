@@ -20,6 +20,13 @@
  * intentionally restated here. Keep the two in lockstep if a mode is ever added. */
 export type AuthMode = "proxy" | "oidc" | "dev";
 
+/** Instance-wide design skin (the expression layer: accent, display type, radii).
+ * Browser-side mirror of `SkinName` in `@canvas-drop/shared` — restated here for the
+ * same reason as {@link AuthMode} (the dashboard must not pull the shared/config
+ * package, and its zod schema, into the browser bundle). Keep in lockstep if a skin
+ * is added. */
+export type DesignSkin = "editorial" | "studio" | "workshop" | "canvas";
+
 export interface Me {
   id: string;
   email: string;
@@ -33,6 +40,9 @@ export interface Me {
   urlMode: "path" | "subdomain";
   /** Instance base URL (plan 004) — host/scheme for the slug URL preview. UX-only. */
   baseUrl: string;
+  /** Active instance-wide design skin (presentation only). Optional on the wire for
+   *  resilience; absent ⇒ the default `editorial`. The SPA applies it to <html data-skin>. */
+  designSkin?: DesignSkin;
 }
 
 /** The four toggleable backend features (plan 006). Identity is implicit (no flag). */

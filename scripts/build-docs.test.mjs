@@ -23,6 +23,25 @@ describe("build-docs renderMarkdown", () => {
     expect(html).toContain("hljs-keyword"); // `const` highlighted
   });
 
+  it("emits ```mermaid blocks as a .mermaid container (not hljs-highlighted)", () => {
+    const { html } = renderMarkdown("# T\n\n```mermaid\nflowchart TD\n  A --> B\n```");
+    expect(html).toContain('<pre class="mermaid">');
+    // The diagram source survives as text for the client renderer; it is NOT run
+    // through highlight.js (no hljs token classes wrapping the DSL).
+    expect(html).toContain("flowchart TD");
+    expect(html).not.toContain('class="hljs');
+  });
+
+  it("escapes mermaid diagram source so it survives sanitization as inert text", () => {
+    // Arrows/labels carry `<`, `>`, `&` — the build escapes them and sanitize-html keeps
+    // the <pre class="mermaid"> wrapper, so no raw markup reaches the DOM pre-render.
+    const { html } = renderMarkdown('# T\n\n```mermaid\nflowchart LR\n  A -->|"x<b>"| B\n```');
+    expect(html).toContain('<pre class="mermaid">');
+    expect(html).toContain("--&gt;"); // arrow escaped
+    expect(html).toContain("&lt;b&gt;"); // would-be tag escaped, never a live <b>
+    expect(html).not.toContain("<b>");
+  });
+
   it("strips raw <script> and event handlers (sanitization)", () => {
     const { html } = renderMarkdown(
       '# T\n\n<script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">',

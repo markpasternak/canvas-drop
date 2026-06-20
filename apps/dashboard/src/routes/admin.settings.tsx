@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminHeader } from "../components/AdminHeader.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
@@ -10,6 +10,7 @@ import { useToast } from "../components/Toast.js";
 import { type AdminConfigField, ApiError } from "../lib/api.js";
 import { useAdminSetConfig } from "../lib/mutations.js";
 import { useAdminConfig } from "../lib/queries.js";
+import { commitSkin, previewSkin, restoreSkinFromCache } from "../lib/skin.js";
 
 /** Source badge: where a setting's effective value comes from. */
 function SourceBadge({ source }: { source: AdminConfigField["source"] }) {
@@ -29,11 +30,20 @@ function valueLabel(f: AdminConfigField): string {
 }
 
 /** One editable setting: an input pre-filled with the current value + Save/Clear. */
-function EditableRow({ field }: { field: AdminConfigField }) {
+export function EditableRow({ field }: { field: AdminConfigField }) {
   const setConfig = useAdminSetConfig();
   const toast = useToast();
   // Secrets are write-only: the input starts empty (we never receive the value).
   const [draft, setDraft] = useState(field.secret ? "" : (field.value ?? ""));
+
+  // The design-skin field previews live across the whole app as the admin picks (they
+  // see the real thing, not a swatch); leaving without saving reverts to the cached
+  // real skin. Save commits it. See lib/skin.ts.
+  const isSkinField = field.key === "core.designSkin";
+  useEffect(() => {
+    if (!isSkinField) return;
+    return () => restoreSkinFromCache();
+  }, [isSkinField]);
 
   async function save() {
     const raw = draft.trim();
@@ -63,9 +73,12 @@ function EditableRow({ field }: { field: AdminConfigField }) {
     }
     try {
       await setConfig.mutateAsync({ key: field.key, value });
+      if (isSkinField && typeof value === "string") commitSkin(value);
       if (field.secret) setDraft("");
       toast(`${field.label} saved`);
     } catch (err) {
+      // A failed save must not leave the live preview on screen — revert to the committed skin.
+      if (isSkinField) restoreSkinFromCache();
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
     }
   }
@@ -88,20 +101,44 @@ function EditableRow({ field }: { field: AdminConfigField }) {
           <SourceBadge source={field.source} />
         </div>
         {field.help ? <p className="text-xs text-muted">{field.help}</p> : null}
+        {isSkinField ? (
+          <p className="text-xs text-accent">
+            Changing this previews it live across the app — Save to apply for everyone, or leave
+            this page to revert.
+          </p>
+        ) : null}
         <p className="font-mono text-[11px] text-muted">
           {field.env !== "—" ? field.env : field.key} · now: {valueLabel(field)}
         </p>
       </div>
       <div className="flex items-center gap-2">
-        <input
-          type={field.secret ? "password" : "text"}
-          aria-label={field.label}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
-          autoComplete={field.secret ? "new-password" : "off"}
-          className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
-        />
+        {field.type === "enum" && field.enumValues ? (
+          <select
+            aria-label={field.label}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (isSkinField) previewSkin(e.target.value);
+            }}
+            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+          >
+            {field.enumValues.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type={field.secret ? "password" : "text"}
+            aria-label={field.label}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={field.secret ? (field.set ? "Replace key…" : "Paste key…") : field.label}
+            autoComplete={field.secret ? "new-password" : "off"}
+            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-3 py-1.5 text-sm sm:w-56"
+          />
+        )}
         <Button size="sm" loading={setConfig.isPending} onClick={save}>
           Save
         </Button>

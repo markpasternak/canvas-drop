@@ -21,6 +21,7 @@ import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
 import { createLogger } from "./log/logger.js";
+import { runOpsCli } from "./ops/cli.js";
 import { createHub } from "./realtime/hub.js";
 import { CAPTURE_VIEWPORT, type CaptureContext } from "./screenshots/capture.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
@@ -31,6 +32,10 @@ import { makeStorage } from "./storage/factory.js";
 const REALTIME_HEARTBEAT_MS = 60_000;
 
 async function main() {
+  // Maintenance subcommands (backup / restore / purge) run and exit instead of starting
+  // the server — same binary, so prod cron runs the app image directly (see docs/ops.md).
+  if (await runOpsCli(process.argv.slice(2))) return;
+
   // 1. Config — the only process.env reader; fail loud on invalid combos.
   let config: ReturnType<typeof loadConfig>;
   try {

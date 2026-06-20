@@ -11,6 +11,33 @@ publish a version directly; each is also available on an existing canvas to
 publish its next version. The in-browser [editor](/docs/authoring/editor) is the
 one source that saves a **draft** first and lets you publish when you're ready.
 
+```mermaid
+flowchart TD
+    subgraph Sources["Five ways in"]
+      DnD[Drag files / folder]
+      Zip[Upload ZIP]
+      Paste[Paste HTML]
+      API[Deploy API]
+      Ed[In-browser editor]
+    end
+    DnD --> Pub{Publish}
+    Zip --> Pub
+    Paste --> Pub
+    API --> Pub
+    Ed --> Draft[(Draft, autosaved)]
+    Draft -->|keep editing| Draft
+    Draft -->|publish when ready| Pub
+    Pub --> V[Immutable version N, content-addressed]
+    V --> Live([Served live at the canvas URL])
+    Live -.->|rollback| Prev[Re-point to an earlier version]
+    Prev -.-> Live
+```
+
+Only the editor saves a draft first; the other four publish a version directly.
+Every publish mints an **immutable version** (content-addressed files), and the
+live URL is just a pointer at one version — so **rollback** is instant and
+non-destructive.
+
 The create flow also has an **Enable backend** toggle (off by default; turns on
 the five primitives — KV, files, AI, identity, realtime) and an optional
 **custom slug** field. If a folder or ZIP deploy fails right after the canvas is

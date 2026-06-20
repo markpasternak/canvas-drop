@@ -17,6 +17,12 @@ describe("loadConfig", () => {
     expect(config.log.format).toBe("pretty"); // non-production default
   });
 
+  it("defaults the design skin to editorial and validates the enum", () => {
+    expect(loadConfig({}).designSkin).toBe("editorial");
+    expect(loadConfig(devEnv({ CANVAS_DROP_DESIGN_SKIN: "workshop" })).designSkin).toBe("workshop");
+    expect(() => loadConfig(devEnv({ CANVAS_DROP_DESIGN_SKIN: "neon" }))).toThrow(ConfigError);
+  });
+
   it("apiBaseUrl defaults to baseUrl, and is overridable for a dedicated API host", () => {
     const def = loadConfig(devEnv({ CANVAS_DROP_BASE_URL: "https://canvas.example.com" }));
     expect(def.apiBaseUrl).toBe("https://canvas.example.com");

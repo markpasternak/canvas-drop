@@ -113,13 +113,13 @@ describe("canvas Overview tab", () => {
     );
   });
 
-  it("renders a flat editorial shell header (serif title, no boxed card, live-URL affordances)", async () => {
+  it("renders a flat editorial shell header (display title, no boxed card, live-URL affordances)", async () => {
     mockStatus();
     renderStatus();
 
-    // Title is the serif page heading, not a sans card title.
+    // Title is the display page heading (skin-voiced), not a sans card title.
     const title = await screen.findByRole("heading", { level: 1, name: "My Canvas" });
-    expect(title.className).toContain("font-serif");
+    expect(title.className).toContain("font-display");
 
     // The shell header is flat — no rounded-xl/shadow card wrapper around it.
     const header = title.closest("header");
@@ -166,10 +166,10 @@ describe("canvas Overview tab", () => {
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
 
-    // Flat redesign (U3): the Basics group is a serif-headed flat band, not a boxed
+    // Flat redesign (U3): the Basics group is a display-headed flat band, not a boxed
     // Panel card — its section carries no rounded-xl/shadow wrapper.
     const basics = screen.getByRole("heading", { level: 2, name: "Basics" });
-    expect(basics.className).toContain("font-serif");
+    expect(basics.className).toContain("font-display");
     const basicsSection = basics.closest("section");
     expect(basicsSection?.className ?? "").not.toMatch(/rounded-xl|shadow-/);
   });

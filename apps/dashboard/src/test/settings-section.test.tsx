@@ -17,7 +17,7 @@ describe("Section (flat settings primitive)", () => {
     );
     const heading = screen.getByRole("heading", { level: 2, name: "General" });
     expect(heading).toBeInTheDocument();
-    expect(heading.className).toContain("font-serif");
+    expect(heading.className).toContain("font-display");
   });
 
   it("is flat — no rounded-xl/shadow card wrapper", () => {

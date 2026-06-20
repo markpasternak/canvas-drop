@@ -224,20 +224,23 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   // Public legal pages (`/privacy`, `/terms`) — mounted BEFORE the auth gateway so
   // the Google OAuth consent screen's reviewers can open them while signed out.
-  app.route("/", legalRoutes(deps.config));
+  app.route("/", legalRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
 
   // Public marketing landing, always-on alias (`/welcome`). Unlike `/` — which is
   // session-branched by `landingGate` so signed-in members get the dashboard — this
   // path ALWAYS renders the landing, so the in-app "About" link and the post-logout
   // redirect can reach the marketing page regardless of session. Pre-gateway.
-  app.get("/welcome", (c) =>
-    landingResponse(deps.config, { signedIn: !!getCookie(c, SESSION_COOKIE) }),
+  app.get("/welcome", async (c) =>
+    landingResponse(deps.config, {
+      signedIn: !!getCookie(c, SESSION_COOKIE),
+      skin: await settingsSvc.effectiveDesignSkin(),
+    }),
   );
 
   // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
   // the gateway so signed-out agents and OSS browsers can read it on every host.
   // `/llms.txt` here REPLACES the formerly-private one in serve-sdk.ts (U4).
-  app.route("/", docsRoutes(deps.config));
+  app.route("/", docsRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
 
   // Login throttle (§12.3) — pre-gateway, keyed by the resolved real client IP
   // (`clientIp`: the socket peer, or the X-Forwarded-For client when behind a
@@ -391,7 +394,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // (oidc mode only). Mounted BEFORE socialPreview so crawlers scrape the real,
   // indexable landing HTML (with its own OG tags) rather than the generic unfurl
   // card. Signed-in visitors and every non-root path fall straight through.
-  app.use("*", landingGate({ config: deps.config }));
+  app.use("*", landingGate({ config: deps.config, skin: () => settingsSvc.effectiveDesignSkin() }));
 
   app.use(
     "*",
@@ -479,6 +482,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       authMode: deps.config.auth.mode,
       urlMode: deps.config.urlMode,
       baseUrl: deps.config.baseUrl,
+      // Effective skin (admin DB override over env/default), resolved per-request so a
+      // runtime flip in Admin → Configuration reaches the SPA without a restart.
+      designSkin: () => settingsSvc.effectiveDesignSkin(),
     }),
   );
 

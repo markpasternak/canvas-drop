@@ -83,7 +83,12 @@ function buildApp(
   });
   app.route(
     "/api/me",
-    meRoutes({ authMode: "dev", urlMode: "path", baseUrl: "http://localhost:8787" }),
+    meRoutes({
+      authMode: "dev",
+      urlMode: "path",
+      baseUrl: "http://localhost:8787",
+      designSkin: async () => "editorial",
+    }),
   );
   app.route(
     "/api/canvases",
@@ -1508,7 +1513,12 @@ describe("managementRoutes", () => {
     });
     app.route(
       "/api/me",
-      meRoutes({ authMode: "oidc", urlMode: "subdomain", baseUrl: "https://example.com" }),
+      meRoutes({
+        authMode: "oidc",
+        urlMode: "subdomain",
+        baseUrl: "https://example.com",
+        designSkin: async () => "workshop",
+      }),
     );
     const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));
     expect(Object.keys(body).sort()).toEqual([
@@ -1516,6 +1526,7 @@ describe("managementRoutes", () => {
       "avatarUrl",
       "baseUrl",
       "canPublishPublic",
+      "designSkin",
       "email",
       "id",
       "isAdmin",
@@ -1528,6 +1539,8 @@ describe("managementRoutes", () => {
     expect(body.canPublishPublic).toBe(true);
     // authMode is instance config, not a spread of the user row.
     expect(body.authMode).toBe("oidc");
+    // designSkin is instance presentation config, surfaced for the SPA's <html data-skin>.
+    expect(body.designSkin).toBe("workshop");
   });
 
   it("list enriches each canvas with its lastDeploy summary (null until deployed)", async () => {
