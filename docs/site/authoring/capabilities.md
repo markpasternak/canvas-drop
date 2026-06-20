@@ -72,11 +72,15 @@ The SDK throws at call time:
 try {
   await canvasdrop.kv.set("count", 1);
 } catch (err) {
-  // err is a CapabilityDisabledError, err.code === "CAPABILITY_DISABLED"
+  // err is a CapabilityDisabledError, err.code === "CAPABILITY_DISABLED".
+  // err.hint says exactly what to turn on (e.g. the backend master switch).
+  console.log(err.hint);
 }
 ```
 
-See [error codes](/docs/api/errors) for the full list.
+The `CAPABILITY_DISABLED` response is self-describing: its body carries
+`backendEnabled`, a `reason` (`backend_off` · `feature_off` · `operator_disabled`),
+and a `hint` you can act on. See [error codes](/docs/api/errors) for the full list.
 
 ## Why off by default
 

@@ -72,6 +72,20 @@ describe("errorFromResponse", () => {
     expect(cap.code).toBe("CAPABILITY_DISABLED");
   });
 
+  it("surfaces a server CAPABILITY_DISABLED hint on the thrown error (.hint + message)", () => {
+    const withHint = errorFromResponse(403, {
+      code: "CAPABILITY_DISABLED",
+      capability: "kv",
+      backendEnabled: false,
+      reason: "backend_off",
+      hint: "This canvas's backend is off. Turn it on in the Backend tab.",
+    });
+    expect(withHint).toBeInstanceOf(CapabilityDisabledError);
+    expect(withHint.hint).toBe("This canvas's backend is off. Turn it on in the Backend tab.");
+    // The hint also becomes the human-readable message (was a generic string before).
+    expect(withHint.message).toContain("backend is off");
+  });
+
   it("maps the 429 GUEST_AI_CAP to QuotaExceededError (per-canvas guest-AI cap)", () => {
     const err = errorFromResponse(429, { code: "GUEST_AI_CAP" });
     expect(err).toBeInstanceOf(QuotaExceededError);

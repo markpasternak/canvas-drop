@@ -66,16 +66,24 @@ export type ErrorCode = keyof typeof ERROR_CODES;
 export class CanvasdropError extends Error {
   readonly code: string;
   readonly status: number;
-  constructor(code: string, status: number, message?: string) {
+  /** Optional server-supplied remediation hint (e.g. how to enable a capability). */
+  readonly hint?: string;
+  constructor(code: string, status: number, message?: string, hint?: string) {
     super(message ?? code);
     this.name = "CanvasdropError";
     this.code = code;
     this.status = status;
+    this.hint = hint;
   }
 }
 export class CapabilityDisabledError extends CanvasdropError {
-  constructor(capability?: string) {
-    super("CAPABILITY_DISABLED", 403, `capability disabled: ${capability ?? "unknown"}`);
+  constructor(capability?: string, hint?: string) {
+    super(
+      "CAPABILITY_DISABLED",
+      403,
+      hint ?? `capability disabled: ${capability ?? "unknown"}`,
+      hint,
+    );
     this.name = "CapabilityDisabledError";
   }
 }
@@ -110,7 +118,11 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
       typeof body === "object" && body && "capability" in body
         ? String((body as { capability: unknown }).capability)
         : undefined;
-    return new CapabilityDisabledError(cap);
+    const hint =
+      typeof body === "object" && body && "hint" in body
+        ? String((body as { hint: unknown }).hint)
+        : undefined;
+    return new CapabilityDisabledError(cap, hint);
   }
   if (status === 404) return new NotFoundError();
   // Quota/limit errors map to QuotaExceededError, signalled either by code (AI:

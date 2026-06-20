@@ -3,7 +3,12 @@ import type { Canvas } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { AppEnv } from "../http/types.js";
-import { assertCapability, CAPABILITY_DISABLED, requireCapability } from "./capability-guard.js";
+import {
+  assertCapability,
+  CAPABILITY_DISABLED,
+  capabilityDisabledDetail,
+  requireCapability,
+} from "./capability-guard.js";
 
 const baseConfig: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
@@ -83,10 +88,19 @@ describe("requireCapability middleware", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("403 CAPABILITY_DISABLED when backend is off", async () => {
+  it("403 CAPABILITY_DISABLED when backend is off — body carries a repair hint", async () => {
     const res = await guardedApp(canvas({ backendEnabled: false })).request("/g");
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ code: CAPABILITY_DISABLED, capability: "kv" });
+    const body = (await res.json()) as Record<string, unknown>;
+    // `code` + `capability` stay stable; the reason/hint fields are additive (D7).
+    expect(body).toMatchObject({
+      code: CAPABILITY_DISABLED,
+      capability: "kv",
+      backendEnabled: false,
+      reason: "backend_off",
+    });
+    expect(typeof body.hint).toBe("string");
+    expect(body.hint as string).toMatch(/backend/i);
   });
 
   it("403 when the specific feature flag is off", async () => {
@@ -119,5 +133,36 @@ describe("requireCapability middleware", () => {
   it("500 contract error when no canvas was resolved upstream", async () => {
     const res = await guardedApp(null).request("/g");
     expect(res.status).toBe(500);
+  });
+});
+
+describe("capabilityDisabledDetail", () => {
+  it("backend off → reason backend_off, hint points at the master switch", () => {
+    const d = capabilityDisabledDetail(canvas({ backendEnabled: false }), "kv");
+    expect(d).toMatchObject({ capability: "kv", backendEnabled: false, reason: "backend_off" });
+    expect(d.hint).toMatch(/backend/i);
+  });
+
+  it("backend on, feature flag off → reason feature_off, hint names the feature", () => {
+    const d = capabilityDisabledDetail(canvas({ capFiles: false }), "files");
+    expect(d).toMatchObject({ capability: "files", backendEnabled: true, reason: "feature_off" });
+    expect(d.hint).toMatch(/"files"/);
+  });
+
+  it("backend + flag on but operator global off → reason operator_disabled (ai/realtime)", () => {
+    // Reached only when the per-feature flag is on but the deployment global is off,
+    // so the hint must not tell the owner to flip a canvas toggle they already have on.
+    const ai = capabilityDisabledDetail(canvas(), "ai");
+    expect(ai).toMatchObject({ backendEnabled: true, reason: "operator_disabled" });
+    expect(ai.hint).toMatch(/deployment|provider key/i);
+    const rt = capabilityDisabledDetail(canvas(), "realtime");
+    expect(rt.reason).toBe("operator_disabled");
+    expect(rt.hint).toMatch(/CANVAS_DROP_REALTIME/);
+  });
+
+  it("identity can only be backend_off (no feature flag, no global)", () => {
+    expect(capabilityDisabledDetail(canvas({ backendEnabled: false }), "identity").reason).toBe(
+      "backend_off",
+    );
   });
 });
