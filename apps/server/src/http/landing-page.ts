@@ -166,6 +166,10 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
     body: "Set global quotas and defaults, and choose which members may publish public links.",
   },
   {
+    title: "Your brand, your look",
+    body: "Flip the whole instance — dashboard, editor, and landing — to one of four design skins from the admin console. No restart, no code.",
+  },
+  {
     title: "Member management",
     body: "See who's in, grant or revoke admin, and block access in a click.",
   },
@@ -398,6 +402,8 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .kicker { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--amber-ink); font-weight: 600; }
 .s-head { max-width: 34ch; margin: .7rem 0 0; font-family: var(--font-serif); font-optical-sizing: auto; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.06; letter-spacing: -.015em; font-weight: 440; }
 .s-sub { max-width: 52ch; margin: .9rem 0 0; color: var(--muted); font-size: 1.05rem; }
+.skins-figure { margin: clamp(1.5rem, 3.5vw, 2.25rem) 0 0; border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-lg); }
+.skins-figure img { display: block; width: 100%; height: auto; }
 
 /* value band — editorial cards with a coloured top-rule + big serif numeral */
 .values { display: grid; gap: clamp(1.25rem, 3vw, 1.75rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
@@ -693,6 +699,17 @@ ${PRIMITIVES.map(primitiveCard).join("\n")}
       <div class="feats reveal">
 ${TEAM.map(featItem).join("\n")}
       </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="kicker reveal">Make it yours</p>
+      <h2 class="s-head reveal">One platform, your look.</h2>
+      <p class="s-sub reveal">Pick a design skin in the admin console and the whole instance re-voices — accent colour, display type, and corner shape — across the dashboard, the editor, and this landing page. Same app, your brand. No restart, no code.</p>
+      <figure class="skins-figure reveal">
+        <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side — Editorial (deep-teal serif) and Canvas (violet, bold) — to show the admin-flippable skin layer." loading="lazy" decoding="async">
+      </figure>
     </div>
   </section>
 

@@ -43,6 +43,7 @@
     "docs:watch": "node scripts/build-docs.mjs --watch",
     "docs:screenshots": "node scripts/screenshots.mjs",
     "landing:screenshots": "node scripts/screenshots.mjs --landing",
+    "skins:shot": "node scripts/skins-shot.mjs",
     "og:build": "node scripts/og-card.mjs",
     "landing:carousel": "esbuild scripts/landing-carousel.src.mjs --bundle --format=iife --minify --target=es2019 --outfile=docs/site/assets/landing-carousel.js",
     "docs:mermaid": "esbuild scripts/docs-mermaid.src.mjs --bundle --format=iife --minify --target=es2020 --outfile=docs/site/assets/mermaid.js",
