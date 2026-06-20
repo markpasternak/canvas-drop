@@ -21,15 +21,39 @@ function cssVar(name, fallback) {
   return v || fallback;
 }
 
+// The design tokens are authored in `oklch()`, which mermaid's color library
+// (khroma) cannot parse — feeding it an oklch string throws "Unsupported color
+// format" out of mermaid.initialize and aborts the (re-)render. So we resolve each
+// token through the browser's own color engine into an `rgb()` string khroma
+// accepts: a hidden probe inherits/normalizes any valid CSS color, and
+// getComputedStyle reports it back as rgb. One probe is reused per rebuild.
+function makeColorResolver() {
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  document.documentElement.appendChild(probe);
+  const resolve = (name, fallback) => {
+    const raw = cssVar(name, fallback);
+    probe.style.color = "";
+    probe.style.color = raw; // invalid values are ignored, leaving the cleared base
+    const rgb = getComputedStyle(probe).color;
+    return rgb || fallback;
+  };
+  resolve.done = () => probe.remove();
+  return resolve;
+}
+
 /** Build mermaid themeVariables from the live design tokens (skin + theme aware). */
 function themeVariables() {
-  const accent = cssVar("--accent", "#0b7");
-  const accentSubtle = cssVar("--accent-subtle", "#dfe");
-  const surface = cssVar("--surface", "#fff");
-  const surfaceRaised = cssVar("--surface-raised", surface);
-  const border = cssVar("--border", "#ccc");
-  const fg = cssVar("--fg", "#111");
-  const muted = cssVar("--muted", fg);
+  const color = makeColorResolver();
+  const accent = color("--accent", "#0b7");
+  const accentSubtle = color("--accent-subtle", "#dfe");
+  const surface = color("--surface", "#fff");
+  const surfaceRaised = color("--surface-raised", "#fff");
+  const border = color("--border", "#ccc");
+  const fg = color("--fg", "#111");
+  const muted = color("--muted", "#666");
+  const surfaceSunken = color("--surface-sunken", "#f0f0f0");
+  color.done();
   return {
     // Core palette — nodes wear the surface, borders the brand accent, text the fg.
     background: surface,
@@ -47,7 +71,7 @@ function themeVariables() {
     textColor: fg,
     mainBkg: surfaceRaised,
     nodeBorder: accent,
-    clusterBkg: cssVar("--surface-sunken", surface),
+    clusterBkg: surfaceSunken,
     clusterBorder: border,
     edgeLabelBackground: surface,
     // Notes + actor styling pick up the brand accent so sequence diagrams stay on-brand.
@@ -66,14 +90,22 @@ function themeVariables() {
 }
 
 function configure() {
-  mermaid.initialize({
+  const base = {
     startOnLoad: false,
     securityLevel: "strict",
     theme: "base",
-    themeVariables: themeVariables(),
     flowchart: { curve: "basis", useMaxWidth: true },
     sequence: { useMaxWidth: true },
-  });
+  };
+  // Theming must never blank a diagram: if a token can't be turned into a color
+  // mermaid accepts, fall back to mermaid's stock theme rather than throwing out
+  // of initialize() and aborting the (re-)render.
+  try {
+    mermaid.initialize({ ...base, themeVariables: themeVariables() });
+  } catch (err) {
+    console.error("[docs] mermaid theming failed; using default theme:", err);
+    mermaid.initialize(base);
+  }
 }
 
 // Each .mermaid block keeps its raw source in a data-attribute the first time we
