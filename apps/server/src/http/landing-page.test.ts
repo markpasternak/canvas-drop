@@ -50,7 +50,9 @@ describe("landing page design skin", () => {
     // Any non-default skin remaps the marketing accent (--amber) to the skin
     // accent, so the hero accent + CTA follow the active skin rather than staying
     // a fixed amber. Editorial stamps no data-skin, so this rule never fires for it.
-    expect(html).toContain(":root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }");
+    expect(html).toContain(
+      ":root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }",
+    );
   });
 
   it("keeps the editorial hero on its fixed amber (the remap is scoped to [data-skin])", () => {
