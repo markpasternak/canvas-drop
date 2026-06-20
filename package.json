@@ -31,6 +31,8 @@
     "test:dashboard": "node scripts/test-runner.mjs dashboard",
     "test:file": "node scripts/test-runner.mjs file",
     "purge": "pnpm --filter @canvas-drop/server run purge",
+    "backup": "pnpm --filter @canvas-drop/server run backup",
+    "restore": "pnpm --filter @canvas-drop/server run restore",
     "seed:showcase": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-showcase.ts",
     "reset:data": "pnpm --filter @canvas-drop/server exec tsx scripts/reset-data.ts",
     "backfill:search-text": "pnpm --filter @canvas-drop/server exec tsx scripts/backfill-search-text.ts",

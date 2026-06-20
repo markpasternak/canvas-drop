@@ -1,0 +1,117 @@
+/**
+ * Maintenance CLI (M10). The server binary doubles as an ops tool: `backup`,
+ * `restore`, and `purge` run and exit instead of starting the HTTP server, so the
+ * production Docker image needs no extra tooling — cron just runs the app image with a
+ * subcommand (see docs/ops.md). All three load the same typed config as the server, so
+ * they act on whichever DB + storage the instance is wired to.
+ */
+import { loadConfig } from "@canvas-drop/shared";
+import { purgeDeletedCanvases } from "../canvas/purge.js";
+import type { DbClient } from "../db/factory.js";
+import { makeDb } from "../db/factory.js";
+import { runMigrations } from "../db/migrate.js";
+import { aiUsageRepository } from "../db/repositories/ai-usage.js";
+import { canvasesRepository } from "../db/repositories/canvases.js";
+import { draftsRepository } from "../db/repositories/drafts.js";
+import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { usageEventsRepository } from "../db/repositories/usage-events.js";
+import { versionsRepository } from "../db/repositories/versions.js";
+import type { Logger } from "../log/logger.js";
+import { createLogger } from "../log/logger.js";
+import type { StorageDriver } from "../storage/driver.js";
+import { makeStorage } from "../storage/factory.js";
+import { createBackup, restoreBackup } from "./backup.js";
+
+/** Subcommands handled by the CLI (anything else → start the server). */
+export const OPS_COMMANDS = ["backup", "restore", "purge"] as const;
+type OpsCommand = (typeof OPS_COMMANDS)[number];
+
+/** Retention window for the append-only metering tables (KTD-7) — stats need ~30d. */
+const USAGE_EVENTS_RETENTION_DAYS = 90;
+
+const firstNonFlag = (args: string[]): string | undefined => args.find((a) => !a.startsWith("-"));
+
+/**
+ * Full maintenance sweep, shared by the CLI and the dev `pnpm purge` script: reclaim
+ * soft-deleted canvases' storage + version rows, then prune the metering tables. One
+ * implementation so the two entry points can't drift.
+ */
+export async function runPurge(
+  db: DbClient,
+  storage: StorageDriver,
+  log: Logger,
+  opts: { olderThanDays: number; dryRun: boolean },
+): Promise<void> {
+  const { olderThanDays, dryRun } = opts;
+  const scope = olderThanDays > 0 ? `soft-deleted ${olderThanDays}+ days ago` : "all soft-deleted";
+  log.info({ olderThanDays, dryRun }, `purge sweep: ${scope}${dryRun ? " (dry run)" : ""}`);
+
+  const summary = await purgeDeletedCanvases(
+    {
+      canvases: canvasesRepository(db),
+      versions: versionsRepository(db),
+      drafts: draftsRepository(db),
+      screenshots: screenshotsRepository(db),
+      storage,
+      log,
+    },
+    { olderThanDays, dryRun },
+  );
+  log.info(summary, `purge: ${summary.canvasesPurged} canvas(es), ${summary.objectsDeleted} files`);
+  if (summary.failed > 0) log.warn({ failed: summary.failed }, "some canvases were skipped; rerun");
+
+  if (dryRun) return;
+  const cutoff = Date.now() - USAGE_EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const usage = await usageEventsRepository(db).pruneBefore(cutoff);
+  const ai = await aiUsageRepository(db).pruneBefore(cutoff);
+  log.info(
+    { usage, ai, retentionDays: USAGE_EVENTS_RETENTION_DAYS },
+    `pruned ${usage} usage_events + ${ai} ai_usage rows`,
+  );
+}
+
+function parsePurgeArgs(rest: string[]): { olderThanDays: number; dryRun: boolean } {
+  const words = rest.filter((a) => !a.startsWith("-"));
+  const dryRun =
+    rest.includes("--dry-run") || words.includes("dry-run") || words.includes("dryrun");
+  const daysArg = words.find((w) => w !== "dry-run" && w !== "dryrun") ?? "0";
+  const olderThanDays = Number(daysArg);
+  if (!Number.isInteger(olderThanDays) || olderThanDays < 0) {
+    throw new Error(`days must be a non-negative integer, got "${daysArg}"`);
+  }
+  return { olderThanDays, dryRun };
+}
+
+/**
+ * If `argv` starts with a maintenance subcommand, run it and return `true` (the caller
+ * should exit); otherwise return `false` so the server starts normally.
+ */
+export async function runOpsCli(argv: string[]): Promise<boolean> {
+  const [cmd, ...rest] = argv;
+  if (!OPS_COMMANDS.includes(cmd as OpsCommand)) return false;
+
+  const config = loadConfig();
+  const log = createLogger(config);
+  const db = makeDb(config);
+  const storage = makeStorage(config);
+
+  try {
+    if (cmd === "backup") {
+      const dir = firstNonFlag(rest);
+      if (!dir) throw new Error("usage: backup <output-dir>");
+      await runMigrations(db); // a backup of an un-migrated DB should still produce a valid schema
+      await createBackup({ client: db, storage, log }, dir);
+    } else if (cmd === "restore") {
+      const dir = firstNonFlag(rest);
+      if (!dir) throw new Error("usage: restore <backup-dir> [--force]");
+      await restoreBackup({ client: db, storage, log }, dir, { force: rest.includes("--force") });
+    } else {
+      // purge
+      await runMigrations(db);
+      await runPurge(db, storage, log, parsePurgeArgs(rest));
+    }
+  } finally {
+    await db.close();
+  }
+  return true;
+}
