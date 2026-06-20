@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  ACCENT_ROLE_ORDER,
+  SKINS,
+  SYNTAX_ROLE_ORDER,
+  SYNTAX_TOKENS,
+  type SkinName,
+} from "./skins.js";
 import { BRAND_TOKENS, RAMP_ROLE_ORDER, type ThemeName } from "./tokens.js";
 
 /**
@@ -76,5 +83,69 @@ describe("BRAND_TOKENS parity", () => {
     it(`${rel.split("/").pop()} carries no indigo-violet (hue ~274)`, () => {
       expect(read(rel)).not.toMatch(INDIGO);
     });
+  }
+});
+
+/**
+ * Design-skin parity (expression layer). The hand-authored `[data-skin]` blocks in
+ * tokens.css must match the canonical `SKINS` / `SYNTAX_TOKENS` in skins.ts — same
+ * guard as the ramp, so a skin can't silently drift. editorial is the base :root.
+ */
+describe("design-skin parity", () => {
+  // Syntax tokens are theme-scoped, skin-independent: base :root (light) + both dark blocks.
+  const SYNTAX_BLOCKS: { theme: ThemeName; selector: string; label: string }[] = [
+    { theme: "light", selector: ":root", label: "light :root" },
+    { theme: "dark", selector: ':root:not([data-theme="light"])', label: "OS-dark @media" },
+    { theme: "dark", selector: '[data-theme="dark"]', label: "toggled [data-theme=dark]" },
+  ];
+  for (const { theme, selector, label } of SYNTAX_BLOCKS) {
+    const body = block(dashboardCss, selector);
+    for (const role of SYNTAX_ROLE_ORDER) {
+      it(`tokens.css · ${label} · --${role} matches SYNTAX_TOKENS`, () => {
+        expect(roleValue(body, role)).toBe(SYNTAX_TOKENS[theme][role]);
+      });
+    }
+  }
+
+  // The editorial defaults live in the base :root; the other skins are override blocks.
+  const NON_DEFAULT: SkinName[] = ["studio", "workshop", "canvas"];
+
+  it("base :root carries the editorial display bundle (the default no-op)", () => {
+    const body = block(dashboardCss, ":root");
+    const d = SKINS.editorial.display;
+    expect(roleValue(body, "font-display")).toBe(d.family);
+    expect(roleValue(body, "display-weight")).toBe(String(d.weight));
+    expect(roleValue(body, "display-tracking")).toBe(d.tracking);
+    expect(roleValue(body, "radius-scale")).toBe(String(SKINS.editorial.radiusScale));
+  });
+
+  for (const skin of NON_DEFAULT) {
+    const lightBody = block(dashboardCss, `:root[data-skin="${skin}"]`);
+
+    it(`${skin} · light accent family matches SKINS`, () => {
+      for (const role of ACCENT_ROLE_ORDER) {
+        expect(roleValue(lightBody, role)).toBe(SKINS[skin].light[role]);
+      }
+    });
+
+    it(`${skin} · display bundle + radius scale match SKINS`, () => {
+      const d = SKINS[skin].display;
+      expect(roleValue(lightBody, "font-display")).toBe(d.family);
+      expect(roleValue(lightBody, "display-weight")).toBe(String(d.weight));
+      expect(roleValue(lightBody, "display-tracking")).toBe(d.tracking);
+      expect(roleValue(lightBody, "radius-scale")).toBe(String(SKINS[skin].radiusScale));
+    });
+
+    for (const selector of [
+      `:root[data-skin="${skin}"]:not([data-theme="light"])`,
+      `:root[data-skin="${skin}"][data-theme="dark"]`,
+    ]) {
+      it(`${skin} · dark accent family matches SKINS · ${selector.includes(":not") ? "OS @media" : "toggled"}`, () => {
+        const body = block(dashboardCss, selector);
+        for (const role of ACCENT_ROLE_ORDER) {
+          expect(roleValue(body, role)).toBe(SKINS[skin].dark[role]);
+        }
+      });
+    }
   }
 });

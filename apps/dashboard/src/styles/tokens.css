@@ -60,6 +60,24 @@
   --logo-drop: oklch(0.49 0.105 200);
   --scrim: oklch(0.21 0.02 80 / 0.5);
 
+  /* --- Expression layer (design skins). The display-type bundle + radius scale
+     default to the editorial skin (no-op); [data-skin] blocks at the end of this
+     file override them. Canonical source: packages/shared/src/brand/skins.ts. --- */
+  --font-display: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --display-weight: 500;
+  --display-tracking: -0.02em;
+  --radius-scale: 1;
+
+  /* Syntax-highlight tokens (editor) — theme-dependent, skin-independent. */
+  --syn-tag: oklch(0.55 0.16 25);
+  --syn-attr: oklch(0.56 0.12 65);
+  --syn-string: oklch(0.52 0.11 150);
+  --syn-comment: oklch(0.62 0.02 80);
+  --syn-keyword: oklch(0.5 0.16 300);
+  --syn-fn: oklch(0.5 0.14 250);
+  --syn-num: oklch(0.55 0.13 45);
+  --syn-punc: oklch(0.5 0.02 75);
+
   /* Full-bleed card overlay (frosted safe-zone over an arbitrary preview). Stays a
      dark translucent glass with light text in BOTH themes for readability; light mode
      is warmer (hue 70) + more see-through, for a soft editorial feel. */
@@ -81,6 +99,16 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+
+    /* Syntax-highlight tokens (dark) — brighter for the deep surface. */
+    --syn-tag: oklch(0.72 0.15 22);
+    --syn-attr: oklch(0.82 0.12 72);
+    --syn-string: oklch(0.8 0.12 152);
+    --syn-comment: oklch(0.6 0.02 82);
+    --syn-keyword: oklch(0.74 0.14 300);
+    --syn-fn: oklch(0.74 0.12 250);
+    --syn-num: oklch(0.78 0.12 52);
+    --syn-punc: oklch(0.62 0.01 82);
 
     --canvas: oklch(0.175 0.018 265);
     --surface: oklch(0.212 0.020 265);
@@ -135,6 +163,16 @@
 /* --- Manual override: forced dark (mirror of the media block) --- */
 [data-theme="dark"] {
   color-scheme: dark;
+
+  /* Syntax-highlight tokens (dark) — brighter for the deep surface. */
+  --syn-tag: oklch(0.72 0.15 22);
+  --syn-attr: oklch(0.82 0.12 72);
+  --syn-string: oklch(0.8 0.12 152);
+  --syn-comment: oklch(0.6 0.02 82);
+  --syn-keyword: oklch(0.74 0.14 300);
+  --syn-fn: oklch(0.74 0.12 250);
+  --syn-num: oklch(0.78 0.12 52);
+  --syn-punc: oklch(0.62 0.01 82);
 
   --canvas: oklch(0.175 0.018 265);
   --surface: oklch(0.212 0.020 265);
@@ -255,12 +293,13 @@
   --text-hero: 2.6rem;
   --text-hero--line-height: 1.02;
 
-  /* Radii — generous, "paper & objects". */
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.25rem;
-  --radius-2xl: 1.5rem;
+  /* Radii — generous, "paper & objects". Scaled by the active skin's --radius-scale
+     (1 = the base geometry; workshop tightens, canvas rounds). */
+  --radius-sm: calc(0.5rem * var(--radius-scale, 1));
+  --radius-md: calc(0.75rem * var(--radius-scale, 1));
+  --radius-lg: calc(1rem * var(--radius-scale, 1));
+  --radius-xl: calc(1.25rem * var(--radius-scale, 1));
+  --radius-2xl: calc(1.5rem * var(--radius-scale, 1));
 
   /* Motion: ≤180ms, ease-out, state-change only (DESIGN.md). --ease-in mirrors it
      for exit motion (overlays animate out before unmount). */
@@ -274,4 +313,99 @@
   --control-md: 2.25rem;
   --control-lg: 2.5rem;
   --content-max: 112rem;
+}
+
+/*
+ * --- Design skins (expression layer) ---
+ * Each skin is a partial override of the accent family + display bundle + radius
+ * scale. editorial is the base :root above (no block needed). Mirrors the canonical
+ * packages/shared/src/brand/skins.ts; the token-parity test fails CI on any drift.
+ * Dark accents are declared under both dark paths (OS @media + toggled [data-theme]).
+ */
+
+/* Studio — warm editorial: terracotta accent, same serif voice. */
+:root[data-skin="studio"] {
+  --accent: oklch(0.55 0.15 42);
+  --accent-hover: oklch(0.49 0.145 42);
+  --accent-fg: oklch(0.99 0.02 60);
+  --accent-subtle: oklch(0.92 0.05 52);
+  --ring: oklch(0.55 0.15 42);
+  --font-display: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --display-weight: 500;
+  --display-tracking: -0.02em;
+  --radius-scale: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="studio"]:not([data-theme="light"]) {
+    --accent: oklch(0.72 0.13 48);
+    --accent-hover: oklch(0.77 0.12 48);
+    --accent-fg: oklch(0.18 0.04 50);
+    --accent-subtle: oklch(0.32 0.07 45);
+    --ring: oklch(0.77 0.12 48);
+  }
+}
+:root[data-skin="studio"][data-theme="dark"] {
+  --accent: oklch(0.72 0.13 48);
+  --accent-hover: oklch(0.77 0.12 48);
+  --accent-fg: oklch(0.18 0.04 50);
+  --accent-subtle: oklch(0.32 0.07 45);
+  --ring: oklch(0.77 0.12 48);
+}
+
+/* Workshop — developer/IDE: monospace display, green accent, tighter corners. */
+:root[data-skin="workshop"] {
+  --accent: oklch(0.52 0.115 165);
+  --accent-hover: oklch(0.46 0.11 165);
+  --accent-fg: oklch(0.99 0.02 165);
+  --accent-subtle: oklch(0.92 0.05 168);
+  --ring: oklch(0.52 0.115 165);
+  --font-display: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --display-weight: 500;
+  --display-tracking: -0.01em;
+  --radius-scale: 0.62;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="workshop"]:not([data-theme="light"]) {
+    --accent: oklch(0.78 0.13 168);
+    --accent-hover: oklch(0.82 0.12 168);
+    --accent-fg: oklch(0.17 0.04 168);
+    --accent-subtle: oklch(0.30 0.06 168);
+    --ring: oklch(0.82 0.12 168);
+  }
+}
+:root[data-skin="workshop"][data-theme="dark"] {
+  --accent: oklch(0.78 0.13 168);
+  --accent-hover: oklch(0.82 0.12 168);
+  --accent-fg: oklch(0.17 0.04 168);
+  --accent-subtle: oklch(0.30 0.06 168);
+  --ring: oklch(0.82 0.12 168);
+}
+
+/* Canvas — playful/bold: heavy sans display, violet-magenta accent, rounder corners. */
+:root[data-skin="canvas"] {
+  --accent: oklch(0.52 0.2 292);
+  --accent-hover: oklch(0.46 0.2 292);
+  --accent-fg: oklch(0.99 0.012 292);
+  --accent-subtle: oklch(0.93 0.06 295);
+  --ring: oklch(0.52 0.2 292);
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --display-weight: 800;
+  --display-tracking: -0.035em;
+  --radius-scale: 1.3;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="canvas"]:not([data-theme="light"]) {
+    --accent: oklch(0.74 0.18 296);
+    --accent-hover: oklch(0.79 0.16 296);
+    --accent-fg: oklch(0.16 0.04 296);
+    --accent-subtle: oklch(0.31 0.09 296);
+    --ring: oklch(0.79 0.16 296);
+  }
+}
+:root[data-skin="canvas"][data-theme="dark"] {
+  --accent: oklch(0.74 0.18 296);
+  --accent-hover: oklch(0.79 0.16 296);
+  --accent-fg: oklch(0.16 0.04 296);
+  --accent-subtle: oklch(0.31 0.09 296);
+  --ring: oklch(0.79 0.16 296);
 }
