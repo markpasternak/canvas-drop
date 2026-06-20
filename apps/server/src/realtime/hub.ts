@@ -366,7 +366,10 @@ export function createHub(deps: HubDeps) {
             isAllowed = false;
           }
         }
-        const decision = decideCanvasAccess(canvas, principal, now, { isAllowed });
+        const decision = decideCanvasAccess(canvas, principal, now, {
+          isAllowed,
+          tenancyActive: !!deps.config.org.name,
+        });
         if (decision.action === "deny") {
           dropConn(conn, CLOSE_UNAUTHORIZED, decision.reason);
           continue;

@@ -578,7 +578,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const onlyCanvas = (mw: ReturnType<typeof createMiddleware<AppEnv>>) =>
     createMiddleware<AppEnv>((c, next) => (c.get("role") === "canvas" ? mw(c, next) : next()));
 
-  app.use("*", onlyCanvas(canvasAccess({ canvases: deps.canvases })));
+  app.use(
+    "*",
+    onlyCanvas(canvasAccess({ canvases: deps.canvases, tenancyActive: !!deps.config.org.name })),
+  );
   app.use(
     "*",
     onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit, rateLimitStore: rlStore })),

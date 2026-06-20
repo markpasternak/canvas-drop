@@ -53,6 +53,7 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
@@ -98,6 +99,9 @@ const createSchema = z.object({
   slug: z.string().max(63).optional(),
   // Backend-group master switch chosen at create time (plan 006). Off by default.
   backendEnabled: z.boolean().optional(),
+  // Home tenant (plan 002 U4): null/absent = personal (default to the caller's org if
+  // they have exactly one); a non-null value is validated against the caller's membership.
+  orgId: z.string().nullable().optional(),
 });
 
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
@@ -322,6 +326,10 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = createSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
+    // Home tenant (plan 002 U4): validate any requested org against the caller's
+    // server-resolved membership; default to their org when they have exactly one.
+    const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
+    if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
@@ -334,6 +342,7 @@ export function managementRoutes(deps: ManagementDeps) {
         apiKeyHash: hashApiKey(apiKey),
         title: body.data.title,
         description: body.data.description,
+        orgId: home.orgId,
         backendEnabled: body.data.backendEnabled,
       });
     } catch (err) {

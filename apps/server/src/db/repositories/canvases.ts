@@ -74,6 +74,9 @@ export interface CreateCanvasInput {
   apiKeyHash: string;
   title?: string;
   description?: string | null;
+  /** Home tenant (plan 002 U4). null = personal. Validated against the caller's
+   *  membership by the create handler — the repo trusts the resolved value. */
+  orgId?: string | null;
   /** Backend-group master switch (plan 006). Defaults off; cap_* columns default on. */
   backendEnabled?: boolean;
   /**
@@ -468,6 +471,9 @@ export function canvasesRepository(client: DbClient) {
             slug: input.slug,
           }),
           ownerId: input.ownerId,
+          // Home tenant (plan 002 U4); null = personal. The handler resolved + validated
+          // this against the caller's membership — never a raw client value.
+          orgId: input.orgId ?? null,
           access: "private",
           galleryListed: false,
           galleryTemplatable: false,

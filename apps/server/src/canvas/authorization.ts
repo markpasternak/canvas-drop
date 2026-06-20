@@ -25,6 +25,14 @@ export type AccessDecision =
 export interface AccessContext {
   isAllowed?: boolean;
   publicEnabled?: boolean;
+  /**
+   * Whether tenancy is active (plan 002 U4) — i.e. an org is configured. When false
+   * (the default — no `CANVAS_DROP_ORG_NAME`), the merge is INERT: `whole_org` keeps its
+   * legacy "any signed-in member" meaning and `org_id` is ignored, so deploying the code
+   * changes nothing until an operator names an org. When true, `whole_org` is re-scoped
+   * to members of the canvas's home org and a null `org_id` is an explicit deny.
+   */
+  tenancyActive?: boolean;
 }
 
 /**
@@ -141,9 +149,23 @@ export function decideCanvasAccess(
   switch (canvas.access) {
     case "private":
       return { action: "deny", status: 404, reason: "owner_only" };
+    case "team":
+      // Reserved rung (plan 002 KTD5): the CHECK permits `team` so P2 needs no SQLite
+      // table-recreation, but teams are NOT implemented in P1 — deny like `private`
+      // (forward-ref guard). The owner already matched above and is unaffected.
+      return { action: "deny", status: 404, reason: "owner_only" };
     case "whole_org":
-      // Org members only — guests/anonymous are outsiders.
+      // Org members only — guests/anonymous are outsiders, at any tenancy state.
       if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
+      // When tenancy is active (plan 002 U4), scope to the canvas's HOME ORG: a null
+      // org_id is an EXPLICIT deny (don't rely on Set.has(null) — a personal/guest-owned
+      // whole_org row is never broadly visible, and the cutover clamps these to private),
+      // and a member of a DIFFERENT org gets the same opaque 404 (§12.0 #3). When tenancy
+      // is INERT (no org configured) this re-scope is skipped and any signed-in member
+      // reaches it, exactly as before — so the merge changes nothing until configured.
+      if (ctx.tenancyActive && (canvas.orgId === null || !principal.orgIds.has(canvas.orgId))) {
+        return { action: "deny", status: 404, reason: "owner_only" };
+      }
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "specific_people":
@@ -168,6 +190,9 @@ export function decideCanvasAccess(
 
 export interface CanvasAccessDeps {
   canvases: CanvasesRepository;
+  /** Whether tenancy is active (plan 002 U4 — an org is configured). Threaded into the
+   *  decision so `whole_org` is org-scoped only once an operator names an org. */
+  tenancyActive: boolean;
 }
 
 /**
@@ -237,7 +262,10 @@ export function canvasAccess(deps: CanvasAccessDeps) {
     const canvas = await deps.canvases.findBySlug(slug);
     const principal = requestPrincipal(c);
     const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
-    const decision = decideCanvasAccess(canvas, principal, Date.now(), ctx);
+    const decision = decideCanvasAccess(canvas, principal, Date.now(), {
+      ...ctx,
+      tenancyActive: deps.tenancyActive,
+    });
 
     if (decision.action === "deny") {
       if (decision.status === 403) {
