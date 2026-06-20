@@ -26,6 +26,27 @@ A request only becomes a *user* after the auth gateway resolves a server-side
 identity, checks the email allowlist (the env domain list **or** an admin-managed
 list of individual emails), maps it to a user, and rejects blocked users. Identity
 always comes from the server-side strategy — never from anything the client sends.
+
+The gateway is the single choke point every request crosses on its way to a
+canvas or the dashboard:
+
+```mermaid
+flowchart TD
+    Req([Incoming request]) --> Gate{Auth gateway}
+    Gate -->|no valid identity| Anon[Anonymous]
+    Gate -->|identity resolved| Allow{Email allowlist?}
+    Allow -->|not allowed| Reject[403 / login]
+    Allow -->|allowed| Blocked{User blocked?}
+    Blocked -->|yes| Reject
+    Blocked -->|no| User([Authenticated user])
+    Anon --> PubCheck{Public canvas?}
+    PubCheck -->|public_link only| Static[Static files only]
+    PubCheck -->|otherwise| NotFound[404]
+    User --> Rung{Access rung}
+    Rung -->|owner / org / invited| Canvas[Canvas + primitives]
+    Rung -->|not authorized| NotFound
+```
+
 Pick the strategy with `CANVAS_DROP_AUTH_MODE`:
 
 - `dev` — auto-logs-in a fixed local user, no external verification. Localhost

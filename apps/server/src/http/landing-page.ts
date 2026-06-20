@@ -2,13 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  type Config,
-  MARKETING_ACCENT,
-  rampCssVars,
-  type SkinName,
-  skinOverridesCss,
-} from "@canvas-drop/shared";
+import { type Config, MARKETING_ACCENT, rampCssVars, type SkinName } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE } from "../auth/session.js";
@@ -16,6 +10,7 @@ import { resolveRequest } from "../routing/resolve-request.js";
 import { BRAND_MARK } from "./brand.js";
 import { escapeHtml } from "./error-pages.js";
 import { baseSecurityHeaders } from "./security-headers.js";
+import { skinnedHtmlTag, skinStyleCss } from "./skin-html.js";
 import { FAVICON_LINKS, ogMeta } from "./social-meta.js";
 import type { AppEnv } from "./types.js";
 
@@ -233,8 +228,7 @@ ${FAVICON_LINKS}
 <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
 <script type="application/ld+json">${jsonLd}</script>
 <style>${STYLES}
-/* Design-skin overrides (expression layer) — selected by <html data-skin>. */
-${skinOverridesCss()}</style>`;
+${skinStyleCss()}</style>`;
 }
 
 /**
@@ -611,9 +605,10 @@ export function renderLandingPage(
 
   // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
   // attribute for editorial) — only the alternates stamp data-skin, so there's no surface
-  // divergence and no [data-skin="editorial"] rule is ever needed.
+  // divergence and no [data-skin="editorial"] rule is ever needed. The tag + the override
+  // CSS both come from the shared skin-html helper, so the landing can't drift from docs/legal.
   return `<!doctype html>
-<html lang="en"${skin === "editorial" ? "" : ` data-skin="${skin}"`}>
+${skinnedHtmlTag(skin)}
 <head>
 ${head(origin)}
 </head>

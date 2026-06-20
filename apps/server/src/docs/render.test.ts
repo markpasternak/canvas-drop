@@ -53,3 +53,48 @@ describe("docs render", () => {
     expect(new Set(SEARCH_INDEX.map((e) => e.path))).toEqual(new Set(DOC_PAGES.map((p) => p.path)));
   });
 });
+
+describe("docs render — design skin", () => {
+  it("omits data-skin on <html> for the default editorial skin (mirrors the landing)", () => {
+    const html = renderDocPage("", "", "editorial") ?? "";
+    // editorial is the attribute-free base; the <html> tag carries no skin attribute.
+    expect(html).toContain('<html lang="en">');
+    expect(html).not.toContain('data-skin="editorial"');
+  });
+
+  it("stamps the chosen skin on <html> and ships the skin override CSS (incl. dark toggle)", () => {
+    const html = renderDocPage("", "", "studio") ?? "";
+    expect(html).toContain('data-skin="studio"');
+    // Override blocks from the canonical shared emitter — and because the docs expose a
+    // theme switch, the [data-theme="dark"] skin selectors must be present too.
+    expect(html).toContain(':root[data-skin="studio"]');
+    expect(html).toContain(':root[data-skin="workshop"]');
+    expect(html).toContain(':root[data-skin="studio"][data-theme="dark"]');
+  });
+
+  it("re-voices headings through --font-display so a skin's display font applies", () => {
+    const html = renderDocPage("", "", "editorial") ?? "";
+    // Headings read the skinnable display face (not the hard-coded serif), and the
+    // editorial default + the self-hosted display faces are present.
+    expect(html).toContain("font-family: var(--font-display)");
+    expect(html).toContain("--font-display: var(--font-serif)");
+    expect(html).toContain("/fonts/geist-mono-latin-wght-normal.woff2");
+  });
+});
+
+describe("docs render — mermaid diagrams", () => {
+  it("renders the security-model request-flow diagram as a .mermaid block", () => {
+    const html = renderDocPage("self-hosting/security-model") ?? "";
+    expect(html).toContain('class="mermaid"');
+    expect(html).toContain("flowchart TD");
+    // The diagram source is HTML-escaped (inert text), never live markup.
+    expect(html).toContain("--&gt;");
+  });
+
+  it("lazily loads the self-hosted mermaid renderer ONLY on pages with a diagram", () => {
+    const withDiagram = renderDocPage("self-hosting/security-model") ?? "";
+    const withoutDiagram = renderDocPage("sdk/kv") ?? "";
+    expect(withDiagram).toContain('<script src="/docs/mermaid.js" defer></script>');
+    expect(withoutDiagram).not.toContain('<script src="/docs/mermaid.js"');
+  });
+});
