@@ -33,6 +33,7 @@ import { kvRepository } from "./db/repositories/kv.js";
 import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { teamsRepository } from "./db/repositories/teams.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
@@ -66,10 +67,12 @@ import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
+import { teamsRoutes } from "./routes/teams.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
 import { PREVIEW_ASSET_PATH, servePreview } from "./screenshots/serve.js";
 import type { StorageDriver } from "./storage/driver.js";
+import { teamsService } from "./teams/service.js";
 import { composeServices } from "./wiring.js";
 
 export interface BuildAppDeps {
@@ -148,6 +151,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const orgs = deps.orgs ?? orgsRepository(deps.db);
   const orgMembers = deps.orgMembers ?? orgMembersRepository(deps.db);
   const orgMembership = makeOrgMembershipResolver(orgs, orgMembers);
+
+  // Teams (plan 003 P2): the repo + the authz-bearing service the routes AND MCP wrap.
+  const teams = teamsRepository(deps.db);
+  const teamsSvc = teamsService({ teams, orgMembers, users: deps.users, audit: deps.audit });
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -550,6 +557,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       screenshots,
     }),
   );
+
+  // Team management (plan 003 P2) — session-authenticated, behind the gateway.
+  app.route("/api/teams", teamsRoutes({ service: teamsSvc, teams, users: deps.users }));
 
   // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
   // (server-resolved isAdmin) gates the whole router. Distinct base from /api/canvases.
