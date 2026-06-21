@@ -22,6 +22,13 @@ export function teamsRepository(client: DbClient) {
   const teamsT = S.teams;
   const membersT = S.teamMembers;
   const canvasTeamsT = S.canvasTeams;
+  const invitationsT = S.invitations;
+
+  // Dual-dialect transaction: better-sqlite3 has no async tx, so run the body directly
+  // (single-process, serialized); Postgres/pglite get a real transaction. Mirrors the
+  // canvases repo's `tx` helper.
+  const tx = <T>(fn: (q: typeof db) => Promise<T>): Promise<T> =>
+    client.dialect === "sqlite" ? fn(db) : db.transaction(fn);
 
   /** The org-scope predicate: a NULL orgId (a PERSONAL team) must compare with `IS NULL`,
    *  never `= NULL` (always false) — plan 003 phase 3. */
@@ -119,11 +126,20 @@ export function teamsRepository(client: DbClient) {
       await db.update(teamsT).set({ name }).where(eq(teamsT.id, id));
     },
 
-    /** Delete a team + its memberships + its canvas grants (the team no longer scopes anything). */
+    /** Delete a team + its memberships + its canvas grants + any pending invitations to it
+     *  (the team no longer scopes anything). Transactional so a mid-operation failure can't
+     *  leave orphaned member/grant rows. Clearing pending invitations is load-bearing: an
+     *  invitation whose target team is gone would otherwise FK-fail on every future login of
+     *  the invitee's email (the materialize hook) and never self-heal. */
     async remove(id: string): Promise<void> {
-      await db.delete(canvasTeamsT).where(eq(canvasTeamsT.teamId, id));
-      await db.delete(membersT).where(eq(membersT.teamId, id));
-      await db.delete(teamsT).where(eq(teamsT.id, id));
+      await tx(async (q) => {
+        await q.delete(canvasTeamsT).where(eq(canvasTeamsT.teamId, id));
+        await q.delete(membersT).where(eq(membersT.teamId, id));
+        await q
+          .delete(invitationsT)
+          .where(and(eq(invitationsT.targetType, "team"), eq(invitationsT.targetId, id)));
+        await q.delete(teamsT).where(eq(teamsT.id, id));
+      });
     },
 
     /** Teams in an org (roster/admin). */

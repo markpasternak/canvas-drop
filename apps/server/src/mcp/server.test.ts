@@ -14,6 +14,7 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
@@ -88,6 +89,7 @@ async function connect(
         audit,
       }),
       invites: makeInviteService(client, cfg),
+      invitations: invitationsRepository(client),
       canvases,
       versions,
       engine,

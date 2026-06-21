@@ -140,9 +140,14 @@ export function inviteService(deps: InviteServiceDeps) {
   }
 
   /** Best-effort courtesy/notify email. Master-gated + mailer-gated; never throws (a mail
-   *  failure must never block the grant). */
-  async function notify(target: InviteTarget, to: string, actor: InviteActor): Promise<void> {
-    const settings = await deps.settings.effectiveInviteSettings();
+   *  failure must never block the grant). Takes the already-resolved `settings` so a send
+   *  doesn't re-read the settings store. */
+  async function notify(
+    target: InviteTarget,
+    to: string,
+    actor: InviteActor,
+    settings: EffectiveInviteSettings,
+  ): Promise<void> {
     if (!settings.emailEnabled || !deps.mailer.canSend) return;
     try {
       const body = await effectiveTemplate(deps.templates, templateKeyFor(target));
@@ -194,7 +199,7 @@ export function inviteService(deps: InviteServiceDeps) {
       const existing = await deps.users.findByEmail(email);
       if (existing) {
         await grantNow(target, existing.id);
-        if (notifyExisting(target, settings)) await notify(target, email, actor);
+        if (notifyExisting(target, settings)) await notify(target, email, actor, settings);
         return { status: "granted", userId: existing.id };
       }
 
@@ -230,7 +235,7 @@ export function inviteService(deps: InviteServiceDeps) {
         });
       }
 
-      if (notifyPending(target, settings)) await notify(target, email, actor);
+      if (notifyPending(target, settings)) await notify(target, email, actor, settings);
       return { status: "pending" };
     },
   };

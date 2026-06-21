@@ -1,9 +1,11 @@
+import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
 import { resolveVisibleTeams } from "../teams/sharing.js";
@@ -14,6 +16,7 @@ import { resolveVisibleTeams } from "../teams/sharing.js";
  * {@link TeamsService} — the same layer the MCP tools use (agent-native parity).
  */
 export interface TeamsRoutesDeps {
+  config: Config;
   service: TeamsService;
   teams: Pick<
     TeamsRepository,
@@ -46,6 +49,10 @@ const addMemberSchema = z.object({ email: z.string().trim().toLowerCase().email(
 
 export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  // Same-origin guard on every mutation — parity with the admin/management routes. A
+  // personal-team add now sends courtesy emails + records allowlist/pending rows, so a CSRF
+  // slipping past SameSite=Lax would be an email-spam / allowlist-widening vector.
+  const sameOrigin = requireSameOrigin(deps.config);
 
   const actorOf = (c: Context<AppEnv>): TeamActor => {
     const user = c.get("user");
@@ -68,7 +75,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return c.json({ teams });
   });
 
-  app.post("/", async (c) => {
+  app.post("/", sameOrigin, async (c) => {
     const body = createSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.create(actorOf(c), body.data);
@@ -90,7 +97,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     );
   });
 
-  app.patch("/:id", async (c) => {
+  app.patch("/:id", sameOrigin, async (c) => {
     const body = renameSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.rename(actorOf(c), c.req.param("id"), body.data.name);
@@ -98,7 +105,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return c.json({ team: { id: r.team.id, name: r.team.name } });
   });
 
-  app.delete("/:id", async (c) => {
+  app.delete("/:id", sameOrigin, async (c) => {
     const r = await deps.service.remove(actorOf(c), c.req.param("id"));
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     return c.json({ ok: true });
@@ -138,7 +145,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     });
   });
 
-  app.post("/:id/members", async (c) => {
+  app.post("/:id/members", sameOrigin, async (c) => {
     const body = addMemberSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.addMemberByEmail(actorOf(c), c.req.param("id"), body.data.email);
@@ -148,7 +155,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return c.json({ ok: true, status: r.status });
   });
 
-  app.delete("/:id/members/:userId", async (c) => {
+  app.delete("/:id/members/:userId", sameOrigin, async (c) => {
     const r = await deps.service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"));
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     return c.json({ ok: true });

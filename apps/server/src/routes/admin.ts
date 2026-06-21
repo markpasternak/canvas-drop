@@ -649,12 +649,15 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const templates = TEMPLATE_KEYS.map((key) => {
       const row = overrides.get(key);
       const body = row ?? DEFAULT_TEMPLATES[key];
+      // A boot-seeded default row has `updatedBy = null`; only an ADMIN override sets it. So
+      // a present row alone is NOT "overridden" — the boot seed inserts one for every key, so
+      // `!!row` would read as customized everywhere in production. Key off the updater.
       return {
         key,
         subject: body.subject,
         bodyHtml: body.bodyHtml,
         bodyText: body.bodyText,
-        overridden: !!row,
+        overridden: row?.updatedBy != null,
       };
     });
     return c.json({ templates });

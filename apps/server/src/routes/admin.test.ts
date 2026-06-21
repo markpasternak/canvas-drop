@@ -22,6 +22,7 @@ import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
+import { seedDefaultTemplates } from "../email/templates.js";
 import type { AppEnv } from "../http/types.js";
 import { makeInviteService } from "../invites/testing.js";
 import { adminRoutes } from "./admin.js";
@@ -868,8 +869,11 @@ describe("admin routes", () => {
     client = await makeTestDb("sqlite");
     const admin = await seedUser(client, "admin");
     const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    // Boot seeds a row for EVERY key (updated_by null) — mirror that so `overridden` is tested
+    // the way production runs (a present seed row must NOT read as customized).
+    await seedDefaultTemplates(emailTemplatesRepository(client));
 
-    // List resolves every known key even before any override exists (default-backed).
+    // List resolves every known key; a seeded (un-edited) row is NOT overridden.
     const initial = await app.request("/api/admin/email-templates");
     expect(initial.status).toBe(200);
     const before = (

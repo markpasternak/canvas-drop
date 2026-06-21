@@ -124,6 +124,32 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(members).toHaveLength(1);
   });
 
+  it("deleting a team clears its pending invitations, so a later login never FK-retries a vanished target (review fix)", async () => {
+    const { users, teams, invitations, deps, inviter } = await harness();
+    const team = await teams.create({ orgId: null, name: "Doomed", createdBy: inviter.id });
+    await invitations.record({
+      email: "late@x.com",
+      target: { type: "team", id: team.id },
+      invitedBy: inviter.id,
+    });
+    expect(await invitations.listForEmail("late@x.com")).toHaveLength(1);
+
+    // The team is deleted before the invitee ever signs in.
+    await teams.remove(team.id);
+    // The pending invitation is gone (no orphaned row to FK-fail forever on every login).
+    expect(await invitations.listForEmail("late@x.com")).toHaveLength(0);
+
+    // A belated first login is a clean no-op: no membership materialized, no throw.
+    const late = await users.upsert({
+      providerSub: "dev:late",
+      email: "late@x.com",
+      name: "Late",
+      isAdmin: false,
+    });
+    await materializePendingInvitations(deps, { id: late.id, email: "late@x.com" });
+    expect(await teams.isTeamMember(team.id, late.id)).toBe(false);
+  });
+
   it("record is idempotent on (email, target) — a duplicate invite does not stack the pending count", async () => {
     const { teams, invitations, inviter } = await harness();
     const team = await teams.create({ orgId: null, name: "Dup", createdBy: inviter.id });

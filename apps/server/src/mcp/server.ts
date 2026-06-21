@@ -21,6 +21,7 @@ import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
@@ -69,6 +70,8 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** The invite primitive (plan 003 U9) — backs `invite_to_canvas` (individual one-off invite),
    *  wrapping the SAME service the HTTP route uses. */
   invites: InviteService;
+  /** Pending invitations — the `list_team_members` roster's pending rows (HTTP-route parity). */
+  invitations: Pick<InvitationsRepository, "listPendingForTarget">;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;
@@ -1406,8 +1409,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_teams",
     {
       description:
-        "List the teams in your org(s). Each carries `mine` (you're a member) and `canManage` " +
-        "(you created it — so you can rename/delete it over MCP).",
+        "List your teams — personal teams you belong to and any teams in your org(s). Each carries " +
+        "`mine` (you're a member) and `canManage` (you created it — so you can rename/delete it over MCP).",
       inputSchema: {},
     },
     async () => {
@@ -1492,7 +1495,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_team_members",
     {
       description:
-        "List the members of a team in your org. A team outside your org(s) reads as not found.",
+        "List a team's roster: active `members` plus `pending` invitations (brand-new invitees " +
+        "who haven't signed in yet — they join on first sign-in). A team you can't see reads as " +
+        "not found.",
       inputSchema: { id: z.string().describe("The team id.") },
     },
     async ({ id }) => {
@@ -1509,11 +1514,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const rows = await deps.teams.getMembers(team.id);
       const users = await deps.users.findByIds(rows.map((m) => m.userId));
       const byId = new Map(users.map((u) => [u.id, u]));
+      // Pending invitations (parity with the HTTP roster, plan 003 U6/U9) — email-only rows,
+      // minus any whose email already became a member.
+      const memberEmails = new Set(
+        rows.map((m) => byId.get(m.userId)?.email).filter((e): e is string => !!e),
+      );
+      const pending = (await deps.invitations.listPendingForTarget("team", team.id))
+        .filter((inv) => !memberEmails.has(inv.email))
+        .map((inv) => ({ email: inv.email, invitedAt: inv.createdAt }));
       return ok({
         members: rows.map((m) => {
           const u = byId.get(m.userId);
           return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
         }),
+        pending,
       });
     },
   );
