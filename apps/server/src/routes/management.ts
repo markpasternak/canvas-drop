@@ -68,6 +68,7 @@ export interface ManagementDeps extends PreviewHintDeps {
     | "setCanvasTeams"
     | "listTeamIdsForCanvas"
     | "listCanvasIdsForUserTeams"
+    | "teamMatch"
   >;
   config: Config;
   canvases: CanvasesRepository;
@@ -403,13 +404,21 @@ export function managementRoutes(deps: ManagementDeps) {
     // Non-owner clone eligibility runs through the SAME gallery visibility predicate as
     // browse (plan 002 U5), org-scoped to the caller: an org template is cloneable only by
     // a member of its org; a personal public_link template (org_id null) stays cloneable.
+    // PLUS the team branch (plan 003 U4): a member of one of a `team` canvas's granted teams
+    // may clone it — team canvases never reach the gallery, so this is their only clone path,
+    // gated by the SAME live-org `teamMatch` re-join that the serve seam uses (KTD3).
+    const orgIds = c.get("orgIds") ?? new Set<string>();
     const eligible =
       source.ownerId === user.id
         ? source.status === "active"
         : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
             tenancyActive: !!deps.config.org.name,
-            viewerOrgIds: c.get("orgIds") ?? new Set<string>(),
-          })) !== null;
+            viewerOrgIds: orgIds,
+          })) !== null ||
+          (source.access === "team" &&
+            source.status === "active" &&
+            !!deps.teams &&
+            (await deps.teams.teamMatch(id, user.id, orgIds)));
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
     const { canvas } = await deps.clone.clone(source, user.id);

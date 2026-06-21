@@ -1267,7 +1267,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
               tenancyActive: caller.tenancyActive,
               viewerOrgIds: caller.orgIds,
-            })) !== null;
+            })) !== null ||
+            // Team branch (plan 003): a member of one of a `team` canvas's granted teams may
+            // clone it — same live-org `teamMatch` re-join the serve seam uses (KTD3).
+            (source.access === "team" &&
+              source.status === "active" &&
+              (await deps.teams.teamMatch(id, caller.userId, caller.orgIds)));
       if (!eligible) return fail("canvas not found");
       const { canvas } = await deps.clone.clone(source, caller.userId);
       deps.audit.recordAudit({

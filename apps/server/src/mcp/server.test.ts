@@ -53,11 +53,14 @@ async function connect(
   // pass a tenancy config so `update_canvas access=team` sees tenancy active (the guard
   // reads config.org.name, not the caller flag).
   cfg = config,
+  // Blob store. Defaults to a fresh in-memory store; cross-connection tests (e.g. a
+  // teammate cloning the owner's deployed canvas) pass ONE shared store so the source
+  // blobs the clone copies are visible to the second connection.
+  storage = memStorage(),
 ): Promise<Client> {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const draftsRepo = draftsRepository(client);
-  const storage = memStorage();
   const audit = createAuditLog(auditRepository(client), silent);
   const teams = teamsRepository(client);
   const orgMembers = orgMembersRepository(client);
@@ -1500,6 +1503,57 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     );
     // biome-ignore lint/suspicious/noExplicitAny: JSON payload
     expect(canvases.map((c: any) => c.id)).toContain(cv.id);
+  });
+
+  it("clone_canvas: a team member may clone a team canvas; a non-member cannot", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const strangerId = await member("stranger@a.example", org.id);
+    // ONE shared blob store so the clone (on the teammate's connection) can read the
+    // source's deployed files the owner's connection wrote.
+    const store = memStorage();
+    const conn = (userId: string) =>
+      connect(
+        client,
+        { userId, orgIds: new Set([org.id]), tenancyActive: true },
+        false,
+        tenantConfig,
+        store,
+      );
+    const ownerMcp = await conn(ownerId);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    await ownerMcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "mate@a.example" },
+    });
+    const cv = payload(
+      await ownerMcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+    });
+    // The teammate clones it into a fresh canvas they own.
+    const cloned = payload(
+      await (await conn(mateId)).callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+    );
+    expect(cloned.id).toBeTruthy();
+    expect(cloned.id).not.toBe(cv.id);
+    // A same-org NON-member of the team can't — it reads as not found.
+    const denied = await (await conn(strangerId)).callTool({
+      name: "clone_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(isError(denied)).toBe(true);
+    expect(text(denied)).toContain("not found");
   });
 
   it("rename_team is creator-only over MCP (no admin bypass)", async () => {

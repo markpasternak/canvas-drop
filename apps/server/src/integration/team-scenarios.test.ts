@@ -1,0 +1,198 @@
+import { afterEach, describe, expect, it } from "vitest";
+import type { DbClient } from "../db/factory.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
+import { teamsRepository } from "../db/repositories/teams.js";
+import { usersRepository } from "../db/repositories/users.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
+import { type Harness, jsonOf, makeHarness, scenarioConfig } from "./scenario-harness.js";
+
+/**
+ * End-to-end invariants for the `team` access rung (plan 003 U8) over the REAL composed
+ * app — the full gateway → orgIds → canvasAccess → decideCanvasAccess (+ the runtime-API
+ * and clone seams). Rejection-first: a team canvas serves to a team member, and is
+ * OPAQUELY 404 to a same-org non-member and a guest. The headline invariant is the KTD3
+ * live-org re-join: an org-revoked member is denied even with a lingering `team_members`
+ * row (a stale row can never widen access).
+ */
+
+const OWNER = "owner@example.com"; // Acme member (example.com); team creator + canvas owner
+const MATE = "mate@contractor.test"; // Acme member (contractor.test domain); on the team
+const NONMEMBER = "other@example.com"; // Acme member, NOT on the team
+const GUEST = "g@guest.test"; // signs in, but in no org
+
+function teamConfig() {
+  return scenarioConfig({
+    CANVAS_DROP_ORG_NAME: "Acme",
+    // contractor.test is BOTH an allowed sign-in domain AND an Acme org domain (below), so
+    // a contractor is a full Acme member — until the operator drops the domain.
+    CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com,contractor.test,guest.test",
+  });
+}
+
+/** Materialize Acme with two member domains (the harness doesn't run boot materialize). */
+async function seedAcme(client: DbClient): Promise<string> {
+  const org = await orgsRepository(client).ensureOrg({
+    name: "Acme",
+    slug: "acme",
+    domains: ["example.com", "contractor.test"],
+  });
+  return org.id;
+}
+
+/** Owner creates a team, adds MATE, publishes a backend-on canvas, scopes it to the team. */
+async function setupTeamCanvas(
+  h: Harness,
+  acmeId: string,
+): Promise<{ teamId: string; canvasId: string; slug: string }> {
+  // Each participant signs in once so the gateway materializes their org membership (a
+  // prerequisite for add_team_member's same-org check + for clone/serve membership).
+  for (const who of [OWNER, MATE, NONMEMBER]) await (await h.GET(who, "/api/me")).text();
+
+  const teamRes = await h.SEND(OWNER, "POST", "/api/teams", { orgId: acmeId, name: "Design" });
+  expect(teamRes.status).toBe(201);
+  const { team } = await jsonOf<{ team: { id: string } }>(teamRes);
+
+  const addRes = await h.SEND(OWNER, "POST", `/api/teams/${team.id}/members`, { email: MATE });
+  expect(addRes.status).toBe(200);
+  await addRes.text();
+
+  const pasteRes = await h.SEND(OWNER, "POST", "/api/canvases/paste", {
+    html: "<h1>team secret</h1>",
+    title: "Team doc",
+    backendEnabled: true,
+  });
+  expect(pasteRes.status).toBe(201);
+  const cv = await jsonOf<{ id: string; slug: string }>(pasteRes);
+
+  const patch = await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, {
+    access: "team",
+    teamIds: [team.id],
+  });
+  expect(patch.status).toBe(200);
+  await patch.text();
+
+  return { teamId: team.id, canvasId: cv.id, slug: cv.slug };
+}
+
+describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("serves a team canvas to team members; opaque 404 to a non-member and a guest", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+    const { slug } = await setupTeamCanvas(h, acmeId);
+
+    // Driven over a REAL socket so each request is fully independent (the serve seam's
+    // authoritative end-to-end check).
+    const server = await h.listen();
+    const get = (email: string) =>
+      fetch(`http://localhost:${server.port}/c/${slug}/`, {
+        headers: { host: h.baseHost, "x-test-user": email },
+      });
+    try {
+      // The owner and the granted teammate reach the content.
+      for (const who of [OWNER, MATE]) {
+        const res = await get(who);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain("team secret");
+      }
+      // A same-org NON-member and a guest get the opaque not_found, never the content.
+      for (const who of [NONMEMBER, GUEST]) {
+        const res = await get(who);
+        const body = await res.text();
+        expect(res.status).toBe(404);
+        expect(body).not.toContain("team secret");
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runtime API (me) honors the team rung — member resolves, non-member 404s", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+    const { slug } = await setupTeamCanvas(h, acmeId);
+
+    // A team member resolves identity through the runtime seam (canvas-api teamMatch).
+    const mate = await h.GET(MATE, `/v1/c/${slug}/me`);
+    expect(mate.status).toBe(200);
+    expect((await jsonOf<{ kind: string }>(mate)).kind).toBe("member");
+
+    // A same-org non-member is denied at the runtime seam too (opaque).
+    const other = await h.GET(NONMEMBER, `/v1/c/${slug}/me`);
+    expect(other.status).toBe(404);
+    await other.text();
+  });
+
+  it("KTD3 live re-join: an org-revoked member is denied even with a lingering team row", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+    const { teamId, slug } = await setupTeamCanvas(h, acmeId);
+
+    // Baseline: the teammate currently reaches the canvas.
+    expect(await (await h.GET(MATE, `/c/${slug}/`)).text()).toContain("team secret");
+
+    // The operator removes the contractor.test domain (re-ensure Acme with only
+    // example.com → the gateway no longer DERIVES Acme for the contractor) and revokes the
+    // explicit membership — but we DON'T reconcile, so the `team_members` row LINGERS.
+    const mate = await usersRepository(client).findByEmail(MATE);
+    if (!mate) throw new Error("seed: mate user missing");
+    await orgsRepository(client).ensureOrg({
+      name: "Acme",
+      slug: "acme",
+      domains: ["example.com"],
+    });
+    await orgMembersRepository(client).remove(acmeId, mate.id);
+
+    // The lingering team membership row still exists — proving the denial below is the
+    // live-org re-join, not row cleanup.
+    expect(await teamsRepository(client).isTeamMember(teamId, mate.id)).toBe(true);
+
+    // Now an outsider: orgIds is empty, so the teamMatch re-join fails → opaque 404, even
+    // though the stale team row says they're on the team.
+    const denied = await h.GET(MATE, `/c/${slug}/`);
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).not.toContain("team secret");
+  });
+
+  it("shared-with-teams lists the canvas for a member, excludes the owner and a non-member", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+    const { canvasId } = await setupTeamCanvas(h, acmeId);
+
+    const idsFor = async (email: string) =>
+      (
+        await jsonOf<{ canvases: Array<{ id: string }> }>(
+          await h.GET(email, "/api/canvases/shared-with-teams"),
+        )
+      ).canvases.map((c) => c.id);
+
+    // The teammate sees it; the owner does NOT (it's their own); a non-member doesn't either.
+    expect(await idsFor(MATE)).toContain(canvasId);
+    expect(await idsFor(OWNER)).not.toContain(canvasId);
+    expect(await idsFor(NONMEMBER)).not.toContain(canvasId);
+  });
+
+  it("clone seam: a team member may clone a team canvas; a non-member cannot", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+    const { canvasId } = await setupTeamCanvas(h, acmeId);
+
+    const mateClone = await h.SEND(MATE, "POST", `/api/canvases/${canvasId}/clone`);
+    expect(mateClone.status).toBe(201);
+    await mateClone.text();
+
+    const otherClone = await h.SEND(NONMEMBER, "POST", `/api/canvases/${canvasId}/clone`);
+    expect(otherClone.status).toBe(404);
+    await otherClone.text();
+  });
+});
