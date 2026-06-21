@@ -62,23 +62,34 @@ choice, and every canvas behaves as it always has. See
 
 ## Teams
 
-A **team** is a named group inside your org — the subset you actually collaborate with,
-between "just me" and "the whole org." Teams are **self-serve**: any org member can create
-one and invite other members by email (an invitee must already be a member of the org).
+A **team** is a named group you share canvases with — the subset you actually collaborate
+with, between "just me" and "everyone." Teams are **self-serve** and come in two kinds, a
+fixed choice at creation:
 
-Manage teams on the **Teams** page (org members only):
+- **Personal** — friends & family. *Any* signed-in user can create one (no org required) and
+  invite *anyone* by email.
+- **Org-attached** — a subset of your org. Only org members can create one, and invitees must
+  be members of that org.
 
-- **Create** a team and **invite** colleagues by email; **leave** a team at any time.
+Manage teams on the **Teams** page (available to everyone):
+
+- **Create** a team — pick **Personal** or your org — and **invite** people by email; **leave**
+  a team at any time. An existing user joins immediately; a brand-new invitee gets a sign-in
+  invitation and shows as **Pending** until they sign in for the first time (no app-owned
+  password — they authenticate through your instance's configured auth).
 - The team's **creator** (or an admin) can **rename** or **delete** it. Deleting a team
   removes its memberships and unshares every canvas shared with it — the canvases
   themselves are untouched.
-- **Shared with your teams** lists the canvases other members shared with a team you're
+- **Shared with your teams** lists the canvases other people shared with a team you're
   on. These never appear in the org-wide gallery, so this is the place to find them.
+
+Team names are **per-creator**: you can't make two teams with the same name, but different
+people can each have a team named "Design."
 
 To share a canvas with a team, set its access rung to **Team** on the
 [Share tab](/docs/authoring/sharing#sharing-with-a-team). Agents do all of this over
-[MCP](/docs/agents/mcp) (`create_team`, `add_team_member`, `update_canvas` with
-`access: "team"`, …).
+[MCP](/docs/agents/mcp) (`create_team` — omit `orgId` for a personal team, `add_team_member`,
+`update_canvas` with `access: "team"`, …).
 
 ## Drag-and-drop files or a folder
 

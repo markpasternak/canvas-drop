@@ -118,6 +118,29 @@ a default. Turning it on for an existing instance is a one-time, dry-run-first
 cutover — see [Configuration → Tenancy](/docs/self-hosting/configuration) and the
 `docs/tenancy.md` runbook.
 
+## Invites are auth-delegated (no app-owned credentials)
+
+When you invite someone who doesn't have an account yet — to a personal team, a canvas, or
+via the admin **Add users** page — canvas-drop records a **pending invitation**, not a new
+login. There is **no app-owned magic-link account and no app-stored password**. The grant
+materializes the *first time that email authenticates* through the instance's configured auth
+(`oidc` / `proxy` / `dev`) — the identity provider is the only authority, so there's nothing
+to take over. The verified login email is the match key; a pending invitation can never grant
+access on its own.
+
+Who may permit a **brand-new email** to sign in is gated (a load-bearing rule):
+
+- An **admin** can, via [Add users](/docs/self-hosting/configuration#add-users--invites).
+- A **member** can only if the operator turns on `email.allowMemberInvitesToNewEmails` (off by
+  default), **or** the email already authenticates (its domain is allowlisted, or it's already
+  a permitted user). Otherwise a self-serve invite of an unknown external email is **rejected**
+  — a member can't widen who may sign in to your instance.
+
+This replaces the older guest **magic-link** flow for these surfaces. (Per-canvas guest invites
+on the *Specific people* rung still use a scoped magic link in `oidc`/`dev` mode; see
+[Sharing](/docs/authoring/sharing#inviting-specific-people).) Invite volume is bounded
+per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
+
 ## Identity is always server-side (invariant #1)
 
 In `proxy` mode exactly one trust path is active, chosen by config — they do not

@@ -42,8 +42,9 @@ client registration) and then get identity-scoped tools across every canvas you 
 `set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
 `clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
-`resend_guest_invite`/`revoke_access`, the team tools `list_teams`/`create_team`/
-`rename_team`/`delete_team`/`add_team_member`/`remove_team_member`/`list_team_members`/
+`invite_to_canvas`/`resend_guest_invite`/`revoke_access`, the team tools `list_teams`/
+`create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
+`add_team_member`/`remove_team_member`/`list_team_members`/
 `list_shared_with_teams` (plus `update_canvas` with `access: "team"` + `teamIds` to share
 a canvas with a team), and the editor draft loop `get_draft`/
 `read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
@@ -111,8 +112,9 @@ Share tab (or its session-authenticated management API). The rung is one of:
 - `private` — owner only.
 - `specific_people` — a named allowlist of org members and/or email-invited
   guests.
-- `team` — members of the granted teams (a subset of the org). Re-checked against
-  live org membership on every request; strictly team-scoped (never in the gallery).
+- `team` — members of the granted teams. A team is personal (friends & family) or
+  org-attached (a subset of the org, re-checked against live org membership on every
+  request). Strictly team-scoped (never in the gallery).
 - `whole_org` — any authenticated org member with the link.
 - `public_link` — anyone with the link. Admin-gated per owner account
   (`canPublishPublic`), and **static-only** for non-owners: every backend

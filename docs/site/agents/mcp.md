@@ -57,15 +57,16 @@ there is no cross-owner access and no existence leak.
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
 | `list_access` | List the canvas's allowlist — named org members + email-invited guests (each with an `id` for `revoke_access`). |
 | `grant_access` | Give a person access by email: an org member is added to the allowlist directly; an outside email gets a guest magic-link invite (oidc/dev + configured email only). Takes effect on the `specific_people` rung. |
+| `invite_to_canvas` | Deliberately invite a person by email (distinct from the silent `grant_access`) — sends a courtesy email. An existing user is granted now (`status: granted`); a brand-new email becomes a pending invitation that materializes on their first sign-in (`status: pending`). A brand-new external email is refused for a non-admin (`NOT_PERMITTED`) unless the instance allows it; `RATE_LIMITED` past the cap. Takes effect on the `specific_people` rung. |
 | `resend_guest_invite` | Re-send a pending guest invite (fresh link), by allowlist entry `id`. |
 | `revoke_access` | Remove an allowlist entry (member or guest); revokes a guest's invite + sessions. |
 | `clone_canvas` | Clone a canvas into a new one you own — any active canvas you own, or a gallery template someone shared. Starts as an unpublished draft with a fresh slug + key. |
 | `get_canvas_usage` | Usage stats: views + 30-day sparkline, and (backend-on) KV/file/AI/realtime op counts, storage, AI tokens/cost. |
-| `list_teams` | The teams in your org(s), each with `mine` (you're a member) and `canManage` (you created it — so you can rename/delete it). |
-| `create_team` | Create a team in an org you belong to (`orgId` from `whoami.orgs`). You become its first member and manager. |
+| `list_teams` | The teams you belong to, each with `mine` (you're a member) and `canManage` (you created it — so you can rename/delete it). |
+| `create_team` | Create a team. **Omit `orgId`** for a *personal* team (friends & family — invite anyone); pass an `orgId` from `whoami.orgs` to attach it to that org. You become its first member and manager. |
 | `rename_team` / `delete_team` | Rename or delete a team you created. Deleting unshares every canvas shared with it (the canvases are untouched). |
-| `add_team_member` / `remove_team_member` | Add a same-org colleague to a team you belong to (by `email`), or remove a member (pass your own user id to leave). |
-| `list_team_members` | The roster of a team in your org (`userId`, `email`, `name`). |
+| `add_team_member` / `remove_team_member` | Add someone to a team you belong to by `email`, or remove a member (pass your own user id to leave). Returns `status`: `granted` (existing user joined now) or `pending` (a brand-new invitee — joins on first sign-in). For an org team they must be a same-org member; a brand-new external email on a personal team is refused for a non-admin unless the instance allows it. |
+| `list_team_members` | The roster of a team you belong to (`userId`, `email`, `name`). |
 | `list_shared_with_teams` | Canvases shared with one of your teams (the "shared with your teams" view) — strictly team-scoped, never in the gallery. Display-only; open via the returned `url`. |
 | `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
 | `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |
