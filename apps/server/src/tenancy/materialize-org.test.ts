@@ -46,6 +46,14 @@ describe.each(DIALECTS)("materializeOrg [%s]", (dialect) => {
     expect(await orgs.listDomains(org.id)).toEqual(["acme.com", "eng.acme.com"]);
   });
 
+  it("fails loud when the configured org has no domains (review fix — avoids a member-less boundary)", async () => {
+    client = await makeTestDb(dialect);
+    const orgs = orgsRepository(client);
+    await expect(
+      materializeOrg({ config: configWithOrg({ name: "Acme", domains: [] }), orgs, log: noopLog }),
+    ).rejects.toThrow(/has no domains/);
+  });
+
   it("fails loud when more than one org exists (P1 single-org guard)", async () => {
     client = await makeTestDb(dialect);
     const orgs = orgsRepository(client);

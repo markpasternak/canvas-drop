@@ -56,12 +56,45 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
   };
 }
 
-const PUBLIC_OK = { canPublishPublic: true, publicEdgeCacheTtlSec: 300, now: NOW };
-const PUBLIC_DENIED = { canPublishPublic: false, publicEdgeCacheTtlSec: 300, now: NOW };
+const PUBLIC_OK = {
+  canPublishPublic: true,
+  publicEdgeCacheTtlSec: 300,
+  now: NOW,
+  tenancyActive: false,
+};
+const PUBLIC_DENIED = {
+  canPublishPublic: false,
+  publicEdgeCacheTtlSec: 300,
+  now: NOW,
+  tenancyActive: false,
+};
 
 function resolve(cv: Canvas, input: CanvasSettingsInput, opts = PUBLIC_OK) {
   return resolveSettingsUpdate(cv, input, opts);
 }
+
+describe("resolveSettingsUpdate — tenancy (plan 002 review fix)", () => {
+  const ACTIVE = { ...PUBLIC_OK, tenancyActive: true };
+
+  it("rejects whole_org on a canvas with no home org under active tenancy (ORG_REQUIRED)", () => {
+    const r = resolve(canvas({ access: "private", orgId: null }), { access: "whole_org" }, ACTIVE);
+    expect(r).toMatchObject({ ok: false, code: "ORG_REQUIRED", status: 409 });
+  });
+
+  it("allows whole_org on a canvas that HAS a home org under active tenancy", () => {
+    const r = resolve(
+      canvas({ access: "private", orgId: "org-A" }),
+      { access: "whole_org" },
+      ACTIVE,
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
+
+  it("allows whole_org on a null-org canvas when tenancy is INERT (legacy any-member)", () => {
+    const r = resolve(canvas({ access: "private", orgId: null }), { access: "whole_org" });
+    expect(r).toMatchObject({ ok: true });
+  });
+});
 
 describe("resolveSettingsUpdate — denial paths", () => {
   it("SHARE_REQUIRES_PUBLISH: sharing an unpublished canvas is rejected (409)", () => {
@@ -203,7 +236,12 @@ function publicCanvas(over: Partial<Canvas> = {}): Canvas {
   } as Canvas;
 }
 
-const cdnOpts = { canPublishPublic: true, publicEdgeCacheTtlSec: 300, now: NOW };
+const cdnOpts = {
+  canPublishPublic: true,
+  publicEdgeCacheTtlSec: 300,
+  now: NOW,
+  tenancyActive: false,
+};
 
 describe("resolveSettingsUpdate — CDN downgrade warning", () => {
   it("warns when a public canvas is restricted, quoting the TTL in human terms", () => {

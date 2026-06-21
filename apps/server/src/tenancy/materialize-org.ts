@@ -37,5 +37,16 @@ export async function materializeOrg(deps: {
   }
 
   const domains = await orgs.listDomains(org.id);
+  // Fail loud on a domainless org (review fix): tenancyActive keys off the org NAME, but
+  // membership keys off its DOMAINS. An org with no domains activates a member boundary
+  // nobody can be on the inside of — every member resolves to ∅, so every whole_org canvas
+  // becomes invisible to everyone. Refuse to boot rather than silently mis-scope.
+  if (domains.length === 0) {
+    throw new Error(
+      `tenancy boot guard: org "${org.name}" has no domains. Set CANVAS_DROP_ORG_DOMAINS ` +
+        "(or CANVAS_DROP_ALLOWED_EMAIL_DOMAINS) — without domains no user can be a member " +
+        "and every whole_org canvas becomes invisible.",
+    );
+  }
   log.info({ org: org.name, slug: org.slug, domains }, "tenancy: org materialized");
 }

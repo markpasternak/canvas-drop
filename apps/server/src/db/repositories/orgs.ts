@@ -1,6 +1,6 @@
 import { normalizeDomain } from "@canvas-drop/shared";
 import { type Org, type OrgDomain, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -45,8 +45,9 @@ export function orgsRepository(client: DbClient) {
         org = rows[0] as Org;
       }
 
-      for (const raw of input.domains) {
-        const domain = normalizeDomain(raw);
+      const configured = input.domains.map(normalizeDomain);
+      const configuredSet = new Set(configured);
+      for (const domain of configured) {
         const cur = (
           await db.select().from(domainsT).where(eq(domainsT.domain, domain)).limit(1)
         )[0] as OrgDomain | undefined;
@@ -60,6 +61,22 @@ export function orgsRepository(client: DbClient) {
             .insert(domainsT)
             .values({ id: uuidv7(), orgId: org.id, domain, verifiedAt: now, createdAt: now })
             .onConflictDoNothing();
+        }
+      }
+      // Make the configured set AUTHORITATIVE (plan 002 — review fix): prune any of this
+      // org's domains that are no longer in config. Without this, a domain removed from
+      // CANVAS_DROP_ORG_DOMAINS keeps granting membership forever (findByDomain still
+      // resolves it) — the isolation boundary could only widen, never narrow. A removed
+      // domain's users correctly drop to guest (∅) on their next request after a reboot.
+      const existingDomains = (await db
+        .select({ domain: domainsT.domain })
+        .from(domainsT)
+        .where(eq(domainsT.orgId, org.id))) as Array<{ domain: string }>;
+      for (const { domain } of existingDomains) {
+        if (!configuredSet.has(domain)) {
+          await db
+            .delete(domainsT)
+            .where(and(eq(domainsT.orgId, org.id), eq(domainsT.domain, domain)));
         }
       }
       return org;

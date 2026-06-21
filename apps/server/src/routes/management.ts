@@ -571,6 +571,7 @@ export function managementRoutes(deps: ManagementDeps) {
       canPublishPublic: c.get("user").canPublishPublic,
       publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
       now: Date.now(),
+      tenancyActive: !!deps.config.org.name,
     });
     if (!resolution.ok) {
       return c.json({ code: resolution.code, message: resolution.message }, resolution.status);

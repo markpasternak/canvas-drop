@@ -51,7 +51,14 @@ export type SettingsResolution =
 export function resolveSettingsUpdate(
   cv: Canvas,
   input: CanvasSettingsInput,
-  opts: { canPublishPublic: boolean; publicEdgeCacheTtlSec: number; now: number },
+  opts: {
+    canPublishPublic: boolean;
+    publicEdgeCacheTtlSec: number;
+    now: number;
+    /** Whether tenancy is active (plan 002 — an org is configured). When true, a
+     *  whole_org canvas must have a home org; see the guard below. */
+    tenancyActive: boolean;
+  },
 ): SettingsResolution {
   const { password, shared, access, ...rest } = input;
   // The target rung: the first-class `access` field wins; else the deprecated
@@ -82,6 +89,19 @@ export function resolveSettingsUpdate(
       code: "PUBLIC_NOT_ALLOWED",
       message: "An administrator must grant your account permission to publish public links.",
       status: 403,
+    };
+  }
+  // Under active tenancy, whole_org means "members of the canvas's home org" — a canvas
+  // with no home org (org_id null: a personal canvas, or a guest/org-less owner's) can't
+  // be shared org-wide. Refuse rather than create a 'dead share' that decideCanvasAccess
+  // denies to everyone (plan 002 — review fix; the runtime twin of the cutover clamp).
+  // Inert tenancy keeps the legacy any-member meaning, so this guard is active-only.
+  if (targetAccess === "whole_org" && opts.tenancyActive && cv.orgId === null) {
+    return {
+      ok: false,
+      code: "ORG_REQUIRED",
+      message: "Only a canvas homed in an org can be shared with the whole org.",
+      status: 409,
     };
   }
   if (rest.galleryListed === true) {

@@ -36,8 +36,14 @@ rollout safe — you merge first, migrate later.
 | `CANVAS_DROP_ORG_DOMAINS` | Comma-separated member domains. Defaults to `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (the common single-org case). |
 
 Domains are normalized to lowercase ASCII; punycode IDNs before listing them. At boot the
-instance materializes the org + its domains idempotently and **fails loud** on a bad config
-(a domain mapped to two orgs, or more than one org — multi-org is Phase 3).
+instance materializes the org + its domains idempotently and **fails loud** on a bad config:
+a domain mapped to two orgs, more than one org (multi-org is Phase 3), or an org with **no
+domains** (a member boundary nobody can be inside — every `whole_org` canvas would become
+invisible).
+
+The configured domain set is **authoritative**: a domain you **remove** from
+`CANVAS_DROP_ORG_DOMAINS` is pruned at the next boot, so its users correctly drop to guest.
+Membership can be narrowed, not just widened — no stale domain keeps granting access.
 
 ## Rollout
 

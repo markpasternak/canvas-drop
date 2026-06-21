@@ -925,6 +925,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         canPublishPublic: user?.canPublishPublic ?? false,
         publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
         now: Date.now(),
+        tenancyActive: !!deps.config.org.name,
       });
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
