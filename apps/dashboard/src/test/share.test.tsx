@@ -41,6 +41,8 @@ const ME = {
   isAdmin: false,
   canPublishPublic: false,
   authMode: "dev",
+  // An org member (the Team rung is gated on org membership).
+  orgs: [{ id: "o1", name: "Acme" }],
 };
 
 function json(body: unknown, status = 200): Response {
@@ -283,7 +285,7 @@ describe("share route", () => {
 
   it("team rung is hidden for a guest (no org)", async () => {
     mockFetch({
-      "GET /api/me": () => json({ ...ME, isGuest: true }),
+      "GET /api/me": () => json({ ...ME, isGuest: true, orgs: [] }),
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
     });

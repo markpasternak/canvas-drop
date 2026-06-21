@@ -1,6 +1,6 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -31,7 +31,6 @@ const BASE_SECTIONS = [
 const PEOPLE_SECTIONS = [
   { id: "share-link", label: "Share link" },
   { id: "access", label: "Access" },
-  { id: "people", label: "People" },
   { id: "locks", label: "Locks" },
   { id: "guest-permissions", label: "Guest permissions" },
   { id: "gallery", label: "Gallery" },
@@ -173,9 +172,11 @@ export default function Share() {
             // viewer is a member — i.e. tenancy is active. The server would 409 it; don't
             // make them bounce off that with no feedback (plan 002/003).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
-            // The "Team" rung only applies under active tenancy (a guest, or an inert
-            // instance, has no teams). Hidden for a guest; shown for org members.
-            allowTeam={!me?.isGuest}
+            // The "Team" rung only applies to a user who actually belongs to an org — so
+            // gate it on org membership (not just "not a guest"). This also hides it on an
+            // inert instance (no org configured → nobody has teams), unlike Whole org which
+            // keeps its legacy any-member meaning there. Same predicate as the Teams nav.
+            allowTeam={(me?.orgs?.length ?? 0) > 0}
             onChange={(access) => {
               if (access === "team") {
                 // Don't write yet — reveal the picker; the save fires from there once a
@@ -186,19 +187,25 @@ export default function Share() {
               setPendingTeam(false);
               save({ access });
             }}
+            // The "who" for the two list-based rungs renders INLINE — nested directly under
+            // the selected rung — so the choice sits with the option, not in a far-off
+            // section. The picker/allowlist only mount when their rung is the active one.
+            details={{
+              specific_people: <Allowlist canvasId={canvas.id} />,
+              team: (
+                <TeamPicker
+                  teams={(teams ?? []).filter((t) => t.mine)}
+                  selected={canvas.access === "team" ? canvas.teamIds : []}
+                  saving={update.isPending}
+                  onShare={(teamIds) => {
+                    setPendingTeam(false);
+                    save({ access: "team", teamIds });
+                  }}
+                  onCancel={pendingTeam ? () => setPendingTeam(false) : undefined}
+                />
+              ),
+            }}
           />
-          {(pendingTeam || canvas.access === "team") && (
-            <TeamPicker
-              teams={(teams ?? []).filter((t) => t.mine)}
-              selected={canvas.access === "team" ? canvas.teamIds : []}
-              saving={update.isPending}
-              onShare={(teamIds) => {
-                setPendingTeam(false);
-                save({ access: "team", teamIds });
-              }}
-              onCancel={pendingTeam ? () => setPendingTeam(false) : undefined}
-            />
-          )}
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
               audiences the URL itself is no longer a secret — lean on the access controls,
               not obscurity. Informational, never a blocker. */}
@@ -210,16 +217,6 @@ export default function Share() {
               </InlineNotice>
             )}
         </Section>
-
-        {canvas.access === "specific_people" && (
-          <Section
-            id="people"
-            title="People"
-            description="Add the people who can open this canvas."
-          >
-            <Allowlist canvasId={canvas.id} />
-          </Section>
-        )}
 
         <Section
           id="locks"
@@ -510,6 +507,7 @@ function AccessLadder({
   allowTeam,
   orgRungDisabled,
   onChange,
+  details,
 }: {
   value: AccessRung;
   allowPublic: boolean;
@@ -521,6 +519,10 @@ function AccessLadder({
    *  pick what can't work (plan 002/003). */
   orgRungDisabled: boolean;
   onChange: (rung: SettableRung) => void;
+  /** Inline "who" detail for a rung (the Specific-people allowlist, the Team picker) —
+   *  rendered nested directly under the rung while it's the selected one, so the choice
+   *  reads as part of the option rather than living in a separate, far-off section. */
+  details?: Partial<Record<SettableRung, ReactNode>>;
 }) {
   const rungs = RUNGS.filter(
     (r) =>
@@ -536,30 +538,42 @@ function AccessLadder({
         // explain, rather than letting the click bounce off the server's 409 with no
         // feedback.
         const disabled = (r.orgGated || r.teamGated) && orgRungDisabled && value !== r.value;
+        const selected = value === r.value;
+        const detail = selected && !disabled ? details?.[r.value] : null;
         return (
-          <label
-            key={r.value}
-            className={`flex items-start gap-3 rounded-lg border border-border p-3 ${
-              disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
-            } ${value === r.value ? "border-accent bg-surface-sunken" : ""}`}
-          >
-            <input
-              type="radio"
-              name="access-rung"
-              className="mt-1"
-              checked={value === r.value}
-              disabled={disabled}
-              onChange={() => onChange(r.value)}
-            />
-            <span>
-              <span className="block text-sm font-semibold text-fg">{r.label}</span>
-              <span className="block text-xs text-muted">
-                {disabled
-                  ? "This canvas is Personal — only a canvas in a workspace can be shared with your org or a team."
-                  : r.hint}
+          <Fragment key={r.value}>
+            <label
+              className={`flex items-start gap-3 rounded-lg border border-border p-3 ${
+                disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
+              } ${selected ? "border-accent bg-surface-sunken" : ""} ${
+                detail ? "rounded-b-none border-b-0" : ""
+              }`}
+            >
+              <input
+                type="radio"
+                name="access-rung"
+                className="mt-1"
+                checked={selected}
+                disabled={disabled}
+                onChange={() => onChange(r.value)}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-fg">{r.label}</span>
+                <span className="block text-xs text-muted">
+                  {disabled
+                    ? "This canvas is Personal — only a canvas in a workspace can be shared with your org or a team."
+                    : r.hint}
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+            {/* The chosen rung's detail, visually fused to it: same accent border, the
+                seam between them removed (the label drops its bottom radius + border). */}
+            {detail && (
+              <div className="-mt-2 rounded-b-lg border border-accent border-t-0 bg-surface-sunken/40 p-3 pt-1">
+                {detail}
+              </div>
+            )}
+          </Fragment>
         );
       })}
       {value === "public_link" && (
@@ -625,7 +639,7 @@ function TeamPicker({
   const same = sel.size === selected.length && selected.every((id) => sel.has(id));
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3">
+    <div className="space-y-3">
       <p className="text-xs text-muted">
         Pick the teams that can open this canvas. Only teams you belong to are listed.
       </p>
@@ -716,7 +730,7 @@ function Allowlist({ canvasId }: { canvasId: string }) {
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3">
+    <div className="space-y-3">
       <p className="text-xs text-muted">
         Add org members by email. They get access only to this canvas.
       </p>
