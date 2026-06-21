@@ -46,4 +46,19 @@ describe("orgSlug", () => {
     expect(orgSlug("  Foo / Bar  ")).toBe("foo-bar");
     expect(orgSlug("!!!")).toBe("org");
   });
+
+  it("collapses separator runs and trims leading/trailing ones", () => {
+    expect(orgSlug("  --Hello, World!--  ")).toBe("hello-world");
+    expect(orgSlug("a-b--c---d")).toBe("a-b-c-d");
+    expect(orgSlug("UPPER_case_123")).toBe("upper-case-123");
+  });
+
+  it("handles pathological separator-heavy input in linear time (ReDoS-safe)", () => {
+    // A long run of dashes used to risk polynomial backtracking in the trim regex
+    // (CodeQL #8). The split-based form is linear — assert correctness + that it returns
+    // promptly rather than hanging.
+    const t0 = performance.now();
+    expect(orgSlug(`${"-".repeat(100_000)}acme${"-".repeat(100_000)}`)).toBe("acme");
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
 });

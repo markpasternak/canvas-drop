@@ -48,10 +48,16 @@ export function domainOfEmail(email: string | null | undefined): string | null {
 
 /** Deterministic URL-safe slug for an org name (the orgs.slug unique key). */
 export function orgSlug(name: string): string {
+  // Split on runs of non-alphanumerics and rejoin with single dashes. This collapses
+  // separators and drops leading/trailing ones in a single linear pass — unlike a
+  // trailing-dash trim (`/-+$/`), it has no polynomial backtracking on pathological
+  // input (ReDoS-safe). Input is operator config (CANVAS_DROP_ORG_NAME) at boot, but
+  // the linear form keeps the regex honest regardless.
   const s = name
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join("-");
   return s || "org";
 }
