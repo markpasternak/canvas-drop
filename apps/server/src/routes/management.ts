@@ -34,6 +34,7 @@ import {
   POPULAR_WINDOW_MS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -57,6 +58,9 @@ import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
+  /** Teams store (plan 003 U4) — the canvas→team grant flow on PATCH /:id/settings.
+   *  Optional: suites that don't exercise the team rung may omit it. */
+  teams?: Pick<TeamsRepository, "findById" | "isTeamMember" | "setCanvasTeams">;
   config: Config;
   canvases: CanvasesRepository;
   users: UsersRepository;
@@ -119,7 +123,10 @@ const settingsSchema = z.object({
   // First-class access rung (D4). `public_link` is admin-gated per account (U10) —
   // accepted here but rejected unless the owner holds the capability. `shared`
   // remains a deprecated boolean alias (true→whole_org, false→private).
-  access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
+  access: z.enum(["private", "specific_people", "team", "whole_org", "public_link"]).optional(),
+  // Teams to grant when access='team' (plan 003 U4). Owner may grant only teams they
+  // belong to in this canvas's org (validated server-side at grant time, KTD4).
+  teamIds: z.array(z.string().min(1)).max(50).optional(),
   // Guest-AI opt-in (U9): off by default; cap is a per-canvas monthly USD ceiling.
   guestAiEnabled: z.boolean().optional(),
   guestAiCap: z.number().min(0).optional(),
@@ -580,6 +587,39 @@ export function managementRoutes(deps: ManagementDeps) {
       return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
     }
     const { patch, password, targetAccess, warning } = resolution;
+
+    // Team grant flow (plan 003 U4): validate + persist the canvas→team grants BEFORE the
+    // access write, so a forbidden grant never leaves a team canvas with zero teams (an
+    // explicit deny to everyone). The owner may grant only teams they belong to, in this
+    // canvas's org (KTD4). Changing away from `team` clears the grants (single-valued rung).
+    if (deps.teams && targetAccess === "team") {
+      const teamIds = [...new Set(body.data.teamIds ?? [])];
+      if (teamIds.length === 0) {
+        return c.json(
+          { code: "TEAM_REQUIRED", message: "Pick at least one team to share with." },
+          409,
+        );
+      }
+      for (const teamId of teamIds) {
+        const team = await deps.teams.findById(teamId);
+        if (
+          !team ||
+          team.orgId !== cv.orgId ||
+          !(await deps.teams.isTeamMember(teamId, c.get("user").id))
+        ) {
+          return c.json(
+            {
+              code: "TEAM_FORBIDDEN",
+              message: "You can only share with teams you belong to in this org.",
+            },
+            403,
+          );
+        }
+      }
+      await deps.teams.setCanvasTeams(cv.id, teamIds);
+    } else if (deps.teams && targetAccess !== undefined) {
+      await deps.teams.setCanvasTeams(cv.id, []);
+    }
 
     let updated = cv;
     if (Object.keys(patch).length > 0) {

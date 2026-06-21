@@ -480,6 +480,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     canvasApiRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      teams,
       kv: kvRepository(deps.db),
       files: filesService({
         files,
@@ -537,6 +538,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     managementRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      teams,
       users: deps.users,
       versions: deps.versions,
       clone,
@@ -600,7 +602,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   app.use(
     "*",
-    onlyCanvas(canvasAccess({ canvases: deps.canvases, tenancyActive: !!deps.config.org.name })),
+    onlyCanvas(
+      canvasAccess({ canvases: deps.canvases, teams, tenancyActive: !!deps.config.org.name }),
+    ),
   );
   app.use(
     "*",

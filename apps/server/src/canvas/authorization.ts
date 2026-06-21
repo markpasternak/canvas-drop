@@ -1,6 +1,7 @@
 import type { Canvas } from "@canvas-drop/shared/db";
 import { createMiddleware } from "hono/factory";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { AppEnv, Principal } from "../http/types.js";
 import { disabledResponse } from "./disabled-page.js";
 
@@ -33,6 +34,12 @@ export interface AccessContext {
    * to members of the canvas's home org and a null `org_id` is an explicit deny.
    */
   tenancyActive?: boolean;
+  /**
+   * Whether the principal may reach this canvas's `team` rung (plan 003 U4): a member of
+   * a team the canvas is granted to AND of that team's org (the live-orgIds re-join,
+   * KTD3). Resolved by {@link resolveAccessContext}; absent ⇒ treated as not-a-match.
+   */
+  teamMatch?: boolean;
 }
 
 /**
@@ -150,10 +157,17 @@ export function decideCanvasAccess(
     case "private":
       return { action: "deny", status: 404, reason: "owner_only" };
     case "team":
-      // Reserved rung (plan 002 KTD5): the CHECK permits `team` so P2 needs no SQLite
-      // table-recreation, but teams are NOT implemented in P1 — deny like `private`
-      // (forward-ref guard). The owner already matched above and is unaffected.
-      return { action: "deny", status: 404, reason: "owner_only" };
+      // Members-only team scope (plan 003 U4). Outsiders (guest/anonymous) never match.
+      // The rung is meaningless without an org, so an inert instance or a null-org canvas
+      // denies to everyone but the owner (handled above). `teamMatch` is the live re-join
+      // (a member of a granted team AND of that team's org) — a removed-from-org user or a
+      // non-team-member gets the same opaque 404 (§12.0 #3).
+      if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
+      if (!ctx.tenancyActive || canvas.orgId === null || !ctx.teamMatch) {
+        return { action: "deny", status: 404, reason: "owner_only" };
+      }
+      if (expired) return { action: "deny", status: 404, reason: "share_expired" };
+      return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "whole_org":
       // Org members only — guests/anonymous are outsiders, at any tenancy state.
       if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
@@ -188,8 +202,14 @@ export function decideCanvasAccess(
   }
 }
 
+/** Fail-closed teams stub for deps that don't wire teams (no team canvas matches). */
+const NO_TEAM_MATCH: Pick<TeamsRepository, "teamMatch"> = { teamMatch: async () => false };
+
 export interface CanvasAccessDeps {
   canvases: CanvasesRepository;
+  /** Teams store (plan 003 U4) — resolves the `team` rung's `teamMatch`. Optional: when
+   *  omitted (suites that don't exercise teams) a team canvas matches no one (fail-closed). */
+  teams?: Pick<TeamsRepository, "teamMatch">;
   /** Whether tenancy is active (plan 002 U4 — an org is configured). Threaded into the
    *  decision so `whole_org` is org-scoped only once an operator names an org. */
   tenancyActive: boolean;
@@ -206,6 +226,7 @@ export interface CanvasAccessDeps {
  */
 export async function resolveAccessContext(
   canvases: Pick<CanvasesRepository, "isPrincipalAllowed" | "isOwnerPublishEnabled">,
+  teams: Pick<TeamsRepository, "teamMatch">,
   canvas: Canvas | null,
   principal: Principal,
 ): Promise<AccessContext> {
@@ -214,6 +235,12 @@ export async function resolveAccessContext(
   // (defense-in-depth; the two layers together honor §12.0 #3/#5).
   if (canvas?.access === "public_link") {
     return { publicEnabled: await canvases.isOwnerPublishEnabled(canvas.ownerId) };
+  }
+  // team: only a member can match; resolve via the live org re-join (KTD3) so a
+  // removed-from-org or non-team-member is denied even with a stale team_members row.
+  if (canvas?.access === "team") {
+    if (principal.kind !== "member") return { teamMatch: false };
+    return { teamMatch: await teams.teamMatch(canvas.id, principal.id, principal.orgIds) };
   }
   if (canvas?.access !== "specific_people") return {};
   if (principal.kind === "anonymous") return { isAllowed: false };
@@ -261,7 +288,12 @@ export function canvasAccess(deps: CanvasAccessDeps) {
 
     const canvas = await deps.canvases.findBySlug(slug);
     const principal = requestPrincipal(c);
-    const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
+    const ctx = await resolveAccessContext(
+      deps.canvases,
+      deps.teams ?? NO_TEAM_MATCH,
+      canvas,
+      principal,
+    );
     const decision = decideCanvasAccess(canvas, principal, Date.now(), {
       ...ctx,
       tenancyActive: deps.tenancyActive,

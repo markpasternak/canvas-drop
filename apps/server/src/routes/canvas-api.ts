@@ -18,6 +18,7 @@ import { GATE_COOKIE, verifyGrant } from "../canvas/password-gate.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { KvRepository } from "../db/repositories/kv.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import {
   applyCors,
@@ -34,6 +35,10 @@ import { canvasRealtimeRoutes } from "./canvas-realtime.js";
 export interface CanvasApiDeps {
   config: Config;
   canvases: CanvasesRepository;
+  /** Teams store (plan 003 U4) — resolves the `team` rung for the runtime API gate.
+   *  Optional: omitted in suites that don't exercise teams (a team canvas then matches
+   *  no one — fail-closed). */
+  teams?: Pick<TeamsRepository, "teamMatch">;
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
@@ -86,7 +91,12 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       }
       const canvas = await deps.canvases.findBySlug(slug);
       const principal = requestPrincipal(c);
-      const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
+      const ctx = await resolveAccessContext(
+        deps.canvases,
+        deps.teams ?? { teamMatch: async () => false },
+        canvas,
+        principal,
+      );
       const decision = decideCanvasAccess(canvas, principal, Date.now(), {
         ...ctx,
         tenancyActive: !!deps.config.org.name,

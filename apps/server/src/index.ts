@@ -17,6 +17,7 @@ import { draftsRepository } from "./db/repositories/drafts.js";
 import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { teamsRepository } from "./db/repositories/teams.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
@@ -59,6 +60,7 @@ async function main() {
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);
   const orgs = orgsRepository(db);
+  const teams = teamsRepository(db);
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
   const drafts = draftsRepository(db);
@@ -133,6 +135,8 @@ async function main() {
     },
     // Live re-auth of a specific_people canvas needs allowlist membership (U3).
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
+    // …and a team canvas needs the live team re-join (plan 003 U4).
+    teamMatch: (canvasId, userId, viewerOrgIds) => teams.teamMatch(canvasId, userId, viewerOrgIds),
   });
 
   // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS

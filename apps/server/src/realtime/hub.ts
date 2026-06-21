@@ -83,6 +83,10 @@ export interface HubDeps {
     canvasId: string,
     principal: { userId?: string; email?: string },
   ): Promise<boolean>;
+  /** team-rung match for live re-auth of a `team` canvas (plan 003 U4): a member of a
+   *  granted team AND of that team's org (live re-join). Omitted ⇒ a team canvas
+   *  re-authorizes as no-match (drops). */
+  teamMatch?(canvasId: string, userId: string, viewerOrgIds: Set<string>): Promise<boolean>;
 }
 
 type PresenceUser = { id: string; name: string };
@@ -366,8 +370,22 @@ export function createHub(deps: HubDeps) {
             isAllowed = false;
           }
         }
+        let teamMatch = false;
+        if (canvas.access === "team" && deps.teamMatch && principal.kind === "member") {
+          try {
+            teamMatch = await deps.teamMatch(canvas.id, principal.id, principal.orgIds);
+          } catch (err) {
+            // Fail closed, same as the allowlist guard above.
+            deps.log?.error(
+              { err, canvasId, userId: conn.user.id },
+              "realtime: teamMatch error — failing closed",
+            );
+            teamMatch = false;
+          }
+        }
         const decision = decideCanvasAccess(canvas, principal, now, {
           isAllowed,
+          teamMatch,
           tenancyActive: !!deps.config.org.name,
         });
         if (decision.action === "deny") {

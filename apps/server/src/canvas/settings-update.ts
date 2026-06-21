@@ -8,7 +8,7 @@ import { isAnonymouslyPublic } from "./authorization.js";
 export interface CanvasSettingsInput {
   title?: string;
   description?: string | null;
-  access?: "private" | "specific_people" | "whole_org" | "public_link";
+  access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
   shared?: boolean;
   guestAiEnabled?: boolean;
   guestAiCap?: number;
@@ -31,7 +31,7 @@ export type SettingsResolution =
       /** undefined = leave password unchanged; null = clear; string = set (caller hashes). */
       password: string | null | undefined;
       /** The resolved target access rung, or undefined when unchanged (for the audit event). */
-      targetAccess?: "private" | "specific_people" | "whole_org" | "public_link";
+      targetAccess?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
       /** Non-blocking advisory for the owner — e.g. CDN edge-cache staleness on an
        *  access downgrade. Present only when there's something worth surfacing. */
       warning?: string;
@@ -101,6 +101,18 @@ export function resolveSettingsUpdate(
       ok: false,
       code: "ORG_REQUIRED",
       message: "Only a canvas homed in an org can be shared with the whole org.",
+      status: 409,
+    };
+  }
+  // The `team` rung (plan 003 U4) is meaningless without a home org + requires active
+  // tenancy. The actual team grants (which teams) are validated + written by the caller
+  // (owner-team membership is a DB check); this pure guard just blocks an unhomed/inert
+  // team share that decideCanvasAccess would deny to everyone.
+  if (targetAccess === "team" && (!opts.tenancyActive || cv.orgId === null)) {
+    return {
+      ok: false,
+      code: "TEAM_REQUIRED",
+      message: "Only a canvas homed in an org can be shared with a team.",
       status: 409,
     };
   }
