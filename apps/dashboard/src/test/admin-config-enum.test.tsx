@@ -6,16 +6,32 @@ import { ToastProvider } from "../components/Toast.js";
 import type { AdminConfigField } from "../lib/api.js";
 import { EditableRow } from "../routes/admin.settings.js";
 
-function renderRow(field: AdminConfigField) {
+function renderRow(
+  field: AdminConfigField,
+  props?: { disabled?: boolean; disabledReason?: string },
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <EditableRow field={field} />
+        <EditableRow field={field} {...props} />
       </ToastProvider>
     </QueryClientProvider>,
   );
 }
+
+const boolField: AdminConfigField = {
+  key: "email.invitesEnabled",
+  env: "—",
+  group: "Email",
+  label: "Send invite & notification emails",
+  type: "boolean",
+  editable: true,
+  source: "default",
+  overridden: false,
+  secret: false,
+  value: "false",
+};
 
 const designSkinField: AdminConfigField = {
   key: "core.designSkin",
@@ -65,5 +81,24 @@ describe("admin configuration — enum field (the design-skin flip control)", ()
     });
     expect(screen.queryByRole("combobox", { name: "Base URL" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Base URL" })).toBeInTheDocument();
+  });
+
+  it("renders a boolean as an On/Off switch reflecting the value — never a free-text true/false box", () => {
+    renderRow(boolField);
+    const sw = screen.getByRole("switch", { name: /send invite & notification emails/i });
+    expect(sw).toBeInTheDocument();
+    expect(sw).toHaveAttribute("aria-checked", "false"); // value "false"
+    // No free-text box and no separate Save button for a boolean (it saves on flip).
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  });
+
+  it("a gated boolean is disabled with its dependency reason (error-prevention)", () => {
+    renderRow(
+      { ...boolField, key: "email.notifyOnAddUser", label: "Notify on Add user" },
+      { disabled: true, disabledReason: "Needs the master switch on." },
+    );
+    expect(screen.getByRole("switch", { name: /notify on add user/i })).toBeDisabled();
+    expect(screen.getByText(/needs the master switch on/i)).toBeInTheDocument();
   });
 });
