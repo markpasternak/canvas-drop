@@ -594,6 +594,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       hub: deps.hub,
       guests: deps.guests,
       mailer: deps.mailer,
+      invites,
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),

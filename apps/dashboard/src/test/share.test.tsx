@@ -403,9 +403,33 @@ describe("share route", () => {
     renderShare();
 
     expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
-    await user.type(await screen.findByLabelText(/add by email/i), "colleague@example.com");
+    await user.type(await screen.findByLabelText(/person's email/i), "colleague@example.com");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
+  });
+
+  it("specific_people: the Invite button sends an individual invite (plan 003 U8)", async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "POST /api/canvases/c1/invite": () => json({ ok: true, status: "pending" }),
+    });
+    renderShare();
+
+    await user.type(await screen.findByLabelText(/person's email/i), "newbie@example.com");
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    await vi.waitFor(() => {
+      const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/invite");
+      expect(post?.body).toContain("newbie@example.com");
+    });
   });
 
   it("updates guest AI settings for specific people access", async () => {

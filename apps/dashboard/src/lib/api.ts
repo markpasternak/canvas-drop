@@ -968,6 +968,14 @@ export const api = {
       `/api/canvases/${id}/allowlist`,
       jsonBody({ email }),
     ),
+  /** Individual one-off canvas invite (plan 003 U8): a deliberate invite that sends a courtesy
+   *  email. `granted` = an existing user got access now; `pending` = a brand-new invitee was
+   *  emailed and gets access on their first sign-in. */
+  inviteToCanvas: (id: string, email: string) =>
+    request<{ ok: true; status: AddMemberStatus }>(
+      `/api/canvases/${id}/invite`,
+      jsonBody({ email }),
+    ),
   removeAllowlistEntry: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
   resendAllowlistInvite: (id: string, entryId: string) =>

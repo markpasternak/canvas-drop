@@ -24,6 +24,7 @@ import { deployEngine } from "../deploy/engine.js";
 import type { DeployEntry } from "../deploy/ingest.js";
 import { logMailer } from "../email/log.js";
 import type { AppEnv } from "../http/types.js";
+import { makeInviteService } from "../invites/testing.js";
 import { memStorage } from "../storage/mem.js";
 import { managementRoutes } from "./management.js";
 import { meRoutes } from "./me.js";
@@ -76,6 +77,7 @@ function buildApp(
       id: actor.id,
       isAdmin: actor.isAdmin,
       name: "Actor",
+      email: `${actor.id}@example.com`,
       canPublishPublic: (actor as { canPublishPublic?: boolean }).canPublishPublic ?? false,
     } as never);
     c.set("clientIp", "127.0.0.1");
@@ -109,6 +111,7 @@ function buildApp(
       hub,
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       mailer: withGuests ? logMailer(silent) : undefined,
+      invites: makeInviteService(client, config),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       screenshots,
     }),
@@ -2669,6 +2672,36 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     );
     expect(after.entries).toHaveLength(0);
     void member;
+  });
+
+  it("individual invite (plan 003 U8): an existing user is granted (allowlist member); a new external email is rejected for a self-serve owner", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    await seedUser(client, "pal"); // pal@example.com — an existing user
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+
+    // Existing user → granted now + lands on the allowlist as a member.
+    const granted = await app.request(`/api/canvases/${id}/invite`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "pal@example.com" }),
+    });
+    expect(granted.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(granted)).status).toBe("granted");
+    const listed = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
+    );
+    expect(listed.entries.map((e) => e.email)).toContain("pal@example.com");
+
+    // A brand-new external email, self-serve owner, toggle off → rejected (KTD5).
+    const rejected = await app.request(`/api/canvases/${id}/invite`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: "stranger@outside.test" }),
+    });
+    expect(rejected.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(rejected)).code).toBe("NOT_PERMITTED");
   });
 
   it("a non-org email becomes an email-invited guest (U8)", async () => {

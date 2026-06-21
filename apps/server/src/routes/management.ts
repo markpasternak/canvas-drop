@@ -45,6 +45,7 @@ import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
 import type { Mailer } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import type { InviteService } from "../invites/service.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
 import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
@@ -101,6 +102,9 @@ export interface ManagementDeps extends PreviewHintDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
+   *  it. Optional: suites that don't exercise the invite path may omit it. */
+  invites?: InviteService;
   // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
   // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
@@ -792,6 +796,50 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const failure = await inviteGuest(c, cv, body.data.email);
     return failure ?? c.json({ ok: true, kind: "guest" });
+  });
+
+  /** Individual one-off canvas invite (plan 003 U8): a DELIBERATE "invite this person to this
+   *  canvas" action, distinct from the silent Specific-people add above. Routes through the
+   *  auth-delegated invite primitive — an existing user is granted + emailed (per
+   *  `notifyOnCanvasInvite`); a brand-new email becomes a pending invitation that materializes
+   *  on their first verified login (no app-owned magic link), with the individual-invite
+   *  courtesy email. KTD5-gated + rate-limited (a self-serve owner can't permit a new
+   *  external email unless the toggle is on). */
+  app.post("/:id/invite", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    if (!deps.invites)
+      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
+    const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = c.get("user");
+    const r = await deps.invites.resolveOrInvite(
+      {
+        kind: "canvas",
+        canvasId: cv.id,
+        canvasSlug: cv.slug,
+        canvasTitle: cv.title,
+        mode: "invite",
+      },
+      body.data.email,
+      { id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin },
+    );
+    if (r.status === "rejected") {
+      return c.json(
+        { code: "NOT_PERMITTED", message: "That email can't be invited from here." },
+        403,
+      );
+    }
+    if (r.status === "rate_limited") {
+      return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);
+    }
+    deps.audit.recordAudit({
+      action: "allowlist_add",
+      actorId: user.id,
+      targetId: cv.id,
+      meta: { kind: "invite", status: r.status },
+    });
+    return c.json({ ok: true, status: r.status });
   });
 
   /** Re-send a guest invite (fresh token); only valid for a guest entry. */

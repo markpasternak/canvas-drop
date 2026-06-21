@@ -717,6 +717,26 @@ function Allowlist({ canvasId }: { canvasId: string }) {
     }
   }
 
+  // Individual one-off invite (plan 003 U8): a DELIBERATE invite that sends a courtesy email.
+  // An existing user is granted now; a brand-new email is invited and gets access on first
+  // sign-in (KTD5: a non-admin can't invite a brand-new external email unless the admin enabled
+  // it). Distinct from the silent "Add" above.
+  async function invite() {
+    const value = email.trim();
+    if (!value) return;
+    setBusy(true);
+    try {
+      const r = await api.inviteToCanvas(canvasId, value);
+      setEmail("");
+      reload();
+      toast(r.status === "pending" ? "Invitation sent" : "Access granted");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't invite that person", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove(entryId: string) {
     try {
       await api.removeAllowlistEntry(canvasId, entryId);
@@ -738,11 +758,13 @@ function Allowlist({ canvasId }: { canvasId: string }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        Add org members by email. They get access only to this canvas.
+        Give someone access to just this canvas. <strong>Add</strong> grants an existing member
+        quietly; <strong>Invite</strong> emails them an invitation (and works for someone who hasn't
+        signed in yet — they get access on their first sign-in).
       </p>
       <div className="flex items-end gap-2">
         <Field
-          label="Add by email"
+          label="Person's email"
           type="email"
           placeholder="colleague@example.com"
           value={email}
@@ -750,12 +772,21 @@ function Allowlist({ canvasId }: { canvasId: string }) {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              void add();
+              void invite();
             }
           }}
         />
-        <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
+        <Button size="sm" variant="ghost" loading={busy} disabled={!email.trim()} onClick={add}>
           Add
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={busy}
+          disabled={!email.trim()}
+          onClick={invite}
+        >
+          Invite
         </Button>
       </div>
       {entries === null ? (
