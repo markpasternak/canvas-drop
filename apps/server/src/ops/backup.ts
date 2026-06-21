@@ -54,6 +54,7 @@ export const BACKUP_TABLE_ORDER = [
   "org_members",
   "teams",
   "team_members",
+  "invitations",
   "canvases",
   "canvas_allowlist",
   "canvas_teams",

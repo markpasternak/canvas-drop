@@ -10,6 +10,7 @@ import type {
   files,
   guestInvites,
   guestSessions,
+  invitations,
   kvEntries,
   mcpTokens,
   oauthClients,
@@ -60,6 +61,8 @@ export type TeamMember = typeof teamMembers.$inferSelect;
 export type NewTeamMember = typeof teamMembers.$inferInsert;
 export type CanvasTeam = typeof canvasTeams.$inferSelect;
 export type NewCanvasTeam = typeof canvasTeams.$inferInsert;
+export type Invitation = typeof invitations.$inferSelect;
+export type NewInvitation = typeof invitations.$inferInsert;
 /** Membership role (flat in P2 — only 'member' is written; RBAC is P4). */
 export type MembershipRole = "member";
 /** How an org_members row was created (P2 only materializes 'domain'). */

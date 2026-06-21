@@ -30,6 +30,7 @@ import {
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
+import { invitationsRepository } from "./db/repositories/invitations.js";
 import { kvRepository } from "./db/repositories/kv.js";
 import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
@@ -158,6 +159,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Teams (plan 003 P2): the repo + the authz-bearing service the routes AND MCP wrap.
   const teams = teamsRepository(deps.db);
   const teamsSvc = teamsService({ teams, orgMembers, users: deps.users, audit: deps.audit });
+
+  // Pending invitations (plan 003 U4): grants recorded before the invitee has a user row,
+  // materialized on their first verified login (see authGateway below).
+  const invitations = invitationsRepository(deps.db);
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -454,6 +459,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         users: deps.users,
         allowedEmails,
         orgMembership,
+        invitations: { invitations, teams, canvases: deps.canvases },
         audit: deps.audit,
       }),
     ),

@@ -737,3 +737,29 @@ export const canvasTeams = pgTable(
     index("canvas_teams_team_idx").on(t.teamId),
   ],
 );
+
+// Pending invitations (plan 003 phase 4 / U4). A grant recorded BEFORE the invitee has a
+// `users` row: when that email first authenticates (verified by the IdP/proxy — never client
+// input), the grant materializes (a `team_members` or `canvas_allowlist` row) and the row is
+// stamped `consumed_at`. No app-owned credentials — auth stays delegated to the configured
+// provider, so there is nothing to take over. `target_type` is polymorphic ('team' | 'canvas')
+// so there is no FK on `target_id`; `invited_by` references the actor.
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: c.text("id").primaryKey(),
+    email: c.text("email").notNull(), // lowercased; the verified-login key
+    targetType: c.text("target_type").notNull(), // 'team' | 'canvas'
+    targetId: c.text("target_id").notNull(),
+    role: c.text("role"), // team member role; null for a canvas grant
+    invitedBy: c.text("invited_by").references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+    consumedAt: c.epochMs("consumed_at"),
+  },
+  (t) => [
+    index("invitations_email_idx").on(t.email),
+    uniqueIndex("invitations_email_target_uq").on(t.email, t.targetType, t.targetId),
+    index("invitations_invited_by_idx").on(t.invitedBy),
+    check("invitations_target_type_chk", sql`${t.targetType} in ('team', 'canvas')`),
+  ],
+);
