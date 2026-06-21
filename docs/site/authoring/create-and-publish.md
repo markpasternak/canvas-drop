@@ -43,6 +43,23 @@ the five primitives — KV, files, AI, identity, realtime) and an optional
 **custom slug** field. If a folder or ZIP deploy fails right after the canvas is
 created, the empty canvas is cleaned up for you.
 
+## Personal vs Workspace
+
+When your instance has an [org boundary configured](/docs/self-hosting/configuration)
+(off by default), the create flow asks where the canvas lives:
+
+- **Personal** — only you, plus anyone you explicitly invite. It can't be shared
+  with the whole org.
+- **Workspace (your org)** — homed in the org, so you can later open it to the
+  **Whole org** rung (members of that org). Guests (people on a non-org domain)
+  only ever get Personal.
+
+**This choice is fixed once the canvas is created** — there's no in-product move
+between Personal and Workspace yet (it's on the roadmap). Pick Workspace if the
+canvas might ever need org-wide sharing. With no org configured you won't see this
+choice, and every canvas behaves as it always has. See
+[Sharing & access](/docs/authoring/sharing).
+
 ## Drag-and-drop files or a folder
 
 The fastest path for an existing project. From the create flow, drop individual

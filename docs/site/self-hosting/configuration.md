@@ -139,6 +139,31 @@ cryptographic) **or** the trusted-header path. Boot fails if neither is set.
 In `proxy` mode you must set either `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` (with
 its issuer and audience) **or** `CANVAS_DROP_TRUSTED_PROXY_IPS`.
 
+## Tenancy — the org boundary (optional)
+
+Names an **org** so that brought-in **guests** (people who sign in on a non-org
+domain — Gmail, a contractor, an admin on another domain) cannot see canvases
+shared with the **whole org**. Membership is derived server-side from the user's
+verified email domain; a member can home a canvas in the org, a guest only ever
+gets Personal.
+
+**Off by default.** With no `CANVAS_DROP_ORG_NAME` the feature is **inert**:
+`whole_org` keeps its legacy "any signed-in user" meaning and the home org is
+ignored everywhere. Setting the name turns it on — so you can deploy first and
+migrate later.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_ORG_NAME` | (unset) | The org's display name. **Setting this turns tenancy on.** Unset = inert. |
+| `CANVAS_DROP_ORG_DOMAINS` | (= `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`) | CSV of member domains, lowercased (punycode IDNs first). Defaults to the sign-in domain allowlist — the common single-org case. |
+
+The domain set is **authoritative**: a domain you remove is pruned at the next
+boot, dropping its users to guest. Boot **fails loud** on a bad config — a domain
+mapped to two orgs, more than one org (multi-org is a later phase), or an org with
+no domains. Migrating an existing instance (homing current canvases, clamping
+guest-owned `whole_org` rows) is a one-time cutover with a read-only dry-run —
+see the **Tenancy cutover runbook** at [`docs/tenancy.md`](../../tenancy.md) in the repo.
+
 ## Database
 
 | Variable | Default | Notes |

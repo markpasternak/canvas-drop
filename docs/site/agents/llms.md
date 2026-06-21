@@ -51,7 +51,10 @@ flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `q
 (matches title + description + tags + slug, case/accent/whitespace-insensitive, multi-word
 AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)
 and the canvas's unified `tags` (max 20, ≤50 chars each — one set used for both owner-list
-filtering and public gallery display, no separate "gallery summary"/"gallery tags").
+filtering and public gallery display, no separate "gallery summary"/"gallery tags"). When the
+instance has an org boundary configured, `whoami` also returns your `orgs` and an `isGuest`
+flag; pass an org `id` as `create_canvas`'s `orgId` to home a canvas in the org so it can be
+shared org-wide (omit for personal). With no org configured these are no-ops.
 If an admin has disabled a canvas it becomes **read-only**: reads keep working but every
 mutation tool fails with `DISABLED: <reason>`. Every deploy **publishes immediately** (no
 draft step). The live URL is **access-controlled** (org sign-in), so don't verify a

@@ -69,7 +69,8 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    SHA-256-hashed at rest (only the hash is stored); a canvas API key is shown
    once at creation, and a session token rides only in an HttpOnly cookie.
 3. **No unauthorized access.** A canvas is reachable only by its owner; at
-   the `whole_org` rung, allowed org members; at `specific_people`, a principal on
+   the `whole_org` rung, allowed org members (when [tenancy](#the-org-boundary-member-vs-guest)
+   is on, that means members of the canvas's *home* org — not brought-in guests); at `specific_people`, a principal on
    its allowlist (an org member, or an invited guest whose magic-link session is
    for *that* canvas); at `public_link`, anyone — but static-only and only while
    the owner account holds the admin-granted publish capability. All subject to
@@ -90,6 +91,28 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    and unpublish take effect on the next request and drop live realtime sockets
    (guest sockets included) — no stale grants. A guest session never outlives its
    invite's expiry or revocation.
+
+## The org boundary (member vs guest)
+
+By default any signed-in user is treated as one org — `whole_org` means "anyone
+who passed sign-in." If you name an org (`CANVAS_DROP_ORG_NAME`, off by default),
+canvas-drop draws a **member-vs-guest boundary**:
+
+- A signed-in user whose **verified email domain** matches a configured org domain
+  is a **member**; everyone else who can sign in (an allowlisted contractor, an
+  admin on another domain, a Gmail guest) is a **guest**.
+- Each canvas has a **home org** (set once at create: a member picks Personal or
+  the org; a guest only gets Personal). `whole_org` now means **"members of the
+  canvas's home org"** — a brought-in guest cannot see it, and a guest-owned (home
+  = Personal) `whole_org` canvas is an explicit deny to everyone but the owner.
+- Membership is resolved **server-side** from the session identity (invariant #1);
+  a client can never assert which org it belongs to. **Admin is orthogonal** — it
+  grants no membership and no content bypass.
+
+The boundary is **inert until an org is named**, so it's an opt-in tightening, not
+a default. Turning it on for an existing instance is a one-time, dry-run-first
+cutover — see [Configuration → Tenancy](/docs/self-hosting/configuration) and the
+`docs/tenancy.md` runbook.
 
 ## Identity is always server-side (invariant #1)
 

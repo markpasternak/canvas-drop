@@ -127,8 +127,11 @@ Everything is set by environment variables, validated at boot, with a precise me
 | URL mode | path, subdomain | `CANVAS_DROP_URL_MODE` |
 | Auth | `proxy` (recommended prod), `oidc`, `dev` | `CANVAS_DROP_AUTH_MODE` |
 | Email (guest invites) | `log`, `smtp`, `mailgun`, `noop` | `CANVAS_DROP_EMAIL_DRIVER` |
+| Tenancy (org boundary, off by default) | name an org so guests can't see whole-org canvases | `CANVAS_DROP_ORG_NAME` |
 
 The blessed production profile is **subdomain mode plus an identity-aware proxy** (e.g. Cloudflare Access) verifying a signed JWT, with Postgres and S3.
+
+**Tenancy (optional).** Set `CANVAS_DROP_ORG_NAME` to draw a member-vs-guest boundary: members (by verified email domain) can share to the **whole org**, while brought-in guests only see canvases they're invited to. It's **inert until named** — deploy first, migrate later. Migrating an existing instance is a dry-run-first cutover; see [`docs/tenancy.md`](docs/tenancy.md).
 
 Day-to-day operation lives in the in-app **admin panel**: the all-canvases list with usage, disable/takedown/restore, the AI model allowlist, and global quota defaults. Operator-tunable settings are editable there or via env; the auth and rate-limit hot path stays read-only.
 
