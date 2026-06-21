@@ -186,16 +186,20 @@ describe("decideCanvasAccess — denials", () => {
     expect(decideCanvasAccess(cv, anon, NOW, TEAM_OK)).toMatchObject({ status: 404 });
   });
 
-  it("team: INERT tenancy denies even a teamMatch (the rung needs an org)", () => {
+  // plan 003 phase 3: `teamMatch` is now the sole gate — it encodes the personal-vs-org rule
+  // and membership — so a team canvas is allowed wherever teamMatch is true, regardless of the
+  // canvas's org or tenancy state. (Org teams still resolve teamMatch=false under inert tenancy,
+  // because the viewer has no orgIds — but that's the repo's job, not this decision table's.)
+  it("team: a matched member is allowed even under INERT tenancy (teamMatch is the gate)", () => {
     expect(
       decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW, { teamMatch: true }),
-    ).toMatchObject({ status: 404, reason: "owner_only" });
+    ).toMatchObject({ action: "allow" });
   });
 
-  it("team: a NULL org_id is an explicit 404 even with a teamMatch", () => {
+  it("team: a NULL org_id (PERSONAL canvas) is allowed with a teamMatch (personal team)", () => {
     expect(
       decideCanvasAccess(canvas({ access: "team", orgId: null }), other, NOW, TEAM_OK),
-    ).toMatchObject({ status: 404, reason: "owner_only" });
+    ).toMatchObject({ action: "allow", staticOnly: false });
   });
 
   it("team: a matched member past the share expiry is 404 (share_expired)", () => {

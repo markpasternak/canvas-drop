@@ -104,18 +104,11 @@ export function resolveSettingsUpdate(
       status: 409,
     };
   }
-  // The `team` rung (plan 003 U4) is meaningless without a home org + requires active
-  // tenancy. The actual team grants (which teams) are validated + written by the caller
-  // (owner-team membership is a DB check); this pure guard just blocks an unhomed/inert
-  // team share that decideCanvasAccess would deny to everyone.
-  if (targetAccess === "team" && (!opts.tenancyActive || cv.orgId === null)) {
-    return {
-      ok: false,
-      code: "TEAM_REQUIRED",
-      message: "Only a canvas homed in an org can be shared with a team.",
-      status: 409,
-    };
-  }
+  // The `team` rung (plan 003 phase 3) no longer requires a home org or active tenancy: a
+  // PERSONAL team can be granted to a personal (org-less) canvas. The actual grant — which
+  // teams, owner membership, org-match for org teams — is validated + written by the caller's
+  // grant resolver (`resolveTeamGrant`), which returns TEAM_REQUIRED (no teams) / TEAM_FORBIDDEN
+  // (invalid), so there's no pure guard to duplicate here.
   if (rest.galleryListed === true) {
     if (!willBeShared) {
       return {

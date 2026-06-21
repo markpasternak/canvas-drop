@@ -1429,7 +1429,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     },
     async ({ id }) => {
       const team = await deps.teams.findById(id);
-      if (!team || !caller.orgIds.has(team.orgId)) return fail("team not found");
+      if (!team) return fail("team not found");
+      // Org team → visible to any member of its org; personal team (org_id null, plan 003) →
+      // its creator + members. Otherwise opaque not-found.
+      const canSee =
+        team.orgId !== null
+          ? caller.orgIds.has(team.orgId)
+          : team.createdBy === caller.userId ||
+            (await deps.teams.isTeamMember(team.id, caller.userId));
+      if (!canSee) return fail("team not found");
       const rows = await deps.teams.getMembers(team.id);
       const users = await deps.users.findByIds(rows.map((m) => m.userId));
       const byId = new Map(users.map((u) => [u.id, u]));

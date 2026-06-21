@@ -56,7 +56,14 @@ export async function resolveTeamGrant(
     if (teamIds.length === 0) return { kind: "error", code: "TEAM_REQUIRED" };
     for (const teamId of teamIds) {
       const team = await teams.findById(teamId);
-      if (!team || team.orgId !== input.canvasOrgId || !(await teams.isTeamMember(teamId, actorId)))
+      // Owner must belong to the team; an ORG team must match the canvas's org; a PERSONAL
+      // team (org_id null, plan 003) is grantable to any canvas the owner owns, incl. a
+      // personal canvas (org_id null) — so only org-attached teams carry the org-match rule.
+      if (
+        !team ||
+        (team.orgId !== null && team.orgId !== input.canvasOrgId) ||
+        !(await teams.isTeamMember(teamId, actorId))
+      )
         return { kind: "error", code: "TEAM_FORBIDDEN" };
     }
     return { kind: "write", teamIds };
@@ -110,10 +117,11 @@ export async function listSharedWithTeams(
   });
 }
 
-/** One team in the viewer's org(s) with their membership + management flags. */
+/** One team visible to the viewer with their membership + management flags. `orgId` is null
+ *  for a PERSONAL team (plan 003). */
 export interface VisibleTeam {
   id: string;
-  orgId: string;
+  orgId: string | null;
   name: string;
   slug: string;
   /** The viewer is a member. */
@@ -134,22 +142,26 @@ export async function resolveVisibleTeams(
   orgIds: Set<string>,
   isAdmin: boolean,
 ): Promise<VisibleTeam[]> {
-  const mine = new Set((await teams.listForUser(actorId)).map((t) => t.id));
+  const myTeams = await teams.listForUser(actorId);
+  const mine = new Set(myTeams.map((t) => t.id));
   const seen = new Set<string>();
   const out: VisibleTeam[] = [];
-  for (const orgId of orgIds) {
-    for (const t of await teams.listByOrg(orgId)) {
-      if (seen.has(t.id)) continue;
-      seen.add(t.id);
-      out.push({
-        id: t.id,
-        orgId: t.orgId,
-        name: t.name,
-        slug: t.slug,
-        mine: mine.has(t.id),
-        canManage: isAdmin || t.createdBy === actorId,
-      });
-    }
-  }
+  const push = (t: (typeof myTeams)[number]) => {
+    if (seen.has(t.id)) return;
+    seen.add(t.id);
+    out.push({
+      id: t.id,
+      orgId: t.orgId,
+      name: t.name,
+      slug: t.slug,
+      mine: mine.has(t.id),
+      canManage: isAdmin || t.createdBy === actorId,
+    });
+  };
+  // The viewer's OWN teams first — this is the ONLY source of personal teams (org_id null),
+  // which no `listByOrg` returns.
+  for (const t of myTeams) push(t);
+  // Plus the org teams of the viewer's org(s), visible to all members of that org.
+  for (const orgId of orgIds) for (const t of await teams.listByOrg(orgId)) push(t);
   return out;
 }

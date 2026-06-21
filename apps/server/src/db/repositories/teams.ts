@@ -1,18 +1,19 @@
 import { orgSlug } from "@canvas-drop/shared";
 import { pgSchema, sqliteSchema, type Team, type TeamMember } from "@canvas-drop/shared/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
 /**
- * Teams store (plan 003 P2 / U3, KTD3/KTD4). Members-only groups inside one org, plus
- * the canvas→team grants (`canvas_teams`) that back the `team` access rung. Dual-dialect
- * seam typed `any` like the sibling repos; rows stay typed.
+ * Teams store (plan 003). Members-only groups that are EITHER org-attached (`org_id` set) or
+ * PERSONAL (`org_id` NULL, user-owned — friends & family), plus the canvas→team grants
+ * (`canvas_teams`) that back the `team` access rung. Dual-dialect seam typed `any` like the
+ * sibling repos; rows stay typed.
  *
- * The auth-critical method is {@link teamMatch}: it answers "may this principal reach this
- * `team` canvas?" by re-joining the LIVE org membership (`viewerOrgIds` from the principal,
- * not a materialized table), so a user removed from the org is denied immediately even if a
- * stale `team_members` row lingers (KTD3).
+ * The auth-critical method is {@link teamMatch}: "may this principal reach this `team` canvas?"
+ * Membership is a MANDATORY inner join (access without a `team_members` row is impossible); the
+ * org clause only NARROWS — a personal team grants by membership alone, an org team additionally
+ * re-joins the LIVE `viewerOrgIds` (so a removed-from-org user is denied even with a stale row).
  */
 export function teamsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
@@ -22,15 +23,31 @@ export function teamsRepository(client: DbClient) {
   const membersT = S.teamMembers;
   const canvasTeamsT = S.canvasTeams;
 
-  /** A slug unique within the org: orgSlug(name), else `<base>-2`, `-3`, … */
-  async function freeSlug(orgId: string, name: string): Promise<string> {
+  /** The org-scope predicate: a NULL orgId (a PERSONAL team) must compare with `IS NULL`,
+   *  never `= NULL` (always false) — plan 003 phase 3. */
+  const orgEq = (orgId: string | null): SQL =>
+    orgId == null ? isNull(teamsT.orgId) : eq(teamsT.orgId, orgId);
+
+  /** The auth org clause for the `team` rung (KTD1): a personal team matches by membership
+   *  alone (`org_id IS NULL`); an org team additionally requires its org in the viewer's
+   *  LIVE orgIds. Empty `viewerOrgIds` ⇒ only the personal arm (we never emit `IN ()`). */
+  const accessOrgClause = (viewerOrgIds: Set<string>): SQL =>
+    viewerOrgIds.size === 0
+      ? isNull(teamsT.orgId)
+      : (or(isNull(teamsT.orgId), inArray(teamsT.orgId, [...viewerOrgIds])) as SQL);
+
+  /** A free slug within the team's namespace: org teams dedupe within the org; PERSONAL
+   *  teams (no org) dedupe within the creator's own personal teams (the slug isn't a
+   *  lookup key, so this is cosmetic — but it keeps a creator's own teams distinct). */
+  async function freeSlug(orgId: string | null, createdBy: string, name: string): Promise<string> {
     const base = orgSlug(name);
+    const scope =
+      orgId == null ? and(isNull(teamsT.orgId), eq(teamsT.createdBy, createdBy)) : orgEq(orgId);
     const taken = new Set(
       (
-        (await db
-          .select({ slug: teamsT.slug })
-          .from(teamsT)
-          .where(eq(teamsT.orgId, orgId))) as Array<{ slug: string }>
+        (await db.select({ slug: teamsT.slug }).from(teamsT).where(scope)) as Array<{
+          slug: string;
+        }>
       ).map((r) => r.slug),
     );
     if (!taken.has(base)) return base;
@@ -38,8 +55,8 @@ export function teamsRepository(client: DbClient) {
   }
 
   return {
-    async create(input: { orgId: string; name: string; createdBy: string }): Promise<Team> {
-      const slug = await freeSlug(input.orgId, input.name);
+    async create(input: { orgId: string | null; name: string; createdBy: string }): Promise<Team> {
+      const slug = await freeSlug(input.orgId, input.createdBy, input.name);
       const now = Date.now();
       const id = uuidv7();
       const rows = await db
@@ -79,13 +96,17 @@ export function teamsRepository(client: DbClient) {
      * on the trimmed name. (The slug stays org-unique via {@link freeSlug}; this guards
      * the human-facing name a creator sees.)
      */
-    async nameTakenByCreator(orgId: string, createdBy: string, name: string): Promise<boolean> {
+    async nameTakenByCreator(
+      orgId: string | null,
+      createdBy: string,
+      name: string,
+    ): Promise<boolean> {
       const rows = (await db
         .select({ id: teamsT.id })
         .from(teamsT)
         .where(
           and(
-            eq(teamsT.orgId, orgId),
+            orgEq(orgId),
             eq(teamsT.createdBy, createdBy),
             eq(sql`lower(${teamsT.name})`, name.trim().toLowerCase()),
           ),
@@ -175,13 +196,15 @@ export function teamsRepository(client: DbClient) {
     },
 
     /**
-     * Auth-critical (KTD3/KTD4): may `userId` (whose LIVE org membership is `viewerOrgIds`)
-     * reach this `team` canvas? True iff some team granted to the canvas has the user as a
-     * member AND lives in an org the user currently belongs to. The org re-join uses the
-     * live `viewerOrgIds`, so a removed-from-org user is denied even with a stale team row.
+     * Auth-critical (KTD1, plan 003): may `userId` (whose LIVE org membership is `viewerOrgIds`)
+     * reach this `team` canvas? Membership is a MANDATORY inner join, so access without a
+     * `team_members` row is impossible. The org clause only narrows: a PERSONAL team
+     * (org_id NULL) matches by membership alone; an ORG team additionally requires its org in
+     * the live `viewerOrgIds` (so a removed-from-org user is denied even with a stale team
+     * row). The empty-`viewerOrgIds` case collapses the org arm to `false`, leaving only the
+     * personal arm — so a no-org user still reaches their own personal team canvases.
      */
     async teamMatch(canvasId: string, userId: string, viewerOrgIds: Set<string>): Promise<boolean> {
-      if (viewerOrgIds.size === 0) return false;
       const rows = (await db
         .select({ one: sql`1` })
         .from(canvasTeamsT)
@@ -191,24 +214,23 @@ export function teamsRepository(client: DbClient) {
           and(
             eq(canvasTeamsT.canvasId, canvasId),
             eq(membersT.userId, userId),
-            inArray(teamsT.orgId, [...viewerOrgIds]),
+            accessOrgClause(viewerOrgIds),
           ),
         )
         .limit(1)) as Array<unknown>;
       return rows.length > 0;
     },
 
-    /** Canvases scoped to a team the user belongs to (the "shared with my teams" view, U5). */
+    /** Canvases scoped to a team the user belongs to (the "shared with my teams" view).
+     *  Same widened, membership-mandatory clause as {@link teamMatch} (KTD1): personal teams
+     *  count by membership; org teams require the live org re-join. */
     async listCanvasIdsForUserTeams(userId: string, viewerOrgIds: Set<string>): Promise<string[]> {
-      if (viewerOrgIds.size === 0) return [];
       const rows = (await db
         .selectDistinct({ canvasId: canvasTeamsT.canvasId })
         .from(canvasTeamsT)
         .innerJoin(membersT, eq(membersT.teamId, canvasTeamsT.teamId))
         .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
-        .where(
-          and(eq(membersT.userId, userId), inArray(teamsT.orgId, [...viewerOrgIds])),
-        )) as Array<{
+        .where(and(eq(membersT.userId, userId), accessOrgClause(viewerOrgIds)))) as Array<{
         canvasId: string;
       }>;
       return rows.map((r) => r.canvasId);

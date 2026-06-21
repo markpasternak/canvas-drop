@@ -157,15 +157,15 @@ export function decideCanvasAccess(
     case "private":
       return { action: "deny", status: 404, reason: "owner_only" };
     case "team":
-      // Members-only team scope (plan 003 U4). Outsiders (guest/anonymous) never match.
-      // The rung is meaningless without an org, so an inert instance or a null-org canvas
-      // denies to everyone but the owner (handled above). `teamMatch` is the live re-join
-      // (a member of a granted team AND of that team's org) — a removed-from-org user or a
-      // non-team-member gets the same opaque 404 (§12.0 #3).
+      // Members-only team scope. Outsiders (canvas-scoped guest / anonymous) never match.
+      // `teamMatch` is the single, widened predicate (plan 003 phase 3): a member of a granted
+      // team AND (the team is PERSONAL — org_id null — OR an ORG team whose org is in the
+      // viewer's LIVE orgIds). It alone decides access — a personal team works without any
+      // org/tenancy (so a personal canvas shared with a personal team is reachable by its
+      // no-org members), while an org team's live re-join still drops a removed-from-org user.
+      // Membership is mandatory inside `teamMatch`, so a non-member gets the opaque 404 (§12.0 #3).
       if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
-      if (!ctx.tenancyActive || canvas.orgId === null || !ctx.teamMatch) {
-        return { action: "deny", status: 404, reason: "owner_only" };
-      }
+      if (!ctx.teamMatch) return { action: "deny", status: 404, reason: "owner_only" };
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "whole_org":
@@ -236,8 +236,10 @@ export async function resolveAccessContext(
   if (canvas?.access === "public_link") {
     return { publicEnabled: await canvases.isOwnerPublishEnabled(canvas.ownerId) };
   }
-  // team: only a member can match; resolve via the live org re-join (KTD3) so a
-  // removed-from-org or non-team-member is denied even with a stale team_members row.
+  // team: only a member can match; resolve the single widened predicate (plan 003 phase 3) —
+  // membership is mandatory, a PERSONAL team grants by that alone, an ORG team additionally
+  // re-joins the live orgIds (so a removed-from-org or non-team-member is denied even with a
+  // stale team_members row). Computed for any team canvas, personal or org-homed.
   if (canvas?.access === "team") {
     if (principal.kind !== "member") return { teamMatch: false };
     return { teamMatch: await teams.teamMatch(canvas.id, principal.id, principal.orgIds) };

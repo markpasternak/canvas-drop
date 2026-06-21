@@ -195,4 +195,60 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
     expect(otherClone.status).toBe(404);
     await otherClone.text();
   });
+
+  it("PERSONAL team: a no-org member reaches a personal-canvas team share; a non-member 404s", async () => {
+    // plan 003 phase 3 — the headline new invariant. A PERSONAL team (org_id null) granted to
+    // a PERSONAL canvas (org_id null) is reachable by its direct members regardless of org —
+    // including a guest with no org — and opaque to everyone else, end-to-end over the serve seam.
+    client = await makeTestDb(dialect);
+    await seedAcme(client);
+    const h = makeHarness(client, { config: teamConfig() });
+
+    // Materialize the participants (first request creates the user; GUEST is a no-org user).
+    for (const who of [OWNER, GUEST, NONMEMBER]) await (await h.GET(who, "/api/me")).text();
+    const users = usersRepository(client);
+    const ownerU = await users.findByEmail(OWNER);
+    const guestU = await users.findByEmail(GUEST);
+    if (!ownerU || !guestU) throw new Error("seed: users missing");
+
+    // Seed a PERSONAL team owned by OWNER (the route doesn't expose personal creation until a
+    // later unit, so seed via the repo) with the no-org GUEST as a member.
+    const teams = teamsRepository(client);
+    const team = await teams.create({ orgId: null, name: "Friends", createdBy: ownerU.id });
+    await teams.addMember(team.id, guestU.id);
+
+    // OWNER publishes a PERSONAL canvas (org_id null) and shares it with the personal team.
+    const paste = await h.SEND(OWNER, "POST", "/api/canvases/paste", {
+      html: "<h1>family photos</h1>",
+      title: "Family",
+      orgId: null,
+      backendEnabled: true,
+    });
+    expect(paste.status).toBe(201);
+    const cv = await jsonOf<{ id: string; slug: string }>(paste);
+    const patch = await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, {
+      access: "team",
+      teamIds: [team.id],
+    });
+    expect(patch.status).toBe(200);
+    await patch.text();
+
+    const server = await h.listen();
+    const get = (email: string) =>
+      fetch(`http://localhost:${server.port}/c/${cv.slug}/`, {
+        headers: { host: h.baseHost, "x-test-user": email },
+      });
+    try {
+      // The no-org GUEST member reaches it (personal teams ignore org membership).
+      const ok = await get(GUEST);
+      expect(ok.status).toBe(200);
+      expect(await ok.text()).toContain("family photos");
+      // A non-member is opaque 404.
+      const denied = await get(NONMEMBER);
+      expect(denied.status).toBe(404);
+      expect(await denied.text()).not.toContain("family photos");
+    } finally {
+      await server.close();
+    }
+  });
 });

@@ -43,7 +43,7 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     return { orgs, orgMembers, teams, users, org, svc, mkUser, actor };
   }
 
-  it("a member creates a team; a guest cannot", async () => {
+  it("a member creates an org team; a non-member cannot attach to that org", async () => {
     const { svc, org, mkUser, actor } = await setup();
     const member = await mkUser("m@acme.com", { member: true });
     const ok = await svc.create(actor(member), { orgId: org.id, name: "Eng" });
@@ -52,6 +52,35 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     const guest = await mkUser("g@gmail.com");
     const denied = await svc.create(actor(guest, false), { orgId: org.id, name: "Sneaky" });
     expect(denied).toEqual({ ok: false, error: "NOT_A_MEMBER" });
+  });
+
+  it("a no-org user (guest) CAN create a PERSONAL team (plan 003 phase 3)", async () => {
+    const { svc, teams, mkUser, actor } = await setup();
+    const guest = await mkUser("g@gmail.com"); // not an org member
+    const r = await svc.create(actor(guest, false), { name: "Family" }); // no orgId → personal
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("setup");
+    const team = await teams.findById(r.team.id);
+    expect(team?.orgId).toBeNull();
+    // The creator is auto a member, can manage it, and reuse the name across namespaces.
+    expect((await svc.rename(actor(guest, false), r.team.id, "Family 2")).ok).toBe(true);
+    expect(await svc.create(actor(guest, false), { name: "Family 2" })).toEqual({
+      ok: false,
+      error: "TEAM_NAME_TAKEN",
+    });
+  });
+
+  it("a personal team accepts ANY existing user as a member (no same-org requirement)", async () => {
+    const { svc, teams, mkUser, actor } = await setup();
+    const owner = await mkUser("o@gmail.com"); // a no-org user
+    await mkUser("friend@hotmail.com"); // another no-org user, exists
+    const r = await svc.create(actor(owner, false), { name: "Friends" });
+    if (!r.ok) throw new Error("setup");
+    // A non-org friend can be added to a PERSONAL team (would be TARGET_NOT_MEMBER for an org team).
+    expect(
+      (await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@hotmail.com")).ok,
+    ).toBe(true);
+    expect(await teams.getMembers(r.team.id)).toHaveLength(2);
   });
 
   it("team names are creator-local: same creator can't dupe, different creators can reuse", async () => {

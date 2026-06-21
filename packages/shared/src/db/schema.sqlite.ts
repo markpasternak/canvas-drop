@@ -663,10 +663,10 @@ export const teams = sqliteTable(
   "teams",
   {
     id: c.text("id").primaryKey(),
-    orgId: c
-      .text("org_id")
-      .notNull()
-      .references(() => orgs.id),
+    // Nullable (plan 003 phase 3): a NULL org_id marks a PERSONAL team (user-owned, no
+    // org). The `team` access predicate widens to `org_id IS NULL OR org_id IN viewerOrgIds`
+    // — personal teams grant by direct membership, org teams keep the live org re-join.
+    orgId: c.text("org_id").references(() => orgs.id),
     name: c.text("name").notNull(),
     slug: c.text("slug").notNull(),
     createdBy: c

@@ -38,11 +38,15 @@ export function teamsService(deps: {
   users: Pick<UsersRepository, "findByEmail">;
   audit: Pick<AuditLog, "recordAudit">;
 }) {
-  /** A team outside the actor's org(s) must read as NOT-FOUND, never FORBIDDEN — else the
-   *  403-vs-404 split leaks the existence of teams in other orgs (§12.0 opacity). Operators
-   *  (`isAdmin`) keep cross-org reach (their power lives on the admin surface). */
+  /** Can the actor even SEE this team exists (else opaque NOT-FOUND, §12.0)? An ORG team is
+   *  visible to any member of its org (and operators); a PERSONAL team (org_id null) is
+   *  visible to its creator (and operators) — its membership is the boundary, so a stranger
+   *  must not learn it exists. Cross-org/foreign personal teams read as not-found, never a
+   *  403-vs-404 existence leak. */
   function visible(actor: TeamActor, team: Team): boolean {
-    return actor.isAdmin || actor.orgIds.has(team.orgId);
+    if (actor.isAdmin) return true;
+    if (team.orgId === null) return team.createdBy === actor.id;
+    return actor.orgIds.has(team.orgId);
   }
 
   /** Load a team + assert the actor may MANAGE it (creator or operator). */
@@ -54,14 +58,22 @@ export function teamsService(deps: {
   }
 
   return {
-    /** Create a team in an org the actor is a (live) member of. Names are creator-local:
-     *  the same actor can't make two teams with one name, but different actors can. */
-    async create(actor: TeamActor, input: { orgId: string; name: string }): Promise<TeamResult> {
-      if (!actor.orgIds.has(input.orgId)) return { ok: false, error: "NOT_A_MEMBER" };
-      if (await deps.teams.nameTakenByCreator(input.orgId, actor.id, input.name))
+    /** Create a team (plan 003 phase 3): PERSONAL when `orgId` is omitted/null (any signed-in
+     *  actor, incl. a no-org user — friends & family); ORG-attached when an `orgId` the actor
+     *  is a live member of is supplied. Names are creator-local: the same actor can't make two
+     *  teams with one name (in the same org-or-personal namespace), but different actors can. */
+    async create(
+      actor: TeamActor,
+      input: { orgId?: string | null; name: string },
+    ): Promise<TeamResult> {
+      const orgId = input.orgId ?? null;
+      // An org-attached team requires live membership of that org; a personal team (null) is
+      // open to any signed-in actor.
+      if (orgId !== null && !actor.orgIds.has(orgId)) return { ok: false, error: "NOT_A_MEMBER" };
+      if (await deps.teams.nameTakenByCreator(orgId, actor.id, input.name))
         return { ok: false, error: "TEAM_NAME_TAKEN" };
       const team = await deps.teams.create({
-        orgId: input.orgId,
+        orgId,
         name: input.name,
         createdBy: actor.id,
       });
@@ -85,7 +97,11 @@ export function teamsService(deps: {
       return { ok: true };
     },
 
-    /** Add a same-org member to a team. Actor must be a team member (self-serve) or operator. */
+    /** Add a member to a team. Actor must be a team member (self-serve) or operator. For an
+     *  ORG team the target must be a same-org member (KTD3); for a PERSONAL team the target may
+     *  be ANY existing user (plan 003 — friends & family). Inviting a not-yet-existing user via
+     *  a pending invitation is the invite-primitive's job (later unit); here the target must
+     *  already exist. */
     async addMemberByEmail(actor: TeamActor, teamId: string, email: string): Promise<VoidResult> {
       const team = await deps.teams.findById(teamId);
       if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
@@ -93,8 +109,8 @@ export function teamsService(deps: {
         return { ok: false, error: "FORBIDDEN" };
       const target = await deps.users.findByEmail(email.trim().toLowerCase());
       if (!target) return { ok: false, error: "TARGET_NOT_FOUND" };
-      // The target must be a (materialized) member of the team's org — same-org only (KTD3).
-      if (!(await deps.orgMembers.isMember(team.orgId, target.id)))
+      // Org team → same-org only; personal team → any existing user.
+      if (team.orgId !== null && !(await deps.orgMembers.isMember(team.orgId, target.id)))
         return { ok: false, error: "TARGET_NOT_MEMBER" };
       await deps.teams.addMember(teamId, target.id);
       deps.audit.recordAudit({ action: "team_member_add", actorId: actor.id, targetId: teamId });

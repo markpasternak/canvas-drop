@@ -88,11 +88,19 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return c.json({ ok: true });
   });
 
-  // Roster — gated to a team in one of the caller's orgs (opaque 404 otherwise).
+  // Roster — opaque 404 unless the caller may see the team. An ORG team's roster is visible
+  // to any member of its org; a PERSONAL team's (org_id null, plan 003) to its creator + its
+  // members. Cross-org/foreign personal teams read as not-found (no existence leak).
   app.get("/:id/members", async (c) => {
     const actor = actorOf(c);
     const team = await deps.teams.findById(c.req.param("id"));
-    if (!team || !actor.orgIds.has(team.orgId)) return c.json({ error: "not_found" }, 404);
+    if (!team) return c.json({ error: "not_found" }, 404);
+    const canSee =
+      actor.isAdmin ||
+      (team.orgId !== null
+        ? actor.orgIds.has(team.orgId)
+        : team.createdBy === actor.id || (await deps.teams.isTeamMember(team.id, actor.id)));
+    if (!canSee) return c.json({ error: "not_found" }, 404);
     const rows = await deps.teams.getMembers(team.id);
     const users = await deps.users.findByIds(rows.map((m) => m.userId));
     const byId = new Map(users.map((u) => [u.id, u]));

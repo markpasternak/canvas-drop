@@ -67,3 +67,87 @@ describe.each(DIALECTS)("teamsRepository.teamMatch (plan 003 U4, KTD3) [%s]", (d
     expect(await teams.teamMatch(canvas.id, member.id, new Set([org.id]))).toBe(false);
   });
 });
+
+describe.each(
+  DIALECTS,
+)("teamsRepository.teamMatch — PERSONAL teams (plan 003 phase 3) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** A PERSONAL team (org_id null) whose canvas is granted to it. The owner + a NO-ORG friend
+   *  are members; a stranger is not. Personal teams grant by direct membership — the org
+   *  re-join does not apply, so even an empty `viewerOrgIds` (a no-org user) reaches it. */
+  async function seedPersonal() {
+    client = await makeTestDb(dialect);
+    const teams = teamsRepository(client);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const owner = await users.upsert({
+      providerSub: "o",
+      email: "o@x.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const friend = await users.upsert({
+      providerSub: "f",
+      email: "f@gmail.com",
+      name: "F",
+      isAdmin: false,
+    });
+    const stranger = await users.upsert({
+      providerSub: "s",
+      email: "s@x.com",
+      name: "S",
+      isAdmin: false,
+    });
+    // A personal team (no org). The creator is auto-added; add the no-org friend too.
+    const team = await teams.create({ orgId: null, name: "Friends", createdBy: owner.id });
+    await teams.addMember(team.id, friend.id);
+    const canvas = await canvases.create({ ownerId: owner.id, slug: "p-deck", apiKeyHash: "k" });
+    await teams.setCanvasTeams(canvas.id, [team.id]);
+    return { teams, owner, friend, stranger, team, canvas };
+  }
+
+  it("the creator reaches their personal team canvas with NO orgs (dropped early return)", async () => {
+    const { teams, owner, canvas } = await seedPersonal();
+    expect(await teams.teamMatch(canvas.id, owner.id, new Set())).toBe(true);
+  });
+
+  it("a no-org friend who is a member reaches it (personal teams ignore org membership)", async () => {
+    const { teams, friend, canvas } = await seedPersonal();
+    expect(await teams.teamMatch(canvas.id, friend.id, new Set())).toBe(true);
+    // …and the viewer's orgs are irrelevant to a personal team.
+    expect(await teams.teamMatch(canvas.id, friend.id, new Set(["any-org"]))).toBe(true);
+  });
+
+  it("a non-member does NOT reach a personal team canvas", async () => {
+    const { teams, stranger, canvas } = await seedPersonal();
+    expect(await teams.teamMatch(canvas.id, stranger.id, new Set())).toBe(false);
+    expect(await teams.teamMatch(canvas.id, stranger.id, new Set(["any-org"]))).toBe(false);
+  });
+
+  it("membership is MANDATORY: removing the team_members row immediately denies (both kinds)", async () => {
+    const { teams, friend, canvas, team } = await seedPersonal();
+    expect(await teams.teamMatch(canvas.id, friend.id, new Set())).toBe(true);
+    await teams.removeMember(team.id, friend.id);
+    expect(await teams.teamMatch(canvas.id, friend.id, new Set())).toBe(false);
+  });
+
+  it("listCanvasIdsForUserTeams returns a personal team canvas for a no-org member", async () => {
+    const { teams, friend, canvas } = await seedPersonal();
+    expect(await teams.listCanvasIdsForUserTeams(friend.id, new Set())).toContain(canvas.id);
+    // A stranger gets nothing.
+    const { teams: t2, stranger, canvas: c2 } = await seedPersonal();
+    expect(await t2.listCanvasIdsForUserTeams(stranger.id, new Set())).not.toContain(c2.id);
+  });
+
+  it("a creator can have a personal AND an org team of the same name (creator-local naming)", async () => {
+    const { teams, owner } = await seedPersonal();
+    // Same creator, same name, but personal vs a (would-be) org namespace are independent.
+    expect(await teams.nameTakenByCreator(null, owner.id, "Friends")).toBe(true);
+    expect(await teams.nameTakenByCreator(null, owner.id, "friends")).toBe(true); // case-insensitive
+    expect(await teams.nameTakenByCreator("org-A", owner.id, "Friends")).toBe(false); // different namespace
+  });
+});
