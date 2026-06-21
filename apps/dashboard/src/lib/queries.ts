@@ -31,6 +31,13 @@ export const keys = {
   adminAllowedEmails: ["admin", "allowed-emails"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
   galleryFacets: ["gallery", "facets"] as const,
+  // Teams (plan 003). The `teams` prefix covers the list + every roster key so a team
+  // mutation can invalidate the whole tree.
+  teams: ["teams"] as const,
+  teamMembers: (id: string) => ["teams", "members", id] as const,
+  // Canvases shared with the caller's teams. Prefixed under `canvases` so a settings
+  // edit that changes a team grant refreshes it alongside the owner's own lists.
+  sharedWithTeams: ["canvases", "shared-with-teams"] as const,
 };
 
 export function useMe() {
@@ -126,4 +133,26 @@ export function useGalleryFacets() {
  *  settings edit that touches tags invalidates and refetches it. */
 export function useCanvasTags() {
   return useQuery({ queryKey: keys.canvasTags, queryFn: api.listCanvasTags });
+}
+
+// --- Teams (plan 003 P2) ---
+
+/** The caller's org teams, each flagged `mine` (membership). Drives the Teams page
+ *  and the share-control picker (which filters to `mine`). */
+export function useTeams() {
+  return useQuery({ queryKey: keys.teams, queryFn: api.teams.list });
+}
+
+/** A team's roster. `enabled` skips the request until a team is expanded/selected. */
+export function useTeamMembers(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.teamMembers(id),
+    queryFn: () => api.teams.listMembers(id),
+    enabled,
+  });
+}
+
+/** Canvases shared with one of the caller's teams (the "shared with my teams" view). */
+export function useSharedWithTeams() {
+  return useQuery({ queryKey: keys.sharedWithTeams, queryFn: api.listSharedWithTeams });
 }

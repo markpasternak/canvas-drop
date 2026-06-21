@@ -46,7 +46,12 @@ export function useUpdateSettings(id: string) {
           // (access !== "private"); keep it in lockstep so the rung and the legacy
           // chip don't flicker apart while the write is in flight.
           optimistic.shared = patch.access !== "private";
+          // The team grant set is single-valued: leaving `team` clears it server-side,
+          // so mirror that optimistically (the picker collapses with the rung).
+          if (patch.access !== "team") optimistic.teamIds = [];
         }
+        // A team grant change (access stays 'team', teams added/removed).
+        if (patch.teamIds !== undefined) optimistic.teamIds = patch.teamIds;
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
         qc.setQueryData(keys.canvas(id), optimistic);
       }
@@ -58,6 +63,9 @@ export function useUpdateSettings(id: string) {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
+      // A team-grant change moves the canvas in/out of others' "shared with my teams"
+      // view (the `keys.canvases` prefix above already covers this key, but be explicit).
+      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
     },
   });
 }
@@ -542,6 +550,69 @@ export function useRemoveAllowedEmail() {
   return useMutation({
     mutationFn: (id: string) => api.admin.removeAllowedEmail(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminAllowedEmails }),
+  });
+}
+
+// --- Teams (plan 003 P2). Self-serve CRUD + roster. Each await-then-invalidate;
+//     the server is the single authz layer (creator-or-admin for rename/delete,
+//     same-org for add-member), so the UI just surfaces its denials. ---
+
+/** Create a team in an org the caller belongs to. */
+export function useCreateTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orgId, name }: { orgId: string; name: string }) => api.teams.create(orgId, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.teams }),
+  });
+}
+
+/** Rename a team (creator or admin). */
+export function useRenameTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.teams.rename(id, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.teams }),
+  });
+}
+
+/** Delete a team (creator or admin). Sweeps its memberships + canvas grants server-side,
+ *  so a team canvas may lose its only grant — refresh the shared-with-teams view too. */
+export function useDeleteTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.teams.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.teams });
+      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+    },
+  });
+}
+
+/** Add an org member to a team by email. Invalidates that team's roster + the list
+ *  (membership counts / `mine` flags can change for the actor when they join). */
+export function useAddTeamMember(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) => api.teams.addMember(id, email),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.teamMembers(id) });
+      qc.invalidateQueries({ queryKey: keys.teams });
+      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+    },
+  });
+}
+
+/** Remove a member (or leave, when userId is the caller). Leaving can change which
+ *  team canvases the caller still reaches, so refresh the shared-with-teams view. */
+export function useRemoveTeamMember(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api.teams.removeMember(id, userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.teamMembers(id) });
+      qc.invalidateQueries({ queryKey: keys.teams });
+      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+    },
   });
 }
 

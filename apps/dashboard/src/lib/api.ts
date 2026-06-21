@@ -78,8 +78,10 @@ export interface CanvasCapabilitiesPatch {
  *  its own state (only the admin purge view surfaces it); computed server-side. */
 export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
 
-/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere). */
-export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
+/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere).
+ *  `team` (plan 003) shares with members of the granted teams — strictly team-scoped
+ *  (never the org-wide gallery), slotted between `specific_people` and `whole_org`. */
+export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 
 /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
  *  cover, "custom" is an owner-uploaded image that survives publishes. */
@@ -103,6 +105,9 @@ export interface Canvas {
   description: string | null;
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
+  /** Teams this canvas is shared with (plan 003) — populated only when access==='team'
+   *  (and only on the single-canvas GET; list rows leave it []). Drives the share picker. */
+  teamIds: string[];
   shared: boolean;
   /** Home tenant (plan 002): null = Personal, else the org id. Map to a name via
    *  `useMe().orgs` for the scope badge + to gate the org-only share controls. */
@@ -246,7 +251,10 @@ export interface CanvasSettings {
   title?: string;
   description?: string | null;
   /** Access rung (D4). `public_link` is accepted only for admin-granted accounts (U10). */
-  access?: "private" | "specific_people" | "whole_org" | "public_link";
+  access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
+  /** Teams to grant when access==='team' (plan 003). Owner may grant only teams they
+   *  belong to in the canvas's org (validated server-side); ignored for other rungs. */
+  teamIds?: string[];
   /** Guest-AI opt-in (U9). */
   guestAiEnabled?: boolean;
   /** Per-canvas guest-AI spend cap in USD (U9). */
@@ -271,6 +279,41 @@ export interface AllowlistEntry {
   email: string | null;
   name: string | null;
   createdAt: number;
+}
+
+/** A team the caller can see (plan 003) — one of their org's teams, flagged with
+ *  whether they're a member (`mine`). The share picker shows only `mine` teams. */
+export interface Team {
+  id: string;
+  orgId: string;
+  name: string;
+  slug: string;
+  /** The caller is a member of this team. */
+  mine: boolean;
+  /** The caller may rename/delete it (creator or admin) — a UX hint; the server
+   *  re-checks on every mutation. */
+  canManage: boolean;
+}
+
+/** One member of a team's roster (plan 003). `email`/`name` are null when the user
+ *  record can't be resolved (defensive — never blocks the roster render). */
+export interface TeamMember {
+  userId: string;
+  email: string | null;
+  name: string | null;
+}
+
+/** A canvas shared with one of the caller's teams (plan 003) — display-only, the
+ *  caller is NOT the owner, so no management fields. The only surface for these
+ *  strictly-team-scoped canvases (they never appear in the org-wide gallery). */
+export interface TeamSharedCanvas {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  description: string | null;
+  hasPreview: boolean;
+  owner: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
 /** One canvas as it appears in the opt-in gallery (M8) — display-only fields. */
@@ -404,6 +447,14 @@ const HINTS: Record<string, string> = {
   NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
+  // Teams (plan 003).
+  NOT_A_MEMBER: "You can only create teams in an org you belong to.",
+  TEAM_NOT_FOUND: "That team no longer exists — refresh and try again.",
+  FORBIDDEN: "Only the team's creator or an administrator can do that.",
+  TARGET_NOT_FOUND: "No account with that email has signed in yet.",
+  TARGET_NOT_MEMBER: "That person isn't a member of this org.",
+  TEAM_REQUIRED: "Pick at least one team to share with.",
+  TEAM_FORBIDDEN: "You can only share with teams you belong to in this org.",
   // Admin user-management self-protection (plan 006).
   cannot_block_self: "You can't block your own account.",
   cannot_demote_self: "You can't remove your own admin access.",
@@ -891,6 +942,33 @@ export const api = {
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
   resendAllowlistInvite: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}/resend`, { method: "POST" }),
+
+  /** Canvases shared with one of the caller's teams (plan 003) — the "shared with my
+   *  teams" view. Server-scoped to the caller's live team membership; excludes their own. */
+  listSharedWithTeams: () =>
+    request<{ canvases: TeamSharedCanvas[] }>("/api/canvases/shared-with-teams").then(
+      (r) => r.canvases,
+    ),
+
+  // --- Teams (plan 003 P2). Self-serve: any org member creates a team and invites
+  //     other members. Management (rename/delete) is creator-or-admin (server-enforced). ---
+  teams: {
+    list: () => request<{ teams: Team[] }>("/api/teams").then((r) => r.teams),
+    create: (orgId: string, name: string) =>
+      request<{ team: Team }>("/api/teams", jsonBody({ orgId, name })).then((r) => r.team),
+    rename: (id: string, name: string) =>
+      request<{ team: { id: string; name: string } }>(`/api/teams/${id}`, {
+        ...jsonBody({ name }),
+        method: "PATCH",
+      }).then((r) => r.team),
+    remove: (id: string) => request<{ ok: true }>(`/api/teams/${id}`, { method: "DELETE" }),
+    listMembers: (id: string) =>
+      request<{ members: TeamMember[] }>(`/api/teams/${id}/members`).then((r) => r.members),
+    addMember: (id: string, email: string) =>
+      request<{ ok: true }>(`/api/teams/${id}/members`, jsonBody({ email })),
+    removeMember: (id: string, userId: string) =>
+      request<{ ok: true }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
+  },
 
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),

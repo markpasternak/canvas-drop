@@ -58,9 +58,17 @@ import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
-  /** Teams store (plan 003 U4) — the canvas→team grant flow on PATCH /:id/settings.
-   *  Optional: suites that don't exercise the team rung may omit it. */
-  teams?: Pick<TeamsRepository, "findById" | "isTeamMember" | "setCanvasTeams">;
+  /** Teams store (plan 003 U4/U5) — the canvas→team grant flow on PATCH /:id/settings,
+   *  the current-grants read on the owner canvas view, and the "shared with my teams"
+   *  list. Optional: suites that don't exercise the team rung may omit it. */
+  teams?: Pick<
+    TeamsRepository,
+    | "findById"
+    | "isTeamMember"
+    | "setCanvasTeams"
+    | "listTeamIdsForCanvas"
+    | "listCanvasIdsForUserTeams"
+  >;
   config: Config;
   canvases: CanvasesRepository;
   users: UsersRepository;
@@ -155,6 +163,10 @@ function ownerCanvasView(
   cv: Canvas,
   globals: CapabilityGlobals,
   hasPreview = false,
+  /** The teams this canvas is granted to (plan 003 U5) — only meaningful (and only
+   *  resolved) when `access === 'team'`. Empty on the list path (no per-row join);
+   *  populated on the single-canvas view so the share picker can pre-check them. */
+  teamIds: string[] = [],
 ) {
   return {
     id: cv.id,
@@ -169,6 +181,9 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // The teams this canvas is shared with (plan 003 U5). Empty unless access==='team'
+    // (and only resolved on the single-canvas view; the list path leaves it []).
+    teamIds,
     // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
     // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
     orgId: cv.orgId,
@@ -279,7 +294,11 @@ export function managementRoutes(deps: ManagementDeps) {
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview);
+    // Resolve the canvas's team grants only here (the single-canvas view) — the share
+    // picker pre-checks them. The list path skips this join (teamIds stays []).
+    const teamIds =
+      deps.teams && cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : [];
+    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds);
   }
 
   /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
@@ -551,6 +570,48 @@ export function managementRoutes(deps: ManagementDeps) {
       return c.json({ error: "not_found" }, 404);
     }
     return c.json({ id: cv.id });
+  });
+
+  // "Shared with my teams" (plan 003 U5): the team canvases the caller can reach via a
+  // team they belong to. This is the ONLY surface for strictly-team-scoped canvases —
+  // they never appear in the org-wide gallery (locked decision). Static segment, so it
+  // is registered before `/:id` (else Hono captures it as `:id="shared-with-teams"`).
+  // The repo join re-uses the caller's LIVE server-resolved orgIds (KTD3 re-join), so a
+  // user removed from the org sees nothing here. Excludes the caller's OWN canvases
+  // (those live in Your-canvases) and anything not live (unpublished/archived/disabled
+  // → unreachable anyway). Display-only projection — never leaks owner email / secrets.
+  app.get("/shared-with-teams", async (c) => {
+    const user = c.get("user");
+    const orgIds = c.get("orgIds") ?? new Set<string>();
+    const ids = deps.teams ? await deps.teams.listCanvasIdsForUserTeams(user.id, orgIds) : [];
+    if (ids.length === 0) return c.json({ canvases: [] });
+    const rows = (await deps.canvases.findByIds(ids)).filter(
+      (cv) =>
+        cv.ownerId !== user.id &&
+        cv.access === "team" &&
+        cv.status === "active" &&
+        cv.currentVersionId !== null,
+    );
+    const owners = new Map(
+      (await deps.users.findByIds(rows.map((r) => r.ownerId))).map((u) => [u.id, u]),
+    );
+    const previews = await previewIds(rows.map((r) => r.id));
+    return c.json({
+      canvases: rows.map((cv) => {
+        const owner = owners.get(cv.ownerId);
+        return {
+          id: cv.id,
+          slug: cv.slug,
+          url: canvasUrl(deps.config, cv.slug),
+          title: cv.title,
+          description: cv.description,
+          hasPreview: previewVisible(cv, previews),
+          owner: owner
+            ? { id: owner.id, name: owner.name, avatarUrl: owner.avatarUrl ?? null }
+            : null,
+        };
+      }),
+    });
   });
 
   app.get("/:id", async (c) => {

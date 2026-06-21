@@ -40,17 +40,33 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return { id: user.id, isAdmin: user.isAdmin, orgIds: c.get("orgIds") ?? new Set<string>() };
   };
 
-  // List teams across the caller's org(s), flagging which they're a member of.
+  // List teams across the caller's org(s), flagging which they're a member of (`mine`)
+  // and which they may manage (rename/delete — creator or instance operator, KTD5).
+  // `canManage` is a UX hint only; the service re-checks it on every mutation.
   app.get("/", async (c) => {
     const actor = actorOf(c);
     const seen = new Set<string>();
-    const out: Array<{ id: string; orgId: string; name: string; slug: string; mine: boolean }> = [];
+    const out: Array<{
+      id: string;
+      orgId: string;
+      name: string;
+      slug: string;
+      mine: boolean;
+      canManage: boolean;
+    }> = [];
     const mine = new Set((await deps.teams.listForUser(actor.id)).map((t) => t.id));
     for (const orgId of actor.orgIds) {
       for (const t of await deps.teams.listByOrg(orgId)) {
         if (seen.has(t.id)) continue;
         seen.add(t.id);
-        out.push({ id: t.id, orgId: t.orgId, name: t.name, slug: t.slug, mine: mine.has(t.id) });
+        out.push({
+          id: t.id,
+          orgId: t.orgId,
+          name: t.name,
+          slug: t.slug,
+          mine: mine.has(t.id),
+          canManage: actor.isAdmin || t.createdBy === actor.id,
+        });
       }
     }
     return c.json({ teams: out });

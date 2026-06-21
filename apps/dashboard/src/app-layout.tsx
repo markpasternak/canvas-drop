@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   SidebarSimple,
   SquaresFour,
+  UsersThree,
   X,
 } from "@phosphor-icons/react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
@@ -26,14 +27,19 @@ import { useMe } from "./lib/queries.js";
  *  Icons match the preview's left-rail nav (icon + label per item). These are the
  *  REAL routes — no fake Templates/Trash entries the preview used as filler. */
 const SECTION_LINKS: ReadonlyArray<{
-  to: "/" | "/admin" | "/gallery";
+  to: "/" | "/admin" | "/gallery" | "/teams";
   label: string;
   icon: Icon;
   exact?: boolean;
   adminOnly?: boolean;
+  /** Org-members only (plan 003): hidden for a Personal-only caller / guest, for whom
+   *  the team concept doesn't apply. UX only — the teams API is org-scoped server-side. */
+  orgOnly?: boolean;
 }> = [
   { to: "/", label: "Canvases", icon: SquaresFour, exact: true },
   { to: "/gallery", label: "Gallery", icon: Compass },
+  // Teams (plan 003) — only for callers in an org workspace.
+  { to: "/teams", label: "Teams", icon: UsersThree, orgOnly: true },
   // Admin sits last — below the member-facing sections, visible only to admins
   // (and the admin API independently 404s non-admins).
   { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
@@ -145,6 +151,7 @@ function DocsLink({
 function pageNameForPath(pathname: string): string {
   if (pathname === "/") return "Canvases";
   if (pathname === "/gallery") return "Gallery";
+  if (pathname === "/teams") return "Teams";
   if (pathname === "/new") return "Create canvas";
   if (pathname === "/onboarding") return "Get started";
   if (pathname === "/admin/canvases") return "Admin · Canvases";
@@ -238,7 +245,9 @@ export function AppLayout() {
     };
   }, [menuOpen]);
 
-  const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
+  const links = SECTION_LINKS.filter(
+    (l) => (!l.adminOnly || me.data?.isAdmin) && (!l.orgOnly || (me.data?.orgs?.length ?? 0) > 0),
+  );
   // Vertical nav item: icon + label, active item lifted to accent-subtle/accent
   // (matches the preview's `.nav a.active`).
   const navLinkClass =

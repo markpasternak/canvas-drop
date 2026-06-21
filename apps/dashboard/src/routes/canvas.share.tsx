@@ -14,11 +14,11 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { type AccessRung, type AllowlistEntry, ApiError, api } from "../lib/api.js";
+import { type AccessRung, type AllowlistEntry, ApiError, api, type Team } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import { usePublishDraft, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
-import { useCanvas, useMe } from "../lib/queries.js";
+import { useCanvas, useMe, useTeams } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const BASE_SECTIONS = [
@@ -42,12 +42,19 @@ export default function Share() {
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
   const { data: me } = useMe();
+  // The caller's teams (plan 003) — the picker offers only the teams they BELONG to
+  // (`mine`). Only meaningful under active tenancy; for a Personal-only caller this is [].
+  const { data: teams } = useTeams();
   const update = useUpdateSettings(id);
 
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [description, setDescription] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
+  // The "Team" rung was picked but not yet committed (no team chosen yet). The rung
+  // can't be saved with zero teams (the server 409s TEAM_REQUIRED), so clicking it
+  // reveals the picker; the save fires once at least one team is selected.
+  const [pendingTeam, setPendingTeam] = useState(false);
 
   const sections = canvas?.access === "specific_people" ? PEOPLE_SECTIONS : BASE_SECTIONS;
   const sectionIds = sections.map((s) => s.id);
@@ -154,18 +161,44 @@ export default function Share() {
           description="Pick the audience that can open this canvas."
         >
           <AccessLadder
-            value={canvas.access}
+            // Reflect the in-flight "Team" pick before it's committed, so the radio
+            // stays selected while the picker is open and no team is chosen yet.
+            value={pendingTeam ? "team" : canvas.access}
             allowPublic={me?.canPublishPublic ?? false}
             // Offer the "Whole org" rung to everyone EXCEPT a guest (a signed-in user in
             // no org). `isGuest` is only ever true under active tenancy, so inert
             // instances keep offering it to all members (plan 002 U6).
             allowOrg={!me?.isGuest}
-            // Disable "Whole org" on a Personal canvas (no home org) when the viewer is a
-            // member — i.e. tenancy is active. The server would 409 it; don't make them
-            // bounce off that with no feedback (plan 002 review fix).
+            // Disable "Whole org"/"Team" on a Personal canvas (no home org) when the
+            // viewer is a member — i.e. tenancy is active. The server would 409 it; don't
+            // make them bounce off that with no feedback (plan 002/003).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
-            onChange={(access) => save({ access })}
+            // The "Team" rung only applies under active tenancy (a guest, or an inert
+            // instance, has no teams). Hidden for a guest; shown for org members.
+            allowTeam={!me?.isGuest}
+            onChange={(access) => {
+              if (access === "team") {
+                // Don't write yet — reveal the picker; the save fires from there once a
+                // team is chosen (an empty team grant is a server 409).
+                setPendingTeam(true);
+                return;
+              }
+              setPendingTeam(false);
+              save({ access });
+            }}
           />
+          {(pendingTeam || canvas.access === "team") && (
+            <TeamPicker
+              teams={(teams ?? []).filter((t) => t.mine)}
+              selected={canvas.access === "team" ? canvas.teamIds : []}
+              saving={update.isPending}
+              onShare={(teamIds) => {
+                setPendingTeam(false);
+                save({ access: "team", teamIds });
+              }}
+              onCancel={pendingTeam ? () => setPendingTeam(false) : undefined}
+            />
+          )}
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
               audiences the URL itself is no longer a secret — lean on the access controls,
               not obscurity. Informational, never a blocker. */}
@@ -431,19 +464,28 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
   );
 }
 
-type SettableRung = "private" | "specific_people" | "whole_org" | "public_link";
+type SettableRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 const RUNGS: {
   value: SettableRung;
   label: string;
   hint: string;
   adminGated?: boolean;
   orgGated?: boolean;
+  teamGated?: boolean;
 }[] = [
   { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
   {
     value: "specific_people",
     label: "Specific people",
     hint: "Only the people you add below can open it.",
+  },
+  {
+    value: "team",
+    label: "Team",
+    hint: "Only members of the teams you pick below can open and use it.",
+    // Tenancy (plan 003): teams exist only under active tenancy, so the rung is hidden
+    // for a guest (a signed-in user in no org). The server denies it regardless.
+    teamGated: true,
   },
   {
     value: "whole_org",
@@ -465,29 +507,35 @@ function AccessLadder({
   value,
   allowPublic,
   allowOrg,
+  allowTeam,
   orgRungDisabled,
   onChange,
 }: {
   value: AccessRung;
   allowPublic: boolean;
   allowOrg: boolean;
-  /** The "Whole org" rung is shown but DISABLED — this is a Personal canvas (no home org),
-   *  so it can't be shared org-wide. Never let the user pick what can't work (plan 002). */
+  /** Show the "Team" rung (plan 003) — org members only; hidden for a guest. */
+  allowTeam: boolean;
+  /** The "Whole org"/"Team" rungs are shown but DISABLED — this is a Personal canvas
+   *  (no home org), so it can't be shared org-wide or with a team. Never let the user
+   *  pick what can't work (plan 002/003). */
   orgRungDisabled: boolean;
   onChange: (rung: SettableRung) => void;
 }) {
   const rungs = RUNGS.filter(
     (r) =>
       (!r.adminGated || allowPublic || value === r.value) &&
-      (!r.orgGated || allowOrg || value === r.value),
+      (!r.orgGated || allowOrg || value === r.value) &&
+      (!r.teamGated || allowTeam || value === r.value),
   );
   return (
     <fieldset className="space-y-2">
       <legend className="sr-only">Who can access this canvas</legend>
       {rungs.map((r) => {
-        // A Personal canvas can't be shared org-wide — disable the rung + explain, rather
-        // than letting the click bounce off the server's 409 with no feedback.
-        const disabled = r.orgGated && orgRungDisabled && value !== r.value;
+        // A Personal canvas can't be shared org-wide or with a team — disable the rung +
+        // explain, rather than letting the click bounce off the server's 409 with no
+        // feedback.
+        const disabled = (r.orgGated || r.teamGated) && orgRungDisabled && value !== r.value;
         return (
           <label
             key={r.value}
@@ -507,7 +555,7 @@ function AccessLadder({
               <span className="block text-sm font-semibold text-fg">{r.label}</span>
               <span className="block text-xs text-muted">
                 {disabled
-                  ? "This canvas is Personal — only a canvas in a workspace can be shared org-wide."
+                  ? "This canvas is Personal — only a canvas in a workspace can be shared with your org or a team."
                   : r.hint}
               </span>
             </span>
@@ -521,6 +569,93 @@ function AccessLadder({
         </InlineNotice>
       )}
     </fieldset>
+  );
+}
+
+/**
+ * Team grant picker (plan 003) — the multi-select shown when the "Team" rung is
+ * chosen. Offers only the teams the owner BELONGS to (`mine`); the server re-checks
+ * membership at grant time (KTD4). The rung can't be saved with zero teams, so the
+ * Share button is disabled until ≥1 is selected. `selected` seeds the checkboxes from
+ * the canvas's current grants; `onCancel` (present only while the pick is pending)
+ * backs out without writing.
+ */
+function TeamPicker({
+  teams,
+  selected,
+  saving,
+  onShare,
+  onCancel,
+}: {
+  teams: Team[];
+  selected: string[];
+  saving: boolean;
+  onShare: (teamIds: string[]) => void;
+  onCancel?: () => void;
+}) {
+  const [sel, setSel] = useState<Set<string>>(() => new Set(selected));
+  // Re-seed when the persisted grant set changes (e.g. after a save settles). Keyed on
+  // the membership string so a re-render doesn't clobber an in-progress edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed on the grant set only
+  useEffect(() => {
+    setSel(new Set(selected));
+  }, [selected.join(",")]);
+
+  if (teams.length === 0) {
+    return (
+      <InlineNotice tone="neutral" className="py-2 text-xs">
+        You're not in any team yet. Create or join one in{" "}
+        <Link to="/teams" className="text-accent hover:underline">
+          Teams
+        </Link>{" "}
+        to share a canvas with it.
+      </InlineNotice>
+    );
+  }
+
+  const toggle = (id: string) =>
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // "Already applied" when the selection exactly equals the persisted grant set.
+  const same = sel.size === selected.length && selected.every((id) => sel.has(id));
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-3">
+      <p className="text-xs text-muted">
+        Pick the teams that can open this canvas. Only teams you belong to are listed.
+      </p>
+      <ul className="space-y-1">
+        {teams.map((t) => (
+          <li key={t.id}>
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-sm hover:bg-surface-hover">
+              <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} />
+              <span className="text-fg">{t.name}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={saving}
+          disabled={sel.size === 0 || same}
+          onClick={() => onShare([...sel])}
+        >
+          {selected.length > 0 ? "Update teams" : "Share with teams"}
+        </Button>
+        {onCancel && (
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -24,6 +24,7 @@ const base: CanvasListItem = {
   title: "Three.js demo",
   description: null,
   access: "whole_org",
+  teamIds: [],
   shared: true,
   orgId: null,
   guestAiEnabled: false,
