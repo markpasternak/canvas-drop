@@ -396,6 +396,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         orgMembers,
         teams,
         teamsService: teamsSvc,
+        invites,
         allowedEmails,
         oauth,
         canvases: deps.canvases,

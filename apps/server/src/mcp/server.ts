@@ -33,6 +33,7 @@ import { LIMITS } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { DraftService } from "../draft/service.js";
 import type { Mailer } from "../email/mailer.js";
+import type { InviteService } from "../invites/service.js";
 import type { Logger } from "../log/logger.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
@@ -65,6 +66,9 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  the `team` canvas grant. The tools wrap the SAME service the management routes use. */
   teams: TeamsRepository;
   teamsService: TeamsService;
+  /** The invite primitive (plan 003 U9) — backs `invite_to_canvas` (individual one-off invite),
+   *  wrapping the SAME service the HTTP route uses. */
+  invites: InviteService;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;
@@ -1201,6 +1205,50 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   server.registerTool(
+    "invite_to_canvas",
+    {
+      description:
+        "Deliberately invite a person to a canvas you own, by email — distinct from grant_access " +
+        "(the silent add). Sends a courtesy email: an existing user is granted now " +
+        "(`status: granted`); a brand-new email gets a sign-in invitation and reaches the canvas " +
+        "on their first sign-in (`status: pending`). A brand-new EXTERNAL email is refused for a " +
+        "non-admin unless the instance allows it (NOT_PERMITTED); RATE_LIMITED if you invite too " +
+        "many. The grant lands on the `specific_people` rung — set that with update_canvas.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        email: z.string().email().describe("The person's email."),
+      },
+    },
+    async ({ id, email }) => {
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
+      const actor = await teamActorNow(); // loads the caller's name/email (isAdmin stays false)
+      const r = await deps.invites.resolveOrInvite(
+        {
+          kind: "canvas",
+          canvasId: cv.id,
+          canvasSlug: cv.slug,
+          canvasTitle: cv.title,
+          mode: "invite",
+        },
+        email,
+        { id: caller.userId, name: actor.name, email: actor.email, isAdmin: false },
+      );
+      if (r.status === "rejected")
+        return fail("NOT_PERMITTED: that email can't be invited from here");
+      if (r.status === "rate_limited") return fail("RATE_LIMITED: too many invites — try later");
+      deps.audit.recordAudit({
+        action: "allowlist_add",
+        actorId: caller.userId,
+        targetId: cv.id,
+        meta: { kind: "invite", status: r.status },
+      });
+      return ok({ status: r.status });
+    },
+  );
+
+  server.registerTool(
     "resend_guest_invite",
     {
       description:
@@ -1332,15 +1380,22 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "create_team",
     {
       description:
-        "Create a team in an org you belong to (see whoami.orgs). You become its first member " +
-        "and its manager (rename/delete). Returns the new team.",
+        "Create a team. Omit `orgId` for a PERSONAL team (friends & family — anyone you invite by " +
+        "email can join); pass an org id you belong to (see whoami.orgs) to attach it to that org. " +
+        "You become its first member and its manager (rename/delete). Returns the new team.",
       inputSchema: {
-        orgId: z.string().describe("An org id you belong to (whoami.orgs)."),
+        orgId: z
+          .string()
+          .nullish()
+          .describe("Omit/null for a personal team, or an org id you belong to (whoami.orgs)."),
         name: z.string().trim().min(1).max(80).describe("The team's display name."),
       },
     },
     async ({ orgId, name }) => {
-      const r = await deps.teamsService.create(await teamActorNow(), { orgId, name });
+      const r = await deps.teamsService.create(await teamActorNow(), {
+        orgId: orgId ?? null,
+        name,
+      });
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       const { team } = r;
       return ok({ id: team.id, orgId: team.orgId, name: team.name, slug: team.slug });
@@ -1399,17 +1454,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "add_team_member",
     {
       description:
-        "Add a colleague to a team you belong to, by email. They must be a member of the team's " +
-        "org and have signed in at least once. Self-serve: any member can invite.",
+        "Add someone to a team you belong to, by email. For a PERSONAL team this can be anyone: an " +
+        "existing user joins now (`status: granted`); a brand-new email gets a sign-in invitation " +
+        "and joins on their first sign-in (`status: pending`). For an ORG team they must already " +
+        "be a member of that org. Self-serve: any member can invite.",
       inputSchema: {
         id: z.string().describe("The team id."),
-        email: z.string().trim().email().describe("The colleague's email."),
+        email: z.string().trim().email().describe("The person's email."),
       },
     },
     async ({ id, email }) => {
       const r = await deps.teamsService.addMemberByEmail(await teamActorNow(), id, email);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
-      return ok({ ok: true });
+      return ok({ status: r.status });
     },
   );
 

@@ -87,6 +87,7 @@ async function connect(
         invites: makeInviteService(client, cfg),
         audit,
       }),
+      invites: makeInviteService(client, cfg),
       canvases,
       versions,
       engine,
@@ -1412,6 +1413,72 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     });
     expect(isError(bad)).toBe(true);
     expect(text(bad)).toContain("TARGET_NOT_MEMBER");
+  });
+
+  it("create_team (no orgId) makes a PERSONAL team; add_team_member grants an existing user, rejects a brand-new external email (plan 003 U9)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@nowhere.test"); // no org
+    const palId = await seedUser(client, "pal@nowhere.test"); // existing user, no org
+    const mcp = await connect(client, {
+      userId: ownerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { name: "Family" } }),
+    );
+    expect(team.orgId).toBeNull();
+
+    // Existing user → granted now.
+    const granted = payload(
+      await mcp.callTool({
+        name: "add_team_member",
+        arguments: { id: team.id, email: "pal@nowhere.test" },
+      }),
+    );
+    expect(granted).toMatchObject({ status: "granted" });
+    const { members } = payload(
+      await mcp.callTool({ name: "list_team_members", arguments: { id: team.id } }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(members.map((m: any) => m.userId).sort()).toEqual([ownerId, palId].sort());
+
+    // Brand-new external email, self-serve (non-admin), toggle off → refused (KTD5).
+    const refused = await mcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "stranger@elsewhere.test" },
+    });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toContain("TARGET_NOT_PERMITTED");
+  });
+
+  it("invite_to_canvas mirrors the HTTP denials: existing user granted, brand-new external rejected (plan 003 U9)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@nowhere.test");
+    await seedUser(client, "pal@nowhere.test");
+    const mcp = await connect(client, {
+      userId: ownerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+
+    const granted = payload(
+      await mcp.callTool({
+        name: "invite_to_canvas",
+        arguments: { id: cv.id, email: "pal@nowhere.test" },
+      }),
+    );
+    expect(granted).toMatchObject({ status: "granted" });
+
+    const refused = await mcp.callTool({
+      name: "invite_to_canvas",
+      arguments: { id: cv.id, email: "stranger@elsewhere.test" },
+    });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toContain("NOT_PERMITTED");
   });
 
   it("update_canvas access=team grants the team; get_canvas echoes teamIds", async () => {

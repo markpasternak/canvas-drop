@@ -323,6 +323,7 @@ export async function connectMcp(
         invites: makeInviteService(h.client, config),
         audit,
       }),
+      invites: makeInviteService(h.client, config),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,
