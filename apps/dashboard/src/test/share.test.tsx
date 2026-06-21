@@ -254,9 +254,12 @@ describe("share route", () => {
 
     // The rung exists between Specific people and Whole org.
     await user.click(await screen.findByRole("radio", { name: /^team/i }));
-    // Picking it reveals the picker (no write yet — an empty team grant is a 409).
-    const teamCheckbox = await screen.findByLabelText("Design");
+    // Picking it reveals the picker (no write yet — an empty team grant is a 409). The
+    // checkbox label now also carries a scope badge ("Acme" / "Personal"), so match by substring.
+    const teamCheckbox = await screen.findByLabelText(/Design/);
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    // The org-team scope badge shows the org name so the share target's reach is legible.
+    expect(screen.getByText("Acme")).toBeInTheDocument();
 
     await user.click(teamCheckbox);
     await user.click(screen.getByRole("button", { name: /share with teams/i }));

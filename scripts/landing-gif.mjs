@@ -23,6 +23,7 @@ const FRAMES = [
   "tour-editor.webp",
   "landing-gallery.webp",
   "tour-sharing.webp",
+  "tour-teams.webp",
   "tour-capabilities.webp",
   "tour-usage.webp",
   "tour-preview.webp",

@@ -1,6 +1,7 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -201,6 +202,7 @@ export default function Share() {
               team: (
                 <TeamPicker
                   teams={shareableTeams}
+                  orgs={me?.orgs ?? []}
                   selected={canvas.access === "team" ? canvas.teamIds : []}
                   saving={update.isPending}
                   onShare={(teamIds) => {
@@ -600,14 +602,25 @@ function AccessLadder({
  * the canvas's current grants; `onCancel` (present only while the pick is pending)
  * backs out without writing.
  */
+/** The scope label for a team in the picker: a PERSONAL team (no org) vs a workspace/org
+ *  team (named by its org). Makes the share target's reach legible — a personal team can hold
+ *  anyone you invite; an org team is your colleagues. */
+function TeamScopeBadge({ team, orgs }: { team: Team; orgs: Array<{ id: string; name: string }> }) {
+  if (team.orgId === null) return <Badge tone="neutral">Personal</Badge>;
+  const orgName = orgs.find((o) => o.id === team.orgId)?.name;
+  return <Badge tone="accent">{orgName ?? "Workspace"}</Badge>;
+}
+
 function TeamPicker({
   teams,
+  orgs,
   selected,
   saving,
   onShare,
   onCancel,
 }: {
   teams: Team[];
+  orgs: Array<{ id: string; name: string }>;
   selected: string[];
   saving: boolean;
   onShare: (teamIds: string[]) => void;
@@ -655,6 +668,7 @@ function TeamPicker({
             <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-sm hover:bg-surface-hover">
               <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} />
               <span className="text-fg">{t.name}</span>
+              <TeamScopeBadge team={t} orgs={orgs} />
             </label>
           </li>
         ))}

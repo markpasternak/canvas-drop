@@ -169,6 +169,22 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("Private by design");
     expect(html).toContain("No telemetry, ever");
   });
+
+  it("shows the sharing-ladder section with every rung and the auth-delegated-invite story (plan 003)", () => {
+    const html = renderLandingPage();
+    // The ladder heading + each rung in product order.
+    expect(html).toContain("An access ladder that fits how people actually share.");
+    for (const rung of ["Private", "Specific people", "Team", "Whole org", "Public link"]) {
+      expect(html).toContain(`class="r-name">${rung}`);
+    }
+    // The Team rung is the accented (feature) one.
+    expect(html).toContain('class="rung feature"');
+    // The headline differentiator: auth-delegated invites (no app-owned credentials).
+    expect(html).toContain("no app-managed passwords, no magic-link accounts");
+    // The Teams capability also appears in the "Built for teams" grid + the tour.
+    expect(html).toContain("Teams &amp; invites");
+    expect(html).toContain('src="/docs/assets/tour-teams.webp');
+  });
 });
 
 describe("landingResponse — headers", () => {

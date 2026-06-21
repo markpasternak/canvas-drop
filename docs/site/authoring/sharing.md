@@ -23,7 +23,7 @@ One rung per canvas, stored as the `access` field (default `private`):
 | --- | --- | --- |
 | **Private** | Only you, the owner. | Full, for the owner. |
 | **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
-| **Team** | Members of the [teams](/docs/authoring/create-and-publish#teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
+| **Team** | Members of the [teams](/docs/authoring/teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
@@ -84,7 +84,7 @@ is set.
 
 ## Sharing with a team
 
-Choose **Team** to share with one or more [teams](/docs/authoring/create-and-publish#teams)
+Choose **Team** to share with one or more [teams](/docs/authoring/teams)
 — named groups you create. A team can be **personal** (friends & family — anyone you invite
 by email) or **org-attached** (a subset of your org). The share control lists only the teams
 **you belong to**; pick one or more, and every member can open and use the canvas (full
