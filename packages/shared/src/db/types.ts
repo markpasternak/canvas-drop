@@ -4,6 +4,7 @@ import type {
   auditLog,
   canvasAllowlist,
   canvases,
+  canvasTeams,
   drafts,
   files,
   guestInvites,
@@ -13,10 +14,13 @@ import type {
   oauthClients,
   oauthCodes,
   orgDomains,
+  orgMembers,
   orgs,
   screenshotJobs,
   sessions,
   settings,
+  teamMembers,
+  teams,
   uploadSessions,
   usageEvents,
   users,
@@ -45,6 +49,18 @@ export type Org = typeof orgs.$inferSelect;
 export type NewOrg = typeof orgs.$inferInsert;
 export type OrgDomain = typeof orgDomains.$inferSelect;
 export type NewOrgDomain = typeof orgDomains.$inferInsert;
+export type OrgMember = typeof orgMembers.$inferSelect;
+export type NewOrgMember = typeof orgMembers.$inferInsert;
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
+export type CanvasTeam = typeof canvasTeams.$inferSelect;
+export type NewCanvasTeam = typeof canvasTeams.$inferInsert;
+/** Membership role (flat in P2 — only 'member' is written; RBAC is P4). */
+export type MembershipRole = "member";
+/** How an org_members row was created (P2 only materializes 'domain'). */
+export type OrgMemberSource = "domain";
 export type Version = typeof versions.$inferSelect;
 export type NewVersion = typeof versions.$inferInsert;
 export type Draft = typeof drafts.$inferSelect;

@@ -629,3 +629,99 @@ export const screenshotJobs = pgTable(
     ),
   ],
 );
+
+// Teams (plan 003, Tenancy P2). Four additive tables — the `team` access value is
+// already reserved in canvases_access_chk (P1/KTD6), so no CHECK migration here.
+
+// Explicit org membership (P2/KTD1). In P1 membership was purely derived from the
+// verified email domain; P2 materializes it as a row at login so it can be a join
+// target. `source='domain'` is the ONLY source written in P2 (an invite/cross-domain
+// flow is deferred to P4 — D8); `role` is a flat 'member' placeholder (KTD5).
+export const orgMembers = pgTable(
+  "org_members",
+  {
+    id: c.text("id").primaryKey(),
+    orgId: c
+      .text("org_id")
+      .notNull()
+      .references(() => orgs.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: c.text("role").notNull().default("member"),
+    source: c.text("source").notNull().default("domain"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("org_members_org_user_uq").on(t.orgId, t.userId),
+    index("org_members_user_idx").on(t.userId),
+  ],
+);
+
+// A members-only sharing group inside one org (P2/KTD3). Self-serve: `created_by`
+// is the de-facto manager until P4 RBAC (KTD5). Unique (org_id, slug).
+export const teams = pgTable(
+  "teams",
+  {
+    id: c.text("id").primaryKey(),
+    orgId: c
+      .text("org_id")
+      .notNull()
+      .references(() => orgs.id),
+    name: c.text("name").notNull(),
+    slug: c.text("slug").notNull(),
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("teams_org_slug_uq").on(t.orgId, t.slug), index("teams_org_idx").on(t.orgId)],
+);
+
+// Membership of a team (P2/KTD3). A row is legitimate only while the user also holds
+// a live org_members row for the team's org — re-checked at read (the `team` rung
+// re-joins org_members) AND reconciled on domain removal (U2). `role` flat (KTD5).
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: c.text("id").primaryKey(),
+    teamId: c
+      .text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: c.text("role").notNull().default("member"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("team_members_team_user_uq").on(t.teamId, t.userId),
+    index("team_members_user_idx").on(t.userId),
+  ],
+);
+
+// Grants a canvas to a team (P2/KTD4): `access='team'` means "a member of any granted
+// team". The grant is INDEPENDENT of the owner's continued team membership (the canvas
+// was shared TO the team). Composite PK (canvas_id, team_id).
+export const canvasTeams = pgTable(
+  "canvas_teams",
+  {
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    teamId: c
+      .text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.canvasId, t.teamId] }),
+    index("canvas_teams_team_idx").on(t.teamId),
+  ],
+);
