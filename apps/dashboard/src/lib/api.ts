@@ -78,8 +78,10 @@ export interface CanvasCapabilitiesPatch {
  *  its own state (only the admin purge view surfaces it); computed server-side. */
 export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
 
-/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere). */
-export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
+/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere).
+ *  `team` (plan 003) shares with members of the granted teams — strictly team-scoped
+ *  (never the org-wide gallery), slotted between `specific_people` and `whole_org`. */
+export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 
 /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
  *  cover, "custom" is an owner-uploaded image that survives publishes. */
@@ -103,6 +105,9 @@ export interface Canvas {
   description: string | null;
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
+  /** Teams this canvas is shared with (plan 003) — populated only when access==='team'
+   *  (and only on the single-canvas GET; list rows leave it []). Drives the share picker. */
+  teamIds: string[];
   shared: boolean;
   /** Home tenant (plan 002): null = Personal, else the org id. Map to a name via
    *  `useMe().orgs` for the scope badge + to gate the org-only share controls. */
@@ -246,7 +251,10 @@ export interface CanvasSettings {
   title?: string;
   description?: string | null;
   /** Access rung (D4). `public_link` is accepted only for admin-granted accounts (U10). */
-  access?: "private" | "specific_people" | "whole_org" | "public_link";
+  access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
+  /** Teams to grant when access==='team' (plan 003). Owner may grant only teams they
+   *  belong to in the canvas's org (validated server-side); ignored for other rungs. */
+  teamIds?: string[];
   /** Guest-AI opt-in (U9). */
   guestAiEnabled?: boolean;
   /** Per-canvas guest-AI spend cap in USD (U9). */
@@ -271,6 +279,60 @@ export interface AllowlistEntry {
   email: string | null;
   name: string | null;
   createdAt: number;
+}
+
+/** A team the caller can see (plan 003) — one of their org's teams, flagged with
+ *  whether they're a member (`mine`). The share picker shows only `mine` teams. */
+export interface Team {
+  id: string;
+  /** `null` for a PERSONAL team (plan 003 U6 — friends & family, no org); an org id for an
+   *  org-attached team. */
+  orgId: string | null;
+  name: string;
+  slug: string;
+  /** The caller is a member of this team. */
+  mine: boolean;
+  /** The caller may rename/delete it (creator or admin) — a UX hint; the server
+   *  re-checks on every mutation. */
+  canManage: boolean;
+}
+
+/** One member of a team's roster (plan 003). `email`/`name` are null when the user
+ *  record can't be resolved (defensive — never blocks the roster render). */
+export interface TeamMember {
+  userId: string;
+  email: string | null;
+  name: string | null;
+}
+
+/** A pending invitation on a team's roster (plan 003 U6): a brand-new invitee who hasn't
+ *  signed in yet. They join (become a TeamMember) on their first verified login. */
+export interface TeamPendingInvite {
+  email: string;
+  invitedAt: number;
+}
+
+/** A team's full roster: active members + not-yet-signed-in pending invitations. */
+export interface TeamRoster {
+  members: TeamMember[];
+  pending: TeamPendingInvite[];
+}
+
+/** Outcome of adding someone to a personal team: `granted` (existing user joined now) or
+ *  `pending` (a brand-new invitee was emailed; they join on first verified login). */
+export type AddMemberStatus = "granted" | "pending";
+
+/** A canvas shared with one of the caller's teams (plan 003) — display-only, the
+ *  caller is NOT the owner, so no management fields. The only surface for these
+ *  strictly-team-scoped canvases (they never appear in the org-wide gallery). */
+export interface TeamSharedCanvas {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  description: string | null;
+  hasPreview: boolean;
+  owner: { id: string; name: string; avatarUrl: string | null } | null;
 }
 
 /** One canvas as it appears in the opt-in gallery (M8) — display-only fields. */
@@ -404,6 +466,15 @@ const HINTS: Record<string, string> = {
   NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
+  // Teams (plan 003).
+  NOT_A_MEMBER: "You can only create teams in an org you belong to.",
+  TEAM_NOT_FOUND: "That team no longer exists — refresh and try again.",
+  TEAM_NAME_TAKEN: "You already have a team with that name.",
+  FORBIDDEN: "Only the team's creator or an administrator can do that.",
+  TARGET_NOT_FOUND: "No account with that email has signed in yet.",
+  TARGET_NOT_MEMBER: "That person isn't a member of this org.",
+  TEAM_REQUIRED: "Pick at least one team to share with.",
+  TEAM_FORBIDDEN: "You can only share with teams you belong to in this org.",
   // Admin user-management self-protection (plan 006).
   cannot_block_self: "You can't block your own account.",
   cannot_demote_self: "You can't remove your own admin access.",
@@ -614,6 +685,16 @@ export interface AllowedEmail {
   email: string;
   createdBy: string | null;
   createdAt: number;
+}
+
+/** An admin-editable email template (plan 003 phase 3). Each known key always resolves
+ *  (admin override else seeded default); `overridden` marks whether a DB row exists. */
+export interface AdminEmailTemplate {
+  key: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText: string;
+  overridden: boolean;
 }
 
 /** Admin all-canvases sort axes (plan 006). `recent` (default) = last activity. */
@@ -887,10 +968,53 @@ export const api = {
       `/api/canvases/${id}/allowlist`,
       jsonBody({ email }),
     ),
+  /** Individual one-off canvas invite (plan 003 U8): a deliberate invite that sends a courtesy
+   *  email. `granted` = an existing user got access now; `pending` = a brand-new invitee was
+   *  emailed and gets access on their first sign-in. */
+  inviteToCanvas: (id: string, email: string) =>
+    request<{ ok: true; status: AddMemberStatus }>(
+      `/api/canvases/${id}/invite`,
+      jsonBody({ email }),
+    ),
   removeAllowlistEntry: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
   resendAllowlistInvite: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}/resend`, { method: "POST" }),
+
+  /** Canvases shared with one of the caller's teams (plan 003) — the "shared with my
+   *  teams" view. Server-scoped to the caller's live team membership; excludes their own. */
+  listSharedWithTeams: () =>
+    request<{ canvases: TeamSharedCanvas[] }>("/api/canvases/shared-with-teams").then(
+      (r) => r.canvases,
+    ),
+
+  // --- Teams (plan 003 P2/U6). Self-serve: any signed-in user creates a PERSONAL team (no org)
+  //     and invites people; an org member may also attach a team to their org. Management
+  //     (rename/delete) is creator-or-admin (server-enforced). ---
+  teams: {
+    list: () => request<{ teams: Team[] }>("/api/teams").then((r) => r.teams),
+    /** Create a team. Pass an `orgId` to attach to your org, or `null` for a personal team. */
+    create: (orgId: string | null, name: string) =>
+      request<{ team: Team }>("/api/teams", jsonBody({ orgId, name })).then((r) => r.team),
+    rename: (id: string, name: string) =>
+      request<{ team: { id: string; name: string } }>(`/api/teams/${id}`, {
+        ...jsonBody({ name }),
+        method: "PATCH",
+      }).then((r) => r.team),
+    remove: (id: string) => request<{ ok: true }>(`/api/teams/${id}`, { method: "DELETE" }),
+    listMembers: (id: string) =>
+      request<TeamRoster>(`/api/teams/${id}/members`).then((r) => ({
+        members: r.members,
+        pending: r.pending ?? [],
+      })),
+    addMember: (id: string, email: string) =>
+      request<{ ok: true; status: AddMemberStatus }>(
+        `/api/teams/${id}/members`,
+        jsonBody({ email }),
+      ),
+    removeMember: (id: string, userId: string) =>
+      request<{ ok: true }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
+  },
 
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>
     request<Canvas>(`/api/canvases/${id}/capabilities`, { ...jsonBody(patch), method: "PATCH" }),
@@ -1044,13 +1168,38 @@ export const api = {
     revokePublic: (id: string) =>
       request<{ ok: true }>(`/api/admin/users/${id}/revoke-public`, { method: "POST" }),
 
-    /** Individual sign-in allowlist (D14 supplement to the env email domains). */
+    /** Add users / sign-in permits (plan 003 U7). Lists the off-domain permits; `addUser`
+     *  permits a brand-new email (or grants an existing one) via the invite primitive — it
+     *  sends a courtesy email and, on a matching org domain, makes them a member on first login.
+     *  `status`: `granted` (already a user) or `pending` (a brand-new invitee). */
     listAllowedEmails: () =>
       request<{ emails: AllowedEmail[] }>("/api/admin/allowed-emails").then((r) => r.emails),
     addAllowedEmail: (email: string) =>
-      request<{ ok: true; entry: AllowedEmail }>("/api/admin/allowed-emails", jsonBody({ email })),
+      request<{ ok: true; status: AddMemberStatus; entry: AllowedEmail | null }>(
+        "/api/admin/allowed-emails",
+        jsonBody({ email }),
+      ),
     removeAllowedEmail: (id: string) =>
       request<{ ok: true }>(`/api/admin/allowed-emails/${id}`, { method: "DELETE" }),
+
+    /** Email templates (plan 003 phase 3): list resolves every key (override else default);
+     *  PUT overrides subject + HTML + text; DELETE resets to the seeded default. */
+    listEmailTemplates: () =>
+      request<{ templates: AdminEmailTemplate[] }>("/api/admin/email-templates").then(
+        (r) => r.templates,
+      ),
+    setEmailTemplate: (
+      key: string,
+      body: { subject: string; bodyHtml: string; bodyText: string },
+    ) =>
+      request<{ ok: true }>(`/api/admin/email-templates/${encodeURIComponent(key)}`, {
+        ...jsonBody(body),
+        method: "PUT",
+      }),
+    resetEmailTemplate: (key: string) =>
+      request<{ ok: true }>(`/api/admin/email-templates/${encodeURIComponent(key)}`, {
+        method: "DELETE",
+      }),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),

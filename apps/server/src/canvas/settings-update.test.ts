@@ -94,6 +94,24 @@ describe("resolveSettingsUpdate — tenancy (plan 002 review fix)", () => {
     const r = resolve(canvas({ access: "private", orgId: null }), { access: "whole_org" });
     expect(r).toMatchObject({ ok: true });
   });
+
+  // plan 003 phase 3: the team rung no longer requires a home org or active tenancy at the
+  // settings-update level — a PERSONAL team may be granted to a personal (org-less) canvas.
+  // The grant resolver (resolveTeamGrant) does the real validation (TEAM_REQUIRED/FORBIDDEN).
+  it("allows the team rung on an ORG-LESS canvas under active tenancy (personal-team case)", () => {
+    const r = resolve(canvas({ access: "private", orgId: null }), { access: "team" }, ACTIVE);
+    expect(r).toMatchObject({ ok: true, targetAccess: "team" });
+  });
+
+  it("allows the team rung when tenancy is INERT (the grant resolver validates the teams)", () => {
+    const r = resolve(canvas({ access: "private", orgId: "org-A" }), { access: "team" });
+    expect(r).toMatchObject({ ok: true, targetAccess: "team" });
+  });
+
+  it("allows the team rung on a homed canvas under active tenancy (grants validated by the caller)", () => {
+    const r = resolve(canvas({ access: "private", orgId: "org-A" }), { access: "team" }, ACTIVE);
+    expect(r).toMatchObject({ ok: true, targetAccess: "team" });
+  });
 });
 
 describe("resolveSettingsUpdate — denial paths", () => {

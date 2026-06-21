@@ -19,6 +19,7 @@
         "file": "authoring/sharing.md",
         "title": "Sharing & access"
       },
+      { "path": "authoring/teams", "file": "authoring/teams.md", "title": "Teams" },
       {
         "path": "authoring/capabilities",
         "file": "authoring/capabilities.md",

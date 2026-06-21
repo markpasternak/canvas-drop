@@ -22,6 +22,8 @@ import { generateApiKey, hashApiKey } from "../src/canvas/api-key.js";
 import { makeDb } from "../src/db/factory.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { canvasesRepository } from "../src/db/repositories/canvases.js";
+import { invitationsRepository } from "../src/db/repositories/invitations.js";
+import { teamsRepository } from "../src/db/repositories/teams.js";
 import { usersRepository } from "../src/db/repositories/users.js";
 import { versionsRepository } from "../src/db/repositories/versions.js";
 
@@ -309,6 +311,24 @@ async function main() {
 
     byOwner.set(owner.name, (byOwner.get(owner.name) ?? 0) + 1);
     if (p.published && p.shared && p.listed && !p.protectedCanvas) galleryVisible++;
+  }
+
+  // Teams (plan 003) — a personal "Family" team owned by the admin dev user, with one colleague
+  // as a member and a not-yet-signed-in PENDING invite. This populates the /teams marketing
+  // shot (tour-teams.webp) with the real invite story. Neutral data only (R11): @example.com +
+  // a generic "sam@example.com" pending invitee. Idempotent: skip if it already exists.
+  const teams = teamsRepository(dbClient);
+  const invitations = invitationsRepository(dbClient);
+  if (!(await teams.nameTakenByCreator(null, admin.id, "Family"))) {
+    const family = await teams.create({ orgId: null, name: "Family", createdBy: admin.id });
+    const colleague = others[0];
+    if (colleague) await teams.addMember(family.id, colleague.id);
+    await invitations.record({
+      email: "sam@example.com",
+      target: { type: "team", id: family.id },
+      role: "member",
+      invitedBy: admin.id,
+    });
   }
 
   const ownerLines = [...byOwner.entries()]

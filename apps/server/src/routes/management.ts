@@ -34,6 +34,7 @@ import {
   POPULAR_WINDOW_MS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -44,6 +45,7 @@ import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
 import type { Mailer } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import type { InviteService } from "../invites/service.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
 import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
@@ -53,10 +55,23 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { listSharedWithTeams, resolveTeamGrant } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
+  /** Teams store (plan 003 U4/U5) — the canvas→team grant flow on PATCH /:id/settings,
+   *  the current-grants read on the owner canvas view, and the "shared with my teams"
+   *  list. Optional: suites that don't exercise the team rung may omit it. */
+  teams?: Pick<
+    TeamsRepository,
+    | "findById"
+    | "isTeamMember"
+    | "setCanvasTeams"
+    | "listTeamIdsForCanvas"
+    | "listCanvasIdsForUserTeams"
+    | "teamMatch"
+  >;
   config: Config;
   canvases: CanvasesRepository;
   users: UsersRepository;
@@ -87,6 +102,9 @@ export interface ManagementDeps extends PreviewHintDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
+   *  it. Optional: suites that don't exercise the invite path may omit it. */
+  invites?: InviteService;
   // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
   // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
@@ -119,7 +137,10 @@ const settingsSchema = z.object({
   // First-class access rung (D4). `public_link` is admin-gated per account (U10) —
   // accepted here but rejected unless the owner holds the capability. `shared`
   // remains a deprecated boolean alias (true→whole_org, false→private).
-  access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
+  access: z.enum(["private", "specific_people", "team", "whole_org", "public_link"]).optional(),
+  // Teams to grant when access='team' (plan 003 U4). Owner may grant only teams they
+  // belong to in this canvas's org (validated server-side at grant time, KTD4).
+  teamIds: z.array(z.string().min(1)).max(50).optional(),
   // Guest-AI opt-in (U9): off by default; cap is a per-canvas monthly USD ceiling.
   guestAiEnabled: z.boolean().optional(),
   guestAiCap: z.number().min(0).optional(),
@@ -148,6 +169,10 @@ function ownerCanvasView(
   cv: Canvas,
   globals: CapabilityGlobals,
   hasPreview = false,
+  /** The teams this canvas is granted to (plan 003 U5) — only meaningful (and only
+   *  resolved) when `access === 'team'`. Empty on the list path (no per-row join);
+   *  populated on the single-canvas view so the share picker can pre-check them. */
+  teamIds: string[] = [],
 ) {
   return {
     id: cv.id,
@@ -162,6 +187,9 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // The teams this canvas is shared with (plan 003 U5). Empty unless access==='team'
+    // (and only resolved on the single-canvas view; the list path leaves it []).
+    teamIds,
     // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
     // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
     orgId: cv.orgId,
@@ -230,7 +258,7 @@ const ownerListQuerySchema = z.object({
   // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
   // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
   access: z
-    .enum(["private", "specific_people", "whole_org", "public_link"])
+    .enum(["private", "specific_people", "team", "whole_org", "public_link"])
     .optional()
     .catch(undefined),
   shared: boolFlag,
@@ -272,7 +300,11 @@ export function managementRoutes(deps: ManagementDeps) {
   /** Serialize one canvas with the per-request effective globals. */
   async function canvasView(cv: Canvas) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview);
+    // Resolve the canvas's team grants only here (the single-canvas view) — the share
+    // picker pre-checks them. The list path skips this join (teamIds stays []).
+    const teamIds =
+      deps.teams && cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : [];
+    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds);
   }
 
   /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
@@ -377,13 +409,21 @@ export function managementRoutes(deps: ManagementDeps) {
     // Non-owner clone eligibility runs through the SAME gallery visibility predicate as
     // browse (plan 002 U5), org-scoped to the caller: an org template is cloneable only by
     // a member of its org; a personal public_link template (org_id null) stays cloneable.
+    // PLUS the team branch (plan 003 U4): a member of one of a `team` canvas's granted teams
+    // may clone it — team canvases never reach the gallery, so this is their only clone path,
+    // gated by the SAME live-org `teamMatch` re-join that the serve seam uses (KTD3).
+    const orgIds = c.get("orgIds") ?? new Set<string>();
     const eligible =
       source.ownerId === user.id
         ? source.status === "active"
         : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
             tenancyActive: !!deps.config.org.name,
-            viewerOrgIds: c.get("orgIds") ?? new Set<string>(),
-          })) !== null;
+            viewerOrgIds: orgIds,
+          })) !== null ||
+          (source.access === "team" &&
+            source.status === "active" &&
+            !!deps.teams &&
+            (await deps.teams.teamMatch(id, user.id, orgIds)));
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
     const { canvas } = await deps.clone.clone(source, user.id);
@@ -546,6 +586,37 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ id: cv.id });
   });
 
+  // "Shared with my teams" (plan 003 U5): the team canvases the caller can reach via a
+  // team they belong to. This is the ONLY surface for strictly-team-scoped canvases —
+  // they never appear in the org-wide gallery (locked decision). Static segment, so it
+  // is registered before `/:id` (else Hono captures it as `:id="shared-with-teams"`).
+  // The repo join re-uses the caller's LIVE server-resolved orgIds (KTD3 re-join), so a
+  // user removed from the org sees nothing here. Excludes the caller's OWN canvases
+  // (those live in Your-canvases) and anything not live (unpublished/archived/disabled
+  // → unreachable anyway). Display-only projection — never leaks owner email / secrets.
+  app.get("/shared-with-teams", async (c) => {
+    const user = c.get("user");
+    const orgIds = c.get("orgIds") ?? new Set<string>();
+    if (!deps.teams) return c.json({ canvases: [] });
+    const shared = await listSharedWithTeams(
+      { teams: deps.teams, canvases: deps.canvases, users: deps.users },
+      user.id,
+      orgIds,
+    );
+    const previews = await previewIds(shared.map((s) => s.canvas.id));
+    return c.json({
+      canvases: shared.map(({ canvas: cv, owner }) => ({
+        id: cv.id,
+        slug: cv.slug,
+        url: canvasUrl(deps.config, cv.slug),
+        title: cv.title,
+        description: cv.description,
+        hasPreview: previewVisible(cv, previews),
+        owner,
+      })),
+    });
+  });
+
   app.get("/:id", async (c) => {
     const cv = await ownedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
@@ -581,6 +652,36 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const { patch, password, targetAccess, warning } = resolution;
 
+    // Team grant flow (plan 003 U4/U5): resolve + persist the canvas→team grants BEFORE
+    // the access write, so a forbidden grant never leaves a team canvas with zero teams (an
+    // explicit deny to everyone). The shared resolver (also used by MCP update_canvas)
+    // validates owner-team membership (KTD4), requires ≥1 team when sharing, lets an agent
+    // change the grant set without re-sending `access`, and clears on a rung change away
+    // from team. `teamGranted` drives the audit for a grant-only change (no rung change).
+    let teamGranted = false;
+    if (deps.teams) {
+      const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
+        canvasOrgId: cv.orgId,
+        currentAccess: cv.access,
+        targetAccess,
+        teamIds: body.data.teamIds,
+      });
+      if (grant.kind === "error") {
+        const status = grant.code === "TEAM_REQUIRED" ? 409 : 403;
+        const message =
+          grant.code === "TEAM_REQUIRED"
+            ? "Pick at least one team to share with."
+            : "You can only share with teams you belong to in this org.";
+        return c.json({ code: grant.code, message }, status);
+      }
+      if (grant.kind === "write") {
+        await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
+        teamGranted = true;
+      } else if (grant.kind === "clear") {
+        await deps.teams.setCanvasTeams(cv.id, []);
+      }
+    }
+
     let updated = cv;
     if (Object.keys(patch).length > 0) {
       updated = await deps.canvases.updateSettings(cv.id, patch);
@@ -606,12 +707,14 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { cleared: password === null },
       });
     }
-    if (targetAccess !== undefined) {
+    // Audit a rung change, OR a grant-only change to the team set (no rung change) — the
+    // latter would otherwise leave no trail when an owner re-picks the granted teams.
+    if (targetAccess !== undefined || teamGranted) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { access: targetAccess },
+        meta: { access: targetAccess ?? cv.access, ...(teamGranted ? { teamsChanged: true } : {}) },
       });
     }
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost
@@ -693,6 +796,50 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const failure = await inviteGuest(c, cv, body.data.email);
     return failure ?? c.json({ ok: true, kind: "guest" });
+  });
+
+  /** Individual one-off canvas invite (plan 003 U8): a DELIBERATE "invite this person to this
+   *  canvas" action, distinct from the silent Specific-people add above. Routes through the
+   *  auth-delegated invite primitive — an existing user is granted + emailed (per
+   *  `notifyOnCanvasInvite`); a brand-new email becomes a pending invitation that materializes
+   *  on their first verified login (no app-owned magic link), with the individual-invite
+   *  courtesy email. KTD5-gated + rate-limited (a self-serve owner can't permit a new
+   *  external email unless the toggle is on). */
+  app.post("/:id/invite", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    if (!deps.invites)
+      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
+    const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = c.get("user");
+    const r = await deps.invites.resolveOrInvite(
+      {
+        kind: "canvas",
+        canvasId: cv.id,
+        canvasSlug: cv.slug,
+        canvasTitle: cv.title,
+        mode: "invite",
+      },
+      body.data.email,
+      { id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin },
+    );
+    if (r.status === "rejected") {
+      return c.json(
+        { code: "NOT_PERMITTED", message: "That email can't be invited from here." },
+        403,
+      );
+    }
+    if (r.status === "rate_limited") {
+      return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);
+    }
+    deps.audit.recordAudit({
+      action: "allowlist_add",
+      actorId: user.id,
+      targetId: cv.id,
+      meta: { kind: "invite", status: r.status },
+    });
+    return c.json({ ok: true, status: r.status });
   });
 
   /** Re-send a guest invite (fresh token); only valid for a guest entry. */

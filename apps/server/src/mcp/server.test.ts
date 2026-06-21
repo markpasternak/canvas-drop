@@ -14,8 +14,11 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -23,7 +26,9 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
+import { makeInviteService } from "../invites/testing.js";
 import { memStorage } from "../storage/mem.js";
+import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
 import { buildMcpServer } from "./server.js";
 
@@ -46,12 +51,21 @@ async function connect(
   client: DbClient,
   caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
   screenshotsEnabled = false,
+  // Config the MCP server runs under. Defaults to the org-less config; team-grant tests
+  // pass a tenancy config so `update_canvas access=team` sees tenancy active (the guard
+  // reads config.org.name, not the caller flag).
+  cfg = config,
+  // Blob store. Defaults to a fresh in-memory store; cross-connection tests (e.g. a
+  // teammate cloning the owner's deployed canvas) pass ONE shared store so the source
+  // blobs the clone copies are visible to the second connection.
+  storage = memStorage(),
 ): Promise<Client> {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const draftsRepo = draftsRepository(client);
-  const storage = memStorage();
   const audit = createAuditLog(auditRepository(client), silent);
+  const teams = teamsRepository(client);
+  const orgMembers = orgMembersRepository(client);
   const engine = deployEngine({
     config,
     canvases,
@@ -62,9 +76,20 @@ async function connect(
   });
   const server = buildMcpServer(
     {
-      config,
+      config: cfg,
       users: usersRepository(client),
       orgs: orgsRepository(client),
+      orgMembers,
+      teams,
+      teamsService: teamsService({
+        teams,
+        orgMembers,
+        users: usersRepository(client),
+        invites: makeInviteService(client, cfg),
+        audit,
+      }),
+      invites: makeInviteService(client, cfg),
+      invitations: invitationsRepository(client),
       canvases,
       versions,
       engine,
@@ -1304,5 +1329,406 @@ describe.each(DIALECTS)("MCP tenancy parity (plan 002 U7) [%s]", (dialect) => {
     const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: null } }));
     const row = await canvasesRepository(client).findById(cv.id);
     expect(row?.orgId).toBeNull();
+  });
+});
+
+describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seedOrg() {
+    return orgsRepository(client).ensureOrg({ name: "A", slug: "a", domains: ["a.example"] });
+  }
+  /** Seed a user AND materialize their org membership (so they're a same-org member). */
+  async function member(email: string, orgId: string) {
+    const id = await seedUser(client, email);
+    await orgMembersRepository(client).upsertDomainMember(orgId, id);
+    return id;
+  }
+  // Tenancy config so `update_canvas access=team` sees tenancy active (the guard reads
+  // config.org.name). The seeded org id is what homes the canvas; the config name only
+  // flips the tenancy switch on.
+  const tenantConfig = loadConfig({ CANVAS_DROP_ORG_NAME: "A" });
+  const connectMember = (userId: string, orgId: string) =>
+    connect(client, { userId, orgIds: new Set([orgId]), tenancyActive: true }, false, tenantConfig);
+  const html = () => zip({ "index.html": "<h1>hi</h1>" });
+
+  it("create_team + list_teams: a member creates and manages a team", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    expect(team).toMatchObject({ orgId: org.id, name: "Design" });
+    const { teams } = payload(await mcp.callTool({ name: "list_teams", arguments: {} }));
+    expect(teams).toHaveLength(1);
+    expect(teams[0]).toMatchObject({ id: team.id, mine: true, canManage: true });
+  });
+
+  it("create_team is denied for an org you don't belong to", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const outsiderId = await seedUser(client, "out@b.example");
+    const mcp = await connect(client, {
+      userId: outsiderId,
+      orgIds: new Set<string>(),
+      tenancyActive: true,
+    });
+    const res = await mcp.callTool({
+      name: "create_team",
+      arguments: { orgId: org.id, name: "X" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("NOT_A_MEMBER");
+  });
+
+  it("add_team_member adds a same-org colleague; rejects a non-org user", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const colleagueId = await member("col@a.example", org.id);
+    await seedUser(client, "out@b.example"); // exists but no org membership
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "add_team_member",
+          arguments: { id: team.id, email: "col@a.example" },
+        }),
+      ),
+    ).toBe(false);
+    const { members } = payload(
+      await mcp.callTool({ name: "list_team_members", arguments: { id: team.id } }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(members.map((m: any) => m.userId).sort()).toEqual([ownerId, colleagueId].sort());
+    const bad = await mcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "out@b.example" },
+    });
+    expect(isError(bad)).toBe(true);
+    expect(text(bad)).toContain("TARGET_NOT_MEMBER");
+  });
+
+  it("create_team (no orgId) makes a PERSONAL team; add_team_member grants an existing user, rejects a brand-new external email (plan 003 U9)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@nowhere.test"); // no org
+    const palId = await seedUser(client, "pal@nowhere.test"); // existing user, no org
+    const mcp = await connect(client, {
+      userId: ownerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { name: "Family" } }),
+    );
+    expect(team.orgId).toBeNull();
+
+    // Existing user → granted now.
+    const granted = payload(
+      await mcp.callTool({
+        name: "add_team_member",
+        arguments: { id: team.id, email: "pal@nowhere.test" },
+      }),
+    );
+    expect(granted).toMatchObject({ status: "granted" });
+    const { members } = payload(
+      await mcp.callTool({ name: "list_team_members", arguments: { id: team.id } }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(members.map((m: any) => m.userId).sort()).toEqual([ownerId, palId].sort());
+
+    // Brand-new external email, self-serve (non-admin), toggle off → refused (KTD5).
+    const refused = await mcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "stranger@elsewhere.test" },
+    });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toContain("TARGET_NOT_PERMITTED");
+  });
+
+  it("invite_to_canvas mirrors the HTTP denials: existing user granted, brand-new external rejected (plan 003 U9)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@nowhere.test");
+    await seedUser(client, "pal@nowhere.test");
+    const mcp = await connect(client, {
+      userId: ownerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+
+    const granted = payload(
+      await mcp.callTool({
+        name: "invite_to_canvas",
+        arguments: { id: cv.id, email: "pal@nowhere.test" },
+      }),
+    );
+    expect(granted).toMatchObject({ status: "granted" });
+
+    const refused = await mcp.callTool({
+      name: "invite_to_canvas",
+      arguments: { id: cv.id, email: "stranger@elsewhere.test" },
+    });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toContain("NOT_PERMITTED");
+  });
+
+  it("update_canvas access=team grants the team; get_canvas echoes teamIds", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    // An empty team grant is refused (a deny to everyone).
+    const empty = await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [] },
+    });
+    expect(isError(empty)).toBe(true);
+    expect(text(empty)).toContain("TEAM_REQUIRED");
+    const granted = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+      }),
+    );
+    expect(granted).toMatchObject({ access: "team", teamIds: [team.id] });
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }));
+    expect(got.teamIds).toEqual([team.id]);
+  });
+
+  it("update_canvas rejects granting a team you don't belong to", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const otherId = await member("other@a.example", org.id);
+    const ownerMcp = await connectMember(ownerId, org.id);
+    const otherMcp = await connectMember(otherId, org.id);
+    const theirTeam = payload(
+      await otherMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Theirs" },
+      }),
+    );
+    const cv = payload(
+      await ownerMcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    const res = await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [theirTeam.id] },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("TEAM_FORBIDDEN");
+  });
+
+  it("list_shared_with_teams surfaces a team canvas to a teammate, not the owner", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const ownerMcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    await ownerMcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "mate@a.example" },
+    });
+    const cv = payload(
+      await ownerMcp.callTool({
+        name: "create_canvas",
+        arguments: { orgId: org.id, title: "Team Thing" },
+      }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+    });
+    // The owner does NOT see their own canvas in the shared-with-teams read.
+    expect(
+      payload(await ownerMcp.callTool({ name: "list_shared_with_teams", arguments: {} })).canvases,
+    ).toHaveLength(0);
+    // The teammate does.
+    const mateMcp = await connectMember(mateId, org.id);
+    const { canvases } = payload(
+      await mateMcp.callTool({ name: "list_shared_with_teams", arguments: {} }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(canvases.map((c: any) => c.id)).toContain(cv.id);
+  });
+
+  it("clone_canvas: a team member may clone a team canvas; a non-member cannot", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const strangerId = await member("stranger@a.example", org.id);
+    // ONE shared blob store so the clone (on the teammate's connection) can read the
+    // source's deployed files the owner's connection wrote.
+    const store = memStorage();
+    const conn = (userId: string) =>
+      connect(
+        client,
+        { userId, orgIds: new Set([org.id]), tenancyActive: true },
+        false,
+        tenantConfig,
+        store,
+      );
+    const ownerMcp = await conn(ownerId);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    await ownerMcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "mate@a.example" },
+    });
+    const cv = payload(
+      await ownerMcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+    });
+    // The teammate clones it into a fresh canvas they own.
+    const cloned = payload(
+      await (await conn(mateId)).callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+    );
+    expect(cloned.id).toBeTruthy();
+    expect(cloned.id).not.toBe(cv.id);
+    // A same-org NON-member of the team can't — it reads as not found.
+    const denied = await (await conn(strangerId)).callTool({
+      name: "clone_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(isError(denied)).toBe(true);
+    expect(text(denied)).toContain("not found");
+  });
+
+  it("rename_team is creator-only over MCP (no admin bypass)", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const otherId = await member("other@a.example", org.id);
+    const ownerMcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    const otherMcp = await connectMember(otherId, org.id);
+    const res = await otherMcp.callTool({
+      name: "rename_team",
+      arguments: { id: team.id, name: "Hacked" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("FORBIDDEN");
+    expect(
+      isError(
+        await ownerMcp.callTool({
+          name: "rename_team",
+          arguments: { id: team.id, name: "Design 2" },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("update_canvas: a teamIds-only change re-grants an already-team canvas (no access re-send)", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const t1 = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "A" } }),
+    );
+    const t2 = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "B" } }),
+    );
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [t1.id] },
+    });
+    // teamIds WITHOUT access on an already-team canvas changes the grant set (was a no-op).
+    const updated = payload(
+      await mcp.callTool({ name: "update_canvas", arguments: { id: cv.id, teamIds: [t2.id] } }),
+    );
+    expect(updated.teamIds).toEqual([t2.id]);
+    // An empty teamIds-only change is still rejected (no deny-to-everyone).
+    const empty = await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, teamIds: [] },
+    });
+    expect(isError(empty)).toBe(true);
+    expect(text(empty)).toContain("TEAM_REQUIRED");
+  });
+
+  it("rename_team is opaque (not-found, not forbidden) for a team in another org", async () => {
+    client = await makeTestDb(dialect);
+    const orgs = orgsRepository(client);
+    const orgA = await orgs.ensureOrg({ name: "A", slug: "a", domains: ["a.example"] });
+    const orgB = await orgs.ensureOrg({ name: "B", slug: "b", domains: ["b.example"] });
+    const aliceId = await seedUser(client, "alice@a.example");
+    await orgMembersRepository(client).upsertDomainMember(orgA.id, aliceId);
+    const bobId = await seedUser(client, "bob@b.example");
+    await orgMembersRepository(client).upsertDomainMember(orgB.id, bobId);
+    // Bob creates a team in org B.
+    const bobMcp = await connect(client, {
+      userId: bobId,
+      orgIds: new Set([orgB.id]),
+      tenancyActive: true,
+    });
+    const team = payload(
+      await bobMcp.callTool({ name: "create_team", arguments: { orgId: orgB.id, name: "Secret" } }),
+    );
+    // Alice (org A) can't even tell it exists — opaque not-found, never a 403.
+    const aliceMcp = await connect(client, {
+      userId: aliceId,
+      orgIds: new Set([orgA.id]),
+      tenancyActive: true,
+    });
+    const res = await aliceMcp.callTool({
+      name: "rename_team",
+      arguments: { id: team.id, name: "Hacked" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("TEAM_NOT_FOUND");
+  });
+
+  it("whoami lists the caller's teams", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    const me = payload(await mcp.callTool({ name: "whoami", arguments: {} }));
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(me.teams.map((t: any) => t.id)).toContain(team.id);
   });
 });

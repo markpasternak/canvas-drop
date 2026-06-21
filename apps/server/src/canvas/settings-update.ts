@@ -8,7 +8,7 @@ import { isAnonymouslyPublic } from "./authorization.js";
 export interface CanvasSettingsInput {
   title?: string;
   description?: string | null;
-  access?: "private" | "specific_people" | "whole_org" | "public_link";
+  access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
   shared?: boolean;
   guestAiEnabled?: boolean;
   guestAiCap?: number;
@@ -31,7 +31,7 @@ export type SettingsResolution =
       /** undefined = leave password unchanged; null = clear; string = set (caller hashes). */
       password: string | null | undefined;
       /** The resolved target access rung, or undefined when unchanged (for the audit event). */
-      targetAccess?: "private" | "specific_people" | "whole_org" | "public_link";
+      targetAccess?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
       /** Non-blocking advisory for the owner — e.g. CDN edge-cache staleness on an
        *  access downgrade. Present only when there's something worth surfacing. */
       warning?: string;
@@ -104,6 +104,11 @@ export function resolveSettingsUpdate(
       status: 409,
     };
   }
+  // The `team` rung (plan 003 phase 3) no longer requires a home org or active tenancy: a
+  // PERSONAL team can be granted to a personal (org-less) canvas. The actual grant — which
+  // teams, owner membership, org-match for org teams — is validated + written by the caller's
+  // grant resolver (`resolveTeamGrant`), which returns TEAM_REQUIRED (no teams) / TEAM_FORBIDDEN
+  // (invalid), so there's no pure guard to duplicate here.
   if (rest.galleryListed === true) {
     if (!willBeShared) {
       return {

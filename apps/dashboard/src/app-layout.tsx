@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   SidebarSimple,
   SquaresFour,
+  UsersThree,
   X,
 } from "@phosphor-icons/react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
@@ -26,7 +27,7 @@ import { useMe } from "./lib/queries.js";
  *  Icons match the preview's left-rail nav (icon + label per item). These are the
  *  REAL routes — no fake Templates/Trash entries the preview used as filler. */
 const SECTION_LINKS: ReadonlyArray<{
-  to: "/" | "/admin" | "/gallery";
+  to: "/" | "/admin" | "/gallery" | "/teams";
   label: string;
   icon: Icon;
   exact?: boolean;
@@ -34,6 +35,9 @@ const SECTION_LINKS: ReadonlyArray<{
 }> = [
   { to: "/", label: "Canvases", icon: SquaresFour, exact: true },
   { to: "/gallery", label: "Gallery", icon: Compass },
+  // Teams (plan 003 U6) — any signed-in user can have personal teams (friends & family),
+  // so this is no longer org-gated.
+  { to: "/teams", label: "Teams", icon: UsersThree },
   // Admin sits last — below the member-facing sections, visible only to admins
   // (and the admin API independently 404s non-admins).
   { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
@@ -145,6 +149,7 @@ function DocsLink({
 function pageNameForPath(pathname: string): string {
   if (pathname === "/") return "Canvases";
   if (pathname === "/gallery") return "Gallery";
+  if (pathname === "/teams") return "Teams";
   if (pathname === "/new") return "Create canvas";
   if (pathname === "/onboarding") return "Get started";
   if (pathname === "/admin/canvases") return "Admin · Canvases";

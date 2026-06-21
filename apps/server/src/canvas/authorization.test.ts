@@ -164,12 +164,59 @@ describe("decideCanvasAccess — denials", () => {
     ).toMatchObject({ action: "allow" });
   });
 
-  it("the reserved `team` rung is rejected (404) until P2 implements it", () => {
-    // The CHECK permits 'team' (KTD5) but decideCanvasAccess denies it like private.
-    expect(decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW)).toMatchObject({
-      action: "deny",
-      status: 404,
-    });
+  // ---- team rung (plan 003 U4): members of a granted team only ----
+  const TEAM_OK = { tenancyActive: true, teamMatch: true } as const;
+  const TEAM_NO = { tenancyActive: true, teamMatch: false } as const;
+
+  it("team: a matched member (granted team + live org) is allowed", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW, TEAM_OK),
+    ).toMatchObject({ action: "allow", staticOnly: false });
+  });
+
+  it("team: a member who is NOT in a granted team is 404 (teamMatch false)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW, TEAM_NO),
+    ).toMatchObject({ status: 404, reason: "owner_only" });
+  });
+
+  it("team: a guest / anonymous is 404 (outsiders never match a team)", () => {
+    const cv = canvas({ id: "cvT", access: "team", orgId: ORG_A });
+    expect(decideCanvasAccess(cv, guest("cvT"), NOW, TEAM_OK)).toMatchObject({ status: 404 });
+    expect(decideCanvasAccess(cv, anon, NOW, TEAM_OK)).toMatchObject({ status: 404 });
+  });
+
+  // plan 003 phase 3: `teamMatch` is now the sole gate — it encodes the personal-vs-org rule
+  // and membership — so a team canvas is allowed wherever teamMatch is true, regardless of the
+  // canvas's org or tenancy state. (Org teams still resolve teamMatch=false under inert tenancy,
+  // because the viewer has no orgIds — but that's the repo's job, not this decision table's.)
+  it("team: a matched member is allowed even under INERT tenancy (teamMatch is the gate)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW, { teamMatch: true }),
+    ).toMatchObject({ action: "allow" });
+  });
+
+  it("team: a NULL org_id (PERSONAL canvas) is allowed with a teamMatch (personal team)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "team", orgId: null }), other, NOW, TEAM_OK),
+    ).toMatchObject({ action: "allow", staticOnly: false });
+  });
+
+  it("team: a matched member past the share expiry is 404 (share_expired)", () => {
+    expect(
+      decideCanvasAccess(
+        canvas({ access: "team", orgId: ORG_A, sharedExpiresAt: NOW - 1 }),
+        other,
+        NOW,
+        TEAM_OK,
+      ),
+    ).toMatchObject({ status: 404, reason: "share_expired" });
+  });
+
+  it("team: the OWNER is allowed by the owner bypass, regardless of teamMatch", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), owner, NOW, TEAM_NO),
+    ).toMatchObject({ action: "allow" });
   });
 
   it("specific_people: a member NOT on the allowlist is 404", () => {

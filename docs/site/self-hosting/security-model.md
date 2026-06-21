@@ -70,7 +70,11 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    once at creation, and a session token rides only in an HttpOnly cookie.
 3. **No unauthorized access.** A canvas is reachable only by its owner; at
    the `whole_org` rung, allowed org members (when [tenancy](#the-org-boundary-member-vs-guest)
-   is on, that means members of the canvas's *home* org — not brought-in guests); at `specific_people`, a principal on
+   is on, that means members of the canvas's *home* org — not brought-in guests); at the
+   `team` rung, a member of one of the canvas's granted teams — re-checked on every request
+   by re-joining the principal's **live** org membership (a stale `team_members` row can't
+   widen access, so a user removed from the org is denied immediately, and a `team` canvas
+   under inert tenancy or with no home org is a deny to everyone); at `specific_people`, a principal on
    its allowlist (an org member, or an invited guest whose magic-link session is
    for *that* canvas); at `public_link`, anyone — but static-only and only while
    the owner account holds the admin-granted publish capability. All subject to
@@ -113,6 +117,29 @@ The boundary is **inert until an org is named**, so it's an opt-in tightening, n
 a default. Turning it on for an existing instance is a one-time, dry-run-first
 cutover — see [Configuration → Tenancy](/docs/self-hosting/configuration) and the
 `docs/tenancy.md` runbook.
+
+## Invites are auth-delegated (no app-owned credentials)
+
+When you invite someone who doesn't have an account yet — to a personal team, a canvas, or
+via the admin **Add users** page — canvas-drop records a **pending invitation**, not a new
+login. There is **no app-owned magic-link account and no app-stored password**. The grant
+materializes the *first time that email authenticates* through the instance's configured auth
+(`oidc` / `proxy` / `dev`) — the identity provider is the only authority, so there's nothing
+to take over. The verified login email is the match key; a pending invitation can never grant
+access on its own.
+
+Who may permit a **brand-new email** to sign in is gated (a load-bearing rule):
+
+- An **admin** can, via [Add users](/docs/self-hosting/configuration#add-users--invites).
+- A **member** can only if the operator turns on `email.allowMemberInvitesToNewEmails` (off by
+  default), **or** the email already authenticates (its domain is allowlisted, or it's already
+  a permitted user). Otherwise a self-serve invite of an unknown external email is **rejected**
+  — a member can't widen who may sign in to your instance.
+
+This replaces the older guest **magic-link** flow for these surfaces. (Per-canvas guest invites
+on the *Specific people* rung still use a scoped magic link in `oidc`/`dev` mode; see
+[Sharing](/docs/authoring/sharing#inviting-specific-people).) Invite volume is bounded
+per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
 
 ## Identity is always server-side (invariant #1)
 

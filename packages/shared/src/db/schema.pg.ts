@@ -67,6 +67,18 @@ export const settings = pgTable("settings", {
   value: c.json("value").notNull(),
 });
 
+// Admin-editable email templates (plan 003 phase 3). One row per template key (a missing
+// row means "use the seeded default" — reset = delete the row). `updated_by`/`updated_at`
+// are null/0 for the boot-seeded defaults; set on an admin override.
+export const emailTemplates = pgTable("email_templates", {
+  key: c.text("key").primaryKey(),
+  subject: c.text("subject").notNull(),
+  bodyHtml: c.text("body_html").notNull(),
+  bodyText: c.text("body_text").notNull(),
+  updatedBy: c.text("updated_by"),
+  updatedAt: c.epochMs("updated_at").notNull(),
+});
+
 // Remote MCP OAuth (agent control plane). DCR-registered clients, single-use
 // authorization codes, and hashed access/refresh tokens — all minted only after
 // the user authenticates via the existing login. Structurally identical to
@@ -627,5 +639,127 @@ export const screenshotJobs = pgTable(
       "screenshot_jobs_status_chk",
       sql`${t.status} in ('pending', 'running', 'done', 'failed')`,
     ),
+  ],
+);
+
+// Teams (plan 003, Tenancy P2). Four additive tables — the `team` access value is
+// already reserved in canvases_access_chk (P1/KTD6), so no CHECK migration here.
+
+// Explicit org membership (P2/KTD1). In P1 membership was purely derived from the
+// verified email domain; P2 materializes it as a row at login so it can be a join
+// target. `source='domain'` is the ONLY source written in P2 (an invite/cross-domain
+// flow is deferred to P4 — D8); `role` is a flat 'member' placeholder (KTD5).
+export const orgMembers = pgTable(
+  "org_members",
+  {
+    id: c.text("id").primaryKey(),
+    orgId: c
+      .text("org_id")
+      .notNull()
+      .references(() => orgs.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: c.text("role").notNull().default("member"),
+    source: c.text("source").notNull().default("domain"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("org_members_org_user_uq").on(t.orgId, t.userId),
+    index("org_members_user_idx").on(t.userId),
+  ],
+);
+
+// A members-only sharing group inside one org (P2/KTD3). Self-serve: `created_by`
+// is the de-facto manager until P4 RBAC (KTD5). Unique (org_id, slug).
+export const teams = pgTable(
+  "teams",
+  {
+    id: c.text("id").primaryKey(),
+    // Nullable (plan 003 phase 3): a NULL org_id marks a PERSONAL team (user-owned, no
+    // org). The `team` access predicate widens to `org_id IS NULL OR org_id IN viewerOrgIds`
+    // — personal teams grant by direct membership, org teams keep the live org re-join.
+    orgId: c.text("org_id").references(() => orgs.id),
+    name: c.text("name").notNull(),
+    slug: c.text("slug").notNull(),
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("teams_org_slug_uq").on(t.orgId, t.slug), index("teams_org_idx").on(t.orgId)],
+);
+
+// Membership of a team (P2/KTD3). A row is legitimate only while the user also holds
+// a live org_members row for the team's org — re-checked at read (the `team` rung
+// re-joins org_members) AND reconciled on domain removal (U2). `role` flat (KTD5).
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: c.text("id").primaryKey(),
+    teamId: c
+      .text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    userId: c
+      .text("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: c.text("role").notNull().default("member"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("team_members_team_user_uq").on(t.teamId, t.userId),
+    index("team_members_user_idx").on(t.userId),
+  ],
+);
+
+// Grants a canvas to a team (P2/KTD4): `access='team'` means "a member of any granted
+// team". The grant is INDEPENDENT of the owner's continued team membership (the canvas
+// was shared TO the team). Composite PK (canvas_id, team_id).
+export const canvasTeams = pgTable(
+  "canvas_teams",
+  {
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    teamId: c
+      .text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.canvasId, t.teamId] }),
+    index("canvas_teams_team_idx").on(t.teamId),
+  ],
+);
+
+// Pending invitations (plan 003 phase 4 / U4). A grant recorded BEFORE the invitee has a
+// `users` row: when that email first authenticates (verified by the IdP/proxy — never client
+// input), the grant materializes (a `team_members` or `canvas_allowlist` row) and the row is
+// stamped `consumed_at`. No app-owned credentials — auth stays delegated to the configured
+// provider, so there is nothing to take over. `target_type` is polymorphic ('team' | 'canvas')
+// so there is no FK on `target_id`; `invited_by` references the actor.
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: c.text("id").primaryKey(),
+    email: c.text("email").notNull(), // lowercased; the verified-login key
+    targetType: c.text("target_type").notNull(), // 'team' | 'canvas'
+    targetId: c.text("target_id").notNull(),
+    role: c.text("role"), // team member role; null for a canvas grant
+    invitedBy: c.text("invited_by").references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+    consumedAt: c.epochMs("consumed_at"),
+  },
+  (t) => [
+    index("invitations_email_idx").on(t.email),
+    uniqueIndex("invitations_email_target_uq").on(t.email, t.targetType, t.targetId),
+    index("invitations_invited_by_idx").on(t.invitedBy),
+    check("invitations_target_type_chk", sql`${t.targetType} in ('team', 'canvas')`),
   ],
 );

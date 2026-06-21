@@ -21,9 +21,12 @@ import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -31,9 +34,11 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { type DeployEngine, deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
 import type { EmailMessage, Mailer } from "../email/mailer.js";
+import { makeInviteService } from "../invites/testing.js";
 import { buildMcpServer } from "../mcp/server.js";
 import { createHub, type RealtimeHub } from "../realtime/hub.js";
 import { memStorage } from "../storage/mem.js";
+import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
 
 /**
@@ -303,11 +308,24 @@ export async function connectMcp(
   caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
 ): Promise<McpClient> {
   const { config, repos, storage, engine, audit } = h;
+  const teams = teamsRepository(h.client);
+  const orgMembers = orgMembersRepository(h.client);
   const server = buildMcpServer(
     {
       config,
       users: repos.users,
       orgs: orgsRepository(h.client),
+      orgMembers,
+      teams,
+      teamsService: teamsService({
+        teams,
+        orgMembers,
+        users: repos.users,
+        invites: makeInviteService(h.client, config),
+        audit,
+      }),
+      invites: makeInviteService(h.client, config),
+      invitations: invitationsRepository(h.client),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,

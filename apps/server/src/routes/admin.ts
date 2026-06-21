@@ -12,11 +12,14 @@ import type { AdminCanvasStatus, AdminRepository } from "../db/repositories/admi
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { DEFAULT_TEMPLATES, TEMPLATE_KEYS } from "../email/templates.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import type { InviteService } from "../invites/service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "./canvas-kv.js";
 
 export interface AdminRoutesDeps {
@@ -29,6 +32,11 @@ export interface AdminRoutesDeps {
   aiUsage: AiUsageRepository;
   settings: AdminSettingsService;
   allowedEmails: AllowedEmailsRepository;
+  /** Admin-editable email templates (plan 003 phase 3). */
+  emailTemplates: EmailTemplatesRepository;
+  /** The invite primitive (plan 003 U5) — Add-users permits + invites through it (so the new
+   *  email gets a courtesy email and, on a matching domain, org membership on first login). */
+  invites: InviteService;
   audit: AuditLog;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
@@ -36,7 +44,7 @@ export interface AdminRoutesDeps {
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
-const ACCESS_RUNGS = ["private", "specific_people", "whole_org", "public_link"] as const;
+const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
 // `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
 // presence-style flags in the URL (?templatable=true), mirroring the member list.
@@ -72,6 +80,14 @@ const quotasBody = z.object({
 // type — the settings service validates/coerces against the registry).
 const configBody = z.object({
   value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+});
+
+/** An email-template override body (plan 003 phase 3). Bodies are bounded; the renderer
+ *  HTML-escapes interpolated values, so an admin can paste HTML here intentionally. */
+const templateBody = z.object({
+  subject: z.string().trim().min(1).max(300),
+  bodyHtml: z.string().max(20_000),
+  bodyText: z.string().max(20_000),
 });
 
 /** The hard fallback for each admin-tunable quota key (KV/files constants; AI from config). */
@@ -486,16 +502,35 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     return c.json({ emails: await deps.allowedEmails.list() });
   });
 
+  // Add users (plan 003 U7) — the only way to permit a brand-new email to sign in. Routes
+  // through the invite primitive with the admin allowance: it permits the email (an
+  // `allowed_emails` row when the domain doesn't already authenticate), records nothing to
+  // materialize (org membership auto-derives from the domain on first login), and sends a
+  // courtesy email. Existing allowlist entries keep working — this replaces the bare add.
   app.post("/allowed-emails", sameOrigin, async (c) => {
     const body = allowedEmailBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const entry = await deps.allowedEmails.add(body.data.email, c.get("user").id);
+    const user = c.get("user");
+    const r = await deps.invites.resolveOrInvite({ kind: "account" }, body.data.email, {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+    });
+    // An admin is never rate-limited or permit-gated, so the only outcomes are granted/pending.
     deps.audit.recordAudit({
       action: "allowed_email_add",
-      actorId: c.get("user").id,
-      meta: { email: body.data.email },
+      actorId: user.id,
+      meta: { email: body.data.email.trim().toLowerCase() },
     });
-    return c.json({ ok: true, entry });
+    // Surface the resulting allowlist entry when one was created (off-domain email) so the
+    // panel can show it; a domain-matched email needs no row (it already authenticates).
+    const status = r.status === "granted" || r.status === "pending" ? r.status : "pending";
+    const entry =
+      (await deps.allowedEmails.list()).find(
+        (e) => e.email === body.data.email.trim().toLowerCase(),
+      ) ?? null;
+    return c.json({ ok: true, status, entry });
   });
 
   app.delete("/allowed-emails/:id", sameOrigin, async (c) => {
@@ -602,6 +637,59 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       action: "admin_settings_update",
       actorId: c.get("user").id,
       meta: { keys: [`config.${key}`, "cleared"] },
+    });
+    return c.json({ ok: true });
+  });
+
+  // ── Email templates (plan 003 phase 3): list / get-effective / override / reset ──────────
+  // Each known key always resolves (admin override else seeded default), so the editor can
+  // show + edit every template even before any override exists.
+  app.get("/email-templates", async (c) => {
+    const overrides = new Map((await deps.emailTemplates.list()).map((t) => [t.key, t]));
+    const templates = TEMPLATE_KEYS.map((key) => {
+      const row = overrides.get(key);
+      const body = row ?? DEFAULT_TEMPLATES[key];
+      // A boot-seeded default row has `updatedBy = null`; only an ADMIN override sets it. So
+      // a present row alone is NOT "overridden" — the boot seed inserts one for every key, so
+      // `!!row` would read as customized everywhere in production. Key off the updater.
+      return {
+        key,
+        subject: body.subject,
+        bodyHtml: body.bodyHtml,
+        bodyText: body.bodyText,
+        overridden: row?.updatedBy != null,
+      };
+    });
+    return c.json({ templates });
+  });
+
+  app.put("/email-templates/:key", sameOrigin, async (c) => {
+    const key = c.req.param("key");
+    if (!TEMPLATE_KEYS.includes(key as (typeof TEMPLATE_KEYS)[number])) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const body = templateBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    await deps.emailTemplates.upsert(key, body.data, c.get("user").id);
+    deps.audit.recordAudit({
+      action: "admin_settings_update",
+      actorId: c.get("user").id,
+      meta: { keys: [`email_template.${key}`] },
+    });
+    return c.json({ ok: true });
+  });
+
+  // Reset a template to its seeded default (delete the override row).
+  app.delete("/email-templates/:key", sameOrigin, async (c) => {
+    const key = c.req.param("key");
+    if (!TEMPLATE_KEYS.includes(key as (typeof TEMPLATE_KEYS)[number])) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    await deps.emailTemplates.remove(key);
+    deps.audit.recordAudit({
+      action: "admin_settings_update",
+      actorId: c.get("user").id,
+      meta: { keys: [`email_template.${key}`, "reset"] },
     });
     return c.json({ ok: true });
   });

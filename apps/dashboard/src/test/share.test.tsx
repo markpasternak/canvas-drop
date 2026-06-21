@@ -41,6 +41,8 @@ const ME = {
   isAdmin: false,
   canPublishPublic: false,
   authMode: "dev",
+  // An org member (the Team rung is gated on org membership).
+  orgs: [{ id: "o1", name: "Acme" }],
 };
 
 function json(body: unknown, status = 200): Response {
@@ -54,6 +56,9 @@ function mockFetch(handlers: Record<string, () => Response>) {
   const calls: { method: string; url: string; body?: string }[] = [];
   const defaults: Record<string, () => Response> = {
     "GET /api/me": () => json(ME),
+    // The share control loads the caller's teams for the Team rung picker (plan 003);
+    // default to none so existing tests don't hit the unmocked fallback.
+    "GET /api/teams": () => json({ teams: [] }),
   };
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
@@ -231,6 +236,80 @@ describe("share route", () => {
     expect(screen.queryByText(/sharing unlocks after you publish/i)).toBeNull();
   });
 
+  it("team rung: picking Team reveals the picker; sharing PATCHes access:team + teamIds", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/teams": () =>
+        json({
+          teams: [
+            { id: "t1", orgId: "o1", name: "Design", slug: "design", mine: true, canManage: true },
+          ],
+        }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...published, access: "team", shared: true, teamIds: ["t1"] }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    // The rung exists between Specific people and Whole org.
+    await user.click(await screen.findByRole("radio", { name: /^team/i }));
+    // Picking it reveals the picker (no write yet — an empty team grant is a 409). The
+    // checkbox label now also carries a scope badge ("Acme" / "Personal"), so match by substring.
+    const teamCheckbox = await screen.findByLabelText(/Design/);
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    // The org-team scope badge shows the org name so the share target's reach is legible.
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+
+    await user.click(teamCheckbox);
+    await user.click(screen.getByRole("button", { name: /share with teams/i }));
+
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"access":"team"');
+      expect(patch?.body).toContain("t1");
+    });
+  });
+
+  it("team rung: shows a 'create a team' notice when the caller has no teams", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/teams": () => json({ teams: [] }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("radio", { name: /^team/i }));
+    expect(await screen.findByText(/not in any team yet/i)).toBeInTheDocument();
+  });
+
+  it("team rung is hidden for a guest (no org)", async () => {
+    mockFetch({
+      "GET /api/me": () => json({ ...ME, isGuest: true, orgs: [] }),
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /private/i });
+    expect(screen.queryByRole("radio", { name: /^team/i })).toBeNull();
+  });
+
+  it("whole-org rung is disabled on a Personal canvas, but the Team rung stays enabled (plan 003 U6)", async () => {
+    mockFetch({
+      "GET /api/me": () => json({ ...ME, orgs: [{ id: "o1", name: "Acme" }] }),
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, orgId: null, publicationState: "published", currentVersionId: "v1" }),
+    });
+    renderShare();
+    // A personal canvas CAN be shared with a personal team — the Team rung is enabled…
+    expect(await screen.findByRole("radio", { name: /^team/i })).toBeEnabled();
+    // …but it still can't be shared org-wide.
+    expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
+  });
+
   it("published: shows the live access ladder (rungs are enabled)", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>
@@ -327,9 +406,33 @@ describe("share route", () => {
     renderShare();
 
     expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
-    await user.type(await screen.findByLabelText(/add by email/i), "colleague@example.com");
+    await user.type(await screen.findByLabelText(/person's email/i), "colleague@example.com");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
+  });
+
+  it("specific_people: the Invite button sends an individual invite (plan 003 U8)", async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "specific_people",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "POST /api/canvases/c1/invite": () => json({ ok: true, status: "pending" }),
+    });
+    renderShare();
+
+    await user.type(await screen.findByLabelText(/person's email/i), "newbie@example.com");
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    await vi.waitFor(() => {
+      const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/invite");
+      expect(post?.body).toContain("newbie@example.com");
+    });
   });
 
   it("updates guest AI settings for specific people access", async () => {

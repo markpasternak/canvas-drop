@@ -4,19 +4,25 @@ import type {
   auditLog,
   canvasAllowlist,
   canvases,
+  canvasTeams,
   drafts,
+  emailTemplates,
   files,
   guestInvites,
   guestSessions,
+  invitations,
   kvEntries,
   mcpTokens,
   oauthClients,
   oauthCodes,
   orgDomains,
+  orgMembers,
   orgs,
   screenshotJobs,
   sessions,
   settings,
+  teamMembers,
+  teams,
   uploadSessions,
   usageEvents,
   users,
@@ -39,12 +45,28 @@ export type AuditEntry = typeof auditLog.$inferSelect;
 export type NewAuditEntry = typeof auditLog.$inferInsert;
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
 export type Canvas = typeof canvases.$inferSelect;
 export type NewCanvas = typeof canvases.$inferInsert;
 export type Org = typeof orgs.$inferSelect;
 export type NewOrg = typeof orgs.$inferInsert;
 export type OrgDomain = typeof orgDomains.$inferSelect;
 export type NewOrgDomain = typeof orgDomains.$inferInsert;
+export type OrgMember = typeof orgMembers.$inferSelect;
+export type NewOrgMember = typeof orgMembers.$inferInsert;
+export type Team = typeof teams.$inferSelect;
+export type NewTeam = typeof teams.$inferInsert;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type NewTeamMember = typeof teamMembers.$inferInsert;
+export type CanvasTeam = typeof canvasTeams.$inferSelect;
+export type NewCanvasTeam = typeof canvasTeams.$inferInsert;
+export type Invitation = typeof invitations.$inferSelect;
+export type NewInvitation = typeof invitations.$inferInsert;
+/** Membership role (flat in P2 — only 'member' is written; RBAC is P4). */
+export type MembershipRole = "member";
+/** How an org_members row was created (P2 only materializes 'domain'). */
+export type OrgMemberSource = "domain";
 export type Version = typeof versions.$inferSelect;
 export type NewVersion = typeof versions.$inferInsert;
 export type Draft = typeof drafts.$inferSelect;
@@ -90,13 +112,15 @@ export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
  * Canvas access rung (D4 ladder). One rung per canvas, stored as text:
  *  - `private`         — owner only (default; a non-owner admin is treated as any member)
  *  - `specific_people` — a named allowlist (org members and/or invited guests)
+ *  - `team`            — members of a granted team (plan 003 P2; needs a home org)
  *  - `whole_org`       — any authenticated org member with the link (the former "shared")
  *  - `public_link`     — anyone with the link; admin-gated per account; static-only
  */
-export type AccessRung = "private" | "specific_people" | "whole_org" | "public_link";
+export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 export const ACCESS_RUNGS: readonly AccessRung[] = [
   "private",
   "specific_people",
+  "team",
   "whole_org",
   "public_link",
 ];

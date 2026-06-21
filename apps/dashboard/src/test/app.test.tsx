@@ -252,7 +252,7 @@ describe("dashboard app", () => {
     const order = within(desktopNav)
       .getAllByRole("link")
       .map((a) => a.textContent);
-    expect(order).toEqual(["Canvases", "Gallery", "Admin"]);
+    expect(order).toEqual(["Canvases", "Gallery", "Teams", "Admin"]);
   });
 
   it("Admin is hidden from non-admins (UX layer of the admin-only boundary)", async () => {

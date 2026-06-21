@@ -125,7 +125,9 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
       // Resolve the caller's org membership server-side (plan 002 U7) from the verified
       // user — same DI resolver the gateway uses; never anything the client asserted.
       const user = await deps.users.findById(auth.userId);
-      const orgIds = user ? await makeOrgMembershipResolver(deps.orgs)(user) : new Set<string>();
+      const orgIds = user
+        ? await makeOrgMembershipResolver(deps.orgs, deps.orgMembers)(user)
+        : new Set<string>();
       // Fresh transport + server per request (stateless), bound to the verified caller.
       // `McpRoutesDeps extends McpToolDeps`, so structural subtyping lets us pass the
       // deps straight through — no field-by-field reconstruction to drift out of sync.

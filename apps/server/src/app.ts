@@ -29,14 +29,19 @@ import {
 } from "./db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
+import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
+import { invitationsRepository } from "./db/repositories/invitations.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { teamsRepository } from "./db/repositories/teams.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
 import { docsRoutes } from "./docs/routes.js";
 import type { Mailer } from "./email/mailer.js";
+import { noopMailer } from "./email/noop.js";
 import { checkHealth } from "./health.js";
 import { brandAssetRoutes } from "./http/brand-assets.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
@@ -53,6 +58,7 @@ import {
 import { securityHeadersMiddleware } from "./http/security-headers.js";
 import { socialPreview } from "./http/social-preview.js";
 import type { AppEnv } from "./http/types.js";
+import { inviteService } from "./invites/service.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import { mcpRoutes } from "./mcp/routes.js";
@@ -65,10 +71,12 @@ import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
+import { teamsRoutes } from "./routes/teams.js";
 import { resolveRequest } from "./routing/resolve-request.js";
 import { captureResolver } from "./screenshots/capture-resolver.js";
 import { PREVIEW_ASSET_PATH, servePreview } from "./screenshots/serve.js";
 import type { StorageDriver } from "./storage/driver.js";
+import { teamsService } from "./teams/service.js";
 import { composeServices } from "./wiring.js";
 
 export interface BuildAppDeps {
@@ -85,6 +93,10 @@ export interface BuildAppDeps {
    *  that omit it get an empty orgs table → every member resolves to ∅, the legacy
    *  org-agnostic behavior). */
   orgs?: OrgsRepository;
+  /** Explicit org-membership store (plan 003 U2). Optional: defaults to a repo over
+   *  `db`. Materialized at login by the membership resolver; the real-time boundary
+   *  stays the live resolver, so this table is roster/reconcile bookkeeping. */
+  orgMembers?: OrgMembersRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   drafts: DraftsRepository;
@@ -136,12 +148,23 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // The individual sign-in allowlist (D14 supplement). Resolve once: callers may
   // inject one, else build a repo over `db` (an empty allowlist = domain-only).
   const allowedEmails = deps.allowedEmails ?? allowedEmailsRepository(deps.db);
+  // Admin-editable email templates (plan 003 phase 3). Boot seeds the defaults (index.ts).
+  const emailTemplates = emailTemplatesRepository(deps.db);
 
   // Tenancy org store + the membership resolver (plan 002 U3). Default to a repo over
   // `db`: tests/callers that omit `orgs` get the real, empty orgs table → every member
   // resolves to ∅, i.e. the legacy org-agnostic `whole_org` behavior.
   const orgs = deps.orgs ?? orgsRepository(deps.db);
-  const orgMembership = makeOrgMembershipResolver(orgs);
+  const orgMembers = deps.orgMembers ?? orgMembersRepository(deps.db);
+  const orgMembership = makeOrgMembershipResolver(orgs, orgMembers);
+
+  // Teams (plan 003 P2): the repo + the authz-bearing service the routes AND MCP wrap.
+  // The service is constructed below, once the invite primitive it depends on exists.
+  const teams = teamsRepository(deps.db);
+
+  // Pending invitations (plan 003 U4): grants recorded before the invitee has a user row,
+  // materialized on their first verified login (see authGateway below).
+  const invitations = invitationsRepository(deps.db);
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -158,6 +181,36 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // login, password-gate) so MAX_KEYS bounds everything. Per-buildApp = per-test
   // isolation.
   const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
+
+  // The invite primitive (plan 003 U5): ONE shared layer every owner-facing invite surface
+  // (team add, canvas add/invite, admin Add-users) routes through — rate-limit → resolve →
+  // grant-now-or-record-pending → notify, with the KTD5 new-email permit gate. Wraps the same
+  // services/repos the routes use. `noopMailer` keeps `canSend` false when email is
+  // unconfigured (grants still apply; no courtesy mail).
+  const mailer = deps.mailer ?? noopMailer();
+  const invites = inviteService({
+    config: deps.config,
+    users: deps.users,
+    allowedEmails,
+    invitations,
+    teams,
+    canvases: deps.canvases,
+    settings: settingsSvc,
+    templates: emailTemplates,
+    mailer,
+    rateLimitStore: rlStore,
+    log: deps.rootLogger,
+  });
+
+  // The team service depends on the invite primitive (personal-team adds route through it).
+  const teamsSvc = teamsService({
+    teams,
+    orgMembers,
+    users: deps.users,
+    invites,
+    audit: deps.audit,
+  });
+
   // Obtain the WebSocket upgrade helper for THIS app instance (chicken-and-egg:
   // @hono/node-ws needs the app; the route needs the helper). Realtime is wired
   // only when both the helper and the hub are present.
@@ -340,6 +393,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         strategy: deps.strategy,
         users: deps.users,
         orgs,
+        orgMembers,
+        teams,
+        teamsService: teamsSvc,
+        invites,
+        invitations,
         allowedEmails,
         oauth,
         canvases: deps.canvases,
@@ -435,6 +493,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         users: deps.users,
         allowedEmails,
         orgMembership,
+        invitations: { invitations, teams, canvases: deps.canvases },
         audit: deps.audit,
       }),
     ),
@@ -466,6 +525,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     canvasApiRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      teams,
       kv: kvRepository(deps.db),
       files: filesService({
         files,
@@ -523,6 +583,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     managementRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      teams,
       users: deps.users,
       versions: deps.versions,
       clone,
@@ -535,6 +596,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       hub: deps.hub,
       guests: deps.guests,
       mailer: deps.mailer,
+      invites,
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
@@ -542,6 +604,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
       screenshots,
     }),
+  );
+
+  // Team management (plan 003 P2) — session-authenticated, behind the gateway.
+  app.route(
+    "/api/teams",
+    teamsRoutes({ config: deps.config, service: teamsSvc, teams, users: deps.users, invitations }),
   );
 
   // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
@@ -558,6 +626,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       aiUsage,
       settings: settingsSvc,
       allowedEmails,
+      emailTemplates,
+      invites,
       audit: deps.audit,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
     }),
@@ -583,7 +653,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   app.use(
     "*",
-    onlyCanvas(canvasAccess({ canvases: deps.canvases, tenancyActive: !!deps.config.org.name })),
+    onlyCanvas(
+      canvasAccess({ canvases: deps.canvases, teams, tenancyActive: !!deps.config.org.name }),
+    ),
   );
   app.use(
     "*",

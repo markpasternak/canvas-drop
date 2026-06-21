@@ -23,6 +23,7 @@ One rung per canvas, stored as the `access` field (default `private`):
 | --- | --- | --- |
 | **Private** | Only you, the owner. | Full, for the owner. |
 | **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
+| **Team** | Members of the [teams](/docs/authoring/teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
@@ -58,6 +59,18 @@ Guests get **KV, files, and realtime**. **AI is off for guests** unless you turn
 it on for the canvas (the *Guest permissions* section), and when you do you set a
 **USD spend cap** — AI is the metered-cost primitive, so it's opt-in and bounded.
 
+### Add vs Invite
+
+The People list has two actions. **Add** grants an existing member access quietly (no
+email). **Invite** is a deliberate one-off invitation that emails the person — and it
+works for someone who hasn't signed in yet: a brand-new email becomes a **pending
+invitation** that turns into real access the first time they sign in through your
+instance's configured auth. There's no app-owned password or magic-link account; the
+invitee authenticates the same way everyone else does. A self-serve owner can't invite a
+brand-new *external* email unless an admin enabled that (see
+[Add users](/docs/self-hosting/configuration#add-users--invites)); existing users and
+people on your org's domains can always be invited.
+
 A guest is never prompted for the canvas password; their magic link is the gate.
 Owners are never prompted either. Other non-owners are prompted when a password
 is set.
@@ -68,6 +81,27 @@ is set.
 > guest invites are refused (`GUESTS_UNAVAILABLE`); without configured email they
 > fail with `EMAIL_NOT_CONFIGURED`. You can still allowlist existing org members
 > by email in any mode.
+
+## Sharing with a team
+
+Choose **Team** to share with one or more [teams](/docs/authoring/teams)
+— named groups you create. A team can be **personal** (friends & family — anyone you invite
+by email) or **org-attached** (a subset of your org). The share control lists only the teams
+**you belong to**; pick one or more, and every member can open and use the canvas (full
+backend, like a member). A team grant is independent of your own membership afterward — if
+you later leave the team, the canvas stays shared with it until you change the rung.
+
+Team canvases are **strictly team-scoped**: they never appear in the org-wide gallery.
+Members reach them through **Teams → Shared with your teams** in the dashboard (or
+`list_shared_with_teams` over [MCP](/docs/agents/mcp)). For an **org** team, membership is
+re-checked on every request against your *live* org membership, so someone removed from the
+org loses access immediately, even if a stale team row lingers. For a **personal** team,
+direct membership is the boundary.
+
+> Unlike **Whole org**, the **Team** rung does **not** require an org workspace: any
+> signed-in user can create a personal team and share even a
+> [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas with it. You
+> manage teams — create, invite, leave — on the **Teams** page.
 
 ## Password & expiry
 

@@ -291,3 +291,42 @@ describe("adminSettingsService — screenshots enablement (plan 004 / U12)", () 
     expect(avail).toMatchObject({ editable: false, type: "boolean" });
   });
 });
+
+describe("effectiveInviteSettings (plan 003 phase 3)", () => {
+  it("defaults: email off, notifications on, rate 20/h, pending cap 50, member-new-emails off", async () => {
+    const s = adminSettingsService({ settings: fakeSettings(), config });
+    expect(await s.effectiveInviteSettings()).toEqual({
+      emailEnabled: false,
+      notifyOnAddUser: true,
+      notifyOnCanvasAdd: true,
+      notifyOnCanvasInvite: true,
+      maxPerActorPerHour: 20,
+      pendingCap: 50,
+      allowMemberNewEmails: false,
+    });
+  });
+
+  it("DB overrides win (email on, tighter rate, member-new-emails on)", async () => {
+    const store = fakeSettings();
+    await store.set("config.email.invitesEnabled", true);
+    await store.set("config.invites.maxPerActorPerHour", 5);
+    await store.set("config.invites.pendingCap", 3);
+    await store.set("config.invites.allowMemberNewEmails", true);
+    await store.set("config.email.notifyOnCanvasAdd", false);
+    const eff = await adminSettingsService({ settings: store, config }).effectiveInviteSettings();
+    expect(eff).toMatchObject({
+      emailEnabled: true,
+      maxPerActorPerHour: 5,
+      pendingCap: 3,
+      allowMemberNewEmails: true,
+      notifyOnCanvasAdd: false,
+    });
+  });
+
+  it("a non-positive rate override falls back to the default", async () => {
+    const store = fakeSettings();
+    await store.set("config.invites.maxPerActorPerHour", 0);
+    const s = adminSettingsService({ settings: store, config });
+    expect((await s.effectiveInviteSettings()).maxPerActorPerHour).toBe(20);
+  });
+});

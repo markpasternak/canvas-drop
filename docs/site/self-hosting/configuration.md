@@ -93,12 +93,14 @@ from the server-side auth strategy, never from anything the client sends.
 | `CANVAS_DROP_AUTH_MODE` | `dev` | `dev` \| `proxy` \| `oidc`. `dev` is **rejected when `NODE_ENV=production`**. |
 | `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` | (empty) | CSV, lowercased. **Required (≥1) in `proxy`/`oidc`.** |
 
-> **Individual email allowlist.** Beyond the domain list above, an admin can allow
-> specific outside emails to sign in (e.g. a contractor or a test account) under
-> **Admin → Users → Allowed sign-in emails**. It's an additive, DB-managed layer:
-> the env domain list is unchanged, and an email passes if its domain is allowed
-> **or** it's on this list. Removing an entry revokes that email's access on its
-> next sign-in.
+> **Add users / invites.** Beyond the domain list above, an admin can permit specific
+> outside emails to sign in (a contractor, a test account, a friend) under
+> **Admin → Users → Add users**. It's an additive, DB-managed layer: the env domain list is
+> unchanged, and an email passes if its domain is allowed **or** it's on this list. Adding an
+> email sends a sign-in invitation and — on a matching org domain — makes them a member on
+> first sign-in; there's no app-owned password (see
+> [Add users & invites](#add-users--invites)). Removing an entry revokes that email's access on
+> its next sign-in.
 
 ### dev mode
 
@@ -253,6 +255,27 @@ server-side only and never logged.
 | `CANVAS_DROP_MAILGUN_API_KEY` | (unset) | Mailgun HTTP API key (driver `mailgun`). |
 | `CANVAS_DROP_MAILGUN_DOMAIN` | (unset) | e.g. `mg.example.com`. |
 | `CANVAS_DROP_MAILGUN_BASE_URL` | `https://api.mailgun.net` | Use `https://api.eu.mailgun.net` for EU. |
+
+## Add users & invites
+
+These are **DB-managed admin settings** (no env vars) under **Admin → Configuration**, layered
+on top of the mailer above. They govern the [auth-delegated invite](/docs/self-hosting/security-model#invites-are-auth-delegated-no-app-owned-credentials)
+flow — personal-team invites, the individual canvas **Invite**, and admin **Add users**.
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `email.invitesEnabled` | `false` | Master switch — when off, grants still happen but **no** invite/notification emails are sent (also requires the mailer to be configured). |
+| `email.notifyOnAddUser` | `true` | Email a courtesy invitation when an admin adds a user. |
+| `email.notifyOnCanvasAdd` | `true` | Email an existing user when added to a canvas (Specific people). |
+| `email.notifyOnCanvasInvite` | `true` | Email on an individual one-off canvas invite. |
+| `invites.allowMemberInvitesToNewEmails` | `false` | Allow a non-admin **member** to invite a brand-new *external* email (off = only admins, domain-matched, or already-permitted emails). |
+| `invites.maxPerActorPerHour` | `20` | Per-actor invite rate cap (admins bypass). |
+| `invites.pendingCap` | `50` | Max un-consumed pending invitations one actor may hold (admins bypass). |
+
+Adding a brand-new person to a **team** always emails them the sign-in invitation (gated only by
+the master switch); existing members are not re-notified. **Email templates** for each of these
+messages are admin-editable (subject + HTML + text, with safe `{{variable}}` interpolation and a
+reset-to-default) under **Admin → Configuration → Email templates**.
 
 ## Logging & error tracking
 

@@ -8,6 +8,7 @@ import type { AccessRung, AdminCanvasSort, AdminCanvasStatus } from "./lib/api.j
 // LCP / route-transition budgets — area E, U2).
 const IndexRoute = lazy(() => import("./routes/index.js"));
 const GalleryRoute = lazy(() => import("./routes/gallery.js"));
+const TeamsRoute = lazy(() => import("./routes/teams.js"));
 const NewRoute = lazy(() => import("./routes/new.js"));
 const OnboardingRoute = lazy(() => import("./routes/onboarding.js"));
 const CanvasLayout = lazy(() => import("./routes/canvas.js"));
@@ -142,6 +143,11 @@ const galleryRoute = createRoute({
   }),
   component: GalleryRoute,
 });
+const teamsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/teams",
+  component: TeamsRoute,
+});
 const newRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/new",
@@ -255,6 +261,7 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   archivedRoute,
   galleryRoute,
+  teamsRoute,
   newRoute,
   onboardingRoute,
   ...(import.meta.env.DEV ? [cardDemoRoute] : []),

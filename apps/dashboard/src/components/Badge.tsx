@@ -91,6 +91,7 @@ export function PublicationBadge({ state }: { state: PublicationState }) {
 const ACCESS_BADGE: Record<AccessRung, { tone: Tone; label: string; dot: boolean }> = {
   private: { tone: "neutral", label: "Private", dot: false },
   specific_people: { tone: "accent", label: "Specific people", dot: false },
+  team: { tone: "accent", label: "Team", dot: false },
   whole_org: { tone: "accent", label: "Whole org", dot: false },
   public_link: { tone: "warning", label: "Public", dot: true },
 };

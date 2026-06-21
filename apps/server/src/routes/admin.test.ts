@@ -10,6 +10,7 @@ import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { emailTemplatesRepository } from "../db/repositories/email-templates.js";
 import { filesRepository } from "../db/repositories/files.js";
 import {
   seedListed,
@@ -21,7 +22,9 @@ import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
+import { seedDefaultTemplates } from "../email/templates.js";
 import type { AppEnv } from "../http/types.js";
+import { makeInviteService } from "../invites/testing.js";
 import { adminRoutes } from "./admin.js";
 
 const silent = pino({ level: "silent" });
@@ -48,6 +51,8 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       aiUsage: aiUsageRepository(client),
       settings: adminSettingsService({ settings: settingsRepository(client), config }),
       allowedEmails: allowedEmailsRepository(client),
+      emailTemplates: emailTemplatesRepository(client),
+      invites: makeInviteService(client, config),
       audit,
     }),
   );
@@ -819,11 +824,117 @@ describe("admin routes", () => {
     expect(((await after.json()) as { emails: unknown[] }).emails).toHaveLength(0);
   });
 
+  it("add-users (U7): a brand-new off-domain email is permitted (pending); an existing user is granted with no new permit row", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+
+    // Brand-new email → permitted + pending (the invitee will sign in for the first time).
+    const newAdd = await app.request(
+      "/api/admin/allowed-emails",
+      post({ email: "fresh@partner.io" }),
+    );
+    expect(newAdd.status).toBe(200);
+    expect((await newAdd.json()) as { status: string }).toMatchObject({ status: "pending" });
+
+    // An EXISTING user re-added → granted now, and NO duplicate allowlist row is created
+    // (they can already sign in).
+    await usersRepository(client).upsert({
+      providerSub: "existing",
+      email: "existing@partner.io",
+      name: "Existing",
+      isAdmin: false,
+    });
+    const exAdd = await app.request(
+      "/api/admin/allowed-emails",
+      post({ email: "existing@partner.io" }),
+    );
+    expect((await exAdd.json()) as { status: string }).toMatchObject({ status: "granted" });
+    const emails = (
+      (await (await app.request("/api/admin/allowed-emails")).json()) as {
+        emails: Array<{ email: string }>;
+      }
+    ).emails;
+    expect(emails.map((e) => e.email)).not.toContain("existing@partner.io");
+  });
+
   it("allowed-emails CRUD 404s for a non-admin (no existence leak)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const { app } = buildAdminApp(client, { id: owner.id, isAdmin: false });
     expect((await app.request("/api/admin/allowed-emails")).status).toBe(404);
+  });
+
+  it("email-templates: list resolves every key, PUT overrides, DELETE resets (plan 003 phase 3)", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    // Boot seeds a row for EVERY key (updated_by null) — mirror that so `overridden` is tested
+    // the way production runs (a present seed row must NOT read as customized).
+    await seedDefaultTemplates(emailTemplatesRepository(client));
+
+    // List resolves every known key; a seeded (un-edited) row is NOT overridden.
+    const initial = await app.request("/api/admin/email-templates");
+    expect(initial.status).toBe(200);
+    const before = (
+      (await initial.json()) as {
+        templates: Array<{ key: string; overridden: boolean }>;
+      }
+    ).templates;
+    expect(before.map((t) => t.key).sort()).toEqual([
+      "account_invite",
+      "canvas_invite",
+      "individual_canvas_invite",
+      "team_invite",
+    ]);
+    expect(before.every((t) => t.overridden === false)).toBe(true);
+
+    // PUT overrides one template.
+    const updated = await app.request(
+      "/api/admin/email-templates/team_invite",
+      put({
+        subject: "Custom subject",
+        bodyHtml: "<p>Custom {{teamName}}</p>",
+        bodyText: "Custom",
+      }),
+    );
+    expect(updated.status).toBe(200);
+    const afterPut = (
+      (await (await app.request("/api/admin/email-templates")).json()) as {
+        templates: Array<{ key: string; subject: string; overridden: boolean }>;
+      }
+    ).templates;
+    const team = afterPut.find((t) => t.key === "team_invite");
+    expect(team?.subject).toBe("Custom subject");
+    expect(team?.overridden).toBe(true);
+
+    // DELETE resets it back to the seeded default.
+    expect(
+      (await app.request("/api/admin/email-templates/team_invite", { method: "DELETE" })).status,
+    ).toBe(200);
+    const afterReset = (
+      (await (await app.request("/api/admin/email-templates")).json()) as {
+        templates: Array<{ key: string; overridden: boolean }>;
+      }
+    ).templates;
+    expect(afterReset.find((t) => t.key === "team_invite")?.overridden).toBe(false);
+
+    // An unknown key 404s (no silent create).
+    expect(
+      (
+        await app.request(
+          "/api/admin/email-templates/bogus",
+          put({ subject: "x", bodyHtml: "x", bodyText: "x" }),
+        )
+      ).status,
+    ).toBe(404);
+  });
+
+  it("email-templates 404 for a non-admin (no existence leak)", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const { app } = buildAdminApp(client, { id: owner.id, isAdmin: false });
+    expect((await app.request("/api/admin/email-templates")).status).toBe(404);
   });
 
   it("canvases list filters by access rung (admin governance — find every public canvas)", async () => {

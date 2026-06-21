@@ -98,12 +98,31 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
     body: "Drag a folder, paste HTML, push from a script, or connect your AI agent over MCP so it can create and deploy canvases for you. A canvas is just static files: no build to wait on, nothing to provision.",
   },
   {
-    title: "Shared with your org",
-    body: "Every canvas lives behind your organization's sign-in. Keep it private, invite specific people, open it to the whole org, or publish an admin-gated public link. Add a password or an expiry, and revoke access whenever you want.",
+    title: "Shared exactly as far as you mean",
+    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish an admin-gated public link. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
   },
   {
     title: "Versions you can roll back",
     body: "Each publish snapshots an immutable version. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click.",
+  },
+];
+
+/** The per-canvas access ladder (the sharing model, plan 003). Rendered as a marketing
+ *  visual — the landing is the widest-reaching surface for the team + invite story. Order
+ *  matches the product's rung order (private → specific_people → team → whole_org → public_link). */
+const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
+  { rung: "Private", who: "Just you, the owner." },
+  { rung: "Specific people", who: "A named few you add or invite, by email." },
+  {
+    rung: "Team",
+    who: "A group you create — your colleagues, or friends & family you invite by email.",
+    feature: true,
+  },
+  { rung: "Whole org", who: "Anyone signed in to your organization." },
+  {
+    rung: "Public link",
+    who: "Anyone with the URL — admin-gated, and static files only.",
+    tag: "admin",
   },
 ];
 
@@ -136,7 +155,14 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   {
     img: "tour-sharing",
     label: "Sharing & access",
-    caption: "Per canvas: keep it org-only, invite a guest, or open an admin-gated public link.",
+    caption:
+      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish an admin-gated public link.",
+  },
+  {
+    img: "tour-teams",
+    label: "Teams & invites",
+    caption:
+      "Make a team — your colleagues, or friends & family — and invite anyone by email. They join the instant they first sign in; no password for you to manage.",
   },
   {
     img: "tour-capabilities",
@@ -157,6 +183,10 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
 
 /** "Built for teams" — admin & control capabilities. */
 const TEAM: ReadonlyArray<{ title: string; body: string }> = [
+  {
+    title: "Teams & invites",
+    body: "Group people into a team — your colleagues, or friends & family — and share a subset of canvases with just them. Invite by email; new people get access the instant they first sign in. No app-managed passwords, no magic-link accounts.",
+  },
   {
     title: "Org sign-in (SSO)",
     body: "Everyone signs in with your Google or OIDC org account, gated by email domain and an admin allowlist.",
@@ -420,6 +450,18 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .value:nth-child(3) .num { color: oklch(0.5 0.14 168); }
 .value p { margin: .25rem 0 0; color: var(--muted); }
 
+/* sharing ladder — the access model as an editorial list, the Team rung accented */
+.ladder { display: grid; gap: .55rem; max-width: 62ch; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
+.rung { display: grid; grid-template-columns: 1.6rem 1fr; gap: 1rem; align-items: start; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
+.rung .r-step { font-family: var(--font-serif); font-weight: 500; font-size: 1.5rem; line-height: 1.1; color: var(--muted); text-align: right; }
+.rung .r-name { font-family: var(--font-serif); font-weight: 500; font-size: 1.2rem; letter-spacing: -.01em; }
+.rung .r-who { margin: .15rem 0 0; color: var(--muted); font-size: .98rem; }
+.rung.feature { border-color: var(--amber); background: color-mix(in oklab, var(--amber) 7%, var(--surface)); box-shadow: 0 0 0 1px var(--amber) inset; }
+.rung.feature .r-step { color: var(--amber-ink); }
+.r-tag { display: inline-block; margin-left: .55rem; font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--amber-ink); border: 1px solid var(--amber); border-radius: 100px; padding: .12rem .5rem; vertical-align: middle; }
+.ladder-note { max-width: 62ch; margin: 1.25rem 0 0; color: var(--muted); font-size: .98rem; line-height: 1.55; }
+.ladder-note strong { color: var(--fg); font-weight: 600; }
+
 /* primitives showcase */
 .prims { display: grid; gap: 1px; grid-template-columns: repeat(5, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
 @media (max-width: 900px) { .prims { grid-template-columns: repeat(2, 1fr); } }
@@ -582,6 +624,15 @@ function featItem(f: { title: string; body: string }): string {
   return `<div class="feat"><h3>${check}${escapeHtml(f.title)}</h3><p>${escapeHtml(f.body)}</p></div>`;
 }
 
+/** One rung of the sharing-ladder marketing visual. */
+function ladderRung(r: (typeof LADDER)[number], i: number): string {
+  const tag = r.tag ? ` <span class="r-tag">${escapeHtml(r.tag)}</span>` : "";
+  return `<div class="rung${r.feature ? " feature" : ""}">
+  <span class="r-step">${i + 1}</span>
+  <div><span class="r-name">${escapeHtml(r.rung)}${tag}</span><p class="r-who">${escapeHtml(r.who)}</p></div>
+</div>`;
+}
+
 function primitiveCard(p: (typeof PRIMITIVES)[number]): string {
   return `<div class="prim p-${escapeHtml(p.tag)}">
   <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="${p.glyph}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -677,6 +728,18 @@ ${TOUR.map((t, i) => `          <button class="dot" type="button" role="tab" dat
       <div class="values">
 ${values}
       </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="kicker reveal">Sharing</p>
+      <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
+      <p class="s-sub reveal">One rung per canvas — from just you to the whole internet, with everything in between. Teams sit in the middle: a group you create and share a subset of canvases with.</p>
+      <div class="ladder reveal">
+${LADDER.map(ladderRung).join("\n")}
+      </div>
+      <p class="ladder-note reveal"><strong>Invite anyone by email</strong> — colleagues, contractors, or friends &amp; family. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. A personal team needs no org at all.</p>
     </div>
   </section>
 

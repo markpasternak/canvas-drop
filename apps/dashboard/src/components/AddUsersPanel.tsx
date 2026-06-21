@@ -8,12 +8,16 @@ import { CollapsibleSection } from "./CollapsibleSection.js";
 import { useToast } from "./Toast.js";
 
 /**
- * Admin individual sign-in allowlist (D14 supplement). Lets an admin allow specific
- * outside emails to sign in even when their domain isn't in the env domain allowlist
- * (CANVAS_DROP_ALLOWED_EMAIL_DOMAINS, which is unchanged). Add-by-email + remove,
- * modeled on the canvas guest-invite UI.
+ * Admin "Add users" (plan 003 U7) — the only way to permit a brand-new email to sign in.
+ * Adding routes through the invite primitive: it permits the email (an explicit entry below
+ * when the domain doesn't already authenticate), sends a courtesy email, and — on a matching
+ * org domain — makes them a member on their first verified login. There are no app-owned
+ * passwords; the invitee signs in through the instance's configured auth.
+ *
+ * The list shows the off-domain permits an admin manages here (an on-domain email needs no
+ * row — it already signs in via the domain allowlist).
  */
-export function AllowedEmailsPanel() {
+export function AddUsersPanel() {
   const { data: emails, isLoading } = useAdminAllowedEmails();
   const add = useAddAllowedEmail();
   const remove = useRemoveAllowedEmail();
@@ -25,11 +29,13 @@ export function AllowedEmailsPanel() {
     const value = email.trim();
     if (!value) return;
     try {
-      await add.mutateAsync(value);
+      const r = await add.mutateAsync(value);
       setEmail("");
-      toast("Email allowed");
+      // `pending` = a brand-new invitee was emailed; they join on first sign-in. `granted` = an
+      // existing user (nothing new to permit).
+      toast(r.status === "pending" ? "Invitation sent" : "User already has access");
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't add email", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't add user", "error");
     }
   }
 
@@ -37,24 +43,24 @@ export function AllowedEmailsPanel() {
 
   return (
     <CollapsibleSection
-      title={`Allowed sign-in emails${count > 0 ? ` (${count})` : ""}`}
-      storageKey="admin:section:allowed-emails"
+      title={`Add users${count > 0 ? ` (${count})` : ""}`}
+      storageKey="admin:section:add-users"
       defaultOpen={false}
     >
       <div className="space-y-3">
         <p className="text-muted text-xs">
-          Individual emails that may sign in even when their domain isn't in the configured
-          email-domain allowlist. The domain allowlist is set by the operator in the environment;
-          this is an additive list you manage here.
+          Invite someone by email. They'll get a sign-in invitation and, if their email domain
+          matches your org, become a member on first sign-in. Emails outside your configured domain
+          allowlist are listed below as individual sign-in permits you manage here.
         </p>
 
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <div className="min-w-[16rem] flex-1">
-            <label htmlFor="allowed-email" className="font-medium text-subtle text-xs">
-              Add by email
+            <label htmlFor="add-user-email" className="font-medium text-subtle text-xs">
+              Invite by email
             </label>
             <input
-              id="allowed-email"
+              id="add-user-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -63,7 +69,7 @@ export function AllowedEmailsPanel() {
             />
           </div>
           <Button type="submit" size="sm" variant="secondary" loading={add.isPending}>
-            Add
+            Add user
           </Button>
         </form>
 
@@ -85,7 +91,7 @@ export function AllowedEmailsPanel() {
                   onClick={async () => {
                     try {
                       await remove.mutateAsync(entry.id);
-                      toast("Email removed");
+                      toast("Sign-in permit removed");
                     } catch (err) {
                       toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
                     }
@@ -98,7 +104,7 @@ export function AllowedEmailsPanel() {
           </ul>
         ) : (
           <p className="text-subtle text-xs">
-            No individual emails yet — sign-in follows the domain allowlist only.
+            No individual sign-in permits yet — sign-in follows the domain allowlist only.
           </p>
         )}
       </div>

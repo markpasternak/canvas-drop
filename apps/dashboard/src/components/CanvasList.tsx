@@ -45,8 +45,9 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       )}
       {/* Home tenant (plan 002): Personal vs the org workspace. Only shows for org members. */}
       <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-      {/* Public is the only beyond-the-org rung — flag it prominently by the title. */}
-      {canvas.access === "public_link" && <AccessBadge access="public_link" />}
+      {/* Who can reach it — shown for every shared rung (Specific people / Team / Whole
+          org / Public). Private is the default, so it gets no badge. */}
+      {canvas.access !== "private" && <AccessBadge access={canvas.access} />}
       {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
       {/* Listed-but-not-template: gallery state used to be its own column. */}
       {canvas.galleryListed && !canvas.galleryTemplatable && (
@@ -100,6 +101,11 @@ function visibility(canvas: CanvasListItem): { primary: string; secondary: strin
       return {
         primary: gated ? "Specific people + protected" : "Specific people",
         secondary: gated ? "Password required" : "Invited only",
+      };
+    case "team":
+      return {
+        primary: gated ? "Team + protected" : "Team",
+        secondary: gated ? "Password required" : "Team members",
       };
     default:
       return { primary: "Private", secondary: "Owner only" };
@@ -424,7 +430,7 @@ export function CanvasCard({
         <>
           <PublicationBadge state={canvas.publicationState} />
           <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-          {canvas.access === "public_link" && <AccessBadge access="public_link" />}
+          {canvas.access !== "private" && <AccessBadge access={canvas.access} />}
           {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
           {canvas.hasPassword && (
             <ConceptBadge concept="protected">

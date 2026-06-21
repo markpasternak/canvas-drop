@@ -64,6 +64,10 @@ export function canvasView(
   // the access-gated cover (`card` rendition) so an agent can surface it the way the
   // dashboard does. Defaults false → no preview (pipeline off / not yet captured).
   hasPreview = false,
+  // The teams this canvas is granted to (plan 003) — only meaningful for `access: "team"`.
+  // Passed (and resolved) only by get_canvas / update_canvas so a write is read-your-writes
+  // confirmable; omitted elsewhere (the field is absent rather than a misleading []).
+  teamIds?: string[],
 ) {
   const url = canvasUrl(config, cv.slug);
   return {
@@ -78,6 +82,7 @@ export function canvasView(
     // Sharing / settings fields (parity with the Settings + Share dashboard tabs) so an
     // agent can confirm an `update_canvas` write from this response, not a second call.
     access: cv.access,
+    ...(teamIds !== undefined ? { teamIds } : {}),
     hasPassword: cv.passwordHash != null,
     sharedExpiresAt: cv.sharedExpiresAt ?? null,
     spaFallback: cv.spaFallback,

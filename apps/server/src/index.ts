@@ -14,13 +14,16 @@ import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
+import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
+import { teamsRepository } from "./db/repositories/teams.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usersRepository } from "./db/repositories/users.js";
 import { versionsRepository } from "./db/repositories/versions.js";
 import { deployEngine } from "./deploy/engine.js";
+import { seedDefaultTemplates } from "./email/templates.js";
 import { createLogger } from "./log/logger.js";
 import { runOpsCli } from "./ops/cli.js";
 import { createHub } from "./realtime/hub.js";
@@ -59,6 +62,7 @@ async function main() {
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);
   const orgs = orgsRepository(db);
+  const teams = teamsRepository(db);
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
   const drafts = draftsRepository(db);
@@ -69,6 +73,11 @@ async function main() {
   // the boot guards BEFORE serving — fail-loud, so a tenancy misconfig can't mis-scope
   // the whole_org boundary. No-op when no org is named (tenancy inert).
   await materializeOrg({ config, orgs, log: rootLogger });
+
+  // Email templates (plan 003 phase 3): idempotently seed the default invite/notification
+  // templates so an admin always has editable rows; an existing override is never clobbered.
+  const emailTemplates = emailTemplatesRepository(db);
+  await seedDefaultTemplates(emailTemplates);
 
   // Screenshot enablement (plan 004): one settings resolver + one capture trigger,
   // shared by the deploy engine (deploy publishes) and the worker. The trigger
@@ -133,6 +142,8 @@ async function main() {
     },
     // Live re-auth of a specific_people canvas needs allowlist membership (U3).
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
+    // …and a team canvas needs the live team re-join (plan 003 U4).
+    teamMatch: (canvasId, userId, viewerOrgIds) => teams.teamMatch(canvasId, userId, viewerOrgIds),
   });
 
   // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS

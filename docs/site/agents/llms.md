@@ -42,7 +42,11 @@ client registration) and then get identity-scoped tools across every canvas you 
 `set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
 `clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
-`resend_guest_invite`/`revoke_access`, and the editor draft loop `get_draft`/
+`invite_to_canvas`/`resend_guest_invite`/`revoke_access`, the team tools `list_teams`/
+`create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
+`add_team_member`/`remove_team_member`/`list_team_members`/
+`list_shared_with_teams` (plus `update_canvas` with `access: "team"` + `teamIds` to share
+a canvas with a team), and the editor draft loop `get_draft`/
 `read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
 `publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
 anything an owner can do in the UI, an agent can do here. The full table is in the
@@ -52,9 +56,9 @@ flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `q
 AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)
 and the canvas's unified `tags` (max 20, ≤50 chars each — one set used for both owner-list
 filtering and public gallery display, no separate "gallery summary"/"gallery tags"). When the
-instance has an org boundary configured, `whoami` also returns your `orgs` and an `isGuest`
-flag; pass an org `id` as `create_canvas`'s `orgId` to home a canvas in the org so it can be
-shared org-wide (omit for personal). With no org configured these are no-ops.
+instance has an org boundary configured, `whoami` also returns your `orgs`, your `teams`, and
+an `isGuest` flag; pass an org `id` as `create_canvas`'s `orgId` to home a canvas in the org so
+it can be shared org-wide (omit for personal). With no org configured these are no-ops.
 If an admin has disabled a canvas it becomes **read-only**: reads keep working but every
 mutation tool fails with `DISABLED: <reason>`. Every deploy **publishes immediately** (no
 draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
@@ -108,6 +112,9 @@ Share tab (or its session-authenticated management API). The rung is one of:
 - `private` — owner only.
 - `specific_people` — a named allowlist of org members and/or email-invited
   guests.
+- `team` — members of the granted teams. A team is personal (friends & family) or
+  org-attached (a subset of the org, re-checked against live org membership on every
+  request). Strictly team-scoped (never in the gallery).
 - `whole_org` — any authenticated org member with the link.
 - `public_link` — anyone with the link. Admin-gated per owner account
   (`canPublishPublic`), and **static-only** for non-owners: every backend

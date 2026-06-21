@@ -75,6 +75,23 @@ async function resolveShots(page) {
     { path: "/?tag=showcase", name: "landing-dashboard.webp" },
     { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
+    // Teams & invites (plan 003): expand the personal "Family" team's roster so the shot
+    // tells the invite story — a member plus a not-yet-signed-in Pending row. Seed a team
+    // first (seed-canvases creates a personal + org team with a pending invite).
+    {
+      path: "/teams",
+      name: "tour-teams.webp",
+      async prepare(page) {
+        const members = page
+          .locator("li", { hasText: "Family" })
+          .getByRole("button", { name: /^Members$/ })
+          .first();
+        if (await members.count()) {
+          await members.click();
+          await page.waitForTimeout(400);
+        }
+      },
+    },
   ];
   // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides — its
   // hand-authored multi-line index.html reads as real, interesting code in the editor.
@@ -119,12 +136,18 @@ async function main() {
     colorScheme: COLOR_SCHEME,
   });
 
-  const shots = await resolveShots(page);
+  // `--only <substr>` captures just the shots whose asset name matches (e.g. `--only teams`)
+  // so a single asset can be refreshed without re-shooting — and overwriting — the others.
+  const onlyIdx = process.argv.indexOf("--only");
+  const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
+  const shots = (await resolveShots(page)).filter((s) => !only || s.name.includes(only));
   for (const shot of shots) {
     const url = BASE + shot.path;
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
       if (SETTLE_MS) await page.waitForTimeout(SETTLE_MS);
+      // Optionally run a per-shot prep step (expand a roster, open a section) before framing.
+      if (shot.prepare) await shot.prepare(page);
       // Optionally scroll a specific section into view (e.g. the Preview control, which
       // sits below the fold on the settings page) before framing the shot.
       if (shot.scrollTo) {
