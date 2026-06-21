@@ -1584,4 +1584,80 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       ),
     ).toBe(false);
   });
+
+  it("update_canvas: a teamIds-only change re-grants an already-team canvas (no access re-send)", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const t1 = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "A" } }),
+    );
+    const t2 = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "B" } }),
+    );
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [t1.id] },
+    });
+    // teamIds WITHOUT access on an already-team canvas changes the grant set (was a no-op).
+    const updated = payload(
+      await mcp.callTool({ name: "update_canvas", arguments: { id: cv.id, teamIds: [t2.id] } }),
+    );
+    expect(updated.teamIds).toEqual([t2.id]);
+    // An empty teamIds-only change is still rejected (no deny-to-everyone).
+    const empty = await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, teamIds: [] },
+    });
+    expect(isError(empty)).toBe(true);
+    expect(text(empty)).toContain("TEAM_REQUIRED");
+  });
+
+  it("rename_team is opaque (not-found, not forbidden) for a team in another org", async () => {
+    client = await makeTestDb(dialect);
+    const orgs = orgsRepository(client);
+    const orgA = await orgs.ensureOrg({ name: "A", slug: "a", domains: ["a.example"] });
+    const orgB = await orgs.ensureOrg({ name: "B", slug: "b", domains: ["b.example"] });
+    const aliceId = await seedUser(client, "alice@a.example");
+    await orgMembersRepository(client).upsertDomainMember(orgA.id, aliceId);
+    const bobId = await seedUser(client, "bob@b.example");
+    await orgMembersRepository(client).upsertDomainMember(orgB.id, bobId);
+    // Bob creates a team in org B.
+    const bobMcp = await connect(client, {
+      userId: bobId,
+      orgIds: new Set([orgB.id]),
+      tenancyActive: true,
+    });
+    const team = payload(
+      await bobMcp.callTool({ name: "create_team", arguments: { orgId: orgB.id, name: "Secret" } }),
+    );
+    // Alice (org A) can't even tell it exists — opaque not-found, never a 403.
+    const aliceMcp = await connect(client, {
+      userId: aliceId,
+      orgIds: new Set([orgA.id]),
+      tenancyActive: true,
+    });
+    const res = await aliceMcp.callTool({
+      name: "rename_team",
+      arguments: { id: team.id, name: "Hacked" },
+    });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("TEAM_NOT_FOUND");
+  });
+
+  it("whoami lists the caller's teams", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    const me = payload(await mcp.callTool({ name: "whoami", arguments: {} }));
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(me.teams.map((t: any) => t.id)).toContain(team.id);
+  });
 });

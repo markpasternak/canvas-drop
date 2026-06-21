@@ -5,6 +5,7 @@ import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
 import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
+import { resolveVisibleTeams } from "../teams/sharing.js";
 
 /**
  * Team management API (plan 003 P2 / U3). Session-authenticated; the acting principal +
@@ -42,34 +43,12 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
 
   // List teams across the caller's org(s), flagging which they're a member of (`mine`)
   // and which they may manage (rename/delete — creator or instance operator, KTD5).
-  // `canManage` is a UX hint only; the service re-checks it on every mutation.
+  // `canManage` is a UX hint only; the service re-checks it on every mutation. Wraps the
+  // shared resolver so the MCP `list_teams` tool can't drift from this shape.
   app.get("/", async (c) => {
     const actor = actorOf(c);
-    const seen = new Set<string>();
-    const out: Array<{
-      id: string;
-      orgId: string;
-      name: string;
-      slug: string;
-      mine: boolean;
-      canManage: boolean;
-    }> = [];
-    const mine = new Set((await deps.teams.listForUser(actor.id)).map((t) => t.id));
-    for (const orgId of actor.orgIds) {
-      for (const t of await deps.teams.listByOrg(orgId)) {
-        if (seen.has(t.id)) continue;
-        seen.add(t.id);
-        out.push({
-          id: t.id,
-          orgId: t.orgId,
-          name: t.name,
-          slug: t.slug,
-          mine: mine.has(t.id),
-          canManage: actor.isAdmin || t.createdBy === actor.id,
-        });
-      }
-    }
-    return c.json({ teams: out });
+    const teams = await resolveVisibleTeams(deps.teams, actor.id, actor.orgIds, actor.isAdmin);
+    return c.json({ teams });
   });
 
   app.post("/", async (c) => {
@@ -77,8 +56,19 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.create(actorOf(c), body.data);
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
+    // The creator is always a member AND its manager — return the full Team shape (mine +
+    // canManage) so the response matches the list shape the client's Team type expects.
     return c.json(
-      { team: { id: r.team.id, name: r.team.name, slug: r.team.slug, orgId: r.team.orgId } },
+      {
+        team: {
+          id: r.team.id,
+          name: r.team.name,
+          slug: r.team.slug,
+          orgId: r.team.orgId,
+          mine: true,
+          canManage: true,
+        },
+      },
       201,
     );
   });

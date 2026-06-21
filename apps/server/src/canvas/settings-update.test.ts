@@ -94,6 +94,21 @@ describe("resolveSettingsUpdate — tenancy (plan 002 review fix)", () => {
     const r = resolve(canvas({ access: "private", orgId: null }), { access: "whole_org" });
     expect(r).toMatchObject({ ok: true });
   });
+
+  it("rejects the team rung on a canvas with no home org under active tenancy (TEAM_REQUIRED)", () => {
+    const r = resolve(canvas({ access: "private", orgId: null }), { access: "team" }, ACTIVE);
+    expect(r).toMatchObject({ ok: false, code: "TEAM_REQUIRED", status: 409 });
+  });
+
+  it("rejects the team rung when tenancy is INERT (no org configured → TEAM_REQUIRED)", () => {
+    const r = resolve(canvas({ access: "private", orgId: "org-A" }), { access: "team" });
+    expect(r).toMatchObject({ ok: false, code: "TEAM_REQUIRED", status: 409 });
+  });
+
+  it("allows the team rung on a homed canvas under active tenancy (grants validated by the caller)", () => {
+    const r = resolve(canvas({ access: "private", orgId: "org-A" }), { access: "team" }, ACTIVE);
+    expect(r).toMatchObject({ ok: true, targetAccess: "team" });
+  });
 });
 
 describe("resolveSettingsUpdate — denial paths", () => {

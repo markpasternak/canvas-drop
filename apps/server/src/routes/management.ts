@@ -54,6 +54,7 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { listSharedWithTeams, resolveTeamGrant } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
@@ -592,34 +593,23 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/shared-with-teams", async (c) => {
     const user = c.get("user");
     const orgIds = c.get("orgIds") ?? new Set<string>();
-    const ids = deps.teams ? await deps.teams.listCanvasIdsForUserTeams(user.id, orgIds) : [];
-    if (ids.length === 0) return c.json({ canvases: [] });
-    const rows = (await deps.canvases.findByIds(ids)).filter(
-      (cv) =>
-        cv.ownerId !== user.id &&
-        cv.access === "team" &&
-        cv.status === "active" &&
-        cv.currentVersionId !== null,
+    if (!deps.teams) return c.json({ canvases: [] });
+    const shared = await listSharedWithTeams(
+      { teams: deps.teams, canvases: deps.canvases, users: deps.users },
+      user.id,
+      orgIds,
     );
-    const owners = new Map(
-      (await deps.users.findByIds(rows.map((r) => r.ownerId))).map((u) => [u.id, u]),
-    );
-    const previews = await previewIds(rows.map((r) => r.id));
+    const previews = await previewIds(shared.map((s) => s.canvas.id));
     return c.json({
-      canvases: rows.map((cv) => {
-        const owner = owners.get(cv.ownerId);
-        return {
-          id: cv.id,
-          slug: cv.slug,
-          url: canvasUrl(deps.config, cv.slug),
-          title: cv.title,
-          description: cv.description,
-          hasPreview: previewVisible(cv, previews),
-          owner: owner
-            ? { id: owner.id, name: owner.name, avatarUrl: owner.avatarUrl ?? null }
-            : null,
-        };
-      }),
+      canvases: shared.map(({ canvas: cv, owner }) => ({
+        id: cv.id,
+        slug: cv.slug,
+        url: canvasUrl(deps.config, cv.slug),
+        title: cv.title,
+        description: cv.description,
+        hasPreview: previewVisible(cv, previews),
+        owner,
+      })),
     });
   });
 
@@ -658,37 +648,34 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const { patch, password, targetAccess, warning } = resolution;
 
-    // Team grant flow (plan 003 U4): validate + persist the canvas→team grants BEFORE the
-    // access write, so a forbidden grant never leaves a team canvas with zero teams (an
-    // explicit deny to everyone). The owner may grant only teams they belong to, in this
-    // canvas's org (KTD4). Changing away from `team` clears the grants (single-valued rung).
-    if (deps.teams && targetAccess === "team") {
-      const teamIds = [...new Set(body.data.teamIds ?? [])];
-      if (teamIds.length === 0) {
-        return c.json(
-          { code: "TEAM_REQUIRED", message: "Pick at least one team to share with." },
-          409,
-        );
+    // Team grant flow (plan 003 U4/U5): resolve + persist the canvas→team grants BEFORE
+    // the access write, so a forbidden grant never leaves a team canvas with zero teams (an
+    // explicit deny to everyone). The shared resolver (also used by MCP update_canvas)
+    // validates owner-team membership (KTD4), requires ≥1 team when sharing, lets an agent
+    // change the grant set without re-sending `access`, and clears on a rung change away
+    // from team. `teamGranted` drives the audit for a grant-only change (no rung change).
+    let teamGranted = false;
+    if (deps.teams) {
+      const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
+        canvasOrgId: cv.orgId,
+        currentAccess: cv.access,
+        targetAccess,
+        teamIds: body.data.teamIds,
+      });
+      if (grant.kind === "error") {
+        const status = grant.code === "TEAM_REQUIRED" ? 409 : 403;
+        const message =
+          grant.code === "TEAM_REQUIRED"
+            ? "Pick at least one team to share with."
+            : "You can only share with teams you belong to in this org.";
+        return c.json({ code: grant.code, message }, status);
       }
-      for (const teamId of teamIds) {
-        const team = await deps.teams.findById(teamId);
-        if (
-          !team ||
-          team.orgId !== cv.orgId ||
-          !(await deps.teams.isTeamMember(teamId, c.get("user").id))
-        ) {
-          return c.json(
-            {
-              code: "TEAM_FORBIDDEN",
-              message: "You can only share with teams you belong to in this org.",
-            },
-            403,
-          );
-        }
+      if (grant.kind === "write") {
+        await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
+        teamGranted = true;
+      } else if (grant.kind === "clear") {
+        await deps.teams.setCanvasTeams(cv.id, []);
       }
-      await deps.teams.setCanvasTeams(cv.id, teamIds);
-    } else if (deps.teams && targetAccess !== undefined) {
-      await deps.teams.setCanvasTeams(cv.id, []);
     }
 
     let updated = cv;
@@ -716,12 +703,14 @@ export function managementRoutes(deps: ManagementDeps) {
         meta: { cleared: password === null },
       });
     }
-    if (targetAccess !== undefined) {
+    // Audit a rung change, OR a grant-only change to the team set (no rung change) — the
+    // latter would otherwise leave no trail when an owner re-picks the granted teams.
+    if (targetAccess !== undefined || teamGranted) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { access: targetAccess },
+        meta: { access: targetAccess ?? cv.access, ...(teamGranted ? { teamsChanged: true } : {}) },
       });
     }
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost

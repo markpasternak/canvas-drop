@@ -37,10 +37,17 @@ export function teamsService(deps: {
   users: Pick<UsersRepository, "findByEmail">;
   audit: Pick<AuditLog, "recordAudit">;
 }) {
+  /** A team outside the actor's org(s) must read as NOT-FOUND, never FORBIDDEN — else the
+   *  403-vs-404 split leaks the existence of teams in other orgs (§12.0 opacity). Operators
+   *  (`isAdmin`) keep cross-org reach (their power lives on the admin surface). */
+  function visible(actor: TeamActor, team: Team): boolean {
+    return actor.isAdmin || actor.orgIds.has(team.orgId);
+  }
+
   /** Load a team + assert the actor may MANAGE it (creator or operator). */
   async function manageable(actor: TeamActor, teamId: string): Promise<TeamResult> {
     const team = await deps.teams.findById(teamId);
-    if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+    if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
     if (!actor.isAdmin && team.createdBy !== actor.id) return { ok: false, error: "FORBIDDEN" };
     return { ok: true, team };
   }
@@ -77,7 +84,7 @@ export function teamsService(deps: {
     /** Add a same-org member to a team. Actor must be a team member (self-serve) or operator. */
     async addMemberByEmail(actor: TeamActor, teamId: string, email: string): Promise<VoidResult> {
       const team = await deps.teams.findById(teamId);
-      if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+      if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
       if (!actor.isAdmin && !(await deps.teams.isTeamMember(teamId, actor.id)))
         return { ok: false, error: "FORBIDDEN" };
       const target = await deps.users.findByEmail(email.trim().toLowerCase());
@@ -97,7 +104,7 @@ export function teamsService(deps: {
       targetUserId: string,
     ): Promise<VoidResult> {
       const team = await deps.teams.findById(teamId);
-      if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+      if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
       const selfLeave = targetUserId === actor.id;
       if (!selfLeave && !actor.isAdmin && !(await deps.teams.isTeamMember(teamId, actor.id)))
         return { ok: false, error: "FORBIDDEN" };

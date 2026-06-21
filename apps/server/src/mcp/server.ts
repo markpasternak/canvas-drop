@@ -44,6 +44,7 @@ import {
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
+import { listSharedWithTeams, resolveTeamGrant, resolveVisibleTeams } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
@@ -975,28 +976,32 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
 
-      // Team grant flow (plan 003 U6) — the SAME logic as the management PATCH route, run
-      // BEFORE the access write so a forbidden grant never leaves a team canvas with zero
-      // teams (a deny to everyone). The owner may grant only teams they belong to, in this
-      // canvas's org (KTD4); switching away from `team` clears the grants (single-valued).
-      if (targetAccess === "team") {
-        const teamIds = [...new Set(input.teamIds ?? [])];
-        if (teamIds.length === 0) {
-          return fail("TEAM_REQUIRED: pick at least one team to share with");
+      // Team grant flow (plan 003 U6) — the SAME shared resolver the management PATCH route
+      // uses (agent-native parity), run BEFORE the access write so a forbidden grant never
+      // leaves a team canvas with zero teams (a deny to everyone). Validates owner-team
+      // membership (KTD4), requires ≥1 team when sharing, lets an agent change the grant set
+      // without re-sending `access`, and clears on a rung change away from team.
+      let teamGranted = false;
+      {
+        const grant = await resolveTeamGrant(deps.teams, caller.userId, {
+          canvasOrgId: cv.orgId,
+          currentAccess: cv.access,
+          targetAccess,
+          teamIds: input.teamIds,
+        });
+        if (grant.kind === "error") {
+          return fail(
+            grant.code === "TEAM_REQUIRED"
+              ? "TEAM_REQUIRED: pick at least one team to share with"
+              : "TEAM_FORBIDDEN: you can only share with teams you belong to in this org",
+          );
         }
-        for (const teamId of teamIds) {
-          const team = await deps.teams.findById(teamId);
-          if (
-            !team ||
-            team.orgId !== cv.orgId ||
-            !(await deps.teams.isTeamMember(teamId, caller.userId))
-          ) {
-            return fail("TEAM_FORBIDDEN: you can only share with teams you belong to in this org");
-          }
+        if (grant.kind === "write") {
+          await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
+          teamGranted = true;
+        } else if (grant.kind === "clear") {
+          await deps.teams.setCanvasTeams(cv.id, []);
         }
-        await deps.teams.setCanvasTeams(cv.id, teamIds);
-      } else if (targetAccess !== undefined) {
-        await deps.teams.setCanvasTeams(cv.id, []);
       }
 
       let updated = cv;
@@ -1022,12 +1027,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           meta: { cleared: password === null },
         });
       }
-      if (targetAccess !== undefined) {
+      // Audit a rung change OR a grant-only change to the team set (parity with the route).
+      if (targetAccess !== undefined || teamGranted) {
         deps.audit.recordAudit({
           action: "share_change",
           actorId: caller.userId,
           targetId: cv.id,
-          meta: { access: targetAccess },
+          meta: {
+            access: targetAccess ?? cv.access,
+            ...(teamGranted ? { teamsChanged: true } : {}),
+          },
         });
       }
       if (deps.hub) {
@@ -1335,31 +1344,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {},
     },
     async () => {
-      const mine = new Set((await deps.teams.listForUser(caller.userId)).map((t) => t.id));
-      const seen = new Set<string>();
-      const teams: Array<{
-        id: string;
-        orgId: string;
-        name: string;
-        slug: string;
-        mine: boolean;
-        canManage: boolean;
-      }> = [];
-      for (const orgId of caller.orgIds) {
-        for (const t of await deps.teams.listByOrg(orgId)) {
-          if (seen.has(t.id)) continue;
-          seen.add(t.id);
-          teams.push({
-            id: t.id,
-            orgId: t.orgId,
-            name: t.name,
-            slug: t.slug,
-            mine: mine.has(t.id),
-            // isAdmin is false on the MCP surface, so manage == created-by-you.
-            canManage: t.createdBy === caller.userId,
-          });
-        }
-      }
+      // Shared resolver, isAdmin=false on the MCP surface (admin cross-owner team actions
+      // live on the admin routes, not here) — so canManage == created-by-you.
+      const teams = await resolveVisibleTeams(deps.teams, caller.userId, caller.orgIds, false);
       return ok({ teams });
     },
   );
@@ -1464,30 +1451,21 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {},
     },
     async () => {
-      const ids = await deps.teams.listCanvasIdsForUserTeams(caller.userId, caller.orgIds);
-      if (ids.length === 0) return ok({ canvases: [] });
-      const rows = (await deps.canvases.findByIds(ids)).filter(
-        (cv) =>
-          cv.ownerId !== caller.userId &&
-          cv.access === "team" &&
-          cv.status === "active" &&
-          cv.currentVersionId !== null,
-      );
-      const owners = new Map(
-        (await deps.users.findByIds(rows.map((r) => r.ownerId))).map((u) => [u.id, u]),
-      );
+      // Shared read (same as the HTTP /shared-with-teams route), so the projection can't
+      // drift between surfaces. Include the same hasPreview + owner.avatarUrl the HTTP route
+      // and the other MCP canvas projections (get_canvas/list_canvases) carry.
+      const shared = await listSharedWithTeams(deps, caller.userId, caller.orgIds);
+      const previews = await previewIds(shared.map((s) => s.canvas.id));
       return ok({
-        canvases: rows.map((cv) => {
-          const owner = owners.get(cv.ownerId);
-          return {
-            id: cv.id,
-            slug: cv.slug,
-            url: canvasUrl(deps.config, cv.slug),
-            title: cv.title,
-            description: cv.description,
-            owner: owner ? { id: owner.id, name: owner.name } : null,
-          };
-        }),
+        canvases: shared.map(({ canvas: cv, owner }) => ({
+          id: cv.id,
+          slug: cv.slug,
+          url: canvasUrl(deps.config, cv.slug),
+          title: cv.title,
+          description: cv.description,
+          hasPreview: previewVisible(cv, previews),
+          owner,
+        })),
       });
     },
   );
