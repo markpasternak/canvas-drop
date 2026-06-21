@@ -86,8 +86,13 @@ export default function Share() {
     }
   };
 
-  const listBlocker = !canvas.shared
-    ? "Choose a shared access level before listing this canvas in the gallery."
+  // The gallery only ever lists Whole-org or Public-link canvases (mirrors the server's
+  // galleryVisibilityFilters). A Private OR Specific-people canvas can never appear, so
+  // don't offer the toggle for it — explain instead of letting it save a no-op (plan 002
+  // review fix; `canvas.shared` was too loose — it let specific_people through).
+  const galleryEligible = canvas.access === "whole_org" || canvas.access === "public_link";
+  const listBlocker = !galleryEligible
+    ? "Only a Whole-org or Public-link canvas can be listed in the gallery."
     : canvas.currentVersionId === null
       ? "Publish this canvas before listing it in the gallery."
       : canvas.hasPassword
@@ -155,6 +160,10 @@ export default function Share() {
             // no org). `isGuest` is only ever true under active tenancy, so inert
             // instances keep offering it to all members (plan 002 U6).
             allowOrg={!me?.isGuest}
+            // Disable "Whole org" on a Personal canvas (no home org) when the viewer is a
+            // member — i.e. tenancy is active. The server would 409 it; don't make them
+            // bounce off that with no feedback (plan 002 review fix).
+            orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
             onChange={(access) => save({ access })}
           />
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
@@ -265,12 +274,12 @@ export default function Share() {
         {canvas.access === "specific_people" && (
           <Section
             id="guest-permissions"
-            title="Guest permissions"
-            description="Control metered primitives for invited guests."
+            title="Invited-people permissions"
+            description="Controls metered AI for the people you invite to THIS canvas (above) — not outside-the-org guests, and separate from your own AI budget."
           >
             <Toggle
-              label="Let invited guests use AI"
-              description="Off by default. Guests can always use KV, files, and realtime; AI is the metered-cost primitive, so it's opt-in per canvas."
+              label="Let invited people use AI"
+              description="Off by default. Invited people can always use KV, files, and realtime; AI is the metered-cost primitive, so it's opt-in per canvas."
               checked={canvas.guestAiEnabled}
               onChange={(guestAiEnabled) => save({ guestAiEnabled })}
             />
@@ -456,11 +465,15 @@ function AccessLadder({
   value,
   allowPublic,
   allowOrg,
+  orgRungDisabled,
   onChange,
 }: {
   value: AccessRung;
   allowPublic: boolean;
   allowOrg: boolean;
+  /** The "Whole org" rung is shown but DISABLED — this is a Personal canvas (no home org),
+   *  so it can't be shared org-wide. Never let the user pick what can't work (plan 002). */
+  orgRungDisabled: boolean;
   onChange: (rung: SettableRung) => void;
 }) {
   const rungs = RUNGS.filter(
@@ -472,23 +485,31 @@ function AccessLadder({
     <fieldset className="space-y-2">
       <legend className="sr-only">Who can access this canvas</legend>
       {rungs.map((r) => {
+        // A Personal canvas can't be shared org-wide — disable the rung + explain, rather
+        // than letting the click bounce off the server's 409 with no feedback.
+        const disabled = r.orgGated && orgRungDisabled && value !== r.value;
         return (
           <label
             key={r.value}
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 ${
-              value === r.value ? "border-accent bg-surface-sunken" : ""
-            }`}
+            className={`flex items-start gap-3 rounded-lg border border-border p-3 ${
+              disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
+            } ${value === r.value ? "border-accent bg-surface-sunken" : ""}`}
           >
             <input
               type="radio"
               name="access-rung"
               className="mt-1"
               checked={value === r.value}
+              disabled={disabled}
               onChange={() => onChange(r.value)}
             />
             <span>
               <span className="block text-sm font-semibold text-fg">{r.label}</span>
-              <span className="block text-xs text-muted">{r.hint}</span>
+              <span className="block text-xs text-muted">
+                {disabled
+                  ? "This canvas is Personal — only a canvas in a workspace can be shared org-wide."
+                  : r.hint}
+              </span>
             </span>
           </label>
         );

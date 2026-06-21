@@ -3,8 +3,15 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
+import { useMe } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
-import { AccessBadge, accessRungLabel, ConceptBadge, PublicationBadge } from "./Badge.js";
+import {
+  AccessBadge,
+  accessRungLabel,
+  ConceptBadge,
+  PublicationBadge,
+  ScopeBadge,
+} from "./Badge.js";
 import { previewCoverUrl } from "./CanvasCover.js";
 import { CanvasGridCard, cardNameLinkClass } from "./CanvasGridCard.js";
 import { CanvasListRow } from "./CanvasListRow.js";
@@ -28,6 +35,7 @@ function canvasTags(canvas: CanvasListItem): string[] {
 }
 
 function RowBadges({ canvas }: { canvas: CanvasListItem }) {
+  const me = useMe().data;
   return (
     <>
       {/* Surface the lifecycle near the title only when it's not the happy
@@ -35,6 +43,8 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       {canvas.publicationState !== "published" && (
         <PublicationBadge state={canvas.publicationState} />
       )}
+      {/* Home tenant (plan 002): Personal vs the org workspace. Only shows for org members. */}
+      <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
       {/* Public is the only beyond-the-org rung — flag it prominently by the title. */}
       {canvas.access === "public_link" && <AccessBadge access="public_link" />}
       {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
@@ -378,6 +388,7 @@ export function CanvasCard({
 }) {
   const title = canvasTitle(canvas);
   const navigate = useNavigate();
+  const me = useMe().data;
   // Body click / Enter navigates to the canvas detail page (`/canvases/$id`); the
   // "Details" button in the actions slot opens the inline rail instead.
   const openDetail = () => navigate({ to: "/canvases/$id", params: { id: canvas.id } });
@@ -412,6 +423,7 @@ export function CanvasCard({
       badges={
         <>
           <PublicationBadge state={canvas.publicationState} />
+          <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
           {canvas.access === "public_link" && <AccessBadge access="public_link" />}
           {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
           {canvas.hasPassword && (

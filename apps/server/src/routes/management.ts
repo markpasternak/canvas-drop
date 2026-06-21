@@ -162,6 +162,9 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
+    // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
+    orgId: cv.orgId,
     // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
     shared: cv.access !== "private",
     guestAiEnabled: cv.guestAiEnabled,

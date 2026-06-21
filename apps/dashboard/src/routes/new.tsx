@@ -317,8 +317,9 @@ export default function CreateCanvas() {
                   ))}
                 </select>
                 <span className="block text-xs text-muted">
-                  Personal canvases are yours alone; an org workspace lets you share with the whole
-                  org.
+                  <strong>Personal</strong> — only you and people you specifically invite.{" "}
+                  <strong>A workspace</strong> — you can later share it with everyone in that org
+                  (the “Whole org” access level). This choice is fixed once the canvas is created.
                 </span>
               </label>
             )}

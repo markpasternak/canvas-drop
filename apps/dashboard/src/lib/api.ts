@@ -104,6 +104,9 @@ export interface Canvas {
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
   shared: boolean;
+  /** Home tenant (plan 002): null = Personal, else the org id. Map to a name via
+   *  `useMe().orgs` for the scope badge + to gate the org-only share controls. */
+  orgId: string | null;
   /** Guest-AI opt-in (U9): off by default; lets invited guests use the AI primitive. */
   guestAiEnabled: boolean;
   /** Per-canvas guest-AI spend cap in USD (U9); 0 disables guest AI spend entirely. */
