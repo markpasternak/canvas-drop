@@ -65,6 +65,18 @@ export const settings = sqliteTable("settings", {
   value: c.json("value").notNull(),
 });
 
+// Admin-editable email templates (plan 003 phase 3). One row per template key (a missing
+// row means "use the seeded default" — reset = delete the row). `updated_by`/`updated_at`
+// are null/0 for the boot-seeded defaults; set on an admin override.
+export const emailTemplates = sqliteTable("email_templates", {
+  key: c.text("key").primaryKey(),
+  subject: c.text("subject").notNull(),
+  bodyHtml: c.text("body_html").notNull(),
+  bodyText: c.text("body_text").notNull(),
+  updatedBy: c.text("updated_by"),
+  updatedAt: c.epochMs("updated_at").notNull(),
+});
+
 // Remote MCP OAuth (agent control plane). DCR-registered clients, single-use
 // authorization codes, and hashed access/refresh tokens — all minted only after
 // the user authenticates via the existing login. Structurally identical to

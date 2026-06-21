@@ -43,6 +43,7 @@ export const BACKUP_TABLE_ORDER = [
   "users",
   "allowed_emails",
   "settings",
+  "email_templates",
   "oauth_clients",
   "oauth_codes",
   "sessions",

@@ -29,6 +29,7 @@ import {
 } from "./db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
+import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { kvRepository } from "./db/repositories/kv.js";
 import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
@@ -144,6 +145,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // The individual sign-in allowlist (D14 supplement). Resolve once: callers may
   // inject one, else build a repo over `db` (an empty allowlist = domain-only).
   const allowedEmails = deps.allowedEmails ?? allowedEmailsRepository(deps.db);
+  // Admin-editable email templates (plan 003 phase 3). Boot seeds the defaults (index.ts).
+  const emailTemplates = emailTemplatesRepository(deps.db);
 
   // Tenancy org store + the membership resolver (plan 002 U3). Default to a repo over
   // `db`: tests/callers that omit `orgs` get the real, empty orgs table → every member
@@ -579,6 +582,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       aiUsage,
       settings: settingsSvc,
       allowedEmails,
+      emailTemplates,
       audit: deps.audit,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
     }),

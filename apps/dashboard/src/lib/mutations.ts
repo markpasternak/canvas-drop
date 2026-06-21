@@ -617,6 +617,31 @@ export function useRemoveTeamMember(id: string) {
 }
 
 /** Set or clear (value === null) a DB override for an editable config setting. */
+/** Email templates (plan 003 phase 3): override one template's subject/HTML/text, or reset
+ *  it to the seeded default. Both refetch the templates list so the editor reflects the
+ *  new `overridden` state. */
+export function useAdminSetEmailTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      key,
+      body,
+    }: {
+      key: string;
+      body: { subject: string; bodyHtml: string; bodyText: string };
+    }) => api.admin.setEmailTemplate(key, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminEmailTemplates }),
+  });
+}
+
+export function useAdminResetEmailTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.admin.resetEmailTemplate(key),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminEmailTemplates }),
+  });
+}
+
 export function useAdminSetConfig() {
   const qc = useQueryClient();
   return useMutation({

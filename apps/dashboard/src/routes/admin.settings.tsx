@@ -7,9 +7,13 @@ import { FilterBar, FilterChip } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
-import { type AdminConfigField, ApiError } from "../lib/api.js";
-import { useAdminSetConfig } from "../lib/mutations.js";
-import { useAdminConfig } from "../lib/queries.js";
+import { type AdminConfigField, type AdminEmailTemplate, ApiError } from "../lib/api.js";
+import {
+  useAdminResetEmailTemplate,
+  useAdminSetConfig,
+  useAdminSetEmailTemplate,
+} from "../lib/mutations.js";
+import { useAdminConfig, useAdminEmailTemplates } from "../lib/queries.js";
 import { commitSkin, previewSkin, restoreSkinFromCache } from "../lib/skin.js";
 
 /** Source badge: where a setting's effective value comes from. */
@@ -353,6 +357,157 @@ function Configuration() {
   );
 }
 
+/** Friendly labels + descriptions for each known email-template key (plan 003 phase 3). */
+const TEMPLATE_META: Record<string, { label: string; help: string }> = {
+  account_invite: {
+    label: "Account invite",
+    help: "Sent when an admin adds a new person — invites them to sign in for the first time.",
+  },
+  canvas_invite: {
+    label: "Canvas shared (Specific people)",
+    help: "Sent when an existing user is given access to a canvas via the Specific-people rung.",
+  },
+  individual_canvas_invite: {
+    label: "Individual canvas invite",
+    help: "Sent for a one-off invite of a person to a single canvas.",
+  },
+  team_invite: {
+    label: "Team invite",
+    help: "Sent to a brand-new person added to a team, so they can sign in and see what's shared.",
+  },
+};
+
+/** Available `{{variables}}` for guidance in the editor (the server allow-lists these). */
+const TEMPLATE_VARS =
+  "{{name}} · {{inviterName}} · {{instanceName}} · {{canvasTitle}} · {{teamName}} · {{link}}";
+
+/** One email template: editable subject + HTML body + text body, with Save and Reset. */
+function TemplateRow({ template }: { template: AdminEmailTemplate }) {
+  const setTemplate = useAdminSetEmailTemplate();
+  const resetTemplate = useAdminResetEmailTemplate();
+  const toast = useToast();
+  const meta = TEMPLATE_META[template.key];
+  const [subject, setSubject] = useState(template.subject);
+  const [bodyHtml, setBodyHtml] = useState(template.bodyHtml);
+  const [bodyText, setBodyText] = useState(template.bodyText);
+
+  // Re-sync local drafts when the server value changes (after a save/reset refetch).
+  useEffect(() => {
+    setSubject(template.subject);
+    setBodyHtml(template.bodyHtml);
+    setBodyText(template.bodyText);
+  }, [template.subject, template.bodyHtml, template.bodyText]);
+
+  async function save() {
+    if (!subject.trim() || !bodyHtml.trim() || !bodyText.trim()) {
+      toast("Subject, HTML body, and text body are all required", "error");
+      return;
+    }
+    try {
+      await setTemplate.mutateAsync({ key: template.key, body: { subject, bodyHtml, bodyText } });
+      toast(`${meta?.label ?? template.key} saved`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+    }
+  }
+
+  async function reset() {
+    try {
+      await resetTemplate.mutateAsync(template.key);
+      toast(`${meta?.label ?? template.key} reset to default`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't reset", "error");
+    }
+  }
+
+  const inputClass = "w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm font-mono";
+
+  return (
+    <div className="space-y-2 py-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-fg">{meta?.label ?? template.key}</span>
+        {template.overridden ? <Badge tone="success">Customized</Badge> : <Badge>Default</Badge>}
+      </div>
+      {meta?.help ? <p className="text-xs text-muted">{meta.help}</p> : null}
+      <label className="block space-y-1">
+        <span className="text-xs text-subtle">Subject</span>
+        <input
+          aria-label={`${meta?.label ?? template.key} subject`}
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          className={inputClass}
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs text-subtle">HTML body</span>
+        <textarea
+          aria-label={`${meta?.label ?? template.key} HTML body`}
+          value={bodyHtml}
+          onChange={(e) => setBodyHtml(e.target.value)}
+          rows={4}
+          className={inputClass}
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs text-subtle">Text body</span>
+        <textarea
+          aria-label={`${meta?.label ?? template.key} text body`}
+          value={bodyText}
+          onChange={(e) => setBodyText(e.target.value)}
+          rows={3}
+          className={inputClass}
+        />
+      </label>
+      <div className="flex items-center gap-2">
+        <Button size="sm" loading={setTemplate.isPending} onClick={save}>
+          Save
+        </Button>
+        {template.overridden ? (
+          <Button size="sm" variant="ghost" loading={resetTemplate.isPending} onClick={reset}>
+            Reset to default
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Admin email-template editor: each invite/notification email, subject + HTML + text. */
+function EmailTemplates() {
+  const templates = useAdminEmailTemplates();
+  if (templates.isError) {
+    return (
+      <Panel className="p-4">
+        <p className="text-sm text-danger">Couldn't load email templates.</p>
+      </Panel>
+    );
+  }
+  if (!templates.data) {
+    return (
+      <Panel className="p-4">
+        <p className="text-sm text-muted">Loading…</p>
+      </Panel>
+    );
+  }
+  return (
+    <Panel className="p-4">
+      <div className="mb-2">
+        <h2 className="text-sm font-semibold text-fg">Email templates</h2>
+        <p className="text-xs text-muted">
+          Customize the invite and notification emails. Variables:{" "}
+          <span className="font-mono">{TEMPLATE_VARS}</span> (HTML-escaped in the HTML body).
+          Unknown variables render empty.
+        </p>
+      </div>
+      <div className="divide-y divide-border">
+        {templates.data.map((t) => (
+          <TemplateRow key={t.key} template={t} />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 /**
  * Admin Configuration (§6.10) — one consistent view of every setting: its
  * effective value, where it comes from (database / environment / default), and
@@ -367,6 +522,7 @@ export default function AdminSettings() {
         description="Database overrides environment; editable AI and quota defaults can change without restart."
       />
       <Configuration />
+      <EmailTemplates />
     </div>
   );
 }

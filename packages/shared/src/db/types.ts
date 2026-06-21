@@ -6,6 +6,7 @@ import type {
   canvases,
   canvasTeams,
   drafts,
+  emailTemplates,
   files,
   guestInvites,
   guestSessions,
@@ -43,6 +44,8 @@ export type AuditEntry = typeof auditLog.$inferSelect;
 export type NewAuditEntry = typeof auditLog.$inferInsert;
 export type Setting = typeof settings.$inferSelect;
 export type NewSetting = typeof settings.$inferInsert;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type NewEmailTemplate = typeof emailTemplates.$inferInsert;
 export type Canvas = typeof canvases.$inferSelect;
 export type NewCanvas = typeof canvases.$inferInsert;
 export type Org = typeof orgs.$inferSelect;

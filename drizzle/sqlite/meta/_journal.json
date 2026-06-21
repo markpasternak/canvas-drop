@@ -204,6 +204,13 @@
       "when": 1782042610705,
       "tag": "0028_teams_org_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1782044147975,
+      "tag": "0029_email_templates",
+      "breakpoints": true
     }
   ]
 }

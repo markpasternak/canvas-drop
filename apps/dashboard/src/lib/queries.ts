@@ -29,6 +29,7 @@ export const keys = {
   adminAiUsage: ["admin", "ai-usage"] as const,
   adminConfig: ["admin", "config"] as const,
   adminAllowedEmails: ["admin", "allowed-emails"] as const,
+  adminEmailTemplates: ["admin", "email-templates"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
   galleryFacets: ["gallery", "facets"] as const,
   // Teams (plan 003). The `teams` prefix covers the list + every roster key so a team
@@ -110,6 +111,13 @@ export function useAdminConfig() {
 
 export function useAdminAllowedEmails() {
   return useQuery({ queryKey: keys.adminAllowedEmails, queryFn: api.admin.listAllowedEmails });
+}
+
+export function useAdminEmailTemplates() {
+  return useQuery({
+    queryKey: keys.adminEmailTemplates,
+    queryFn: api.admin.listEmailTemplates,
+  });
 }
 
 export function useGallery(query: GalleryQuery) {

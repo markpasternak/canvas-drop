@@ -668,6 +668,16 @@ export interface AllowedEmail {
   createdAt: number;
 }
 
+/** An admin-editable email template (plan 003 phase 3). Each known key always resolves
+ *  (admin override else seeded default); `overridden` marks whether a DB row exists. */
+export interface AdminEmailTemplate {
+  key: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText: string;
+  overridden: boolean;
+}
+
 /** Admin all-canvases sort axes (plan 006). `recent` (default) = last activity. */
 export type AdminCanvasSort = "recent" | "created" | "title";
 
@@ -1130,6 +1140,25 @@ export const api = {
       request<{ ok: true; entry: AllowedEmail }>("/api/admin/allowed-emails", jsonBody({ email })),
     removeAllowedEmail: (id: string) =>
       request<{ ok: true }>(`/api/admin/allowed-emails/${id}`, { method: "DELETE" }),
+
+    /** Email templates (plan 003 phase 3): list resolves every key (override else default);
+     *  PUT overrides subject + HTML + text; DELETE resets to the seeded default. */
+    listEmailTemplates: () =>
+      request<{ templates: AdminEmailTemplate[] }>("/api/admin/email-templates").then(
+        (r) => r.templates,
+      ),
+    setEmailTemplate: (
+      key: string,
+      body: { subject: string; bodyHtml: string; bodyText: string },
+    ) =>
+      request<{ ok: true }>(`/api/admin/email-templates/${encodeURIComponent(key)}`, {
+        ...jsonBody(body),
+        method: "PUT",
+      }),
+    resetEmailTemplate: (key: string) =>
+      request<{ ok: true }>(`/api/admin/email-templates/${encodeURIComponent(key)}`, {
+        method: "DELETE",
+      }),
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),
