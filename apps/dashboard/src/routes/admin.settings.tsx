@@ -5,8 +5,10 @@ import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { FilterBar, FilterChip } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
+import { SettingsNav } from "../components/SettingsNav.js";
 import { Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
+import { Toggle } from "../components/Toggle.js";
 import { type AdminConfigField, type AdminEmailTemplate, ApiError } from "../lib/api.js";
 import {
   useAdminResetEmailTemplate,
@@ -15,6 +17,7 @@ import {
 } from "../lib/mutations.js";
 import { useAdminConfig, useAdminEmailTemplates } from "../lib/queries.js";
 import { commitSkin, previewSkin, restoreSkinFromCache } from "../lib/skin.js";
+import { useSectionNav } from "../lib/use-section-nav.js";
 
 /** Source badge: where a setting's effective value comes from. */
 function SourceBadge({ source }: { source: AdminConfigField["source"] }) {
@@ -30,11 +33,112 @@ function valueLabel(f: AdminConfigField): string {
     if (!f.set) return "Not set";
     return f.last4 ? `Configured · …${f.last4}` : "Configured";
   }
+  // Booleans read as On/Off, not a bare "true"/"false" (matches the editor control).
+  if (f.type === "boolean") return f.value === "true" ? "On" : "Off";
   return f.value && f.value !== "" ? f.value : "—";
 }
 
-/** One editable setting: an input pre-filled with the current value + Save/Clear. */
-export function EditableRow({ field }: { field: AdminConfigField }) {
+/** A boolean config field's current on/off — narrows past the secret union member
+ *  (boolean fields are never secret, so `value` is always present). */
+function fieldOn(f: AdminConfigField): boolean {
+  return !f.secret && f.value === "true";
+}
+
+/** One editable setting. Dispatches by type so each value gets a control that's hard to
+ *  mis-set: a boolean is a real On/Off switch, never a free-text "true"/"false" box. A
+ *  `disabled` gate (+ reason) lets a parent express a dependency, e.g. the email sub-toggles
+ *  do nothing until the master switch is on. */
+export function EditableRow({
+  field,
+  disabled,
+  disabledReason,
+}: {
+  field: AdminConfigField;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
+  if (field.type === "boolean") {
+    return <BooleanRow field={field} disabled={disabled} disabledReason={disabledReason} />;
+  }
+  return <DraftRow field={field} />;
+}
+
+/** A boolean setting as a switch that saves the instant you flip it (no Save button to
+ *  forget). Optimistic; reverts on error. A `disabled` gate greys it out with a reason. */
+function BooleanRow({
+  field,
+  disabled,
+  disabledReason,
+}: {
+  field: AdminConfigField;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
+  const setConfig = useAdminSetConfig();
+  const toast = useToast();
+  const serverOn = fieldOn(field);
+  const [on, setOn] = useState(serverOn);
+  // Re-sync when the server value changes (after a save settles or a dependency flips it).
+  useEffect(() => setOn(serverOn), [serverOn]);
+
+  async function flip(next: boolean) {
+    setOn(next); // optimistic
+    try {
+      await setConfig.mutateAsync({ key: field.key, value: next });
+      toast(`${field.label} turned ${next ? "on" : "off"}`);
+    } catch (err) {
+      setOn(!next); // revert
+      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+    }
+  }
+
+  async function reset() {
+    try {
+      await setConfig.mutateAsync({ key: field.key, value: null });
+      toast(`${field.label} reset to default`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't reset", "error");
+    }
+  }
+
+  return (
+    <div className="py-3">
+      <Toggle
+        checked={on}
+        disabled={disabled}
+        onChange={flip}
+        label={
+          <span className="inline-flex items-center gap-2">
+            {field.label}
+            <SourceBadge source={field.source} />
+          </span>
+        }
+        description={
+          <>
+            {field.help}
+            {disabled && disabledReason ? (
+              <span className="mt-0.5 block text-warning">{disabledReason}</span>
+            ) : null}
+          </>
+        }
+      />
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] text-muted">
+          {field.env !== "—" ? field.env : field.key}
+        </span>
+        {field.overridden ? (
+          <Button size="sm" variant="ghost" onClick={reset}>
+            Reset to default
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** A non-boolean setting edited via a draft + explicit Save/Clear (numbers, lists, secrets,
+ *  enums). Numbers use a real numeric input; secrets are write-only (start empty). */
+function DraftRow({ field }: { field: AdminConfigField }) {
   const setConfig = useAdminSetConfig();
   const toast = useToast();
   // Secrets are write-only: the input starts empty (we never receive the value).
@@ -134,7 +238,9 @@ export function EditableRow({ field }: { field: AdminConfigField }) {
           </select>
         ) : (
           <input
-            type={field.secret ? "password" : "text"}
+            type={field.secret ? "password" : field.type === "number" ? "number" : "text"}
+            inputMode={field.type === "number" ? "numeric" : undefined}
+            min={field.type === "number" ? 1 : undefined}
             aria-label={field.label}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -224,27 +330,34 @@ function searchableText(field: AdminConfigField): string {
     .toLowerCase();
 }
 
+// Cross-field dependencies (error-prevention): a setting that has no effect until another is
+// on. The email notify toggles do nothing while the master send switch is off.
+const EMAIL_MASTER = "email.invitesEnabled";
+const EMAIL_SUBS = new Set([
+  "email.notifyOnAddUser",
+  "email.notifyOnCanvasAdd",
+  "email.notifyOnCanvasInvite",
+]);
+
+/** A short intro note for a group, shown under its heading. */
+const GROUP_NOTES: Record<string, string> = {
+  Email:
+    "Invite + notification emails send only when the master switch is on AND an email driver (SMTP or Mailgun) is configured. With no driver, a new invitee still joins on first sign-in — they just won't get an onboarding email.",
+};
+
+/** Anchor id for a group section (and its nav link). */
+const groupAnchor = (group: string) => `cfg-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
 /** Unified Configuration view: every setting with value/source, a safe editable subset. */
 function Configuration() {
   const config = useAdminConfig();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SettingsFilter>("all");
-  if (config.isError) {
-    return (
-      <Panel className="p-4">
-        <p className="text-sm text-danger">Couldn't load configuration.</p>
-      </Panel>
-    );
-  }
-  if (!config.data) {
-    return (
-      <Panel className="p-4">
-        <p className="text-sm text-muted">Loading…</p>
-      </Panel>
-    );
-  }
+
+  // Derive everything from `config.data ?? []` so the hooks below (useSectionNav) run on every
+  // render — even while loading — keeping hook order stable (React's rules of hooks).
+  const allFields = config.data ?? [];
   const search = query.trim().toLowerCase();
-  const allFields = config.data;
   const filteredFields = allFields.filter((f) => {
     if (!matchesFilter(f, filter)) return false;
     if (!search) return true;
@@ -266,6 +379,21 @@ function Configuration() {
   const groups = [...byGroup.keys()].sort(
     (a, b) => (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99),
   );
+
+  // In-page section nav (mirrors the canvas detail tabs). Active = the section you're scrolled to.
+  const sectionIds = groups.map(groupAnchor);
+  const { active, select } = useSectionNav(sectionIds, !!config.data);
+
+  const byKey = new Map(allFields.map((f) => [f.key, f]));
+  /** Whether a field is gated off by a dependency (with a reason to show). */
+  const gateOf = (field: AdminConfigField): { disabled?: boolean; disabledReason?: string } => {
+    const master = byKey.get(EMAIL_MASTER);
+    if (EMAIL_SUBS.has(field.key) && master && !fieldOn(master)) {
+      return { disabled: true, disabledReason: "Needs “Send invite & notification emails” on." };
+    }
+    return {};
+  };
+
   const activeFiltering = Boolean(search || filter !== "all");
   const editableCount = allFields.filter((f) => f.editable).length;
   const overriddenCount = allFields.filter((f) => f.overridden).length;
@@ -273,6 +401,21 @@ function Configuration() {
   function clearFilters() {
     setQuery("");
     setFilter("all");
+  }
+
+  if (config.isError) {
+    return (
+      <Panel className="p-4">
+        <p className="text-sm text-danger">Couldn't load configuration.</p>
+      </Panel>
+    );
+  }
+  if (!config.data) {
+    return (
+      <Panel className="p-4">
+        <p className="text-sm text-muted">Loading…</p>
+      </Panel>
+    );
   }
 
   return (
@@ -328,30 +471,47 @@ function Configuration() {
           }
         />
       ) : (
-        groups.map((group) => {
-          const fields = byGroup.get(group) ?? [];
-          const total = allByGroup.get(group)?.length ?? fields.length;
-          const groupEditable = (allByGroup.get(group) ?? []).filter((f) => f.editable).length;
-          return (
-            <Panel key={group} className="p-4">
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold text-fg">{group}</h2>
-                <p className="text-xs text-subtle">
-                  {fields.length} of {total} settings · {groupEditable} editable
-                </p>
-              </div>
-              <div className="divide-y divide-border">
-                {fields.map((f) =>
-                  f.editable ? (
-                    <EditableRow key={f.key} field={f} />
-                  ) : (
-                    <ReadonlyRow key={f.key} field={f} />
-                  ),
-                )}
-              </div>
-            </Panel>
-          );
-        })
+        <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8">
+          <SettingsNav
+            sections={groups.map((g) => ({ id: groupAnchor(g), label: g }))}
+            active={active}
+            onSelect={select}
+            ariaLabel="Configuration sections"
+          />
+          <div className="space-y-5">
+            {groups.map((group) => {
+              const fields = byGroup.get(group) ?? [];
+              const total = allByGroup.get(group)?.length ?? fields.length;
+              const groupEditable = (allByGroup.get(group) ?? []).filter((f) => f.editable).length;
+              return (
+                <section key={group} id={groupAnchor(group)} className="scroll-mt-24">
+                  <Panel className="p-4">
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                      <h2 className="text-sm font-semibold text-fg">{group}</h2>
+                      <p className="text-xs text-subtle">
+                        {fields.length} of {total} settings · {groupEditable} editable
+                      </p>
+                    </div>
+                    {GROUP_NOTES[group] ? (
+                      <p className="mb-2 rounded-md bg-surface-sunken px-3 py-2 text-xs text-muted">
+                        {GROUP_NOTES[group]}
+                      </p>
+                    ) : null}
+                    <div className="divide-y divide-border">
+                      {fields.map((f) =>
+                        f.editable ? (
+                          <EditableRow key={f.key} field={f} {...gateOf(f)} />
+                        ) : (
+                          <ReadonlyRow key={f.key} field={f} />
+                        ),
+                      )}
+                    </div>
+                  </Panel>
+                </section>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
