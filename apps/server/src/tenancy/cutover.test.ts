@@ -80,6 +80,19 @@ describe.each(DIALECTS)("tenancy cutover (plan 002 U8) [%s]", (dialect) => {
     expect((await canvases.findById(ids.guestWholeOrg))?.access).toBe("whole_org");
   });
 
+  it("skips soft-deleted tombstones — a deleted guest-owned whole_org is neither counted nor clamped", async () => {
+    const { orgs, canvases, ids } = await seed();
+    // Soft-delete the guest-owned whole_org canvas; the cutover must ignore the tombstone.
+    await canvases.setStatus(ids.guestWholeOrg, "deleted");
+    const plan = await planTenancy(client, orgs);
+    expect(plan.canvases.willClampToPrivate).toBe(0); // the only clamp candidate is now deleted
+    expect(plan.details.find((d) => d.id === ids.guestWholeOrg)).toBeUndefined();
+    // Apply leaves the deleted tombstone untouched (still deleted, no clamp write).
+    const res = await applyTenancy(client, orgs);
+    expect(res.clamped).toBe(0);
+    expect((await canvases.findById(ids.guestWholeOrg))?.access).toBe("whole_org");
+  });
+
   it("apply homes member canvases by owner domain and clamps guest-owned whole_org", async () => {
     const { orgs, canvases, acme, ids } = await seed();
     const res = await applyTenancy(client, orgs);

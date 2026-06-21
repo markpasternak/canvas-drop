@@ -1,6 +1,6 @@
 import { domainOfEmail } from "@canvas-drop/shared";
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import type { DbClient } from "../db/factory.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 
@@ -108,7 +108,11 @@ export async function planTenancy(
       access: t.canvases.access,
       orgId: t.canvases.orgId,
     })
-    .from(t.canvases)) as Array<{
+    .from(t.canvases)
+    // Skip soft-deleted tombstones (status='deleted'): they're never served, so homing or
+    // clamping them is pointless and pollutes the report with phantom changes. Archived
+    // canvases ARE processed — they can be restored, so they should carry the right home.
+    .where(ne(t.canvases.status, "deleted"))) as Array<{
     id: string;
     slug: string;
     ownerId: string;
