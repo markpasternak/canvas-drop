@@ -47,3 +47,23 @@ Found during a live browser walkthrough of Tenancy P1.
 - **Teams (Phase 2).** The `team` rung is reserved in the CHECK and rejected by
   `decideCanvasAccess`; the membership resolver is DI-ready for `derived ∪ explicit`. Plan:
   `docs/plans/2026-06-20-003-feat-tenancy-p2-teams-plan.md`.
+
+- **★ Per-org capability + config policy (P2/P3 — user-requested next-round feature).**
+  Today capabilities (AI / KV / files / realtime) resolve as `operator-global ∧ per-canvas`,
+  and config (AI budget, model allowlist, quotas, etc.) is instance-wide (env + admin
+  DB-override). Add an **org tier** in between: each org carries its own policy, and the
+  effective state becomes `operator-global ∧ ORG-policy ∧ per-canvas`, keyed off the
+  caller's / canvas's org.
+  - Concrete ask: **"Seenthis members get AI, the public (org-guests) don't."** In the
+    single-org case this is a **member-vs-guest capability gate** (members get AI, guests
+    don't — built on the P1 `orgIds`/`isGuest` we already have). In multi-org (P3) it
+    generalizes to **org A's policy vs org B's** (e.g. AI on for A, off for B).
+  - Scope of "config by org": AI on/off + per-org AI budget + model allowlist first; then
+    KV/files/realtime toggles and other env-like settings as needed.
+  - Touches: the capability resolver (`packages/shared/src/capabilities`), the AI quota
+    system (org-scoped budgets), the org model (orgs gain a settings/policy store, not just
+    name + domains), and a **per-org admin surface** (which dovetails with the admin-surface
+    item above). Already partly anticipated by the P3 plan's "per-org quotas" line.
+  - Decide whether the gate is **membership-based** (member vs guest, doable in P2 with the
+    teams work) or full **per-org config** (P3, multi-org) — likely ship the member/guest
+    AI gate first, then the per-org policy store.
