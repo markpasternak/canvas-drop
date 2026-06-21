@@ -1160,11 +1160,17 @@ export const api = {
     revokePublic: (id: string) =>
       request<{ ok: true }>(`/api/admin/users/${id}/revoke-public`, { method: "POST" }),
 
-    /** Individual sign-in allowlist (D14 supplement to the env email domains). */
+    /** Add users / sign-in permits (plan 003 U7). Lists the off-domain permits; `addUser`
+     *  permits a brand-new email (or grants an existing one) via the invite primitive — it
+     *  sends a courtesy email and, on a matching org domain, makes them a member on first login.
+     *  `status`: `granted` (already a user) or `pending` (a brand-new invitee). */
     listAllowedEmails: () =>
       request<{ emails: AllowedEmail[] }>("/api/admin/allowed-emails").then((r) => r.emails),
     addAllowedEmail: (email: string) =>
-      request<{ ok: true; entry: AllowedEmail }>("/api/admin/allowed-emails", jsonBody({ email })),
+      request<{ ok: true; status: AddMemberStatus; entry: AllowedEmail | null }>(
+        "/api/admin/allowed-emails",
+        jsonBody({ email }),
+      ),
     removeAllowedEmail: (id: string) =>
       request<{ ok: true }>(`/api/admin/allowed-emails/${id}`, { method: "DELETE" }),
 

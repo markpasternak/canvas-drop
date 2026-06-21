@@ -19,6 +19,7 @@ import type { VersionsRepository } from "../db/repositories/versions.js";
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS } from "../email/templates.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
+import type { InviteService } from "../invites/service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "./canvas-kv.js";
 
 export interface AdminRoutesDeps {
@@ -33,6 +34,9 @@ export interface AdminRoutesDeps {
   allowedEmails: AllowedEmailsRepository;
   /** Admin-editable email templates (plan 003 phase 3). */
   emailTemplates: EmailTemplatesRepository;
+  /** The invite primitive (plan 003 U5) — Add-users permits + invites through it (so the new
+   *  email gets a courtesy email and, on a matching domain, org membership on first login). */
+  invites: InviteService;
   audit: AuditLog;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
@@ -498,16 +502,35 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     return c.json({ emails: await deps.allowedEmails.list() });
   });
 
+  // Add users (plan 003 U7) — the only way to permit a brand-new email to sign in. Routes
+  // through the invite primitive with the admin allowance: it permits the email (an
+  // `allowed_emails` row when the domain doesn't already authenticate), records nothing to
+  // materialize (org membership auto-derives from the domain on first login), and sends a
+  // courtesy email. Existing allowlist entries keep working — this replaces the bare add.
   app.post("/allowed-emails", sameOrigin, async (c) => {
     const body = allowedEmailBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const entry = await deps.allowedEmails.add(body.data.email, c.get("user").id);
+    const user = c.get("user");
+    const r = await deps.invites.resolveOrInvite({ kind: "account" }, body.data.email, {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+    });
+    // An admin is never rate-limited or permit-gated, so the only outcomes are granted/pending.
     deps.audit.recordAudit({
       action: "allowed_email_add",
-      actorId: c.get("user").id,
-      meta: { email: body.data.email },
+      actorId: user.id,
+      meta: { email: body.data.email.trim().toLowerCase() },
     });
-    return c.json({ ok: true, entry });
+    // Surface the resulting allowlist entry when one was created (off-domain email) so the
+    // panel can show it; a domain-matched email needs no row (it already authenticates).
+    const status = r.status === "granted" || r.status === "pending" ? r.status : "pending";
+    const entry =
+      (await deps.allowedEmails.list()).find(
+        (e) => e.email === body.data.email.trim().toLowerCase(),
+      ) ?? null;
+    return c.json({ ok: true, status, entry });
   });
 
   app.delete("/allowed-emails/:id", sameOrigin, async (c) => {

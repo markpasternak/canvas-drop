@@ -23,6 +23,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
+import { makeInviteService } from "../invites/testing.js";
 import { adminRoutes } from "./admin.js";
 
 const silent = pino({ level: "silent" });
@@ -50,6 +51,7 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       settings: adminSettingsService({ settings: settingsRepository(client), config }),
       allowedEmails: allowedEmailsRepository(client),
       emailTemplates: emailTemplatesRepository(client),
+      invites: makeInviteService(client, config),
       audit,
     }),
   );
@@ -819,6 +821,40 @@ describe("admin routes", () => {
     ).toBe(200);
     const after = await app.request("/api/admin/allowed-emails");
     expect(((await after.json()) as { emails: unknown[] }).emails).toHaveLength(0);
+  });
+
+  it("add-users (U7): a brand-new off-domain email is permitted (pending); an existing user is granted with no new permit row", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+
+    // Brand-new email → permitted + pending (the invitee will sign in for the first time).
+    const newAdd = await app.request(
+      "/api/admin/allowed-emails",
+      post({ email: "fresh@partner.io" }),
+    );
+    expect(newAdd.status).toBe(200);
+    expect((await newAdd.json()) as { status: string }).toMatchObject({ status: "pending" });
+
+    // An EXISTING user re-added → granted now, and NO duplicate allowlist row is created
+    // (they can already sign in).
+    await usersRepository(client).upsert({
+      providerSub: "existing",
+      email: "existing@partner.io",
+      name: "Existing",
+      isAdmin: false,
+    });
+    const exAdd = await app.request(
+      "/api/admin/allowed-emails",
+      post({ email: "existing@partner.io" }),
+    );
+    expect((await exAdd.json()) as { status: string }).toMatchObject({ status: "granted" });
+    const emails = (
+      (await (await app.request("/api/admin/allowed-emails")).json()) as {
+        emails: Array<{ email: string }>;
+      }
+    ).emails;
+    expect(emails.map((e) => e.email)).not.toContain("existing@partner.io");
   });
 
   it("allowed-emails CRUD 404s for a non-admin (no existence leak)", async () => {
