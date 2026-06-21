@@ -108,16 +108,26 @@ auth-sensitive, migration-bearing, and multi-surface (server, dashboard, MCP, do
 
 ## Key Technical Decisions
 
-- **KTD1 — `teams.org_id` nullable; `teamMatch` branches on org presence.** A `NULL` org_id
-  marks a **personal** team. `teamMatch(canvasId, userId, viewerOrgIds)` and
-  `listCanvasIdsForUserTeams` must split: for a canvas granted to a personal team, access =
-  the viewer holds a direct `team_members` row (no org re-join); for an org team, the existing
-  live `org_members` re-join (`inArray(teams.orgId, viewerOrgIds)`) stays. **This is the #1
-  invariant risk** — the split must hold identically across all three seams (serve
-  `resolveAccessContext`, runtime `canvas-api.ts`, realtime `hub.ts`) and stay fail-closed.
-  A personal team's members are the boundary, so a stale `team_members` row IS authoritative
-  there (there's no org to be revoked from) — which is correct: a personal team is the
-  creator's own grant, removable only by editing the team.
+- **KTD1 — `teams.org_id` nullable; ONE membership-mandatory predicate, NOT a branch.**
+  A `NULL` org_id marks a **personal** team. The risk-lowering reframe (2026-06-21): do **not**
+  add a personal-vs-org code branch. `teamMatch` already makes membership a **mandatory
+  `INNER JOIN` on `team_members`**, with the org rule as a `WHERE` filter on top. Personal teams
+  only widen that filter by one clause — from `teams.org_id IN (viewerOrgIds)` to
+  `(teams.org_id IS NULL OR teams.org_id IN (viewerOrgIds))`. The predicate becomes a single
+  expression: **`member AND (personal OR org-in-scope)`**. Consequences that lower the risk:
+  (a) "the personal path skips the membership check" is **structurally impossible** — membership
+  is the inner join, not a branch; no team-members row ⇒ zero rows ⇒ deny, identically for both
+  kinds. The org clause can only *narrow*. (b) The three seams (serve `resolveAccessContext`,
+  runtime `canvas-api.ts`, realtime `hub.ts`) keep calling the **same one** `teamMatch`/
+  `listCanvasIdsForUserTeams` method — a one-line `WHERE` widening, no new per-seam logic to
+  diverge. (c) Org teams keep the exact read-time `org_id ∈ live viewerOrgIds` re-join (the
+  fail-safe KTD3 invariant — a stale `team_members` row can't widen an *org* canvas); personal
+  teams just add the `IS NULL` arm. (d) **Drop the `viewerOrgIds.size === 0` early-return** in
+  `teamMatch`/`listCanvasIdsForUserTeams` — today it would wrongly deny a guest their own
+  personal team; the `IS NULL` arm handles them, safe because membership is still the inner join.
+  A personal team's members are the boundary (no org to be revoked from), which is correct: a
+  personal team is the creator's own grant, edited only via the team. *(Invariant-critical, but
+  now a one-clause widening rather than duplicated conditional logic — see OQ1.)*
 
 - **KTD2 — Org attachment is set at creation and immutable.** `teamsService.create` takes an
   optional `orgId`: present (and the creator is a live member) → org team; absent → personal.
@@ -204,10 +214,11 @@ flowchart TD
   MAIL --> TPL
   TPL --> MAILER[Mailer - smtp/mailgun/log]
 
-  subgraph AccessInvariant[team access - all three seams]
-    TM[teamMatch] --> ORGQ{team.org_id null?}
-    ORGQ -->|personal| DIRECT[direct team_members membership]
-    ORGQ -->|org| REJOIN[live org_members re-join - KTD3 P2]
+  subgraph AccessInvariant[team access - ONE predicate, all three seams]
+    SEAMS[serve / runtime / realtime] --> TM[teamMatch - single method]
+    TM --> JOIN[INNER JOIN team_members - membership MANDATORY]
+    JOIN --> GATE["AND (org_id IS NULL OR org_id IN live viewerOrgIds)"]
+    GATE --> OUT[member AND personal-or-org-in-scope]
   end
 ```
 
@@ -234,25 +245,36 @@ teams skip the `team.orgId === cv.orgId` check), `apps/server/src/canvas/setting
 (KTD5 relax `TEAM_REQUIRED` for personal teams), `apps/server/src/canvas/authorization.ts`
 (no change if the seam consumes `teamMatch`; verify), `apps/server/src/db/repositories/teams.test.ts`,
 `apps/server/src/integration/team-scenarios.test.ts`.
-**Approach:** `teamMatch` LEFT-branches on `teams.org_id IS NULL`: personal → require a
-`team_members` row for the canvas's granted personal team (membership is the boundary, no org
-filter); org → unchanged. `listCanvasIdsForUserTeams` unions both. Grant validation in
-`sharing.ts`: a personal team is grantable to any of the owner's canvases (incl. personal);
-an org team only to canvases in that org. The serve/runtime/realtime seams already call
-`teamMatch`, so they inherit the branch — **add an explicit test at each seam** so a future
-regression can't silently widen access.
-**Patterns to follow:** the existing P2 `teamMatch` re-join + the three-seam tests in
-`team-scenarios.test.ts`; the dual-dialect-seam learning (`docs/solutions/2026-06-13-dual-dialect-drizzle-seam.md`).
+**Approach (no branch — one widened predicate; KTD1):** `teamMatch` keeps its mandatory
+`INNER JOIN team_members`; change only its org `WHERE` from `inArray(teams.orgId, viewerOrgIds)`
+to `or(isNull(teams.orgId), inArray(teams.orgId, viewerOrgIds))`, and **remove the
+`viewerOrgIds.size === 0` early return**. `listCanvasIdsForUserTeams` gets the same one-clause
+widening. Membership stays the inner join, so access without a `team_members` row is
+unrepresentable for either kind. Grant validation in `sharing.ts`: a personal team is grantable
+to any of the owner's canvases (incl. personal); an org team only to canvases in that org. The
+three seams already call this one method — verify each routes through a **single shared
+`resolveTeamMatch` helper** (not three hand-rolled resolutions) so there's one place to be
+correct.
+**Patterns to follow:** the existing P2 `teamMatch` query (already membership-mandatory) + the
+three-seam tests in `team-scenarios.test.ts`; the dual-dialect-seam learning
+(`docs/solutions/2026-06-13-dual-dialect-drizzle-seam.md`).
 **Test scenarios:**
-- Personal team canvas (personal canvas, org_id null) serves **200** to a direct team member,
-  **404** to a non-member and a guest — across serve **and** runtime-API. *(Covers R1/R-sec.)*
-- Org team canvas unchanged: 200 to a same-org granted member, 404 to a non-member; a
-  revoked-org-member is still dropped (the org re-join still applies to org teams).
-- A personal team member who is **removed from the org** still reaches a *personal* team
-  canvas (no org dependency) — but loses *org* team canvases (branch isolation).
-- Grant validation: an owner may grant a personal team to a personal canvas; may NOT grant an
-  org team to a canvas outside that org (TEAM_FORBIDDEN); `settings-update` no longer 409s
-  `TEAM_REQUIRED` for a personal-team grant on an org-less canvas.
+- **Cross-seam access matrix (parameterized, one table run against ALL three seams — serve,
+  runtime-API, realtime):** for {personal team, org team} × {member, non-member, guest,
+  revoked-org-member}, assert allow/deny is identical at every seam. A divergent/bypassing seam
+  fails here loudly. *(Covers R1/R-sec — the #1 risk.)*
+- **Named membership invariant:** access ⇒ a `team_members` row exists, for BOTH personal and
+  org teams (delete the row → immediate 404). Asserts the inner-join guarantee directly.
+- Personal team canvas (personal canvas, org_id null) serves 200 to a direct member, 404 to a
+  non-member and a guest; a **guest** reaches their OWN personal team canvas (the dropped
+  empty-orgIds early return).
+- Org team unchanged: 200 to a same-org granted member; a revoked-org-member is still dropped
+  (the `org_id IN viewerOrgIds` arm still applies to org teams) even with a stale team row.
+- A personal team member removed from the org still reaches *personal* team canvases (no org
+  dependency) but loses *org* team canvases.
+- Grant validation: grant a personal team to a personal canvas (ok); may NOT grant an org team
+  to a canvas outside that org (TEAM_FORBIDDEN); `settings-update` no longer 409s `TEAM_REQUIRED`
+  for a personal-team grant on an org-less canvas.
 - Schema parity green on both dialects; migration is additive (existing org teams keep org_id).
 
 ### Phase 2 — Accounts & invites
@@ -457,12 +479,14 @@ fix everything real with regression tests, weight to the trust model.
 
 ## Open Questions / Risks
 
-- **OQ1 (the #1 invariant risk) — the personal-vs-org `teamMatch` branch must be identical and
-  fail-closed across all three seams.** A divergence (e.g. the runtime seam forgetting the
-  personal branch, or the personal branch accidentally skipping the membership check) is a
-  silent access leak. Mitigation: a single branched `teamMatch` consumed by all three seams +
-  an explicit per-seam test (U1, U11). Resolve in implementation by routing every seam through
-  the one repo method — never re-deriving the predicate.
+- **OQ1 (the #1 invariant risk — now substantially lowered by the KTD1 reframe).** Originally:
+  a personal-vs-org *branch* duplicated across three seams. Reframed to **one widened predicate**
+  where membership is a mandatory inner join and the org rule is a single OR-clause that can only
+  narrow — so "skip the membership check" is structurally impossible and there is no second code
+  path to diverge. Residual risk reduces to "does every seam route through the one
+  `teamMatch`/`resolveTeamMatch` method" — pinned by the **parameterized cross-seam access matrix
+  + the named membership-invariant test** (U1, U11). Implementation rule: never re-derive the
+  predicate in a seam; widen the one method.
 - **OQ2 — persistent passwordless session lifetime + re-auth cadence.** Default proposal: mirror
   the normal session TTL; re-auth via a fresh magic link on expiry. Confirm whether invited
   accounts should have a shorter TTL or a "remember me". Decide at U2.
