@@ -179,7 +179,13 @@ export function takeToken(
   store: RateLimitStore,
   key: string,
   limit: number,
+  /** Window in ms (default 60s). The invite limiter (plan 003) passes an HOUR so an
+   *  hourly cap isn't applied to a per-minute window. Existing per-minute callers omit it. */
+  windowMs: number = WINDOW_MS,
 ): { allowed: boolean; retryAfterSec: number } {
-  const r = store.hit(key, limit, WINDOW_MS);
+  const r = store.hit(key, limit, windowMs);
   return { allowed: r.allowed, retryAfterSec: r.retryAfterSec };
 }
+
+/** One hour, for the invite per-actor rate window (plan 003 phase 3 / KTD9). */
+export const HOUR_MS = 3_600_000;

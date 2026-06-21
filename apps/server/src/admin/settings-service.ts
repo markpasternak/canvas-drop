@@ -18,6 +18,18 @@ const SCREENSHOTS_KEY = "config.screenshots.enabled";
 /** Design-skin admin runtime override (editable; DB override wins over env/default). */
 const DESIGN_SKIN_KEY = "config.core.designSkin";
 
+// Invite / notification email + rate settings (plan 003 phase 3; DB-only, default constants
+// mirror config-fields.ts `fromConfig`). Read by the invite primitive.
+const EMAIL_INVITES_ENABLED = "config.email.invitesEnabled";
+const NOTIFY_ADD_USER = "config.email.notifyOnAddUser";
+const NOTIFY_CANVAS_ADD = "config.email.notifyOnCanvasAdd";
+const NOTIFY_CANVAS_INVITE = "config.email.notifyOnCanvasInvite";
+const INVITE_RATE_PER_HOUR = "config.invites.maxPerActorPerHour";
+const INVITE_PENDING_CAP = "config.invites.pendingCap";
+const ALLOW_MEMBER_NEW_EMAILS = "config.invites.allowMemberNewEmails";
+const INVITE_RATE_DEFAULT = 20;
+const INVITE_PENDING_CAP_DEFAULT = 50;
+
 const last4 = (s: string) => (s.length <= 4 ? s : s.slice(-4));
 
 /** Source of a setting's effective value, for the admin Configuration view. */
@@ -224,6 +236,34 @@ export function adminSettingsService(deps: {
     async effectiveScreenshotsEnabled(): Promise<boolean> {
       if (!config.screenshots.available) return false;
       return (await boolOverride(SCREENSHOTS_KEY)) ?? false;
+    },
+
+    // ── Invite / notification email settings (plan 003 phase 3) ──────────────
+    // The effective invite policy the invite primitive reads in one shot. A positive number
+    // override wins for the rate caps; the booleans default per config-fields.
+
+    async effectiveInviteSettings(): Promise<{
+      emailEnabled: boolean;
+      notifyOnAddUser: boolean;
+      notifyOnCanvasAdd: boolean;
+      notifyOnCanvasInvite: boolean;
+      maxPerActorPerHour: number;
+      pendingCap: number;
+      allowMemberNewEmails: boolean;
+    }> {
+      const posNum = async (key: string, fallback: number): Promise<number> => {
+        const v = await settings.get(key);
+        return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+      };
+      return {
+        emailEnabled: (await boolOverride(EMAIL_INVITES_ENABLED)) ?? false,
+        notifyOnAddUser: (await boolOverride(NOTIFY_ADD_USER)) ?? true,
+        notifyOnCanvasAdd: (await boolOverride(NOTIFY_CANVAS_ADD)) ?? true,
+        notifyOnCanvasInvite: (await boolOverride(NOTIFY_CANVAS_INVITE)) ?? true,
+        maxPerActorPerHour: await posNum(INVITE_RATE_PER_HOUR, INVITE_RATE_DEFAULT),
+        pendingCap: await posNum(INVITE_PENDING_CAP, INVITE_PENDING_CAP_DEFAULT),
+        allowMemberNewEmails: (await boolOverride(ALLOW_MEMBER_NEW_EMAILS)) ?? false,
+      };
     },
 
     // ── Unified Configuration view (all settings; one resolution rule) ───────

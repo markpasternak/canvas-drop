@@ -15,7 +15,23 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import { memStorage } from "../storage/mem.js";
-import { inProcessRateLimitStore } from "./rate-limit.js";
+import { HOUR_MS, inProcessRateLimitStore, takeToken } from "./rate-limit.js";
+
+// --- takeToken windowMs (plan 003 phase 3 — the invite limiter uses an hourly window) ---
+
+describe("takeToken windowMs", () => {
+  it("defaults to a per-minute window; an explicit hourly window holds across minutes", () => {
+    let now = 1_000_000;
+    const store = inProcessRateLimitStore(() => now);
+    // Hourly window: 2 allowed, the 3rd blocked even after a minute passes.
+    expect(takeToken(store, "invite:u", 2, HOUR_MS).allowed).toBe(true);
+    expect(takeToken(store, "invite:u", 2, HOUR_MS).allowed).toBe(true);
+    now += 61_000; // a minute later — a per-minute window would have reset
+    expect(takeToken(store, "invite:u", 2, HOUR_MS).allowed).toBe(false);
+    now += HOUR_MS; // past the hour — now it resets
+    expect(takeToken(store, "invite:u", 2, HOUR_MS).allowed).toBe(true);
+  });
+});
 
 // --- The in-process store (injected clock) ---
 
