@@ -70,7 +70,11 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    once at creation, and a session token rides only in an HttpOnly cookie.
 3. **No unauthorized access.** A canvas is reachable only by its owner; at
    the `whole_org` rung, allowed org members (when [tenancy](#the-org-boundary-member-vs-guest)
-   is on, that means members of the canvas's *home* org — not brought-in guests); at `specific_people`, a principal on
+   is on, that means members of the canvas's *home* org — not brought-in guests); at the
+   `team` rung, a member of one of the canvas's granted teams — re-checked on every request
+   by re-joining the principal's **live** org membership (a stale `team_members` row can't
+   widen access, so a user removed from the org is denied immediately, and a `team` canvas
+   under inert tenancy or with no home org is a deny to everyone); at `specific_people`, a principal on
    its allowlist (an org member, or an invited guest whose magic-link session is
    for *that* canvas); at `public_link`, anyone — but static-only and only while
    the owner account holds the admin-granted publish capability. All subject to

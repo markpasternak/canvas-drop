@@ -23,6 +23,7 @@ One rung per canvas, stored as the `access` field (default `private`):
 | --- | --- | --- |
 | **Private** | Only you, the owner. | Full, for the owner. |
 | **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
+| **Team** | Members of the [teams](/docs/authoring/create-and-publish#teams) you grant — a subset of your org. | Full, for team members. |
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
@@ -68,6 +69,25 @@ is set.
 > guest invites are refused (`GUESTS_UNAVAILABLE`); without configured email they
 > fail with `EMAIL_NOT_CONFIGURED`. You can still allowlist existing org members
 > by email in any mode.
+
+## Sharing with a team
+
+Choose **Team** to share with one or more [teams](/docs/authoring/create-and-publish#teams)
+— named groups inside your org. The share control lists only the teams **you belong to**;
+pick one or more, and every member of those teams can open and use the canvas (full
+backend, like a member). A team grant is independent of your own membership afterward — if
+you later leave the team, the canvas stays shared with it until you change the rung.
+
+Team canvases are **strictly team-scoped**: they never appear in the org-wide gallery.
+Members reach them through **Teams → Shared with your teams** in the dashboard (or
+`list_shared_with_teams` over [MCP](/docs/agents/mcp)). Membership is re-checked on every
+request against your *live* org membership, so someone removed from the org loses access
+immediately, even if a stale team row lingers.
+
+> Like **Whole org**, the **Team** rung needs an org workspace: it's hidden for a guest and
+> disabled on a [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas
+> (the server refuses an un-homed team share). You manage teams — create, invite, leave —
+> on the **Teams** page.
 
 ## Password & expiry
 

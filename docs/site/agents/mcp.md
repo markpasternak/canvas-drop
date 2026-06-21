@@ -35,7 +35,7 @@ there is no cross-owner access and no existence leak.
 
 | Tool | What it does |
 |---|---|
-| `whoami` | The connected account (`id`, `email`, `name`). When an org boundary is configured, also `orgs` (`[{id, name}]` you're a member of) and `isGuest` (true = signed in but in no org) — use an org `id` as `create_canvas`'s `orgId`. |
+| `whoami` | The connected account (`id`, `email`, `name`). When an org boundary is configured, also `orgs` (`[{id, name}]` you're a member of), `teams` (the teams you belong to), and `isGuest` (true = signed in but in no org) — use an org `id` as `create_canvas`'s `orgId`. |
 | `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). Optional `orgId` homes it in an org you belong to (from `whoami.orgs`) so it can be shared org-wide; omit or `null` for a personal canvas. Only meaningful when an org boundary is configured. |
 | `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
@@ -53,7 +53,7 @@ there is no cross-owner access and no existence leak.
 | `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes guest grants. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
 | `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
-| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), guest-AI. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), guest-AI. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to in the canvas's org — see `list_teams`); switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
 | `list_access` | List the canvas's allowlist — named org members + email-invited guests (each with an `id` for `revoke_access`). |
 | `grant_access` | Give a person access by email: an org member is added to the allowlist directly; an outside email gets a guest magic-link invite (oidc/dev + configured email only). Takes effect on the `specific_people` rung. |
@@ -61,6 +61,12 @@ there is no cross-owner access and no existence leak.
 | `revoke_access` | Remove an allowlist entry (member or guest); revokes a guest's invite + sessions. |
 | `clone_canvas` | Clone a canvas into a new one you own — any active canvas you own, or a gallery template someone shared. Starts as an unpublished draft with a fresh slug + key. |
 | `get_canvas_usage` | Usage stats: views + 30-day sparkline, and (backend-on) KV/file/AI/realtime op counts, storage, AI tokens/cost. |
+| `list_teams` | The teams in your org(s), each with `mine` (you're a member) and `canManage` (you created it — so you can rename/delete it). |
+| `create_team` | Create a team in an org you belong to (`orgId` from `whoami.orgs`). You become its first member and manager. |
+| `rename_team` / `delete_team` | Rename or delete a team you created. Deleting unshares every canvas shared with it (the canvases are untouched). |
+| `add_team_member` / `remove_team_member` | Add a same-org colleague to a team you belong to (by `email`), or remove a member (pass your own user id to leave). |
+| `list_team_members` | The roster of a team in your org (`userId`, `email`, `name`). |
+| `list_shared_with_teams` | Canvases shared with one of your teams (the "shared with your teams" view) — strictly team-scoped, never in the gallery. Display-only; open via the returned `url`. |
 | `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
 | `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |
 | `write_draft_file` | Write/replace a draft file (`create: true` refuses to overwrite). |

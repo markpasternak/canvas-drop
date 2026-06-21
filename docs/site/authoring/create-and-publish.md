@@ -60,6 +60,26 @@ canvas might ever need org-wide sharing. With no org configured you won't see th
 choice, and every canvas behaves as it always has. See
 [Sharing & access](/docs/authoring/sharing).
 
+## Teams
+
+A **team** is a named group inside your org — the subset you actually collaborate with,
+between "just me" and "the whole org." Teams are **self-serve**: any org member can create
+one and invite other members by email (an invitee must already be a member of the org).
+
+Manage teams on the **Teams** page (org members only):
+
+- **Create** a team and **invite** colleagues by email; **leave** a team at any time.
+- The team's **creator** (or an admin) can **rename** or **delete** it. Deleting a team
+  removes its memberships and unshares every canvas shared with it — the canvases
+  themselves are untouched.
+- **Shared with your teams** lists the canvases other members shared with a team you're
+  on. These never appear in the org-wide gallery, so this is the place to find them.
+
+To share a canvas with a team, set its access rung to **Team** on the
+[Share tab](/docs/authoring/sharing#sharing-with-a-team). Agents do all of this over
+[MCP](/docs/agents/mcp) (`create_team`, `add_team_member`, `update_canvas` with
+`access: "team"`, …).
+
 ## Drag-and-drop files or a folder
 
 The fastest path for an existing project. From the create flow, drop individual
