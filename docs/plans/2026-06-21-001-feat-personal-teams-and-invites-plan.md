@@ -1,5 +1,5 @@
 ---
-title: "feat: Personal teams + invited (magic-link) accounts + invite emails & admin-editable templates"
+title: "feat: Personal teams + auth-delegated invites + invite emails & admin-editable templates"
 type: feat
 date: 2026-06-21
 deepened: 2026-06-21
@@ -11,79 +11,84 @@ depends_on: docs/plans/2026-06-20-003-feat-tenancy-p2-teams-plan.md
 origin: step-by-step Q&A with the owner (2026-06-21), captured in "Decisions locked" below
 ---
 
-# feat: Personal teams + invited accounts + invite emails & templates
+# feat: Personal teams + auth-delegated invites + invite emails & templates
 
 > **Builds on P2 org teams** (PR #58, the `team` access rung across the three seams). This
-> phase **unifies the team model** so any user — including a guest in no org — can own a
-> team and invite friends/family by email, and turns the individual sign-in allowlist into
-> a real **"add users"** flow that mints persistent passwordless accounts. **Invariant-
-> critical**: the `team` predicate is widened (not branched) across the same three seams, and
-> a new persistent passwordless account type enters the auth context. Both gate the PR behind
-> `/ce-code-review` (security + adversarial) and the §12 auth checklist
-> (`docs/solutions/2026-06-13-auth-invariant-checklist.md`).
+> phase **unifies the team model** so any signed-in user — including a guest in no org — can
+> own a team and invite people by email, and turns the individual sign-in allowlist into a real
+> **"add users"** flow. **Invites delegate identity to the instance's configured auth** — we
+> mint no app-owned credentials; an invite is a *pending grant* that materializes when the
+> person signs in through OIDC/proxy (which verifies them). **Invariant-critical**: the `team`
+> predicate is widened (not branched) across the same three seams. Gates the PR behind
+> `/ce-code-review` + the §12 auth checklist (`docs/solutions/2026-06-13-auth-invariant-checklist.md`).
 
-> **Deepening pass (2026-06-21, review agents).** A feasibility/security/coherence/scope review
-> changed the plan materially: (1) **resequenced** to break a U3↔settings/templates cycle —
-> email settings + templates now land *before* the invite primitive; (2) added the **blocking
-> code-fact fixes** the original missed (`freeSlug`/`nameTakenByCreator`/`resolveTeamGrant`/
-> `resolveVisibleTeams` all assume a non-null `org_id`; the gateway `isEmailAllowed` deny path;
-> the `takeToken` 60s window vs an hourly cap); (3) hardened the invited-account auth model (a
-> **normal member session, not a guest principal**; an `account_type='invited'` gateway permit;
-> an **`email_verified:true`-gated** invited→managed link; a **POST-only** redeem); (4) gave
-> `invitePendingCap` a concrete `invited_by` + unredeemed-count mechanism. See the per-unit
-> "Review notes".
+> **Design history.** v1 proposed app-owned passwordless magic-link accounts. A deepening review
+> (feasibility/security/coherence/scope) flagged that as a parallel-auth surface with an
+> account-takeover vector (invited→managed link-by-email). The owner then chose to **delegate to
+> the configured auth instead** (2026-06-21): no magic link, no app-issued sessions. An invite is
+> a sign-in permit + a pending grant; the person gets in by authenticating through the real IdP,
+> and the grant materializes on that first **verified** login — exactly how every normal user is
+> created today. This deletes the entire passwordless-account unit, the takeover vector, the
+> proxy carve-out, and the session-lifetime question, and shrinks the abuse surface. The
+> remaining security crux is **who may permit a new email to sign in** (admin by default).
 
 ## Summary
 
-Today teams are **strictly org-owned**: `teams.org_id` is required and only org members can
-create them. This phase makes teams **user-owned with an optional org**: a team always has a
-creator; it is either **personal** (no org — friends & family, for the creator's own
-canvases) or **org-attached** (the existing behavior). The access check is **one widened
-predicate** — an org team keeps the live `org_members` re-join (KTD3 of P2); a personal team
-matches on **direct `team_members` membership** with no org filter — never a code branch.
+Today teams are **strictly org-owned**. This phase makes them **user-owned with an optional
+org**: a team always has a creator; it is **personal** (no org — for the creator's own
+canvases) or **org-attached** (existing behavior). Access is **one widened predicate** — org
+team → live `org_members` re-join (P2's KTD3); personal team → direct `team_members` membership,
+no org filter — never a code branch.
 
-To make "invite friends & family" real, inviting by email adds the person as a **full member
-immediately**; a brand-new email mints a **persistent passwordless account** and emails them
-a **magic link** (today's guest mechanism, promoted from a canvas-scoped session to a real
-account that redeems into a normal member session). The admin **individual sign-in allowlist
-is replaced by "Add users"**, which creates the account, sends the invite, and grants org
-membership when the email matches an org domain. **DB-controlled email settings** gate
-notifications, **admin-configurable rate limits** bound the self-serve invite abuse surface,
-and a **DB-seeded, admin-editable template set** (subject + HTML/text, `{{variables}}`) backs
-every email.
+Inviting by email is a **pending grant**, not a new account. If the email belongs to an existing
+user, the grant applies immediately; if not, a **pending invitation** is recorded (and, if the
+admin permits that email to sign in, a courtesy "you've been invited — sign in" email goes out).
+The person gets in by **authenticating through the configured auth** (OIDC verifies their email;
+proxy asserts it); on that first verified login their user materializes and the pending grants
+apply. The admin **sign-in allowlist becomes "Add users"** (permit + pending grant + courtesy
+email + org membership iff the domain matches). **DB-controlled email settings** gate
+notifications, **admin-configurable rate limits** bound the invite/courtesy-email surface, and a
+**DB-seeded, admin-editable template set** backs every email.
 
-## Terminology (load-bearing — review fix)
+## Terminology (load-bearing)
 
-- **guest** = a canvas-scoped, *pre-account* visitor (the existing `auth/guest.ts` session,
-  `principal.kind === "guest"`). Never a real `users` row.
-- **invited user / invited account** = a *persistent* `users` row with `account_type='invited'`
-  that redeems a magic link into a **normal member session** (`principal.kind === "member"`,
-  `orgIds = ∅` when off-domain). This is the new thing in this plan.
-- A user "in no org" below means an **invited user or a dev user with `orgIds = ∅`** — written
-  as "no-org user", never "guest", to avoid the P2 collision.
+- **member** — a real `users` row authenticated through the configured auth; `principal.kind ===
+  "member"`. Org membership is derived server-side (domain ∈ org domains → org member; else a
+  no-org user / "guest").
+- **guest** — a signed-in member with `orgIds = ∅` (no org). NOT the canvas-scoped P2 guest
+  session — that pre-account concept is unchanged but unrelated here. A guest is a full
+  authenticated user who simply belongs to no org.
+- **pending invitation** — an `email → grant` row for someone who has **not yet signed in**. It
+  holds no auth. It applies + is consumed on that email's first **verified** login. The team
+  roster shows such people as **Pending** (email only, no `user_id`) until then.
 
 ## Decisions locked (2026-06-21, owner — do not re-litigate)
 
-1. **Unified team model.** Every team is user-owned (`created_by`); `teams.org_id` becomes
-   **nullable**. Access is one widened predicate (KTD1): org team → live `org_members` re-join;
-   personal team → direct `team_members` membership. *(Invariant-critical.)*
-2. **Org-vs-personal chosen at creation, fixed after.** Creator picks **Personal**, or — only
-   if they are an org member — **attach to my org**. A no-org user sees only Personal.
-3. **Membership.** A personal team may include **any user**; an org team keeps the same-org
-   rule. Team names stay creator-local (already shipped: `nameTakenByCreator`).
-4. **Invite = immediate full member.** A **not-yet-a-user** email mints a passwordless account
-   + magic-link email. If they never click, they're a member who can't open anything yet.
-5. **Invited accounts are persistent + passwordless** (magic link every time). `oidc`/`dev`
-   only — **not `proxy`** (the proxy owns identity; refuse like guest invites today).
-6. **DB-controlled email settings** — a master toggle + per-event notify toggles for
-   *admin-adds-a-user*, *added-to-a-canvas*, *individual canvas invite*. Team-add notifies only
-   brand-new invitees (the magic link); existing users added to a team are not notified.
-7. **"Add users" replaces the allowlist.** Adding an email creates the user, sends a magic-link
-   invite, and makes them an org member **iff** the email domain matches an org domain.
-8. **Email templates** — DB-seeded, admin-editable subject + HTML + text, `{{variable}}` interp,
+1. **Unified team model.** Every team is user-owned (`created_by`); `teams.org_id` nullable.
+   Access is one widened predicate (KTD1): org team → live `org_members` re-join; personal team
+   → direct `team_members` membership. *(Invariant-critical.)*
+2. **Org-vs-personal chosen at creation, fixed after.** Creator picks Personal, or — if an org
+   member — attach to their org. A no-org user sees only Personal.
+3. **Membership.** A personal team may include any user; an org team keeps the same-org rule.
+   Team names stay creator-local (already shipped).
+4. **Invites delegate to the configured auth — no app-owned magic link.** An invite is a sign-in
+   permit + a pending grant; the person authenticates through OIDC/proxy and the grant
+   materializes on first **verified** login. Existing users are granted immediately; new people
+   are **Pending** until they sign in. *(KTD4 — invariant-critical.)*
+5. **Permitting a brand-new email to sign in is admin-controlled.** Self-serve (member/guest)
+   invites only grant to people who can already authenticate (existing user / domain-matched /
+   already-permitted). Permitting a **new external email** is the admin **Add users** action, or
+   an admin toggle `allowMemberInvitesToNewEmails` (default OFF). This keeps non-admins from
+   widening the instance's sign-in surface. *(KTD5/KTD7 — the security crux.)*
+6. **DB-controlled email settings** — master toggle + per-event notify/courtesy toggles
+   (admin-adds-a-user, added-to-a-canvas, individual canvas invite).
+7. **"Add users" replaces the allowlist** — permit + pending grant + courtesy email + org member
+   iff domain matches.
+8. **Email templates** — DB-seeded, admin-editable subject + HTML + text, `{{variable}}`,
    reset-to-default.
-9. **Admin-configurable invite rate limits** (KTD9) — bound the self-serve abuse surface.
-10. **"deck"/"presentation" = a canvas** (terminology only; no new entity).
+9. **Admin-configurable invite rate limits** (KTD9) — bound the per-actor invite + courtesy-email
+   surface.
+10. **"deck"/"presentation" = a canvas** (terminology only).
 
 ---
 
@@ -91,95 +96,96 @@ every email.
 
 | Requirement | Decisions | Units |
 |---|---|---|
-| R1 Unified team model (org optional) + one widened, membership-mandatory team-access predicate | KTD1, KTD2 | U1 |
-| R2 Persistent passwordless invited accounts (member-session magic-link, gateway permit) | KTD4 | U2 |
-| R3 DB-controlled email settings + admin-configurable rate caps | KTD6, KTD9 | U3 |
-| R4 DB-seeded, admin-editable email templates | KTD8 | U4 |
-| R5 The invite primitive (resolve-or-create, immediate member, notify, rate-limited) | KTD3, KTD6, KTD9 | U5 |
-| R6 Personal teams self-serve for any user (incl. no-org) + dashboard | KTD2, KTD3 | U6 |
-| R7 Admin "Add users" replaces the sign-in allowlist | KTD7 | U7 |
+| R1 Unified team model + one widened, membership-mandatory team-access predicate | KTD1, KTD2 | U1 |
+| R2 DB-controlled email settings + admin-configurable rate caps | KTD6, KTD9 | U2 |
+| R3 DB-seeded, admin-editable email templates | KTD8 | U3 |
+| R4 Pending invitations + materialize-on-verified-login (no app auth) | KTD4 | U4 |
+| R5 The invite primitive (resolve-or-record, grant/pending, notify, rate-limited) | KTD3, KTD5, KTD6, KTD9 | U5 |
+| R6 Personal teams self-serve for any signed-in user + dashboard (pending roster) | KTD2, KTD3 | U6 |
+| R7 Admin "Add users" replaces the sign-in allowlist (the only new-email permit path) | KTD5, KTD7 | U7 |
 | R8 Individual one-off canvas invite | KTD6 | U8 |
 | R9 MCP agent-native parity | — | U9 |
 | R10 Docs parity | — | U10 |
-| R-sec Invariant tests + review | KTD1, KTD4, KTD9 | U1, U2, U5, U11 |
+| R-sec Invariant tests + review | KTD1, KTD4, KTD5, KTD9 | U1, U4, U5, U11 |
 
 ---
 
 ## Key Technical Decisions
 
 - **KTD1 — `teams.org_id` nullable; ONE membership-mandatory predicate, NOT a branch.**
-  `teamMatch` already makes membership a mandatory `INNER JOIN team_members`, with the org rule
-  as a `WHERE` filter. Personal teams widen that filter by one clause — from
-  `teams.org_id IN (viewerOrgIds)` to `(teams.org_id IS NULL OR teams.org_id IN (viewerOrgIds))`
-  — so the predicate is `member AND (personal OR org-in-scope)`. "Skip the membership check" is
-  structurally impossible (membership is the join), the three seams call the **same one** method
-  (one-line widening), and org teams keep their exact read-time re-join. **Also drop the
-  `viewerOrgIds.size === 0` early return** (today it would wrongly deny a no-org user their own
-  personal team; the `IS NULL` arm handles them, safe because membership is the join).
+  `teamMatch` already makes membership a mandatory `INNER JOIN team_members`. Personal teams
+  widen the org `WHERE` by one clause: `inArray(teams.orgId, viewerOrgIds)` →
+  `or(isNull(teams.orgId), inArray(teams.orgId, viewerOrgIds))`. The predicate is `member AND
+  (personal OR org-in-scope)` — "skip membership" is structurally impossible (it's the join),
+  the three seams call the same one method, org teams keep their read-time re-join. **Drop the
+  `viewerOrgIds.size === 0` early return** (it would wrongly deny a no-org user their own personal
+  team). **Code-fact fixes the review flagged (blocking):** `freeSlug`, `nameTakenByCreator`, and
+  `resolveTeamGrant` all filter `eq(teamsT.orgId, …)` which emits `org_id = NULL` (always false)
+  for personal teams — branch on `orgId == null ? isNull(...) : eq(...)`; `resolveTeamGrant`
+  becomes `team.orgId !== null && team.orgId !== cv.orgId`; `resolveVisibleTeams` adds a
+  `listForUser` pass so personal teams appear for a no-org user.
 
-- **KTD2 — Org attachment set at creation, immutable.** `teamsService.create` takes an optional
+- **KTD2 — Org attachment set at creation, immutable.** `teamsService.create` takes optional
   `orgId`; present (creator is a live member) → org team, absent → personal. A no-org user may
-  only create personal teams. No promote-later (would have to reconcile non-org members).
+  only create personal teams.
 
-- **KTD3 — One invite primitive, resolve-or-create, immediate membership.** A single
-  `inviteService.resolveOrInvite({ email, target, actor })` → `{ userId, created }` is the
-  shared layer behind team-add, canvas-add, individual-canvas-invite, and admin add-users
-  (agent-native: routes AND MCP wrap it — never a parallel impl). Find by lowercased email or
-  **create** an invited account; add to the target immediately; if newly-created, always send
-  the magic link; else notify per the settings. **Signature is `{ email, target, actor }`** (the
-  actor is named for rate-limiting).
+- **KTD3 — One invite primitive, resolve-or-record.** `inviteService.resolveOrInvite({ email,
+  target, actor })` → `{ status: "granted" | "pending" | "rejected" }`. Shared by team-add,
+  canvas-add, individual-canvas-invite, admin add-users (routes AND MCP — never a parallel
+  impl). Find by lowercased email: **existing user → grant immediately** (add `team_members` /
+  allowlist row) + notify per settings; **no user → record a pending invitation** keyed by email
+  (no `user_id`) + courtesy email (if email is configured + the target's setting is on). A new
+  external email that the actor isn't allowed to permit (KTD5) → `rejected` with a clear reason
+  (or recorded pending-but-inert pending an admin permit — pick at U5).
 
-- **KTD4 — Persistent passwordless "invited" account, redeeming into a NORMAL member session.**
-  A new `users.account_type` (`'managed'` | `'invited'`) + an `invited_by` column (the actor who
-  minted it, for the pending-cap query). Invited rows carry `provider_sub = invite:<lower-email>`.
-  **Sign-in establishes a normal session via `sessionService.issue`** — NOT a guest principal —
-  so subsequent requests resolve through the standard gateway as `kind:'member'` with `orgIds=∅`
-  for off-domain emails (so the `team` rung, which denies non-members, admits them). **The
-  gateway `isEmailAllowed` deny path must permit `account_type='invited'`** (the invite IS the
-  permit) — resolved here, *not* deferred, because every post-redeem request hits it (review
-  finding). The `/invite/<token>` redeem is **POST-only** (GET renders a confirm landing; only a
-  same-origin POST consumes the token — no cross-origin token burn). Refused in `proxy` mode
-  (the IAP owns identity). A later IdP sign-in links to the invited row + upgrades to `managed`
-  **only when the claims carry `email_verified: true`** (an absent/false flag does NOT link — an
-  invited account already holds memberships, so the link is account-takeover-shaped). Session
-  lifetime → OQ2 (default: the normal session TTL; re-auth via a fresh link).
+- **KTD4 — Invites are pending grants; identity comes from the configured auth on first login.**
+  An `invitations(email, target_type, target_id, role, invited_by, created_at, consumed_at)` table
+  (or per-target rows). **No app-owned credential, no `account_type`, no token, no magic-link
+  session.** On a successful **verified** login (the existing OIDC/proxy → `users.upsert` path),
+  after the user is resolved, a single hook applies + consumes all pending invitations whose email
+  equals the verified identity email, creating the `team_members` / allowlist rows. The verified
+  email is the IdP's (OIDC) or the trusted proxy's — never client-asserted — so there is **no
+  link-by-email takeover vector**: the user is materialized once, from a verified identity, exactly
+  like every normal first login. Works uniformly across proxy/oidc/dev. The roster/allowlist UIs
+  show un-consumed invitations as **Pending**.
 
-- **KTD5 — Personal canvas + personal team bypasses `TEAM_REQUIRED`; org teams stay org-pinned.**
-  `settings-update.ts` no longer 409s `team` when `cv.orgId === null` if the granted teams are
-  personal. The grant validator (`resolveTeamGrant`) changes `team.orgId !== cv.orgId` to
-  `team.orgId !== null && team.orgId !== cv.orgId` — an **org** team still requires the canvas in
-  that org; a **personal** team is grantable to any canvas the actor owns (incl. personal).
+- **KTD5 — Self-serve invites never permit a NEW email to sign in (the security crux).** In
+  oidc/dev the sign-in gate is `isEmailAllowed` (domain OR `allowed_emails`). Permitting a
+  brand-new external email is a **privilege change** (it widens who can authenticate), so it is
+  **admin-only** (Add users, U7) — or enabled by the admin toggle `allowMemberInvitesToNewEmails`
+  (default OFF). A self-serve (member/guest) invite to an email that already can authenticate
+  (existing user, domain-matched, or already-permitted) is fine and records the grant; a
+  self-serve invite to a not-yet-permitted external email is `rejected` (default) unless the
+  toggle is on. In proxy mode the proxy owns admission, so the permit step is a no-op and invites
+  are pure pending grants. *(This replaces the abuse surface that app-owned account minting had.)*
 
-- **KTD6 — Email settings via the existing config-override system.** Add to
-  `admin/config-fields.ts` + `settings-service.ts`: `emailInvitesEnabled` (master),
+- **KTD6 — Email settings via the config-override system.** `emailInvitesEnabled` (master),
   `notifyOnAddUser`, `notifyOnCanvasAdd`, `notifyOnCanvasInvite`. DB-only fields follow the
-  existing `env: "—"` + `fromConfig: () => <default>` pattern (like the KV quota fields) — no
-  new `process.env` reader; `config` stays the only env reader. New-user magic links bypass the
-  per-event toggles but still need the master gate + a configured mailer (else the invite fails
-  closed with `EMAIL_NOT_CONFIGURED` — a new user can't be onboarded silently).
+  existing `env: "—"` + `fromConfig: () => <default>` pattern (no new `process.env` reader).
+  Courtesy/notification emails are best-effort (a send failure never blocks the grant) — there's
+  no credential in them, so a missing mailer is non-fatal (unlike the old magic-link flow).
 
-- **KTD7 — Add-users replaces allowed_emails (admin UX); the table stays a back-compat permit.**
-  The admin surface becomes Add users (wrapping `inviteService`): create now + magic-link invite
-  + org member iff domain ∈ org domains. `allowed_emails` is **retained** purely as a legacy
-  sign-in permit so existing entries don't strand; new invited accounts are permitted via the
-  `account_type='invited'` gateway path (KTD4), not a new allowlist row. (Resolves OQ4 at U2/U7.)
+- **KTD7 — Add-users replaces allowed_emails (admin UX) and is the new-email permit path.** The
+  admin surface becomes Add users (wrapping `inviteService` with the admin allowance): permit the
+  email to sign in (`allowed_emails`), record any pending grant, courtesy email, org member iff
+  domain ∈ org domains. The `allowed_emails` table is **retained and is now the canonical permit
+  store**; existing entries keep working. No schema retire needed.
 
 - **KTD8 — Email templates + safe interpolation.** `email_templates(key PK, subject, body_html,
-  body_text, updated_by, updated_at)`. Seed idempotently at boot. Allow-listed `{{variable}}`
-  interpolator: HTML-escape values in the HTML body; plain in text; unknown var → empty
-  (defined, never throws). **The admin editor renders the stored HTML as escaped source / in a
-  sandboxed `<iframe srcdoc>` — never `dangerouslySetInnerHTML`** (stored-XSS on the admin
-  surface, review finding). Reset = delete row → re-seed. Org-agnostic copy.
+  body_text, updated_by, updated_at)`, seeded idempotently at boot. Allow-listed `{{variable}}`
+  interpolator: HTML-escape values in the HTML body; plain in text; unknown var → empty. **The
+  admin editor renders the stored HTML as escaped source / sandboxed `<iframe srcdoc>` — never
+  `dangerouslySetInnerHTML`** (stored-XSS on the admin surface). Reset = delete row → re-seed.
+  Org-agnostic copy.
 
 - **KTD9 — Admin-configurable invite rate limits (resolves OQ5).** The invite primitive enforces,
-  before any side effect: (a) a per-actor **rate** via the existing token bucket — but
-  `takeToken` hardcodes a 60s window, so either add a `windowMs` param (default 60_000) or call
-  `store.hit(key, limit, 3_600_000)` directly for the **hourly** `inviteMaxPerActorPerHour`; and
-  (b) a **standing cap** `invitePendingCap` = `COUNT(users WHERE account_type='invited' AND
-  invited_by = actor AND last_seen_at IS NULL)` (never-redeemed) — needs the `invited_by` column
-  (KTD4) + an index. Over-limit → `RATE_LIMITED` (429 / MCP fail), no account, no mail. Admin
-  add-users gets a higher ceiling (the trusted bulk path); the exact allowance is set in U3's
-  config. Defense-in-depth on top of the master gate, not a replacement.
+  before any side effect: a per-actor **hourly** rate (`inviteMaxPerActorPerHour`) via the
+  existing token bucket — note `takeToken` hardcodes a 60s window, so add an optional `windowMs`
+  (default 60_000) or call `store.hit(key, limit, 3_600_000)` — and a standing
+  `invitePendingCap` = `COUNT(invitations WHERE invited_by = actor AND consumed_at IS NULL)`.
+  Over-limit → `RATE_LIMITED` (429 / MCP fail), nothing recorded/sent. Admin Add-users gets a
+  higher ceiling. The abuse blast radius is now just pending rows + courtesy emails (no account
+  minting, no sign-in permits for self-serve), so this is defense-in-depth, not the primary guard.
 
 ---
 
@@ -187,28 +193,22 @@ every email.
 
 ```mermaid
 flowchart TD
-  subgraph Surfaces
-    TA[team add] --> INV
-    CA[canvas add] --> INV
-    CI[individual invite] --> INV
-    AU[admin Add users] --> INV
-    MCP[MCP tools] --> INV
+  subgraph InviteTime
+    INV[inviteService.resolveOrInvite] --> RL{rate limit ok?}
+    RL -->|no| REJ[RATE_LIMITED]
+    RL -->|yes| FIND{user exists?}
+    FIND -->|yes| GRANT[grant now - team_members / allowlist]
+    FIND -->|no| PERMITQ{actor may permit a new email?}
+    PERMITQ -->|admin / toggle on| PEND[record pending invitation + permit sign-in + courtesy email]
+    PERMITQ -->|self-serve, new external| REJ2[rejected - admin must add them]
+    GRANT --> NOTIFY{notify setting on?}
+    NOTIFY -->|yes| MAIL[send notification]
   end
-  INV[inviteService.resolveOrInvite] --> RL{rate limit ok?}
-  RL -->|no| REJ[RATE_LIMITED - no side effects]
-  RL -->|yes| FIND{user exists?}
-  FIND -->|yes| ADD[add as member now]
-  FIND -->|no| NEW[mint invited account + invited_by]
-  NEW --> ADD
-  NEW --> LINK[always send magic-link email]
-  ADD -->|existing user| NOTIFY{per-event setting on?}
-  NOTIFY -->|yes| MAIL[send notification]
-  LINK --> TPL[render via email_templates]
-  MAIL --> TPL
-  TPL --> MAILER[Mailer]
-  REDEEM["POST /invite/token"] --> SESS[sessionService.issue - NORMAL member session]
-  SESS --> GW[gateway permits account_type=invited]
-
+  subgraph LoginTime[first VERIFIED login - OIDC / proxy]
+    LOGIN[configured auth verifies email] --> UPSERT[users.upsert - normal]
+    UPSERT --> APPLY[apply + consume pending invitations for this verified email]
+    APPLY --> MEMBER[team_members / allowlist rows created]
+  end
   subgraph AccessInvariant[team access - ONE predicate, all three seams]
     SEAMS[serve / runtime / realtime] --> TM[teamMatch - single method]
     TM --> JOIN[INNER JOIN team_members - membership MANDATORY]
@@ -220,242 +220,211 @@ flowchart TD
 
 ## Implementation Units
 
-> Phases group the units; build in order. Dual-dialect migrations for every schema change
-> (`drizzle/{pg,sqlite}/*`); the schema-parity test stays green. **U1 and U2 are each the most
-> invariant-critical unit in their phase — land + validate them in isolation (own commit, green
-> security review) before the units that build on them.**
+> Phases group the units; build in order. Dual-dialect migrations for every schema change; the
+> parity test stays green. **U1 is the most invariant-critical unit — land + validate it in
+> isolation (own commit, green review) before the rest.**
 
-### Phase 1 — Model & accounts
+### Phase 1 — Model & access invariant
 
 ### U1. Teams: `org_id` nullable + one widened, membership-mandatory access predicate
-**Goal:** Make a team org-optional and widen the **single** `teamMatch` predicate so personal
-and org teams are one membership-mandatory query — across all three seams. **No branch.**
+**Goal:** Make a team org-optional and widen the **single** `teamMatch` predicate so personal and
+org teams are one membership-mandatory query — across all three seams. **No branch.**
 **Requirements:** R1, R-sec. **Dependencies:** none (extends P2).
-**Files:** `packages/shared/src/db/schema.{sqlite,pg}.ts` (org_id nullable), `drizzle/{pg,sqlite}/*`
-(migration `teams_org_nullable`), `apps/server/src/db/repositories/teams.ts`
-(`teamMatch`/`listCanvasIdsForUserTeams` widening + **`freeSlug` & `nameTakenByCreator`
-null-safety**), `apps/server/src/teams/service.ts` (create takes optional orgId; no-org user →
-personal), `apps/server/src/teams/sharing.ts` (`resolveTeamGrant` null-safe org check +
-`resolveVisibleTeams` personal-team path), `apps/server/src/canvas/settings-update.ts` (KTD5),
+**Files:** `packages/shared/src/db/schema.{sqlite,pg}.ts`, `drizzle/{pg,sqlite}/*`
+(`teams_org_nullable`), `apps/server/src/db/repositories/teams.ts` (widening +
+`freeSlug`/`nameTakenByCreator` null-safety), `apps/server/src/teams/service.ts`,
+`apps/server/src/teams/sharing.ts` (`resolveTeamGrant` null-safe + `resolveVisibleTeams`
+personal path), `apps/server/src/canvas/settings-update.ts` (KTD5 relax `TEAM_REQUIRED`),
 `apps/server/src/db/repositories/teams.test.ts`, `apps/server/src/integration/team-scenarios.test.ts`.
-**Approach (no branch — KTD1):** change only `teamMatch`'s org `WHERE` from
-`inArray(teams.orgId, viewerOrgIds)` to `or(isNull(teams.orgId), inArray(teams.orgId, viewerOrgIds))`,
-remove the `viewerOrgIds.size === 0` early return, same one-clause widening in
-`listCanvasIdsForUserTeams`. Verify all three seams route through one shared `teamMatch`/
-`resolveTeamMatch` (not three hand-rolled resolutions).
-**Review notes — concrete code-fact fixes (blocking, found by review):**
-- **`freeSlug` and `nameTakenByCreator`** filter `eq(teamsT.orgId, orgId)`. With a null orgId
-  this emits `org_id = NULL` (always false) → personal teams all get the base slug (unique
-  collision) and never detect a duplicate name. Branch: `orgId == null ? isNull(teamsT.orgId) :
-  eq(teamsT.orgId, orgId)`.
-- **`resolveTeamGrant`** currently `team.orgId !== cv.orgId` → blocks granting a personal team
-  (orgId null) to an org canvas. Change to `team.orgId !== null && team.orgId !== cv.orgId`.
-- **`resolveVisibleTeams`** iterates `orgIds` + `listByOrg`, so a no-org user sees zero teams.
-  Add a `listForUser(actorId)` pass and merge personal teams (`t.orgId === null`) into the list.
+**Approach:** the one-clause widening of KTD1; remove the empty-orgIds early return; route all
+three seams through one shared `teamMatch`/`resolveTeamMatch`. Apply the three code-fact fixes.
 **Test scenarios:**
-- **Cross-seam access matrix (parameterized, one table run against serve, runtime-API AND
-  realtime):** {personal, org} × {member, non-member, no-org user, revoked-org-member} → allow/
-  deny identical at every seam. *(Covers R1/R-sec — the #1 risk.)*
-- **Membership invariant:** access ⇒ a `team_members` row exists, for both kinds (delete the row
-  → immediate 404).
-- A no-org user reaches their OWN personal team canvas (dropped early return); a non-member 404s.
+- **Cross-seam access matrix (parameterized, run against serve, runtime-API AND realtime):**
+  {personal, org} × {member, non-member, no-org user, revoked-org-member} → identical allow/deny.
+  *(Covers R1/R-sec — the #1 risk.)*
+- **Membership invariant:** access ⇒ a `team_members` row exists, both kinds (delete → 404).
+- A no-org user reaches their OWN personal team canvas (dropped early return); non-member 404s.
 - Org team unchanged: revoked-org-member dropped even with a stale team row.
-- **Grant authz (security finding):** a user who is a *member* of a personal team but does NOT
-  own a target canvas cannot grant that team to it (FORBIDDEN/404, anchored on canvas ownership).
-- Grant a personal team to a personal canvas (ok); cannot grant an org team to a canvas outside
-  its org; `settings-update` no longer 409s `TEAM_REQUIRED` for a personal-team grant.
-- Personal-team duplicate-name by the same creator is rejected; a different creator may reuse it.
+- **Grant authz:** a member of a personal team who does NOT own a target canvas cannot grant that
+  team to it (anchored on canvas ownership).
+- Grant a personal team to a personal canvas (ok); cannot grant an org team outside its org;
+  `settings-update` no longer 409s `TEAM_REQUIRED` for a personal-team grant.
+- Personal-team duplicate-name by the same creator rejected; different creator may reuse.
 - Schema parity green; migration additive.
 
-### U2. Persistent passwordless "invited" account → NORMAL member session
-**Goal:** A persistent account minted from an email, redeeming a magic link into a *normal*
-session, permitted by the gateway, refused in proxy. **Land as its own commit + security pass.**
-**Requirements:** R2, R-sec. **Dependencies:** U1 (soft).
-**Files:** `packages/shared/src/db/schema.{sqlite,pg}.ts` (`users.account_type`, `users.invited_by`,
-an `invite_tokens` table), `drizzle/{pg,sqlite}/*`, `apps/server/src/db/repositories/users.ts`
-(create-invited; `email_verified`-gated link/upgrade; pending-count query),
-`apps/server/src/auth/invite.ts` (NEW — token mint/redeem/expire only; returns the token),
-`apps/server/src/auth/invite-routes.ts` (NEW — GET landing + **POST** redeem →
-`sessionService.issue`), `apps/server/src/auth/gateway.ts` + `apps/server/src/auth/identity-mapping.ts`
-(**permit `account_type='invited'` in `isEmailAllowed`**; refuse mint/redeem in proxy),
-`apps/server/src/auth/invite.test.ts`.
-**Approach:** Mirror `auth/guest.ts` for the token lifecycle ONLY; redeem issues a **normal
-member session** (`sessionService.issue(c, userId)`), never a guest principal/context var. The
-gateway's existing `isEmailAllowed` gets a fast-path: a resolved user with `account_type='invited'`
-is permitted (the invite is the permit — KTD4/KTD7). Off-domain → `orgIds = ∅`, resolved
-server-side as today. Proxy mode refuses both mint + redeem. `auth/invite.ts` only mints/returns
-a token; **composing + sending the email belongs to the invite primitive (U5)** — U2's tests
-mock the send.
-**Review notes:** the gateway permit + the `email_verified` link-gate + POST-only redeem are
-the three security-critical specifics (account-takeover + token-burn + dead-on-arrival risks).
-**Test scenarios:**
-- Invited account created (`account_type='invited'`, `invited_by` set); a POST redeem yields a
-  normal authenticated session; `/api/me` shows the user (no org for off-domain).
-- **An off-domain invited user makes authenticated requests after redeem** (the gateway permit).
-- **GET `/invite/<token>` does NOT consume the token; only a same-origin POST does** (CSRF).
-- Re-redeem issues a fresh token; expired/used token refused.
-- Proxy mode: mint + redeem refused, no account created (spoof/refusal path tested first).
-- **IdP sign-in with a matching email but no `email_verified:true` does NOT link/upgrade** the
-  invited account; with `email_verified:true` it links (no duplicate user, upgraded to managed).
+### Phase 2 — Foundations (settings, templates, the materialize hook)
 
-### Phase 2 — Email foundations (before the invite primitive — breaks the cycle)
-
-### U3. DB-controlled email + invite-limit settings
-**Goal:** The master email toggle + per-event notify toggles + the admin-configurable rate caps,
-admin-overridable, ready for the invite primitive to consume.
-**Requirements:** R3, R-sec. **Dependencies:** none.
+### U2. DB-controlled email + invite-limit settings
+**Goal:** master email toggle + per-event notify toggles + admin rate caps + the
+`allowMemberInvitesToNewEmails` toggle, all admin-overridable.
+**Requirements:** R2, R-sec, R5(KTD5). **Dependencies:** none.
 **Files:** `apps/server/src/admin/config-fields.ts`, `apps/server/src/admin/settings-service.ts`,
-`apps/server/src/http/rate-limit.ts` (add an optional `windowMs` to `takeToken`, default 60_000),
-dashboard admin config view (auto-renders), `apps/server/src/admin/settings-service.test.ts`.
-**Approach:** Add `emailInvitesEnabled`, `notifyOnAddUser`, `notifyOnCanvasAdd`,
-`notifyOnCanvasInvite` (booleans), `inviteMaxPerActorPerHour` + `invitePendingCap` (numbers),
-and an admin allowance knob — all DB-only (`env: "—"` + `fromConfig` default). Widen `takeToken`
-with `windowMs` so an hourly cap is expressible without touching the per-minute callers.
+`apps/server/src/http/rate-limit.ts` (optional `windowMs` on `takeToken`, default 60_000),
+`apps/server/src/admin/settings-service.test.ts`.
+**Approach:** add `emailInvitesEnabled`, `notifyOnAddUser`, `notifyOnCanvasAdd`,
+`notifyOnCanvasInvite`, `inviteMaxPerActorPerHour`, `invitePendingCap`,
+`allowMemberInvitesToNewEmails` (default off) + an admin-allowance knob — all DB-only fields.
 **Test scenarios:**
-- Each setting is DB-overridable and reflected without restart (effective resolution).
-- `takeToken` with a custom `windowMs` enforces an hourly budget; existing per-minute callers
-  unchanged (default window).
-- Sensible defaults: master off until a mailer is configured; rate caps non-zero.
+- Each setting DB-overridable + reflected without restart.
+- `takeToken` with a custom `windowMs` enforces an hourly budget; per-minute callers unchanged.
+- `allowMemberInvitesToNewEmails` default OFF.
 
-### U4. Email templates: table, seed, renderer, admin editor
-**Goal:** DB-seeded defaults; admin-editable subject + HTML/text with safe interpolation +
-reset-to-default; a renderer the invite primitive calls.
-**Requirements:** R4. **Dependencies:** none.
+### U3. Email templates: table, seed, renderer, admin editor
+**Goal:** DB-seeded defaults; admin-editable subject + HTML/text with safe interpolation + reset.
+**Requirements:** R3. **Dependencies:** none.
 **Files:** `packages/shared/src/db/schema.{sqlite,pg}.ts` (`email_templates`), `drizzle/{pg,sqlite}/*`,
 `apps/server/src/db/repositories/email-templates.ts` (NEW), `apps/server/src/email/templates.ts`
-(NEW — default set + seed-at-boot + `{{var}}` renderer w/ HTML-escaping),
-`apps/server/src/routes/admin.ts` (get/list/update/reset), `apps/dashboard/src/routes/admin.settings.tsx`
-(+ `lib/api.ts`), `apps/server/src/email/templates.test.ts`, dashboard admin test.
-**Approach:** One row per key (`account_invite`, `canvas_invite`, `individual_canvas_invite`,
-`team_invite`). Seed idempotently at boot. Renderer: allow-listed vars only; HTML-escape in the
-HTML body; unknown var → empty. **Admin editor displays the stored HTML as escaped source /
-sandboxed `<iframe srcdoc>` preview — never `dangerouslySetInnerHTML`** (KTD8 / review). Reset =
-delete row → re-seed.
+(NEW — defaults + seed + renderer), `apps/server/src/routes/admin.ts`,
+`apps/dashboard/src/routes/admin.settings.tsx` (+ `lib/api.ts`),
+`apps/server/src/email/templates.test.ts`, dashboard admin test.
+**Approach:** one row per key (`account_invite`, `canvas_invite`, `individual_canvas_invite`,
+`team_invite`); seed idempotently; allow-listed `{{var}}` renderer with HTML-escaping; admin
+editor with escaped/sandboxed preview (never `dangerouslySetInnerHTML`); reset = delete → re-seed.
 **Test scenarios:**
-- Boot seeds all defaults idempotently; admin override persists + renders; reset restores default.
-- Interpolation substitutes allow-listed vars; HTML-escapes values (no injection via a name);
-  unknown `{{var}}` renders empty, never throws.
-- A missing row falls back to the seeded default.
-- The admin preview does not execute injected `<script>` (rendered escaped / sandboxed).
+- Boot seeds defaults idempotently; override persists + renders; reset restores default.
+- Interpolation HTML-escapes values; unknown var → empty, never throws.
+- Admin preview does not execute injected `<script>`.
 
-### Phase 3 — Invites & surfaces
+### U4. Pending invitations + materialize-on-verified-login
+**Goal:** Record pending grants and apply them when the email first authenticates — no app auth.
+**Requirements:** R4, R-sec. **Dependencies:** none (the hook lives in the existing login path).
+**Files:** `packages/shared/src/db/schema.{sqlite,pg}.ts` (`invitations`), `drizzle/{pg,sqlite}/*`,
+`apps/server/src/db/repositories/invitations.ts` (NEW — record / list-for-email / consume /
+count-pending-by-actor), `apps/server/src/auth/gateway.ts` or the login completion path
+(`apps/server/src/auth/identity-mapping.ts`) — the apply-on-first-verified-login hook,
+`apps/server/src/auth/invitations.test.ts`.
+**Approach:** `invitations(id, email, target_type, target_id, role, invited_by, created_at,
+consumed_at)`. On a verified login, after `users.upsert`, fetch un-consumed invitations for the
+verified email and apply each (create the `team_members`/allowlist row), then stamp `consumed_at`
+— idempotent + transactional. The verified email is the IdP/proxy identity (never client input).
+**Review note:** this is deliberately small — it reuses the existing first-login user-creation
+path and adds one apply step. No `account_type`, no tokens, no sessions.
+**Test scenarios:**
+- A pending team invitation for `x@e.com` materializes a `team_members` row on x's first verified
+  login; re-login does not double-apply (consumed).
+- Identity is the verified login email only; a pending invitation never grants without a login.
+- Proxy mode: a pending invitation applies when the proxy admits that identity.
+- Concurrent logins don't double-create the membership (transactional/idempotent).
+
+### Phase 3 — The invite primitive & surfaces
 
 ### U5. The invite primitive (`inviteService.resolveOrInvite`)
-**Goal:** One shared layer: rate-limit → resolve-or-create → add member now → email (magic link
-for new, per-setting notify for existing).
+**Goal:** One shared layer: rate-limit → resolve → grant-now-or-record-pending → notify, with the
+KTD5 new-email-permit gate.
 **Requirements:** R5, R-sec. **Dependencies:** U2, U3, U4.
 **Files:** `apps/server/src/invites/service.ts` (NEW), `apps/server/src/invites/service.test.ts`.
-Deps struct receives `users`, `org-members`, the U2 invite/token service, the U3 settings, the
-U4 template renderer, the `Mailer`, **and `rateLimitStore: RateLimitStore`** (wired from
-`buildApp` — it's a local there, not a singleton).
-**Approach:** `resolveOrInvite({ email, target, actor })` → `{ userId, created }`. **First** the
-KTD9 rate check (per-actor hourly bucket + the `invitePendingCap` count) BEFORE any side effect
-— over-limit → `RATE_LIMITED`, nothing created/sent; admins get the higher allowance. Then
-resolve-or-create (U2); add to target immediately; new → always send the magic link (fail closed
-if mailer/master off); existing → notify per setting. All mail via the U4 renderer.
+Deps: `users`, `org-members`, `allowed-emails`, the U4 `invitations` repo, the U2 settings, the U3
+renderer, the `Mailer`, **and `rateLimitStore: RateLimitStore`** (wired from `buildApp`).
+**Approach:** `resolveOrInvite({ email, target, actor })`. First the KTD9 rate + pending-cap check
+(no side effects on over-limit). Resolve by lowercased email: existing user → grant now + notify
+per setting; no user → if the actor may permit (admin, or `allowMemberInvitesToNewEmails`, or the
+email already authenticates) → permit (`allowed_emails`, admin path) + record pending invitation +
+courtesy email; else → `rejected` (a self-serve invite can't admit a brand-new external email).
+Courtesy/notify emails are best-effort (never block the grant). All mail via the U3 renderer.
 **Test scenarios:**
-- Existing user → member now, email only when the per-event setting is on.
-- New email → invited account + member + magic-link email (always); mailer-off → fails closed,
-  no orphan membership.
-- Idempotent for an already-member; email lowercased/trimmed; one email never makes two users.
-- **Rate limit:** a non-admin over `inviteMaxPerActorPerHour` → `RATE_LIMITED`, no account/mail;
-  `invitePendingCap` blocks minting beyond N unredeemed; the cap **decreases when a pending
-  account redeems**; admin/add-users gets the higher ceiling.
+- Existing user → granted now; email only when the per-event setting is on.
+- New email, admin actor → pending invitation + permit + courtesy email.
+- New external email, **self-serve actor, toggle OFF → `rejected`** (no permit, no pending, no
+  mail); toggle ON → pending + courtesy.
+- New email that's domain-matched (would authenticate anyway), self-serve → pending + courtesy
+  (no new permit needed).
+- Idempotent for an already-member; email lowercased/trimmed.
+- **Rate limit:** over `inviteMaxPerActorPerHour` → `RATE_LIMITED`, nothing recorded/sent;
+  `invitePendingCap` blocks beyond N un-consumed; the cap drops when an invitation is consumed;
+  admin gets the higher ceiling.
 
-### U6. Personal teams: self-serve for any user + dashboard
-**Goal:** Any user (incl. no-org) creates a personal team + invites friends; org members can also
-attach to their org. Dashboard reflects Personal/Org + the invite flow.
+### U6. Personal teams: self-serve + dashboard (pending roster)
+**Goal:** Any signed-in user (incl. no-org) creates a personal team + invites people; org members
+can also attach to their org. Dashboard shows Personal/Org + a Pending roster state.
 **Requirements:** R6. **Dependencies:** U1, U5.
-**Files:** `apps/server/src/teams/service.ts` (create allows no-org users for personal; add-member
-routes through `inviteService` for personal, same-org rule for org), `apps/server/src/routes/teams.ts`,
-`apps/dashboard/src/routes/teams.tsx`, `apps/dashboard/src/routes/canvas.share.tsx` (Team rung
-for no-org users on personal canvases), `apps/dashboard/src/app-layout.tsx` (drop the org-only
-nav gate), `apps/dashboard/src/lib/api.ts` (`Team.orgId: string | null`, create takes `orgId?`),
-`apps/dashboard/src/test/teams.test.tsx`, `apps/server/src/integration/team-scenarios.test.ts`.
-**Approach:** Replace the `orgOnly` nav gate + the `me.orgs.length` Team-rung gate with
-"any signed-in user" for personal teams; keep the org option gated on org membership. Create
-form: a Personal/Org control (Org hidden for no-org users). Roster add uses `inviteService`.
+**Files:** `apps/server/src/teams/service.ts` (create allows no-org for personal; add-member →
+`inviteService`), `apps/server/src/routes/teams.ts` (roster includes pending invitations),
+`apps/dashboard/src/routes/teams.tsx` (Pending rows; works with no org),
+`apps/dashboard/src/routes/canvas.share.tsx` (Team rung for no-org users on personal canvases),
+`apps/dashboard/src/app-layout.tsx` (drop org-only nav gate), `apps/dashboard/src/lib/api.ts`
+(`Team.orgId: string | null`; roster member vs pending), `apps/dashboard/src/test/teams.test.tsx`,
+`apps/server/src/integration/team-scenarios.test.ts`.
+**Approach:** replace the org-only gates with "any signed-in user" for personal teams; org option
+gated on membership. Roster merges real `team_members` (active) + pending invitations (Pending,
+email only). Add-member routes through `inviteService`.
 **Test scenarios:**
-- A no-org user creates a personal team; the Teams nav + page work for them.
-- A no-org user invites a brand-new friend → member + emailed (mocked).
+- A no-org user creates a personal team; Teams nav + page work for them.
+- A no-org user invites an existing/domain-matched person → granted (or Pending) + roster reflects
+  it; the person reaches the personal team canvas after they sign in.
 - A no-org user shares a **personal** canvas with their personal team (Team rung enabled; save
   succeeds — no `TEAM_REQUIRED`).
 - Org member sees Personal AND Org at creation; a no-org user sees only Personal.
-- Org-team add-member still enforces same-org (TARGET_NOT_MEMBER for an off-domain email).
+- Org-team add-member still enforces same-org.
 
-### U7. Admin "Add users" replaces the sign-in allowlist
-**Goal:** Replace the `allowed_emails` admin surface with Add users (create + invite + domain
-membership), keeping the table as a legacy permit.
+### U7. Admin "Add users" replaces the sign-in allowlist (the new-email permit path)
+**Goal:** Replace the allowlist surface with Add users — the only way to permit a brand-new email
+to sign in (+ pending grant + courtesy + domain membership).
 **Requirements:** R7. **Dependencies:** U5.
 **Files:** `apps/server/src/routes/admin.ts`, `apps/server/src/db/repositories/allowed-emails.ts`
-(retain as a back-compat permit), `apps/dashboard/src/components/AllowedEmailsPanel.tsx` →
+(now the canonical permit store), `apps/dashboard/src/components/AllowedEmailsPanel.tsx` →
 `AddUsersPanel.tsx`, `apps/dashboard/src/routes/admin.users.tsx`, `apps/dashboard/src/lib/api.ts`,
 `apps/server/src/routes/admin.test.ts`, dashboard admin test.
-**Approach:** Adding an email calls `inviteService` with an admin target + the admin allowance;
-domain-match decides org membership; off-domain → invited user, no org. Existing `allowed_emails`
-rows keep permitting sign-in (the old first-login mint path still works for them).
+**Approach:** Add-users calls `inviteService` with the admin allowance: permit + pending grant +
+courtesy email; org member iff domain. Existing allowlist entries keep working (the panel lists
+them; they remain valid permits).
 **Test scenarios:**
-- On-domain email → user created, org member, magic-link emailed.
-- Off-domain email → user created, NOT an org member, emailed (personal teams only).
-- Admin allowance: an admin can add in bulk past the per-actor user cap; self-protection guards
-  preserved; re-add idempotent.
-- Existing allowlist entries still permit sign-in after the migration.
+- Add on-domain email → permitted; becomes org member on first verified login; courtesy emailed.
+- Add off-domain email → permitted; NOT an org member; can be on personal teams once signed in.
+- Existing allowlist entries still permit sign-in; self-protection + admin guards preserved.
 
 ### U8. Individual one-off canvas invite
 **Goal:** A deliberate "invite this person to this canvas" action distinct from a silent
-Specific-people add, with its own email (per `notifyOnCanvasInvite`).
+Specific-people add, with its own courtesy email (per `notifyOnCanvasInvite`).
 **Requirements:** R8. **Dependencies:** U5.
 **Files:** `apps/server/src/routes/management.ts`, `apps/dashboard/src/routes/canvas.share.tsx`,
 `apps/server/src/routes/management.test.ts`, dashboard share test.
-**Approach:** Wraps `inviteService` with the canvas as target + the `individual_canvas_invite`
-template; ensures `specific_people` access (or a clear precondition). *(Thin — could merge into
-U6; kept separate for the distinct template + the per-event toggle.)*
+**Approach:** wraps `inviteService` with the canvas target + `individual_canvas_invite` template.
 **Test scenarios:**
-- New person invited to a canvas → invited account + allowlist entry + email.
-- Existing member invited → added + emailed only when `notifyOnCanvasInvite` is on.
-- Distinct from the silent bulk add (no email for existing members unless toggled).
+- New person invited (admin/permit) → pending allowlist invitation + courtesy email; materializes
+  on first verified login.
+- Existing member invited → granted + emailed only when `notifyOnCanvasInvite` is on.
 
 ### Phase 4 — Parity & hardening
 
 ### U9. MCP agent-native parity
 **Goal:** Every new owner-facing action over MCP, wrapping the same services.
 **Requirements:** R9. **Dependencies:** U6, U8.
-**Files:** `apps/server/src/mcp/server.ts` (`create_team` gains a Personal/Org choice;
-`add_team_member` → `inviteService`; a `invite_to_canvas` tool), `apps/server/src/mcp/server.test.ts`.
-**Approach:** Reuse `teamsService` + `inviteService` (same denials/audit/rate-limit). Admin
-add-users stays off the per-account MCP surface (admin routes only — the parity exception).
+**Files:** `apps/server/src/mcp/server.ts` (`create_team` Personal/Org; `add_team_member` →
+`inviteService`; `invite_to_canvas`), `apps/server/src/mcp/server.test.ts`.
+**Approach:** reuse `teamsService` + `inviteService` (same denials/audit/rate-limit + the KTD5
+permit gate); admin add-users stays off the per-account MCP surface.
 **Test scenarios:**
-- `create_team` no-org → a personal team owned by the caller (works for a no-org caller).
-- `add_team_member` with a brand-new email → invited account + emailed (mocked); honors the
-  rate limit.
-- `invite_to_canvas` mirrors the HTTP individual-invite denials.
+- `create_team` no-org → a personal team (works for a no-org caller).
+- `add_team_member` existing/domain-matched email → granted/pending; a new external email →
+  rejected unless the toggle is on.
+- `invite_to_canvas` mirrors the HTTP denials.
 
 ### U10. Docs parity
-**Goal:** Served docs + llms/mcp + README for personal teams, invited accounts, add-users, email
-settings/templates.
+**Goal:** Served docs + llms/mcp + README for personal teams, auth-delegated invites, add-users,
+email settings/templates.
 **Requirements:** R10. **Dependencies:** U1–U9.
 **Files:** `docs/site/authoring/{sharing,create-and-publish}.md`,
-`docs/site/self-hosting/{security-model,configuration}.md`, `docs/site/agents/{mcp,llms}.md`,
-`README.md`; run `pnpm docs:build` (drift gate) + the integrity test.
-**Test scenarios:** Test expectation: none — docs; the `docs:build` drift gate + integrity test
-are the checks.
+`docs/site/self-hosting/{security-model,configuration}.md` (the invite model + the new-email
+permit gate + the no-app-auth note), `docs/site/agents/{mcp,llms}.md`, `README.md`; run
+`pnpm docs:build` + integrity test.
+**Test scenarios:** Test expectation: none — docs; the drift gate + integrity test are the checks.
 
 ### U11. Invariant tests + `/ce-code-review` + PR
 **Goal:** End-to-end rejection-first coverage + the security/adversarial review, then ship.
 **Requirements:** R-sec. **Dependencies:** all.
 **Files:** `apps/server/src/integration/team-scenarios.test.ts`,
 `apps/server/src/integration/invite-scenarios.test.ts` (NEW).
-**Approach:** HTTP-level: the personal-team access matrix across serve+runtime; the invited-
-account POST-redeem → member-session → reach a personal team canvas; the gateway permit on every
-request; proxy-mode refusal; the `email_verified` link gate; add-users membership matrix; email-
-settings gating; the rate-limit refusal (no side effects); template override applied to a sent
-email. Run `/ce-code-review` (security + adversarial); fix everything real with regression tests.
+**Approach:** the personal-team access matrix across serve+runtime; a pending invitation
+materializing on a verified login → the person reaches the personal team canvas; the KTD5 gate
+(self-serve can't permit a new external email; admin can; toggle flips it); rate-limit refusal;
+add-users membership matrix; email-settings gating; template override. Run `/ce-code-review`
+(security + adversarial); fix everything real with regression tests.
 **Test scenarios:**
 - Full personal-team access matrix over a real socket.
-- Invited account: invite → POST redeem → authenticated member session → reach the personal team
-  canvas → make a second authenticated request (gateway permit).
-- Proxy mode: invited mint/redeem refused end-to-end.
-- Rate limit: a no-org actor hammering invites is refused after the cap, with no accounts/mail
+- Invite (pending) → the invitee's first verified login materializes the membership → reaches the
+  canvas; second login doesn't double-apply.
+- Self-serve invite of a new external email is rejected (toggle off); admin Add-users permits it.
+- Rate limit: an actor hammering invites is refused after the cap, with nothing recorded/sent
   beyond it.
 
 ---
@@ -463,30 +432,27 @@ email. Run `/ce-code-review` (security + adversarial); fix everything real with 
 ## Open Questions / Risks
 
 - **OQ1 — the widened predicate must stay one method across three seams** (the #1 risk, now a
-  one-clause widening, not a branch). Pinned by the parameterized cross-seam matrix + the
-  membership invariant (U1, U11). Rule: never re-derive the predicate in a seam.
-- **OQ2 — invited-account session lifetime / re-auth cadence.** Default: the normal session TTL,
-  re-auth via a fresh magic link. Decide at U2.
-- **OQ3 — no personal↔org promotion** (KTD2). Deferred unless requested.
-- **OQ4 — RESOLVED (KTD4/KTD7):** invited accounts are permitted at the gateway via
-  `account_type='invited'`; `allowed_emails` is retained only as a legacy permit (no strand). The
-  schema decision is made at U2 (the column), not deferred to U7.
-- **OQ5 — RESOLVED (KTD9):** admin-configurable per-actor hourly rate + an unredeemed-invite cap
-  (`invited_by` + `last_seen_at IS NULL`), enforced before side effects. Admin allowance set in
-  U3's config.
-- **Risk — proxy mode.** Invited accounts can't exist in proxy mode; the dashboard hides personal-
-  team invites there and the server refuses (U2/U11).
-- **Risk — migration/back-compat.** `teams.org_id` nullable, `users.account_type`/`invited_by`,
-  and the new tables are additive; existing org teams + managed users untouched; the replaced
-  allowlist keeps permitting existing entries.
-- **Scope note (review).** U2 (persistent passwordless accounts) is a real auth sub-project, not
-  a teams add-on. It is the most invariant-critical single unit — ship + review it in isolation
-  before U5+ build on it. KTD4/5 (persistent accounts) are owner-locked; not re-opened.
+  one-clause widening). Pinned by the cross-seam matrix + the membership invariant (U1, U11).
+- **OQ2 — RESOLVED:** no app-owned auth; identity comes from the configured auth on first verified
+  login. No session-lifetime question (normal sessions only).
+- **OQ3 — no personal↔org promotion** (KTD2). Deferred.
+- **OQ4 — RESOLVED:** `allowed_emails` is retained as the canonical sign-in permit store (Add
+  users writes it). No retire/strand.
+- **OQ5 — RESOLVED (KTD9):** admin-configurable per-actor hourly rate + a pending-invitation cap.
+  Abuse blast radius is now pending rows + courtesy emails only (no account minting; self-serve
+  can't permit new sign-ins).
+- **Security crux (KTD5).** The one knob to get right: self-serve invites must NOT permit a
+  brand-new email to sign in (default). Tested directly (U5, U11). The admin toggle is the only way
+  to open it.
+- **UX note.** A new invitee is **Pending** until they sign in (no instant access) — surface this
+  in the roster/allowlist UIs so an owner isn't surprised the person "can't see it yet."
+- **Risk — migration/back-compat.** `teams.org_id` nullable + the `invitations` table are
+  additive; existing org teams + the allowlist untouched.
 
 ---
 
 ## Out of scope (later)
 
-Personal↔org team promotion · password-based accounts (passwordless only) · cross-org / multi-org
-instances · invite analytics beyond the rate cap · rich WYSIWYG template editing (subject +
-HTML/text source only).
+App-owned magic-link accounts (explicitly dropped — delegate to the configured auth) ·
+personal↔org team promotion · cross-org / multi-org instances · invite analytics beyond the rate
+cap · rich WYSIWYG template editing.
