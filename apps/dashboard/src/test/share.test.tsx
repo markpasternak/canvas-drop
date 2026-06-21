@@ -294,14 +294,16 @@ describe("share route", () => {
     expect(screen.queryByRole("radio", { name: /^team/i })).toBeNull();
   });
 
-  it("team + whole-org rungs are disabled on a Personal canvas under active tenancy", async () => {
+  it("whole-org rung is disabled on a Personal canvas, but the Team rung stays enabled (plan 003 U6)", async () => {
     mockFetch({
       "GET /api/me": () => json({ ...ME, orgs: [{ id: "o1", name: "Acme" }] }),
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, orgId: null, publicationState: "published", currentVersionId: "v1" }),
     });
     renderShare();
-    expect(await screen.findByRole("radio", { name: /^team/i })).toBeDisabled();
+    // A personal canvas CAN be shared with a personal team — the Team rung is enabled…
+    expect(await screen.findByRole("radio", { name: /^team/i })).toBeEnabled();
+    // …but it still can't be shared org-wide.
     expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
   });
 

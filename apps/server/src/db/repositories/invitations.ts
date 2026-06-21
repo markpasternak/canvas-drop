@@ -44,6 +44,19 @@ export function invitationsRepository(client: DbClient) {
         .onConflictDoNothing();
     },
 
+    /** Un-consumed invitations for a target (e.g. a team's pending roster rows). */
+    async listPendingForTarget(
+      targetType: InvitationTarget["type"],
+      targetId: string,
+    ): Promise<Invitation[]> {
+      return (await db
+        .select()
+        .from(T)
+        .where(
+          and(eq(T.targetType, targetType), eq(T.targetId, targetId), isNull(T.consumedAt)),
+        )) as Invitation[];
+    },
+
     /** Un-consumed invitations for a (lowercased) email — the apply set on first login. */
     async listForEmail(email: string): Promise<Invitation[]> {
       return (await db

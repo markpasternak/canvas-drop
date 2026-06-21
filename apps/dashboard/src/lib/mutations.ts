@@ -561,7 +561,9 @@ export function useRemoveAllowedEmail() {
 export function useCreateTeam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ orgId, name }: { orgId: string; name: string }) => api.teams.create(orgId, name),
+    // `orgId` null = a personal team (plan 003 U6); an org id attaches it to that org.
+    mutationFn: ({ orgId, name }: { orgId: string | null; name: string }) =>
+      api.teams.create(orgId, name),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.teams }),
   });
 }

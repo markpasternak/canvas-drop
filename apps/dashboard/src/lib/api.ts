@@ -285,7 +285,9 @@ export interface AllowlistEntry {
  *  whether they're a member (`mine`). The share picker shows only `mine` teams. */
 export interface Team {
   id: string;
-  orgId: string;
+  /** `null` for a PERSONAL team (plan 003 U6 — friends & family, no org); an org id for an
+   *  org-attached team. */
+  orgId: string | null;
   name: string;
   slug: string;
   /** The caller is a member of this team. */
@@ -302,6 +304,23 @@ export interface TeamMember {
   email: string | null;
   name: string | null;
 }
+
+/** A pending invitation on a team's roster (plan 003 U6): a brand-new invitee who hasn't
+ *  signed in yet. They join (become a TeamMember) on their first verified login. */
+export interface TeamPendingInvite {
+  email: string;
+  invitedAt: number;
+}
+
+/** A team's full roster: active members + not-yet-signed-in pending invitations. */
+export interface TeamRoster {
+  members: TeamMember[];
+  pending: TeamPendingInvite[];
+}
+
+/** Outcome of adding someone to a personal team: `granted` (existing user joined now) or
+ *  `pending` (a brand-new invitee was emailed; they join on first verified login). */
+export type AddMemberStatus = "granted" | "pending";
 
 /** A canvas shared with one of the caller's teams (plan 003) — display-only, the
  *  caller is NOT the owner, so no management fields. The only surface for these
@@ -961,11 +980,13 @@ export const api = {
       (r) => r.canvases,
     ),
 
-  // --- Teams (plan 003 P2). Self-serve: any org member creates a team and invites
-  //     other members. Management (rename/delete) is creator-or-admin (server-enforced). ---
+  // --- Teams (plan 003 P2/U6). Self-serve: any signed-in user creates a PERSONAL team (no org)
+  //     and invites people; an org member may also attach a team to their org. Management
+  //     (rename/delete) is creator-or-admin (server-enforced). ---
   teams: {
     list: () => request<{ teams: Team[] }>("/api/teams").then((r) => r.teams),
-    create: (orgId: string, name: string) =>
+    /** Create a team. Pass an `orgId` to attach to your org, or `null` for a personal team. */
+    create: (orgId: string | null, name: string) =>
       request<{ team: Team }>("/api/teams", jsonBody({ orgId, name })).then((r) => r.team),
     rename: (id: string, name: string) =>
       request<{ team: { id: string; name: string } }>(`/api/teams/${id}`, {
@@ -974,9 +995,15 @@ export const api = {
       }).then((r) => r.team),
     remove: (id: string) => request<{ ok: true }>(`/api/teams/${id}`, { method: "DELETE" }),
     listMembers: (id: string) =>
-      request<{ members: TeamMember[] }>(`/api/teams/${id}/members`).then((r) => r.members),
+      request<TeamRoster>(`/api/teams/${id}/members`).then((r) => ({
+        members: r.members,
+        pending: r.pending ?? [],
+      })),
     addMember: (id: string, email: string) =>
-      request<{ ok: true }>(`/api/teams/${id}/members`, jsonBody({ email })),
+      request<{ ok: true; status: AddMemberStatus }>(
+        `/api/teams/${id}/members`,
+        jsonBody({ email }),
+      ),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
   },

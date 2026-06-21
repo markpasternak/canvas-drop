@@ -33,6 +33,7 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { type DeployEngine, deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
 import type { EmailMessage, Mailer } from "../email/mailer.js";
+import { makeInviteService } from "../invites/testing.js";
 import { buildMcpServer } from "../mcp/server.js";
 import { createHub, type RealtimeHub } from "../realtime/hub.js";
 import { memStorage } from "../storage/mem.js";
@@ -315,7 +316,13 @@ export async function connectMcp(
       orgs: orgsRepository(h.client),
       orgMembers,
       teams,
-      teamsService: teamsService({ teams, orgMembers, users: repos.users, audit }),
+      teamsService: teamsService({
+        teams,
+        orgMembers,
+        users: repos.users,
+        invites: makeInviteService(h.client, config),
+        audit,
+      }),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,

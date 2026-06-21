@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { AppEnv } from "../http/types.js";
@@ -19,18 +20,27 @@ export interface TeamsRoutesDeps {
     "listByOrg" | "findById" | "listForUser" | "getMembers" | "isTeamMember"
   >;
   users: Pick<UsersRepository, "findByIds">;
+  /** Un-consumed invitations for a team's pending roster rows (plan 003 U6). */
+  invitations: Pick<InvitationsRepository, "listPendingForTarget">;
 }
 
-const HTTP: Record<TeamError, 403 | 404 | 409> = {
+const HTTP: Record<TeamError, 403 | 404 | 409 | 429> = {
   NOT_A_MEMBER: 403,
   TEAM_NOT_FOUND: 404,
   TEAM_NAME_TAKEN: 409,
   FORBIDDEN: 403,
   TARGET_NOT_FOUND: 404,
   TARGET_NOT_MEMBER: 409,
+  TARGET_NOT_PERMITTED: 403,
+  RATE_LIMITED: 429,
 };
 
-const createSchema = z.object({ orgId: z.string().min(1), name: z.string().trim().min(1).max(80) });
+// Personal teams (plan 003 U6) carry no org → `orgId` is optional/null; an org-attached team
+// supplies a non-empty id the service re-checks against the actor's LIVE membership.
+const createSchema = z.object({
+  orgId: z.string().min(1).nullish(),
+  name: z.string().trim().min(1).max(80),
+});
 const renameSchema = z.object({ name: z.string().trim().min(1).max(80) });
 const addMemberSchema = z.object({ email: z.string().trim().toLowerCase().email() });
 
@@ -39,7 +49,13 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
 
   const actorOf = (c: Context<AppEnv>): TeamActor => {
     const user = c.get("user");
-    return { id: user.id, isAdmin: user.isAdmin, orgIds: c.get("orgIds") ?? new Set<string>() };
+    return {
+      id: user.id,
+      isAdmin: user.isAdmin,
+      orgIds: c.get("orgIds") ?? new Set<string>(),
+      name: user.name,
+      email: user.email,
+    };
   };
 
   // List teams across the caller's org(s), flagging which they're a member of (`mine`)
@@ -104,11 +120,21 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     const rows = await deps.teams.getMembers(team.id);
     const users = await deps.users.findByIds(rows.map((m) => m.userId));
     const byId = new Map(users.map((u) => [u.id, u]));
+    // Pending invitations (plan 003 U6): brand-new invitees who haven't signed in yet. They
+    // appear as email-only "Pending" rows (no userId) until their first verified login
+    // materializes the membership. Suppress any whose email already became a member.
+    const memberEmails = new Set(
+      rows.map((m) => byId.get(m.userId)?.email).filter((e): e is string => !!e),
+    );
+    const pending = (await deps.invitations.listPendingForTarget("team", team.id))
+      .filter((inv) => !memberEmails.has(inv.email))
+      .map((inv) => ({ email: inv.email, invitedAt: inv.createdAt }));
     return c.json({
       members: rows.map((m) => {
         const u = byId.get(m.userId);
         return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
       }),
+      pending,
     });
   });
 
@@ -117,7 +143,9 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.addMemberByEmail(actorOf(c), c.req.param("id"), body.data.email);
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
-    return c.json({ ok: true });
+    // `granted` = an existing user joined now; `pending` = a brand-new invitee was emailed and
+    // will join on their first verified login (the UI shows them as Pending).
+    return c.json({ ok: true, status: r.status });
   });
 
   app.delete("/:id/members/:userId", async (c) => {

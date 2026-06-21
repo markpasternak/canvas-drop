@@ -68,13 +68,28 @@ afterEach(() => {
 });
 
 describe("teams page", () => {
-  it("shows the no-workspace empty state for a Personal-only caller", async () => {
-    mockFetch({ "GET /api/me": () => json({ ...ME, orgs: [] }) });
+  it("a no-org user can create a PERSONAL team (no org id in the POST)", async () => {
+    const calls = mockFetch({
+      "GET /api/me": () => json({ ...ME, orgs: [] }),
+      "POST /api/teams": () =>
+        json({ team: { id: "t9", orgId: null, name: "Family", slug: "family" } }),
+    });
+    const user = userEvent.setup();
     renderTeams();
-    expect(await screen.findByText(/teams need an org workspace/i)).toBeInTheDocument();
+
+    // No org → no "Team type" selector; the create form is available straight away.
+    expect(screen.queryByLabelText(/team type/i)).toBeNull();
+    await user.type(await screen.findByLabelText(/new team name/i), "Family");
+    await user.click(screen.getByRole("button", { name: /create team/i }));
+
+    await vi.waitFor(() => {
+      const post = calls.find((c) => c.method === "POST" && c.url === "/api/teams");
+      expect(post?.body).toContain("Family");
+      expect(post?.body).toContain('"orgId":null');
+    });
   });
 
-  it("lists the org's teams and creates a new one via POST", async () => {
+  it("lists teams and creates an ORG team when the org type is chosen", async () => {
     const calls = mockFetch({
       "GET /api/teams": () =>
         json({
@@ -89,6 +104,8 @@ describe("teams page", () => {
     renderTeams();
 
     expect(await screen.findByText("Design")).toBeInTheDocument();
+    // An org member sees the Personal/Org selector; pick the org to attach the team.
+    await user.selectOptions(await screen.findByLabelText(/team type/i), "o1");
     await user.type(await screen.findByLabelText(/new team name/i), "Growth");
     await user.click(screen.getByRole("button", { name: /create team/i }));
 
@@ -99,7 +116,7 @@ describe("teams page", () => {
     });
   });
 
-  it("expands a team roster and invites a member", async () => {
+  it("expands a team roster and invites a member; shows pending invitations", async () => {
     const calls = mockFetch({
       "GET /api/teams": () =>
         json({
@@ -108,14 +125,20 @@ describe("teams page", () => {
           ],
         }),
       "GET /api/teams/t1/members": () =>
-        json({ members: [{ userId: "u2", email: "ada@example.com", name: "Ada Lovelace" }] }),
-      "POST /api/teams/t1/members": () => json({ ok: true }),
+        json({
+          members: [{ userId: "u2", email: "ada@example.com", name: "Ada Lovelace" }],
+          pending: [{ email: "waiting@example.com", invitedAt: 1 }],
+        }),
+      "POST /api/teams/t1/members": () => json({ ok: true, status: "granted" }),
     });
     const user = userEvent.setup();
     renderTeams();
 
     await user.click(await screen.findByRole("button", { name: /^members$/i }));
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
+    // The pending invitee appears with a Pending badge (not yet a member).
+    expect(await screen.findByText("waiting@example.com")).toBeInTheDocument();
+    expect(screen.getByText(/pending/i)).toBeInTheDocument();
 
     await user.type(await screen.findByLabelText(/add a colleague by email/i), "new@example.com");
     await user.click(screen.getByRole("button", { name: /^add$/i }));

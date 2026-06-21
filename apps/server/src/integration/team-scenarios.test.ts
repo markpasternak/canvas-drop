@@ -130,6 +130,63 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
     await other.text();
   });
 
+  it("personal team (plan 003 U6): a no-org user shares a personal canvas with a personal team; members reach it, a stranger 404s", async () => {
+    client = await makeTestDb(dialect);
+    // No org needed — guest.test isn't an Acme domain, so these users are all no-org.
+    const h = makeHarness(client, { config: teamConfig() });
+
+    const FRIEND = "friend@guest.test"; // no org (guest.test isn't an Acme domain)
+    const PAL = "pal@guest.test"; // no org; an existing user FRIEND invites
+    const STRANGER = "stranger@guest.test"; // no org; never on the team
+    for (const who of [FRIEND, PAL, STRANGER]) await (await h.GET(who, "/api/me")).text();
+
+    // A no-org user creates a PERSONAL team (no orgId in the body).
+    const teamRes = await h.SEND(FRIEND, "POST", "/api/teams", { name: "Family" });
+    expect(teamRes.status).toBe(201);
+    const { team } = await jsonOf<{ team: { id: string; orgId: string | null } }>(teamRes);
+    expect(team.orgId).toBeNull();
+
+    // Invite PAL (an existing user) → granted immediately (no org-membership requirement).
+    const addRes = await h.SEND(FRIEND, "POST", `/api/teams/${team.id}/members`, { email: PAL });
+    expect(addRes.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(addRes)).status).toBe("granted");
+
+    // FRIEND publishes a PERSONAL canvas (org_id null) and scopes it to the personal team —
+    // this must NOT trip a TEAM_REQUIRED/home-org guard (KTD: personal teams need no org).
+    const pasteRes = await h.SEND(FRIEND, "POST", "/api/canvases/paste", {
+      html: "<h1>family photos</h1>",
+      title: "Family",
+      backendEnabled: true,
+    });
+    expect(pasteRes.status).toBe(201);
+    const cv = await jsonOf<{ id: string; slug: string }>(pasteRes);
+    const patch = await h.SEND(FRIEND, "PATCH", `/api/canvases/${cv.id}/settings`, {
+      access: "team",
+      teamIds: [team.id],
+    });
+    expect(patch.status).toBe(200);
+    await patch.text();
+
+    // Serve over a real socket: FRIEND (owner) + PAL (member) reach it; STRANGER is opaque 404.
+    const server = await h.listen();
+    const get = (email: string) =>
+      fetch(`http://localhost:${server.port}/c/${cv.slug}/`, {
+        headers: { host: h.baseHost, "x-test-user": email },
+      });
+    try {
+      for (const who of [FRIEND, PAL]) {
+        const res = await get(who);
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain("family photos");
+      }
+      const stranger = await get(STRANGER);
+      expect(stranger.status).toBe(404);
+      expect(await stranger.text()).not.toContain("family photos");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("KTD3 live re-join: an org-revoked member is denied even with a lingering team row", async () => {
     client = await makeTestDb(dialect);
     const acmeId = await seedAcme(client);

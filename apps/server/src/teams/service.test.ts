@@ -1,3 +1,4 @@
+import { type Config, loadConfig } from "@canvas-drop/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
@@ -5,7 +6,10 @@ import { orgsRepository } from "../db/repositories/orgs.js";
 import { teamsRepository } from "../db/repositories/teams.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
+import { makeInviteService } from "../invites/testing.js";
 import { type TeamActor, teamsService } from "./service.js";
+
+const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
 describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
   let client: DbClient;
@@ -21,7 +25,13 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     const users = usersRepository(client);
     const org = await orgs.ensureOrg({ name: "Acme", slug: "acme", domains: ["acme.com"] });
     const audit = { recordAudit: () => {} };
-    const svc = teamsService({ teams, orgMembers, users, audit });
+    const svc = teamsService({
+      teams,
+      orgMembers,
+      users,
+      invites: makeInviteService(client, config),
+      audit,
+    });
 
     /** Create a user + (for members) materialize their org membership. */
     async function mkUser(email: string, opts: { member?: boolean; admin?: boolean } = {}) {
@@ -34,10 +44,15 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
       if (opts.member) await orgMembers.upsertDomainMember(org.id, u.id);
       return u;
     }
-    const actor = (u: { id: string; isAdmin: boolean }, member = true): TeamActor => ({
+    const actor = (
+      u: { id: string; isAdmin: boolean; email?: string; name?: string },
+      member = true,
+    ): TeamActor => ({
       id: u.id,
       isAdmin: u.isAdmin,
       orgIds: member ? new Set([org.id]) : new Set<string>(),
+      name: u.name ?? u.email ?? "Actor",
+      email: u.email ?? "actor@acme.com",
     });
 
     return { orgs, orgMembers, teams, users, org, svc, mkUser, actor };

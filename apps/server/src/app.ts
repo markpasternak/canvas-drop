@@ -41,6 +41,7 @@ import type { VersionsRepository } from "./db/repositories/versions.js";
 import type { DeployEngine } from "./deploy/engine.js";
 import { docsRoutes } from "./docs/routes.js";
 import type { Mailer } from "./email/mailer.js";
+import { noopMailer } from "./email/noop.js";
 import { checkHealth } from "./health.js";
 import { brandAssetRoutes } from "./http/brand-assets.js";
 import { canvasApiPreflight } from "./http/canvas-api-isolation.js";
@@ -57,6 +58,7 @@ import {
 import { securityHeadersMiddleware } from "./http/security-headers.js";
 import { socialPreview } from "./http/social-preview.js";
 import type { AppEnv } from "./http/types.js";
+import { inviteService } from "./invites/service.js";
 import type { Logger } from "./log/logger.js";
 import { requestLogger } from "./log/middleware.js";
 import { mcpRoutes } from "./mcp/routes.js";
@@ -157,8 +159,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const orgMembership = makeOrgMembershipResolver(orgs, orgMembers);
 
   // Teams (plan 003 P2): the repo + the authz-bearing service the routes AND MCP wrap.
+  // The service is constructed below, once the invite primitive it depends on exists.
   const teams = teamsRepository(deps.db);
-  const teamsSvc = teamsService({ teams, orgMembers, users: deps.users, audit: deps.audit });
 
   // Pending invitations (plan 003 U4): grants recorded before the invitee has a user row,
   // materialized on their first verified login (see authGateway below).
@@ -179,6 +181,36 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // login, password-gate) so MAX_KEYS bounds everything. Per-buildApp = per-test
   // isolation.
   const rlStore = deps.rateLimitStore ?? inProcessRateLimitStore();
+
+  // The invite primitive (plan 003 U5): ONE shared layer every owner-facing invite surface
+  // (team add, canvas add/invite, admin Add-users) routes through — rate-limit → resolve →
+  // grant-now-or-record-pending → notify, with the KTD5 new-email permit gate. Wraps the same
+  // services/repos the routes use. `noopMailer` keeps `canSend` false when email is
+  // unconfigured (grants still apply; no courtesy mail).
+  const mailer = deps.mailer ?? noopMailer();
+  const invites = inviteService({
+    config: deps.config,
+    users: deps.users,
+    allowedEmails,
+    invitations,
+    teams,
+    canvases: deps.canvases,
+    settings: settingsSvc,
+    templates: emailTemplates,
+    mailer,
+    rateLimitStore: rlStore,
+    log: deps.rootLogger,
+  });
+
+  // The team service depends on the invite primitive (personal-team adds route through it).
+  const teamsSvc = teamsService({
+    teams,
+    orgMembers,
+    users: deps.users,
+    invites,
+    audit: deps.audit,
+  });
+
   // Obtain the WebSocket upgrade helper for THIS app instance (chicken-and-egg:
   // @hono/node-ws needs the app; the route needs the helper). Realtime is wired
   // only when both the helper and the hub are present.
@@ -572,7 +604,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   );
 
   // Team management (plan 003 P2) — session-authenticated, behind the gateway.
-  app.route("/api/teams", teamsRoutes({ service: teamsSvc, teams, users: deps.users }));
+  app.route(
+    "/api/teams",
+    teamsRoutes({ service: teamsSvc, teams, users: deps.users, invitations }),
+  );
 
   // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
   // (server-resolved isAdmin) gates the whole router. Distinct base from /api/canvases.

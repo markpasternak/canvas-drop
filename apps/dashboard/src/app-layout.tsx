@@ -32,14 +32,12 @@ const SECTION_LINKS: ReadonlyArray<{
   icon: Icon;
   exact?: boolean;
   adminOnly?: boolean;
-  /** Org-members only (plan 003): hidden for a Personal-only caller / guest, for whom
-   *  the team concept doesn't apply. UX only — the teams API is org-scoped server-side. */
-  orgOnly?: boolean;
 }> = [
   { to: "/", label: "Canvases", icon: SquaresFour, exact: true },
   { to: "/gallery", label: "Gallery", icon: Compass },
-  // Teams (plan 003) — only for callers in an org workspace.
-  { to: "/teams", label: "Teams", icon: UsersThree, orgOnly: true },
+  // Teams (plan 003 U6) — any signed-in user can have personal teams (friends & family),
+  // so this is no longer org-gated.
+  { to: "/teams", label: "Teams", icon: UsersThree },
   // Admin sits last — below the member-facing sections, visible only to admins
   // (and the admin API independently 404s non-admins).
   { to: "/admin", label: "Admin", icon: ShieldCheck, adminOnly: true },
@@ -245,9 +243,7 @@ export function AppLayout() {
     };
   }, [menuOpen]);
 
-  const links = SECTION_LINKS.filter(
-    (l) => (!l.adminOnly || me.data?.isAdmin) && (!l.orgOnly || (me.data?.orgs?.length ?? 0) > 0),
-  );
+  const links = SECTION_LINKS.filter((l) => !l.adminOnly || me.data?.isAdmin);
   // Vertical nav item: icon + label, active item lifted to accent-subtle/accent
   // (matches the preview's `.nav a.active`).
   const navLinkClass =

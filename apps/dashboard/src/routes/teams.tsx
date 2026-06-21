@@ -20,49 +20,31 @@ import {
 import { useMe, useSharedWithTeams, useTeamMembers, useTeams } from "../lib/queries.js";
 
 /**
- * Teams (plan 003 P2) — the self-serve team management surface + the "shared with my
+ * Teams (plan 003 P2/U6) — the self-serve team management surface + the "shared with my
  * teams" view (the only place strictly-team-scoped canvases surface; they never appear
- * in the org-wide gallery). Any org member can create a team and invite other members;
- * rename/delete is the creator's or an admin's (the server is authoritative — the UI
- * only gates affordances by the `canManage` hint and surfaces denials as toasts).
+ * in the org-wide gallery). ANY signed-in user can create a PERSONAL team (friends & family,
+ * no org) and invite people; an org member may also attach a team to their org. Rename/delete
+ * is the creator's or an admin's (the server is authoritative — the UI only gates affordances
+ * by the `canManage` hint and surfaces denials as toasts).
  */
 export default function Teams() {
   const { data: me } = useMe();
   const { data: teams, isLoading } = useTeams();
   const orgs = me?.orgs ?? [];
 
-  // Teams live inside an org workspace. A Personal-only caller (or a guest) has no org,
-  // so there's nothing to manage — explain rather than show an empty create form.
-  if (me && orgs.length === 0) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="Teams" description="Share canvases with a group inside your org." />
-        <EmptyState
-          icon={<UsersThree size={28} weight="duotone" />}
-          title="Teams need an org workspace"
-          description="Your account isn't part of an org workspace, so there are no teams to manage. Teams let colleagues in the same org share a subset of canvases with each other."
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-8">
       <PageHeader
         title="Teams"
-        description="Groups inside your org. Share a canvas with a team from its Share tab, and anyone on the team can open it."
+        description="A team is a group you share canvases with. Share a canvas with a team from its Share tab, and anyone on the team can open it."
       />
 
       <Section
         id="your-teams"
         title="Your teams"
-        description="Create a team and invite colleagues, or browse the teams in your org."
+        description="Create a personal team and invite anyone by email — or, if you're in an org, attach a team to it."
       >
-        {isLoading ? (
-          <Skeleton className="h-24" />
-        ) : (
-          <YourTeams teams={teams ?? []} defaultOrgId={orgs[0]?.id ?? null} orgs={orgs} />
-        )}
+        {isLoading ? <Skeleton className="h-24" /> : <YourTeams teams={teams ?? []} orgs={orgs} />}
       </Section>
 
       <Section
@@ -76,28 +58,20 @@ export default function Teams() {
   );
 }
 
-/** The create form + the roster-managing list of the caller's org teams. */
-function YourTeams({
-  teams,
-  defaultOrgId,
-  orgs,
-}: {
-  teams: Team[];
-  defaultOrgId: string | null;
-  orgs: Array<{ id: string; name: string }>;
-}) {
+/** The create form + the roster-managing list of the caller's teams. The "Personal vs Org"
+ *  choice is fixed at creation: a no-org user sees only Personal; an org member sees both. */
+function YourTeams({ teams, orgs }: { teams: Team[]; orgs: Array<{ id: string; name: string }> }) {
   const toast = useToast();
   const create = useCreateTeam();
   const [name, setName] = useState("");
-  // P2 is single-org per instance; default to the caller's org. A future multi-org
-  // instance (P3) would add a picker — keep the orgId explicit so that's a small change.
-  const [orgId, setOrgId] = useState(defaultOrgId ?? "");
+  // "" = a personal team (no org); otherwise the chosen org id. Default to Personal.
+  const [orgId, setOrgId] = useState("");
 
   async function submit() {
     const value = name.trim();
-    if (!value || !orgId) return;
+    if (!value) return;
     try {
-      await create.mutateAsync({ orgId, name: value });
+      await create.mutateAsync({ orgId: orgId === "" ? null : orgId, name: value });
       setName("");
       toast("Team created");
     } catch (err) {
@@ -108,14 +82,16 @@ function YourTeams({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border p-3">
-        {orgs.length > 1 && (
+        {orgs.length > 0 && (
           <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-            Org
+            Team type
             <select
               className="h-9 rounded-md border border-border bg-surface px-2 text-sm text-fg"
               value={orgId}
               onChange={(e) => setOrgId(e.target.value)}
+              aria-label="Team type"
             >
+              <option value="">Personal</option>
               {orgs.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
@@ -126,7 +102,7 @@ function YourTeams({
         )}
         <Field
           label="New team name"
-          placeholder="Design, Growth, …"
+          placeholder="Family, Design, …"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
@@ -140,7 +116,7 @@ function YourTeams({
           size="sm"
           variant="secondary"
           loading={create.isPending}
-          disabled={!name.trim() || !orgId}
+          disabled={!name.trim()}
           onClick={submit}
         >
           Create team
@@ -148,7 +124,7 @@ function YourTeams({
       </div>
 
       {teams.length === 0 ? (
-        <p className="text-sm text-muted">No teams in your org yet. Create the first one above.</p>
+        <p className="text-sm text-muted">No teams yet. Create the first one above.</p>
       ) : (
         <ul className="space-y-2">
           {teams.map((team) => (
@@ -221,6 +197,7 @@ function TeamRow({ team }: { team: Team }) {
           ) : (
             <span className="truncate text-sm font-medium text-fg">{team.name}</span>
           )}
+          {team.orgId === null && <Badge tone="neutral">Personal</Badge>}
           {team.mine && <Badge tone="accent">Member</Badge>}
         </div>
         <div className="flex items-center gap-1">
@@ -283,18 +260,27 @@ function TeamRow({ team }: { team: Team }) {
 function TeamRoster({ team }: { team: Team }) {
   const toast = useToast();
   const { data: me } = useMe();
-  const { data: members, isLoading } = useTeamMembers(team.id);
+  const { data: roster, isLoading } = useTeamMembers(team.id);
   const add = useAddTeamMember(team.id);
   const removeMember = useRemoveTeamMember(team.id);
   const [email, setEmail] = useState("");
+  const members = roster?.members ?? [];
+  const pending = roster?.pending ?? [];
+  const personal = team.orgId === null;
 
   async function invite() {
     const value = email.trim();
     if (!value) return;
     try {
-      await add.mutateAsync(value);
+      const r = await add.mutateAsync(value);
       setEmail("");
-      toast("Added to the team");
+      // `pending` = a brand-new invitee was emailed and joins on first sign-in; `granted` = an
+      // existing user joined now.
+      toast(
+        r.status === "pending"
+          ? "Invitation sent — they'll join after signing in"
+          : "Added to the team",
+      );
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
     }
@@ -314,9 +300,9 @@ function TeamRoster({ team }: { team: Team }) {
       {team.mine && (
         <div className="flex items-end gap-2">
           <Field
-            label="Add a colleague by email"
+            label={personal ? "Invite anyone by email" : "Add a colleague by email"}
             type="email"
-            placeholder="colleague@example.com"
+            placeholder={personal ? "friend@example.com" : "colleague@example.com"}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => {
@@ -333,7 +319,7 @@ function TeamRoster({ team }: { team: Team }) {
             disabled={!email.trim()}
             onClick={invite}
           >
-            Add
+            {personal ? "Invite" : "Add"}
           </Button>
         </div>
       )}
@@ -345,7 +331,7 @@ function TeamRoster({ team }: { team: Team }) {
 
       {isLoading ? (
         <Skeleton className="h-8" />
-      ) : !members || members.length === 0 ? (
+      ) : members.length === 0 && pending.length === 0 ? (
         <p className="text-xs text-muted">No members yet.</p>
       ) : (
         <ul className="divide-y divide-border">
@@ -367,6 +353,17 @@ function TeamRoster({ team }: { team: Team }) {
               </li>
             );
           })}
+          {/* Pending invitations: brand-new invitees who haven't signed in yet. They become
+              full members on their first verified login. */}
+          {pending.map((p) => (
+            <li
+              key={`pending:${p.email}`}
+              className="flex items-center justify-between py-2 text-sm"
+            >
+              <span className="min-w-0 truncate text-muted">{p.email}</span>
+              <Badge tone="neutral">Pending</Badge>
+            </li>
+          ))}
         </ul>
       )}
     </div>

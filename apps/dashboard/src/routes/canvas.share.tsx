@@ -129,6 +129,12 @@ export default function Share() {
     return <ShareLocked canvasId={canvas.id} />;
   }
 
+  // Teams the caller can share THIS canvas to (plan 003 U6): their own teams (`mine`). A
+  // personal team (org_id null) is grantable to any canvas; an org team to a same-org canvas —
+  // the server re-checks via resolveTeamGrant, so an incompatible pick surfaces as a toast
+  // rather than being silently hidden here.
+  const shareableTeams = (teams ?? []).filter((t) => t.mine);
+
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav
@@ -172,11 +178,11 @@ export default function Share() {
             // viewer is a member — i.e. tenancy is active. The server would 409 it; don't
             // make them bounce off that with no feedback (plan 002/003).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
-            // The "Team" rung only applies to a user who actually belongs to an org — so
-            // gate it on org membership (not just "not a guest"). This also hides it on an
-            // inert instance (no org configured → nobody has teams), unlike Whole org which
-            // keeps its legacy any-member meaning there. Same predicate as the Teams nav.
-            allowTeam={(me?.orgs?.length ?? 0) > 0}
+            // The "Team" rung (plan 003 U6) shows when the caller has a team to share to, OR is
+            // an org member (so org members discover it even before creating one — the picker
+            // then prompts them). A no-org friends-&-family user with a personal team gets it;
+            // a stranger with no teams and no org doesn't.
+            allowTeam={shareableTeams.length > 0 || (me?.orgs?.length ?? 0) > 0}
             onChange={(access) => {
               if (access === "team") {
                 // Don't write yet — reveal the picker; the save fires from there once a
@@ -194,7 +200,7 @@ export default function Share() {
               specific_people: <Allowlist canvasId={canvas.id} />,
               team: (
                 <TeamPicker
-                  teams={(teams ?? []).filter((t) => t.mine)}
+                  teams={shareableTeams}
                   selected={canvas.access === "team" ? canvas.teamIds : []}
                   saving={update.isPending}
                   onShare={(teamIds) => {
@@ -514,9 +520,9 @@ function AccessLadder({
   allowOrg: boolean;
   /** Show the "Team" rung (plan 003) — org members only; hidden for a guest. */
   allowTeam: boolean;
-  /** The "Whole org"/"Team" rungs are shown but DISABLED — this is a Personal canvas
-   *  (no home org), so it can't be shared org-wide or with a team. Never let the user
-   *  pick what can't work (plan 002/003). */
+  /** The "Whole org" rung is shown but DISABLED — this is a Personal canvas (no home org),
+   *  so it can't be shared org-wide. The Team rung stays enabled: a personal canvas CAN be
+   *  shared with a personal team (plan 003 U6). Never let the user pick what can't work. */
   orgRungDisabled: boolean;
   onChange: (rung: SettableRung) => void;
   /** Inline "who" detail for a rung (the Specific-people allowlist, the Team picker) —
@@ -534,10 +540,10 @@ function AccessLadder({
     <fieldset className="space-y-2">
       <legend className="sr-only">Who can access this canvas</legend>
       {rungs.map((r) => {
-        // A Personal canvas can't be shared org-wide or with a team — disable the rung +
-        // explain, rather than letting the click bounce off the server's 409 with no
-        // feedback.
-        const disabled = (r.orgGated || r.teamGated) && orgRungDisabled && value !== r.value;
+        // A Personal canvas can't be shared org-wide — disable the "Whole org" rung + explain,
+        // rather than letting the click bounce off the server's 409 with no feedback. The Team
+        // rung stays enabled (a personal team can hold a personal canvas — plan 003 U6).
+        const disabled = r.orgGated && orgRungDisabled && value !== r.value;
         const selected = value === r.value;
         const detail = selected && !disabled ? details?.[r.value] : null;
         return (
@@ -561,7 +567,7 @@ function AccessLadder({
                 <span className="block text-sm font-semibold text-fg">{r.label}</span>
                 <span className="block text-xs text-muted">
                   {disabled
-                    ? "This canvas is Personal — only a canvas in a workspace can be shared with your org or a team."
+                    ? "This canvas is Personal — only a canvas in a workspace can be shared with your whole org."
                     : r.hint}
                 </span>
               </span>

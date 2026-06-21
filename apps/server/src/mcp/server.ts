@@ -149,8 +149,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   /** The team-management actor for THIS caller (plan 003 U6). `isAdmin` is fixed FALSE on
    *  the per-account MCP surface: cross-owner admin team actions are the dedicated admin
    *  routes only (agent-native parity rule's exception), so over MCP "manage" means the
-   *  team CREATOR only. `orgIds` is the caller's LIVE server-resolved membership. */
-  const teamActor: TeamActor = { id: caller.userId, isAdmin: false, orgIds: caller.orgIds };
+   *  team CREATOR only. `orgIds` is the caller's LIVE server-resolved membership; name/email
+   *  (for personal-team invites) are loaded once from the caller's own user row. */
+  let cachedIdentity: { name: string; email: string } | null = null;
+  const teamActorNow = async (): Promise<TeamActor> => {
+    if (!cachedIdentity) {
+      const u = await deps.users.findById(caller.userId);
+      cachedIdentity = { name: u?.name ?? "", email: u?.email ?? "" };
+    }
+    return { id: caller.userId, isAdmin: false, orgIds: caller.orgIds, ...cachedIdentity };
+  };
 
   /** Map a {@link TeamError} from the shared service to a stable `CODE: message` fail —
    *  the same posture as the HTTP team routes (a non-owned/unknown team reads as not found). */
@@ -161,6 +169,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     FORBIDDEN: "FORBIDDEN: only the team's creator can do that over MCP",
     TARGET_NOT_FOUND: "TARGET_NOT_FOUND: no account with that email has signed in yet",
     TARGET_NOT_MEMBER: "TARGET_NOT_MEMBER: that person is not a member of this org",
+    TARGET_NOT_PERMITTED:
+      "TARGET_NOT_PERMITTED: a brand-new external email can't be invited from here (ask an admin)",
+    RATE_LIMITED: "RATE_LIMITED: too many invites — try again later",
   };
 
   server.registerTool(
@@ -1329,7 +1340,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ orgId, name }) => {
-      const r = await deps.teamsService.create(teamActor, { orgId, name });
+      const r = await deps.teamsService.create(await teamActorNow(), { orgId, name });
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       const { team } = r;
       return ok({ id: team.id, orgId: team.orgId, name: team.name, slug: team.slug });
@@ -1363,7 +1374,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, name }) => {
-      const r = await deps.teamsService.rename(teamActor, id, name);
+      const r = await deps.teamsService.rename(await teamActorNow(), id, name);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       return ok({ id: r.team.id, name: r.team.name });
     },
@@ -1378,7 +1389,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The team id.") },
     },
     async ({ id }) => {
-      const r = await deps.teamsService.remove(teamActor, id);
+      const r = await deps.teamsService.remove(await teamActorNow(), id);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       return ok({ ok: true });
     },
@@ -1396,7 +1407,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, email }) => {
-      const r = await deps.teamsService.addMemberByEmail(teamActor, id, email);
+      const r = await deps.teamsService.addMemberByEmail(await teamActorNow(), id, email);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       return ok({ ok: true });
     },
@@ -1414,7 +1425,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, userId }) => {
-      const r = await deps.teamsService.removeMember(teamActor, id, userId);
+      const r = await deps.teamsService.removeMember(await teamActorNow(), id, userId);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
       return ok({ ok: true });
     },

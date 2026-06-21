@@ -25,6 +25,7 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
+import { makeInviteService } from "../invites/testing.js";
 import { memStorage } from "../storage/mem.js";
 import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
@@ -83,6 +84,7 @@ async function connect(
         teams,
         orgMembers,
         users: usersRepository(client),
+        invites: makeInviteService(client, cfg),
         audit,
       }),
       canvases,
