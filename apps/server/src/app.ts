@@ -11,6 +11,7 @@ import { authGateway } from "./auth/gateway.js";
 import type { GuestService } from "./auth/guest.js";
 import { guestPublicResolver, onlyWhenNoPrincipal } from "./auth/guest-public-resolver.js";
 import { guestRoutes } from "./auth/guest-routes.js";
+import { makeOrgMembershipResolver } from "./auth/org-membership.js";
 import { authRoutes } from "./auth/routes.js";
 import { SESSION_COOKIE, type SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
@@ -29,6 +30,7 @@ import {
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import type { UsersRepository } from "./db/repositories/users.js";
 import type { VersionsRepository } from "./db/repositories/versions.js";
@@ -79,6 +81,10 @@ export interface BuildAppDeps {
    *  Optional: defaults to a repo over `db` (so tests that omit it get the real,
    *  empty allowlist — domain-only sign-in, the legacy behavior). */
   allowedEmails?: AllowedEmailsRepository;
+  /** Tenancy org store (plan 002 U3). Optional: defaults to a repo over `db` (tests
+   *  that omit it get an empty orgs table → every member resolves to ∅, the legacy
+   *  org-agnostic behavior). */
+  orgs?: OrgsRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   drafts: DraftsRepository;
@@ -130,6 +136,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // The individual sign-in allowlist (D14 supplement). Resolve once: callers may
   // inject one, else build a repo over `db` (an empty allowlist = domain-only).
   const allowedEmails = deps.allowedEmails ?? allowedEmailsRepository(deps.db);
+
+  // Tenancy org store + the membership resolver (plan 002 U3). Default to a repo over
+  // `db`: tests/callers that omit `orgs` get the real, empty orgs table → every member
+  // resolves to ∅, i.e. the legacy org-agnostic `whole_org` behavior.
+  const orgs = deps.orgs ?? orgsRepository(deps.db);
+  const orgMembership = makeOrgMembershipResolver(orgs);
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -327,6 +339,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         log: deps.rootLogger,
         strategy: deps.strategy,
         users: deps.users,
+        orgs,
         allowedEmails,
         oauth,
         canvases: deps.canvases,
@@ -421,6 +434,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         config: deps.config,
         users: deps.users,
         allowedEmails,
+        orgMembership,
         audit: deps.audit,
       }),
     ),
@@ -485,6 +499,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective skin (admin DB override over env/default), resolved per-request so a
       // runtime flip in Admin → Configuration reaches the SPA without a restart.
       designSkin: () => settingsSvc.effectiveDesignSkin(),
+      orgs,
+      tenancyActive: !!deps.config.org.name,
     }),
   );
 
@@ -565,7 +581,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const onlyCanvas = (mw: ReturnType<typeof createMiddleware<AppEnv>>) =>
     createMiddleware<AppEnv>((c, next) => (c.get("role") === "canvas" ? mw(c, next) : next()));
 
-  app.use("*", onlyCanvas(canvasAccess({ canvases: deps.canvases })));
+  app.use(
+    "*",
+    onlyCanvas(canvasAccess({ canvases: deps.canvases, tenancyActive: !!deps.config.org.name })),
+  );
   app.use(
     "*",
     onlyCanvas(passwordGate({ config: deps.config, audit: deps.audit, rateLimitStore: rlStore })),

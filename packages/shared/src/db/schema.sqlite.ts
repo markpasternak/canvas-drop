@@ -139,6 +139,41 @@ export const auditLog = sqliteTable(
   (t) => [index("audit_log_created_at_idx").on(t.createdAt)],
 );
 
+// Tenancy (plan 002, Tenancy P1). An org is a member boundary; membership is DERIVED
+// server-side from a user's verified email domain (no org_members table in P1, KTD2).
+// Exactly one org is materialized from operator config at boot (KTD4); multi-org is P3.
+export const orgs = sqliteTable(
+  "orgs",
+  {
+    id: c.text("id").primaryKey(),
+    name: c.text("name").notNull(),
+    slug: c.text("slug").notNull(),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("orgs_slug_uq").on(t.slug)],
+);
+
+// Domains that map a verified email domain → org membership (exact match, normalized
+// lowercase). Operator-seeded rows are trusted, so `verified_at` is set at boot;
+// the nullable column lets P4 self-serve verification be data, not a migration (U1).
+export const orgDomains = sqliteTable(
+  "org_domains",
+  {
+    id: c.text("id").primaryKey(),
+    orgId: c
+      .text("org_id")
+      .notNull()
+      .references(() => orgs.id),
+    domain: c.text("domain").notNull(),
+    verifiedAt: c.epochMs("verified_at"),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("org_domains_domain_uq").on(t.domain),
+    index("org_domains_org_id_idx").on(t.orgId),
+  ],
+);
+
 export const canvases = sqliteTable(
   "canvases",
   {
@@ -156,6 +191,11 @@ export const canvases = sqliteTable(
       .text("owner_id")
       .notNull()
       .references(() => users.id),
+    // Home tenant (plan 002, Tenancy P1). Nullable: null = personal space (KTD1 — the
+    // ABSENCE of a tenant, never a reserved "personal org" id). When set, `whole_org`
+    // is scoped to members of THIS org. Pointer-style FK; no child table gains org_id
+    // (isolation is transitive via canvas_id).
+    orgId: c.text("org_id").references(() => orgs.id),
     // Access rung (D4 ladder): private | specific_people | whole_org | public_link.
     // Replaces the former `shared` boolean — `whole_org` is its successor.
     access: c.text("access").notNull().default("private"),
@@ -233,9 +273,12 @@ export const canvases = sqliteTable(
     // Soft-delete purge sweep: WHERE status='deleted' AND deleted_at <= cutoff.
     index("canvases_status_deleted_idx").on(t.status, t.deletedAt),
     check("canvases_status_chk", sql`${t.status} in ('active', 'disabled', 'archived', 'deleted')`),
+    // `team` is RESERVED here (plan 002 KTD5) so P2 needs no SQLite table-recreation of
+    // this CHECK — but `decideCanvasAccess` rejects it until P2 implements teams. It is
+    // intentionally absent from the app-level AccessRung union (not user-settable in P1).
     check(
       "canvases_access_chk",
-      sql`${t.access} in ('private', 'specific_people', 'whole_org', 'public_link')`,
+      sql`${t.access} in ('private', 'specific_people', 'team', 'whole_org', 'public_link')`,
     ),
   ],
 );

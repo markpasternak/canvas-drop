@@ -201,6 +201,12 @@ const rawSchema = z
     // Auth
     CANVAS_DROP_AUTH_MODE: AUTH_MODES.optional().default("dev"),
     CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: csv(),
+    // Tenancy (plan 002 U2). Naming an org turns on the member boundary: `whole_org`
+    // canvases become visible only to members (verified email domain ∈ ORG_DOMAINS).
+    // Unset = tenancy inert (whole_org stays "any signed-in user", legacy behavior).
+    // Domains default to the allowed-email domains (the common single-org case).
+    CANVAS_DROP_ORG_NAME: z.string().optional(),
+    CANVAS_DROP_ORG_DOMAINS: csv(),
     CANVAS_DROP_AUTH_PROXY_EMAIL_HEADER: z.string().optional().default("X-Auth-Request-Email"),
     CANVAS_DROP_AUTH_PROXY_NAME_HEADER: z
       .string()
@@ -443,6 +449,17 @@ const rawSchema = z
       port: r.CANVAS_DROP_PORT,
       sessionSecret: r.CANVAS_DROP_SESSION_SECRET ?? "dev-insecure-session-secret",
       adminEmails,
+      // Tenancy (plan 002 U2/KTD4). The single org materialized at boot; `name`
+      // undefined = inert. Domains are normalized + the boot guards run in the orgs
+      // repository / boot step (fail-loud there), not here — config just carries the
+      // raw selection (default = the allowed-email domains, lowercased).
+      org: {
+        name: r.CANVAS_DROP_ORG_NAME?.trim() || undefined,
+        domains:
+          r.CANVAS_DROP_ORG_DOMAINS.length > 0
+            ? r.CANVAS_DROP_ORG_DOMAINS.map((d) => d.toLowerCase())
+            : allowedEmailDomains,
+      },
       realtimeEnabled: r.CANVAS_DROP_REALTIME === "on",
       mcp: { enabled: r.CANVAS_DROP_MCP === "on" },
       screenshots: {

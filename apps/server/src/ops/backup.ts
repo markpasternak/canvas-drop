@@ -48,6 +48,8 @@ export const BACKUP_TABLE_ORDER = [
   "sessions",
   "mcp_tokens",
   "audit_log",
+  "orgs",
+  "org_domains",
   "canvases",
   "canvas_allowlist",
   "guest_invites",

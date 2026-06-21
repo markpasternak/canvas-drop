@@ -21,6 +21,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     title: "",
     description: null,
     ownerId: "owner",
+    orgId: null,
     access: "private",
     sharedExpiresAt: null,
     galleryListed: false,
@@ -54,9 +55,20 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
   };
 }
 
-const owner: Principal = { kind: "member", id: "owner", isAdmin: false };
-const other: Principal = { kind: "member", id: "other", isAdmin: false };
-const admin: Principal = { kind: "member", id: "admin", isAdmin: true };
+// Inferred (not annotated `: Principal`) so they stay assignable both to `Principal`
+// params and to the `{ id, isAdmin }` shape `appFor` sets as the user. The two orgs let
+// the U4 truth table exercise same-org vs cross-org. `other`/`admin` are members of
+// ORG_A; whole_org canvases set orgId: ORG_A to match. `owner` keeps ∅ — the owner bypass
+// fires before the rung, so its membership is irrelevant.
+const ORG_A = "org-A";
+const ORG_B = "org-B";
+const owner = { kind: "member" as const, id: "owner", isAdmin: false, orgIds: new Set<string>() };
+const other = { kind: "member" as const, id: "other", isAdmin: false, orgIds: new Set([ORG_A]) };
+const admin = { kind: "member" as const, id: "admin", isAdmin: true, orgIds: new Set([ORG_A]) };
+const memberB = { kind: "member" as const, id: "mb", isAdmin: false, orgIds: new Set([ORG_B]) };
+// Tenancy-active access context (plan 002 U4). Without this, the whole_org re-scope is
+// INERT (legacy "any signed-in member") — most existing tests deliberately run inert.
+const ACTIVE = { tenancyActive: true } as const;
 const anon: Principal = { kind: "anonymous" };
 const guest = (canvasId = "cv1", email = "g@x.com"): Principal => ({
   kind: "guest",
@@ -83,9 +95,13 @@ describe("decideCanvasAccess — denials", () => {
     expect(decideCanvasAccess(disabled, admin, NOW)).toMatchObject({ status: 403 });
   });
 
-  it("expired share: 404 to non-owner once past sharedExpiresAt", () => {
+  it("expired share: 404 to a same-org member once past sharedExpiresAt", () => {
     expect(
-      decideCanvasAccess(canvas({ access: "whole_org", sharedExpiresAt: NOW - 1 }), other, NOW),
+      decideCanvasAccess(
+        canvas({ access: "whole_org", orgId: ORG_A, sharedExpiresAt: NOW - 1 }),
+        other,
+        NOW,
+      ),
     ).toEqual({ action: "deny", status: 404, reason: "share_expired" });
   });
 
@@ -122,9 +138,38 @@ describe("decideCanvasAccess — denials", () => {
   });
 
   it("whole_org excludes non-members (guest / anonymous → 404)", () => {
-    const cv = canvas({ access: "whole_org" });
+    const cv = canvas({ access: "whole_org", orgId: ORG_A });
     expect(decideCanvasAccess(cv, guest("cv1"), NOW)).toMatchObject({ status: 404 });
     expect(decideCanvasAccess(cv, anon, NOW)).toMatchObject({ status: 404 });
+  });
+
+  it("active tenancy: whole_org of org A is 404 to a member of a DIFFERENT org B (plan 002 U4)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: ORG_A }), memberB, NOW, ACTIVE),
+    ).toEqual({ action: "deny", status: 404, reason: "owner_only" });
+  });
+
+  it("active tenancy: whole_org with a NULL org_id is an explicit 404 even to a member (cutover footgun)", () => {
+    // A personal/guest-owned whole_org row (org_id null) is never broadly visible —
+    // don't rely on Set.has(null). The cutover clamps these to private; this is the seam.
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: null }), other, NOW, ACTIVE),
+    ).toEqual({ action: "deny", status: 404, reason: "owner_only" });
+  });
+
+  it("INERT tenancy: any signed-in member reaches whole_org regardless of org (legacy, pre-cutover)", () => {
+    // The safety property — deploying the re-scope changes nothing until an org is named.
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: null }), memberB, NOW),
+    ).toMatchObject({ action: "allow" });
+  });
+
+  it("the reserved `team` rung is rejected (404) until P2 implements it", () => {
+    // The CHECK permits 'team' (KTD5) but decideCanvasAccess denies it like private.
+    expect(decideCanvasAccess(canvas({ access: "team", orgId: ORG_A }), other, NOW)).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
   });
 
   it("specific_people: a member NOT on the allowlist is 404", () => {
@@ -175,16 +220,27 @@ describe("decideCanvasAccess — allows", () => {
     ).toMatchObject({ status: 404, reason: "owner_only" });
   });
 
-  it("admin reaches whole_org (as a member) and FACES its password gate, like any member", () => {
+  it("active tenancy: admin reaches whole_org (as a SAME-ORG member) and FACES its password gate", () => {
     // Admins get no password bypass on canvases they don't own — treated as a member.
+    // And no cross-org bypass: the admin only reaches it because they're in ORG_A.
     expect(
-      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), admin, NOW),
+      decideCanvasAccess(
+        canvas({ access: "whole_org", orgId: ORG_A, passwordHash: "h" }),
+        admin,
+        NOW,
+        ACTIVE,
+      ),
     ).toEqual({ action: "allow", needsPasswordGate: true, staticOnly: false });
     // …and no gate when the canvas has no password.
-    expect(decideCanvasAccess(canvas({ access: "whole_org" }), admin, NOW)).toMatchObject({
-      action: "allow",
-      needsPasswordGate: false,
-    });
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: ORG_A }), admin, NOW, ACTIVE),
+    ).toMatchObject({ action: "allow", needsPasswordGate: false });
+  });
+
+  it("active tenancy: admin is NOT a cross-org bypass — whole_org of an org the admin isn't in is 404", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: ORG_B }), admin, NOW, ACTIVE),
+    ).toMatchObject({ action: "deny", status: 404 });
   });
 
   it("admin sees a public_link canvas static-only, like any non-owner member", () => {
@@ -195,7 +251,11 @@ describe("decideCanvasAccess — allows", () => {
 
   it("admin is 404 on an expired whole_org share, like a normal member", () => {
     expect(
-      decideCanvasAccess(canvas({ access: "whole_org", sharedExpiresAt: NOW - 1 }), admin, NOW),
+      decideCanvasAccess(
+        canvas({ access: "whole_org", orgId: ORG_A, sharedExpiresAt: NOW - 1 }),
+        admin,
+        NOW,
+      ),
     ).toMatchObject({ action: "deny", reason: "share_expired" });
   });
 
@@ -205,14 +265,17 @@ describe("decideCanvasAccess — allows", () => {
     ).toMatchObject({ action: "allow", staticOnly: false });
   });
 
-  it("whole_org: any member; needsPasswordGate reflects the password", () => {
-    expect(decideCanvasAccess(canvas({ access: "whole_org" }), other, NOW)).toEqual({
-      action: "allow",
-      needsPasswordGate: false,
-      staticOnly: false,
-    });
+  it("active tenancy: a member of the canvas's home org is allowed; gate reflects the password", () => {
     expect(
-      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), other, NOW),
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: ORG_A }), other, NOW, ACTIVE),
+    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+    expect(
+      decideCanvasAccess(
+        canvas({ access: "whole_org", orgId: ORG_A, passwordHash: "h" }),
+        other,
+        NOW,
+        ACTIVE,
+      ),
     ).toMatchObject({ action: "allow", needsPasswordGate: true });
   });
 
@@ -293,7 +356,7 @@ describe("canvasAccess — disabled-canvas rendering", () => {
       c.set("user", { id: user.id, isAdmin: user.isAdmin } as never);
       await next();
     });
-    app.use("*", canvasAccess({ canvases }));
+    app.use("*", canvasAccess({ canvases, tenancyActive: false }));
     app.get("*", (c) => c.text("CANVAS CONTENT")); // only reached on allow
     return app;
   }

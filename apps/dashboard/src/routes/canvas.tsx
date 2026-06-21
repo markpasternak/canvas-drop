@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { AccessBadge, GalleryBadge, PublicationBadge } from "../components/Badge.js";
+import { AccessBadge, GalleryBadge, PublicationBadge, ScopeBadge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -11,7 +11,7 @@ import { useToast } from "../components/Toast.js";
 import { ApiError, api } from "../lib/api.js";
 import { isCanvasId } from "../lib/cosmetic-slug.js";
 import { useUnarchiveCanvas } from "../lib/mutations.js";
-import { useCanvas } from "../lib/queries.js";
+import { useCanvas, useMe } from "../lib/queries.js";
 
 /**
  * Resolve a non-id path param (a pasted cosmetic slug) to the canonical canvas id and
@@ -61,6 +61,7 @@ function useSlugRedirect(param: string): { resolving: boolean } {
 export default function CanvasLayout() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: canvas, isLoading, isError } = useCanvas(id);
+  const me = useMe().data;
   const unarchive = useUnarchiveCanvas(id);
   const toast = useToast();
   // When `id` is actually a cosmetic slug, resolve it to the canonical id + redirect.
@@ -161,6 +162,7 @@ export default function CanvasLayout() {
           canvas ? (
             <span className="flex flex-wrap items-center gap-1.5">
               <PublicationBadge state={canvas.publicationState} />
+              <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
               <AccessBadge access={canvas.access} />
               <GalleryBadge canvas={canvas} />
             </span>

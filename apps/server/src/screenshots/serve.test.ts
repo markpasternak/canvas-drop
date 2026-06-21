@@ -171,7 +171,7 @@ describe("servePreview — access gating via the real canvas chain (U7 / R5)", (
         c.set("canvasSlug", "s");
         await next();
       });
-      a.use("*", canvasAccess({ canvases }));
+      a.use("*", canvasAccess({ canvases, tenancyActive: false }));
       a.use("*", servePreview({ config, storage, enabled: async () => true }));
       a.all("*", (c) => c.notFound());
       return a;

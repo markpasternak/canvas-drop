@@ -1,3 +1,4 @@
+import { Buildings, User } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import type { AccessRung, Canvas, PublicationState } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -123,6 +124,37 @@ export function AccessBadge({ access }: { access: AccessRung }) {
 /** Visibility axis (legacy boolean): kept for callers that only know `shared`. */
 export function VisibilityBadge({ shared }: { shared: boolean }) {
   return <Badge tone={shared ? "accent" : "neutral"}>{shared ? "Shared" : "Private"}</Badge>;
+}
+
+/**
+ * Scope axis (plan 002): a canvas's home — Personal (yours alone) vs an org workspace
+ * (shared-with-the-org capable). Rendered ONLY when the viewer belongs to an org, since
+ * on an inert instance / for a guest the workspace concept doesn't apply. Resolves the
+ * org id to a name via the caller's `orgs` (from /api/me), falling back to "Workspace".
+ */
+export function ScopeBadge({
+  canvas,
+  orgs,
+}: {
+  canvas: Pick<Canvas, "orgId">;
+  orgs: Array<{ id: string; name: string }>;
+}) {
+  if (orgs.length === 0) return null; // no workspace concept for this viewer
+  if (canvas.orgId === null) {
+    return (
+      <Badge tone="neutral">
+        <User size={12} weight="bold" aria-hidden />
+        Personal
+      </Badge>
+    );
+  }
+  const name = orgs.find((o) => o.id === canvas.orgId)?.name ?? "Workspace";
+  return (
+    <Badge tone="accent">
+      <Buildings size={12} weight="bold" aria-hidden />
+      {name}
+    </Badge>
+  );
 }
 
 /** Gallery axis: discovery state. Template implies listed; listed implies shared. */

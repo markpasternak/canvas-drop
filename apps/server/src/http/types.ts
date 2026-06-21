@@ -10,7 +10,11 @@ import type { Logger } from "../log/logger.js";
  * never collides with an org user id in KV scoping / audit / presence (KTD2).
  */
 export type Principal =
-  | { kind: "member"; id: string; isAdmin: boolean }
+  // `orgIds` = the orgs this member belongs to (plan 002 U3), DERIVED server-side from
+  // their verified email domain — never client-asserted. ∅ for a member whose domain
+  // matches no org (a "guest-shaped member": signed in, but not in any org). Backs the
+  // re-scoped `whole_org` rung in decideCanvasAccess (member of the canvas's home org).
+  | { kind: "member"; id: string; isAdmin: boolean; orgIds: Set<string> }
   | { kind: "guest"; id: string; inviteId: string; canvasId: string; email: string }
   | { kind: "anonymous" }
   // The internal screenshot worker rendering one canvas+version for a capture
@@ -37,6 +41,10 @@ export interface AppVariables {
   clientIp?: string;
   /** The authenticated user — guaranteed set by the auth gateway on protected routes. */
   user: User;
+  /** The caller's org membership (plan 002 U3), resolved server-side by the gateway
+   *  from the user's verified email domain. Carried so `requestPrincipal` can build a
+   *  member principal synchronously; ∅ for a member in no org. Never client-asserted. */
+  orgIds?: Set<string>;
   /**
    * The canvas-facing principal (U3/U7). Set by the guest/public resolver for a
    * guest or anonymous request; for the normal org path it is derived from `user`.

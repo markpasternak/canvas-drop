@@ -9,6 +9,9 @@ production image runs the cron jobs.
 > they act on whichever DB (SQLite/Postgres) and storage (local/S3) the instance is wired
 > to. Run them as the app, in the app's container.
 
+> **Turning on the org boundary?** That's a separate one-time cutover (dry-run first, then
+> an idempotent backfill) — see the [Tenancy cutover runbook](./tenancy.md).
+
 ---
 
 ## 1. Backup

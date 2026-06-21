@@ -30,6 +30,7 @@ function buildApp(
     config?: Config;
     events?: AuthEvent[];
     allowedEmails?: { isAllowed: (email: string) => Promise<boolean> };
+    orgMembership?: (user: { email: string }) => Promise<Set<string>>;
   } = {},
 ) {
   const config = opts.config ?? adminConfig;
@@ -49,12 +50,18 @@ function buildApp(
       config,
       users: usersRepository(client),
       allowedEmails: opts.allowedEmails ?? allowedEmailsRepository(client),
+      orgMembership: opts.orgMembership ?? (async () => new Set<string>()),
       audit,
     }),
   );
   app.get("/me", (c) => {
     const u = c.get("user");
-    return c.json({ id: u.id, email: u.email, isAdmin: u.isAdmin });
+    return c.json({
+      id: u.id,
+      email: u.email,
+      isAdmin: u.isAdmin,
+      orgIds: [...(c.get("orgIds") ?? new Set<string>())],
+    });
   });
   return app;
 }
@@ -74,6 +81,20 @@ describe.each(DIALECTS)("authGateway [%s]", (dialect) => {
     expect(body.email).toBe("mark@example.com");
     expect(body.isAdmin).toBe(true);
     expect(events.some((e) => e.action === "auth_ok")).toBe(true);
+  });
+
+  it("resolves orgIds server-side from the verified user and ignores any client-asserted org (U3)", async () => {
+    client = await makeTestDb(dialect);
+    // A resolver that classifies the dev user (mark@example.com) as a member of "org-1",
+    // and would only ever key off the server-resolved user.email.
+    const orgMembership = async (u: { email: string }) =>
+      u.email === "mark@example.com" ? new Set(["org-1"]) : new Set<string>();
+    const res = await buildApp(client, { orgMembership }).request("/me", {
+      // A spoofed membership header must have NO effect — orgIds is server-derived.
+      headers: { "x-org-id": "org-EVIL", "x-canvas-drop-orgids": "org-EVIL" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { orgIds: string[] }).toMatchObject({ orgIds: ["org-1"] });
   });
 
   it("rejects an identity whose email domain is not allowed", async () => {

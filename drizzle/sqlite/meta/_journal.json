@@ -183,6 +183,13 @@
       "when": 1781864732995,
       "tag": "0025_drop_gallery_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1781995068432,
+      "tag": "0026_tenancy_orgs",
+      "breakpoints": true
     }
   ]
 }

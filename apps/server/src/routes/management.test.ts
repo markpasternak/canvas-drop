@@ -88,6 +88,8 @@ function buildApp(
       urlMode: "path",
       baseUrl: "http://localhost:8787",
       designSkin: async () => "editorial",
+      orgs: { findById: async () => null },
+      tenancyActive: false,
     }),
   );
   app.route(
@@ -1518,6 +1520,8 @@ describe("managementRoutes", () => {
         urlMode: "subdomain",
         baseUrl: "https://example.com",
         designSkin: async () => "workshop",
+        orgs: { findById: async () => null },
+        tenancyActive: false,
       }),
     );
     const body = await jsonOf<Record<string, unknown>>(await app.request("/api/me"));
@@ -1530,7 +1534,9 @@ describe("managementRoutes", () => {
       "email",
       "id",
       "isAdmin",
+      "isGuest",
       "name",
+      "orgs",
       "urlMode",
     ]);
     expect(body.providerSub).toBeUndefined();

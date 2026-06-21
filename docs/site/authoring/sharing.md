@@ -26,6 +26,14 @@ One rung per canvas, stored as the `access` field (default `private`):
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
 
+> **When an org boundary is configured** (the operator named an org — off by
+> default), **Whole org** means *members of this canvas's home org*, not "anyone
+> signed in." Members pick **Personal** or the workspace when they create a canvas
+> (a [fixed choice](/docs/authoring/create-and-publish#personal-vs-workspace)); a
+> Personal canvas can't be shared org-wide, and brought-in **guests** (people on a
+> non-org domain) never see Whole-org canvases — only the specific ones they're
+> invited to. With no org configured, Whole org is simply "any signed-in user."
+
 Password and expiry are modifiers you can add on top of any rung. The slug in each
 canvas URL is defense-in-depth, not a substitute for a rung — and only when it's the
 default **random** slug (`quiet-otter-x7k2…`). If you give a canvas a **custom slug**

@@ -356,7 +356,7 @@ describe("share route", () => {
     const user = userEvent.setup();
     renderShare();
 
-    await user.click(await screen.findByRole("switch", { name: /let invited guests use ai/i }));
+    await user.click(await screen.findByRole("switch", { name: /let invited people use ai/i }));
 
     await vi.waitFor(() => {
       const patch = calls.find(
@@ -391,9 +391,10 @@ describe("share route", () => {
     expect(screen.queryByText(/this share expired/i)).toBeNull();
   });
 
-  it("gallery-listing control is discoverable but disabled until the canvas is shared", async () => {
+  it("gallery-listing control is discoverable but disabled until the canvas is gallery-eligible", async () => {
     // Published but still private: sharing is unlocked, so the gallery control is
-    // visible, but listBlocker (needs a shared access level) keeps it disabled.
+    // visible, but listBlocker (only Whole-org / Public-link canvases can be listed)
+    // keeps it disabled — specific_people/private never appear in the gallery.
     mockFetch({
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, publicationState: "published", currentVersionId: "v1", shared: false }),
@@ -402,13 +403,19 @@ describe("share route", () => {
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
     expect(toggle).toBeDisabled();
-    expect(screen.getByText(/choose a shared access level/i)).toBeInTheDocument();
+    expect(screen.getByText(/only a whole-org or public-link canvas/i)).toBeInTheDocument();
   });
 
-  it("gallery-listing control is enabled once the canvas is shared AND published", async () => {
+  it("gallery-listing control is enabled once the canvas is Whole-org AND published", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>
-        json({ ...CANVAS, publicationState: "published", shared: true, currentVersionId: "v1" }),
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "whole_org",
+          shared: true,
+          currentVersionId: "v1",
+        }),
     });
     renderShare();
 
@@ -430,11 +437,14 @@ describe("share route", () => {
   });
 
   it("gallery-listing is blocked for a password-protected canvas", async () => {
+    // Whole-org + published, so the access/publish blockers clear and the password
+    // blocker is the one that surfaces.
     mockFetch({
       "GET /api/canvases/c1": () =>
         json({
           ...CANVAS,
           publicationState: "published",
+          access: "whole_org",
           shared: true,
           currentVersionId: "v1",
           hasPassword: true,

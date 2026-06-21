@@ -120,6 +120,8 @@ describe("BACKUP_TABLE_ORDER", () => {
       ["sessions", "users"],
       ["mcp_tokens", "users"],
       ["audit_log", "users"],
+      ["org_domains", "orgs"],
+      ["canvases", "orgs"],
       ["canvases", "users"],
       ["canvas_allowlist", "canvases"],
       ["guest_invites", "canvases"],

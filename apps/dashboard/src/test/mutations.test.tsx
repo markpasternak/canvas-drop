@@ -22,6 +22,7 @@ const CANVAS: Canvas = {
   description: null,
   access: "private",
   shared: false,
+  orgId: null,
   guestAiEnabled: false,
   guestAiCap: 0,
   sharedExpiresAt: null,

@@ -25,6 +25,7 @@ const base: CanvasListItem = {
   description: null,
   access: "whole_org",
   shared: true,
+  orgId: null,
   guestAiEnabled: false,
   guestAiCap: 0,
   sharedExpiresAt: null,

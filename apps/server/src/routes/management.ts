@@ -53,6 +53,7 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
@@ -98,6 +99,9 @@ const createSchema = z.object({
   slug: z.string().max(63).optional(),
   // Backend-group master switch chosen at create time (plan 006). Off by default.
   backendEnabled: z.boolean().optional(),
+  // Home tenant (plan 002 U4): null/absent = personal (default to the caller's org if
+  // they have exactly one); a non-null value is validated against the caller's membership.
+  orgId: z.string().nullable().optional(),
 });
 
 /** Capability patch (plan 006). All fields optional booleans; absent = unchanged. */
@@ -158,6 +162,9 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
+    // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
+    orgId: cv.orgId,
     // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
     shared: cv.access !== "private",
     guestAiEnabled: cv.guestAiEnabled,
@@ -322,6 +329,10 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = createSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
+    // Home tenant (plan 002 U4): validate any requested org against the caller's
+    // server-resolved membership; default to their org when they have exactly one.
+    const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
+    if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
@@ -334,6 +345,7 @@ export function managementRoutes(deps: ManagementDeps) {
         apiKeyHash: hashApiKey(apiKey),
         title: body.data.title,
         description: body.data.description,
+        orgId: home.orgId,
         backendEnabled: body.data.backendEnabled,
       });
     } catch (err) {
@@ -362,10 +374,16 @@ export function managementRoutes(deps: ManagementDeps) {
     const source = await deps.canvases.findById(id);
     if (!source || source.status === "deleted") return c.json({ error: "not_found" }, 404);
 
+    // Non-owner clone eligibility runs through the SAME gallery visibility predicate as
+    // browse (plan 002 U5), org-scoped to the caller: an org template is cloneable only by
+    // a member of its org; a personal public_link template (org_id null) stays cloneable.
     const eligible =
       source.ownerId === user.id
         ? source.status === "active"
-        : (await deps.canvases.findCloneableTemplate(id, Date.now())) !== null;
+        : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+            tenancyActive: !!deps.config.org.name,
+            viewerOrgIds: c.get("orgIds") ?? new Set<string>(),
+          })) !== null;
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
     const { canvas } = await deps.clone.clone(source, user.id);
@@ -556,6 +574,7 @@ export function managementRoutes(deps: ManagementDeps) {
       canPublishPublic: c.get("user").canPublishPublic,
       publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
       now: Date.now(),
+      tenancyActive: !!deps.config.org.name,
     });
     if (!resolution.ok) {
       return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
@@ -969,10 +988,15 @@ export function managementRoutes(deps: ManagementDeps) {
         title: z.string().max(200).optional(),
         slug: z.string().max(63).optional(),
         backendEnabled: z.boolean().optional(),
+        orgId: z.string().nullable().optional(),
       })
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const user = c.get("user");
+    // Home tenant (plan 002 U6), validated against the caller's membership — same rule as
+    // the management create, so the paste create path can't bypass it.
+    const home = resolveHomeOrg(body.data.orgId, c.get("orgIds") ?? new Set<string>());
+    if ("error" in home) return c.json({ error: home.error }, 403);
     const resolved = await resolveCreateSlug(body.data.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     const apiKey = generateApiKey();
@@ -987,6 +1011,7 @@ export function managementRoutes(deps: ManagementDeps) {
         slugCustom: resolved.custom,
         apiKeyHash: hashApiKey(apiKey),
         title: body.data.title,
+        orgId: home.orgId,
         backendEnabled: body.data.backendEnabled,
       });
     } catch (err) {

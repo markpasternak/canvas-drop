@@ -14,6 +14,7 @@ import { allowedEmailsRepository } from "./db/repositories/allowed-emails.js";
 import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
+import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
@@ -27,6 +28,7 @@ import { CAPTURE_VIEWPORT, type CaptureContext } from "./screenshots/capture.js"
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import { startScreenshotWorker } from "./screenshots/worker.js";
 import { makeStorage } from "./storage/factory.js";
+import { materializeOrg } from "./tenancy/materialize-org.js";
 
 /** Periodic realtime re-authorization (D-RT-6 backstop, §9.7 default 60s). */
 const REALTIME_HEARTBEAT_MS = 60_000;
@@ -56,11 +58,17 @@ async function main() {
   const storage = makeStorage(config);
   const users = usersRepository(db);
   const allowedEmails = allowedEmailsRepository(db);
+  const orgs = orgsRepository(db);
   const canvases = canvasesRepository(db);
   const versions = versionsRepository(db);
   const drafts = draftsRepository(db);
   const uploadSessions = uploadSessionsRepository(db);
   const audit = createAuditLog(auditRepository(db), rootLogger);
+
+  // Tenancy (plan 002 U2): materialize the single configured org + its domains and run
+  // the boot guards BEFORE serving — fail-loud, so a tenancy misconfig can't mis-scope
+  // the whole_org boundary. No-op when no org is named (tenancy inert).
+  await materializeOrg({ config, orgs, log: rootLogger });
 
   // Screenshot enablement (plan 004): one settings resolver + one capture trigger,
   // shared by the deploy engine (deploy publishes) and the worker. The trigger
@@ -139,6 +147,7 @@ async function main() {
     strategy,
     users,
     allowedEmails,
+    orgs,
     canvases,
     versions,
     drafts,

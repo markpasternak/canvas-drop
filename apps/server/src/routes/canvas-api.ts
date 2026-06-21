@@ -87,7 +87,10 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       const canvas = await deps.canvases.findBySlug(slug);
       const principal = requestPrincipal(c);
       const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
-      const decision = decideCanvasAccess(canvas, principal, Date.now(), ctx);
+      const decision = decideCanvasAccess(canvas, principal, Date.now(), {
+        ...ctx,
+        tenancyActive: !!deps.config.org.name,
+      });
       if (decision.action === "deny") {
         return c.json({ code: decision.reason.toUpperCase() }, decision.status);
       }

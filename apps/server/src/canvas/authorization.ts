@@ -25,11 +25,27 @@ export type AccessDecision =
 export interface AccessContext {
   isAllowed?: boolean;
   publicEnabled?: boolean;
+  /**
+   * Whether tenancy is active (plan 002 U4) — i.e. an org is configured. When false
+   * (the default — no `CANVAS_DROP_ORG_NAME`), the merge is INERT: `whole_org` keeps its
+   * legacy "any signed-in member" meaning and `org_id` is ignored, so deploying the code
+   * changes nothing until an operator names an org. When true, `whole_org` is re-scoped
+   * to members of the canvas's home org and a null `org_id` is an explicit deny.
+   */
+  tenancyActive?: boolean;
 }
 
-/** Build a member principal from the org-resolved user (the normal gateway path). */
-export function memberPrincipal(user: { id: string; isAdmin: boolean }): Principal {
-  return { kind: "member", id: user.id, isAdmin: user.isAdmin };
+/**
+ * Build a member principal from the org-resolved user (the normal gateway path). `orgIds`
+ * is REQUIRED (plan 002 U3) so the compiler forces every fabrication site to supply the
+ * server-resolved membership — there is no default that could silently widen or narrow
+ * the `whole_org` boundary.
+ */
+export function memberPrincipal(
+  user: { id: string; isAdmin: boolean },
+  orgIds: Set<string>,
+): Principal {
+  return { kind: "member", id: user.id, isAdmin: user.isAdmin, orgIds };
 }
 
 /**
@@ -133,9 +149,23 @@ export function decideCanvasAccess(
   switch (canvas.access) {
     case "private":
       return { action: "deny", status: 404, reason: "owner_only" };
+    case "team":
+      // Reserved rung (plan 002 KTD5): the CHECK permits `team` so P2 needs no SQLite
+      // table-recreation, but teams are NOT implemented in P1 — deny like `private`
+      // (forward-ref guard). The owner already matched above and is unaffected.
+      return { action: "deny", status: 404, reason: "owner_only" };
     case "whole_org":
-      // Org members only — guests/anonymous are outsiders.
+      // Org members only — guests/anonymous are outsiders, at any tenancy state.
       if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
+      // When tenancy is active (plan 002 U4), scope to the canvas's HOME ORG: a null
+      // org_id is an EXPLICIT deny (don't rely on Set.has(null) — a personal/guest-owned
+      // whole_org row is never broadly visible, and the cutover clamps these to private),
+      // and a member of a DIFFERENT org gets the same opaque 404 (§12.0 #3). When tenancy
+      // is INERT (no org configured) this re-scope is skipped and any signed-in member
+      // reaches it, exactly as before — so the merge changes nothing until configured.
+      if (ctx.tenancyActive && (canvas.orgId === null || !principal.orgIds.has(canvas.orgId))) {
+        return { action: "deny", status: 404, reason: "owner_only" };
+      }
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "specific_people":
@@ -160,6 +190,9 @@ export function decideCanvasAccess(
 
 export interface CanvasAccessDeps {
   canvases: CanvasesRepository;
+  /** Whether tenancy is active (plan 002 U4 — an org is configured). Threaded into the
+   *  decision so `whole_org` is org-scoped only once an operator names an org. */
+  tenancyActive: boolean;
 }
 
 /**
@@ -188,19 +221,27 @@ export async function resolveAccessContext(
 }
 
 /** The acting principal for a canvas-facing request: the resolver-set guest/
- *  anonymous principal (U7) if present, else the org member from the gateway. */
-export function requestPrincipal(c: { get: (k: "principal" | "user") => unknown }): Principal {
+ *  anonymous principal (U7) if present, else the org member from the gateway. The
+ *  member's `orgIds` come from the gateway-resolved context var (plan 002 U3) — ∅ when
+ *  absent (a member in no org), never client-derived. */
+export function requestPrincipal(c: {
+  get: (k: "principal" | "user" | "orgIds") => unknown;
+}): Principal {
   const p = c.get("principal") as Principal | undefined;
   if (p) return p;
   const user = c.get("user") as { id: string; isAdmin: boolean } | undefined;
   // In production the content/runtime path always has one or the other; fall back
   // to anonymous defensively rather than dereferencing an absent user.
-  return user ? memberPrincipal(user) : { kind: "anonymous" };
+  if (!user) return { kind: "anonymous" };
+  const orgIds = (c.get("orgIds") as Set<string> | undefined) ?? new Set<string>();
+  return memberPrincipal(user, orgIds);
 }
 
 /** Attribution id for audit/usage on the canvas content path (U9/U11): a member or
  *  guest by principal id, an anonymous public visitor by a stable sentinel. */
-export function principalAttributionId(c: { get: (k: "principal" | "user") => unknown }): string {
+export function principalAttributionId(c: {
+  get: (k: "principal" | "user" | "orgIds") => unknown;
+}): string {
   const p = requestPrincipal(c);
   if (p.kind === "member" || p.kind === "guest") return p.id;
   // `capture` never reaches the content attribution path (it's the internal worker,
@@ -221,7 +262,10 @@ export function canvasAccess(deps: CanvasAccessDeps) {
     const canvas = await deps.canvases.findBySlug(slug);
     const principal = requestPrincipal(c);
     const ctx = await resolveAccessContext(deps.canvases, canvas, principal);
-    const decision = decideCanvasAccess(canvas, principal, Date.now(), ctx);
+    const decision = decideCanvasAccess(canvas, principal, Date.now(), {
+      ...ctx,
+      tenancyActive: deps.tenancyActive,
+    });
 
     if (decision.action === "deny") {
       if (decision.status === 403) {

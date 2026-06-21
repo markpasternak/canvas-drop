@@ -14,6 +14,7 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
@@ -24,7 +25,7 @@ import { deployEngine } from "../deploy/engine.js";
 import { draftService } from "../draft/service.js";
 import { memStorage } from "../storage/mem.js";
 import { uploadService } from "../upload/service.js";
-import { buildMcpServer, type McpCaller } from "./server.js";
+import { buildMcpServer } from "./server.js";
 
 const silent = pino({ level: "silent" });
 const config = loadConfig({});
@@ -43,7 +44,7 @@ async function seedUser(client: DbClient, email: string): Promise<string> {
  *  toggles the effective preview pipeline (plan 004); the real repo always backs it. */
 async function connect(
   client: DbClient,
-  caller: McpCaller,
+  caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
   screenshotsEnabled = false,
 ): Promise<Client> {
   const canvases = canvasesRepository(client);
@@ -63,6 +64,7 @@ async function connect(
     {
       config,
       users: usersRepository(client),
+      orgs: orgsRepository(client),
       canvases,
       versions,
       engine,
@@ -93,7 +95,11 @@ async function connect(
       screenshots: screenshotsRepository(client),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
     },
-    caller,
+    {
+      userId: caller.userId,
+      orgIds: caller.orgIds ?? new Set<string>(),
+      tenancyActive: caller.tenancyActive ?? false,
+    },
   );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -1216,5 +1222,87 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     });
     expect(isError(finalizeRes)).toBe(true);
     expect(text(finalizeRes)).toContain("NOT_ACTIVE");
+  });
+});
+
+describe.each(DIALECTS)("MCP tenancy parity (plan 002 U7) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seedTwoOrgs() {
+    const orgs = orgsRepository(client);
+    const a = await orgs.ensureOrg({ name: "A", slug: "a", domains: ["a.example"] });
+    const b = await orgs.ensureOrg({ name: "B", slug: "b", domains: ["b.example"] });
+    return { a, b };
+  }
+
+  it("whoami exposes the caller's orgs + isGuest, server-resolved", async () => {
+    client = await makeTestDb(dialect);
+    const { a } = await seedTwoOrgs();
+    const memberId = await seedUser(client, "m@a.example");
+    const member = await connect(client, {
+      userId: memberId,
+      orgIds: new Set([a.id]),
+      tenancyActive: true,
+    });
+    expect(payload(await member.callTool({ name: "whoami", arguments: {} }))).toMatchObject({
+      orgs: [{ id: a.id, name: "A" }],
+      isGuest: false,
+    });
+
+    const guestId = await seedUser(client, "g@gmail.com");
+    const guest = await connect(client, {
+      userId: guestId,
+      orgIds: new Set(),
+      tenancyActive: true,
+    });
+    expect(payload(await guest.callTool({ name: "whoami", arguments: {} }))).toMatchObject({
+      orgs: [],
+      isGuest: true,
+    });
+  });
+
+  it("create_canvas homes a canvas in an org the caller belongs to", async () => {
+    client = await makeTestDb(dialect);
+    const { a } = await seedTwoOrgs();
+    const memberId = await seedUser(client, "m@a.example");
+    const mcp = await connect(client, {
+      userId: memberId,
+      orgIds: new Set([a.id]),
+      tenancyActive: true,
+    });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: a.id } }));
+    const row = await canvasesRepository(client).findById(cv.id);
+    expect(row?.orgId).toBe(a.id);
+  });
+
+  it("create_canvas REJECTS an org the caller is not a member of (never trust the client)", async () => {
+    client = await makeTestDb(dialect);
+    const { a, b } = await seedTwoOrgs();
+    const memberId = await seedUser(client, "m@a.example");
+    const mcp = await connect(client, {
+      userId: memberId,
+      orgIds: new Set([a.id]),
+      tenancyActive: true,
+    });
+    const res = await mcp.callTool({ name: "create_canvas", arguments: { orgId: b.id } });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toContain("ORG_FORBIDDEN");
+  });
+
+  it("create_canvas with explicit null org_id is personal (org_id stays null)", async () => {
+    client = await makeTestDb(dialect);
+    const { a } = await seedTwoOrgs();
+    const memberId = await seedUser(client, "m@a.example");
+    const mcp = await connect(client, {
+      userId: memberId,
+      orgIds: new Set([a.id]),
+      tenancyActive: true,
+    });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: null } }));
+    const row = await canvasesRepository(client).findById(cv.id);
+    expect(row?.orgId).toBeNull();
   });
 });

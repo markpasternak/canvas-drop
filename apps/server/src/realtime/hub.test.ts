@@ -51,7 +51,12 @@ function fakeCanvas(over: Partial<Canvas> = {}): Canvas {
   } as unknown as Canvas;
 }
 
-const user = (id: string, isAdmin = false): ConnUser => ({ id, name: id, isAdmin });
+const user = (id: string, isAdmin = false, orgIds = new Set<string>()): ConnUser => ({
+  id,
+  name: id,
+  isAdmin,
+  orgIds,
+});
 
 function makeHub(
   canvas: Canvas | null = fakeCanvas(),
@@ -221,6 +226,28 @@ describe("RealtimeHub", () => {
     await hub.revalidateCanvas("c1");
     expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
     expect(ownerSock.closed).toBeNull();
+  });
+
+  it("revalidateCanvas org-scopes a whole_org canvas: drops a cross-org member, keeps a same-org member (plan 002)", async () => {
+    // Tenancy active (config.org.name set). The re-auth fabricates the member principal
+    // from conn.user.orgIds, so this exercises the realtime fallback path under tenancy.
+    const tenancyConfig: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "Acme",
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "acme.com",
+    });
+    const hub = createHub({
+      config: tenancyConfig,
+      resolveCanvas: async () =>
+        fakeCanvas({ access: "whole_org", orgId: "org-A", ownerId: "owner" }),
+    });
+    const aSock = new FakeSocket();
+    const bSock = new FakeSocket();
+    mc(hub, "c1", user("ma", false, new Set(["org-A"])), aSock); // member of the canvas's org
+    mc(hub, "c1", user("mb", false, new Set(["org-B"])), bSock); // member of a DIFFERENT org
+    await hub.revalidateCanvas("c1");
+    expect(bSock.closed?.code).toBe(CLOSE_UNAUTHORIZED); // cross-org socket dropped
+    expect(aSock.closed).toBeNull(); // same-org socket kept
   });
 
   it("revalidateCanvas drops everyone when the realtime capability is turned off", async () => {
