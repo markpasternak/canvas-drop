@@ -21,6 +21,7 @@ import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
@@ -308,6 +309,7 @@ export async function connectMcp(
       config,
       users: repos.users,
       orgs: orgsRepository(h.client),
+      orgMembers: orgMembersRepository(h.client),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,

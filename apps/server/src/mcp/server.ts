@@ -21,6 +21,7 @@ import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -54,6 +55,9 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** Tenancy org store (plan 002 U7): `findById` for whoami names; `findByDomain` for the
    *  route's membership resolver that derives the caller's orgIds. */
   orgs: Pick<OrgsRepository, "findById" | "findByDomain">;
+  /** Explicit org-membership store (plan 003 U2) — the MCP membership resolver
+   *  materializes a row so a pure-MCP user still appears in the org roster. */
+  orgMembers: Pick<OrgMembersRepository, "upsertDomainMember">;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;

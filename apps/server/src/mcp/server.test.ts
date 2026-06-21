@@ -14,6 +14,7 @@ import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
@@ -65,6 +66,7 @@ async function connect(
       config,
       users: usersRepository(client),
       orgs: orgsRepository(client),
+      orgMembers: orgMembersRepository(client),
       canvases,
       versions,
       engine,

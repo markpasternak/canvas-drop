@@ -112,12 +112,8 @@
           "name": "ai_usage_canvas_id_canvases_id_fk",
           "tableFrom": "ai_usage",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -363,12 +359,8 @@
           "name": "canvas_allowlist_canvas_id_canvases_id_fk",
           "tableFrom": "canvas_allowlist",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -376,12 +368,8 @@
           "name": "canvas_allowlist_user_id_users_id_fk",
           "tableFrom": "canvas_allowlist",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -450,12 +438,8 @@
           "name": "canvas_teams_canvas_id_canvases_id_fk",
           "tableFrom": "canvas_teams",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -463,12 +447,8 @@
           "name": "canvas_teams_team_id_teams_id_fk",
           "tableFrom": "canvas_teams",
           "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -476,10 +456,7 @@
       "compositePrimaryKeys": {
         "canvas_teams_canvas_id_team_id_pk": {
           "name": "canvas_teams_canvas_id_team_id_pk",
-          "columns": [
-            "canvas_id",
-            "team_id"
-          ]
+          "columns": ["canvas_id", "team_id"]
         }
       },
       "uniqueConstraints": {},
@@ -805,12 +782,8 @@
           "name": "canvases_owner_id_users_id_fk",
           "tableFrom": "canvases",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -818,12 +791,8 @@
           "name": "canvases_org_id_orgs_id_fk",
           "tableFrom": "canvases",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -913,12 +882,8 @@
           "name": "drafts_canvas_id_canvases_id_fk",
           "tableFrom": "drafts",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1004,12 +969,8 @@
           "name": "files_canvas_id_canvases_id_fk",
           "tableFrom": "files",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1117,12 +1078,8 @@
           "name": "guest_invites_canvas_id_canvases_id_fk",
           "tableFrom": "guest_invites",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1237,12 +1194,8 @@
           "name": "guest_sessions_invite_id_guest_invites_id_fk",
           "tableFrom": "guest_sessions",
           "tableTo": "guest_invites",
-          "columnsFrom": [
-            "invite_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invite_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1250,12 +1203,8 @@
           "name": "guest_sessions_canvas_id_canvases_id_fk",
           "tableFrom": "guest_sessions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1313,12 +1262,8 @@
           "name": "kv_entries_canvas_id_canvases_id_fk",
           "tableFrom": "kv_entries",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1326,11 +1271,7 @@
       "compositePrimaryKeys": {
         "kv_entries_canvas_id_scope_key_pk": {
           "name": "kv_entries_canvas_id_scope_key_pk",
-          "columns": [
-            "canvas_id",
-            "scope",
-            "key"
-          ]
+          "columns": ["canvas_id", "scope", "key"]
         }
       },
       "uniqueConstraints": {},
@@ -1434,12 +1375,8 @@
           "name": "mcp_tokens_user_id_users_id_fk",
           "tableFrom": "mcp_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1595,12 +1532,8 @@
           "name": "oauth_codes_user_id_users_id_fk",
           "tableFrom": "oauth_codes",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1683,12 +1616,8 @@
           "name": "org_domains_org_id_orgs_id_fk",
           "tableFrom": "org_domains",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1785,12 +1714,8 @@
           "name": "org_members_org_id_orgs_id_fk",
           "tableFrom": "org_members",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1798,12 +1723,8 @@
           "name": "org_members_user_id_users_id_fk",
           "tableFrom": "org_members",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1992,12 +1913,8 @@
           "name": "screenshot_jobs_canvas_id_canvases_id_fk",
           "tableFrom": "screenshot_jobs",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2103,12 +2020,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2223,12 +2136,8 @@
           "name": "team_members_team_id_teams_id_fk",
           "tableFrom": "team_members",
           "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2236,12 +2145,8 @@
           "name": "team_members_user_id_users_id_fk",
           "tableFrom": "team_members",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2336,12 +2241,8 @@
           "name": "teams_org_id_orgs_id_fk",
           "tableFrom": "teams",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2349,12 +2250,8 @@
           "name": "teams_created_by_users_id_fk",
           "tableFrom": "teams",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2482,12 +2379,8 @@
           "name": "upload_sessions_canvas_id_canvases_id_fk",
           "tableFrom": "upload_sessions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2495,12 +2388,8 @@
           "name": "upload_sessions_owner_id_users_id_fk",
           "tableFrom": "upload_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2613,12 +2502,8 @@
           "name": "usage_events_canvas_id_canvases_id_fk",
           "tableFrom": "usage_events",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2832,12 +2717,8 @@
           "name": "versions_canvas_id_canvases_id_fk",
           "tableFrom": "versions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2845,12 +2726,8 @@
           "name": "versions_created_by_users_id_fk",
           "tableFrom": "versions",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

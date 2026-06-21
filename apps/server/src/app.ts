@@ -30,6 +30,7 @@ import {
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { kvRepository } from "./db/repositories/kv.js";
+import { type OrgMembersRepository, orgMembersRepository } from "./db/repositories/org-members.js";
 import { type OrgsRepository, orgsRepository } from "./db/repositories/orgs.js";
 import { settingsRepository } from "./db/repositories/settings.js";
 import type { UsersRepository } from "./db/repositories/users.js";
@@ -85,6 +86,10 @@ export interface BuildAppDeps {
    *  that omit it get an empty orgs table → every member resolves to ∅, the legacy
    *  org-agnostic behavior). */
   orgs?: OrgsRepository;
+  /** Explicit org-membership store (plan 003 U2). Optional: defaults to a repo over
+   *  `db`. Materialized at login by the membership resolver; the real-time boundary
+   *  stays the live resolver, so this table is roster/reconcile bookkeeping. */
+  orgMembers?: OrgMembersRepository;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   drafts: DraftsRepository;
@@ -141,7 +146,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // `db`: tests/callers that omit `orgs` get the real, empty orgs table → every member
   // resolves to ∅, i.e. the legacy org-agnostic `whole_org` behavior.
   const orgs = deps.orgs ?? orgsRepository(deps.db);
-  const orgMembership = makeOrgMembershipResolver(orgs);
+  const orgMembers = deps.orgMembers ?? orgMembersRepository(deps.db);
+  const orgMembership = makeOrgMembershipResolver(orgs, orgMembers);
 
   // Admin-tunable global quota defaults (M7, §6.10.4) over the settings store.
   // `effectiveQuota` is the resolver the KV/files primitives read (settings
@@ -340,6 +346,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         strategy: deps.strategy,
         users: deps.users,
         orgs,
+        orgMembers,
         allowedEmails,
         oauth,
         canvases: deps.canvases,

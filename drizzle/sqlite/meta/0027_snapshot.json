@@ -74,18 +74,12 @@
       "indexes": {
         "ai_usage_canvas_created_idx": {
           "name": "ai_usage_canvas_created_idx",
-          "columns": [
-            "canvas_id",
-            "created_at"
-          ],
+          "columns": ["canvas_id", "created_at"],
           "isUnique": false
         },
         "ai_usage_user_created_idx": {
           "name": "ai_usage_user_created_idx",
-          "columns": [
-            "user_id",
-            "created_at"
-          ],
+          "columns": ["user_id", "created_at"],
           "isUnique": false
         }
       },
@@ -94,12 +88,8 @@
           "name": "ai_usage_canvas_id_canvases_id_fk",
           "tableFrom": "ai_usage",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -143,9 +133,7 @@
       "indexes": {
         "allowed_emails_email_uq": {
           "name": "allowed_emails_email_uq",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -217,9 +205,7 @@
       "indexes": {
         "audit_log_created_at_idx": {
           "name": "audit_log_created_at_idx",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -277,25 +263,17 @@
       "indexes": {
         "canvas_allowlist_canvas_idx": {
           "name": "canvas_allowlist_canvas_idx",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": false
         },
         "canvas_allowlist_canvas_user_uq": {
           "name": "canvas_allowlist_canvas_user_uq",
-          "columns": [
-            "canvas_id",
-            "user_id"
-          ],
+          "columns": ["canvas_id", "user_id"],
           "isUnique": true
         },
         "canvas_allowlist_canvas_email_uq": {
           "name": "canvas_allowlist_canvas_email_uq",
-          "columns": [
-            "canvas_id",
-            "email"
-          ],
+          "columns": ["canvas_id", "email"],
           "isUnique": true
         }
       },
@@ -304,12 +282,8 @@
           "name": "canvas_allowlist_canvas_id_canvases_id_fk",
           "tableFrom": "canvas_allowlist",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -317,12 +291,8 @@
           "name": "canvas_allowlist_user_id_users_id_fk",
           "tableFrom": "canvas_allowlist",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -372,9 +342,7 @@
       "indexes": {
         "canvas_teams_team_idx": {
           "name": "canvas_teams_team_idx",
-          "columns": [
-            "team_id"
-          ],
+          "columns": ["team_id"],
           "isUnique": false
         }
       },
@@ -383,12 +351,8 @@
           "name": "canvas_teams_canvas_id_canvases_id_fk",
           "tableFrom": "canvas_teams",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -396,22 +360,15 @@
           "name": "canvas_teams_team_id_teams_id_fk",
           "tableFrom": "canvas_teams",
           "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "canvas_teams_canvas_id_team_id_pk": {
-          "columns": [
-            "canvas_id",
-            "team_id"
-          ],
+          "columns": ["canvas_id", "team_id"],
           "name": "canvas_teams_canvas_id_team_id_pk"
         }
       },
@@ -695,32 +652,22 @@
       "indexes": {
         "canvases_slug_uq": {
           "name": "canvases_slug_uq",
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "isUnique": true
         },
         "canvases_owner_created_idx": {
           "name": "canvases_owner_created_idx",
-          "columns": [
-            "owner_id",
-            "created_at"
-          ],
+          "columns": ["owner_id", "created_at"],
           "isUnique": false
         },
         "canvases_api_key_hash_uq": {
           "name": "canvases_api_key_hash_uq",
-          "columns": [
-            "api_key_hash"
-          ],
+          "columns": ["api_key_hash"],
           "isUnique": true
         },
         "canvases_status_deleted_idx": {
           "name": "canvases_status_deleted_idx",
-          "columns": [
-            "status",
-            "deleted_at"
-          ],
+          "columns": ["status", "deleted_at"],
           "isUnique": false
         }
       },
@@ -729,12 +676,8 @@
           "name": "canvases_owner_id_users_id_fk",
           "tableFrom": "canvases",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -742,12 +685,8 @@
           "name": "canvases_org_id_orgs_id_fk",
           "tableFrom": "canvases",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -822,9 +761,7 @@
       "indexes": {
         "drafts_canvas_id_uq": {
           "name": "drafts_canvas_id_uq",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": true
         }
       },
@@ -833,12 +770,8 @@
           "name": "drafts_canvas_id_canvases_id_fk",
           "tableFrom": "drafts",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -910,9 +843,7 @@
       "indexes": {
         "files_canvas_id_idx": {
           "name": "files_canvas_id_idx",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": false
         }
       },
@@ -921,12 +852,8 @@
           "name": "files_canvas_id_canvases_id_fk",
           "tableFrom": "files",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -999,17 +926,12 @@
       "indexes": {
         "guest_invites_token_hash_uq": {
           "name": "guest_invites_token_hash_uq",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "isUnique": true
         },
         "guest_invites_canvas_email_uq": {
           "name": "guest_invites_canvas_email_uq",
-          "columns": [
-            "canvas_id",
-            "email"
-          ],
+          "columns": ["canvas_id", "email"],
           "isUnique": true
         }
       },
@@ -1018,12 +940,8 @@
           "name": "guest_invites_canvas_id_canvases_id_fk",
           "tableFrom": "guest_invites",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1093,23 +1011,17 @@
       "indexes": {
         "guest_sessions_token_hash_uq": {
           "name": "guest_sessions_token_hash_uq",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "isUnique": true
         },
         "guest_sessions_invite_idx": {
           "name": "guest_sessions_invite_idx",
-          "columns": [
-            "invite_id"
-          ],
+          "columns": ["invite_id"],
           "isUnique": false
         },
         "guest_sessions_canvas_idx": {
           "name": "guest_sessions_canvas_idx",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": false
         }
       },
@@ -1118,12 +1030,8 @@
           "name": "guest_sessions_invite_id_guest_invites_id_fk",
           "tableFrom": "guest_sessions",
           "tableTo": "guest_invites",
-          "columnsFrom": [
-            "invite_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invite_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1131,12 +1039,8 @@
           "name": "guest_sessions_canvas_id_canvases_id_fk",
           "tableFrom": "guest_sessions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1197,23 +1101,15 @@
           "name": "kv_entries_canvas_id_canvases_id_fk",
           "tableFrom": "kv_entries",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "kv_entries_canvas_id_scope_key_pk": {
-          "columns": [
-            "canvas_id",
-            "scope",
-            "key"
-          ],
+          "columns": ["canvas_id", "scope", "key"],
           "name": "kv_entries_canvas_id_scope_key_pk"
         }
       },
@@ -1290,16 +1186,12 @@
       "indexes": {
         "mcp_tokens_token_hash_uq": {
           "name": "mcp_tokens_token_hash_uq",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "isUnique": true
         },
         "mcp_tokens_user_id_idx": {
           "name": "mcp_tokens_user_id_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -1308,12 +1200,8 @@
           "name": "mcp_tokens_user_id_users_id_fk",
           "tableFrom": "mcp_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1444,16 +1332,12 @@
       "indexes": {
         "oauth_codes_code_hash_uq": {
           "name": "oauth_codes_code_hash_uq",
-          "columns": [
-            "code_hash"
-          ],
+          "columns": ["code_hash"],
           "isUnique": true
         },
         "oauth_codes_user_id_idx": {
           "name": "oauth_codes_user_id_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -1462,12 +1346,8 @@
           "name": "oauth_codes_user_id_users_id_fk",
           "tableFrom": "oauth_codes",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1518,16 +1398,12 @@
       "indexes": {
         "org_domains_domain_uq": {
           "name": "org_domains_domain_uq",
-          "columns": [
-            "domain"
-          ],
+          "columns": ["domain"],
           "isUnique": true
         },
         "org_domains_org_id_idx": {
           "name": "org_domains_org_id_idx",
-          "columns": [
-            "org_id"
-          ],
+          "columns": ["org_id"],
           "isUnique": false
         }
       },
@@ -1536,12 +1412,8 @@
           "name": "org_domains_org_id_orgs_id_fk",
           "tableFrom": "org_domains",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1601,17 +1473,12 @@
       "indexes": {
         "org_members_org_user_uq": {
           "name": "org_members_org_user_uq",
-          "columns": [
-            "org_id",
-            "user_id"
-          ],
+          "columns": ["org_id", "user_id"],
           "isUnique": true
         },
         "org_members_user_idx": {
           "name": "org_members_user_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -1620,12 +1487,8 @@
           "name": "org_members_org_id_orgs_id_fk",
           "tableFrom": "org_members",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1633,12 +1496,8 @@
           "name": "org_members_user_id_users_id_fk",
           "tableFrom": "org_members",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1682,9 +1541,7 @@
       "indexes": {
         "orgs_slug_uq": {
           "name": "orgs_slug_uq",
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "isUnique": true
         }
       },
@@ -1765,25 +1622,17 @@
       "indexes": {
         "screenshot_jobs_canvas_uq": {
           "name": "screenshot_jobs_canvas_uq",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": true
         },
         "screenshot_jobs_status_leased_idx": {
           "name": "screenshot_jobs_status_leased_idx",
-          "columns": [
-            "status",
-            "leased_at"
-          ],
+          "columns": ["status", "leased_at"],
           "isUnique": false
         },
         "screenshot_jobs_status_updated_idx": {
           "name": "screenshot_jobs_status_updated_idx",
-          "columns": [
-            "status",
-            "updated_at"
-          ],
+          "columns": ["status", "updated_at"],
           "isUnique": false
         }
       },
@@ -1792,12 +1641,8 @@
           "name": "screenshot_jobs_canvas_id_canvases_id_fk",
           "tableFrom": "screenshot_jobs",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1874,16 +1719,12 @@
       "indexes": {
         "sessions_token_hash_uq": {
           "name": "sessions_token_hash_uq",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "isUnique": true
         },
         "sessions_user_id_idx": {
           "name": "sessions_user_id_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -1892,12 +1733,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1973,17 +1810,12 @@
       "indexes": {
         "team_members_team_user_uq": {
           "name": "team_members_team_user_uq",
-          "columns": [
-            "team_id",
-            "user_id"
-          ],
+          "columns": ["team_id", "user_id"],
           "isUnique": true
         },
         "team_members_user_idx": {
           "name": "team_members_user_idx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -1992,12 +1824,8 @@
           "name": "team_members_team_id_teams_id_fk",
           "tableFrom": "team_members",
           "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["team_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2005,12 +1833,8 @@
           "name": "team_members_user_id_users_id_fk",
           "tableFrom": "team_members",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2068,17 +1892,12 @@
       "indexes": {
         "teams_org_slug_uq": {
           "name": "teams_org_slug_uq",
-          "columns": [
-            "org_id",
-            "slug"
-          ],
+          "columns": ["org_id", "slug"],
           "isUnique": true
         },
         "teams_org_idx": {
           "name": "teams_org_idx",
-          "columns": [
-            "org_id"
-          ],
+          "columns": ["org_id"],
           "isUnique": false
         }
       },
@@ -2087,12 +1906,8 @@
           "name": "teams_org_id_orgs_id_fk",
           "tableFrom": "teams",
           "tableTo": "orgs",
-          "columnsFrom": [
-            "org_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2100,12 +1915,8 @@
           "name": "teams_created_by_users_id_fk",
           "tableFrom": "teams",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2191,23 +2002,17 @@
       "indexes": {
         "upload_sessions_handle_hash_uq": {
           "name": "upload_sessions_handle_hash_uq",
-          "columns": [
-            "handle_hash"
-          ],
+          "columns": ["handle_hash"],
           "isUnique": true
         },
         "upload_sessions_canvas_idx": {
           "name": "upload_sessions_canvas_idx",
-          "columns": [
-            "canvas_id"
-          ],
+          "columns": ["canvas_id"],
           "isUnique": false
         },
         "upload_sessions_expires_idx": {
           "name": "upload_sessions_expires_idx",
-          "columns": [
-            "expires_at"
-          ],
+          "columns": ["expires_at"],
           "isUnique": false
         }
       },
@@ -2216,12 +2021,8 @@
           "name": "upload_sessions_canvas_id_canvases_id_fk",
           "tableFrom": "upload_sessions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2229,12 +2030,8 @@
           "name": "upload_sessions_owner_id_users_id_fk",
           "tableFrom": "upload_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2292,20 +2089,12 @@
       "indexes": {
         "usage_events_canvas_created_idx": {
           "name": "usage_events_canvas_created_idx",
-          "columns": [
-            "canvas_id",
-            "created_at"
-          ],
+          "columns": ["canvas_id", "created_at"],
           "isUnique": false
         },
         "usage_events_canvas_user_type_created_idx": {
           "name": "usage_events_canvas_user_type_created_idx",
-          "columns": [
-            "canvas_id",
-            "user_id",
-            "type",
-            "created_at"
-          ],
+          "columns": ["canvas_id", "user_id", "type", "created_at"],
           "isUnique": false
         }
       },
@@ -2314,12 +2103,8 @@
           "name": "usage_events_canvas_id_canvases_id_fk",
           "tableFrom": "usage_events",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2408,16 +2193,12 @@
       "indexes": {
         "users_provider_sub_uq": {
           "name": "users_provider_sub_uq",
-          "columns": [
-            "provider_sub"
-          ],
+          "columns": ["provider_sub"],
           "isUnique": true
         },
         "users_email_uq": {
           "name": "users_email_uq",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -2506,10 +2287,7 @@
       "indexes": {
         "versions_canvas_number_uq": {
           "name": "versions_canvas_number_uq",
-          "columns": [
-            "canvas_id",
-            "number"
-          ],
+          "columns": ["canvas_id", "number"],
           "isUnique": true
         }
       },
@@ -2518,12 +2296,8 @@
           "name": "versions_canvas_id_canvases_id_fk",
           "tableFrom": "versions",
           "tableTo": "canvases",
-          "columnsFrom": [
-            "canvas_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canvas_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2531,12 +2305,8 @@
           "name": "versions_created_by_users_id_fk",
           "tableFrom": "versions",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
