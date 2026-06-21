@@ -92,14 +92,17 @@ export function teamsRepository(client: DbClient) {
         .orderBy(teamsT.createdAt)) as Team[];
     },
 
-    /** Teams the user is a member of (the share picker + "my teams" view). */
+    /** Teams the user is a member of (the share picker + "my teams" view). The join
+     *  projects under `team`, so unwrap to a flat `Team[]` — callers (the `/api/teams`
+     *  `mine` flag, MCP `list_teams`) read `t.id` directly, not `t.team.id`. */
     async listForUser(userId: string): Promise<Team[]> {
-      return (await db
+      const rows = (await db
         .select({ team: teamsT })
         .from(membersT)
         .innerJoin(teamsT, eq(membersT.teamId, teamsT.id))
         .where(eq(membersT.userId, userId))
-        .orderBy(teamsT.createdAt)) as unknown as Team[];
+        .orderBy(teamsT.createdAt)) as Array<{ team: Team }>;
+      return rows.map((r) => r.team);
     },
 
     async getMembers(teamId: string): Promise<TeamMember[]> {

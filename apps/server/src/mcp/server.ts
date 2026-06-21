@@ -23,6 +23,7 @@ import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/c
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { OrgsRepository } from "../db/repositories/orgs.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -42,6 +43,7 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
+import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
@@ -58,6 +60,10 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** Explicit org-membership store (plan 003 U2) — the MCP membership resolver
    *  materializes a row so a pure-MCP user still appears in the org roster. */
   orgMembers: Pick<OrgMembersRepository, "upsertDomainMember">;
+  /** Teams store + service (plan 003 U6) — agent-native parity for the team tools and
+   *  the `team` canvas grant. The tools wrap the SAME service the management routes use. */
+  teams: TeamsRepository;
+  teamsService: TeamsService;
   canvases: CanvasesRepository;
   versions: VersionsRepository;
   engine: DeployEngine;
@@ -139,6 +145,22 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
    *  (shared gate + degrade with the management and gallery surfaces). */
   const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
 
+  /** The team-management actor for THIS caller (plan 003 U6). `isAdmin` is fixed FALSE on
+   *  the per-account MCP surface: cross-owner admin team actions are the dedicated admin
+   *  routes only (agent-native parity rule's exception), so over MCP "manage" means the
+   *  team CREATOR only. `orgIds` is the caller's LIVE server-resolved membership. */
+  const teamActor: TeamActor = { id: caller.userId, isAdmin: false, orgIds: caller.orgIds };
+
+  /** Map a {@link TeamError} from the shared service to a stable `CODE: message` fail —
+   *  the same posture as the HTTP team routes (a non-owned/unknown team reads as not found). */
+  const TEAM_FAIL: Record<TeamError, string> = {
+    NOT_A_MEMBER: "NOT_A_MEMBER: you are not a member of that org",
+    TEAM_NOT_FOUND: "TEAM_NOT_FOUND: team not found",
+    FORBIDDEN: "FORBIDDEN: only the team's creator can do that over MCP",
+    TARGET_NOT_FOUND: "TARGET_NOT_FOUND: no account with that email has signed in yet",
+    TARGET_NOT_MEMBER: "TARGET_NOT_MEMBER: that person is not a member of this org",
+  };
+
   server.registerTool(
     "whoami",
     { description: "Return the identity of the connected canvas-drop account.", inputSchema: {} },
@@ -150,11 +172,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const orgRows = (
         await Promise.all([...caller.orgIds].map((id) => deps.orgs.findById(id)))
       ).filter((o): o is NonNullable<typeof o> => o !== null);
+      // The caller's teams (plan 003 U6) — the ones they belong to, for discoverability
+      // (the share-with-a-team grant + the "shared with my teams" read reference these).
+      const teamRows = await deps.teams.listForUser(caller.userId);
       return ok({
         id: user.id,
         email: user.email,
         name: user.name,
         orgs: orgRows.map((o) => ({ id: o.id, name: o.name })),
+        teams: teamRows.map((t) => ({ id: t.id, name: t.name, slug: t.slug, orgId: t.orgId })),
         isGuest: caller.tenancyActive && caller.orgIds.size === 0,
       });
     },
@@ -310,10 +336,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
       const hasPreview = previewVisible(cv, await previewIds([cv.id]));
+      // Echo the team grants for a team-scoped canvas (parity with the dashboard share view).
+      const teamIds =
+        cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : undefined;
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
-        ...canvasView(deps.config, cv, hasPreview),
+        ...canvasView(deps.config, cv, hasPreview, teamIds),
         deploy: deployEndpoints(deps.config, cv.id),
       });
     },
@@ -875,9 +904,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
         "preconditions (sharing/listing need a published canvas; public_link needs an admin grant; a " +
         "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
-        "grant_access / revoke_access. When restricting a previously-public canvas, the response may " +
-        "include a `warning` string (a plain-language CDN edge-cache staleness notice) — surface it to " +
-        "the user.",
+        "grant_access / revoke_access. To share with one or more teams, set access='team' AND pass " +
+        "`teamIds` (the teams you belong to — see whoami.teams / list_teams); you can only grant teams " +
+        "you're a member of, in the canvas's org. Switching off the team rung clears the grants. When " +
+        "restricting a previously-public canvas, the response may include a `warning` string (a " +
+        "plain-language CDN edge-cache staleness notice) — surface it to the user.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         title: z.string().max(200).optional(),
@@ -890,7 +921,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
             "The canvas's description — one field shown in the canvas overview, the gallery, and " +
               "grid cards (shown publicly when the canvas is listed). null clears it.",
           ),
-        access: z.enum(["private", "specific_people", "whole_org", "public_link"]).optional(),
+        access: z
+          .enum(["private", "specific_people", "team", "whole_org", "public_link"])
+          .optional(),
+        teamIds: z
+          .array(z.string().min(1))
+          .max(50)
+          .optional()
+          .describe(
+            "Teams to grant when access='team' (the teams you belong to in this canvas's org). " +
+              "Required (≥1) when setting access='team'; ignored for other rungs.",
+          ),
         password: z
           .string()
           .min(1)
@@ -934,6 +975,30 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
 
+      // Team grant flow (plan 003 U6) — the SAME logic as the management PATCH route, run
+      // BEFORE the access write so a forbidden grant never leaves a team canvas with zero
+      // teams (a deny to everyone). The owner may grant only teams they belong to, in this
+      // canvas's org (KTD4); switching away from `team` clears the grants (single-valued).
+      if (targetAccess === "team") {
+        const teamIds = [...new Set(input.teamIds ?? [])];
+        if (teamIds.length === 0) {
+          return fail("TEAM_REQUIRED: pick at least one team to share with");
+        }
+        for (const teamId of teamIds) {
+          const team = await deps.teams.findById(teamId);
+          if (
+            !team ||
+            team.orgId !== cv.orgId ||
+            !(await deps.teams.isTeamMember(teamId, caller.userId))
+          ) {
+            return fail("TEAM_FORBIDDEN: you can only share with teams you belong to in this org");
+          }
+        }
+        await deps.teams.setCanvasTeams(cv.id, teamIds);
+      } else if (targetAccess !== undefined) {
+        await deps.teams.setCanvasTeams(cv.id, []);
+      }
+
       let updated = cv;
       if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
       // Leaving `custom` for auto/off drops the owner-uploaded renditions (mirrors the
@@ -969,7 +1034,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub.revalidateCanvas(cv.id).catch(() => {});
         if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
       }
-      const view = canvasView(deps.config, updated);
+      // Echo the resolved team grants when the canvas is team-scoped (read-your-writes).
+      const teamIds =
+        updated.access === "team" ? await deps.teams.listTeamIdsForCanvas(updated.id) : undefined;
+      const view = canvasView(deps.config, updated, false, teamIds);
       return ok(warning ? { ...view, warning } : view);
     },
   );
@@ -1225,6 +1293,197 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = await requireOwned(id);
       if (!cv) return fail("canvas not found");
       return ok(await fetchCanvasUsage(deps, cv.id));
+    },
+  );
+
+  // ---- Teams (plan 003 U6) ---------------------------------------------------
+  // Self-serve team management + the "shared with my teams" read, wrapping the SAME
+  // teamsService + teams repo the HTTP routes use (agent-native parity; identical
+  // denials + audit events). Admin cross-owner team actions are NOT here — they live
+  // on the dedicated admin routes (the parity rule's admin exception).
+
+  server.registerTool(
+    "create_team",
+    {
+      description:
+        "Create a team in an org you belong to (see whoami.orgs). You become its first member " +
+        "and its manager (rename/delete). Returns the new team.",
+      inputSchema: {
+        orgId: z.string().describe("An org id you belong to (whoami.orgs)."),
+        name: z.string().trim().min(1).max(80).describe("The team's display name."),
+      },
+    },
+    async ({ orgId, name }) => {
+      const r = await deps.teamsService.create(teamActor, { orgId, name });
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      const { team } = r;
+      return ok({ id: team.id, orgId: team.orgId, name: team.name, slug: team.slug });
+    },
+  );
+
+  server.registerTool(
+    "list_teams",
+    {
+      description:
+        "List the teams in your org(s). Each carries `mine` (you're a member) and `canManage` " +
+        "(you created it — so you can rename/delete it over MCP).",
+      inputSchema: {},
+    },
+    async () => {
+      const mine = new Set((await deps.teams.listForUser(caller.userId)).map((t) => t.id));
+      const seen = new Set<string>();
+      const teams: Array<{
+        id: string;
+        orgId: string;
+        name: string;
+        slug: string;
+        mine: boolean;
+        canManage: boolean;
+      }> = [];
+      for (const orgId of caller.orgIds) {
+        for (const t of await deps.teams.listByOrg(orgId)) {
+          if (seen.has(t.id)) continue;
+          seen.add(t.id);
+          teams.push({
+            id: t.id,
+            orgId: t.orgId,
+            name: t.name,
+            slug: t.slug,
+            mine: mine.has(t.id),
+            // isAdmin is false on the MCP surface, so manage == created-by-you.
+            canManage: t.createdBy === caller.userId,
+          });
+        }
+      }
+      return ok({ teams });
+    },
+  );
+
+  server.registerTool(
+    "rename_team",
+    {
+      description:
+        "Rename a team you created. A team you don't manage reads as not found/forbidden.",
+      inputSchema: {
+        id: z.string().describe("The team id."),
+        name: z.string().trim().min(1).max(80).describe("The new name."),
+      },
+    },
+    async ({ id, name }) => {
+      const r = await deps.teamsService.rename(teamActor, id, name);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok({ id: r.team.id, name: r.team.name });
+    },
+  );
+
+  server.registerTool(
+    "delete_team",
+    {
+      description:
+        "Delete a team you created. Removes its memberships and unshares every canvas shared with " +
+        "it (the canvases are untouched). A team you don't manage reads as not found/forbidden.",
+      inputSchema: { id: z.string().describe("The team id.") },
+    },
+    async ({ id }) => {
+      const r = await deps.teamsService.remove(teamActor, id);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "add_team_member",
+    {
+      description:
+        "Add a colleague to a team you belong to, by email. They must be a member of the team's " +
+        "org and have signed in at least once. Self-serve: any member can invite.",
+      inputSchema: {
+        id: z.string().describe("The team id."),
+        email: z.string().trim().email().describe("The colleague's email."),
+      },
+    },
+    async ({ id, email }) => {
+      const r = await deps.teamsService.addMemberByEmail(teamActor, id, email);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "remove_team_member",
+    {
+      description:
+        "Remove a member from a team you belong to (pass your own user id to leave). Use " +
+        "list_team_members for the user ids.",
+      inputSchema: {
+        id: z.string().describe("The team id."),
+        userId: z.string().describe("The member's user id (your own id to leave)."),
+      },
+    },
+    async ({ id, userId }) => {
+      const r = await deps.teamsService.removeMember(teamActor, id, userId);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "list_team_members",
+    {
+      description:
+        "List the members of a team in your org. A team outside your org(s) reads as not found.",
+      inputSchema: { id: z.string().describe("The team id.") },
+    },
+    async ({ id }) => {
+      const team = await deps.teams.findById(id);
+      if (!team || !caller.orgIds.has(team.orgId)) return fail("team not found");
+      const rows = await deps.teams.getMembers(team.id);
+      const users = await deps.users.findByIds(rows.map((m) => m.userId));
+      const byId = new Map(users.map((u) => [u.id, u]));
+      return ok({
+        members: rows.map((m) => {
+          const u = byId.get(m.userId);
+          return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
+        }),
+      });
+    },
+  );
+
+  server.registerTool(
+    "list_shared_with_teams",
+    {
+      description:
+        "List canvases shared with one of your teams (the 'shared with my teams' view). These are " +
+        "strictly team-scoped — they never appear in the org gallery. Excludes your own canvases " +
+        "and anything not live. Display-only (you don't own these); open via the returned url.",
+      inputSchema: {},
+    },
+    async () => {
+      const ids = await deps.teams.listCanvasIdsForUserTeams(caller.userId, caller.orgIds);
+      if (ids.length === 0) return ok({ canvases: [] });
+      const rows = (await deps.canvases.findByIds(ids)).filter(
+        (cv) =>
+          cv.ownerId !== caller.userId &&
+          cv.access === "team" &&
+          cv.status === "active" &&
+          cv.currentVersionId !== null,
+      );
+      const owners = new Map(
+        (await deps.users.findByIds(rows.map((r) => r.ownerId))).map((u) => [u.id, u]),
+      );
+      return ok({
+        canvases: rows.map((cv) => {
+          const owner = owners.get(cv.ownerId);
+          return {
+            id: cv.id,
+            slug: cv.slug,
+            url: canvasUrl(deps.config, cv.slug),
+            title: cv.title,
+            description: cv.description,
+            owner: owner ? { id: owner.id, name: owner.name } : null,
+          };
+        }),
+      });
     },
   );
 

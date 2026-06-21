@@ -354,6 +354,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         users: deps.users,
         orgs,
         orgMembers,
+        teams,
+        teamsService: teamsSvc,
         allowedEmails,
         oauth,
         canvases: deps.canvases,

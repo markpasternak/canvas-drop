@@ -25,6 +25,7 @@ import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -35,6 +36,7 @@ import type { EmailMessage, Mailer } from "../email/mailer.js";
 import { buildMcpServer } from "../mcp/server.js";
 import { createHub, type RealtimeHub } from "../realtime/hub.js";
 import { memStorage } from "../storage/mem.js";
+import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
 
 /**
@@ -304,12 +306,16 @@ export async function connectMcp(
   caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
 ): Promise<McpClient> {
   const { config, repos, storage, engine, audit } = h;
+  const teams = teamsRepository(h.client);
+  const orgMembers = orgMembersRepository(h.client);
   const server = buildMcpServer(
     {
       config,
       users: repos.users,
       orgs: orgsRepository(h.client),
-      orgMembers: orgMembersRepository(h.client),
+      orgMembers,
+      teams,
+      teamsService: teamsService({ teams, orgMembers, users: repos.users, audit }),
       canvases: repos.canvases,
       versions: repos.versions,
       engine,
