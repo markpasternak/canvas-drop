@@ -157,6 +157,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   const TEAM_FAIL: Record<TeamError, string> = {
     NOT_A_MEMBER: "NOT_A_MEMBER: you are not a member of that org",
     TEAM_NOT_FOUND: "TEAM_NOT_FOUND: team not found",
+    TEAM_NAME_TAKEN: "TEAM_NAME_TAKEN: you already have a team with that name",
     FORBIDDEN: "FORBIDDEN: only the team's creator can do that over MCP",
     TARGET_NOT_FOUND: "TARGET_NOT_FOUND: no account with that email has signed in yet",
     TARGET_NOT_MEMBER: "TARGET_NOT_MEMBER: that person is not a member of this org",

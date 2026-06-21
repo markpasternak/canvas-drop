@@ -134,6 +134,7 @@ describe("list row badges", () => {
         shared: true,
         hasPassword: true,
       }),
+      canvas({ id: "f", slug: "s-team", title: "Team one", access: "team", shared: true }),
     ]);
     await screen.findAllByText("Private one"); // list rendered
 
@@ -147,6 +148,9 @@ describe("list row badges", () => {
     expect(screen.queryByText("Owner only")).toBeNull();
     expect(screen.queryByText("Anyone with the link")).toBeNull();
     expect(screen.queryByText("Password required")).toBeNull();
+    // A team canvas surfaces "Team" — the access badge near its title + the meta primary
+    // (plus the access filter option), so it appears more than once.
+    expect(screen.getAllByText("Team").length).toBeGreaterThan(1);
   });
 
   it("surfaces draft-only deployment state, but not zeros for deployed canvases", async () => {

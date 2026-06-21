@@ -17,6 +17,7 @@ import type { UsersRepository } from "../db/repositories/users.js";
 export type TeamError =
   | "NOT_A_MEMBER"
   | "TEAM_NOT_FOUND"
+  | "TEAM_NAME_TAKEN"
   | "FORBIDDEN"
   | "TARGET_NOT_FOUND"
   | "TARGET_NOT_MEMBER";
@@ -53,9 +54,12 @@ export function teamsService(deps: {
   }
 
   return {
-    /** Create a team in an org the actor is a (live) member of. */
+    /** Create a team in an org the actor is a (live) member of. Names are creator-local:
+     *  the same actor can't make two teams with one name, but different actors can. */
     async create(actor: TeamActor, input: { orgId: string; name: string }): Promise<TeamResult> {
       if (!actor.orgIds.has(input.orgId)) return { ok: false, error: "NOT_A_MEMBER" };
+      if (await deps.teams.nameTakenByCreator(input.orgId, actor.id, input.name))
+        return { ok: false, error: "TEAM_NAME_TAKEN" };
       const team = await deps.teams.create({
         orgId: input.orgId,
         name: input.name,

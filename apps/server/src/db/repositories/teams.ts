@@ -72,6 +72,28 @@ export function teamsRepository(client: DbClient) {
       return rows[0] ?? null;
     },
 
+    /**
+     * Has this creator already made a team with this name in this org? Teams are
+     * creator-local for naming (plan 003): a user can't have two teams with the same
+     * name, but DIFFERENT users may each have a team of the same name. Case-insensitive,
+     * on the trimmed name. (The slug stays org-unique via {@link freeSlug}; this guards
+     * the human-facing name a creator sees.)
+     */
+    async nameTakenByCreator(orgId: string, createdBy: string, name: string): Promise<boolean> {
+      const rows = (await db
+        .select({ id: teamsT.id })
+        .from(teamsT)
+        .where(
+          and(
+            eq(teamsT.orgId, orgId),
+            eq(teamsT.createdBy, createdBy),
+            eq(sql`lower(${teamsT.name})`, name.trim().toLowerCase()),
+          ),
+        )
+        .limit(1)) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
     async rename(id: string, name: string): Promise<void> {
       await db.update(teamsT).set({ name }).where(eq(teamsT.id, id));
     },

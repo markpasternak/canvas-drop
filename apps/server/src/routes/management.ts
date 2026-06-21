@@ -254,7 +254,7 @@ const ownerListQuerySchema = z.object({
   // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
   // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
   access: z
-    .enum(["private", "specific_people", "whole_org", "public_link"])
+    .enum(["private", "specific_people", "team", "whole_org", "public_link"])
     .optional()
     .catch(undefined),
   shared: boolFlag,

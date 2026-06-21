@@ -54,6 +54,21 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     expect(denied).toEqual({ ok: false, error: "NOT_A_MEMBER" });
   });
 
+  it("team names are creator-local: same creator can't dupe, different creators can reuse", async () => {
+    const { svc, org, mkUser, actor } = await setup();
+    const alice = await mkUser("a@acme.com", { member: true });
+    const bob = await mkUser("b@acme.com", { member: true });
+
+    expect((await svc.create(actor(alice), { orgId: org.id, name: "Design" })).ok).toBe(true);
+    // Same creator, same name (case-insensitive) → rejected.
+    expect(await svc.create(actor(alice), { orgId: org.id, name: "design" })).toEqual({
+      ok: false,
+      error: "TEAM_NAME_TAKEN",
+    });
+    // A DIFFERENT creator may reuse the name (teams are creator-local for naming).
+    expect((await svc.create(actor(bob), { orgId: org.id, name: "Design" })).ok).toBe(true);
+  });
+
   it("rename/delete: creator or operator only", async () => {
     const { svc, org, teams, mkUser, actor } = await setup();
     const creator = await mkUser("c@acme.com", { member: true });

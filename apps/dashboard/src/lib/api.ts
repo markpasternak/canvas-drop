@@ -450,6 +450,7 @@ const HINTS: Record<string, string> = {
   // Teams (plan 003).
   NOT_A_MEMBER: "You can only create teams in an org you belong to.",
   TEAM_NOT_FOUND: "That team no longer exists — refresh and try again.",
+  TEAM_NAME_TAKEN: "You already have a team with that name.",
   FORBIDDEN: "Only the team's creator or an administrator can do that.",
   TARGET_NOT_FOUND: "No account with that email has signed in yet.",
   TARGET_NOT_MEMBER: "That person isn't a member of this org.",

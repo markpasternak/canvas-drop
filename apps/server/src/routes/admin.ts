@@ -36,7 +36,7 @@ export interface AdminRoutesDeps {
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
-const ACCESS_RUNGS = ["private", "specific_people", "whole_org", "public_link"] as const;
+const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
 // `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
 // presence-style flags in the URL (?templatable=true), mirroring the member list.

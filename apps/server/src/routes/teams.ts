@@ -24,6 +24,7 @@ export interface TeamsRoutesDeps {
 const HTTP: Record<TeamError, 403 | 404 | 409> = {
   NOT_A_MEMBER: 403,
   TEAM_NOT_FOUND: 404,
+  TEAM_NAME_TAKEN: 409,
   FORBIDDEN: 403,
   TARGET_NOT_FOUND: 404,
   TARGET_NOT_MEMBER: 409,
