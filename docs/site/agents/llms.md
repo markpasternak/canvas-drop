@@ -42,7 +42,7 @@ client registration) and then get identity-scoped tools across every canvas you 
 `set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
 `clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
-`invite_to_canvas`/`resend_guest_invite`/`revoke_access`, the team tools `list_teams`/
+`invite_to_canvas`/`revoke_access`, the team tools `list_teams`/
 `create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
 `add_team_member`/`remove_team_member`/`list_team_members`/
 `list_shared_with_teams` (plus `update_canvas` with `access: "team"` + `teamIds` to share
@@ -120,9 +120,9 @@ Share tab (or its session-authenticated management API). The rung is one of:
   (`canPublishPublic`), and **static-only** for non-owners: every backend
   primitive is refused, returning `403 STATIC_ONLY`.
 
-Invited guests get KV, files, and realtime; **AI is opt-in per canvas** with a
-USD spend cap (`guestAiEnabled` / `guestAiCap`). The full model — guest
-magic-link invites, password locks, share expiry — is in
+Specific people are added through auth-delegated Add person grants: existing users are
+granted now; admissible new emails show as pending until first verified sign-in. Public links,
+password locks, share expiry, and the full access model are in
 [Sharing & access](/docs/authoring/sharing).
 
 ## Capabilities and errors

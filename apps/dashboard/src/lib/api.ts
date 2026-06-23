@@ -1064,8 +1064,6 @@ export const api = {
     ),
   removeAllowlistEntry: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
-  resendAllowlistInvite: (id: string, entryId: string) =>
-    request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}/resend`, { method: "POST" }),
 
   people: {
     search: (params: PersonSearchParams) => {

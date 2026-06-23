@@ -406,7 +406,6 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         upload,
         storage: deps.storage,
         guests: deps.guests,
-        mailer: deps.mailer,
         clone,
         drafts,
         usage,
@@ -595,7 +594,6 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       aiUsage,
       hub: deps.hub,
       guests: deps.guests,
-      mailer: deps.mailer,
       invites,
       invitations,
       // Effective operator globals (admin DB override ?? env) for the capabilities view.

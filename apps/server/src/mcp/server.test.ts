@@ -34,6 +34,10 @@ import { buildMcpServer } from "./server.js";
 
 const silent = pino({ level: "silent" });
 const config = loadConfig({});
+const domainConfig = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "dev",
+  CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+});
 
 async function seedUser(client: DbClient, email: string): Promise<string> {
   const u = await usersRepository(client).upsert({
@@ -749,7 +753,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(got.publicationState).not.toBe("published");
   });
 
-  it("grant_access adds an org member to the allowlist; list/revoke reflect it", async () => {
+  it("grant_access adds an existing user; list/revoke reflect it", async () => {
     client = await makeTestDb(dialect);
     const owner = await seedUser(client, "owner@example.com");
     await seedUser(client, "teammate@example.com"); // an org member
@@ -762,7 +766,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
         arguments: { id: cv.id, email: "teammate@example.com" },
       }),
     );
-    expect(granted).toMatchObject({ ok: true, kind: "member" });
+    expect(granted).toMatchObject({ ok: true, status: "granted" });
 
     const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
     expect(access.entries).toHaveLength(1);
@@ -778,14 +782,55 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
     expect(after.entries).toHaveLength(0);
 
-    // The legacy guest-invite path is retired; unknown emails will be handled by
-    // invite_to_canvas/Add person, not by minting app-owned magic links.
-    const guest = await mcp.callTool({
+    // The legacy guest-invite path is retired; unknown self-serve external emails are denied
+    // through the shared Add person policy, not by minting app-owned magic links.
+    const external = await mcp.callTool({
       name: "grant_access",
-      arguments: { id: cv.id, email: "outsider@example.com" },
+      arguments: { id: cv.id, email: "outsider@external.test" },
     });
-    expect(isError(guest)).toBe(true);
-    expect(text(guest)).toContain("GUEST_INVITES_RETIRED");
+    expect(isError(external)).toBe(true);
+    expect(text(external)).toContain("NOT_PERMITTED");
+  });
+
+  it("grant_access records admissible new emails as pending and revoke_access cancels them", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId: owner }, false, domainConfig);
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const pending = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "new-person@example.com" },
+      }),
+    );
+    expect(pending).toMatchObject({ ok: true, status: "pending" });
+
+    const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(access.entries).toHaveLength(1);
+    expect(access.entries[0]).toMatchObject({
+      kind: "pending",
+      email: "new-person@example.com",
+    });
+
+    const revoked = payload(
+      await mcp.callTool({
+        name: "revoke_access",
+        arguments: { id: cv.id, entryId: access.entries[0].id },
+      }),
+    );
+    expect(revoked.ok).toBe(true);
+    const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(after.entries).toHaveLength(0);
+  });
+
+  it("does not expose the retired resend_guest_invite tool", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId: owner });
+
+    const tools = await mcp.listTools();
+    expect(tools.tools.map((tool) => tool.name)).not.toContain("resend_guest_invite");
   });
 
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {
@@ -813,7 +858,6 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       "unarchive_canvas",
       "delete_canvas",
       "list_access",
-      "resend_guest_invite",
       "revoke_access",
       "get_canvas_usage",
       "get_draft",
