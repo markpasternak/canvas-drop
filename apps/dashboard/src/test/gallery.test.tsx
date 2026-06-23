@@ -91,6 +91,11 @@ function renderGallery(initial = "/gallery") {
   );
 }
 
+async function chooseFilterOption(label: string, optionName: string) {
+  await userEvent.click(screen.getByRole("combobox", { name: label }));
+  await userEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 const page = (items: GalleryItem[], over: Partial<GalleryPage> = {}): GalleryPage => ({
   items,
   total: items.length,
@@ -273,10 +278,7 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByRole("link", { name: "All" });
 
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Filter by owner" }),
-      "u-bob",
-    );
+    await chooseFilterOption("Filter by owner", "bob");
     await waitFor(() => expect(calls.some((c) => c.get("owner") === "u-bob")).toBe(true));
   });
 
@@ -299,7 +301,7 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByRole("link", { name: "Budget chart" });
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Sort canvases" }), "title");
+    await chooseFilterOption("Sort canvases", "Title A–Z");
     await waitFor(() => expect(calls.some((c) => c.get("sort") === "title")).toBe(true));
   });
 
@@ -328,7 +330,7 @@ describe("Gallery view", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("combobox", { name: "Sort canvases" })).toHaveValue("title");
+    expect(screen.getByRole("combobox", { name: "Sort canvases" })).toHaveTextContent("Title A–Z");
   });
 
   it("Clear all resets every filter at once (plan 004)", async () => {
@@ -437,16 +439,14 @@ describe("Gallery view", () => {
     renderGallery();
     await screen.findByRole("link", { name: "Budget chart" });
 
-    const select = screen.getByRole("combobox", { name: "Sort canvases" });
-    const labels = within(select)
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort canvases" }));
+    const listbox = screen.getByRole("listbox", { name: "Sort canvases" });
+    const labels = within(listbox)
       .getAllByRole("option")
       .map((o) => o.textContent);
     expect(labels).toEqual(["Featured", "Trending", "Recent", "Title A–Z"]);
 
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Sort canvases" }),
-      "trending",
-    );
+    await userEvent.click(screen.getByRole("option", { name: "Trending" }));
     await waitFor(() => expect(calls.some((c) => c.get("sort") === "trending")).toBe(true));
   });
 
