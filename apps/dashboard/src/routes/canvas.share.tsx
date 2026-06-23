@@ -1,6 +1,6 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Fragment, type ReactNode, useEffect, useId, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
@@ -9,6 +9,7 @@ import { CopyButton } from "../components/CopyButton.js";
 import { Field } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
 import { PasswordField } from "../components/PasswordField.js";
+import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -696,14 +697,14 @@ function TeamPicker({
 
 function Allowlist({ canvasId }: { canvasId: string }) {
   const toast = useToast();
-  const listId = useId();
   const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const search = email.trim();
-  const { data: suggestions = [] } = usePeopleSearch(
+  const searchEnabled = search.length >= 2;
+  const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
     { context: "canvas", canvasId, q: search },
-    search.length >= 2,
+    searchEnabled,
   );
 
   const reload = () => {
@@ -756,27 +757,16 @@ function Allowlist({ canvasId }: { canvasId: string }) {
         pending until they sign in through this instance.
       </p>
       <div className="flex items-end gap-2">
-        <Field
+        <PeopleEmailCombobox
           label="Person's email"
-          type="email"
           placeholder="colleague@example.com"
-          list={listId}
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void add();
-            }
-          }}
+          onChange={setEmail}
+          onSubmit={() => void add()}
+          suggestions={suggestions}
+          searchEnabled={searchEnabled}
+          searching={searchingPeople}
         />
-        <datalist id={listId}>
-          {suggestions.map((p) => (
-            <option key={p.id} value={p.email}>
-              {p.name}
-            </option>
-          ))}
-        </datalist>
         <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
           Add person
         </Button>

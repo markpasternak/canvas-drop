@@ -157,14 +157,14 @@ describe("design-skin parity", () => {
  * Skin-list parity (the no-shared-import tax). The dashboard can't import @canvas-drop/shared
  * into its browser bundle, so it RESTATES the skin list in three places that the token-parity
  * blocks above don't cover. A TS union won't catch a member missing from a runtime array, and
- * the pre-paint script is plain JS with no type at all — so a 5th skin added to the canonical
+ * the pre-paint bootstrap is plain JS with no type at all — so a 5th skin added to the canonical
  * SKIN_NAMES would silently no-op (SkinSync) or FOUC on reload until each is updated by hand.
  * Assert all three enumerate exactly SKIN_NAMES here, where the canonical list lives.
  */
 describe("dashboard skin-list parity (restated, can't import shared)", () => {
   const apiTs = read("../../../../apps/dashboard/src/lib/api.ts");
   const skinTsx = read("../../../../apps/dashboard/src/lib/skin.tsx");
-  const indexHtml = read("../../../../apps/dashboard/index.html");
+  const bootstrapJs = read("../../../../apps/dashboard/public/dashboard-bootstrap.js");
   const expected = [...SKIN_NAMES].sort();
   const literals = (s: string) => [...s.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
 
@@ -180,11 +180,11 @@ describe("dashboard skin-list parity (restated, can't import shared)", () => {
     expect(literals(arr ?? "")).toEqual(expected);
   });
 
-  it("index.html pre-paint guard lists every non-editorial skin (no FOUC on a new skin)", () => {
+  it("dashboard bootstrap pre-paint guard lists every non-editorial skin (no FOUC on a new skin)", () => {
     // editorial is the attribute-free default, so the pre-paint guard only names the alternates.
     for (const skin of SKIN_NAMES) {
       if (skin === "editorial") continue;
-      expect(indexHtml, `index.html pre-paint script is missing "${skin}"`).toContain(`"${skin}"`);
+      expect(bootstrapJs, `dashboard bootstrap is missing "${skin}"`).toContain(`"${skin}"`);
     }
   });
 });
