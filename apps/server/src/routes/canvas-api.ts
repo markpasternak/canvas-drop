@@ -35,6 +35,8 @@ import { canvasRealtimeRoutes } from "./canvas-realtime.js";
 export interface CanvasApiDeps {
   config: Config;
   canvases: CanvasesRepository;
+  /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
+  publicLinksEnabled?: () => Promise<boolean>;
   /** Teams store (plan 003 U4) — resolves the `team` rung for the runtime API gate.
    *  Optional: omitted in suites that don't exercise teams (a team canvas then matches
    *  no one — fail-closed). */
@@ -96,6 +98,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         deps.teams ?? { teamMatch: async () => false },
         canvas,
         principal,
+        { publicLinksEnabled: deps.publicLinksEnabled },
       );
       const decision = decideCanvasAccess(canvas, principal, Date.now(), {
         ...ctx,

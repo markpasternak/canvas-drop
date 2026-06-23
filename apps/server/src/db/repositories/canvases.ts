@@ -764,8 +764,8 @@ export function canvasesRepository(client: DbClient) {
       return touchesSearchBlob ? inTransaction(apply) : apply(db);
     },
 
-    /** Revoke-sweep (U10): flip an owner's public_link canvases back to private when
-     *  an admin removes their publish-public capability. Atomic single UPDATE. */
+    /** Revoke-sweep: flip an owner's public_link canvases back to private when an admin
+     *  removes their publish-public capability. Atomic single UPDATE. */
     async revertPublicForOwner(ownerId: string): Promise<void> {
       await db
         .update(t)
@@ -775,6 +775,14 @@ export function canvasesRepository(client: DbClient) {
         // match on galleryListed alone). Mirrors archive/unpublish.
         .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.ownerId, ownerId), eq(t.access, "public_link")));
+    },
+
+    /** Global public-link shutdown: sweep every active public_link row back to private. */
+    async revertAllPublicLinks(): Promise<void> {
+      await db
+        .update(t)
+        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
+        .where(eq(t.access, "public_link"));
     },
 
     /**
@@ -885,7 +893,7 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Whether the owner account may currently publish public links (U10 capability).
+     * Whether the owner account may currently publish public links (per-user capability).
      * The defense-in-depth half of the public_link gate: the admin revoke sweep
      * (revertPublicForOwner) flips canvases to private at write time, and this
      * per-request check makes the decision table self-sufficient if a public_link

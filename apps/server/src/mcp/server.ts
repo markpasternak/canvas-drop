@@ -73,6 +73,8 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** Pending invitations — the `list_team_members` roster's pending rows (HTTP-route parity). */
   invitations: Pick<InvitationsRepository, "listPendingForTarget">;
   canvases: CanvasesRepository;
+  /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
+  publicLinksEnabled?: () => Promise<boolean>;
   versions: VersionsRepository;
   engine: DeployEngine;
   upload: UploadService;
@@ -925,7 +927,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Update a canvas you own (mirrors the dashboard Settings + Share tabs). All fields optional; " +
         "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
-        "preconditions (sharing/listing need a published canvas; public_link needs an admin grant; a " +
+        "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
         "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
         "grant_access / revoke_access. To share with one or more teams, set access='team' AND pass " +
         "`teamIds` (the teams you belong to — see whoami.teams / list_teams); you can only grant teams " +
@@ -990,6 +992,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = gate.canvas;
       const user = await deps.users.findById(caller.userId);
       const resolution = resolveSettingsUpdate(cv, input, {
+        publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
         canPublishPublic: user?.canPublishPublic ?? false,
         publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
         now: Date.now(),

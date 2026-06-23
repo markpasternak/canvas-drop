@@ -413,6 +413,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         files,
         aiUsage,
         audit: deps.audit,
+        publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
         oauthAudit: {
           record: (e) =>
@@ -522,6 +523,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     canvasApiRoutes({
       config: deps.config,
       canvases: deps.canvases,
+      publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
       teams,
       kv: kvRepository(deps.db),
       files: filesService({
@@ -556,6 +558,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective skin (admin DB override over env/default), resolved per-request so a
       // runtime flip in Admin → Configuration reaches the SPA without a restart.
       designSkin: () => settingsSvc.effectiveDesignSkin(),
+      publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
       orgs,
       tenancyActive: !!deps.config.org.name,
     }),
@@ -598,6 +601,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
+      publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
       // Screenshot preview support (plan 004) for the dashboard `hasPreview` cover hint.
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
       screenshots,
@@ -664,7 +668,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   app.use(
     "*",
     onlyCanvas(
-      canvasAccess({ canvases: deps.canvases, teams, tenancyActive: !!deps.config.org.name }),
+      canvasAccess({
+        canvases: deps.canvases,
+        teams,
+        tenancyActive: !!deps.config.org.name,
+        publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+      }),
     ),
   );
   app.use(

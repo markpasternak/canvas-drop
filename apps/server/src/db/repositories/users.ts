@@ -61,7 +61,7 @@ export function usersRepository(client: DbClient) {
       return (rows[0] as User | undefined) ?? null;
     },
 
-    /** Grant/revoke the publish-public capability (U10). Admin-only at the route. */
+    /** Restore/revoke the publish-public capability. Admin-only at the route. */
     async setPublishPublic(id: string, value: boolean): Promise<User> {
       const rows = await db
         .update(t)

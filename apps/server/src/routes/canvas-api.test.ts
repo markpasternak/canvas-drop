@@ -296,9 +296,6 @@ describe("canvasApiRoutes — guest/anonymous primitives (U9)", () => {
       backendEnabled: true,
     });
     await repo.setAccess(cv.id, access);
-    // A public_link canvas only exists while its owner holds the publish capability
-    // (U10) — grant it so resolveAccessContext resolves publicEnabled=true.
-    if (access === "public_link") await usersRepository(client).setPublishPublic(owner.id, true);
     if (guestEmail)
       await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "guest", email: guestEmail });
     return cv;

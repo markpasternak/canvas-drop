@@ -19,9 +19,9 @@ export type AccessDecision =
 /**
  * Context the pure decision table can't compute itself (caller-resolved so the
  * table stays I/O-free, KTD4): whether the principal is on this canvas's allowlist
- * (`specific_people`), and whether the owner account may publish public links
- * (`public_link`, resolved by {@link resolveAccessContext} from the owner's U10
- * capability; an absent value is treated as not-enabled by the table).
+ * (`specific_people`), and whether public-link access is effectively enabled
+ * (`public_link`, resolved by {@link resolveAccessContext} from the global switch
+ * and owner's per-user capability; an absent value is treated as not-enabled by the table).
  */
 export interface AccessContext {
   isAllowed?: boolean;
@@ -189,10 +189,10 @@ export function decideCanvasAccess(
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "public_link":
-      // Admin-gated per owner account (U10): default-deny unless the caller resolved
-      // the owner's publish capability as enabled (resolveAccessContext). The realtime
-      // hub doesn't resolve it, but it drops every static-only non-owner socket below,
-      // so a public_link socket is never left live by this absence.
+      // Global + per-owner gated: default-deny unless the caller resolved public-link
+      // access as enabled (resolveAccessContext). The realtime hub doesn't resolve it,
+      // but still drops public-link non-owner sockets on revalidation, so a public_link
+      // socket is never left live by this absence.
       if (!ctx.publicEnabled) return { action: "deny", status: 404, reason: "owner_only" };
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       // Static-only for every non-owner (anonymous AND org members) — R17.
@@ -213,6 +213,8 @@ export interface CanvasAccessDeps {
   /** Whether tenancy is active (plan 002 U4 — an org is configured). Threaded into the
    *  decision so `whole_org` is org-scoped only once an operator names an org. */
   tenancyActive: boolean;
+  /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
+  publicLinksEnabled?: () => Promise<boolean>;
 }
 
 /**
@@ -229,12 +231,16 @@ export async function resolveAccessContext(
   teams: Pick<TeamsRepository, "teamMatch">,
   canvas: Canvas | null,
   principal: Principal,
+  opts: { publicLinksEnabled?: () => Promise<boolean> } = {},
 ): Promise<AccessContext> {
   // public_link: resolve the owner's publish capability so the decision table can
   // deny a canvas whose owner lost the grant, independent of the write-time sweep
   // (defense-in-depth; the two layers together honor §12.0 #3/#5).
   if (canvas?.access === "public_link") {
-    return { publicEnabled: await canvases.isOwnerPublishEnabled(canvas.ownerId) };
+    const globalEnabled = opts.publicLinksEnabled ? await opts.publicLinksEnabled() : true;
+    return {
+      publicEnabled: globalEnabled && (await canvases.isOwnerPublishEnabled(canvas.ownerId)),
+    };
   }
   // team: only a member can match; resolve the single widened predicate (plan 003 phase 3) —
   // membership is mandatory, a PERSONAL team grants by that alone, an ORG team additionally
@@ -295,6 +301,7 @@ export function canvasAccess(deps: CanvasAccessDeps) {
       deps.teams ?? NO_TEAM_MATCH,
       canvas,
       principal,
+      { publicLinksEnabled: deps.publicLinksEnabled },
     );
     const decision = decideCanvasAccess(canvas, principal, Date.now(), {
       ...ctx,

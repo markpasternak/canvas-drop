@@ -731,13 +731,12 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     await h.repos.canvases.updateSettings(cv.id, { sharedExpiresAt: Date.now() - 1000 });
     expect((await h.GET(MEMBER, content)).status).toBe(404);
 
-    // public_link is admin-gated: an un-granted owner cannot set it.
+    // public_link is default-on: a fresh owner can set it.
     await h.repos.canvases.updateSettings(cv.id, { sharedExpiresAt: null });
     const pub = await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, {
       access: "public_link",
     });
-    expect(pub.status).toBe(403);
-    expect((await jsonOf<{ code: string }>(pub)).code).toBe("PUBLIC_NOT_ALLOWED");
+    expect(pub.status).toBe(200);
   });
 
   // ── S9 — Admin governance & the hard invariants ──────────────────────────────
@@ -829,19 +828,20 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     );
     expect(quotas.quotas.find((q) => q.key === "ai.user.daily.usd")?.value).toBe(9);
 
-    // public_link grant: the owner cannot self-grant, but an admin grant unlocks it.
+    // public_link default-on, with per-user revoke still enforced immediately.
     const ownerUser = await h.repos.users.findByEmail(OWNER);
     expect(
       (await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, { access: "public_link" }))
         .status,
-    ).toBe(403);
-    expect(
-      (await h.SEND(ADMIN, "POST", `/api/admin/users/${ownerUser?.id}/grant-public`)).status,
     ).toBe(200);
+    expect(
+      (await h.SEND(ADMIN, "POST", `/api/admin/users/${ownerUser?.id}/revoke-public`)).status,
+    ).toBe(200);
+    expect((await h.repos.canvases.findById(cv.id))?.access).toBe("private");
     expect(
       (await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, { access: "public_link" }))
         .status,
-    ).toBe(200);
+    ).toBe(403);
   });
 
   // ── S10 — Agent over MCP at dashboard parity + clone/usage/docs/gallery ──────

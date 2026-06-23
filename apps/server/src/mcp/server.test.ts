@@ -620,7 +620,16 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     expect(shared.id).toBe(cv.id);
 
-    // public_link is admin-gated per account; a seeded non-admin owner is refused.
+    // public_link is default-on, then denied after a per-user revoke.
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "update_canvas",
+          arguments: { id: cv.id, access: "public_link" },
+        }),
+      ),
+    ).toBe(false);
+    await usersRepository(client).setPublishPublic(userId, false);
     expect(
       isError(
         await mcp.callTool({

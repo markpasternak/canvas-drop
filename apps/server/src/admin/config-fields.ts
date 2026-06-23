@@ -437,6 +437,18 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: () => false,
   },
   {
+    key: "access.publicLinksEnabled",
+    env: "—",
+    group: "Access",
+    label: "Public links enabled",
+    help: "Instance-wide switch for the Public link rung. Off denies new public-link publishes for everyone and immediately returns existing public-link canvases to private.",
+    type: "boolean",
+    secret: false,
+    editable: true,
+    settingKey: "access.publicLinksEnabled",
+    fromConfig: () => true,
+  },
+  {
     key: "quota.ai.user.daily.usd",
     env: "CANVAS_DROP_AI_USER_DAILY_USD",
     group: "Limits",
