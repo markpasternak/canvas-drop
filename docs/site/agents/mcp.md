@@ -50,13 +50,13 @@ there is no cross-owner access and no existence leak.
 | `set_capabilities` | Toggle a canvas's backend capabilities — `backendEnabled` is the master switch; `kv`/`files`/`ai`/`realtime` are individual features (effective only when backend is on). Omitted fields are unchanged. |
 | `set_canvas_slug` | Change a canvas's URL slug (pass a custom one, or omit for a fresh random slug). The old URL stops working immediately. |
 | `regenerate_deploy_key` | Mint a new `cd_…` deploy key and invalidate the old one; the new key is returned **once**. |
-| `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes guest grants. |
+| `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes any retained legacy guest sessions for that canvas. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
 | `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
-| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), guest-AI. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to in the canvas's org — see `list_teams`); switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), and retained legacy guest-session AI settings where present. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to in the canvas's org — see `list_teams`); switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs an admin grant; a password un-lists). |
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
 | `list_access` | List active named people plus pending sign-in grants for a canvas you own (each with an `id` for `revoke_access`; legacy guest rows can still appear during migration). |
-| `grant_access` | Add a person by email. Existing users are granted now (`status: granted`); admissible new emails become pending auth-delegated grants (`status: pending`). No guest magic link is created. Takes effect on the `specific_people` rung. |
+| `grant_access` | Add a person by email. Existing users are granted now (`status: granted`); admissible new emails become pending auth-delegated grants (`status: pending`). No app-owned credential is created. Takes effect on the `specific_people` rung. |
 | `invite_to_canvas` | Deliberately invite a person by email (distinct from the quiet `grant_access`) — sends the courtesy email when email is enabled. It uses the same Add person service and statuses. A brand-new external email is refused for a non-admin (`NOT_PERMITTED`) unless the instance allows it; `RATE_LIMITED` past the cap. |
 | `revoke_access` | Remove an active person, pending sign-in grant, or legacy guest row. Legacy guest sessions are revoked when present. |
 | `clone_canvas` | Clone a canvas into a new one you own — any active canvas you own, or a gallery template someone shared. Starts as an unpublished draft with a fresh slug + key. |
@@ -81,7 +81,7 @@ canvas is live in one round trip, and no per-canvas key is ever handled by the a
 **If an admin has disabled a canvas** (a moderation takedown), it goes **read-only**:
 the read tools (`get_canvas`, `list_versions`, `get_canvas_usage`, `get_draft`, …) keep
 working, but every mutation tool — settings/sharing via `update_canvas`, capabilities,
-slug, preview, access/guest tools, deploy / publish / rollback, archive / unpublish,
+slug, preview, access tools, deploy / publish / rollback, archive / unpublish,
 `delete_canvas`, and the draft-edit tools — fails with `DISABLED: <reason>` (the same
 contract as the management API's `409 { code: "DISABLED" }`). The owner can still read
 the canvas and the admin's takedown reason; only an admin can re-enable it.

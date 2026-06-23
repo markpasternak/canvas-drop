@@ -105,7 +105,8 @@ from the server-side auth strategy, never from anything the client sends.
 > email sends a sign-in invitation and — on a matching org domain — makes them a member on
 > first sign-in; there's no app-owned password (see
 > [Add users & invites](#add-users--invites)). Removing an entry revokes that email's access on
-> its next sign-in.
+> its next sign-in. In `proxy` mode this list cannot widen the upstream IAP by itself: admit a
+> brand-new external email in the proxy first, then add it here.
 
 ### dev mode
 
@@ -250,7 +251,7 @@ brand-new external email needs operator admission upstream before it can become 
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `CANVAS_DROP_EMAIL_DRIVER` | `log` | `log` (writes the link to the server log — zero-setup dev) \| `smtp` \| `mailgun` \| `noop` (disables invites). |
+| `CANVAS_DROP_EMAIL_DRIVER` | `log` | `log` (records the envelope only — zero-setup dev, no delivered email) \| `smtp` \| `mailgun` \| `noop` (disables invite/notification email). |
 | `CANVAS_DROP_EMAIL_FROM` | `no-reply@<mailgun domain>` or `no-reply@localhost` | Sender address. |
 | `CANVAS_DROP_SMTP_HOST` | (unset) | SMTP server host (driver `smtp`). |
 | `CANVAS_DROP_SMTP_PORT` | `587` | `587` = STARTTLS, `465` = implicit TLS. |

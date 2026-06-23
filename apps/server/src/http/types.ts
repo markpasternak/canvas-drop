@@ -4,9 +4,9 @@ import type { Logger } from "../log/logger.js";
 
 /**
  * The principal a canvas-facing request acts as (D4 access ladder, U3). Three
- * kinds: an org `member` (the normal gateway path), an invited `guest` (a
- * magic-link session scoped to one canvas — U6/U7), or `anonymous` (a visitor to
- * a public_link canvas — U7). Identity always comes from the server-side resolver,
+ * kinds: an org `member` (the normal gateway path), a retained legacy `guest`
+ * session scoped to one canvas, or `anonymous` (a visitor to a public_link canvas).
+ * Identity always comes from the server-side resolver,
  * never the client (§12.0 #1). A guest's id is namespaced `guest:<inviteId>` so it
  * never collides with an org user id in KV scoping / audit / presence (KTD2).
  */

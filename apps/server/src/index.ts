@@ -125,8 +125,8 @@ async function main() {
         })
       : undefined;
 
-  // 3b. Guest magic-link service (U6/U7) — the carve-out is app-gated, so it only
-  //     exists outside proxy mode (in proxy mode the IAP authenticates first).
+  // 3b. Legacy guest service — retained outside proxy mode only so cutover and
+  //     revocation can clean up old app-issued guest sessions without data loss.
   const { guestService } = await import("./auth/guest.js");
   const { setupMailer } = await import("./email/factory.js");
   const guestRepo = guestRepository(db);

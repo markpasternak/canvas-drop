@@ -90,11 +90,11 @@ immutable version and point the canvas URL at it. Roll back or switch the curren
 version from the **Versions** tab. Set who can open it in the **Share** tab: the
 access ladder runs **Private** (owner only, the default — a non-owner admin is
 treated like any member and the canvas 404s for them) → **Specific
-people** (an email allowlist, including email-invited guests) → **Whole org** (any
-signed-in member with the link) → **Public link** (anyone with the link;
-admin-gated, static files only — primitives are refused for public visitors). On
-top of any rung you can add a password gate or a share expiry. Once a version is
-published you can also list the canvas in the gallery.
+people** (signed-in members plus pending emails that become live only after verified
+sign-in) → **Whole org** (any signed-in member with the link) → **Public link**
+(anyone with the link; admin-gated, static files only — primitives are refused for
+public visitors). On top of any rung you can add a password gate or a share expiry.
+Once a version is published you can also list the canvas in the gallery.
 
 ## Deploying as an agent
 

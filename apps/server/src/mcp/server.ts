@@ -82,9 +82,8 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  failure in `set_canvas_preview`) that are otherwise hidden behind a user-facing fail. */
   log: Logger;
   hub?: RealtimeHub;
-  /** Guest magic-link service (oidc/dev only; absent in proxy mode, where guest
-   *  invites are refused — the IAP owns that boundary). Backs the guest-access tools
-   *  and the guest-grant revocation on archive/unpublish/delete. */
+  /** Legacy guest service. Retained only to revoke old guest sessions on
+   *  archive/unpublish/delete; current sharing uses auth-delegated Add person grants. */
   guests?: GuestService;
   /** Clone-as-template service — backs `clone_canvas`. */
   clone: CloneService;
@@ -1207,7 +1206,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "Grant a person access to a canvas you own by email (mirrors the Share tab's add-person). " +
         "An existing user is granted now (`status: granted`); an admissible new email becomes a " +
         "pending sign-in grant (`status: pending`) and materializes after verified sign-in. No " +
-        "guest magic link is created. The grant only takes effect on the `specific_people` rung — " +
+        "app-owned credential is created. The grant only takes effect on the `specific_people` rung — " +
         "set that with update_canvas.",
       inputSchema: {
         id: z.string().describe("The canvas id."),

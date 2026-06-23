@@ -34,8 +34,8 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 | `MODEL_NOT_ALLOWED` | 403 | The requested AI model is not in the allow-list. |
 | `DISABLED` | 403 | The canvas has been disabled by an administrator. |
 | `STATIC_ONLY` | 403 | The canvas is a public link (`public_link`) — every backend primitive is refused for non-owners. |
-| `GUEST_AI_DISABLED` | 403 | The canvas owner has not enabled AI for invited guests. |
-| `GUEST_AI_CAP` | 429 | The canvas reached its guest-AI spend cap. |
+| `GUEST_AI_DISABLED` | 403 | AI is not enabled for a retained legacy guest-session viewer. |
+| `GUEST_AI_CAP` | 429 | The canvas reached its retained legacy guest-session AI spend cap. |
 | `NOT_FOUND` | 404 | The key, file, or canvas does not exist. |
 | `INVALID_BODY` | 400 | The request body failed validation. |
 | `KEY_TOO_LARGE` | 413 | The KV key exceeds the size limit. |

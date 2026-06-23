@@ -22,7 +22,7 @@ One rung per canvas, stored as the `access` field (default `private`):
 | Rung | Who can open it | Backend primitives |
 | --- | --- | --- |
 | **Private** | Only you, the owner. | Full, for the owner. |
-| **Specific people** | A named allowlist — org members *and/or* outside guests you invite by email. | Members & guests: KV, files, realtime. AI: off for guests unless you opt in. |
+| **Specific people** | A named allowlist — signed-in users plus pending emails that activate after verified sign-in. | Full, for authenticated people on the allowlist. |
 | **Team** | Members of the [teams](/docs/authoring/teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
 | **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
@@ -44,43 +44,34 @@ link) and using a custom slug.
 
 ## Inviting specific people
 
-Choose **Specific people**, then add by email:
+Choose **Specific people**, then add by email. The result is deterministic:
 
-- An **org member's** email goes straight onto the allowlist — they open the
-  canvas with their normal sign-in. Matched by user id.
-- An **outside email** becomes an **invited guest**: the app emails them a
-  single-use magic sign-in link. Clicking it opens a confirm page; a same-origin
-  POST consumes the token and establishes a **guest session scoped to that one
-  canvas** — guests can never reach your other canvases. Matched by email. Each
-  guest shows in the People list as pending or active, with **Resend** and
-  **Remove**.
+- An **existing signed-in user** is granted immediately. They open the canvas with
+  their normal sign-in and appear as active in the People list.
+- A **new email that your auth setup can admit** becomes a **pending sign-in grant**.
+  It has no login power by itself. It turns into real access only after that exact
+  email signs in through your configured auth (`oidc`, `proxy`, or `dev`).
+- A **brand-new external email** is refused unless policy allows it. Admins can add
+  external people from **Admin -> People**. A non-admin member can add one only when
+  the operator enables `invites.allowMemberNewEmails`, or when the email can already
+  authenticate through an allowed domain or an existing sign-in permit.
 
-Guests get **KV, files, and realtime**. **AI is off for guests** unless you turn
-it on for the canvas (the *Guest permissions* section), and when you do you set a
-**USD spend cap** — AI is the metered-cost primitive, so it's opt-in and bounded.
+Pending people are visible in the People list and can be removed before they ever
+sign in. Removing an active or pending person takes effect on the next request.
 
 ### Add vs Invite
 
-The People list has two actions. **Add** grants an existing member access quietly (no
-email). **Invite** is a deliberate one-off invitation that emails the person — and it
-works for someone who hasn't signed in yet: a brand-new email becomes a **pending
-invitation** that turns into real access the first time they sign in through your
-instance's configured auth. There's no app-owned password or magic-link account; the
-invitee authenticates the same way everyone else does. A self-serve owner can't invite a
-brand-new *external* email unless an admin enabled that (see
-[Add users](/docs/self-hosting/configuration#add-users--invites)); existing users and
-people on your org's domains can always be invited.
+The People list has two actions. **Add** quietly grants access when it can. **Invite**
+uses the same Add person service but also sends a courtesy email when outbound email is
+enabled. Either action can return `granted`, `pending`, `already_added`,
+`already_pending`, or a policy/error state such as `NOT_PERMITTED` or `RATE_LIMITED`.
+There is no app-owned password or magic-link account; the invitee authenticates the same
+way everyone else does.
 
-A guest is never prompted for the canvas password; their magic link is the gate.
-Owners are never prompted either. Other non-owners are prompted when a password
-is set.
-
-> Email-invited guests work only when the app manages sign-in (`oidc` / `dev`
-> modes) **and** the operator has configured outbound email. Behind an
-> identity-aware proxy (`proxy` mode) the proxy owns the sign-in boundary, so
-> guest invites are refused (`GUESTS_UNAVAILABLE`); without configured email they
-> fail with `EMAIL_NOT_CONFIGURED`. You can still allowlist existing org members
-> by email in any mode.
+> In `proxy` mode the upstream IAP owns admission. canvas-drop can record grants for
+> existing or already-admitted people, but it cannot make a brand-new external email
+> reachable by itself. Add that person to the upstream access policy or use
+> **Admin -> People** for app-managed admission where applicable.
 
 ## Sharing with a team
 
@@ -106,8 +97,7 @@ direct membership is the boundary.
 ## Password & expiry
 
 - **Password** (the *Locks* section): set a password and non-owners are prompted
-  before the canvas opens (argon2id-hashed, scoped cookie). Owners and invited
-  guests are never prompted.
+  before the canvas opens (argon2id-hashed, scoped cookie). Owners are never prompted.
 - **Share expiry**: set a timestamp and access auto-revokes when it passes. You
   see a countdown, then an expired state.
 
@@ -169,8 +159,8 @@ restore it; you cannot delete a disabled canvas while it's down.
 ## Revoking
 
 Access is always revocable and never cached. Lowering the rung, removing an
-allowlist entry, revoking a guest invite, hitting an expiry, regenerating the
-slug, or unpublishing the canvas takes effect on the **next request** and drops
-live realtime sockets — no stale grants. A guest session never outlives its
-invite's expiry or revocation. Re-publishing a canvas does **not** silently
-restore old guest grants; invite people again deliberately.
+allowlist or pending entry, hitting an expiry, regenerating the slug, or
+unpublishing the canvas takes effect on the **next request** and drops live
+realtime sockets — no stale grants. Legacy guest rows retained from older
+deployments are revocation-only migration data; re-publishing a canvas does **not**
+silently restore old grants.

@@ -43,7 +43,7 @@ flowchart TD
     PubCheck -->|public_link only| Static[Static files only]
     PubCheck -->|otherwise| NotFound[404]
     User --> Rung{Access rung}
-    Rung -->|owner / org / invited| Canvas[Canvas + primitives]
+    Rung -->|owner / org / allowlist| Canvas[Canvas + primitives]
     Rung -->|not authorized| NotFound
 ```
 
@@ -74,10 +74,11 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    `team` rung, a member of one of the canvas's granted teams — re-checked on every request
    by re-joining the principal's **live** org membership (a stale `team_members` row can't
    widen access, so a user removed from the org is denied immediately, and a `team` canvas
-   under inert tenancy or with no home org is a deny to everyone); at `specific_people`, a principal on
-   its allowlist (an org member, or an invited guest whose magic-link session is
-   for *that* canvas); at `public_link`, anyone — but static-only and only while
-   the owner account holds the admin-granted publish capability. All subject to
+   under inert tenancy or with no home org is a deny to everyone); at `specific_people`, a signed-in
+   principal on its allowlist (an existing user or a pending email after that exact
+   email has verified through the configured auth); at `public_link`, anyone — but
+   static-only and only while the owner account holds the admin-granted publish
+   capability. Pending grants have no auth power by themselves. All subject to
    not revoked/expired and any password. An **admin has no special access to
    canvases it doesn't own** — for someone else's canvas an admin is treated as an
    ordinary org member: the rung applies (a non-owned private or unlisted canvas
@@ -85,16 +86,16 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    admin power is limited to the dedicated admin routes (the all-canvases list +
    disable/enable/restore); it never extends to canvas content, the owner
    management/editor surface, the runtime API, or realtime. Everything else returns
-   `404`; a guest can never reach a canvas it wasn't invited to, and an anonymous
-   public visitor gets no backend primitives.
+   `404`; an external person can never reach a canvas they were not granted, and
+   an anonymous public visitor gets no backend primitives.
 4. **No cross-canvas reach in subdomain mode.** One canvas (or its code, SDK, or
    socket) cannot read, write, or act on another canvas's data, files, AI quota,
    or realtime channels. Path mode has reduced browser isolation (see below).
 5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug
-   regen, key regen, rung lowering, allowlist removal, guest-invite revocation,
-   and unpublish take effect on the next request and drop live realtime sockets
-   (guest sockets included) — no stale grants. A guest session never outlives its
-   invite's expiry or revocation.
+   regen, key regen, rung lowering, allowlist/pending-grant removal, and unpublish
+   take effect on the next request and drop live realtime sockets — no stale grants.
+   Legacy guest sessions retained from the old model are revoked during cutover or
+   removal and are not a new sharing path.
 
 ## The org boundary (member vs guest)
 
@@ -131,15 +132,14 @@ access on its own.
 Who may permit a **brand-new email** to sign in is gated (a load-bearing rule):
 
 - An **admin** can, via [Add users](/docs/self-hosting/configuration#add-users--invites).
-- A **member** can only if the operator turns on `email.allowMemberInvitesToNewEmails` (off by
+- A **member** can only if the operator turns on `invites.allowMemberNewEmails` (off by
   default), **or** the email already authenticates (its domain is allowlisted, or it's already
   a permitted user). Otherwise a self-serve invite of an unknown external email is **rejected**
   — a member can't widen who may sign in to your instance.
 
-This replaces the older guest **magic-link** flow for these surfaces. (Per-canvas guest invites
-on the *Specific people* rung still use a scoped magic link in `oidc`/`dev` mode; see
-[Sharing](/docs/authoring/sharing#inviting-specific-people).) Invite volume is bounded
-per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
+This replaces the older guest **magic-link** flow. New canvas and team sharing never mints
+app-owned guest credentials; it records pending grants that depend on the configured auth path.
+Invite volume is bounded per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
 
 ## Identity is always server-side (invariant #1)
 

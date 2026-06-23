@@ -87,8 +87,10 @@ It exposes one global, **`canvasdrop`** (there is no `cd` alias). Mode and slug
 are auto-detected from the canvas URL; every call hits
 `{apiBase}/v1/c/{slug}/...` with the session cookie.
 
-- `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }` where `kind` is
-  `"member"` (an org user) or `"guest"` (an email-invited viewer).
+- `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }`. `kind` is normally
+  `"member"` for the current signed-in user; `"guest"` is retained only for legacy
+  guest sessions from older instances. New Add person grants materialize as
+  signed-in users after verified auth.
 - `canvasdrop.kv` and `canvasdrop.kv.user` — `get(key)` → value or `null`,
   `set(key, value)`, `delete(key)`, `list({ prefix?, cursor?, limit? })` →
   `{ entries, nextCursor }`, `increment(key, by = 1)` → number. `kv.user` is
@@ -110,8 +112,8 @@ Sharing is one **access rung** per canvas, set by the owner from the dashboard's
 Share tab (or its session-authenticated management API). The rung is one of:
 
 - `private` — owner only.
-- `specific_people` — a named allowlist of org members and/or email-invited
-  guests.
+- `specific_people` — a named allowlist of signed-in users and/or pending emails
+  that materialize after exact-email verified sign-in.
 - `team` — members of the granted teams. A team is personal (friends & family) or
   org-attached (a subset of the org, re-checked against live org membership on every
   request). Strictly team-scoped (never in the gallery).

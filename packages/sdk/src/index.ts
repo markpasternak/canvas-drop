@@ -37,11 +37,11 @@ export const ERROR_CODES = {
   },
   GUEST_AI_DISABLED: {
     status: 403,
-    summary: "The canvas owner has not enabled AI for invited guests.",
+    summary: "AI is not enabled for a retained legacy guest-session viewer.",
   },
   GUEST_AI_CAP: {
     status: 429,
-    summary: "The canvas reached its guest-AI spend cap.",
+    summary: "The canvas reached its retained legacy guest-session AI spend cap.",
   },
   NOT_FOUND: { status: 404, summary: "The key, file, or canvas does not exist." },
   INVALID_BODY: { status: 400, summary: "The request body failed validation." },
@@ -236,7 +236,7 @@ export interface Me {
   email: string;
   name: string;
   avatarUrl: string | null;
-  /** Whether the viewer is an org `member` or an email-invited `guest` (U9). */
+  /** Runtime viewer kind. `guest` is retained for legacy guest sessions. */
   kind: "member" | "guest";
 }
 
@@ -414,7 +414,7 @@ function aiErrorFromFrame(frame: SseFrame): CanvasdropError {
   if (code === "CAPABILITY_DISABLED") return new CapabilityDisabledError("ai");
   // Quota signals carry 429 (matching ERROR_CODES) so callers reading err.status
   // see a rate-limit, and `err instanceof QuotaExceededError` catches the
-  // per-canvas guest-AI cap in-stream just as it does pre-stream.
+  // retained legacy guest-session AI cap in-stream just as it does pre-stream.
   if (code === "GUEST_AI_CAP" || code === "QUOTA_EXCEEDED")
     return new QuotaExceededError(code, 429);
   return new CanvasdropError(code, 502, message);

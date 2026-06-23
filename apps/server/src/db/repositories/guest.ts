@@ -11,7 +11,7 @@ import type { DbClient } from "../factory.js";
 export interface CreateInviteInput {
   canvasId: string;
   email: string;
-  /** Hash of the magic-link token (never the plaintext). */
+  /** Hash of the retained legacy token (never the plaintext). */
   tokenHash: string;
   expiresAt: number | null;
 }
@@ -24,9 +24,10 @@ export interface CreateGuestSessionInput {
 }
 
 /**
- * Guest invites + sessions repository (D4 email-invited guests, U6). Tokens are
- * stored hashed (the auth layer hashes before calling). Dual-dialect seam typed
- * `any` like the other repos; row shapes stay typed.
+ * Retained legacy guest invites + sessions repository. New owner sharing no longer
+ * creates these rows; the repository remains for cutover, revocation, and retention.
+ * Tokens are stored hashed (the auth layer hashes before calling). Dual-dialect seam
+ * typed `any` like the other repos; row shapes stay typed.
  */
 export function guestRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
@@ -96,7 +97,7 @@ export function guestRepository(client: DbClient) {
     },
 
     /**
-     * Mark an invite consumed (pending → active) on first magic-link use. Atomic
+     * Mark an invite consumed (pending → active) on first retained-token use. Atomic
      * compare-and-swap on `state='pending'` so two concurrent consumes can't both
      * mint a session from one single-use token — only the row that actually flips
      * returns true (KTD: no read-then-write TOCTOU on a single-use credential).
@@ -132,7 +133,7 @@ export function guestRepository(client: DbClient) {
         .where(and(eq(sessions.canvasId, canvasId), isNull(sessions.revokedAt)));
     },
 
-    /** Retire every legacy magic-link credential while keeping rows for retention/backups. */
+    /** Retire every legacy credential while keeping rows for retention/backups. */
     async revokeAllInvitesAndSessions(): Promise<void> {
       const now = Date.now();
       await db.update(invites).set({ state: "revoked" }).where(ne(invites.state, "revoked"));
@@ -186,7 +187,7 @@ export function guestRepository(client: DbClient) {
     },
 
     /**
-     * Retention prune (KTD-7): hard-delete dead guest invites (and their sessions)
+     * Retention prune (KTD-7): hard-delete dead legacy guest invites (and their sessions)
      * older than `cutoffMs`. Guest invites store an email address (PII), so a
      * revoked or long-expired invite is dead weight to discard per the privacy
      * policy. "Dead" = revoked, or expired before the cutoff; a still-active or

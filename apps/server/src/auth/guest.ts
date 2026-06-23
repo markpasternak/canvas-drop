@@ -23,26 +23,26 @@ function guestPrincipal(invite: GuestInvite): Principal {
 }
 
 export interface GuestService {
-  /** Mint an invite; returns the plaintext magic-link token (only the hash is stored). */
+  /** Legacy-only: mint an invite; returns the plaintext token (only the hash is stored). */
   createInvite(
     canvasId: string,
     email: string,
     expiresAt?: number | null,
   ): Promise<{ token: string; invite: GuestInvite }>;
   /**
-   * Read-only peek at a magic-link token's invite — does NOT consume it (the
+   * Read-only peek at a legacy token's invite — does NOT consume it (the
    * single-use token stays pending). Returns the still-valid pending invite, or
    * null when it's missing / revoked / already-used / expired. Lets a caller check
    * a precondition (e.g. the target canvas is still active) BEFORE burning the token.
    */
   peekInvite(token: string): Promise<GuestInvite | null>;
-  /** Consume a magic-link token: establish a guest session + cookie. Single-use. */
+  /** Legacy-only: consume a token to establish a guest session + cookie. Single-use. */
   consumeMagicLink(c: Context<AppEnv>, token: string): Promise<Principal | null>;
   /** Resolve the guest cookie to a principal, or null. Cross-checks the invite (R12). */
   resolveGuest(c: Context<AppEnv>): Promise<Principal | null>;
   /** Revoke a guest's invite + sessions for (canvas, email) — drops access next request. */
   revokeInvite(canvasId: string, email: string): Promise<void>;
-  /** Revoke every guest invite + session for a canvas (unpublish/archive cleanup). */
+  /** Revoke every retained guest invite + session for a canvas (cleanup path). */
   revokeAllForCanvas(canvasId: string): Promise<void>;
   /** Clear the guest cookie (sign-out / dead session). */
   clearCookie(c: Context<AppEnv>): void;

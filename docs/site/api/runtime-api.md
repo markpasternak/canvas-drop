@@ -64,8 +64,9 @@ Capability: `identity`. Returns `403 CAPABILITY_DISABLED` when identity is off.
 GET {base}/v1/c/{slug}/me   → 200 { id, email, name, avatarUrl, kind }
 ```
 
-`avatarUrl` may be `null`. `kind` is `"member"` (an org user) or `"guest"` (an
-email-invited viewer) so canvas code can branch on who's viewing; an anonymous
+`avatarUrl` may be `null`. `kind` is normally `"member"` for the current signed-in
+user. `"guest"` is retained only for legacy guest sessions from older instances; new
+Add person grants materialize as signed-in users after verified auth. An anonymous
 visitor never reaches the runtime API (a `public_link` canvas is static-only and
 returns `STATIC_ONLY`). This runtime `me()` deliberately omits `isAdmin`; the
 dashboard SPA's `/api/me` is a separate endpoint that includes it.
@@ -143,10 +144,11 @@ Errors are split by when they occur:
 
 - **Pre-stream** (status set before the body): `INVALID_BODY` (400),
   `MODEL_NOT_ALLOWED` (403, model not in the allowlist or allowlisted-but-unpriced),
-  `GUEST_AI_DISABLED` (403, a guest called AI on a canvas that hasn't opted guests
-  in), `GUEST_AI_CAP` (429, guest spend cap reached; body `{ code, scope: "guest" }`),
-  `QUOTA_EXCEEDED` (429, spend/rate cap; body `{ code, scope }`),
-  `CAPABILITY_DISABLED` (403, no effective provider key after the gate).
+  `GUEST_AI_DISABLED` (403, a retained legacy guest-session viewer called AI on a
+  canvas that has not enabled it for that retained session type), `GUEST_AI_CAP`
+  (429, retained legacy guest-session spend cap reached; body
+  `{ code, scope: "guest" }`), `QUOTA_EXCEEDED` (429, spend/rate cap; body
+  `{ code, scope }`), `CAPABILITY_DISABLED` (403, no effective provider key after the gate).
 - **In-stream** (HTTP already 200): an SSE
   `{ type: "error", code: "AI_UPSTREAM_ERROR", message }` event. Usage and quota are
   recorded even if the client aborts mid-stream.

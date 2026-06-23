@@ -148,9 +148,9 @@ export function decideCanvasAccess(
   }
 
   const expired = canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= now;
-  // The magic link is the guest's gate, so guests bypass the per-canvas password.
-  // Everyone else — including a non-owner admin — faces it where set (R4/R21); only
-  // the owner (handled above) is never prompted.
+  // A retained legacy guest session has already passed its invite gate, so guests bypass
+  // the per-canvas password. Everyone else — including a non-owner admin — faces it
+  // where set (R4/R21); only the owner (handled above) is never prompted.
   const gate = principal.kind === "guest" ? false : canvas.passwordHash !== null;
 
   switch (canvas.access) {

@@ -52,7 +52,7 @@ for the full picture.
 > **Who may invite a brand-new external email is gated.** A self-serve member can
 > always invite existing users and people on your org's domains, but inviting a
 > brand-new *external* email (one that can't already sign in) is **admin-only** unless
-> the operator turns on `invites.allowMemberInvitesToNewEmails`. Invites are also
+> the operator turns on `invites.allowMemberNewEmails`. Invites are also
 > rate-limited per person. See
 > [Add users & invites](/docs/self-hosting/configuration#add-users--invites).
 
