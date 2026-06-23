@@ -17,6 +17,7 @@ import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { type AccessRung, type AllowlistEntry, ApiError, api, type Team } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
+import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { usePublishDraft, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
 import { useCanvas, useMe, usePeopleSearch, useTeams } from "../lib/queries.js";
@@ -730,15 +731,8 @@ function Allowlist({ canvasId }: { canvasId: string }) {
       const r = await api.addAllowlistMember(canvasId, value);
       setEmail("");
       reload();
-      toast(
-        r.status === "pending"
-          ? "Access pending until sign-in"
-          : r.status === "already_pending"
-            ? "Access is already pending"
-            : r.status === "already_added"
-              ? "Access already granted"
-              : "Access granted",
-      );
+      const feedback = addPersonFeedback("canvas", r.status, r.emailDelivery);
+      toast(feedback.message, feedback.tone);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
     } finally {

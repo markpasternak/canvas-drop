@@ -46,15 +46,22 @@ export interface InviteActor {
   isAdmin: boolean;
 }
 
+export type InviteEmailDelivery =
+  | { status: "sent" }
+  | { status: "failed" }
+  | { status: "skipped"; reason: "event_disabled" | "email_disabled" | "mailer_disabled" };
+
+type WithInviteEmailDelivery<T> = T & { emailDelivery?: InviteEmailDelivery };
+
 export type InviteResult =
-  | { status: "granted"; userId: string }
-  | { status: "already_added"; userId?: string }
-  | { status: "pending" }
-  | { status: "already_pending" }
-  | { status: "blocked"; userId: string }
-  | { status: "policy_blocked"; reason: "new_email_not_permitted" }
-  | { status: "auth_admission_required" }
-  | { status: "rate_limited"; retryAfterSec: number };
+  | WithInviteEmailDelivery<{ status: "granted"; userId: string }>
+  | WithInviteEmailDelivery<{ status: "already_added"; userId?: string }>
+  | WithInviteEmailDelivery<{ status: "pending" }>
+  | WithInviteEmailDelivery<{ status: "already_pending" }>
+  | WithInviteEmailDelivery<{ status: "blocked"; userId: string }>
+  | WithInviteEmailDelivery<{ status: "policy_blocked"; reason: "new_email_not_permitted" }>
+  | WithInviteEmailDelivery<{ status: "auth_admission_required" }>
+  | WithInviteEmailDelivery<{ status: "rate_limited"; retryAfterSec: number }>;
 
 interface EffectiveInviteSettings {
   emailEnabled: boolean;
@@ -180,8 +187,9 @@ export function inviteService(deps: InviteServiceDeps) {
     to: string,
     actor: InviteActor,
     settings: EffectiveInviteSettings,
-  ): Promise<void> {
-    if (!settings.emailEnabled || !deps.mailer.canSend) return;
+  ): Promise<InviteEmailDelivery> {
+    if (!settings.emailEnabled) return { status: "skipped", reason: "email_disabled" };
+    if (!deps.mailer.canSend) return { status: "skipped", reason: "mailer_disabled" };
     try {
       const body = await effectiveTemplate(deps.templates, templateKeyFor(target));
       const link =
@@ -199,10 +207,12 @@ export function inviteService(deps: InviteServiceDeps) {
         link,
       });
       const res = await deps.mailer.send(msg);
-      if (!res.ok) deps.log?.error({ error: res.error }, "invite: courtesy email send failed");
+      if (res.ok) return { status: "sent" };
+      deps.log?.error({ error: res.error }, "invite: courtesy email send failed");
     } catch (err) {
       deps.log?.error({ err }, "invite: courtesy email render/send threw (grant unaffected)");
     }
+    return { status: "failed" };
   }
 
   return {
@@ -241,8 +251,14 @@ export function inviteService(deps: InviteServiceDeps) {
           return { status: "already_added", userId: existing.id };
         }
         await grantNow(target, existing.id);
-        if (notifyExisting(target, settings)) await notify(target, email, actor, settings);
-        return { status: "granted", userId: existing.id };
+        const emailDelivery = notifyExisting(target, settings)
+          ? await notify(target, email, actor, settings)
+          : target.kind === "team"
+            ? undefined
+            : ({ status: "skipped", reason: "event_disabled" } as const);
+        return emailDelivery
+          ? { status: "granted", userId: existing.id, emailDelivery }
+          : { status: "granted", userId: existing.id };
       }
 
       const admission = await resolveNewEmailAdmission({
@@ -286,8 +302,10 @@ export function inviteService(deps: InviteServiceDeps) {
         });
       }
 
-      if (notifyPending(target, settings)) await notify(target, email, actor, settings);
-      return { status: "pending" };
+      const emailDelivery = notifyPending(target, settings)
+        ? await notify(target, email, actor, settings)
+        : ({ status: "skipped", reason: "event_disabled" } as const);
+      return { status: "pending", emailDelivery };
     },
   };
 }

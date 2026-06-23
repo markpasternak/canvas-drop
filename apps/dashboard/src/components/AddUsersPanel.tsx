@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../lib/api.js";
 import { relativeTime } from "../lib/format.js";
+import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { useAddAllowedEmail, useRemoveAllowedEmail } from "../lib/mutations.js";
 import { useAdminAllowedEmails } from "../lib/queries.js";
 import { Button } from "./Button.js";
@@ -31,9 +32,8 @@ export function AddUsersPanel() {
     try {
       const r = await add.mutateAsync(value);
       setEmail("");
-      // `pending` = a brand-new email was permitted; they join on first sign-in. `granted` = an
-      // existing user (nothing new to permit).
-      toast(r.status === "pending" ? "Sign-in permit added" : "Email already permitted");
+      const feedback = addPersonFeedback("account", r.status, r.emailDelivery);
+      toast(feedback.message, feedback.tone);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add sign-in permit", "error");
     }

@@ -332,6 +332,17 @@ export type PersonSearchParams =
 /** Outcome of Add person across canvas/team surfaces. */
 export type AddMemberStatus = "granted" | "already_added" | "pending" | "already_pending";
 
+export type EmailDelivery =
+  | { status: "sent" }
+  | { status: "failed" }
+  | { status: "skipped"; reason: "event_disabled" | "email_disabled" | "mailer_disabled" };
+
+export interface AddMemberResult {
+  ok: true;
+  status: AddMemberStatus;
+  emailDelivery?: EmailDelivery;
+}
+
 /** A canvas shared with one of the caller's teams (plan 003) — display-only, the
  *  caller is NOT the owner, so no management fields. The only surface for these
  *  strictly-team-scoped canvases (they never appear in the org-wide gallery). */
@@ -1051,17 +1062,11 @@ export const api = {
   listAllowlist: (id: string) =>
     request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
   addAllowlistMember: (id: string, email: string) =>
-    request<{ ok: true; status: AddMemberStatus }>(
-      `/api/canvases/${id}/allowlist`,
-      jsonBody({ email }),
-    ),
+    request<AddMemberResult>(`/api/canvases/${id}/allowlist`, jsonBody({ email })),
   /** Individual one-canvas access email (plan 003 U8). `granted` = an existing user got
    *  access now; `pending` = a brand-new person gets access on their first sign-in. */
   inviteToCanvas: (id: string, email: string) =>
-    request<{ ok: true; status: AddMemberStatus }>(
-      `/api/canvases/${id}/invite`,
-      jsonBody({ email }),
-    ),
+    request<AddMemberResult>(`/api/canvases/${id}/invite`, jsonBody({ email })),
   removeAllowlistEntry: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, { method: "DELETE" }),
 
@@ -1103,10 +1108,7 @@ export const api = {
         pending: r.pending ?? [],
       })),
     addMember: (id: string, email: string) =>
-      request<{ ok: true; status: AddMemberStatus }>(
-        `/api/teams/${id}/members`,
-        jsonBody({ email }),
-      ),
+      request<AddMemberResult>(`/api/teams/${id}/members`, jsonBody({ email })),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
   },
@@ -1294,7 +1296,7 @@ export const api = {
     listAllowedEmails: () =>
       request<{ emails: AllowedEmail[] }>("/api/admin/allowed-emails").then((r) => r.emails),
     addAllowedEmail: (email: string) =>
-      request<{ ok: true; status: AddMemberStatus; entry: AllowedEmail | null }>(
+      request<AddMemberResult & { entry: AllowedEmail | null }>(
         "/api/admin/allowed-emails",
         jsonBody({ email }),
       ),

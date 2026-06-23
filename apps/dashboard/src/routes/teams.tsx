@@ -10,6 +10,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type Team } from "../lib/api.js";
+import { addPersonFeedback } from "../lib/invite-feedback.js";
 import {
   useAddTeamMember,
   useCreateTeam,
@@ -286,15 +287,8 @@ function TeamRoster({ team }: { team: Team }) {
     try {
       const r = await add.mutateAsync(value);
       setEmail("");
-      toast(
-        r.status === "pending"
-          ? "Team access pending until sign-in"
-          : r.status === "already_pending"
-            ? "Team access is already pending"
-            : r.status === "already_added"
-              ? "Already on the team"
-              : "Added to the team",
-      );
+      const feedback = addPersonFeedback("team", r.status, r.emailDelivery);
+      toast(feedback.message, feedback.tone);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
     }

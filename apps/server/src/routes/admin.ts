@@ -665,7 +665,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       (await deps.allowedEmails.list()).find(
         (e) => e.email === body.data.email.trim().toLowerCase(),
       ) ?? null;
-    return c.json({ ok: true, status, entry });
+    return c.json({ ok: true, status, entry, emailDelivery: r.emailDelivery });
   });
 
   app.delete("/allowed-emails/:id", sameOrigin, async (c) => {

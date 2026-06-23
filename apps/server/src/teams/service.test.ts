@@ -120,7 +120,11 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     await allowedEmails.add("friend@external.test", owner.id);
     expect(
       await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test"),
-    ).toEqual({ ok: true, status: "pending" });
+    ).toEqual({
+      ok: true,
+      status: "pending",
+      emailDelivery: { status: "skipped", reason: "email_disabled" },
+    });
     expect(
       await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test"),
     ).toEqual({ ok: true, status: "already_pending" });
