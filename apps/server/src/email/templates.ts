@@ -2,7 +2,7 @@ import type { EmailTemplatesRepository, TemplateBody } from "../db/repositories/
 import type { EmailMessage } from "./mailer.js";
 
 /**
- * Email templates (plan 003 phase 3). Each invite/notification email is one keyed template
+ * Email templates (plan 003 phase 3). Each sign-in/access email is one keyed template
  * with a seeded default that an admin may override (subject + HTML + text). Bodies use an
  * **allow-listed `{{variable}}`** interpolator: values are HTML-escaped in the HTML body,
  * substituted raw in the text body + subject, and an unknown `{{var}}` renders empty (defined,

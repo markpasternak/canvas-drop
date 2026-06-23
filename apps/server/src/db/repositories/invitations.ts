@@ -6,7 +6,7 @@ import type { DbClient } from "../factory.js";
 /** A grant target — a team membership or a canvas allowlist entry to materialize on login. */
 export type InvitationTarget = { type: "team"; id: string } | { type: "canvas"; id: string };
 
-/** What `record` needs to persist a pending invitation. */
+/** What `record` needs to persist pending access. */
 export interface RecordInvitation {
   email: string; // already lowercased by the caller
   target: InvitationTarget;
@@ -15,11 +15,11 @@ export interface RecordInvitation {
 }
 
 /**
- * Pending-invitations store (plan 003 phase 4 / U4). A pending invitation is a grant recorded
- * BEFORE the invitee has a `users` row. When the email first authenticates (verified by the
+ * Pending-access store (plan 003 phase 4 / U4). Pending access is a grant recorded
+ * BEFORE the person has a `users` row. When the email first authenticates (verified by the
  * IdP/proxy — never client input), {@link materializePendingInvitations} applies each grant and
  * stamps `consumed_at`. `record` is idempotent on (email, target_type, target_id): a duplicate
- * pending invite is a no-op rather than a constraint crash.
+ * pending access row is a no-op rather than a constraint crash.
  */
 export function invitationsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam

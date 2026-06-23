@@ -456,7 +456,7 @@ describe("share route", () => {
     });
   });
 
-  it("updates guest AI settings for specific people access", async () => {
+  it("updates added-people AI settings for specific people access", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () =>
         json({
@@ -480,7 +480,7 @@ describe("share route", () => {
     const user = userEvent.setup();
     renderShare();
 
-    await user.click(await screen.findByRole("switch", { name: /let invited people use ai/i }));
+    await user.click(await screen.findByRole("switch", { name: /allow added people to use ai/i }));
 
     await vi.waitFor(() => {
       const patch = calls.find(

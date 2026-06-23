@@ -33,7 +33,7 @@ const PEOPLE_SECTIONS = [
   { id: "share-link", label: "Share link" },
   { id: "access", label: "Access" },
   { id: "locks", label: "Locks" },
-  { id: "guest-permissions", label: "Guest permissions" },
+  { id: "added-people-ai", label: "Added people" },
   { id: "gallery", label: "Gallery" },
 ] as const;
 
@@ -311,23 +311,23 @@ export default function Share() {
 
         {canvas.access === "specific_people" && (
           <Section
-            id="guest-permissions"
-            title="Invited-people permissions"
-            description="Controls metered AI for the people you invite to THIS canvas (above) — not outside-the-org guests, and separate from your own AI budget."
+            id="added-people-ai"
+            title="AI for added people"
+            description="Controls metered AI for people added to this canvas. This does not change your own AI budget."
           >
             <Toggle
-              label="Let invited people use AI"
-              description="Off by default. Invited people can always use KV, files, and realtime; AI is the metered-cost primitive, so it's opt-in per canvas."
+              label="Allow added people to use AI"
+              description="Off by default. Added people can use KV, files, and realtime when those capabilities are enabled; AI is metered, so it is opt-in per canvas."
               checked={canvas.guestAiEnabled}
               onChange={(guestAiEnabled) => save({ guestAiEnabled })}
             />
             {canvas.guestAiEnabled && (
               <Field
-                label="Guest AI spend cap (USD)"
+                label="Added people AI spend cap (USD)"
                 type="number"
                 min="0"
                 step="0.01"
-                hint="Total guest AI spend allowed for this canvas. 0 disables guest AI spend."
+                hint="Total AI spend allowed for added people on this canvas. 0 disables their AI spend."
                 defaultValue={String(canvas.guestAiCap)}
                 onBlur={(e) => {
                   const v = Number(e.target.value);
@@ -478,7 +478,7 @@ const RUNGS: {
   orgGated?: boolean;
   teamGated?: boolean;
 }[] = [
-  { value: "private", label: "Private", hint: "Only you and admins can open this canvas." },
+  { value: "private", label: "Private", hint: "Only you can open this canvas." },
   {
     value: "specific_people",
     label: "Specific people",
@@ -604,7 +604,7 @@ function AccessLadder({
  */
 /** The scope label for a team in the picker: a PERSONAL team (no org) vs a workspace/org
  *  team (named by its org). Makes the share target's reach legible — a personal team can hold
- *  anyone you invite; an org team is your colleagues. */
+ *  people added by email; an org team is your colleagues. */
 function TeamScopeBadge({ team, orgs }: { team: Team; orgs: Array<{ id: string; name: string }> }) {
   if (team.orgId === null) return <Badge tone="neutral">Personal</Badge>;
   const orgName = orgs.find((o) => o.id === team.orgId)?.name;

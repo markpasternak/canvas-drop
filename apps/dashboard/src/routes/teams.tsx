@@ -377,7 +377,7 @@ function TeamRoster({ team }: { team: Team }) {
               </li>
             );
           })}
-          {/* Pending access: brand-new invitees who haven't signed in yet. They become
+          {/* Pending access: brand-new people who haven't signed in yet. They become
               full members on their first verified login. */}
           {pending.map((p) => (
             <li

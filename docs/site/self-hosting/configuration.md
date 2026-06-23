@@ -50,10 +50,10 @@ change, never a code change.
 | `CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL` | `300` | Seconds a shared cache (a CDN in front) may hold a **public** canvas's HTML (emitted as `s-maxage`; the browser still revalidates each load). Only the `public_link`, no-password rung is ever shared-cacheable — auth-gated canvases stay `private`. Also the window a canvas can stay visible at the edge after access is restricted (the dashboard warns owners with this figure). `0` disables shared caching. See [Behind a CDN](cdn). |
 | `CANVAS_DROP_DESIGN_SKIN` | `editorial` | Instance-wide visual design language: `editorial` \| `studio` \| `workshop` \| `canvas`. An admin can override this at runtime from the console — the DB override wins over this env value. See [Design skins](#design-skins). |
 
-Admin -> Configuration also exposes `core.instanceName`, a DB-managed display name for invite
-and notification emails. It defaults to the `CANVAS_DROP_BASE_URL` host and is deliberately
-separate from `CANVAS_DROP_ORG_NAME`: the org name appears only when an email domain maps to the
-configured org.
+Admin -> Configuration also exposes `core.instanceName`, a DB-managed compatibility display
+name for custom email templates that still use `{{instanceName}}`. The seeded access templates
+do not use the deployment name or org name in recipient copy; they identify the recipient email
+and the specific canvas/team/sign-in action instead.
 
 ## Design skins
 
@@ -98,13 +98,13 @@ from the server-side auth strategy, never from anything the client sends.
 | `CANVAS_DROP_AUTH_MODE` | `dev` | `dev` \| `proxy` \| `oidc`. `dev` is **rejected when `NODE_ENV=production`**. |
 | `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` | (empty) | CSV, lowercased. **Required (≥1) in `proxy`/`oidc`.** |
 
-> **Add users / invites.** Beyond the domain list above, an admin can permit specific
+> **Sign-in permits.** Beyond the domain list above, an admin can permit specific
 > outside emails to sign in (a contractor, a test account, a friend) under
-> **Admin → Users → Add users**. It's an additive, DB-managed layer: the env domain list is
+> **Admin → People → Sign-in permits**. It's an additive, DB-managed layer: the env domain list is
 > unchanged, and an email passes if its domain is allowed **or** it's on this list. Adding an
 > email sends a sign-in invitation and — on a matching org domain — makes them a member on
 > first sign-in; there's no app-owned password (see
-> [Add users & invites](#add-users--invites)). Removing an entry revokes that email's access on
+> [Sign-in permits & access emails](#sign-in-permits--access-emails)). Removing an entry revokes that email's access on
 > its next sign-in. In `proxy` mode this list cannot widen the upstream IAP by itself: admit a
 > brand-new external email in the proxy first, then add it here.
 
@@ -243,7 +243,7 @@ server-side only and is never exposed to the browser.
 
 ## Email transport
 
-Sends auth-delegated invite and notification emails for account, canvas, and team access.
+Sends auth-delegated sign-in and access emails for account, canvas, and team access.
 It is a driver-behind-interface like the database and storage, so adding a future provider is
 a config change. Provider secrets are server-side only and never logged. In `proxy` mode,
 canvas-drop can only notify people who can already authenticate through the upstream IAP; a
@@ -251,7 +251,7 @@ brand-new external email needs operator admission upstream before it can become 
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `CANVAS_DROP_EMAIL_DRIVER` | `log` | `log` (records the envelope only — zero-setup dev, no delivered email) \| `smtp` \| `mailgun` \| `noop` (disables invite/notification email). |
+| `CANVAS_DROP_EMAIL_DRIVER` | `log` | `log` (records the envelope only — zero-setup dev, no delivered email) \| `smtp` \| `mailgun` \| `noop` (disables sign-in/access email). |
 | `CANVAS_DROP_EMAIL_FROM` | `no-reply@<mailgun domain>` or `no-reply@localhost` | Sender address. |
 | `CANVAS_DROP_SMTP_HOST` | (unset) | SMTP server host (driver `smtp`). |
 | `CANVAS_DROP_SMTP_PORT` | `587` | `587` = STARTTLS, `465` = implicit TLS. |
@@ -261,28 +261,32 @@ brand-new external email needs operator admission upstream before it can become 
 | `CANVAS_DROP_MAILGUN_DOMAIN` | (unset) | e.g. `mg.example.com`. |
 | `CANVAS_DROP_MAILGUN_BASE_URL` | `https://api.mailgun.net` | Use `https://api.eu.mailgun.net` for EU. |
 
-## Add users & invites
+<a id="add-users--invites"></a>
+
+## Sign-in permits & access emails
 
 These are **DB-managed admin settings** (no env vars) under **Admin → Configuration**, layered
-on top of the mailer above. They govern the [auth-delegated invite](/docs/self-hosting/security-model#invites-are-auth-delegated-no-app-owned-credentials)
-flow — personal-team invites, the individual canvas **Invite**, and admin **Add person**.
+on top of the mailer above. They govern the [auth-delegated add-person flow](/docs/self-hosting/security-model#adds-are-auth-delegated-no-app-owned-credentials)
+— personal-team adds, canvas **Add person**, and admin sign-in permits.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `email.invitesEnabled` | `false` | Master switch — when off, grants still happen but **no** invite/notification emails are sent (also requires the mailer to be configured). |
-| `email.notifyOnAddUser` | `true` | Email a courtesy invitation when an admin adds a person. Org wording is available only when the email domain maps to the configured org. |
+| `email.invitesEnabled` | `false` | Master switch — when off, grants still happen but **no** sign-in/access emails are sent (also requires the mailer to be configured). |
+| `email.notifyOnAddUser` | `true` | Email a courtesy sign-in invitation when an admin permits a new email. |
 | `email.notifyOnCanvasAdd` | `true` | Email an existing user when added to a canvas (Specific people). |
-| `email.notifyOnCanvasInvite` | `true` | Email on an individual one-off canvas invite. |
-| `invites.allowMemberNewEmails` | `false` | Allow a non-admin **member** to invite a brand-new *external* email (off = only admins, domain-matched, or already-permitted emails). |
-| `invites.maxPerActorPerHour` | `20` | Per-actor invite rate cap (admins bypass). |
-| `invites.pendingCap` | `50` | Max un-consumed pending invitations one actor may hold (admins bypass). |
+| `email.notifyOnCanvasInvite` | `true` | Email on an individual one-canvas access action. |
+| `invites.allowMemberNewEmails` | `false` | Allow a non-admin **member** to add a brand-new *external* email (off = only admins, domain-matched, or already-permitted emails). |
+| `invites.maxPerActorPerHour` | `20` | Per-actor add-person rate cap (admins bypass). |
+| `invites.pendingCap` | `50` | Max unconsumed pending sign-ins one actor may hold (admins bypass). |
 
 Adding a brand-new person to a **team** always emails them the sign-in invitation (gated only by
 the master switch); existing members are not re-notified. **Email templates** for each of these
 messages are admin-editable (subject + HTML + text, with safe `{{variable}}` interpolation and a
-reset to the latest default) under **Admin → Configuration → Email templates**. Available
-variables include `{{instanceName}}`, optional `{{orgName}}` / `{{orgContext}}`,
-`{{canvasTitle}}`, `{{teamName}}`, `{{inviterName}}`, and `{{link}}`.
+reset to the latest default) under **Admin → Configuration → Email templates**. Seeded defaults
+are access-first and recipient-specific: they use `{{recipientEmail}}`, `{{inviterName}}`,
+`{{canvasTitle}}`, `{{teamName}}`, and `{{link}}`. Existing custom templates may still render
+legacy `{{instanceName}}`, `{{orgName}}`, and `{{orgContext}}`, but new default recipient copy
+does not depend on deployment or org branding.
 
 ## Logging & error tracking
 

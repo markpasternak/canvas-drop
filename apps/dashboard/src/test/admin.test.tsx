@@ -151,7 +151,7 @@ const CONFIG_FIELDS = [
     env: "CANVAS_DROP_SMTP_HOST",
     group: "Email",
     label: "SMTP host",
-    help: "Outgoing mail server for invite and notification emails.",
+    help: "Outgoing mail server for sign-in and access emails.",
     type: "string",
     secret: false,
     editable: false,
@@ -654,7 +654,7 @@ describe("admin dashboard", () => {
       { term: "Provider", visible: "Provider API key", hidden: "SMTP host" },
       { term: "CANVAS_DROP_AI_MODELS", visible: "Model allowlist", hidden: "SMTP host" },
       { term: "Email", visible: "SMTP host", hidden: "Auth mode" },
-      { term: "notification emails", visible: "SMTP host", hidden: "Model allowlist" },
+      { term: "access emails", visible: "SMTP host", hidden: "Model allowlist" },
       { term: "smtp.local", visible: "SMTP host", hidden: "Provider API key" },
       { term: "environment", visible: "Auth mode", hidden: "SMTP host" },
     ];

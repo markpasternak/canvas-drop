@@ -172,7 +172,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     expect(h.mailer.sent).toHaveLength(0);
   });
 
-  it("new email, admin actor → permit + pending invitation + courtesy email", async () => {
+  it("new email, admin actor → permit + pending access + courtesy email", async () => {
     const h = await harness();
     const r = await h.svc.resolveOrInvite(h.teamTarget, "newbie@external.io", h.adminActor);
     expect(r).toEqual({ status: "pending" });
@@ -225,7 +225,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     expect(members).toHaveLength(1);
   });
 
-  it("already-pending invitation returns already_pending without duplicating or emailing again", async () => {
+  it("already-pending access returns already_pending without duplicating or emailing again", async () => {
     const h = await harness();
     const first = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);
     const second = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);

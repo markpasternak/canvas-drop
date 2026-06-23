@@ -24,7 +24,7 @@ const boolField: AdminConfigField = {
   key: "email.invitesEnabled",
   env: "—",
   group: "Email",
-  label: "Send invite & notification emails",
+  label: "Send access emails",
   type: "boolean",
   editable: true,
   source: "default",
@@ -85,7 +85,7 @@ describe("admin configuration — enum field (the design-skin flip control)", ()
 
   it("renders a boolean as an On/Off switch reflecting the value — never a free-text true/false box", () => {
     renderRow(boolField);
-    const sw = screen.getByRole("switch", { name: /send invite & notification emails/i });
+    const sw = screen.getByRole("switch", { name: /send access emails/i });
     expect(sw).toBeInTheDocument();
     expect(sw).toHaveAttribute("aria-checked", "false"); // value "false"
     // No free-text box and no separate Save button for a boolean (it saves on flip).

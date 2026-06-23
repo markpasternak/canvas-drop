@@ -11,12 +11,13 @@ import { HOUR_MS, type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { Logger } from "../log/logger.js";
 
 /**
- * The invite primitive (plan 003 phase 3 / U5). ONE shared layer every owner-facing invite
- * surface routes through (team add, canvas Specific-people add, individual canvas invite, admin
- * Add-users): rate-limit → resolve → grant-now-or-record-pending → notify.
+ * The Add person primitive (plan 003 phase 3 / U5). ONE shared layer every owner-facing
+ * person-access surface routes through (team add, canvas Specific people add,
+ * individual canvas access, admin sign-in permits): rate-limit → resolve →
+ * grant-now-or-record-pending → notify.
  *
  * Auth-delegated (KTD3/KTD4): there are no app-owned credentials. An existing user is granted
- * immediately; a brand-new email is recorded as a pending invitation that materializes on the
+ * immediately; a brand-new email is recorded as pending access that materializes on the
  * person's first VERIFIED login (the IdP/proxy is the identity authority — see auth/invitations).
  *
  * KTD5 (the load-bearing gate): a self-serve actor can NOT permit a brand-new external email to
@@ -112,7 +113,7 @@ function templateKeyFor(target: InviteTarget): TemplateKey {
 }
 
 /** Whether an EXISTING-user grant emails an FYI (per the event's toggle). A team add never
- *  notifies an existing member (only brand-new invitees learn to sign in). */
+ *  notifies an existing member (only brand-new people need to learn to sign in). */
 function notifyExisting(target: InviteTarget, s: EffectiveInviteSettings): boolean {
   switch (target.kind) {
     case "team":
@@ -207,7 +208,7 @@ export function inviteService(deps: InviteServiceDeps) {
   return {
     /**
      * Resolve an email to a grant. Existing user → granted now; brand-new email → permit +
-     * pending invitation (gated by KTD5) or rejected. Rate-limited per actor; admins bypass the
+     * pending access (gated by KTD5) or rejected. Rate-limited per actor; admins bypass the
      * caps (the trusted higher ceiling). The email is lowercased/trimmed; idempotent for an
      * already-member (the repo inserts are no-ops on conflict).
      */

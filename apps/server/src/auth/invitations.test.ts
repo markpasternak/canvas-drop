@@ -60,7 +60,7 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(members).toHaveLength(1);
   });
 
-  it("identity is the verified login email only — a pending invitation never grants without a matching login", async () => {
+  it("identity is the verified login email only — pending access never grants without a matching login", async () => {
     const { users, teams, invitations, deps, inviter } = await harness();
     const team = await teams.create({ orgId: null, name: "Family", createdBy: inviter.id });
     await invitations.record({
@@ -69,7 +69,7 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
       invitedBy: inviter.id,
     });
 
-    // A DIFFERENT email signs in — the pending invitation for wanted@x.com must not apply.
+    // A DIFFERENT email signs in — the pending access for wanted@x.com must not apply.
     const other = await users.upsert({
       providerSub: "dev:other",
       email: "other@x.com",
@@ -124,7 +124,7 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(members).toHaveLength(1);
   });
 
-  it("deleting a team clears its pending invitations, so a later login never FK-retries a vanished target (review fix)", async () => {
+  it("deleting a team clears its pending access, so a later login never FK-retries a vanished target (review fix)", async () => {
     const { users, teams, invitations, deps, inviter } = await harness();
     const team = await teams.create({ orgId: null, name: "Doomed", createdBy: inviter.id });
     await invitations.record({
@@ -136,7 +136,7 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
 
     // The team is deleted before the invitee ever signs in.
     await teams.remove(team.id);
-    // The pending invitation is gone (no orphaned row to FK-fail forever on every login).
+    // The pending access row is gone (no orphaned row to FK-fail forever on every login).
     expect(await invitations.listForEmail("late@x.com")).toHaveLength(0);
 
     // A belated first login is a clean no-op: no membership materialized, no throw.

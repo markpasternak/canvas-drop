@@ -484,7 +484,7 @@ describe("canvasAccess — disabled-canvas rendering", () => {
 describe("principalLookupKey — allowlist match parity", () => {
   it("normalizes a guest email to trim+lowercase so casing/whitespace never spuriously denies", () => {
     // Allowlist rows are stored trim+lowercased (allowlistAddSchema); the lookup
-    // key must match that form or a legitimately-invited guest gets denied.
+    // key must match that form or a retained legacy guest gets denied.
     expect(principalLookupKey(guest("cv1", "  Guest@Acme.COM "))).toEqual({
       email: "guest@acme.com",
     });

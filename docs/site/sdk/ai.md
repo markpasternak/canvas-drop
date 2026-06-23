@@ -84,9 +84,9 @@ Use the exact model id as configured.
 - **Capability off.** If the `ai` capability is disabled for the canvas — or no
   provider key is configured on the instance — calls throw
   `CapabilityDisabledError` (`code: "CAPABILITY_DISABLED"`, HTTP 403).
-- **Guests.** When an invited guest (not an org member) calls AI, the owner must
-  have opted the canvas in, or the call throws `code: "GUEST_AI_DISABLED"`
-  (HTTP 403). Guest spend has its own cap; hitting it throws
+- **Retained legacy guest sessions.** When a retained legacy guest session calls AI,
+  the owner must have opted the canvas in, or the call throws
+  `code: "GUEST_AI_DISABLED"` (HTTP 403). Legacy guest spend has its own cap; hitting it throws
   `QuotaExceededError` with `code: "GUEST_AI_CAP"` (HTTP 429).
 - **Stream truncated.** If the stream ends before a terminal frame arrives,
   both `chat` and `stream` throw with `code: "AI_STREAM_TRUNCATED"` (HTTP 502).

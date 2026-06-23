@@ -15,7 +15,7 @@ import type { StorageDriver } from "../storage/driver.js";
  * content surface, mounted AFTER `canvasAccess` + `passwordGate` — so the access
  * decision (`decideCanvasAccess`) and the password rung have already run. By the time
  * this handler sees a request, the requester is authorized to view the canvas:
- *   - owner / allowed member / invited guest → served (incl. private/gated covers);
+ *   - owner / allowed member / retained legacy guest → served (incl. private/gated covers);
  *   - public_link anonymous → served (the cover is public, like the content);
  *   - anyone else → `canvasAccess` already 404'd, never reaching here.
  *

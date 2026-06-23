@@ -126,9 +126,9 @@ export function teamsRepository(client: DbClient) {
       await db.update(teamsT).set({ name }).where(eq(teamsT.id, id));
     },
 
-    /** Delete a team + its memberships + its canvas grants + any pending invitations to it
+    /** Delete a team + its memberships + its canvas grants + any pending access rows for it
      *  (the team no longer scopes anything). Transactional so a mid-operation failure can't
-     *  leave orphaned member/grant rows. Clearing pending invitations is load-bearing: an
+     *  leave orphaned member/grant rows. Clearing pending access is load-bearing: an
      *  invitation whose target team is gone would otherwise FK-fail on every future login of
      *  the invitee's email (the materialize hook) and never self-heal. */
     async remove(id: string): Promise<void> {

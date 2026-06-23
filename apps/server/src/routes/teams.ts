@@ -129,7 +129,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     const rows = await deps.teams.getMembers(team.id);
     const users = await deps.users.findByIds(rows.map((m) => m.userId));
     const byId = new Map(users.map((u) => [u.id, u]));
-    // Pending invitations (plan 003 U6): brand-new invitees who haven't signed in yet. They
+    // Pending access (plan 003 U6): brand-new people who haven't signed in yet. They
     // appear as email-only "Pending" rows (no userId) until their first verified login
     // materializes the membership. Suppress any whose email already became a member.
     const memberEmails = new Set(
@@ -153,7 +153,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     const r = await deps.service.addMemberByEmail(actorOf(c), c.req.param("id"), body.data.email);
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     // `granted`/`already_added` = an existing user is active now; `pending`/`already_pending`
-    // = a brand-new invitee will join on their first verified login.
+    // = a brand-new person will join on their first verified login.
     return c.json({ ok: true, status: r.status });
   });
 

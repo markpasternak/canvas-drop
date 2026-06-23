@@ -112,7 +112,7 @@ export interface Canvas {
   /** Home tenant (plan 002): null = Personal, else the org id. Map to a name via
    *  `useMe().orgs` for the scope badge + to gate the org-only share controls. */
   orgId: string | null;
-  /** Guest-AI opt-in (U9): off by default; lets invited guests use the AI primitive. */
+  /** Retained legacy guest-session AI opt-in (U9): off by default. */
   guestAiEnabled: boolean;
   /** Per-canvas guest-AI spend cap in USD (U9); 0 disables guest AI spend entirely. */
   guestAiCap: number;
@@ -305,14 +305,14 @@ export interface TeamMember {
   name: string | null;
 }
 
-/** A pending invitation on a team's roster (plan 003 U6): a brand-new invitee who hasn't
+/** Pending access on a team's roster (plan 003 U6): a brand-new person who hasn't
  *  signed in yet. They join (become a TeamMember) on their first verified login. */
 export interface TeamPendingInvite {
   email: string;
   invitedAt: number;
 }
 
-/** A team's full roster: active members + not-yet-signed-in pending invitations. */
+/** A team's full roster: active members + not-yet-signed-in pending access. */
 export interface TeamRoster {
   members: TeamMember[];
   pending: TeamPendingInvite[];
@@ -1054,9 +1054,8 @@ export const api = {
       `/api/canvases/${id}/allowlist`,
       jsonBody({ email }),
     ),
-  /** Individual one-off canvas invite (plan 003 U8): a deliberate invite that sends a courtesy
-   *  email. `granted` = an existing user got access now; `pending` = a brand-new invitee was
-   *  emailed and gets access on their first sign-in. */
+  /** Individual one-canvas access email (plan 003 U8). `granted` = an existing user got
+   *  access now; `pending` = a brand-new person gets access on their first sign-in. */
   inviteToCanvas: (id: string, email: string) =>
     request<{ ok: true; status: AddMemberStatus }>(
       `/api/canvases/${id}/invite`,
@@ -1287,10 +1286,10 @@ export const api = {
     revokePublic: (id: string) =>
       request<{ ok: true }>(`/api/admin/users/${id}/revoke-public`, { method: "POST" }),
 
-    /** Add users / sign-in permits (plan 003 U7). Lists the off-domain permits; `addUser`
-     *  permits a brand-new email (or grants an existing one) via the invite primitive — it
+    /** Sign-in permits (plan 003 U7). Lists the off-domain permits; `addUser`
+     *  permits a brand-new email (or grants an existing one) via Add person — it
      *  sends a courtesy email and, on a matching org domain, makes them a member on first login.
-     *  `status`: `granted` (already a user) or `pending` (a brand-new invitee). */
+     *  `status`: `granted` (already a user) or `pending` (a brand-new person). */
     listAllowedEmails: () =>
       request<{ emails: AllowedEmail[] }>("/api/admin/allowed-emails").then((r) => r.emails),
     addAllowedEmail: (email: string) =>

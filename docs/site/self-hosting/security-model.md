@@ -119,27 +119,27 @@ a default. Turning it on for an existing instance is a one-time, dry-run-first
 cutover — see [Configuration → Tenancy](/docs/self-hosting/configuration) and the
 `docs/tenancy.md` runbook.
 
-## Invites are auth-delegated (no app-owned credentials)
+## Adds are auth-delegated (no app-owned credentials)
 
-When you invite someone who doesn't have an account yet — to a personal team, a canvas, or
-via the admin **Add users** page — canvas-drop records a **pending invitation**, not a new
+When you add someone who doesn't have an account yet — to a personal team, a canvas, or
+via **Admin -> People -> Sign-in permits** — canvas-drop records **pending access**, not a new
 login. There is **no app-owned magic-link account and no app-stored password**. The grant
 materializes the *first time that email authenticates* through the instance's configured auth
 (`oidc` / `proxy` / `dev`) — the identity provider is the only authority, so there's nothing
-to take over. The verified login email is the match key; a pending invitation can never grant
+to take over. The verified login email is the match key; pending access can never grant
 access on its own.
 
 Who may permit a **brand-new email** to sign in is gated (a load-bearing rule):
 
-- An **admin** can, via [Add users](/docs/self-hosting/configuration#add-users--invites).
+- An **admin** can, via [Sign-in permits](/docs/self-hosting/configuration#sign-in-permits--access-emails).
 - A **member** can only if the operator turns on `invites.allowMemberNewEmails` (off by
   default), **or** the email already authenticates (its domain is allowlisted, or it's already
-  a permitted user). Otherwise a self-serve invite of an unknown external email is **rejected**
+  a permitted user). Otherwise a self-serve add of an unknown external email is **rejected**
   — a member can't widen who may sign in to your instance.
 
 This replaces the older guest **magic-link** flow. New canvas and team sharing never mints
 app-owned guest credentials; it records pending grants that depend on the configured auth path.
-Invite volume is bounded per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
+Add-person volume is bounded per-actor (`invites.maxPerActorPerHour`, `invites.pendingCap`).
 
 ## Identity is always server-side (invariant #1)
 

@@ -4,9 +4,9 @@ import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { type Harness, jsonOf, makeHarness, scenarioConfig } from "./scenario-harness.js";
 
 /**
- * End-to-end invariants for the auth-delegated invite flow (plan 003 U4/U5/U6/U7) over the
- * REAL composed app. Rejection-first: a pending invitation NEVER grants on its own — it
- * materializes only on the invitee's first VERIFIED login (the gateway hook). The KTD5 gate
+ * End-to-end invariants for the auth-delegated Add person flow (plan 003 U4/U5/U6/U7) over the
+ * REAL composed app. Rejection-first: pending access NEVER grants on its own — it
+ * materializes only on the person's first VERIFIED login (the gateway hook). The KTD5 gate
  * (a self-serve actor can't permit a brand-new external email; an admin can) and the per-actor
  * rate cap are exercised through the real HTTP routes.
  */
@@ -57,8 +57,8 @@ describe.each(DIALECTS)("invite scenarios [%s]", (dialect) => {
     const h = makeHarness(client, { config: inviteConfig() });
     const { teamId, slug } = await setupPersonalTeamCanvas(h);
 
-    // Invite a BRAND-NEW (not-yet-signed-in) email. Domain-allowed → a self-serve owner may
-    // record a pending invitation. The invite returns `pending` (no user row yet).
+    // Add a BRAND-NEW (not-yet-signed-in) email. Domain-allowed → a self-serve owner may
+    // record pending access. The add returns `pending` (no user row yet).
     const invite = await h.SEND(FRIEND, "POST", `/api/teams/${teamId}/members`, { email: NEWPAL });
     expect(invite.status).toBe(200);
     expect((await jsonOf<{ status: string }>(invite)).status).toBe("pending");
@@ -122,7 +122,7 @@ describe.each(DIALECTS)("invite scenarios [%s]", (dialect) => {
     expect(rejected.status).toBe(403);
     expect((await jsonOf<{ error: string }>(rejected)).error).toBe("TARGET_NOT_PERMITTED");
 
-    // An ADMIN can permit that same external email to sign in via Add users.
+    // An ADMIN can permit that same external email to sign in via Sign-in permits.
     await (await h.GET(ADMIN, "/api/me")).text();
     const added = await h.SEND(ADMIN, "POST", "/api/admin/allowed-emails", { email: STRANGER });
     expect(added.status).toBe(200);

@@ -100,7 +100,7 @@ function visibility(canvas: CanvasListItem): { primary: string; secondary: strin
     case "specific_people":
       return {
         primary: gated ? "Specific people + protected" : "Specific people",
-        secondary: gated ? "Password required" : "Invited only",
+        secondary: gated ? "Password required" : "Added people only",
       };
     case "team":
       return {

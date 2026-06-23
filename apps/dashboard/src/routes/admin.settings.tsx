@@ -342,7 +342,7 @@ const EMAIL_SUBS = new Set([
 /** A short intro note for a group, shown under its heading. */
 const GROUP_NOTES: Record<string, string> = {
   Email:
-    "Invite + notification emails send only when the master switch is on AND an email driver (SMTP or Mailgun) is configured. With no driver, a new invitee still joins on first sign-in — they just won't get an onboarding email.",
+    "Access emails send only when the master switch is on AND an email driver (SMTP or Mailgun) is configured. With no driver, a new person can still join on first sign-in — they just won't get an onboarding email.",
 };
 
 /** Anchor id for a group section (and its nav link). */
@@ -389,7 +389,7 @@ function Configuration() {
   const gateOf = (field: AdminConfigField): { disabled?: boolean; disabledReason?: string } => {
     const master = byKey.get(EMAIL_MASTER);
     if (EMAIL_SUBS.has(field.key) && master && !fieldOn(master)) {
-      return { disabled: true, disabledReason: "Needs “Send invite & notification emails” on." };
+      return { disabled: true, disabledReason: "Needs “Send access emails” on." };
     }
     return {};
   };
@@ -528,11 +528,11 @@ const TEMPLATE_META: Record<string, { label: string; help: string }> = {
     help: "Sent when a person is given access to a canvas via Specific people.",
   },
   individual_canvas_invite: {
-    label: "Individual canvas invite",
-    help: "Sent for a one-off invite of a person to a single canvas.",
+    label: "Individual canvas access",
+    help: "Sent when a person is deliberately given one-canvas access.",
   },
   team_invite: {
-    label: "Team invite",
+    label: "Team access",
     help: "Sent to a brand-new person added to a team, so they can sign in and see what's shared.",
   },
 };
@@ -632,7 +632,7 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
   );
 }
 
-/** Admin email-template editor: each invite/notification email, subject + HTML + text. */
+/** Admin email-template editor: each sign-in/access email, subject + HTML + text. */
 function EmailTemplates() {
   const templates = useAdminEmailTemplates();
   if (templates.isError) {
@@ -654,7 +654,7 @@ function EmailTemplates() {
       <div className="mb-2">
         <h2 className="text-sm font-semibold text-fg">Email templates</h2>
         <p className="text-xs text-muted">
-          Customize the invite and notification emails. Variables:{" "}
+          Customize the sign-in and access emails. Variables:{" "}
           <span className="font-mono">{TEMPLATE_VARS}</span> (HTML-escaped in the HTML body).
           Unknown variables render empty. Reset uses the latest seeded default.
         </p>
