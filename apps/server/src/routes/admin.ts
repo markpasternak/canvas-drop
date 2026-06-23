@@ -14,6 +14,8 @@ import type { AuditLog } from "../audit/audit-log.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { canvasUrl } from "../canvas/url.js";
 import type {
+  AdminCanvasContextFilter,
+  AdminCanvasExpiryFilter,
   AdminCanvasStatus,
   AdminPersonKind,
   AdminPublicCapabilityFilter,
@@ -59,6 +61,8 @@ export interface AdminRoutesDeps {
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
 const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public_link"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
+const EXPIRY_FILTERS = ["none", "active", "expired"] as const;
+const CONTEXT_FILTERS = ["personal", "org", "team"] as const;
 // `"true"` ⇒ on; anything else (absent / "false") ⇒ off. Boolean facets are
 // presence-style flags in the URL (?templatable=true), mirroring the member list.
 const boolFlag = z
@@ -68,6 +72,12 @@ const boolFlag = z
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
   access: z.enum(ACCESS_RUNGS).optional(),
+  publicLink: boolFlag,
+  password: boolFlag,
+  external: boolFlag,
+  pending: boolFlag,
+  expiry: z.enum(EXPIRY_FILTERS).optional(),
+  context: z.enum(CONTEXT_FILTERS).optional(),
   templatable: boolFlag,
   listed: boolFlag,
   q: z.string().trim().max(200).optional(),
@@ -157,6 +167,12 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const q = listQuery.safeParse({
       status: c.req.query("status"),
       access: c.req.query("access"),
+      publicLink: c.req.query("public"),
+      password: c.req.query("password"),
+      external: c.req.query("external"),
+      pending: c.req.query("pending"),
+      expiry: c.req.query("expiry"),
+      context: c.req.query("context"),
       templatable: c.req.query("templatable"),
       listed: c.req.query("listed"),
       q: c.req.query("q"),
@@ -168,9 +184,17 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     });
     if (!q.success) return c.json({ error: "invalid_query" }, 400);
 
+    const publicLinksEnabled = await deps.settings.effectivePublicLinksEnabled();
     const { items: rows, total } = await deps.admin.listAllCanvasesFiltered({
       status: q.data.status as AdminCanvasStatus | undefined,
       access: q.data.access,
+      publicLink: q.data.publicLink,
+      publicLinksEnabled,
+      password: q.data.password,
+      external: q.data.external,
+      pending: q.data.pending,
+      expiry: q.data.expiry as AdminCanvasExpiryFilter | undefined,
+      context: q.data.context as AdminCanvasContextFilter | undefined,
       templatable: q.data.templatable,
       listed: q.data.listed,
       q: q.data.q,
@@ -186,11 +210,12 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const versionIds = rows
       .map((cv) => cv.currentVersionId)
       .filter((id): id is string => id !== null);
-    const [owners, versions, fileBytes, usage] = await Promise.all([
+    const [owners, versions, fileBytes, usage, exposure] = await Promise.all([
       deps.users.findByIds(ownerIds),
       deps.versions.findByIds(versionIds),
       deps.files.bytesByCanvas(ids),
       deps.admin.usageCountByCanvas(ids),
+      deps.admin.exposureByCanvas(ids),
     ]);
     const ownerById = new Map(owners.map((u) => [u.id, u]));
     const versionById = new Map(versions.map((v) => [v.id, v]));
@@ -221,6 +246,22 @@ export function adminRoutes(deps: AdminRoutesDeps) {
         hasPassword: cv.passwordHash !== null,
         sharedExpiresAt: cv.sharedExpiresAt,
         owner: owner ? { id: owner.id, email: owner.email, name: owner.name } : null,
+        ownerCanPublishPublic: owner?.canPublishPublic ?? null,
+        publicLinkEffective:
+          cv.access === "public_link" && publicLinksEnabled && (owner?.canPublishPublic ?? false),
+        expiryState:
+          cv.sharedExpiresAt === null
+            ? "none"
+            : cv.sharedExpiresAt <= Date.now()
+              ? "expired"
+              : "active",
+        context: cv.access === "team" ? "team" : cv.orgId === null ? "personal" : "org",
+        exposure: exposure.get(cv.id) ?? {
+          specificPeopleCount: 0,
+          teamCount: 0,
+          pendingInviteCount: 0,
+          externalPeopleCount: 0,
+        },
         // Size = deployed version bytes + uploaded file bytes (§6.10.1).
         sizeBytes: deployedBytes + (fileBytes.get(cv.id) ?? 0),
         usageOps: usage.get(cv.id) ?? 0,
