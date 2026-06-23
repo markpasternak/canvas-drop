@@ -1,3 +1,4 @@
+import type { Invitation } from "@canvas-drop/shared/db";
 import type { AllowlistEntry } from "../db/repositories/canvases.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 
@@ -7,12 +8,13 @@ import type { UsersRepository } from "../db/repositories/users.js";
 export async function resolveAllowlistEntries(
   entries: AllowlistEntry[],
   users: Pick<UsersRepository, "findByIds">,
+  pending: Invitation[] = [],
 ) {
   const memberIds = entries
     .filter((e) => e.principalKind === "member" && e.userId)
     .map((e) => e.userId as string);
   const byId = new Map((await users.findByIds(memberIds)).map((u) => [u.id, u]));
-  return entries.map((e) => {
+  const active = entries.map((e) => {
     const u = e.userId ? byId.get(e.userId) : undefined;
     return {
       id: e.id,
@@ -22,4 +24,17 @@ export async function resolveAllowlistEntries(
       createdAt: e.createdAt,
     };
   });
+  const activeEmails = new Set(
+    active.map((e) => e.email?.trim().toLowerCase()).filter((e): e is string => !!e),
+  );
+  const pendingRows = pending
+    .filter((inv) => !activeEmails.has(inv.email.trim().toLowerCase()))
+    .map((inv) => ({
+      id: `pending:${inv.id}`,
+      kind: "pending" as const,
+      email: inv.email,
+      name: null,
+      createdAt: inv.createdAt,
+    }));
+  return [...active, ...pendingRows];
 }

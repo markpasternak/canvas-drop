@@ -400,19 +400,20 @@ describe("share route", () => {
         }),
       "POST /api/canvases/c1/allowlist": () => {
         added = true;
-        return json({ ok: true });
+        return json({ ok: true, status: "granted" });
       },
     });
     renderShare();
 
     expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
     await user.type(await screen.findByLabelText(/person's email/i), "colleague@example.com");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Add person" }));
     expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
   });
 
-  it("specific_people: the Invite button sends an individual invite (plan 003 U8)", async () => {
+  it("specific_people: Add person records a pending external email", async () => {
     const user = userEvent.setup();
+    let pending = false;
     const calls = mockFetch({
       "GET /api/canvases/c1": () =>
         json({
@@ -422,15 +423,34 @@ describe("share route", () => {
           shared: true,
           currentVersionId: "v1",
         }),
-      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
-      "POST /api/canvases/c1/invite": () => json({ ok: true, status: "pending" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: pending
+            ? [
+                {
+                  id: "pending:p1",
+                  kind: "pending",
+                  email: "newbie@example.com",
+                  name: null,
+                  createdAt: 1,
+                },
+              ]
+            : [],
+        }),
+      "POST /api/canvases/c1/allowlist": () => {
+        pending = true;
+        return json({ ok: true, status: "pending" });
+      },
     });
     renderShare();
 
     await user.type(await screen.findByLabelText(/person's email/i), "newbie@example.com");
-    await user.click(screen.getByRole("button", { name: "Invite" }));
+    expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add person" }));
+    expect(await screen.findByText("newbie@example.com")).toBeInTheDocument();
+    expect(screen.getByText(/pending sign-in/i)).toBeInTheDocument();
     await vi.waitFor(() => {
-      const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/invite");
+      const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/allowlist");
       expect(post?.body).toContain("newbie@example.com");
     });
   });
