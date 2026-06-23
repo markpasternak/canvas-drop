@@ -42,7 +42,8 @@ that communicates better as a working artifact than as a screenshot or a slide.
 - **Share** the URL on a per-canvas access rung: `private` (owner only),
   `specific_people` (signed-in members plus auth-delegated pending emails),
   `whole_org` (any signed-in member with the link), or `public_link` (anyone with
-  the link, admin-gated per owner, and static-only). Layer on a per-canvas
+  the link, static-only while the instance switch is on and the owner account has
+  not been revoked). Layer on a per-canvas
   password or a share expiry, and list a shared canvas in the gallery for
   colleagues to browse. A canvas must be published before any shared rung takes
   effect. With an optional [org boundary](/docs/self-hosting/configuration)

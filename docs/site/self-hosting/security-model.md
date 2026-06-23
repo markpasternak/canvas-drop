@@ -77,8 +77,8 @@ These are the guarantees the platform upholds (`BUILD_BRIEF.md` §12.0):
    under inert tenancy or with no home org is a deny to everyone); at `specific_people`, a signed-in
    principal on its allowlist (an existing user or a pending email after that exact
    email has verified through the configured auth); at `public_link`, anyone — but
-   static-only and only while the owner account holds the admin-granted publish
-   capability. Pending grants have no auth power by themselves. All subject to
+   static-only and only while the instance public-link switch is on and the owner
+   account has not been revoked. Pending grants have no auth power by themselves. All subject to
    not revoked/expired and any password. An **admin has no special access to
    canvases it doesn't own** — for someone else's canvas an admin is treated as an
    ordinary org member: the rung applies (a non-owned private or unlisted canvas

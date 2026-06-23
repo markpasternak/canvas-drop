@@ -157,4 +157,19 @@ describe.each(DIALECTS)("usersRepository [%s]", (dialect) => {
     });
     expect(again.isBlocked).toBe(true);
   });
+
+  it("setPublishPublic revocation persists across a later login", async () => {
+    client = await makeTestDb(dialect);
+    const repo = usersRepository(client);
+    const u = await repo.upsert({ providerSub: "s", email: "a@x.com", name: "A", isAdmin: false });
+    expect(u.canPublishPublic).toBe(true);
+    await repo.setPublishPublic(u.id, false);
+    const again = await repo.upsert({
+      providerSub: "s",
+      email: "a@x.com",
+      name: "A",
+      isAdmin: false,
+    });
+    expect(again.canPublishPublic).toBe(false);
+  });
 });

@@ -118,8 +118,8 @@ Share tab (or its session-authenticated management API). The rung is one of:
   org-attached (a subset of the org, re-checked against live org membership on every
   request). Strictly team-scoped (never in the gallery).
 - `whole_org` — any authenticated org member with the link.
-- `public_link` — anyone with the link. Admin-gated per owner account
-  (`canPublishPublic`), and **static-only** for non-owners: every backend
+- `public_link` — anyone with the link while the instance switch is on and the owner
+  account has not been revoked (`canPublishPublic`), and **static-only** for non-owners: every backend
   primitive is refused, returning `403 STATIC_ONLY`.
 
 Specific people are added through auth-delegated Add person grants: existing users are

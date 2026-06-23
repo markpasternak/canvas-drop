@@ -30,9 +30,11 @@ import type { AppEnv } from "./types.js";
  *     mode — one card for every gated link, leaking nothing about the target. Real
  *     humans are redirected straight on to `/auth/login` (parity with the gateway).
  *
- * Only active in `oidc` mode: `proxy` never reaches the app unauthenticated (the
- * IAP bounces it) and `dev` is always signed in. (The per-canvas branch keys off
- * the `anonymous` principal, which only exists in app-gated modes anyway.)
+ * The generic signed-out card is only active in `oidc` mode. The per-canvas card
+ * keys off an already-resolved `anonymous` principal, which the public-link
+ * resolver now sets only after the effective public-link gates pass. In `proxy`
+ * mode that resolver uses a fallback principal instead, so signed-out public-link
+ * visitors reach the static canvas without socialPreview minting metadata first.
  */
 
 const PREVIEW_TITLE = "canvas-drop";

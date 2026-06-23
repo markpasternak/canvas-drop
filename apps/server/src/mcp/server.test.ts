@@ -39,12 +39,12 @@ const domainConfig = loadConfig({
   CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
 });
 
-async function seedUser(client: DbClient, email: string): Promise<string> {
+async function seedUser(client: DbClient, email: string, isAdmin = false): Promise<string> {
   const u = await usersRepository(client).upsert({
     providerSub: email,
     email,
     name: email,
-    isAdmin: false,
+    isAdmin,
   });
   return u.id;
 }
@@ -53,7 +53,7 @@ async function seedUser(client: DbClient, email: string): Promise<string> {
  *  toggles the effective preview pipeline (plan 004); the real repo always backs it. */
 async function connect(
   client: DbClient,
-  caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
+  caller: { userId: string; isAdmin?: boolean; orgIds?: Set<string>; tenancyActive?: boolean },
   screenshotsEnabled = false,
   // Config the MCP server runs under. Defaults to the org-less config; team-grant tests
   // pass a tenancy config so `update_canvas access=team` sees tenancy active (the guard
@@ -126,6 +126,7 @@ async function connect(
     },
     {
       userId: caller.userId,
+      isAdmin: caller.isAdmin ?? false,
       orgIds: caller.orgIds ?? new Set<string>(),
       tenancyActive: caller.tenancyActive ?? false,
     },
@@ -222,7 +223,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       name: "deploy_canvas",
       arguments: { id: created.id, zipBase64: zip({ "index.html": "<h1>hi</h1>" }) },
     });
-    // Seed the anonymously-public state directly (public_link is admin-gated), then
+    // Seed the anonymously-public state directly, then
     // exercise the downgrade through the MCP tool — the warning must reach the agent.
     await canvasesRepository(client).updateSettings(created.id, { access: "public_link" });
     const restricted = payload(
@@ -822,6 +823,66 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(revoked.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
     expect(after.entries).toHaveLength(0);
+  });
+
+  it("admin owners can admit a never-seen external email through grant_access", async () => {
+    client = await makeTestDb(dialect);
+    const admin = await seedUser(client, "admin@example.com", true);
+    const mcp = await connect(client, { userId: admin, isAdmin: true });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+
+    const pending = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "contractor@external.test" },
+      }),
+    );
+    expect(pending).toMatchObject({ ok: true, status: "pending" });
+    expect(
+      await invitationsRepository(client).listForEmail("contractor@external.test"),
+    ).toHaveLength(1);
+  });
+
+  it("search_people mirrors the canvas Add person picker scope", async () => {
+    client = await makeTestDb(dialect);
+    const org = await orgsRepository(client).ensureOrg({
+      name: "Example",
+      slug: "example",
+      domains: ["example.com"],
+    });
+    const owner = await seedUser(client, "owner@example.com");
+    const colleague = await seedUser(client, "colleague@example.com");
+    const alreadyAdded = await seedUser(client, "added@example.com");
+    await seedUser(client, "outsider@example.com");
+    const orgMembers = orgMembersRepository(client);
+    for (const userId of [owner, colleague, alreadyAdded]) {
+      await orgMembers.upsertDomainMember(org.id, userId);
+    }
+    const canvases = canvasesRepository(client);
+    const cv = await canvases.create({
+      ownerId: owner,
+      slug: "org-picker",
+      apiKeyHash: "h",
+      orgId: org.id,
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: alreadyAdded,
+    });
+    const mcp = await connect(client, {
+      userId: owner,
+      orgIds: new Set([org.id]),
+      tenancyActive: true,
+    });
+
+    const result = payload(
+      await mcp.callTool({
+        name: "search_people",
+        arguments: { context: "canvas", canvasId: cv.id, q: "example" },
+      }),
+    );
+    expect(result.people.map((p: { email: string }) => p.email)).toEqual(["colleague@example.com"]);
   });
 
   it("does not expose the retired resend_guest_invite tool", async () => {

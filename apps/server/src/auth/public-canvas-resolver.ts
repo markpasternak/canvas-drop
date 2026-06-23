@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
+import { isAnonymouslyPublic } from "../canvas/authorization.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { AppEnv } from "../http/types.js";
 import { resolveRequest } from "../routing/resolve-request.js";
@@ -8,7 +9,8 @@ import { SESSION_COOKIE } from "./session.js";
 
 export interface PublicCanvasResolverDeps {
   config: Config;
-  canvases: Pick<CanvasesRepository, "findBySlug">;
+  canvases: Pick<CanvasesRepository, "findBySlug" | "isOwnerPublishEnabled">;
+  publicLinksEnabled?: () => Promise<boolean>;
 }
 
 /**
@@ -26,13 +28,24 @@ export function publicCanvasResolver(deps: PublicCanvasResolverDeps) {
     );
     if ((role !== "canvas" && role !== "platform-api") || !canvasSlug) return next();
 
-    // If an org session exists, let the normal gateway authenticate the member so
-    // owners keep full access and non-owners are classified by the decision table.
-    if (getCookie(c, SESSION_COOKIE)) return next();
-
     const canvas = await deps.canvases.findBySlug(canvasSlug);
-    if (canvas && canvas.status === "active" && canvas.access === "public_link") {
-      c.set("principal", { kind: "anonymous" });
+    const publicLinksEnabled = await (deps.publicLinksEnabled?.() ?? Promise.resolve(true));
+    if (
+      canvas &&
+      canvas.status === "active" &&
+      publicLinksEnabled &&
+      (await deps.canvases.isOwnerPublishEnabled(canvas.ownerId)) &&
+      isAnonymouslyPublic(
+        canvas.access,
+        canvas.passwordHash !== null,
+        canvas.sharedExpiresAt,
+        Date.now(),
+      )
+    ) {
+      const anonymous = { kind: "anonymous" as const };
+      if (deps.config.auth.mode === "proxy" || getCookie(c, SESSION_COOKIE)) {
+        c.set("publicFallbackPrincipal", anonymous);
+      } else c.set("principal", anonymous);
     }
     return next();
   });

@@ -34,6 +34,7 @@ import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { DraftService } from "../draft/service.js";
 import type { InviteService } from "../invites/service.js";
 import type { Logger } from "../log/logger.js";
+import { searchPersonSuggestions } from "../people/search.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { encodeRenditions } from "../screenshots/capture.js";
 import { deletePreviewRenditions } from "../screenshots/custom-preview.js";
@@ -59,8 +60,9 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  route's membership resolver that derives the caller's orgIds. */
   orgs: Pick<OrgsRepository, "findById" | "findByDomain">;
   /** Explicit org-membership store (plan 003 U2) — the MCP membership resolver
-   *  materializes a row so a pure-MCP user still appears in the org roster. */
-  orgMembers: Pick<OrgMembersRepository, "upsertDomainMember">;
+   *  materializes a row so a pure-MCP user still appears in the org roster; the
+   *  people-search parity tool also uses it for org-scoped suggestions. */
+  orgMembers: Pick<OrgMembersRepository, "upsertDomainMember" | "searchMembers">;
   /** Teams store + service (plan 003 U6) — agent-native parity for the team tools and
    *  the `team` canvas grant. The tools wrap the SAME service the management routes use. */
   teams: TeamsRepository;
@@ -104,6 +106,7 @@ const READBACK_MAX_BYTES = 256 * 1024;
  *  MCP route from the user — never client-asserted; `tenancyActive` mirrors config. */
 export interface McpCaller {
   userId: string;
+  isAdmin: boolean;
   orgIds: Set<string>;
   tenancyActive: boolean;
 }
@@ -149,18 +152,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
    *  (shared gate + degrade with the management and gallery surfaces). */
   const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
 
-  /** The team-management actor for THIS caller (plan 003 U6). `isAdmin` is fixed FALSE on
-   *  the per-account MCP surface: cross-owner admin team actions are the dedicated admin
-   *  routes only (agent-native parity rule's exception), so over MCP "manage" means the
-   *  team CREATOR only. `orgIds` is the caller's LIVE server-resolved membership; name/email
-   *  (for personal-team invites) are loaded once from the caller's own user row. */
+  /** The caller identity for invite/team service calls. Admin authority is passed only
+   *  where the owner surface intentionally supports it (canvas add-person admission).
+   *  Team management over MCP stays self-service; cross-owner admin team actions remain
+   *  dedicated admin routes only. */
   let cachedIdentity: { name: string; email: string } | null = null;
-  const teamActorNow = async (): Promise<TeamActor> => {
+  const identityNow = async (): Promise<{ name: string; email: string }> => {
     if (!cachedIdentity) {
       const u = await deps.users.findById(caller.userId);
       cachedIdentity = { name: u?.name ?? "", email: u?.email ?? "" };
     }
-    return { id: caller.userId, isAdmin: false, orgIds: caller.orgIds, ...cachedIdentity };
+    return cachedIdentity;
+  };
+  const teamActorNow = async (): Promise<TeamActor> => {
+    return { id: caller.userId, isAdmin: false, orgIds: caller.orgIds, ...(await identityNow()) };
   };
 
   /** Map a {@link TeamError} from the shared service to a stable `CODE: message` fail —
@@ -1024,16 +1029,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       }
 
       let updated = cv;
-      if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
-      // Leaving `custom` for auto/off drops the owner-uploaded renditions (mirrors the
-      // dashboard's DELETE /:id/preview), else they orphan and serve.ts would hand the
-      // stale custom image back under `auto`. Agent-native parity with the HTTP path.
-      if (
-        cv.previewMode === "custom" &&
-        (patch.previewMode === "auto" || patch.previewMode === "off")
-      ) {
-        await deletePreviewRenditions(deps.storage, cv.id);
-      }
       if (password !== undefined) {
         updated = await deps.canvases.setPassword(
           cv.id,
@@ -1045,6 +1040,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           targetId: cv.id,
           meta: { cleared: password === null },
         });
+      }
+      if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
+      // Leaving `custom` for auto/off drops the owner-uploaded renditions (mirrors the
+      // dashboard's DELETE /:id/preview), else they orphan and serve.ts would hand the
+      // stale custom image back under `auto`. Agent-native parity with the HTTP path.
+      if (
+        cv.previewMode === "custom" &&
+        (patch.previewMode === "auto" || patch.previewMode === "off")
+      ) {
+        await deletePreviewRenditions(deps.storage, cv.id);
       }
       // Audit a rung change OR a grant-only change to the team set (parity with the route).
       if (targetAccess !== undefined || teamGranted) {
@@ -1155,7 +1160,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   }
 
   async function addCanvasPerson(cv: Canvas, email: string, mode: "add" | "invite") {
-    const actor = await teamActorNow(); // loads the caller's name/email (isAdmin stays false)
+    const actor = await identityNow();
     const r = await deps.invites.resolveOrInvite(
       {
         kind: "canvas",
@@ -1165,7 +1170,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         mode,
       },
       email,
-      { id: caller.userId, name: actor.name, email: actor.email, isAdmin: false },
+      { id: caller.userId, name: actor.name, email: actor.email, isAdmin: caller.isAdmin },
     );
     const failure = addPersonFailure(r.status);
     if (failure) return failure;
@@ -1177,6 +1182,40 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     });
     return ok({ ok: true, status: r.status });
   }
+
+  server.registerTool(
+    "search_people",
+    {
+      description:
+        "Search eligible people for an Add person flow, mirroring the dashboard picker. " +
+        "Use context='canvas' with canvasId for a canvas you own, or context='team' with teamId " +
+        "for a team you can see. Returns scoped suggestions only; it does not expose admin People.",
+      inputSchema: {
+        context: z.enum(["canvas", "team"]).describe("Which picker context to search."),
+        canvasId: z.string().optional().describe("Required when context is canvas."),
+        teamId: z.string().optional().describe("Required when context is team."),
+        q: z.string().trim().min(1).max(80).describe("Name or email search text."),
+      },
+    },
+    async ({ context, canvasId, teamId, q }) => {
+      const input =
+        context === "canvas"
+          ? canvasId
+            ? { context: "canvas" as const, canvasId, q }
+            : null
+          : teamId
+            ? { context: "team" as const, teamId, q }
+            : null;
+      if (!input) return fail("INVALID_REQUEST: missing canvasId or teamId for context");
+      const result = await searchPersonSuggestions(
+        deps,
+        { id: caller.userId, isAdmin: false, orgIds: caller.orgIds },
+        input,
+      );
+      if (!result.ok) return fail("not found");
+      return ok({ people: result.people });
+    },
+  );
 
   server.registerTool(
     "list_access",

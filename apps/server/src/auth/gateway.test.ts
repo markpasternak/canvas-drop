@@ -23,6 +23,10 @@ const nonAdminConfig = loadConfig({
   CANVAS_DROP_ADMIN_EMAILS: "someone-else@example.com",
 });
 
+async function jsonOf<T>(res: Response): Promise<T> {
+  return (await res.json()) as T;
+}
+
 function buildApp(
   client: DbClient,
   opts: {
@@ -31,6 +35,7 @@ function buildApp(
     events?: AuthEvent[];
     allowedEmails?: { isAllowed: (email: string) => Promise<boolean> };
     orgMembership?: (user: { email: string }) => Promise<Set<string>>;
+    publicFallback?: boolean;
   } = {},
 ) {
   const config = opts.config ?? adminConfig;
@@ -41,6 +46,7 @@ function buildApp(
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("clientIp", "127.0.0.1");
+    if (opts.publicFallback) c.set("publicFallbackPrincipal", { kind: "anonymous" });
     await next();
   });
   app.use(
@@ -63,6 +69,7 @@ function buildApp(
       orgIds: [...(c.get("orgIds") ?? new Set<string>())],
     });
   });
+  app.get("/principal", (c) => c.json({ kind: c.get("principal")?.kind ?? null }));
   return app;
 }
 
@@ -212,5 +219,31 @@ describe.each(DIALECTS)("authGateway [%s]", (dialect) => {
     expect(loc.startsWith("/auth/login?returnTo=")).toBe(true);
     const returnTo = new URL(loc, "https://canvases.example.com").searchParams.get("returnTo");
     expect(returnTo).toBe("https://my-deck.canvases.example.com/c/deck/");
+  });
+
+  it("missing identity can fall back to a pre-resolved anonymous public-link principal", async () => {
+    client = await makeTestDb(dialect);
+    const oidcConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "oidc",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_OIDC_ISSUER: "https://idp.example.com",
+      CANVAS_DROP_OIDC_CLIENT_ID: "client",
+      CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+    });
+    const anon: AuthStrategy = {
+      async resolveIdentity() {
+        return null;
+      },
+    };
+    const res = await buildApp(client, {
+      strategy: anon,
+      config: oidcConfig,
+      publicFallback: true,
+    }).request("/principal");
+    expect(res.status).toBe(200);
+    expect(await jsonOf<{ kind: string }>(res)).toEqual({ kind: "anonymous" });
   });
 });

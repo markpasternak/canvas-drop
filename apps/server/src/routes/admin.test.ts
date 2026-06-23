@@ -532,6 +532,14 @@ describe("admin routes", () => {
       name: "Signed External",
       isAdmin: false,
     });
+    await users.setBlocked(signedExternal.id, true);
+    const revokedPublic = await users.upsert({
+      providerSub: "revoked-public",
+      email: "revoked@partner.io",
+      name: "Revoked Public",
+      isAdmin: false,
+    });
+    await users.setPublishPublic(revokedPublic.id, false);
     const org = await orgsRepository(client).ensureOrg({
       name: "Example",
       slug: "example",
@@ -612,6 +620,24 @@ describe("admin routes", () => {
       people: Array<{ email: string }>;
     };
     expect(filtered.people.map((p) => p.email)).toEqual(["pending@partner.io"]);
+
+    async function peopleEmails(query: string): Promise<string[]> {
+      const page = (await (await app.request(`/api/admin/people?${query}`)).json()) as {
+        people: Array<{ email: string }>;
+      };
+      return page.people.map((p) => p.email);
+    }
+    expect(await peopleEmails("q=signed")).toEqual(["signed@partner.io"]);
+    expect(new Set(await peopleEmails("pending=true"))).toEqual(
+      new Set([alice.email, "pending@partner.io"]),
+    );
+    expect(await peopleEmails("blocked=true")).toEqual(["signed@partner.io"]);
+    expect(await peopleEmails("admin=true")).toEqual([admin.email]);
+    expect(new Set(await peopleEmails("permit=true"))).toEqual(
+      new Set([alice.email, "pending@partner.io"]),
+    );
+    expect(await peopleEmails("publicCapability=revoked")).toEqual(["revoked@partner.io"]);
+    expect((await peopleEmails("sort=canvases"))[0]).toBe(alice.email);
   });
 
   it("cancels a pending People grant and removes it from the target pending list", async () => {
@@ -848,6 +874,13 @@ describe("admin routes", () => {
       apiKeyHash: "u7-team",
     });
     await canvases.setAccess(teamCanvas.id, "team");
+    const orgTeamCanvas = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "org-team-context",
+      apiKeyHash: "u7-org-team",
+      orgId: org.id,
+    });
+    await canvases.setAccess(orgTeamCanvas.id, "team");
 
     const publicBody = (await (await app.request("/api/admin/canvases?public=true")).json()) as {
       canvases: Array<{
@@ -874,6 +907,15 @@ describe("admin routes", () => {
       { id: expired.id, expiryState: "expired" },
     ]);
 
+    const personalBody = (await (
+      await app.request("/api/admin/canvases?context=personal")
+    ).json()) as {
+      canvases: Array<{ id: string; context: string }>;
+    };
+    const personalIds = new Set(personalBody.canvases.map((c) => c.id));
+    expect(personalIds.has(teamCanvas.id)).toBe(false);
+    expect(personalBody.canvases.every((c) => c.context === "personal")).toBe(true);
+
     const orgBody = (await (await app.request("/api/admin/canvases?context=org")).json()) as {
       canvases: Array<{ id: string; context: string }>;
     };
@@ -884,9 +926,10 @@ describe("admin routes", () => {
     const teamBody = (await (await app.request("/api/admin/canvases?context=team")).json()) as {
       canvases: Array<{ id: string; context: string }>;
     };
-    expect(teamBody.canvases.map((c) => ({ id: c.id, context: c.context }))).toEqual([
-      { id: teamCanvas.id, context: "team" },
-    ]);
+    expect(new Set(teamBody.canvases.map((c) => c.id))).toEqual(
+      new Set([teamCanvas.id, orgTeamCanvas.id]),
+    );
+    expect(teamBody.canvases.every((c) => c.context === "team")).toBe(true);
   });
 
   it("blocks then unblocks a user (audited); the stored bit flips", async () => {

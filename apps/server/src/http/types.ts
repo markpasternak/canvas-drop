@@ -57,6 +57,9 @@ export interface AppVariables {
    * dashboard/management routes keep using `user`.
    */
   principal?: Principal;
+  /** Anonymous public-link fallback resolved before auth. Used only when a stale
+   *  session/proxy identity cannot authenticate; valid sessions still become members. */
+  publicFallbackPrincipal?: Principal;
   /** Static-only access (public_link rung, U3) — set by canvasAccess; the serve
    *  layer serves files but every primitive is refused (R17, enforced in U9/U11). */
   staticOnly?: boolean;

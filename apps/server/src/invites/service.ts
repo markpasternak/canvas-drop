@@ -1,5 +1,4 @@
 import type { Config } from "@canvas-drop/shared";
-import { isEmailDomainAllowed } from "../auth/identity-mapping.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
@@ -9,6 +8,7 @@ import type { Mailer } from "../email/mailer.js";
 import { effectiveTemplate, renderTemplate, type TemplateKey } from "../email/templates.js";
 import { HOUR_MS, type RateLimitStore, takeToken } from "../http/rate-limit.js";
 import type { Logger } from "../log/logger.js";
+import { resolveNewEmailAdmission } from "./admission.js";
 
 /**
  * The Add person primitive (plan 003 phase 3 / U5). ONE shared layer every owner-facing
@@ -245,18 +245,18 @@ export function inviteService(deps: InviteServiceDeps) {
         return { status: "granted", userId: existing.id };
       }
 
-      // New email: the KTD5 permit gate.
-      const alreadyAuthenticates =
-        isEmailDomainAllowed(email, deps.config) || (await deps.allowedEmails.isAllowed(email));
-
-      // In proxy/IAP mode the app cannot create an upstream admission rule. It may record a
-      // pending grant only for emails the configured auth path already admits.
-      if (deps.config.auth.mode === "proxy" && !alreadyAuthenticates) {
+      const admission = await resolveNewEmailAdmission({
+        config: deps.config,
+        email,
+        canCreatePermit: actor.isAdmin || settings.allowMemberNewEmails,
+        allowedEmails: deps.allowedEmails,
+      });
+      if (admission.status === "auth_admission_required") {
         return { status: "auth_admission_required" };
       }
-
-      const mayPermit = actor.isAdmin || settings.allowMemberNewEmails || alreadyAuthenticates;
-      if (!mayPermit) return { status: "policy_blocked", reason: "new_email_not_permitted" };
+      if (admission.status === "policy_blocked") {
+        return { status: "policy_blocked", reason: "new_email_not_permitted" };
+      }
 
       if (await alreadyPending(target, email)) return { status: "already_pending" };
 
@@ -267,7 +267,7 @@ export function inviteService(deps: InviteServiceDeps) {
       }
 
       // Permit sign-in only when the email can't already authenticate (domain/allowlist).
-      if (!alreadyAuthenticates) await deps.allowedEmails.add(email, actor.id);
+      if (!admission.alreadyAuthenticates) await deps.allowedEmails.add(email, actor.id);
 
       // Record the pending grant (team/canvas only — `account` is a permit with no grant row;
       // org membership auto-derives from the domain on first login).

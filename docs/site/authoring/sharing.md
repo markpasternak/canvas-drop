@@ -25,7 +25,7 @@ One rung per canvas, stored as the `access` field (default `private`):
 | **Specific people** | A named allowlist — signed-in users plus pending emails that activate after verified sign-in. | Full, for authenticated people on the allowlist. |
 | **Team** | Members of the [teams](/docs/authoring/teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
 | **Whole org** | Any signed-in org member with the link. | Full, for org members. |
-| **Public link** | Anyone with the link (no sign-in). Granted per account by an admin. | **None** — static files only. |
+| **Public link** | Anyone with the link (no sign-in), while the instance switch is on and the owner has not been revoked. | **None** — static files only. |
 
 > **When an org boundary is configured** (the operator named an org — off by
 > default), **Whole org** means *members of this canvas's home org*, not "anyone
@@ -106,10 +106,10 @@ A canvas with a password cannot be listed in the gallery.
 **Public link** lets anyone with the URL view a canvas with no sign-in — but it's
 **static-only**: the page and its files serve, while every backend primitive (KV,
 files, AI, realtime) is refused for public visitors, so the open internet can
-never touch your org's spend or stored data. It's a guarded capability: an
-**admin grants the publish-public capability per account**, and the **Public link**
-rung only appears in your Share tab once you hold it. For everyone except the
-owner, a public-link canvas is always static-only.
+never touch your org's spend or stored data. It's governed at two levels:
+**public links are available by default while the instance switch is on**, and an
+admin can revoke the publish-public capability for a specific account. For
+everyone except the owner, a public-link canvas is always static-only.
 
 ## Tags
 

@@ -132,4 +132,24 @@ describe("peopleRoutes", () => {
     expect(personalRes.status).toBe(200);
     expect((await jsonOf<{ people: unknown[] }>(personalRes)).people).toHaveLength(0);
   });
+
+  it("searches all signed-in users for a personal canvas while tenancy is inert", async () => {
+    client = await makeTestDb("sqlite");
+    const inertConfig = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
+    const owner = await user(client, "owner@example.com", "Owner");
+    await user(client, "colleague@example.com", "Colleague");
+    const canvas = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "personal-canvas",
+      apiKeyHash: "hash",
+    });
+
+    const res = await appFor(client, owner, new Set(), inertConfig).request(
+      `/api/people/search?context=canvas&canvasId=${canvas.id}&q=colleague`,
+    );
+    expect(res.status).toBe(200);
+    expect(
+      (await jsonOf<{ people: Array<{ email: string }> }>(res)).people.map((p) => p.email),
+    ).toEqual(["colleague@example.com"]);
+  });
 });

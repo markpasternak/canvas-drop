@@ -26,21 +26,40 @@ const config = loadConfig({
   CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
 });
 
-async function seedCanvas(client: DbClient, access: AccessRung): Promise<string> {
+async function seedCanvas(
+  client: DbClient,
+  access: AccessRung,
+  opts: {
+    passwordHash?: string;
+    sharedExpiresAt?: number;
+    canPublishPublic?: boolean;
+  } = {},
+): Promise<string> {
   const owner = await usersRepository(client).upsert({
     providerSub: "owner",
     email: "owner@example.com",
     name: "Owner",
     isAdmin: false,
   });
+  if (opts.canPublishPublic === false) {
+    await usersRepository(client).setPublishPublic(owner.id, false);
+  }
   const repo = canvasesRepository(client);
-  const cv = await repo.create({ ownerId: owner.id, slug: "demo", apiKeyHash: "h" });
+  const cv = await repo.create({
+    ownerId: owner.id,
+    slug: "demo",
+    apiKeyHash: "h",
+    passwordHash: opts.passwordHash,
+  });
   if (access !== "private") await repo.setAccess(cv.id, access);
+  if (opts.sharedExpiresAt !== undefined) {
+    await repo.updateSettings(cv.id, { sharedExpiresAt: opts.sharedExpiresAt });
+  }
   return cv.id;
 }
 
 /** Build the carve-out chain over a fake gateway, ending in a probe handler. */
-function appFor(client: DbClient) {
+function appFor(client: DbClient, opts: { publicLinksEnabled?: boolean } = {}) {
   const canvases = canvasesRepository(client);
   // Fake org gateway: marks that it ran and sets a member user.
   const fakeGateway = createMiddleware<AppEnv>(async (c, next) => {
@@ -53,7 +72,14 @@ function appFor(client: DbClient) {
     c.set("clientIp", "1.2.3.4");
     await next();
   });
-  app.use("*", publicCanvasResolver({ config, canvases }));
+  app.use(
+    "*",
+    publicCanvasResolver({
+      config,
+      canvases,
+      publicLinksEnabled: () => Promise.resolve(opts.publicLinksEnabled ?? true),
+    }),
+  );
   app.use("*", socialPreview(config));
   app.use("*", onlyWhenNoPrincipal(fakeGateway));
   app.all("*", (c) => {
@@ -101,6 +127,28 @@ describe("publicCanvasResolver — public-link carve-out (sqlite)", () => {
     };
     expect(body.kind).toBe("anonymous");
     expect(body.gateway).toBe("skipped");
+  });
+
+  it("effective public-link gates fall through to the gateway", async () => {
+    for (const [name, seedOpts, appOpts] of [
+      ["passworded", { passwordHash: "hash" }, {}],
+      ["expired", { sharedExpiresAt: Date.now() - 1_000 }, {}],
+      ["owner revoked", { canPublishPublic: false }, {}],
+      ["globally disabled", {}, { publicLinksEnabled: false }],
+    ] as const) {
+      const caseClient = await makeTestDb("sqlite");
+      try {
+        await seedCanvas(caseClient, "public_link", seedOpts);
+        const { app } = appFor(caseClient, appOpts);
+        const body = (await (await app.request("/c/demo", { headers: JSON_HDR })).json()) as {
+          kind: string;
+          gateway: string;
+        };
+        expect(body, name).toMatchObject({ kind: "member", gateway: "ran" });
+      } finally {
+        await caseClient.close();
+      }
+    }
   });
 
   it("a forged/invalid guest cookie sets no principal — the gateway runs", async () => {

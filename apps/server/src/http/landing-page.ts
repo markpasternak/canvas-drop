@@ -99,7 +99,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Shared exactly as far as you mean",
-    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish an admin-gated public link. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
+    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
   },
   {
     title: "Versions you can roll back",
@@ -121,7 +121,7 @@ const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?:
   { rung: "Whole org", who: "Anyone signed in to your organization." },
   {
     rung: "Public link",
-    who: "Anyone with the URL — admin-gated, and static files only.",
+    who: "Anyone with the URL — static files only; admins can disable globally or revoke per account.",
     tag: "admin",
   },
 ];
@@ -156,7 +156,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-sharing",
     label: "Sharing & access",
     caption:
-      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish an admin-gated public link.",
+      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish a static public link admins can govern.",
   },
   {
     img: "tour-teams",

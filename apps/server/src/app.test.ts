@@ -27,6 +27,12 @@ async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function* folder(files: Record<string, string>) {
+  for (const [path, text] of Object.entries(files)) {
+    yield { path, bytes: new TextEncoder().encode(text) };
+  }
+}
+
 function app(client: DbClient, config: Config = devConfig) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -250,6 +256,69 @@ describe("buildApp", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(await res.text()).toContain("Sign in required");
+  });
+
+  it("proxy mode serves anonymous public_link static content while runtime APIs stay static-only", async () => {
+    client = await makeTestDb("sqlite");
+    const proxyConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "proxy",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+    });
+    const { proxyStrategy } = await import("./auth/proxy.js");
+    const users = usersRepository(client);
+    const owner = await users.upsert({
+      providerSub: "owner",
+      email: "owner@example.com",
+      name: "Owner",
+      isAdmin: false,
+    });
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({
+      config: proxyConfig,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      log: silent,
+    });
+    const cv = await canvases.create({
+      ownerId: owner.id,
+      slug: "public-demo",
+      apiKeyHash: "h",
+    });
+    await engine.deploy(cv, "api", folder({ "index.html": "<h1>public</h1>" }), owner.id);
+    await canvases.setAccess(cv.id, "public_link");
+    const a = buildApp({
+      config: proxyConfig,
+      db: client,
+      rootLogger: silent,
+      strategy: proxyStrategy(proxyConfig),
+      users,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine,
+      audit: createAuditLog(auditRepository(client), silent),
+      peerIp: () => "8.8.8.8",
+    });
+
+    const html = await a.request("/", { headers: { host: "public-demo.canvases.example.com" } });
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain("public");
+
+    const api = await a.request("/v1/c/public-demo/me", {
+      headers: { host: "public-demo.canvases.example.com" },
+    });
+    expect(api.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(api)).code).toBe("STATIC_ONLY");
   });
 
   it("public legal pages are reachable WITHOUT auth in proxy mode (mounted before the gateway)", async () => {

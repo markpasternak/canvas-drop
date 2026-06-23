@@ -91,9 +91,13 @@ account and the canvases you own:
   and `tags` — one unified tag set per canvas (max 20, ≤50 chars each) that powers both
   owner-list filtering and public gallery display (there is no separate "gallery summary"
   or "gallery tags").
-- `list_access` / `grant_access` / `resend_guest_invite` / `revoke_access` — the
-  per-canvas allowlist for the `specific_people` rung: list members + guests, add a member
-  or email-invite a guest, re-send, or remove.
+- `search_people` — search eligible people for a canvas or team Add person flow,
+  matching the dashboard picker.
+- `list_access` / `grant_access` / `revoke_access` — the per-canvas access list for the
+  `specific_people` rung: list active named people plus pending sign-in grants, add a
+  person by email, or remove an entry. Existing users are granted immediately; admissible
+  new emails become pending grants that materialize after verified sign-in. No app-owned
+  credential is created.
 - `clone_canvas` — clone an owned canvas (or a shared gallery template) into a new draft.
 - `get_canvas_usage` — view + op/storage/AI usage stats.
 - `get_draft` / `read_draft_file` / `write_draft_file` / `delete_draft_file` /

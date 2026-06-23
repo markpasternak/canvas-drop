@@ -92,8 +92,9 @@ access ladder runs **Private** (owner only, the default — a non-owner admin is
 treated like any member and the canvas 404s for them) → **Specific
 people** (signed-in members plus pending emails that become live only after verified
 sign-in) → **Whole org** (any signed-in member with the link) → **Public link**
-(anyone with the link; admin-gated, static files only — primitives are refused for
-public visitors). On top of any rung you can add a password gate or a share expiry.
+(anyone with the link; static files only while the instance switch is on and the
+owner account has not been revoked — primitives are refused for public visitors).
+On top of any rung you can add a password gate or a share expiry.
 Once a version is published you can also list the canvas in the gallery.
 
 ## Deploying as an agent

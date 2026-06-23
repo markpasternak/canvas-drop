@@ -175,6 +175,13 @@ export function guestRepository(client: DbClient) {
       return (rows[0] as GuestSession | undefined) ?? null;
     },
 
+    async listLiveSessions(now: number = Date.now()): Promise<GuestSession[]> {
+      return (await db
+        .select()
+        .from(sessions)
+        .where(and(isNull(sessions.revokedAt), gt(sessions.expiresAt, now)))) as GuestSession[];
+    },
+
     async touchSessionExpiry(tokenHash: string, expiresAt: number): Promise<void> {
       await db.update(sessions).set({ expiresAt }).where(eq(sessions.tokenHash, tokenHash));
     },

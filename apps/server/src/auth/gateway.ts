@@ -52,6 +52,12 @@ export function authGateway(deps: AuthGatewayDeps) {
     const identity = await deps.strategy.resolveIdentity(c);
 
     if (!identity) {
+      const fallback = c.get("publicFallbackPrincipal");
+      if (fallback?.kind === "anonymous") {
+        c.set("principal", fallback);
+        await next();
+        return;
+      }
       deps.audit?.record({ action: "auth_denied", reason: "no_identity", ip });
       return unauthorized(c, deps.config);
     }
