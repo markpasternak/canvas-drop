@@ -95,7 +95,14 @@ describe("teams page", () => {
       "GET /api/teams": () =>
         json({
           teams: [
-            { id: "t1", orgId: "o1", name: "Design", slug: "design", mine: true, canManage: true },
+            {
+              id: "t1",
+              orgId: null,
+              name: "Design",
+              slug: "design",
+              mine: true,
+              canManage: true,
+            },
           ],
         }),
       "POST /api/teams": () =>
@@ -130,7 +137,8 @@ describe("teams page", () => {
           members: [{ userId: "u2", email: "ada@example.com", name: "Ada Lovelace" }],
           pending: [{ email: "waiting@example.com", invitedAt: 1 }],
         }),
-      "POST /api/teams/t1/members": () => json({ ok: true, status: "granted" }),
+      "POST /api/teams/t1/members": () =>
+        json({ ok: true, status: "pending", emailDelivery: { status: "sent" } }),
     });
     const user = userEvent.setup();
     renderTeams();
@@ -143,6 +151,9 @@ describe("teams page", () => {
 
     await user.type(await screen.findByLabelText(/person's email/i), "new@example.com");
     await user.click(screen.getByRole("button", { name: /^add person$/i }));
+    expect(
+      await screen.findByText("Team access pending until sign-in. Email sent"),
+    ).toBeInTheDocument();
     await vi.waitFor(() => {
       const post = calls.find((c) => c.method === "POST" && c.url === "/api/teams/t1/members");
       expect(post?.body).toContain("new@example.com");

@@ -54,10 +54,11 @@ const orgConfig: Config = loadConfig({
 
 class FakeMailer implements Mailer {
   sent: EmailMessage[] = [];
+  result: SendResult = { ok: true };
   constructor(readonly canSend = true) {}
   async send(msg: EmailMessage): Promise<SendResult> {
     this.sent.push(msg);
-    return { ok: true };
+    return this.result;
   }
 }
 
@@ -175,7 +176,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
   it("new email, admin actor → permit + pending access + courtesy email", async () => {
     const h = await harness();
     const r = await h.svc.resolveOrInvite(h.teamTarget, "newbie@external.io", h.adminActor);
-    expect(r).toEqual({ status: "pending" });
+    expect(r).toEqual({ status: "pending", emailDelivery: { status: "sent" } });
     expect(await h.allowedEmails.isAllowed("newbie@external.io")).toBe(true);
     expect(await h.invitations.listForEmail("newbie@external.io")).toHaveLength(1);
     expect(h.mailer.sent.map((m) => m.to)).toEqual(["newbie@external.io"]);
@@ -193,7 +194,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
   it("new external email, self-serve actor, toggle ON → pending + courtesy", async () => {
     const h = await harness({ allowMemberNewEmails: true });
     const r = await h.svc.resolveOrInvite(h.teamTarget, "friend@external.io", h.memberActor);
-    expect(r).toEqual({ status: "pending" });
+    expect(r).toEqual({ status: "pending", emailDelivery: { status: "sent" } });
     expect(await h.allowedEmails.isAllowed("friend@external.io")).toBe(true);
     expect(await h.invitations.listForEmail("friend@external.io")).toHaveLength(1);
     expect(h.mailer.sent).toHaveLength(1);
@@ -202,7 +203,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
   it("new email that's domain-matched (authenticates anyway), self-serve → pending + courtesy, no new permit row", async () => {
     const h = await harness({ allowMemberNewEmails: false });
     const r = await h.svc.resolveOrInvite(h.teamTarget, "colleague@corp.com", h.memberActor);
-    expect(r).toEqual({ status: "pending" });
+    expect(r).toEqual({ status: "pending", emailDelivery: { status: "sent" } });
     // Domain already authenticates → no allowlist row was added.
     expect(await h.allowedEmails.list()).toHaveLength(0);
     expect(await h.invitations.listForEmail("colleague@corp.com")).toHaveLength(1);
@@ -229,7 +230,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     const h = await harness();
     const first = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);
     const second = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);
-    expect(first).toEqual({ status: "pending" });
+    expect(first).toEqual({ status: "pending", emailDelivery: { status: "sent" } });
     expect(second).toEqual({ status: "already_pending" });
     expect(await h.invitations.listForEmail("pending@external.io")).toHaveLength(1);
     expect(h.mailer.sent.map((m) => m.to)).toEqual(["pending@external.io"]);
@@ -289,9 +290,21 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
   it("master email toggle OFF → grant/pending still happen, but no email is sent", async () => {
     const h = await harness({ emailEnabled: false, allowMemberNewEmails: true });
     const r = await h.svc.resolveOrInvite(h.teamTarget, "silent@external.io", h.memberActor);
-    expect(r.status).toBe("pending");
+    expect(r).toMatchObject({
+      status: "pending",
+      emailDelivery: { status: "skipped", reason: "email_disabled" },
+    });
     expect(await h.invitations.listForEmail("silent@external.io")).toHaveLength(1);
     expect(h.mailer.sent).toHaveLength(0);
+  });
+
+  it("email send failure is reported without blocking the grant", async () => {
+    const h = await harness({ allowMemberNewEmails: true });
+    h.mailer.result = { ok: false, error: "smtp rejected" };
+    const r = await h.svc.resolveOrInvite(h.teamTarget, "fail@external.io", h.memberActor);
+    expect(r).toEqual({ status: "pending", emailDelivery: { status: "failed" } });
+    expect(await h.invitations.listForEmail("fail@external.io")).toHaveLength(1);
+    expect(h.mailer.sent.map((m) => m.to)).toEqual(["fail@external.io"]);
   });
 
   it("canvas Specific-people add of an existing user notifies per notifyOnCanvasAdd", async () => {
@@ -311,7 +324,11 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
       mode: "add",
     };
     const r = await h.svc.resolveOrInvite(target, "cm@corp.com", h.memberActor);
-    expect(r).toEqual({ status: "granted", userId: existing.id });
+    expect(r).toEqual({
+      status: "granted",
+      userId: existing.id,
+      emailDelivery: { status: "skipped", reason: "event_disabled" },
+    });
     expect(await h.canvases.isPrincipalAllowed(cv.id, { userId: existing.id })).toBe(true);
     expect(h.mailer.sent).toHaveLength(0); // toggle off
   });

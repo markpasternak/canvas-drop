@@ -440,7 +440,7 @@ describe("share route", () => {
         }),
       "POST /api/canvases/c1/allowlist": () => {
         pending = true;
-        return json({ ok: true, status: "pending" });
+        return json({ ok: true, status: "pending", emailDelivery: { status: "sent" } });
       },
     });
     renderShare();
@@ -448,6 +448,7 @@ describe("share route", () => {
     await user.type(await screen.findByLabelText(/person's email/i), "newbie@example.com");
     expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add person" }));
+    expect(await screen.findByText("Access pending until sign-in. Email sent")).toBeInTheDocument();
     expect(await screen.findByText("newbie@example.com")).toBeInTheDocument();
     expect(screen.getByText(/pending sign-in/i)).toBeInTheDocument();
     await vi.waitFor(() => {

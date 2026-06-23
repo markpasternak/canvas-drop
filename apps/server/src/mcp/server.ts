@@ -1180,7 +1180,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       targetId: cv.id,
       meta: { kind: "add_person", mode, status: r.status },
     });
-    return ok({ ok: true, status: r.status });
+    return ok(
+      r.emailDelivery
+        ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }
+        : { ok: true, status: r.status },
+    );
   }
 
   server.registerTool(
@@ -1492,7 +1496,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, email }) => {
       const r = await deps.teamsService.addMemberByEmail(await teamActorNow(), id, email);
       if (!r.ok) return fail(TEAM_FAIL[r.error]);
-      return ok({ status: r.status });
+      return ok(
+        r.emailDelivery
+          ? { status: r.status, emailDelivery: r.emailDelivery }
+          : { status: r.status },
+      );
     },
   );
 

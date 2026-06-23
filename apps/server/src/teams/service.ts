@@ -3,7 +3,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
-import type { InviteService } from "../invites/service.js";
+import type { InviteEmailDelivery, InviteService } from "../invites/service.js";
 
 /**
  * Team service (plan 003 P2 / U3). The single authz-bearing layer the management routes
@@ -42,7 +42,11 @@ type TeamResult = { ok: true; team: Team } | Fail;
 type VoidResult = { ok: true } | Fail;
 /** add-member can grant now, no-op idempotently, or record pending access. */
 type AddMemberResult =
-  | { ok: true; status: "granted" | "already_added" | "pending" | "already_pending" }
+  | {
+      ok: true;
+      status: "granted" | "already_added" | "pending" | "already_pending";
+      emailDelivery?: InviteEmailDelivery;
+    }
   | Fail;
 
 export function teamsService(deps: {
@@ -157,7 +161,9 @@ export function teamsService(deps: {
       if (r.status === "blocked") return { ok: false, error: "TARGET_BLOCKED" };
       if (r.status === "rate_limited") return { ok: false, error: "RATE_LIMITED" };
       deps.audit.recordAudit({ action: "team_member_add", actorId: actor.id, targetId: teamId });
-      return { ok: true, status: r.status };
+      return r.emailDelivery
+        ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }
+        : { ok: true, status: r.status };
     },
 
     /** Remove a member. A team member or operator may remove anyone; anyone may remove self. */

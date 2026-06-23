@@ -811,7 +811,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { kind: "add_person", mode, status: r.status },
     });
-    return c.json({ ok: true, status: r.status });
+    return c.json({ ok: true, status: r.status, emailDelivery: r.emailDelivery });
   }
 
   /** Add person: existing user -> granted now; admissible new email -> pending. */

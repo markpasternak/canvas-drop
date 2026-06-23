@@ -154,7 +154,7 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     // `granted`/`already_added` = an existing user is active now; `pending`/`already_pending`
     // = a brand-new person will join on their first verified login.
-    return c.json({ ok: true, status: r.status });
+    return c.json({ ok: true, status: r.status, emailDelivery: r.emailDelivery });
   });
 
   app.delete("/:id/members/:userId", sameOrigin, async (c) => {
