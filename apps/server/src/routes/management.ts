@@ -90,7 +90,7 @@ export interface ManagementDeps extends PreviewHintDeps {
    */
   hub?: RealtimeHub;
   /** Legacy guest service. Kept only so revoking old access rows can revoke any
-   *  retained guest sessions; new sharing never creates guest magic links. */
+   *  retained guest sessions; new sharing never creates app-owned credentials. */
   guests?: GuestService;
   /**
    * Effective operator-global resolvers (admin DB override ?? env). Optional —
@@ -827,7 +827,7 @@ export function managementRoutes(deps: ManagementDeps) {
    *  canvas" action, distinct from the silent Specific-people add above. Routes through the
    *  auth-delegated invite primitive — an existing user is granted + emailed (per
    *  `notifyOnCanvasInvite`); a brand-new email becomes a pending invitation that materializes
-   *  on their first verified login (no app-owned magic link), with the individual-invite
+   *  on their first verified login (no app-owned credential), with the individual-invite
    *  courtesy email. KTD5-gated + rate-limited (a self-serve owner can't permit a new
    *  external email unless the toggle is on). */
   app.post("/:id/invite", sameOrigin, async (c) => {

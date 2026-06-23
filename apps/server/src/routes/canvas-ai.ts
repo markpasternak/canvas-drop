@@ -124,9 +124,9 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
     const canvas = requireCanvas(c);
     const user = c.get("user");
 
-    // Guest-AI gate (U9, KTD5): AI is off for invited guests unless the owner opts
-    // this canvas in. The metered-$ surface is the one primitive guests don't get
-    // by default. (Anonymous never reaches here — refused as static-only.)
+    // Retained legacy guest-session AI gate (U9, KTD5): AI is off for legacy guests
+    // unless the owner had opted this canvas in. New Add person grants materialize as
+    // signed-in users. (Anonymous never reaches here — refused as static-only.)
     const isGuest = c.get("principal")?.kind === "guest";
     if (isGuest && !canvas.guestAiEnabled) {
       return c.json({ code: "GUEST_AI_DISABLED" }, 403);
@@ -138,9 +138,7 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       deps.aiUsage.userSpendSince(user.id, dayStartUtc(now)),
       deps.aiUsage.canvasSpendSince(canvas.id, monthStartUtc(now)),
     ]);
-    // Per-canvas guest-AI cap (best-effort, windowed like the org quota): when a
-    // guest is calling and the owner set a cap, the canvas's monthly AI spend must
-    // be under it (0 = no extra cap beyond the org quotas).
+    // Per-canvas retained-guest AI cap (best-effort, windowed like the org quota).
     if (isGuest && canvas.guestAiCap > 0 && canvasSpend >= canvas.guestAiCap) {
       return c.json({ code: "GUEST_AI_CAP", scope: "guest" }, 429);
     }

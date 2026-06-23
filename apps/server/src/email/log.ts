@@ -7,9 +7,10 @@ import type { EmailMessage, Mailer } from "./mailer.js";
  * caller directly. Intended for dev only (the operator picks `mailgun`/`smtp` in
  * production); see the boot warning in config when `log` runs under NODE_ENV=production.
  *
- * The body is NEVER logged: it carries the one-time magic-link credential, and the
- * `log` driver writes to stdout that any aggregator captures. Log only the envelope
- * (`to`, `subject`) so a credential can never leak into the log stream.
+ * The body is NEVER logged: invite and notification email content can carry private
+ * access context, and the `log` driver writes to stdout that any aggregator captures.
+ * Log only the envelope (`to`, `subject`) so private content can never leak into the
+ * log stream.
  */
 export function logMailer(log: Logger): Mailer {
   return {

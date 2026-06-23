@@ -107,7 +107,7 @@ export interface BuildAppDeps {
   sessionSvc?: SessionService;
   /** Legacy guest service. Retained for cutover/revocation compatibility only. */
   guests?: GuestService;
-  /** Mailer for guest invites (U8). Present in oidc/dev. */
+  /** Mailer for invite and notification emails. */
   mailer?: Mailer;
   oidc?: Parameters<typeof authRoutes>[0]["oidc"];
   /** Override the socket-peer-IP extractor (tests inject a fixed peer). */

@@ -17,15 +17,15 @@ The only open milestone is **M10 — ops/packaging** (Docker image + compose, ba
 drill, single-VPS load test, IAP pilot), which is **partial**: the `Dockerfile`, `docker-compose.yml`,
 `scripts/compose-smoke.sh`, and `.env.production.example` are shipped, but the backup/restore
 round-trip drill, the single-VPS load test, and the IAP colleague pilot are still deferred. The
-full sharing access ladder (private / specific-people / whole-org / public-link, guest magic-link
-invites, admin-gated public links) is also shipped and merged.
+full sharing access ladder (private / specific-people / whole-org / public-link, auth-delegated
+Add person grants, admin-gated public links) is also shipped and merged.
 
 Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
 though their scope is merged — the header pointers are stale. The MCP ↔ user parity plan
 (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`) is `status: completed` and merged: the
-MCP server now ships a **33-tool surface** with full dashboard parity, including `update_canvas`,
-`set_canvas_preview`, `clone_canvas`, `get_canvas_usage`, the sharing/guest tools (`grant_access`/`revoke_access`/
-`list_access`/`resend_guest_invite`), and the draft-editor loop (`get_draft`, `read_draft_file`,
+MCP server now ships a **32-tool surface** with full dashboard parity, including `update_canvas`,
+`set_canvas_preview`, `clone_canvas`, `get_canvas_usage`, the Add person tools (`grant_access`/
+`invite_to_canvas`/`revoke_access`/`list_access`), and the draft-editor loop (`get_draft`, `read_draft_file`,
 `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft`).
 For overall status defer to `BUILD_BRIEF.md` §16 and the README Status section.
 

@@ -25,7 +25,7 @@ const me = await canvasdrop.me();
 | `email` | `string` | The viewer's email. |
 | `name` | `string` | Display name. |
 | `avatarUrl` | `string \| null` | Avatar URL, or `null` when the provider gives none. |
-| `kind` | `"member" \| "guest"` | `"member"` for org members, `"guest"` for invited guests. For guests, `email`/`name` reflect the invite. |
+| `kind` | `"member" \| "guest"` | `"member"` for the current signed-in user. `"guest"` is retained only for legacy guest sessions from older instances; new Add person grants materialize as signed-in users after verified auth. |
 
 Under the hood, `me()` calls `GET {base}/v1/c/{slug}/me` with the session cookie.
 No token is ever passed in the page.

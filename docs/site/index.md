@@ -40,13 +40,14 @@ that communicates better as a working artifact than as a screenshot or a slide.
   kept); one-click **Make current** switches the served version in either
   direction.
 - **Share** the URL on a per-canvas access rung: `private` (owner only),
-  `specific_people` (named org members and email-invited guests), `whole_org`
-  (any signed-in member with the link), or `public_link` (anyone with the link,
-  admin-gated per owner, and static-only). Layer on a per-canvas password or a
-  share expiry, and list a shared canvas in the gallery for colleagues to
-  browse. A canvas must be published before any shared rung takes effect. With an
-  optional [org boundary](/docs/self-hosting/configuration) configured, `whole_org`
-  is scoped to the canvas's home org and brought-in guests are kept out.
+  `specific_people` (signed-in members plus auth-delegated pending emails),
+  `whole_org` (any signed-in member with the link), or `public_link` (anyone with
+  the link, admin-gated per owner, and static-only). Layer on a per-canvas
+  password or a share expiry, and list a shared canvas in the gallery for
+  colleagues to browse. A canvas must be published before any shared rung takes
+  effect. With an optional [org boundary](/docs/self-hosting/configuration)
+  configured, `whole_org` is scoped to the canvas's home org and external people
+  are kept out unless they are named directly.
 
 ## Where to go next
 
