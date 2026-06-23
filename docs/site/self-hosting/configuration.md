@@ -50,6 +50,11 @@ change, never a code change.
 | `CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL` | `300` | Seconds a shared cache (a CDN in front) may hold a **public** canvas's HTML (emitted as `s-maxage`; the browser still revalidates each load). Only the `public_link`, no-password rung is ever shared-cacheable — auth-gated canvases stay `private`. Also the window a canvas can stay visible at the edge after access is restricted (the dashboard warns owners with this figure). `0` disables shared caching. See [Behind a CDN](cdn). |
 | `CANVAS_DROP_DESIGN_SKIN` | `editorial` | Instance-wide visual design language: `editorial` \| `studio` \| `workshop` \| `canvas`. An admin can override this at runtime from the console — the DB override wins over this env value. See [Design skins](#design-skins). |
 
+Admin -> Configuration also exposes `core.instanceName`, a DB-managed display name for invite
+and notification emails. It defaults to the `CANVAS_DROP_BASE_URL` host and is deliberately
+separate from `CANVAS_DROP_ORG_NAME`: the org name appears only when an email domain maps to the
+configured org.
+
 ## Design skins
 
 A **design skin** is an instance-wide visual language you can flip for the whole
@@ -235,14 +240,13 @@ server-side only and is never exposed to the browser.
 | `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. |
 | `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. |
 
-## Email (guest invites)
+## Email transport
 
-Sends the magic-link sign-in emails for **email-invited guests** (the
-`specific_people` access rung). It is a driver-behind-interface like the database
-and storage, so adding a future provider is a config change. Guest invites and
-public links are app-gated-mode features (`oidc`/`dev`); in `proxy` mode the
-upstream IAP owns the boundary and invites are refused. Provider secrets are
-server-side only and never logged.
+Sends auth-delegated invite and notification emails for account, canvas, and team access.
+It is a driver-behind-interface like the database and storage, so adding a future provider is
+a config change. Provider secrets are server-side only and never logged. In `proxy` mode,
+canvas-drop can only notify people who can already authenticate through the upstream IAP; a
+brand-new external email needs operator admission upstream before it can become a useful grant.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -260,22 +264,24 @@ server-side only and never logged.
 
 These are **DB-managed admin settings** (no env vars) under **Admin → Configuration**, layered
 on top of the mailer above. They govern the [auth-delegated invite](/docs/self-hosting/security-model#invites-are-auth-delegated-no-app-owned-credentials)
-flow — personal-team invites, the individual canvas **Invite**, and admin **Add users**.
+flow — personal-team invites, the individual canvas **Invite**, and admin **Add person**.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
 | `email.invitesEnabled` | `false` | Master switch — when off, grants still happen but **no** invite/notification emails are sent (also requires the mailer to be configured). |
-| `email.notifyOnAddUser` | `true` | Email a courtesy invitation when an admin adds a user. |
+| `email.notifyOnAddUser` | `true` | Email a courtesy invitation when an admin adds a person. Org wording is available only when the email domain maps to the configured org. |
 | `email.notifyOnCanvasAdd` | `true` | Email an existing user when added to a canvas (Specific people). |
 | `email.notifyOnCanvasInvite` | `true` | Email on an individual one-off canvas invite. |
-| `invites.allowMemberInvitesToNewEmails` | `false` | Allow a non-admin **member** to invite a brand-new *external* email (off = only admins, domain-matched, or already-permitted emails). |
+| `invites.allowMemberNewEmails` | `false` | Allow a non-admin **member** to invite a brand-new *external* email (off = only admins, domain-matched, or already-permitted emails). |
 | `invites.maxPerActorPerHour` | `20` | Per-actor invite rate cap (admins bypass). |
 | `invites.pendingCap` | `50` | Max un-consumed pending invitations one actor may hold (admins bypass). |
 
 Adding a brand-new person to a **team** always emails them the sign-in invitation (gated only by
 the master switch); existing members are not re-notified. **Email templates** for each of these
 messages are admin-editable (subject + HTML + text, with safe `{{variable}}` interpolation and a
-reset-to-default) under **Admin → Configuration → Email templates**.
+reset to the latest default) under **Admin → Configuration → Email templates**. Available
+variables include `{{instanceName}}`, optional `{{orgName}}` / `{{orgContext}}`,
+`{{canvasTitle}}`, `{{teamName}}`, `{{inviterName}}`, and `{{link}}`.
 
 ## Logging & error tracking
 

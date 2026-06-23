@@ -39,6 +39,19 @@ const proxyConfig: Config = loadConfig({
   CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
 });
 
+const orgConfig: Config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "oidc",
+  CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "corp.com",
+  CANVAS_DROP_ORG_NAME: "Acme",
+  CANVAS_DROP_ORG_DOMAINS: "corp.com",
+  CANVAS_DROP_OIDC_ISSUER: "https://idp.example",
+  CANVAS_DROP_OIDC_CLIENT_ID: "cid",
+  CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+  CANVAS_DROP_SESSION_SECRET: "x".repeat(32),
+  CANVAS_DROP_BASE_URL: "https://canvas.corp.com",
+  CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: "true",
+});
+
 class FakeMailer implements Mailer {
   sent: EmailMessage[] = [];
   constructor(readonly canSend = true) {}
@@ -65,7 +78,11 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     await client?.close();
   });
 
-  async function harness(overrides: Partial<Settings> = {}, cfg: Config = config) {
+  async function harness(
+    overrides: Partial<Settings> = {},
+    cfg: Config = config,
+    displayName = "canvas.corp.com",
+  ) {
     client = await makeTestDb(dialect);
     const users = usersRepository(client);
     const allowedEmails = allowedEmailsRepository(client);
@@ -87,6 +104,9 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
       settings: {
         async effectiveInviteSettings() {
           return settings;
+        },
+        async effectiveInstanceName() {
+          return displayName;
         },
       },
       templates,
@@ -294,5 +314,37 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     expect(r).toEqual({ status: "granted", userId: existing.id });
     expect(await h.canvases.isPrincipalAllowed(cv.id, { userId: existing.id })).toBe(true);
     expect(h.mailer.sent).toHaveLength(0); // toggle off
+  });
+
+  it("external canvas invite copy names the canvas, not the org", async () => {
+    const h = await harness({ allowMemberNewEmails: true }, orgConfig, "Canvas Drop Internal");
+    const cv = await h.canvases.create({ ownerId: h.owner.id, slug: "deck-copy", apiKeyHash: "k" });
+    const target: InviteTarget = {
+      kind: "canvas",
+      canvasId: cv.id,
+      canvasSlug: cv.slug,
+      canvasTitle: "Board Review",
+      mode: "invite",
+    };
+
+    const r = await h.svc.resolveOrInvite(target, "friend@external.io", h.memberActor);
+    expect(r.status).toBe("pending");
+    expect(h.mailer.sent).toHaveLength(1);
+    expect(h.mailer.sent[0]?.text).toContain("access to the canvas “Board Review”");
+    expect(h.mailer.sent[0]?.text).toContain("Canvas Drop Internal");
+    expect(h.mailer.sent[0]?.text).not.toContain("Acme");
+  });
+
+  it("account invite copy uses org language only when the email maps to the org domain", async () => {
+    const h = await harness({}, orgConfig, "Canvas Drop Internal");
+    const target: InviteTarget = { kind: "account" };
+
+    await h.svc.resolveOrInvite(target, "colleague@corp.com", h.adminActor);
+    await h.svc.resolveOrInvite(target, "contractor@external.io", h.adminActor);
+
+    expect(h.mailer.sent).toHaveLength(2);
+    expect(h.mailer.sent[0]?.text).toContain("Canvas Drop Internal for Acme");
+    expect(h.mailer.sent[1]?.text).toContain("Canvas Drop Internal");
+    expect(h.mailer.sent[1]?.text).not.toContain("Acme");
   });
 });

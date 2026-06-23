@@ -316,6 +316,37 @@ describe("adminSettingsService — public links gate", () => {
   });
 });
 
+describe("adminSettingsService — instance display name", () => {
+  it("falls back to the base host, not the org name, and honors an admin override", async () => {
+    const store = fakeSettings();
+    const s = adminSettingsService({
+      settings: store,
+      config: loadConfig({
+        CANVAS_DROP_AUTH_MODE: "dev",
+        CANVAS_DROP_BASE_URL: "https://canvas.corp.example",
+        CANVAS_DROP_ORG_NAME: "Acme",
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "corp.example",
+      }),
+    });
+
+    expect(await s.effectiveInstanceName()).toBe("canvas.corp.example");
+    await s.setConfigOverride("core.instanceName", "Canvas Drop Internal");
+    expect(await s.effectiveInstanceName()).toBe("Canvas Drop Internal");
+    await s.clearConfigOverride("core.instanceName");
+    expect(await s.effectiveInstanceName()).toBe("canvas.corp.example");
+  });
+
+  it("exposes the instance display name as an editable Core string", async () => {
+    const row = (await configSvc().describeConfig()).find((r) => r.key === "core.instanceName");
+    expect(row).toMatchObject({
+      group: "Core",
+      editable: true,
+      type: "string",
+      source: "default",
+    });
+  });
+});
+
 describe("effectiveInviteSettings (plan 003 phase 3)", () => {
   it("defaults: email off, notifications on, rate 20/h, pending cap 50, member-new-emails off", async () => {
     const s = adminSettingsService({ settings: fakeSettings(), config });

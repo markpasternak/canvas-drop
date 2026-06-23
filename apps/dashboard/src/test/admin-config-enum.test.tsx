@@ -95,10 +95,10 @@ describe("admin configuration — enum field (the design-skin flip control)", ()
 
   it("a gated boolean is disabled with its dependency reason (error-prevention)", () => {
     renderRow(
-      { ...boolField, key: "email.notifyOnAddUser", label: "Notify on Add user" },
+      { ...boolField, key: "email.notifyOnAddUser", label: "Notify on Add person" },
       { disabled: true, disabledReason: "Needs the master switch on." },
     );
-    expect(screen.getByRole("switch", { name: /notify on add user/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /notify on add person/i })).toBeDisabled();
     expect(screen.getByText(/needs the master switch on/i)).toBeInTheDocument();
   });
 });
