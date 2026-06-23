@@ -7,6 +7,7 @@ import {
   ADMIN,
   AI_MODEL,
   connectMcp,
+  DOMAIN,
   enc,
   GUEST_EMAIL,
   type Harness,
@@ -18,6 +19,7 @@ import {
   OTHER,
   OWNER,
   type ServerHandle,
+  scenarioConfig,
   zip,
 } from "./scenario-harness.js";
 
@@ -627,10 +629,14 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     }
   });
 
-  // ── S8 — Sharing ladder, guest invite & identity ─────────────────────────────
-  it("S8: access ladder + me(member/guest) + guest invite + password + revoke + expiry + public gating", async () => {
+  // ── S8 — Sharing ladder, auth-delegated Add person & identity ───────────────
+  it("S8: access ladder + me(member) + auth-delegated Add person + password + revoke + expiry + public gating", async () => {
     client = await makeTestDb(dialect);
-    const h = makeHarness(client);
+    const h = makeHarness(client, {
+      config: scenarioConfig({
+        CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: `${DOMAIN},partner.test`,
+      }),
+    });
     const cv = await jsonOf<{ id: string; slug: string }>(
       await h.SEND(OWNER, "POST", "/api/canvases/paste", { html: "<h1>secret</h1>" }),
     );
@@ -649,51 +655,45 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     );
     expect(meMember).toMatchObject({ kind: "member", email: MEMBER });
 
-    // specific_people + email guest invite.
+    // specific_people + auth-delegated Add person.
     await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, { access: "specific_people" });
-    const invite = await h.SEND(OWNER, "POST", `/api/canvases/${cv.id}/allowlist`, {
+    const add = await h.SEND(OWNER, "POST", `/api/canvases/${cv.id}/allowlist`, {
       email: GUEST_EMAIL,
     });
-    expect(invite.status).toBe(200);
-    expect((await jsonOf<{ kind: string }>(invite)).kind).toBe("guest");
-    const token = h.mailer.tokenFor(GUEST_EMAIL);
-    expect(token).toBeTruthy();
+    expect(add.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(add)).status).toBe("pending");
+    expect(h.mailer.sent).toHaveLength(0); // quiet Add records access but sends no courtesy email.
 
-    // Redeem the magic link (same-origin POST) → guest session cookie.
-    const redeem = await h.app.request(`/guest/${token}`, {
-      method: "POST",
-      headers: h.headers(null, { "Sec-Fetch-Site": "same-origin" }),
-    });
-    expect(redeem.status).toBe(302);
-    const guestCookie = cookiePair(redeem, "__canvasdrop_guest");
-    expect(guestCookie).toBeTruthy();
-
-    // The guest's me() → kind "guest"; the guest may use KV but NOT AI (not opted in).
-    const meGuest = await jsonOf<{ kind: string }>(
-      await h.GET(null, `/v1/c/${cv.slug}/me`, { cookie: guestCookie as string }),
+    const pending = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
+      await h.GET(OWNER, `/api/canvases/${cv.id}/allowlist`),
     );
-    expect(meGuest.kind).toBe("guest");
-    const guestKv = await h.app.request(`/v1/c/${cv.slug}/kv/user/pref`, {
-      method: "PUT",
-      headers: h.headers(null, {
-        "Sec-Fetch-Site": "same-origin",
-        "content-type": "application/json",
-        cookie: guestCookie as string,
-      }),
-      body: JSON.stringify("set"),
-    });
-    expect(guestKv.status).toBe(200);
-    const guestAi = await h.app.request(`/v1/c/${cv.slug}/ai/chat`, {
-      method: "POST",
-      headers: h.headers(null, {
-        "Sec-Fetch-Site": "same-origin",
-        "content-type": "application/json",
-        cookie: guestCookie as string,
-      }),
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: "user", content: "hi" }] }),
-    });
-    expect(guestAi.status).toBe(403);
-    expect((await jsonOf<{ code: string }>(guestAi)).code).toBe("GUEST_AI_DISABLED");
+    expect(pending.entries).toEqual([
+      expect.objectContaining({ kind: "pending", email: GUEST_EMAIL }),
+    ]);
+    expect(await h.repos.guests.listInvitesByCanvas(cv.id)).toHaveLength(0);
+
+    // Pending grants have no auth power by themselves: before exact-email verified
+    // sign-in, another signed-in user still cannot use that pending row.
+    expect((await h.GET(OTHER, content)).status).toBe(404);
+
+    // First verified login for that exact email materializes the pending grant into a
+    // normal signed-in member allowlist entry. There is no app-issued credential.
+    await (await h.GET(GUEST_EMAIL, "/api/me")).text();
+    const materialized = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
+      await h.GET(OWNER, `/api/canvases/${cv.id}/allowlist`),
+    );
+    expect(materialized.entries).toEqual([
+      expect.objectContaining({ kind: "member", email: GUEST_EMAIL }),
+    ]);
+
+    // The external person's runtime identity is now a signed-in user. They may use KV
+    // under their own user scope; legacy guest-only AI gates are not involved.
+    const meExternal = await jsonOf<{ kind: string; email: string }>(
+      await h.GET(GUEST_EMAIL, `/v1/c/${cv.slug}/me`),
+    );
+    expect(meExternal).toMatchObject({ kind: "member", email: GUEST_EMAIL });
+    const externalKv = await h.SEND(GUEST_EMAIL, "PUT", `/v1/c/${cv.slug}/kv/user/pref`, "set");
+    expect(externalKv.status).toBe(200);
 
     // Password gate: a member without the cookie is gated (401); the right password admits.
     await h.SEND(OWNER, "PATCH", `/api/canvases/${cv.id}/settings`, {

@@ -101,11 +101,9 @@ function headerStrategy(): AuthStrategy {
 
 export interface CaptureMailer extends Mailer {
   readonly sent: EmailMessage[];
-  /** The most recent guest magic-link token sent to `email`, parsed from the body. */
-  tokenFor(email: string): string | null;
 }
 
-/** A mailer that records every message so a test can read back the invite link. */
+/** A mailer that records every message so scenarios can assert notification behavior. */
 export function captureMailer(): CaptureMailer {
   const sent: EmailMessage[] = [];
   return {
@@ -114,12 +112,6 @@ export function captureMailer(): CaptureMailer {
     async send(msg) {
       sent.push(msg);
       return { ok: true };
-    },
-    tokenFor(email) {
-      const msg = [...sent].reverse().find((m) => m.to === email);
-      if (!msg) return null;
-      const match = /\/guest\/([A-Za-z0-9_.-]+)/.exec(msg.text);
-      return match?.[1] ?? null;
     },
   };
 }
