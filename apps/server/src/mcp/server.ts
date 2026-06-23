@@ -178,6 +178,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     TARGET_NOT_MEMBER: "TARGET_NOT_MEMBER: that person is not a member of this org",
     TARGET_NOT_PERMITTED:
       "TARGET_NOT_PERMITTED: a brand-new external email can't be invited from here (ask an admin)",
+    TARGET_BLOCKED: "TARGET_BLOCKED: that account is blocked",
+    AUTH_ADMISSION_REQUIRED:
+      "AUTH_ADMISSION_REQUIRED: that email must be admitted by the configured identity provider first",
     RATE_LIMITED: "RATE_LIMITED: too many invites — try again later",
   };
 
@@ -1238,8 +1241,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         email,
         { id: caller.userId, name: actor.name, email: actor.email, isAdmin: false },
       );
-      if (r.status === "rejected")
+      if (r.status === "policy_blocked")
         return fail("NOT_PERMITTED: that email can't be invited from here");
+      if (r.status === "auth_admission_required")
+        return fail(
+          "AUTH_ADMISSION_REQUIRED: that email must be admitted by the configured identity provider first",
+        );
+      if (r.status === "blocked") return fail("BLOCKED: that account is blocked");
       if (r.status === "rate_limited") return fail("RATE_LIMITED: too many invites — try later");
       deps.audit.recordAudit({
         action: "allowlist_add",

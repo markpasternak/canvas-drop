@@ -30,6 +30,15 @@ const config: Config = loadConfig({
   CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE: "true",
 });
 
+const proxyConfig: Config = loadConfig({
+  CANVAS_DROP_AUTH_MODE: "proxy",
+  CANVAS_DROP_URL_MODE: "subdomain",
+  CANVAS_DROP_BASE_URL: "https://canvas.corp.com",
+  CANVAS_DROP_SESSION_SECRET: "x".repeat(32),
+  CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "corp.com",
+  CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+});
+
 class FakeMailer implements Mailer {
   sent: EmailMessage[] = [];
   constructor(readonly canSend = true) {}
@@ -56,7 +65,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     await client?.close();
   });
 
-  async function harness(overrides: Partial<Settings> = {}) {
+  async function harness(overrides: Partial<Settings> = {}, cfg: Config = config) {
     client = await makeTestDb(dialect);
     const users = usersRepository(client);
     const allowedEmails = allowedEmailsRepository(client);
@@ -69,7 +78,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     const settings = { ...SETTINGS, ...overrides };
 
     const svc = inviteService({
-      config,
+      config: cfg,
       users,
       allowedEmails,
       invitations,
@@ -155,7 +164,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
   it("new external email, self-serve actor, toggle OFF → rejected (no permit, no pending, no mail)", async () => {
     const h = await harness({ allowMemberNewEmails: false });
     const r = await h.svc.resolveOrInvite(h.teamTarget, "stranger@external.io", h.memberActor);
-    expect(r).toEqual({ status: "rejected", reason: "new_email_not_permitted" });
+    expect(r).toEqual({ status: "policy_blocked", reason: "new_email_not_permitted" });
     expect(await h.allowedEmails.isAllowed("stranger@external.io")).toBe(false);
     expect(await h.invitations.listForEmail("stranger@external.io")).toHaveLength(0);
     expect(h.mailer.sent).toHaveLength(0);
@@ -180,7 +189,7 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     expect(h.mailer.sent).toHaveLength(1);
   });
 
-  it("idempotent for an already-member; email lowercased/trimmed", async () => {
+  it("already-member returns already_added; email lowercased/trimmed", async () => {
     const h = await harness();
     const existing = await h.users.upsert({
       providerSub: "oidc:dup",
@@ -188,10 +197,45 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
       name: "Dup",
       isAdmin: false,
     });
-    await h.svc.resolveOrInvite(h.teamTarget, "  DUP@corp.com  ", h.memberActor);
-    await h.svc.resolveOrInvite(h.teamTarget, "dup@corp.com", h.memberActor);
+    const first = await h.svc.resolveOrInvite(h.teamTarget, "  DUP@corp.com  ", h.memberActor);
+    const second = await h.svc.resolveOrInvite(h.teamTarget, "dup@corp.com", h.memberActor);
+    expect(first).toEqual({ status: "granted", userId: existing.id });
+    expect(second).toEqual({ status: "already_added", userId: existing.id });
     const members = (await h.teams.getMembers(h.team.id)).filter((m) => m.userId === existing.id);
     expect(members).toHaveLength(1);
+  });
+
+  it("already-pending invitation returns already_pending without duplicating or emailing again", async () => {
+    const h = await harness();
+    const first = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);
+    const second = await h.svc.resolveOrInvite(h.teamTarget, "pending@external.io", h.adminActor);
+    expect(first).toEqual({ status: "pending" });
+    expect(second).toEqual({ status: "already_pending" });
+    expect(await h.invitations.listForEmail("pending@external.io")).toHaveLength(1);
+    expect(h.mailer.sent.map((m) => m.to)).toEqual(["pending@external.io"]);
+  });
+
+  it("blocked signed-in user returns blocked and is not granted", async () => {
+    const h = await harness();
+    const blocked = await h.users.upsert({
+      providerSub: "oidc:blocked",
+      email: "blocked@corp.com",
+      name: "Blocked",
+      isAdmin: false,
+    });
+    await h.users.setBlocked(blocked.id, true);
+    const r = await h.svc.resolveOrInvite(h.teamTarget, "blocked@corp.com", h.adminActor);
+    expect(r).toEqual({ status: "blocked", userId: blocked.id });
+    expect(await h.teams.isTeamMember(h.team.id, blocked.id)).toBe(false);
+  });
+
+  it("proxy mode blocks brand-new external email without permit or pending grant", async () => {
+    const h = await harness({ allowMemberNewEmails: true }, proxyConfig);
+    const r = await h.svc.resolveOrInvite(h.teamTarget, "iap@external.io", h.adminActor);
+    expect(r).toEqual({ status: "auth_admission_required" });
+    expect(await h.allowedEmails.isAllowed("iap@external.io")).toBe(false);
+    expect(await h.invitations.listForEmail("iap@external.io")).toHaveLength(0);
+    expect(h.mailer.sent).toHaveLength(0);
   });
 
   it("rate limit: over maxPerActorPerHour → rate_limited with nothing recorded/sent; admin bypasses", async () => {

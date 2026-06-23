@@ -824,11 +824,23 @@ export function managementRoutes(deps: ManagementDeps) {
       body.data.email,
       { id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin },
     );
-    if (r.status === "rejected") {
+    if (r.status === "policy_blocked") {
       return c.json(
         { code: "NOT_PERMITTED", message: "That email can't be invited from here." },
         403,
       );
+    }
+    if (r.status === "auth_admission_required") {
+      return c.json(
+        {
+          code: "AUTH_ADMISSION_REQUIRED",
+          message: "That email must be admitted by the configured identity provider first.",
+        },
+        403,
+      );
+    }
+    if (r.status === "blocked") {
+      return c.json({ code: "BLOCKED", message: "That account is blocked." }, 403);
     }
     if (r.status === "rate_limited") {
       return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);

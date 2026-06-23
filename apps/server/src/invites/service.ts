@@ -47,8 +47,12 @@ export interface InviteActor {
 
 export type InviteResult =
   | { status: "granted"; userId: string }
+  | { status: "already_added"; userId?: string }
   | { status: "pending" }
-  | { status: "rejected"; reason: "new_email_not_permitted" }
+  | { status: "already_pending" }
+  | { status: "blocked"; userId: string }
+  | { status: "policy_blocked"; reason: "new_email_not_permitted" }
+  | { status: "auth_admission_required" }
   | { status: "rate_limited"; retryAfterSec: number };
 
 interface EffectiveInviteSettings {
@@ -65,8 +69,14 @@ export interface InviteServiceDeps {
   config: Config;
   users: Pick<UsersRepository, "findByEmail">;
   allowedEmails: Pick<AllowedEmailsRepository, "isAllowed" | "add">;
-  invitations: Pick<InvitationsRepository, "record" | "countPendingByActor">;
-  teams: { addMember(teamId: string, userId: string): Promise<void> };
+  invitations: Pick<
+    InvitationsRepository,
+    "record" | "countPendingByActor" | "hasPendingForTarget"
+  >;
+  teams: {
+    addMember(teamId: string, userId: string): Promise<void>;
+    isTeamMember(teamId: string, userId: string): Promise<boolean>;
+  };
   canvases: {
     addAllowlistEntry(input: {
       canvasId: string;
@@ -74,6 +84,10 @@ export interface InviteServiceDeps {
       userId?: string | null;
       email?: string | null;
     }): Promise<unknown>;
+    isPrincipalAllowed(
+      canvasId: string,
+      principal: { userId?: string | null; email?: string | null },
+    ): Promise<boolean>;
   };
   settings: { effectiveInviteSettings(): Promise<EffectiveInviteSettings> };
   /** The email-templates store — the renderer resolves the admin override else the seeded default. */
@@ -125,6 +139,24 @@ function notifyPending(target: InviteTarget, s: EffectiveInviteSettings): boolea
 }
 
 export function inviteService(deps: InviteServiceDeps) {
+  async function alreadyGranted(target: InviteTarget, userId: string): Promise<boolean> {
+    if (target.kind === "team") return deps.teams.isTeamMember(target.teamId, userId);
+    if (target.kind === "canvas") {
+      return deps.canvases.isPrincipalAllowed(target.canvasId, { userId });
+    }
+    return false;
+  }
+
+  async function alreadyPending(target: InviteTarget, email: string): Promise<boolean> {
+    if (target.kind === "team") {
+      return deps.invitations.hasPendingForTarget("team", target.teamId, email);
+    }
+    if (target.kind === "canvas") {
+      return deps.invitations.hasPendingForTarget("canvas", target.canvasId, email);
+    }
+    return false;
+  }
+
   /** Apply a grant to an existing user (idempotent at the repo layer). */
   async function grantNow(target: InviteTarget, userId: string): Promise<void> {
     if (target.kind === "team") {
@@ -198,6 +230,10 @@ export function inviteService(deps: InviteServiceDeps) {
       // does not apply.
       const existing = await deps.users.findByEmail(email);
       if (existing) {
+        if (existing.isBlocked) return { status: "blocked", userId: existing.id };
+        if (await alreadyGranted(target, existing.id)) {
+          return { status: "already_added", userId: existing.id };
+        }
         await grantNow(target, existing.id);
         if (notifyExisting(target, settings)) await notify(target, email, actor, settings);
         return { status: "granted", userId: existing.id };
@@ -206,8 +242,17 @@ export function inviteService(deps: InviteServiceDeps) {
       // New email: the KTD5 permit gate.
       const alreadyAuthenticates =
         isEmailDomainAllowed(email, deps.config) || (await deps.allowedEmails.isAllowed(email));
+
+      // In proxy/IAP mode the app cannot create an upstream admission rule. It may record a
+      // pending grant only for emails the configured auth path already admits.
+      if (deps.config.auth.mode === "proxy" && !alreadyAuthenticates) {
+        return { status: "auth_admission_required" };
+      }
+
       const mayPermit = actor.isAdmin || settings.allowMemberNewEmails || alreadyAuthenticates;
-      if (!mayPermit) return { status: "rejected", reason: "new_email_not_permitted" };
+      if (!mayPermit) return { status: "policy_blocked", reason: "new_email_not_permitted" };
+
+      if (await alreadyPending(target, email)) return { status: "already_pending" };
 
       // Pending-cap (un-consumed invitations recorded by this actor). Admins bypass.
       if (!actor.isAdmin) {

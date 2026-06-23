@@ -517,7 +517,21 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       email: user.email,
       isAdmin: user.isAdmin,
     });
-    // An admin is never rate-limited or permit-gated, so the only outcomes are granted/pending.
+    if (r.status === "auth_admission_required") {
+      return c.json(
+        {
+          code: "AUTH_ADMISSION_REQUIRED",
+          message: "That email must be admitted by the configured identity provider first.",
+        },
+        403,
+      );
+    }
+    if (r.status === "blocked") {
+      return c.json({ code: "BLOCKED", message: "That account is blocked." }, 403);
+    }
+    if (r.status === "rate_limited") {
+      return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);
+    }
     deps.audit.recordAudit({
       action: "allowed_email_add",
       actorId: user.id,
@@ -525,7 +539,13 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     });
     // Surface the resulting allowlist entry when one was created (off-domain email) so the
     // panel can show it; a domain-matched email needs no row (it already authenticates).
-    const status = r.status === "granted" || r.status === "pending" ? r.status : "pending";
+    const status =
+      r.status === "granted" ||
+      r.status === "already_added" ||
+      r.status === "pending" ||
+      r.status === "already_pending"
+        ? r.status
+        : "pending";
     const entry =
       (await deps.allowedEmails.list()).find(
         (e) => e.email === body.data.email.trim().toLowerCase(),
