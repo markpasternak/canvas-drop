@@ -729,6 +729,166 @@ describe("admin routes", () => {
     expect(pendingBody.canvases.map((c) => c.id)).toEqual([pendingTeamCanvas.id]);
   });
 
+  it("projects exposure summaries and filters by external/pending governance state", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const owner = await seedUser(client, "owner");
+    const external = await usersRepository(client).upsert({
+      providerSub: "external",
+      email: "external@partner.io",
+      name: "External",
+      isAdmin: false,
+    });
+    const { app, canvases, invitations } = buildAdminApp(client, {
+      id: admin.id,
+      isAdmin: true,
+    });
+    const directExternal = await canvases.create({
+      ownerId: owner.id,
+      slug: "direct-external",
+      apiKeyHash: "u7-h1",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: directExternal.id,
+      principalKind: "member",
+      userId: external.id,
+    });
+    const pending = await canvases.create({
+      ownerId: owner.id,
+      slug: "pending-external",
+      apiKeyHash: "u7-h2",
+    });
+    await invitations.record({
+      email: "pending@partner.io",
+      target: { type: "canvas", id: pending.id },
+      invitedBy: admin.id,
+    });
+    const unrelated = await canvases.create({
+      ownerId: owner.id,
+      slug: "internal-only",
+      apiKeyHash: "u7-h3",
+    });
+
+    const externalBody = (await (
+      await app.request("/api/admin/canvases?external=true")
+    ).json()) as {
+      canvases: Array<{
+        id: string;
+        exposure: {
+          specificPeopleCount: number;
+          externalPeopleCount: number;
+          pendingInviteCount: number;
+        };
+      }>;
+    };
+    const byId = new Map(externalBody.canvases.map((c) => [c.id, c]));
+    expect(byId.get(directExternal.id)?.exposure).toMatchObject({
+      specificPeopleCount: 1,
+      externalPeopleCount: 1,
+      pendingInviteCount: 0,
+    });
+    expect(byId.get(pending.id)?.exposure).toMatchObject({
+      specificPeopleCount: 0,
+      externalPeopleCount: 1,
+      pendingInviteCount: 1,
+    });
+    expect(byId.has(unrelated.id)).toBe(false);
+
+    const pendingBody = (await (await app.request("/api/admin/canvases?pending=true")).json()) as {
+      canvases: Array<{ id: string }>;
+    };
+    expect(pendingBody.canvases.map((c) => c.id)).toEqual([pending.id]);
+  });
+
+  it("filters admin canvases by effective public, password, expiry, and context", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const publicOwner = await seedUser(client, "public-owner");
+    const revokedOwner = await seedUser(client, "revoked-owner");
+    const org = await orgsRepository(client).ensureOrg({
+      name: "Example",
+      slug: "example",
+      domains: ["example.com"],
+    });
+    const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const effectivePublic = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "effective-public",
+      apiKeyHash: "u7-pub",
+    });
+    await canvases.setAccess(effectivePublic.id, "public_link");
+    const stalePublic = await canvases.create({
+      ownerId: revokedOwner.id,
+      slug: "stale-public",
+      apiKeyHash: "u7-stale",
+    });
+    await usersRepository(client).setPublishPublic(revokedOwner.id, false);
+    await canvases.setAccess(stalePublic.id, "public_link");
+    const protectedCanvas = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "protected-canvas",
+      apiKeyHash: "u7-protected",
+      passwordHash: "hash",
+    });
+    const expired = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "expired-canvas",
+      apiKeyHash: "u7-expired",
+    });
+    await canvases.updateSettings(expired.id, { sharedExpiresAt: Date.now() - 1_000 });
+    const orgCanvas = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "org-context",
+      apiKeyHash: "u7-org",
+      orgId: org.id,
+    });
+    const teamCanvas = await canvases.create({
+      ownerId: publicOwner.id,
+      slug: "team-context",
+      apiKeyHash: "u7-team",
+    });
+    await canvases.setAccess(teamCanvas.id, "team");
+
+    const publicBody = (await (await app.request("/api/admin/canvases?public=true")).json()) as {
+      canvases: Array<{
+        id: string;
+        publicLinkEffective: boolean;
+        ownerCanPublishPublic: boolean | null;
+      }>;
+    };
+    expect(publicBody.canvases.map((c) => c.id)).toEqual([effectivePublic.id]);
+    expect(publicBody.canvases[0]).toMatchObject({
+      publicLinkEffective: true,
+      ownerCanPublishPublic: true,
+    });
+
+    const passwordBody = (await (
+      await app.request("/api/admin/canvases?password=true")
+    ).json()) as { canvases: Array<{ id: string }> };
+    expect(passwordBody.canvases.map((c) => c.id)).toEqual([protectedCanvas.id]);
+
+    const expiredBody = (await (
+      await app.request("/api/admin/canvases?expiry=expired")
+    ).json()) as { canvases: Array<{ id: string; expiryState: string }> };
+    expect(expiredBody.canvases.map((c) => ({ id: c.id, expiryState: c.expiryState }))).toEqual([
+      { id: expired.id, expiryState: "expired" },
+    ]);
+
+    const orgBody = (await (await app.request("/api/admin/canvases?context=org")).json()) as {
+      canvases: Array<{ id: string; context: string }>;
+    };
+    expect(orgBody.canvases.map((c) => ({ id: c.id, context: c.context }))).toEqual([
+      { id: orgCanvas.id, context: "org" },
+    ]);
+
+    const teamBody = (await (await app.request("/api/admin/canvases?context=team")).json()) as {
+      canvases: Array<{ id: string; context: string }>;
+    };
+    expect(teamBody.canvases.map((c) => ({ id: c.id, context: c.context }))).toEqual([
+      { id: teamCanvas.id, context: "team" },
+    ]);
+  });
+
   it("blocks then unblocks a user (audited); the stored bit flips", async () => {
     client = await makeTestDb("sqlite");
     const bob = await seedUser(client, "bob");

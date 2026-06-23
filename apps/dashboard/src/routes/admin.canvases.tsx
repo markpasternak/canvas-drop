@@ -11,6 +11,8 @@ import { SearchInput } from "../components/SearchInput.js";
 import {
   type AccessRung,
   ADMIN_PAGE_SIZE,
+  type AdminCanvasContextFilter,
+  type AdminCanvasExpiryFilter,
   type AdminCanvasSort,
   type AdminCanvasStatus,
 } from "../lib/api.js";
@@ -33,6 +35,20 @@ const ADMIN_SORT_OPTIONS = [
   { value: "title", label: "Title A–Z" },
 ];
 
+const CONTEXT_OPTIONS = [
+  { value: "all", label: "All contexts" },
+  { value: "personal", label: "Personal" },
+  { value: "org", label: "Org" },
+  { value: "team", label: "Team shared" },
+];
+
+const EXPIRY_OPTIONS = [
+  { value: "all", label: "All expiries" },
+  { value: "none", label: "No expiry" },
+  { value: "active", label: "Expires later" },
+  { value: "expired", label: "Expired" },
+];
+
 /** Admin all-canvases governance table (§6.10.1). Split from the overview so
  *  owner drill-downs land directly on the table with their filter context visible. */
 export default function AdminCanvases() {
@@ -42,6 +58,12 @@ export default function AdminCanvases() {
 
   const status = search.status;
   const access = search.access;
+  const publicOnly = search.public === true;
+  const password = search.password === true;
+  const external = search.external === true;
+  const pending = search.pending === true;
+  const expiry = search.expiry;
+  const context = search.context;
   const templatable = search.templatable === true;
   const listed = search.listed === true;
   const owner = search.owner;
@@ -53,11 +75,31 @@ export default function AdminCanvases() {
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q || status || access || templatable || listed || owner || person);
+  const filtering = Boolean(
+    q ||
+      status ||
+      access ||
+      publicOnly ||
+      password ||
+      external ||
+      pending ||
+      expiry ||
+      context ||
+      templatable ||
+      listed ||
+      owner ||
+      person,
+  );
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
     status,
     access,
+    public: publicOnly || undefined,
+    password: password || undefined,
+    external: external || undefined,
+    pending: pending || undefined,
+    expiry,
+    context,
     templatable: templatable || undefined,
     listed: listed || undefined,
     q,
@@ -93,6 +135,26 @@ export default function AdminCanvases() {
       }),
     });
   }
+  function setContext(next: string) {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({
+        ...prev,
+        context: next === "all" ? undefined : (next as AdminCanvasContextFilter),
+        page: 1,
+      }),
+    });
+  }
+  function setExpiry(next: string) {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({
+        ...prev,
+        expiry: next === "all" ? undefined : (next as AdminCanvasExpiryFilter),
+        page: 1,
+      }),
+    });
+  }
   function setSort(next: string) {
     navigate({
       to: "/admin/canvases",
@@ -101,6 +163,12 @@ export default function AdminCanvases() {
         sort: next === "recent" ? undefined : (next as AdminCanvasSort),
         page: 1,
       }),
+    });
+  }
+  function toggleFlag(flag: "public" | "password" | "external" | "pending", value: boolean) {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({ ...prev, [flag]: value ? undefined : true, page: 1 }),
     });
   }
   function setOwner(next: string) {
@@ -201,6 +269,18 @@ export default function AdminCanvases() {
           onValueChange={setAccess}
         />
         <FilterSelect
+          label="Filter by context"
+          options={CONTEXT_OPTIONS}
+          value={context ?? "all"}
+          onValueChange={setContext}
+        />
+        <FilterSelect
+          label="Filter by expiry"
+          options={EXPIRY_OPTIONS}
+          value={expiry ?? "all"}
+          onValueChange={setExpiry}
+        />
+        <FilterSelect
           label="Sort canvases"
           options={ADMIN_SORT_OPTIONS}
           value={sort}
@@ -220,6 +300,19 @@ export default function AdminCanvases() {
             {chip.label}
           </FilterChip>
         ))}
+        <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+        <FilterChip active={publicOnly} onClick={() => toggleFlag("public", publicOnly)}>
+          Public
+        </FilterChip>
+        <FilterChip active={password} onClick={() => toggleFlag("password", password)}>
+          Password
+        </FilterChip>
+        <FilterChip active={external} onClick={() => toggleFlag("external", external)}>
+          External people
+        </FilterChip>
+        <FilterChip active={pending} onClick={() => toggleFlag("pending", pending)}>
+          Pending grants
+        </FilterChip>
         <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
         <FilterChip
           active={templatable}

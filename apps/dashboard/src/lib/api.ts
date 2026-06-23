@@ -652,6 +652,15 @@ function jsonBody(body: unknown): RequestInit {
 //     404s non-admins, and the UI hides the entry behind `me.isAdmin`. ---
 
 export type AdminCanvasStatus = CanvasStatus;
+export type AdminCanvasExpiryFilter = "none" | "active" | "expired";
+export type AdminCanvasContextFilter = "personal" | "org" | "team";
+
+export interface AdminCanvasExposure {
+  specificPeopleCount: number;
+  teamCount: number;
+  pendingInviteCount: number;
+  externalPeopleCount: number;
+}
 
 export interface AdminCanvasRow {
   id: string;
@@ -680,6 +689,11 @@ export interface AdminCanvasRow {
   /** Share-link expiry (epoch ms), or null when no expiry is set. Feeds the same gate. */
   sharedExpiresAt: number | null;
   owner: { id: string; email: string; name: string } | null;
+  ownerCanPublishPublic: boolean | null;
+  publicLinkEffective: boolean;
+  expiryState: AdminCanvasExpiryFilter;
+  context: AdminCanvasContextFilter;
+  exposure: AdminCanvasExposure;
   sizeBytes: number;
   usageOps: number;
   lastActivityAt: number;
@@ -714,6 +728,13 @@ export type AdminCanvasSort = "recent" | "created" | "title";
 export interface AdminCanvasesQuery {
   status?: AdminCanvasStatus;
   access?: AccessRung;
+  /** Effective public-link filter. */
+  public?: boolean;
+  password?: boolean;
+  expiry?: AdminCanvasExpiryFilter;
+  context?: AdminCanvasContextFilter;
+  external?: boolean;
+  pending?: boolean;
   /** Gallery facet: only clone-able templates. */
   templatable?: boolean;
   /** Gallery facet: only gallery-listed canvases. */
@@ -1205,6 +1226,12 @@ export const api = {
       const sp = new URLSearchParams();
       if (query.status) sp.set("status", query.status);
       if (query.access) sp.set("access", query.access);
+      if (query.public) sp.set("public", "true");
+      if (query.password) sp.set("password", "true");
+      if (query.expiry) sp.set("expiry", query.expiry);
+      if (query.context) sp.set("context", query.context);
+      if (query.external) sp.set("external", "true");
+      if (query.pending) sp.set("pending", "true");
       if (query.templatable) sp.set("templatable", "true");
       if (query.listed) sp.set("listed", "true");
       if (query.q) sp.set("q", query.q);

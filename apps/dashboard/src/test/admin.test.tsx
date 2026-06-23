@@ -69,6 +69,16 @@ const ROW = {
   hasPassword: false,
   sharedExpiresAt: null,
   owner: { id: "u1", email: "alice@example.com", name: "Alice" },
+  ownerCanPublishPublic: true,
+  publicLinkEffective: false,
+  expiryState: "none",
+  context: "personal",
+  exposure: {
+    specificPeopleCount: 0,
+    teamCount: 0,
+    pendingInviteCount: 0,
+    externalPeopleCount: 0,
+  },
   sizeBytes: 2048,
   usageOps: 1280,
   lastActivityAt: Date.now(),
@@ -289,6 +299,53 @@ describe("admin dashboard", () => {
     expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
     expect(screen.getByText("2.0 KB")).toBeInTheDocument(); // row size
+  });
+
+  it("renders admin exposure badges on canvas rows", async () => {
+    const exposed = {
+      ...ROW,
+      access: "public_link",
+      publicLinkEffective: true,
+      hasPassword: true,
+      expiryState: "active",
+      context: "team",
+      exposure: {
+        specificPeopleCount: 3,
+        teamCount: 2,
+        pendingInviteCount: 1,
+        externalPeopleCount: 1,
+      },
+    };
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases": () => canvasPage([exposed]),
+    });
+    renderAt("/admin/canvases");
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Effective public")).toBeInTheDocument();
+    expect(within(table).getByText("Password")).toBeInTheDocument();
+    expect(within(table).getByText("Expires")).toBeInTheDocument();
+    expect(within(table).getByText("2 teams")).toBeInTheDocument();
+    expect(within(table).getByText("3 people")).toBeInTheDocument();
+    expect(within(table).getByText("1 external")).toBeInTheDocument();
+    expect(within(table).getByText("1 pending")).toBeInTheDocument();
+  });
+
+  it("filters the Canvases table with exposure chips", async () => {
+    const external = { ...ROW, id: "external-row", title: "External Row" };
+    mockFetch({
+      "GET /api/me": () => json(ADMIN_ME),
+      "GET /api/admin/canvases?external=true&limit=50&offset=0": () => canvasPage([external]),
+      "GET /api/admin/canvases": () => canvasPage([ROW]),
+    });
+    renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    expect(await screen.findByText("Happy Otter")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "External people" }));
+    expect(await screen.findByText("External Row")).toBeInTheDocument();
+    expect(
+      calls.some((c) => c.path === "/api/admin/canvases?external=true&limit=50&offset=0"),
+    ).toBe(true);
   });
 
   it("redirects old filtered /admin links to the Canvases tab with filters preserved", async () => {

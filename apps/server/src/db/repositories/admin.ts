@@ -1,5 +1,5 @@
 import { type AccessRung, type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, gte, inArray, isNull, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, or, type SQL, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -11,6 +11,19 @@ export type AdminCanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 /** Sort axes for the admin all-canvases list (member-parity, plan 006). */
 export type AdminCanvasSort = "recent" | "created" | "title";
+export type AdminCanvasExpiryFilter = "none" | "active" | "expired";
+export type AdminCanvasContextFilter = "personal" | "org" | "team";
+
+export interface AdminCanvasExposure {
+  /** Direct specific-people rows, excluding pending grants. */
+  specificPeopleCount: number;
+  /** Team grants attached to this canvas. */
+  teamCount: number;
+  /** Unconsumed canvas/team invitations that can affect this canvas. */
+  pendingInviteCount: number;
+  /** Signed-in no-org direct members, email rows, and pending grants. */
+  externalPeopleCount: number;
+}
 
 export interface ListAllCanvasesQuery {
   /** Narrow to one status; default returns all non-deleted canvases. */
@@ -23,6 +36,19 @@ export interface ListAllCanvasesQuery {
   person?: string;
   /** Governance filter: narrow to one access rung (e.g. find every `public_link`). */
   access?: AccessRung;
+  /** Effective public-link filter (access rung + owner/global capability). */
+  publicLink?: boolean;
+  publicLinksEnabled?: boolean;
+  /** Stored password gate filter. */
+  password?: boolean;
+  /** Share-window filter over sharedExpiresAt. */
+  expiry?: AdminCanvasExpiryFilter;
+  /** Home/access context filter: personal, org, or team-rung. */
+  context?: AdminCanvasContextFilter;
+  /** Exposure filter: canvases involving external people. */
+  external?: boolean;
+  /** Exposure filter: canvases with unconsumed pending grants. */
+  pending?: boolean;
   /** Gallery filter: only canvases offered as clone-able templates (galleryTemplatable). */
   templatable?: boolean;
   /** Gallery filter: only canvases listed in the public gallery (galleryListed). */
@@ -164,6 +190,117 @@ export function adminRepository(client: DbClient) {
   const usageT = sqlite ? sqliteSchema.usageEvents : pgSchema.usageEvents;
   const versionsT = sqlite ? sqliteSchema.versions : pgSchema.versions;
 
+  const blankExposure = (): AdminCanvasExposure => ({
+    specificPeopleCount: 0,
+    teamCount: 0,
+    pendingInviteCount: 0,
+    externalPeopleCount: 0,
+  });
+
+  async function exposureByCanvasIds(ids: string[]): Promise<Map<string, AdminCanvasExposure>> {
+    const map = new Map(ids.map((id) => [id, blankExposure()]));
+    if (ids.length === 0) return map;
+
+    const allowRows = (await db
+      .select({
+        canvasId: canvasAllowlistT.canvasId,
+        userId: canvasAllowlistT.userId,
+        email: canvasAllowlistT.email,
+      })
+      .from(canvasAllowlistT)
+      .where(inArray(canvasAllowlistT.canvasId, ids))) as Array<{
+      canvasId: string;
+      userId: string | null;
+      email: string | null;
+    }>;
+    const allowUserIds = [
+      ...new Set(allowRows.map((r) => r.userId).filter((id): id is string => id !== null)),
+    ];
+    const orgRows =
+      allowUserIds.length > 0
+        ? ((await db
+            .select({ userId: orgMembersT.userId })
+            .from(orgMembersT)
+            .where(inArray(orgMembersT.userId, allowUserIds))) as Array<{ userId: string }>)
+        : [];
+    const orgUserIds = new Set(orgRows.map((r) => r.userId));
+
+    for (const row of allowRows) {
+      const exposure = map.get(row.canvasId);
+      if (!exposure) continue;
+      exposure.specificPeopleCount += 1;
+      if (row.email !== null || (row.userId !== null && !orgUserIds.has(row.userId))) {
+        exposure.externalPeopleCount += 1;
+      }
+    }
+
+    const teamRows = (await db
+      .select({ canvasId: canvasTeamsT.canvasId, teamId: canvasTeamsT.teamId })
+      .from(canvasTeamsT)
+      .where(inArray(canvasTeamsT.canvasId, ids))) as Array<{ canvasId: string; teamId: string }>;
+    const canvasIdsByTeam = new Map<string, string[]>();
+    for (const row of teamRows) {
+      const exposure = map.get(row.canvasId);
+      if (!exposure) continue;
+      exposure.teamCount += 1;
+      canvasIdsByTeam.set(row.teamId, [...(canvasIdsByTeam.get(row.teamId) ?? []), row.canvasId]);
+    }
+
+    const pendingCanvasRows = (await db
+      .select({ canvasId: invitationsT.targetId })
+      .from(invitationsT)
+      .where(
+        and(
+          eq(invitationsT.targetType, "canvas"),
+          inArray(invitationsT.targetId, ids),
+          isNull(invitationsT.consumedAt),
+        ),
+      )) as Array<{ canvasId: string }>;
+    for (const row of pendingCanvasRows) {
+      const exposure = map.get(row.canvasId);
+      if (!exposure) continue;
+      exposure.pendingInviteCount += 1;
+      exposure.externalPeopleCount += 1;
+    }
+
+    const teamIds = [...canvasIdsByTeam.keys()];
+    if (teamIds.length > 0) {
+      const pendingTeamRows = (await db
+        .select({ teamId: invitationsT.targetId })
+        .from(invitationsT)
+        .where(
+          and(
+            eq(invitationsT.targetType, "team"),
+            inArray(invitationsT.targetId, teamIds),
+            isNull(invitationsT.consumedAt),
+          ),
+        )) as Array<{ teamId: string }>;
+      for (const row of pendingTeamRows) {
+        for (const canvasId of canvasIdsByTeam.get(row.teamId) ?? []) {
+          const exposure = map.get(canvasId);
+          if (!exposure) continue;
+          exposure.pendingInviteCount += 1;
+          exposure.externalPeopleCount += 1;
+        }
+      }
+    }
+
+    return map;
+  }
+
+  async function canvasIdsWithExposure(
+    predicate: (exposure: AdminCanvasExposure) => boolean,
+  ): Promise<Set<string>> {
+    const rows = (await db
+      .select({ id: canvasesT.id })
+      .from(canvasesT)
+      .where(ne(canvasesT.status, "deleted"))) as Array<{ id: string }>;
+    const exposure = await exposureByCanvasIds(rows.map((r) => r.id));
+    return new Set(
+      rows.map((r) => r.id).filter((id) => predicate(exposure.get(id) ?? blankExposure())),
+    );
+  }
+
   return {
     /**
      * Cross-owner canvas list with member-parity filter/search/sort + offset
@@ -182,6 +319,31 @@ export function adminRepository(client: DbClient) {
       if (q.status) filters.push(eq(canvasesT.status, q.status));
       else filters.push(ne(canvasesT.status, "deleted"));
       if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
+      if (q.publicLink) {
+        filters.push(eq(canvasesT.access, "public_link"));
+        filters.push(eq(usersT.canPublishPublic, true));
+        if (q.publicLinksEnabled === false) filters.push(sql`1 = 0`);
+      }
+      if (q.password) filters.push(isNotNull(canvasesT.passwordHash));
+      if (q.expiry === "none") filters.push(isNull(canvasesT.sharedExpiresAt));
+      else if (q.expiry === "active") {
+        filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
+        filters.push(sql`${canvasesT.sharedExpiresAt} > ${Date.now()}`);
+      } else if (q.expiry === "expired") {
+        filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
+        filters.push(sql`${canvasesT.sharedExpiresAt} <= ${Date.now()}`);
+      }
+      if (q.context === "personal") filters.push(isNull(canvasesT.orgId));
+      else if (q.context === "org") filters.push(isNotNull(canvasesT.orgId));
+      else if (q.context === "team") filters.push(eq(canvasesT.access, "team"));
+      if (q.external) {
+        const externalIds = await canvasIdsWithExposure((e) => e.externalPeopleCount > 0);
+        filters.push(externalIds.size > 0 ? inArray(canvasesT.id, [...externalIds]) : sql`1 = 0`);
+      }
+      if (q.pending) {
+        const pendingIds = await canvasIdsWithExposure((e) => e.pendingInviteCount > 0);
+        filters.push(pendingIds.size > 0 ? inArray(canvasesT.id, [...pendingIds]) : sql`1 = 0`);
+      }
       const person = q.person?.trim().toLowerCase();
       if (person) {
         const personUsers = (await db
@@ -651,6 +813,13 @@ export function adminRepository(client: DbClient) {
           ops: Number(r.ops),
         })),
       };
+    },
+
+    /** Batched exposure summaries for the admin list's governance columns (no N+1). */
+    async exposureByCanvas(
+      canvasIds: readonly string[],
+    ): Promise<Map<string, AdminCanvasExposure>> {
+      return exposureByCanvasIds([...canvasIds]);
     },
 
     /** Batched per-canvas op counts for the admin list's "usage" column (no N+1). */

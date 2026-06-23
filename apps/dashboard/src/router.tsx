@@ -2,7 +2,13 @@ import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/
 import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
-import type { AccessRung, AdminCanvasSort, AdminCanvasStatus } from "./lib/api.js";
+import type {
+  AccessRung,
+  AdminCanvasContextFilter,
+  AdminCanvasExpiryFilter,
+  AdminCanvasSort,
+  AdminCanvasStatus,
+} from "./lib/api.js";
 
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
@@ -170,6 +176,12 @@ export interface AdminCanvasesSearch {
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */
   access?: AccessRung;
+  public?: boolean;
+  password?: boolean;
+  expiry?: AdminCanvasExpiryFilter;
+  context?: AdminCanvasContextFilter;
+  external?: boolean;
+  pending?: boolean;
   /** Gallery facet: only clone-able templates. */
   templatable?: boolean;
   /** Gallery facet: only gallery-listed canvases. */

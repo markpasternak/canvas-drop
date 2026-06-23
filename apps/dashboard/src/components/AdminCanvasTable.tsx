@@ -32,6 +32,17 @@ const MENU_ICON = 15;
 /** Server cap on the takedown reason (routes/admin.ts disableBody.max). */
 const REASON_MAX = 500;
 
+function exposureFor(canvas: AdminCanvasRow): AdminCanvasRow["exposure"] {
+  return (
+    canvas.exposure ?? {
+      specificPeopleCount: 0,
+      teamCount: 0,
+      pendingInviteCount: 0,
+      externalPeopleCount: 0,
+    }
+  );
+}
+
 /** Reason-capturing takedown dialog (§6.10.2 — the reason the owner later sees). */
 function TakedownDialog({
   canvas,
@@ -301,7 +312,37 @@ export function AdminCanvasTable({
             )}
           </td>
           <td className="px-3 py-2">
-            <AccessBadge access={c.access} />
+            <div className="flex max-w-64 flex-wrap gap-1.5">
+              <AccessBadge access={c.access} />
+              {c.context && (
+                <Badge tone="neutral">
+                  {c.context === "team" ? "Team" : c.context === "org" ? "Org" : "Personal"}
+                </Badge>
+              )}
+              {c.access === "public_link" &&
+                (c.publicLinkEffective ? (
+                  <Badge tone="success">Effective public</Badge>
+                ) : (
+                  <Badge tone="danger">
+                    {c.ownerCanPublishPublic === false ? "Owner revoked" : "Public disabled"}
+                  </Badge>
+                ))}
+              {c.hasPassword && <Badge tone="warning">Password</Badge>}
+              {c.expiryState === "active" && <Badge tone="warning">Expires</Badge>}
+              {c.expiryState === "expired" && <Badge tone="danger">Expired</Badge>}
+              {exposureFor(c).teamCount > 0 && (
+                <Badge tone="accent">{exposureFor(c).teamCount} teams</Badge>
+              )}
+              {exposureFor(c).specificPeopleCount > 0 && (
+                <Badge tone="accent">{exposureFor(c).specificPeopleCount} people</Badge>
+              )}
+              {exposureFor(c).externalPeopleCount > 0 && (
+                <Badge tone="warning">{exposureFor(c).externalPeopleCount} external</Badge>
+              )}
+              {exposureFor(c).pendingInviteCount > 0 && (
+                <Badge tone="warning">{exposureFor(c).pendingInviteCount} pending</Badge>
+              )}
+            </div>
           </td>
           <td className="px-3 py-2">
             <StatusBadge status={c.status} />
