@@ -11,8 +11,8 @@ import {
   TEMPLATE_KEYS,
 } from "./templates.js";
 
-function previousDefaults() {
-  const previous = PREVIOUS_DEFAULT_TEMPLATES[0];
+function previousDefaults(index = 0) {
+  const previous = PREVIOUS_DEFAULT_TEMPLATES[index];
   if (!previous) throw new Error("expected previous default templates fixture");
   return previous;
 }
@@ -62,6 +62,15 @@ describe("renderTemplate (plan 003 phase 3)", () => {
     const msg = renderTemplate(body, "u@x.com", { name: "<script>alert(1)</script>" });
     expect(msg.html).not.toContain("<script>");
     expect(msg.html).toContain("&lt;script&gt;");
+  });
+
+  it("seeded defaults avoid instance and org branding in recipient copy", () => {
+    for (const template of Object.values(DEFAULT_TEMPLATES)) {
+      const combined = `${template.subject}\n${template.bodyHtml}\n${template.bodyText}`;
+      expect(combined).not.toContain("{{instanceName}}");
+      expect(combined).not.toContain("{{orgName}}");
+      expect(combined).not.toContain("{{orgContext}}");
+    }
   });
 });
 
@@ -128,6 +137,22 @@ describe.each(DIALECTS)("emailTemplates repo + seed (plan 003 phase 3) [%s]", (d
     const row = await repo.get("canvas_invite");
     expect(row?.updatedBy).toBeNull();
     expect(row?.subject).toBe(DEFAULT_TEMPLATES.canvas_invite.subject);
+  });
+
+  it("updates the just-replaced seeded defaults to the latest defaults", async () => {
+    client = await makeTestDb(dialect);
+    const repo = emailTemplatesRepository(client);
+    const previous = previousDefaults(2);
+
+    await repo.seedDefaults(previous);
+    expect((await effectiveTemplate(repo, "team_invite")).subject).toBe(
+      previous.team_invite.subject,
+    );
+
+    await seedDefaultTemplates(repo);
+    const row = await repo.get("team_invite");
+    expect(row?.updatedBy).toBeNull();
+    expect(row?.subject).toBe(DEFAULT_TEMPLATES.team_invite.subject);
   });
 
   it("preserves admin-customized rows even when the body matches a previous default", async () => {

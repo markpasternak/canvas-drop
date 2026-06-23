@@ -520,12 +520,12 @@ function Configuration() {
 /** Friendly labels + descriptions for each known email-template key (plan 003 phase 3). */
 const TEMPLATE_META: Record<string, { label: string; help: string }> = {
   account_invite: {
-    label: "Account Add person",
-    help: "Sent when an admin adds a sign-in permit. Org wording is only available for emails that map to the configured org domain.",
+    label: "Sign-in permit",
+    help: "Sent when an admin permits a new email to sign in.",
   },
   canvas_invite: {
     label: "Canvas shared (Specific people)",
-    help: "Sent when a person is given access to a canvas via the Specific-people rung.",
+    help: "Sent when a person is given access to a canvas via Specific people.",
   },
   individual_canvas_invite: {
     label: "Individual canvas invite",
@@ -539,7 +539,7 @@ const TEMPLATE_META: Record<string, { label: string; help: string }> = {
 
 /** Available `{{variables}}` for guidance in the editor (the server allow-lists these). */
 const TEMPLATE_VARS =
-  "{{name}} · {{inviterName}} · {{instanceName}} · {{orgName}} · {{orgContext}} · {{canvasTitle}} · {{teamName}} · {{link}}";
+  "{{recipientEmail}} · {{name}} · {{inviterName}} · {{canvasTitle}} · {{teamName}} · {{link}}";
 
 /** One email template: editable subject + HTML body + text body, with Save and Reset. */
 function TemplateRow({ template }: { template: AdminEmailTemplate }) {
