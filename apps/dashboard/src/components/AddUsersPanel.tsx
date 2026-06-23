@@ -8,7 +8,7 @@ import { CollapsibleSection } from "./CollapsibleSection.js";
 import { useToast } from "./Toast.js";
 
 /**
- * Admin "Add users" (plan 003 U7) — the only way to permit a brand-new email to sign in.
+ * Admin sign-in permits (plan 003 U7) — the only way to permit a brand-new email to sign in.
  * Adding routes through the invite primitive: it permits the email (an explicit entry below
  * when the domain doesn't already authenticate), sends a courtesy email, and — on a matching
  * org domain — makes them a member on their first verified login. There are no app-owned
@@ -33,9 +33,9 @@ export function AddUsersPanel() {
       setEmail("");
       // `pending` = a brand-new invitee was emailed; they join on first sign-in. `granted` = an
       // existing user (nothing new to permit).
-      toast(r.status === "pending" ? "Invitation sent" : "User already has access");
+      toast(r.status === "pending" ? "Sign-in invitation sent" : "Email already permitted");
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't add user", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't add sign-in permit", "error");
     }
   }
 
@@ -43,21 +43,21 @@ export function AddUsersPanel() {
 
   return (
     <CollapsibleSection
-      title={`Add users${count > 0 ? ` (${count})` : ""}`}
+      title={`Sign-in permits${count > 0 ? ` (${count})` : ""}`}
       storageKey="admin:section:add-users"
       defaultOpen={false}
     >
       <div className="space-y-3">
         <p className="text-muted text-xs">
-          Invite someone by email. They'll get a sign-in invitation and, if their email domain
-          matches your org, become a member on first sign-in. Emails outside your configured domain
-          allowlist are listed below as individual sign-in permits you manage here.
+          Permit an email outside your domain allowlist to sign in. This does not grant canvas
+          access by itself; canvas and team access appears in the People table as pending access
+          until that email signs in. Permits stay here until you remove them.
         </p>
 
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <div className="min-w-[16rem] flex-1">
             <label htmlFor="add-user-email" className="font-medium text-subtle text-xs">
-              Invite by email
+              Email to permit
             </label>
             <input
               id="add-user-email"
@@ -69,7 +69,7 @@ export function AddUsersPanel() {
             />
           </div>
           <Button type="submit" size="sm" variant="secondary" loading={add.isPending}>
-            Add user
+            Add permit
           </Button>
         </form>
 
@@ -81,7 +81,9 @@ export function AddUsersPanel() {
               <li key={entry.id} className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <div className="truncate font-medium text-fg text-sm">{entry.email}</div>
-                  <div className="text-subtle text-xs">added {relativeTime(entry.createdAt)}</div>
+                  <div className="text-subtle text-xs">
+                    Can sign in · added {relativeTime(entry.createdAt)}
+                  </div>
                 </div>
                 <Button
                   size="sm"
@@ -97,7 +99,7 @@ export function AddUsersPanel() {
                     }
                   }}
                 >
-                  Remove
+                  Remove permit
                 </Button>
               </li>
             ))}

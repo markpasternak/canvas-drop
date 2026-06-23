@@ -152,7 +152,7 @@ export default function AdminUsers() {
     <div className="space-y-6">
       <AdminHeader
         title="People"
-        description="Signed-in members, external emails, sign-in permits, pending grants, and access governance."
+        description="Signed-in members, external emails, sign-in permits, and canvas or team access waiting for first sign-in."
       />
 
       <AddUsersPanel />
@@ -186,7 +186,7 @@ export default function AdminUsers() {
 
       <FilterBar>
         <FilterChip active={pending} onClick={() => toggleFlag("pending", pending)}>
-          Pending grants
+          Pending access
         </FilterChip>
         <FilterChip active={blocked} onClick={() => toggleFlag("blocked", blocked)}>
           Blocked
@@ -224,7 +224,9 @@ export default function AdminUsers() {
         <EmptyState
           title={filtering ? "No people match" : "No people"}
           description={
-            filtering ? "Try a different search." : "No people have signed in or been invited yet."
+            filtering
+              ? "Try a different search."
+              : "No people have signed in or been permitted yet."
           }
         />
       )}

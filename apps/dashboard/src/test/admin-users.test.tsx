@@ -161,7 +161,7 @@ describe("admin users", () => {
     );
   });
 
-  it("cancels a pending grant from an email-only row", async () => {
+  it("cancels pending access from an email-only row", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),
       "GET /api/admin/people": () =>
@@ -190,7 +190,7 @@ describe("admin users", () => {
     renderAt("/admin/users");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Actions for pending@partner.io" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Cancel pending grant" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Cancel pending access" }));
     await waitFor(() =>
       expect(
         calls.some(

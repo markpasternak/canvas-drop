@@ -73,9 +73,9 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
     if (!firstPending) return;
     try {
       await cancelPending.mutateAsync(firstPending.id);
-      toast("Pending grant canceled");
+      toast("Pending access canceled");
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't cancel pending grant", "error");
+      toast(err instanceof ApiError ? err.hint : "Couldn't cancel pending access", "error");
     }
   }
 
@@ -85,10 +85,10 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
         <ActionMenuItem
           danger
           icon={<XCircle size={MENU_ICON} aria-hidden />}
-          title="Cancel this unconsumed pending grant"
+          title="Cancel this pending canvas or team access"
           onSelect={cancelFirstPending}
         >
-          Cancel pending grant
+          Cancel pending access
         </ActionMenuItem>
       )}
       {userId && (
@@ -178,7 +178,7 @@ export function AdminUserTable({
                     : "External"}
               </Badge>
               {u.permitId && <Badge tone="accent">Sign-in permit</Badge>}
-              {u.pendingCount > 0 && <Badge tone="warning">{u.pendingCount} pending</Badge>}
+              {u.pendingCount > 0 && <Badge tone="warning">{u.pendingCount} pending access</Badge>}
             </div>
           </td>
           <td className="px-3 py-2 text-right text-muted">

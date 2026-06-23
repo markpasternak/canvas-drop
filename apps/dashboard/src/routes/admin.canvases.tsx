@@ -311,7 +311,7 @@ export default function AdminCanvases() {
           External people
         </FilterChip>
         <FilterChip active={pending} onClick={() => toggleFlag("pending", pending)}>
-          Pending grants
+          Pending access
         </FilterChip>
         <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
         <FilterChip
