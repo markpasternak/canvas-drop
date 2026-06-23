@@ -8,6 +8,7 @@ import {
   type ConfigField,
   type ConfigGroup,
 } from "./config-fields.js";
+import { defaultInstanceName, INSTANCE_NAME_SETTING_KEY } from "./instance-display-name.js";
 
 /** AI provider-key override store key (write-only secret; DB overrides env). */
 const AI_API_KEY = "config.ai.apiKey";
@@ -225,6 +226,15 @@ export function adminSettingsService(deps: {
     async effectiveDesignSkin(): Promise<SkinName> {
       const v = await strOverride(DESIGN_SKIN_KEY);
       return v && isSkinName(v) ? v : config.designSkin;
+    },
+
+    /**
+     * Effective instance display name for outbound copy. This deliberately does not
+     * fall back to `config.org.name`: the instance and the configured org are
+     * distinct concepts, and org language is only valid for domain-derived members.
+     */
+    async effectiveInstanceName(): Promise<string> {
+      return (await strOverride(INSTANCE_NAME_SETTING_KEY)) ?? defaultInstanceName(config);
     },
 
     /**

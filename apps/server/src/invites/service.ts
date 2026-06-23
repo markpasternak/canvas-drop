@@ -89,23 +89,15 @@ export interface InviteServiceDeps {
       principal: { userId?: string | null; email?: string | null },
     ): Promise<boolean>;
   };
-  settings: { effectiveInviteSettings(): Promise<EffectiveInviteSettings> };
+  settings: {
+    effectiveInviteSettings(): Promise<EffectiveInviteSettings>;
+    effectiveInstanceName(): Promise<string>;
+  };
   /** The email-templates store — the renderer resolves the admin override else the seeded default. */
   templates: Pick<EmailTemplatesRepository, "get">;
   mailer: Mailer;
   rateLimitStore: RateLimitStore;
   log?: Logger;
-}
-
-/** Instance display name for email copy — org-agnostic (no hardcoded brand): the tenant org
- *  name if configured, else the public host. */
-function instanceName(config: Config): string {
-  if (config.org.name) return config.org.name;
-  try {
-    return new URL(config.baseUrl).host;
-  } catch {
-    return config.baseUrl;
-  }
 }
 
 function templateKeyFor(target: InviteTarget): TemplateKey {
@@ -136,6 +128,14 @@ function notifyExisting(target: InviteTarget, s: EffectiveInviteSettings): boole
  *  sign-in invite (master-gated only); Add-users follows its own per-event toggle. */
 function notifyPending(target: InviteTarget, s: EffectiveInviteSettings): boolean {
   return target.kind === "account" ? s.notifyOnAddUser : true;
+}
+
+/** The configured org name is valid in account copy only when the recipient's verified email
+ *  domain would make them an org member. It is never used for external canvas/team grants. */
+function orgNameForEmail(config: Config, email: string): string | undefined {
+  if (!config.org.name) return undefined;
+  const domain = email.split("@").pop()?.toLowerCase();
+  return domain && config.org.domains.includes(domain) ? config.org.name : undefined;
 }
 
 export function inviteService(deps: InviteServiceDeps) {
@@ -185,9 +185,13 @@ export function inviteService(deps: InviteServiceDeps) {
       const body = await effectiveTemplate(deps.templates, templateKeyFor(target));
       const link =
         target.kind === "canvas" ? canvasUrl(deps.config, target.canvasSlug) : deps.config.baseUrl;
+      const instanceName = await deps.settings.effectiveInstanceName();
+      const orgName = target.kind === "account" ? orgNameForEmail(deps.config, to) : undefined;
       const msg = renderTemplate(body, to, {
         inviterName: actor.name,
-        instanceName: instanceName(deps.config),
+        instanceName,
+        orgName,
+        orgContext: orgName ? ` for ${orgName}` : undefined,
         canvasTitle: target.kind === "canvas" ? target.canvasTitle : undefined,
         teamName: target.kind === "team" ? target.teamName : undefined,
         link,

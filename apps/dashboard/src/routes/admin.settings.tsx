@@ -520,12 +520,12 @@ function Configuration() {
 /** Friendly labels + descriptions for each known email-template key (plan 003 phase 3). */
 const TEMPLATE_META: Record<string, { label: string; help: string }> = {
   account_invite: {
-    label: "Account invite",
-    help: "Sent when an admin adds a new person — invites them to sign in for the first time.",
+    label: "Account Add person",
+    help: "Sent when an admin adds a sign-in permit. Org wording is only available for emails that map to the configured org domain.",
   },
   canvas_invite: {
     label: "Canvas shared (Specific people)",
-    help: "Sent when an existing user is given access to a canvas via the Specific-people rung.",
+    help: "Sent when a person is given access to a canvas via the Specific-people rung.",
   },
   individual_canvas_invite: {
     label: "Individual canvas invite",
@@ -539,7 +539,7 @@ const TEMPLATE_META: Record<string, { label: string; help: string }> = {
 
 /** Available `{{variables}}` for guidance in the editor (the server allow-lists these). */
 const TEMPLATE_VARS =
-  "{{name}} · {{inviterName}} · {{instanceName}} · {{canvasTitle}} · {{teamName}} · {{link}}";
+  "{{name}} · {{inviterName}} · {{instanceName}} · {{orgName}} · {{orgContext}} · {{canvasTitle}} · {{teamName}} · {{link}}";
 
 /** One email template: editable subject + HTML body + text body, with Save and Reset. */
 function TemplateRow({ template }: { template: AdminEmailTemplate }) {
@@ -624,7 +624,7 @@ function TemplateRow({ template }: { template: AdminEmailTemplate }) {
         </Button>
         {template.overridden ? (
           <Button size="sm" variant="ghost" loading={resetTemplate.isPending} onClick={reset}>
-            Reset to default
+            Reset to latest default
           </Button>
         ) : null}
       </div>
@@ -656,7 +656,7 @@ function EmailTemplates() {
         <p className="text-xs text-muted">
           Customize the invite and notification emails. Variables:{" "}
           <span className="font-mono">{TEMPLATE_VARS}</span> (HTML-escaped in the HTML body).
-          Unknown variables render empty.
+          Unknown variables render empty. Reset uses the latest seeded default.
         </p>
       </div>
       <div className="divide-y divide-border">

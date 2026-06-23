@@ -1,6 +1,7 @@
 import { type Config, SKIN_NAMES } from "@canvas-drop/shared";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { KV_MAX_KEYS_SHARED, KV_MAX_KEYS_USER } from "../routes/canvas-kv.js";
+import { defaultInstanceName, INSTANCE_NAME_SETTING_KEY } from "./instance-display-name.js";
 
 /**
  * Config registry — the single source of truth for the admin Configuration view
@@ -87,6 +88,18 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     secret: false,
     editable: false,
     fromConfig: (c) => c.baseUrl,
+  },
+  {
+    key: "core.instanceName",
+    env: "—",
+    group: "Core",
+    label: "Instance display name",
+    help: "Human-readable instance name used in invite and notification emails. Defaults to the public base host. Separate from the org name, which appears only when an email maps to the configured org domain.",
+    type: "string",
+    secret: false,
+    editable: true,
+    settingKey: INSTANCE_NAME_SETTING_KEY,
+    fromConfig: defaultInstanceName,
   },
   {
     key: "core.designSkin",
@@ -242,15 +255,15 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: (c) => c.ai.baseUrl,
   },
 
-  // ── Email (guest invites) — read-only for now ────────────────────────────
-  // Provider secrets are env-only (never DB-editable): invite emails are auth
-  // credentials. Shown for transparency so an operator can confirm the transport.
+  // ── Email transport — read-only for now ──────────────────────────────────
+  // Provider secrets are env-only (never DB-editable). Shown for transparency so
+  // an operator can confirm how delegated invite/notification emails are sent.
   {
     key: "email.driver",
     env: "CANVAS_DROP_EMAIL_DRIVER",
     group: "Email",
     label: "Email driver",
-    help: "How guest-invite magic links are sent: log (dev), smtp, mailgun, or noop.",
+    help: "How invite and notification emails are sent: log (dev), smtp, mailgun, or noop.",
     type: "enum",
     enumValues: ["log", "smtp", "mailgun", "noop"],
     secret: false,
@@ -366,8 +379,8 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     key: "email.notifyOnAddUser",
     env: "—",
     group: "Email",
-    label: "Notify on Add user",
-    help: "Email an existing user when an admin adds their account. No effect unless the master switch above is on and an email driver is configured.",
+    label: "Notify on Add person",
+    help: "Email a person when an admin adds their sign-in permit. Org language is used only when the email domain maps to the configured org.",
     type: "boolean",
     secret: false,
     editable: true,
@@ -429,7 +442,7 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     env: "—",
     group: "Access",
     label: "Let members invite brand-new emails",
-    help: "Off by default. When OFF, a member/guest invite only grants to people who can already sign in; permitting a brand-new external email is admin-only (Add users). When ON, any member may permit a new email to sign in by inviting them.",
+    help: "Off by default. When OFF, a member invite only grants to people who can already sign in; permitting a brand-new external email is admin-only (Add person). When ON, any member may permit a new email to sign in by inviting them.",
     type: "boolean",
     secret: false,
     editable: true,

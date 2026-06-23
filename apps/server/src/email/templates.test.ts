@@ -5,10 +5,17 @@ import { DIALECTS, makeTestDb } from "../db/testing.js";
 import {
   DEFAULT_TEMPLATES,
   effectiveTemplate,
+  PREVIOUS_DEFAULT_TEMPLATES,
   renderTemplate,
   seedDefaultTemplates,
   TEMPLATE_KEYS,
 } from "./templates.js";
+
+function previousDefaults() {
+  const previous = PREVIOUS_DEFAULT_TEMPLATES[0];
+  if (!previous) throw new Error("expected previous default templates fixture");
+  return previous;
+}
 
 describe("renderTemplate (plan 003 phase 3)", () => {
   it("substitutes allow-listed vars; HTML-escapes them in the HTML body, raw in text/subject", () => {
@@ -33,6 +40,21 @@ describe("renderTemplate (plan 003 phase 3)", () => {
     expect(msg.subject).toBe("");
     expect(msg.html).toBe("<p> ok</p>");
     expect(msg.text).toBe(" ok");
+  });
+
+  it("substitutes org variables when supplied", () => {
+    const body = {
+      subject: "{{orgName}}",
+      bodyHtml: "<p>{{orgName}}{{orgContext}}</p>",
+      bodyText: "{{orgName}}{{orgContext}}",
+    };
+    const msg = renderTemplate(body, "u@x.com", {
+      orgName: "A&B <Org>",
+      orgContext: " for A&B <Org>",
+    });
+    expect(msg.subject).toBe("A&B <Org>");
+    expect(msg.html).toContain("A&amp;B &lt;Org&gt;");
+    expect(msg.text).toContain("A&B <Org> for A&B <Org>");
   });
 
   it("a script-bearing value cannot inject executable markup into the HTML body", () => {
@@ -90,5 +112,34 @@ describe.each(DIALECTS)("emailTemplates repo + seed (plan 003 phase 3) [%s]", (d
     expect((await effectiveTemplate(repo, "canvas_invite")).subject).toBe(
       DEFAULT_TEMPLATES.canvas_invite.subject,
     );
+  });
+
+  it("updates previous untouched seeded defaults to the latest defaults", async () => {
+    client = await makeTestDb(dialect);
+    const repo = emailTemplatesRepository(client);
+    const previous = previousDefaults();
+
+    await repo.seedDefaults(previous);
+    expect((await effectiveTemplate(repo, "canvas_invite")).subject).toBe(
+      previous.canvas_invite.subject,
+    );
+
+    await seedDefaultTemplates(repo);
+    const row = await repo.get("canvas_invite");
+    expect(row?.updatedBy).toBeNull();
+    expect(row?.subject).toBe(DEFAULT_TEMPLATES.canvas_invite.subject);
+  });
+
+  it("preserves admin-customized rows even when the body matches a previous default", async () => {
+    client = await makeTestDb(dialect);
+    const repo = emailTemplatesRepository(client);
+    const previous = previousDefaults().canvas_invite;
+
+    await repo.upsert("canvas_invite", previous, "admin-1");
+    await seedDefaultTemplates(repo);
+
+    const row = await repo.get("canvas_invite");
+    expect(row?.updatedBy).toBe("admin-1");
+    expect(row?.subject).toBe(previous.subject);
   });
 });

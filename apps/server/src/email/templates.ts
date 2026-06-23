@@ -21,7 +21,17 @@ export type TemplateKey =
 /** The variables a caller may supply (the allow-list — any `{{var}}` outside this set, or
  *  absent from the supplied map, renders empty). */
 export type TemplateVars = Partial<
-  Record<"name" | "inviterName" | "instanceName" | "canvasTitle" | "teamName" | "link", string>
+  Record<
+    | "name"
+    | "inviterName"
+    | "instanceName"
+    | "orgName"
+    | "orgContext"
+    | "canvasTitle"
+    | "teamName"
+    | "link",
+    string
+  >
 >;
 
 export const TEMPLATE_KEYS: readonly TemplateKey[] = [
@@ -39,46 +49,95 @@ const html = (subject: string, lead: string, cta: string): string =>
   `<p style="font-size:12px;color:#888">If the button doesn't work, open: {{link}}</p>` +
   `</div>`;
 
+/** Seeded defaults from before the auth-delegated access cleanup. Used only for safe rollout:
+ *  rows that still exactly match one of these boot-seeded bodies can be migrated to the new
+ *  defaults; admin-customized rows are preserved. */
+export const PREVIOUS_DEFAULT_TEMPLATES: readonly Record<TemplateKey, TemplateBody>[] = [
+  {
+    account_invite: {
+      subject: "You've been invited to {{instanceName}}",
+      bodyHtml: html(
+        "You've been invited to {{instanceName}}",
+        "{{inviterName}} added you to {{instanceName}}. Sign in to get started.",
+        "Sign in",
+      ),
+      bodyText:
+        "{{inviterName}} added you to {{instanceName}}. Sign in to get started:\n\n{{link}}\n",
+    },
+    canvas_invite: {
+      subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
+      bodyHtml: html(
+        "A canvas was shared with you",
+        "{{inviterName}} gave you access to “{{canvasTitle}}” on {{instanceName}}. Sign in to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} gave you access to “{{canvasTitle}}” on {{instanceName}}. Sign in to open it:\n\n{{link}}\n",
+    },
+    individual_canvas_invite: {
+      subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
+      bodyHtml: html(
+        "You're invited to a canvas",
+        "{{inviterName}} invited you to “{{canvasTitle}}” on {{instanceName}}.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} invited you to “{{canvasTitle}}” on {{instanceName}}:\n\n{{link}}\n",
+    },
+    team_invite: {
+      subject: "You've been added to the team “{{teamName}}”",
+      bodyHtml: html(
+        "Added to a team",
+        "{{inviterName}} added you to the team “{{teamName}}” on {{instanceName}}. Canvases shared with that team are now available to you.",
+        "Open {{instanceName}}",
+      ),
+      bodyText:
+        "{{inviterName}} added you to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
+    },
+  },
+];
+
 /** The seeded defaults. Subjects are plain; bodies use `{{variable}}`. */
 export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateBody> = {
   account_invite: {
     subject: "You've been invited to {{instanceName}}",
     bodyHtml: html(
       "You've been invited to {{instanceName}}",
-      "{{inviterName}} added you to {{instanceName}}. Sign in to get started.",
+      "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started.",
       "Sign in",
     ),
     bodyText:
-      "{{inviterName}} added you to {{instanceName}}. Sign in to get started:\n\n{{link}}\n",
+      "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started:\n\n{{link}}\n",
   },
   canvas_invite: {
-    subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
+    subject: "{{inviterName}} shared the canvas “{{canvasTitle}}” with you",
     bodyHtml: html(
       "A canvas was shared with you",
-      "{{inviterName}} gave you access to “{{canvasTitle}}” on {{instanceName}}. Sign in to open it.",
+      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it.",
       "Open canvas",
     ),
     bodyText:
-      "{{inviterName}} gave you access to “{{canvasTitle}}” on {{instanceName}}. Sign in to open it:\n\n{{link}}\n",
+      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it:\n\n{{link}}\n",
   },
   individual_canvas_invite: {
     subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
     bodyHtml: html(
       "You're invited to a canvas",
-      "{{inviterName}} invited you to “{{canvasTitle}}” on {{instanceName}}.",
+      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}.",
       "Open canvas",
     ),
-    bodyText: "{{inviterName}} invited you to “{{canvasTitle}}” on {{instanceName}}:\n\n{{link}}\n",
+    bodyText:
+      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}:\n\n{{link}}\n",
   },
   team_invite: {
     subject: "You've been added to the team “{{teamName}}”",
     bodyHtml: html(
       "Added to a team",
-      "{{inviterName}} added you to the team “{{teamName}}” on {{instanceName}}. Canvases shared with that team are now available to you.",
+      "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Canvases shared with that team are now available to you.",
       "Open {{instanceName}}",
     ),
     bodyText:
-      "{{inviterName}} added you to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
+      "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
   },
 };
 
@@ -114,7 +173,7 @@ export function renderTemplate(body: TemplateBody, to: string, vars: TemplateVar
 
 /** Idempotently seed the default templates at boot (no-op for keys that already have a row). */
 export async function seedDefaultTemplates(repo: EmailTemplatesRepository): Promise<void> {
-  await repo.seedDefaults(DEFAULT_TEMPLATES);
+  await repo.seedDefaults(DEFAULT_TEMPLATES, PREVIOUS_DEFAULT_TEMPLATES);
 }
 
 /** Resolve a template's effective body: the admin override if present, else the seeded default
