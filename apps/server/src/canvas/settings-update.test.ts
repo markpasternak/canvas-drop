@@ -57,16 +57,22 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
 }
 
 const PUBLIC_OK = {
+  publicLinksEnabled: true,
   canPublishPublic: true,
   publicEdgeCacheTtlSec: 300,
   now: NOW,
   tenancyActive: false,
 };
 const PUBLIC_DENIED = {
+  publicLinksEnabled: true,
   canPublishPublic: false,
   publicEdgeCacheTtlSec: 300,
   now: NOW,
   tenancyActive: false,
+};
+const PUBLIC_GLOBAL_OFF = {
+  ...PUBLIC_OK,
+  publicLinksEnabled: false,
 };
 
 function resolve(cv: Canvas, input: CanvasSettingsInput, opts = PUBLIC_OK) {
@@ -127,7 +133,12 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "SHARE_REQUIRES_PUBLISH", status: 409 });
   });
 
-  it("PUBLIC_NOT_ALLOWED: public_link without the admin grant is rejected (403)", () => {
+  it("PUBLIC_LINKS_DISABLED: public_link while the instance switch is off is rejected (403)", () => {
+    const r = resolve(canvas(), { access: "public_link" }, PUBLIC_GLOBAL_OFF);
+    expect(r).toMatchObject({ ok: false, code: "PUBLIC_LINKS_DISABLED", status: 403 });
+  });
+
+  it("PUBLIC_NOT_ALLOWED: public_link for a revoked account is rejected (403)", () => {
     const r = resolve(canvas(), { access: "public_link" }, PUBLIC_DENIED);
     expect(r).toMatchObject({ ok: false, code: "PUBLIC_NOT_ALLOWED", status: 403 });
   });
@@ -227,7 +238,7 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     if (r.ok) expect(r.targetAccess).toBe("private");
   });
 
-  it("public_link with the admin grant is allowed", () => {
+  it("public_link is allowed when the global and per-user gates are on", () => {
     const r = resolve(canvas(), { access: "public_link" }, PUBLIC_OK);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.targetAccess).toBe("public_link");
@@ -255,6 +266,7 @@ function publicCanvas(over: Partial<Canvas> = {}): Canvas {
 }
 
 const cdnOpts = {
+  publicLinksEnabled: true,
   canPublishPublic: true,
   publicEdgeCacheTtlSec: 300,
   now: NOW,

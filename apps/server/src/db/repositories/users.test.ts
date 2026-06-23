@@ -23,6 +23,7 @@ describe.each(DIALECTS)("usersRepository [%s]", (dialect) => {
     expect(u.id).toMatch(UUID_RE);
     expect(u.email).toBe("a@example.com");
     expect(u.isBlocked).toBe(false);
+    expect(u.canPublishPublic).toBe(true);
   });
 
   it("reuses the existing row on repeat upsert (no duplicate) and updates fields", async () => {

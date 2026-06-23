@@ -250,7 +250,7 @@ export interface PublishResult {
 export interface CanvasSettings {
   title?: string;
   description?: string | null;
-  /** Access rung (D4). `public_link` is accepted only for admin-granted accounts (U10). */
+  /** Access rung (D4). `public_link` is accepted only while the global/user gates allow it. */
   access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
   /** Teams to grant when access==='team' (plan 003). Owner may grant only teams they
    *  belong to in the canvas's org (validated server-side); ignored for other rungs. */
@@ -746,7 +746,7 @@ export interface AdminUserRow {
   avatarUrl: string | null;
   isAdmin: boolean;
   isBlocked: boolean;
-  /** Admin-granted publish-public capability (U10). */
+  /** Effective publish-public capability (global switch AND per-user bit). */
   canPublishPublic: boolean;
   createdAt: number;
   lastSeenAt: number | null;

@@ -503,7 +503,7 @@ const RUNGS: {
   {
     value: "public_link",
     label: "Public link",
-    hint: "Anyone with the link can view it (static only, no backend). Admin-granted.",
+    hint: "Anyone with the link can view it (static only, no backend). Admins can turn this off.",
     adminGated: true,
   },
 ];

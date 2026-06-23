@@ -292,6 +292,30 @@ describe("adminSettingsService — screenshots enablement (plan 004 / U12)", () 
   });
 });
 
+describe("adminSettingsService — public links gate", () => {
+  it("defaults public links on and honors an admin override", async () => {
+    const s = configSvc();
+    expect(await s.effectivePublicLinksEnabled()).toBe(true);
+    await s.setConfigOverride("access.publicLinksEnabled", false);
+    expect(await s.effectivePublicLinksEnabled()).toBe(false);
+    await s.clearConfigOverride("access.publicLinksEnabled");
+    expect(await s.effectivePublicLinksEnabled()).toBe(true);
+  });
+
+  it("exposes the public links switch as an editable Access boolean", async () => {
+    const row = (await configSvc().describeConfig()).find(
+      (r) => r.key === "access.publicLinksEnabled",
+    );
+    expect(row).toMatchObject({
+      group: "Access",
+      editable: true,
+      type: "boolean",
+      value: "true",
+      source: "default",
+    });
+  });
+});
+
 describe("effectiveInviteSettings (plan 003 phase 3)", () => {
   it("defaults: email off, notifications on, rate 20/h, pending cap 50, member-new-emails off", async () => {
     const s = adminSettingsService({ settings: fakeSettings(), config });

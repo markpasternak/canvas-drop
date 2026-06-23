@@ -44,14 +44,15 @@ export type SettingsResolution =
  * diverge on the listability invariant (templatable ⊆ listed ⊆ shared/published/
  * unprotected), the share-requires-publish rule, or the public_link admin gate.
  *
- * `opts.canPublishPublic` is the caller's per-account admin grant (the `public_link`
- * gate). The caller applies the result: `updateSettings(patch)` + `setPassword(hash)`
+ * `opts.publicLinksEnabled` and `opts.canPublishPublic` are the global + per-account
+ * `public_link` gate. The caller applies the result: `updateSettings(patch)` + `setPassword(hash)`
  * when `password !== undefined`, then audits `share_change` when `targetAccess` is set.
  */
 export function resolveSettingsUpdate(
   cv: Canvas,
   input: CanvasSettingsInput,
   opts: {
+    publicLinksEnabled: boolean;
     canPublishPublic: boolean;
     publicEdgeCacheTtlSec: number;
     now: number;
@@ -83,13 +84,23 @@ export function resolveSettingsUpdate(
       status: 409,
     };
   }
-  if (targetAccess === "public_link" && !opts.canPublishPublic) {
-    return {
-      ok: false,
-      code: "PUBLIC_NOT_ALLOWED",
-      message: "An administrator must grant your account permission to publish public links.",
-      status: 403,
-    };
+  if (targetAccess === "public_link") {
+    if (!opts.publicLinksEnabled) {
+      return {
+        ok: false,
+        code: "PUBLIC_LINKS_DISABLED",
+        message: "Public links are disabled for this instance.",
+        status: 403,
+      };
+    }
+    if (!opts.canPublishPublic) {
+      return {
+        ok: false,
+        code: "PUBLIC_NOT_ALLOWED",
+        message: "An administrator has revoked this account's permission to publish public links.",
+        status: 403,
+      };
+    }
   }
   // Under active tenancy, whole_org means "members of the canvas's home org" — a canvas
   // with no home org (org_id null: a personal canvas, or a guest/org-less owner's) can't

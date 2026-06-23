@@ -25,7 +25,7 @@ function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefin
   async function togglePublic() {
     try {
       await publishPublic.mutateAsync({ id: user.id, allowed: !user.canPublishPublic });
-      toast(user.canPublishPublic ? "Public publishing revoked" : "Public publishing granted");
+      toast(user.canPublishPublic ? "Public publishing revoked" : "Public publishing restored");
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't update", "error");
     }
@@ -53,10 +53,10 @@ function RowActions({ user, meId }: { user: AdminUserRow; meId: string | undefin
     <ActionMenu label={`Actions for ${user.name || user.email}`}>
       <ActionMenuItem
         icon={<Globe size={MENU_ICON} aria-hidden />}
-        title="Allow this account to publish canvases as static public links"
+        title="Revoke or restore this account's ability to publish canvases as static public links"
         onSelect={togglePublic}
       >
-        {user.canPublishPublic ? "Revoke public publishing" : "Grant public publishing"}
+        {user.canPublishPublic ? "Revoke public publishing" : "Restore public publishing"}
       </ActionMenuItem>
       <ActionMenuItem
         icon={<ShieldChevron size={MENU_ICON} aria-hidden />}

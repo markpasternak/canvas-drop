@@ -388,13 +388,20 @@ describe("decideCanvasAccess — allows", () => {
 
 describe("canvasAccess — disabled-canvas rendering", () => {
   /** Minimal app: inject slug + user, run canvasAccess over a fake repo. */
-  function appFor(cv: Canvas | null, user: { id: string; isAdmin: boolean }) {
+  function appFor(
+    cv: Canvas | null,
+    user: { id: string; isAdmin: boolean },
+    publicLinksEnabled = true,
+  ) {
     const canvases = {
       async findBySlug() {
         return cv;
       },
       async isPrincipalAllowed() {
         return false;
+      },
+      async isOwnerPublishEnabled() {
+        return true;
       },
     } as unknown as CanvasesRepository;
     const app = new Hono<AppEnv>();
@@ -403,7 +410,14 @@ describe("canvasAccess — disabled-canvas rendering", () => {
       c.set("user", { id: user.id, isAdmin: user.isAdmin } as never);
       await next();
     });
-    app.use("*", canvasAccess({ canvases, tenancyActive: false }));
+    app.use(
+      "*",
+      canvasAccess({
+        canvases,
+        tenancyActive: false,
+        publicLinksEnabled: async () => publicLinksEnabled,
+      }),
+    );
     app.get("*", (c) => c.text("CANVAS CONTENT")); // only reached on allow
     return app;
   }
@@ -438,6 +452,16 @@ describe("canvasAccess — disabled-canvas rendering", () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("CANVAS CONTENT");
+  });
+
+  it("public_link stale rows are denied when the instance public-link switch is off", async () => {
+    const cv = canvas({ status: "active", access: "public_link" });
+    expect((await appFor(cv, other, true).request("/")).status).toBe(200);
+    const res = await appFor(cv, other, false).request("/", {
+      headers: { accept: "application/json" },
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
   });
 
   // §12.2 / D23: every 404 denial reason must collapse to an OPAQUE body at the

@@ -56,7 +56,7 @@ export interface AdminUserRow {
   avatarUrl: string | null;
   isAdmin: boolean;
   isBlocked: boolean;
-  /** Admin-granted publish-public capability (U10). */
+  /** Per-user publish-public capability (default on; admin-revocable). */
   canPublishPublic: boolean;
   createdAt: number;
   lastSeenAt: number | null;

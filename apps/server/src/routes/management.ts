@@ -102,6 +102,8 @@ export interface ManagementDeps extends PreviewHintDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
+  publicLinksEnabled?: () => Promise<boolean>;
   /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
    *  it. Optional: suites that don't exercise the invite path may omit it. */
   invites?: InviteService;
@@ -135,9 +137,9 @@ const capabilitiesSchema = z.object({
 const settingsSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  // First-class access rung (D4). `public_link` is admin-gated per account (U10) —
-  // accepted here but rejected unless the owner holds the capability. `shared`
-  // remains a deprecated boolean alias (true→whole_org, false→private).
+  // First-class access rung (D4). `public_link` is accepted here but rejected unless
+  // the instance-wide switch is on and the owner's per-user capability has not been
+  // revoked. `shared` remains a deprecated boolean alias (true→whole_org, false→private).
   access: z.enum(["private", "specific_people", "team", "whole_org", "public_link"]).optional(),
   // Teams to grant when access='team' (plan 003 U4). Owner may grant only teams they
   // belong to in this canvas's org (validated server-side at grant time, KTD4).
@@ -643,6 +645,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // The share/gallery preconditions + persisted-patch shaping live in the shared
     // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
     const resolution = resolveSettingsUpdate(cv, body.data, {
+      publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
       canPublishPublic: c.get("user").canPublishPublic,
       publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
       now: Date.now(),

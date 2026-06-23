@@ -20,6 +20,8 @@ export interface MeRoutesDeps {
    *  env/default), read per-request so an admin's runtime flip takes effect without a
    *  restart. The SPA applies the result to <html data-skin>. */
   designSkin: () => Promise<SkinName>;
+  /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
+  publicLinksEnabled?: () => Promise<boolean>;
   /** Tenancy org store (plan 002 U6) — resolves the caller's org ids to {id,name}. */
   orgs: Pick<OrgsRepository, "findById">;
   /** Whether tenancy is active (an org is configured). Drives `isGuest`: only meaningful
@@ -54,6 +56,7 @@ export function meRoutes(deps: MeRoutesDeps) {
       (o): o is NonNullable<typeof o> => o !== null,
     );
     const orgs = orgRows.map((o) => ({ id: o.id, name: o.name }));
+    const publicLinksEnabled = await (deps.publicLinksEnabled?.() ?? Promise.resolve(true));
     return c.json({
       id: u.id,
       email: u.email,
@@ -63,9 +66,9 @@ export function meRoutes(deps: MeRoutesDeps) {
       // Tenancy (plan 002 U6) — the member's orgs + whether they're a guest (no org).
       orgs,
       isGuest: deps.tenancyActive && orgIds.size === 0,
-      // Whether this account may publish public links (U10) — the dashboard offers
-      // the public_link rung only when true.
-      canPublishPublic: u.canPublishPublic,
+      // Effective public-link capability — the dashboard offers the public_link rung
+      // only when both the instance switch and this account's bit allow it.
+      canPublishPublic: publicLinksEnabled && u.canPublishPublic,
       authMode: deps.authMode,
       // Instance URL config (plan 004) — UX-only, like authMode; NEVER an authz signal.
       // The dashboard uses these to preview a custom slug's final URL before create.

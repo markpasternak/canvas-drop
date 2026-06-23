@@ -81,7 +81,7 @@ function buildApp(
       isAdmin: actor.isAdmin,
       name: "Actor",
       email: `${actor.id}@example.com`,
-      canPublishPublic: (actor as { canPublishPublic?: boolean }).canPublishPublic ?? false,
+      canPublishPublic: (actor as { canPublishPublic?: boolean }).canPublishPublic ?? true,
     } as never);
     c.set("clientIp", "127.0.0.1");
     await next();
@@ -93,6 +93,7 @@ function buildApp(
       urlMode: "path",
       baseUrl: "http://localhost:8787",
       designSkin: async () => "editorial",
+      publicLinksEnabled: async () => true,
       orgs: { findById: async () => null },
       tenancyActive: false,
     }),
@@ -116,6 +117,7 @@ function buildApp(
       mailer: withGuests ? logMailer(silent) : undefined,
       invites: makeInviteService(client, config),
       invitations: invitationsRepository(client),
+      publicLinksEnabled: () => Promise.resolve(true),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       screenshots,
     }),
@@ -2614,26 +2616,30 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     expect((await jsonOf<{ access: string }>(ok)).access).toBe("specific_people");
   });
 
-  it("public_link is rejected for an owner without the publish capability (U10)", async () => {
-    client = await makeTestDb("sqlite");
-    const owner = await seedUser(client, "owner");
-    const id = await publishedCanvas(owner.id);
-    const res = await buildApp(client, { id: owner.id, isAdmin: false }).request(
-      `/api/canvases/${id}/settings`,
-      { method: "PATCH", headers: mut, body: JSON.stringify({ access: "public_link" }) },
-    );
-    expect(res.status).toBe(403);
-    expect((await jsonOf<{ code: string }>(res)).code).toBe("PUBLIC_NOT_ALLOWED");
-  });
-
-  it("public_link is settable by an owner the admin has granted the capability (U10)", async () => {
+  it("public_link is rejected for an owner whose publish capability was revoked", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
     const res = await buildApp(client, {
       id: owner.id,
       isAdmin: false,
-      canPublishPublic: true,
+      canPublishPublic: false,
+    }).request(`/api/canvases/${id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ access: "public_link" }),
+    });
+    expect(res.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("public_link is settable by a fresh owner while the instance switch is on", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const id = await publishedCanvas(owner.id);
+    const res = await buildApp(client, {
+      id: owner.id,
+      isAdmin: false,
     }).request(`/api/canvases/${id}/settings`, {
       method: "PATCH",
       headers: mut,

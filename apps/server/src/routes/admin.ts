@@ -4,7 +4,12 @@ import { publicationState } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireAdmin } from "../admin/authz.js";
-import { type AdminSettingsService, QUOTA_KEYS, type QuotaKey } from "../admin/settings-service.js";
+import {
+  type AdminSettingsService,
+  PUBLIC_LINKS_ENABLED_KEY,
+  QUOTA_KEYS,
+  type QuotaKey,
+} from "../admin/settings-service.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -118,6 +123,12 @@ function quotaFallback(config: Config, key: QuotaKey): number {
 export function adminRoutes(deps: AdminRoutesDeps) {
   const app = new Hono<AppEnv>();
   const sameOrigin = requireSameOrigin(deps.config);
+
+  async function applyConfigSideEffects(key: string): Promise<void> {
+    if (key !== PUBLIC_LINKS_ENABLED_KEY) return;
+    if (await deps.settings.effectivePublicLinksEnabled()) return;
+    await deps.canvases.revertAllPublicLinks();
+  }
 
   app.use("*", requireAdmin());
 
@@ -634,6 +645,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     try {
       await deps.settings.setConfigOverride(key, body.data.value);
+      await applyConfigSideEffects(key);
     } catch (err) {
       return c.json({ error: "invalid_value", message: (err as Error).message }, 400);
     }
@@ -650,6 +662,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     const key = c.req.param("key");
     try {
       await deps.settings.clearConfigOverride(key);
+      await applyConfigSideEffects(key);
     } catch (err) {
       return c.json({ error: "invalid_key", message: (err as Error).message }, 400);
     }

@@ -763,17 +763,14 @@ describe("admin routes", () => {
     expect(JSON.stringify(r)).not.toContain("sk-ant-secret-WXYZ");
   });
 
-  it("grant/revoke publish-public; revoke sweeps the owner's public canvases to private (U10)", async () => {
+  it("grant/revoke publish-public; revoke sweeps the owner's public canvases to private", async () => {
     client = await makeTestDb("sqlite");
     const admin = await seedUser(client, "admin");
     const owner = await seedUser(client, "owner");
     const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
     const users = usersRepository(client);
 
-    // Grant → the owner gains the capability.
-    expect((await app.request(`/api/admin/users/${owner.id}/grant-public`, post())).status).toBe(
-      200,
-    );
+    // Default-on → the owner starts with the capability.
     expect((await users.findById(owner.id))?.canPublishPublic).toBe(true);
 
     // The owner publishes a canvas openly.
@@ -786,6 +783,32 @@ describe("admin routes", () => {
     );
     expect((await users.findById(owner.id))?.canPublishPublic).toBe(false);
     expect((await canvases.findById(cv.id))?.access).toBe("private");
+
+    // Restore → the user can publish again.
+    expect((await app.request(`/api/admin/users/${owner.id}/grant-public`, post())).status).toBe(
+      200,
+    );
+    expect((await users.findById(owner.id))?.canPublishPublic).toBe(true);
+  });
+
+  it("turning public links off globally sweeps every public-link canvas to private", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const one = await seedUser(client, "one");
+    const two = await seedUser(client, "two");
+    const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const a = await canvases.create({ ownerId: one.id, slug: "pub-a", apiKeyHash: "a" });
+    const b = await canvases.create({ ownerId: two.id, slug: "pub-b", apiKeyHash: "b" });
+    await canvases.setAccess(a.id, "public_link");
+    await canvases.setAccess(b.id, "public_link");
+
+    const res = await app.request(
+      "/api/admin/config/access.publicLinksEnabled",
+      put({ value: false }),
+    );
+    expect(res.status).toBe(200);
+    expect((await canvases.findById(a.id))?.access).toBe("private");
+    expect((await canvases.findById(b.id))?.access).toBe("private");
   });
 
   it("publish-public grant/revoke 404s for a non-admin (no existence leak)", async () => {

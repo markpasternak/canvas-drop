@@ -17,6 +17,8 @@ const REALTIME_KEY = "config.realtime.enabled";
 const SCREENSHOTS_KEY = "config.screenshots.enabled";
 /** Design-skin admin runtime override (editable; DB override wins over env/default). */
 const DESIGN_SKIN_KEY = "config.core.designSkin";
+/** Instance-wide public-link publishing switch (editable; default on). */
+export const PUBLIC_LINKS_ENABLED_KEY = "access.publicLinksEnabled";
 
 // Invite / notification email + rate settings (plan 003 phase 3; DB-only, default constants
 // mirror config-fields.ts `fromConfig`). Read by the invite primitive.
@@ -236,6 +238,15 @@ export function adminSettingsService(deps: {
     async effectiveScreenshotsEnabled(): Promise<boolean> {
       if (!config.screenshots.available) return false;
       return (await boolOverride(SCREENSHOTS_KEY)) ?? false;
+    },
+
+    /**
+     * Effective public-link publishing gate. Default ON for self-hosted instances; admins
+     * can turn it off globally, and the per-user `can_publish_public` bit can still revoke
+     * individual accounts while this is on.
+     */
+    async effectivePublicLinksEnabled(): Promise<boolean> {
+      return (await boolOverride(PUBLIC_LINKS_ENABLED_KEY)) ?? true;
     },
 
     // ── Invite / notification email settings (plan 003 phase 3) ──────────────

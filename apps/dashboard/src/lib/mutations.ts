@@ -516,7 +516,7 @@ export function useAdminPromoteUser() {
   });
 }
 
-/** Grant/revoke the publish-public capability (U10). Revoking sweeps the owner's
+/** Restore/revoke the per-user publish-public capability. Revoking sweeps the owner's
  *  public_link canvases back to private, so invalidate the canvas lists too — not
  *  just the admin views — or an owner's open list/detail shows a stale rung. */
 export function useAdminPublishPublic() {
