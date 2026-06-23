@@ -328,7 +328,7 @@ describe("admin dashboard", () => {
     expect(within(table).getByText("2 teams")).toBeInTheDocument();
     expect(within(table).getByText("3 people")).toBeInTheDocument();
     expect(within(table).getByText("1 external")).toBeInTheDocument();
-    expect(within(table).getByText("1 pending")).toBeInTheDocument();
+    expect(within(table).getByText("1 pending access")).toBeInTheDocument();
   });
 
   it("filters the Canvases table with exposure chips", async () => {

@@ -340,7 +340,7 @@ export function AdminCanvasTable({
                 <Badge tone="warning">{exposureFor(c).externalPeopleCount} external</Badge>
               )}
               {exposureFor(c).pendingInviteCount > 0 && (
-                <Badge tone="warning">{exposureFor(c).pendingInviteCount} pending</Badge>
+                <Badge tone="warning">{exposureFor(c).pendingInviteCount} pending access</Badge>
               )}
             </div>
           </td>
