@@ -141,16 +141,16 @@ describe("list row badges", () => {
     // Visibility now rides the quiet meta line (the access "primary"), not a dedicated
     // column. The protected-on-org primary is unique to the row (not a filter option).
     expect(screen.getByText(/Whole org \+ protected/)).toBeInTheDocument();
-    // Public is the only beyond-the-org rung: a distinct near-title pill PLUS the access
-    // filter option, so it appears at least twice.
-    expect(screen.getAllByText("Public").length).toBeGreaterThan(1);
+    // Public is the only beyond-the-org rung, so it gets a distinct near-title pill.
+    // Custom filter menus render their options only while open, so the row badge is the
+    // stable visible assertion here.
+    expect(screen.getByText("Public")).toBeInTheDocument();
     // The old Visibility column's secondary lines are gone.
     expect(screen.queryByText("Owner only")).toBeNull();
     expect(screen.queryByText("Anyone with the link")).toBeNull();
     expect(screen.queryByText("Password required")).toBeNull();
-    // A team canvas surfaces "Team" — the access badge near its title + the meta primary
-    // (plus the access filter option), so it appears more than once.
-    expect(screen.getAllByText("Team").length).toBeGreaterThan(1);
+    // A team canvas surfaces "Team" as the visible access badge.
+    expect(screen.getByText("Team")).toBeInTheDocument();
   });
 
   it("surfaces draft-only deployment state, but not zeros for deployed canvases", async () => {
