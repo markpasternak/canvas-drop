@@ -318,6 +318,16 @@ export interface TeamRoster {
   pending: TeamPendingInvite[];
 }
 
+export interface PersonSuggestion {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export type PersonSearchParams =
+  | { context: "canvas"; canvasId: string; q: string }
+  | { context: "team"; teamId: string; q: string };
+
 /** Outcome of Add person across canvas/team surfaces. */
 export type AddMemberStatus = "granted" | "already_added" | "pending" | "already_pending";
 
@@ -980,6 +990,17 @@ export const api = {
   resendAllowlistInvite: (id: string, entryId: string) =>
     request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}/resend`, { method: "POST" }),
 
+  people: {
+    search: (params: PersonSearchParams) => {
+      const sp = new URLSearchParams({ context: params.context, q: params.q });
+      if (params.context === "canvas") sp.set("canvasId", params.canvasId);
+      else sp.set("teamId", params.teamId);
+      return request<{ people: PersonSuggestion[] }>(`/api/people/search?${sp.toString()}`).then(
+        (r) => r.people,
+      );
+    },
+  },
+
   /** Canvases shared with one of the caller's teams (plan 003) — the "shared with my
    *  teams" view. Server-scoped to the caller's live team membership; excludes their own. */
   listSharedWithTeams: () =>
@@ -988,7 +1009,7 @@ export const api = {
     ),
 
   // --- Teams (plan 003 P2/U6). Self-serve: any signed-in user creates a PERSONAL team (no org)
-  //     and invites people; an org member may also attach a team to their org. Management
+  //     and adds people; an org member may also attach a team to their org. Management
   //     (rename/delete) is creator-or-admin (server-enforced). ---
   teams: {
     list: () => request<{ teams: Team[] }>("/api/teams").then((r) => r.teams),

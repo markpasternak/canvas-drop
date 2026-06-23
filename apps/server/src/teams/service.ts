@@ -137,6 +137,9 @@ export function teamsService(deps: {
         if (!target) return { ok: false, error: "TARGET_NOT_FOUND" };
         if (!(await deps.orgMembers.isMember(team.orgId, target.id)))
           return { ok: false, error: "TARGET_NOT_MEMBER" };
+        if (await deps.teams.isTeamMember(teamId, target.id)) {
+          return { ok: true, status: "already_added" };
+        }
         await deps.teams.addMember(teamId, target.id);
         deps.audit.recordAudit({ action: "team_member_add", actorId: actor.id, targetId: teamId });
         return { ok: true, status: "granted" };

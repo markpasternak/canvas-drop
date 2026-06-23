@@ -59,6 +59,7 @@ function mockFetch(handlers: Record<string, () => Response>) {
     // The share control loads the caller's teams for the Team rung picker (plan 003);
     // default to none so existing tests don't hit the unmocked fallback.
     "GET /api/teams": () => json({ teams: [] }),
+    "GET /api/people/search": () => json({ people: [] }),
   };
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();

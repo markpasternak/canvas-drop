@@ -5,6 +5,7 @@ import {
   api,
   type CanvasesQuery,
   type GalleryQuery,
+  type PersonSearchParams,
 } from "./api.js";
 
 export const keys = {
@@ -36,6 +37,14 @@ export const keys = {
   // mutation can invalidate the whole tree.
   teams: ["teams"] as const,
   teamMembers: (id: string) => ["teams", "members", id] as const,
+  peopleSearch: (params: PersonSearchParams) =>
+    [
+      "people",
+      "search",
+      params.context,
+      params.context === "canvas" ? params.canvasId : params.teamId,
+      params.q,
+    ] as const,
   // Canvases shared with the caller's teams. Prefixed under `canvases` so a settings
   // edit that changes a team grant refreshes it alongside the owner's own lists.
   sharedWithTeams: ["canvases", "shared-with-teams"] as const,
@@ -156,6 +165,14 @@ export function useTeamMembers(id: string, enabled = true) {
   return useQuery({
     queryKey: keys.teamMembers(id),
     queryFn: () => api.teams.listMembers(id),
+    enabled,
+  });
+}
+
+export function usePeopleSearch(params: PersonSearchParams, enabled = true) {
+  return useQuery({
+    queryKey: keys.peopleSearch(params),
+    queryFn: () => api.people.search(params),
     enabled,
   });
 }

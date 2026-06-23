@@ -70,6 +70,7 @@ import { draftApiRoutes } from "./routes/draft-api.js";
 import { galleryRoutes } from "./routes/gallery.js";
 import { managementRoutes } from "./routes/management.js";
 import { meRoutes } from "./routes/me.js";
+import { peopleRoutes } from "./routes/people.js";
 import { serveSdkRoutes } from "./routes/serve-sdk.js";
 import { teamsRoutes } from "./routes/teams.js";
 import { resolveRequest } from "./routing/resolve-request.js";
@@ -600,6 +601,18 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Screenshot preview support (plan 004) for the dashboard `hasPreview` cover hint.
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),
       screenshots,
+    }),
+  );
+
+  // Add person suggestions. Server-scoped to owned canvas / visible team contexts.
+  app.route(
+    "/api/people",
+    peopleRoutes({
+      config: deps.config,
+      canvases: deps.canvases,
+      teams,
+      users: deps.users,
+      orgMembers,
     }),
   );
 

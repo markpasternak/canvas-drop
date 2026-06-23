@@ -31,6 +31,7 @@ function mockFetch(handlers: Record<string, () => Response>) {
     "GET /api/me": () => json(ME),
     "GET /api/teams": () => json({ teams: [] }),
     "GET /api/canvases/shared-with-teams": () => json({ canvases: [] }),
+    "GET /api/people/search": () => json({ people: [] }),
   };
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
@@ -116,7 +117,7 @@ describe("teams page", () => {
     });
   });
 
-  it("expands a team roster and invites a member; shows pending invitations", async () => {
+  it("expands a team roster and adds a member; shows pending sign-ins", async () => {
     const calls = mockFetch({
       "GET /api/teams": () =>
         json({
@@ -136,12 +137,12 @@ describe("teams page", () => {
 
     await user.click(await screen.findByRole("button", { name: /^members$/i }));
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
-    // The pending invitee appears with a Pending badge (not yet a member).
+    // The pending invitee appears with a Pending sign-in badge (not yet a member).
     expect(await screen.findByText("waiting@example.com")).toBeInTheDocument();
-    expect(screen.getByText(/pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/pending sign-in/i)).toBeInTheDocument();
 
-    await user.type(await screen.findByLabelText(/add a colleague by email/i), "new@example.com");
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    await user.type(await screen.findByLabelText(/person's email/i), "new@example.com");
+    await user.click(screen.getByRole("button", { name: /^add person$/i }));
     await vi.waitFor(() => {
       const post = calls.find((c) => c.method === "POST" && c.url === "/api/teams/t1/members");
       expect(post?.body).toContain("new@example.com");
