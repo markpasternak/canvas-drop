@@ -217,6 +217,16 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   const upgradeWebSocket = deps.registerWebSocket?.(app);
   const realtime = upgradeWebSocket && deps.hub ? { hub: deps.hub, upgradeWebSocket } : undefined;
 
+  // Stash typed config on every request's context FIRST, so surfaces that render
+  // outside a route closure — the branded error pages, which need the dashboard
+  // origin + auth mode to build a working "Open dashboard" link (absolute, since a
+  // canvas subdomain's `/` is the canvas, not the dashboard) — can read it. Set
+  // before errorPageMiddleware so it's present when that middleware post-processes.
+  app.use("*", async (c, next) => {
+    c.set("config", deps.config);
+    await next();
+  });
+
   app.use("*", requestLogger(deps.rootLogger));
 
   // §12.4 baseline security headers for JSON/text API responses (M7). Set before
