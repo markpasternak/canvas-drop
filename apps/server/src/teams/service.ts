@@ -23,6 +23,8 @@ export type TeamError =
   | "TARGET_NOT_FOUND"
   | "TARGET_NOT_MEMBER"
   | "TARGET_NOT_PERMITTED"
+  | "TARGET_BLOCKED"
+  | "AUTH_ADMISSION_REQUIRED"
   | "RATE_LIMITED";
 
 export interface TeamActor {
@@ -38,8 +40,10 @@ export interface TeamActor {
 type Fail = { ok: false; error: TeamError };
 type TeamResult = { ok: true; team: Team } | Fail;
 type VoidResult = { ok: true } | Fail;
-/** add-member can grant now (existing user) or record a pending invitation (brand-new email). */
-type AddMemberResult = { ok: true; status: "granted" | "pending" } | Fail;
+/** add-member can grant now, no-op idempotently, or record a pending invitation. */
+type AddMemberResult =
+  | { ok: true; status: "granted" | "already_added" | "pending" | "already_pending" }
+  | Fail;
 
 export function teamsService(deps: {
   teams: TeamsRepository;
@@ -144,7 +148,10 @@ export function teamsService(deps: {
         email,
         { id: actor.id, name: actor.name, email: actor.email, isAdmin: actor.isAdmin },
       );
-      if (r.status === "rejected") return { ok: false, error: "TARGET_NOT_PERMITTED" };
+      if (r.status === "policy_blocked") return { ok: false, error: "TARGET_NOT_PERMITTED" };
+      if (r.status === "auth_admission_required")
+        return { ok: false, error: "AUTH_ADMISSION_REQUIRED" };
+      if (r.status === "blocked") return { ok: false, error: "TARGET_BLOCKED" };
       if (r.status === "rate_limited") return { ok: false, error: "RATE_LIMITED" };
       deps.audit.recordAudit({ action: "team_member_add", actorId: actor.id, targetId: teamId });
       return { ok: true, status: r.status };

@@ -35,6 +35,8 @@ const HTTP: Record<TeamError, 403 | 404 | 409 | 429> = {
   TARGET_NOT_FOUND: 404,
   TARGET_NOT_MEMBER: 409,
   TARGET_NOT_PERMITTED: 403,
+  TARGET_BLOCKED: 403,
+  AUTH_ADMISSION_REQUIRED: 403,
   RATE_LIMITED: 429,
 };
 
@@ -150,8 +152,8 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     if (!body.success) return c.json({ error: "invalid_request" }, 400);
     const r = await deps.service.addMemberByEmail(actorOf(c), c.req.param("id"), body.data.email);
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
-    // `granted` = an existing user joined now; `pending` = a brand-new invitee was emailed and
-    // will join on their first verified login (the UI shows them as Pending).
+    // `granted`/`already_added` = an existing user is active now; `pending`/`already_pending`
+    // = a brand-new invitee will join on their first verified login.
     return c.json({ ok: true, status: r.status });
   });
 

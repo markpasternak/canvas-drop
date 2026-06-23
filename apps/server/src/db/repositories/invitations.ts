@@ -57,6 +57,27 @@ export function invitationsRepository(client: DbClient) {
         )) as Invitation[];
     },
 
+    /** Whether a lowercased email already has an unconsumed invitation for this target. */
+    async hasPendingForTarget(
+      targetType: InvitationTarget["type"],
+      targetId: string,
+      email: string,
+    ): Promise<boolean> {
+      const rows = (await db
+        .select({ id: T.id })
+        .from(T)
+        .where(
+          and(
+            eq(T.targetType, targetType),
+            eq(T.targetId, targetId),
+            eq(T.email, email.trim().toLowerCase()),
+            isNull(T.consumedAt),
+          ),
+        )
+        .limit(1)) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
     /** Un-consumed invitations for a (lowercased) email — the apply set on first login. */
     async listForEmail(email: string): Promise<Invitation[]> {
       return (await db
