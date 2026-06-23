@@ -1,7 +1,15 @@
 import { type OrgMember, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
+import type { UserSearchResult } from "./users.js";
+
+function escapedLikePattern(q: string): string {
+  return `%${q
+    .trim()
+    .toLowerCase()
+    .replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+}
 
 /**
  * Explicit org-membership store (plan 003 P2 / U2, KTD1). In P1 membership was purely
@@ -14,7 +22,9 @@ import type { DbClient } from "../factory.js";
 export function orgMembersRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
-  const t = client.dialect === "sqlite" ? sqliteSchema.orgMembers : pgSchema.orgMembers;
+  const schema = client.dialect === "sqlite" ? sqliteSchema : pgSchema;
+  const t = schema.orgMembers;
+  const usersT = schema.users;
 
   return {
     /** Idempotent: materialize a `source='domain'` membership row (no-op if present). */
@@ -49,6 +59,24 @@ export function orgMembersRepository(client: DbClient) {
         .where(and(eq(t.orgId, orgId), eq(t.userId, userId)))
         .limit(1)) as Array<{ id: string }>;
       return rows.length > 0;
+    },
+
+    /** Search live, signed-in members of one org by name/email for Add person suggestions. */
+    async searchMembers(orgId: string, q: string, limit = 8): Promise<UserSearchResult[]> {
+      const pattern = escapedLikePattern(q);
+      return (await db
+        .select({ id: usersT.id, email: usersT.email, name: usersT.name })
+        .from(t)
+        .innerJoin(usersT, eq(t.userId, usersT.id))
+        .where(
+          and(
+            eq(t.orgId, orgId),
+            eq(usersT.isBlocked, false),
+            sql`(lower(${usersT.name}) like ${pattern} escape '\\' or lower(${usersT.email}) like ${pattern} escape '\\')`,
+          ),
+        )
+        .orderBy(sql`lower(${usersT.email}) asc`, desc(usersT.id))
+        .limit(limit)) as UserSearchResult[];
     },
 
     /** Every materialized membership row (the reconcile sweep scans these). */

@@ -1,6 +1,6 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
@@ -19,7 +19,7 @@ import { type AccessRung, type AllowlistEntry, ApiError, api, type Team } from "
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import { usePublishDraft, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
-import { useCanvas, useMe, useTeams } from "../lib/queries.js";
+import { useCanvas, useMe, usePeopleSearch, useTeams } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const BASE_SECTIONS = [
@@ -695,9 +695,15 @@ function TeamPicker({
 
 function Allowlist({ canvasId }: { canvasId: string }) {
   const toast = useToast();
+  const listId = useId();
   const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const search = email.trim();
+  const { data: suggestions = [] } = usePeopleSearch(
+    { context: "canvas", canvasId, q: search },
+    search.length >= 2,
+  );
 
   const reload = () => {
     api
@@ -760,6 +766,7 @@ function Allowlist({ canvasId }: { canvasId: string }) {
           label="Person's email"
           type="email"
           placeholder="colleague@example.com"
+          list={listId}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => {
@@ -769,6 +776,13 @@ function Allowlist({ canvasId }: { canvasId: string }) {
             }
           }}
         />
+        <datalist id={listId}>
+          {suggestions.map((p) => (
+            <option key={p.id} value={p.email}>
+              {p.name}
+            </option>
+          ))}
+        </datalist>
         <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
           Add person
         </Button>

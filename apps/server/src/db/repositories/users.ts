@@ -1,5 +1,5 @@
 import { pgSchema, sqliteSchema, type User } from "@canvas-drop/shared/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -9,6 +9,19 @@ export interface UpsertUserInput {
   name: string;
   avatarUrl?: string | null;
   isAdmin: boolean;
+}
+
+export interface UserSearchResult {
+  id: string;
+  email: string;
+  name: string;
+}
+
+function escapedLikePattern(q: string): string {
+  return `%${q
+    .trim()
+    .toLowerCase()
+    .replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
 /**
@@ -65,6 +78,22 @@ export function usersRepository(client: DbClient) {
         .select()
         .from(t)
         .where(inArray(t.id, [...ids]))) as User[];
+    },
+
+    /** Search signed-in, unblocked users by name/email. Used only when tenancy is inactive. */
+    async search(q: string, limit = 8): Promise<UserSearchResult[]> {
+      const pattern = escapedLikePattern(q);
+      return (await db
+        .select({ id: t.id, email: t.email, name: t.name })
+        .from(t)
+        .where(
+          and(
+            eq(t.isBlocked, false),
+            sql`(lower(${t.name}) like ${pattern} escape '\\' or lower(${t.email}) like ${pattern} escape '\\')`,
+          ),
+        )
+        .orderBy(sql`lower(${t.email}) asc`, desc(t.id))
+        .limit(limit)) as UserSearchResult[];
     },
 
     /** Total user count for the platform overview (M7, §6.10.6). */

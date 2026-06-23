@@ -1,5 +1,5 @@
 import { ArrowSquareOut, UsersThree } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -17,13 +17,19 @@ import {
   useRemoveTeamMember,
   useRenameTeam,
 } from "../lib/mutations.js";
-import { useMe, useSharedWithTeams, useTeamMembers, useTeams } from "../lib/queries.js";
+import {
+  useMe,
+  usePeopleSearch,
+  useSharedWithTeams,
+  useTeamMembers,
+  useTeams,
+} from "../lib/queries.js";
 
 /**
  * Teams (plan 003 P2/U6) — the self-serve team management surface + the "shared with my
  * teams" view (the only place strictly-team-scoped canvases surface; they never appear
  * in the org-wide gallery). ANY signed-in user can create a PERSONAL team (friends & family,
- * no org) and invite people; an org member may also attach a team to their org. Rename/delete
+ * no org) and add people; an org member may also attach a team to their org. Rename/delete
  * is the creator's or an admin's (the server is authoritative — the UI only gates affordances
  * by the `canManage` hint and surfaces denials as toasts).
  */
@@ -42,7 +48,7 @@ export default function Teams() {
       <Section
         id="your-teams"
         title="Your teams"
-        description="Create a personal team and invite anyone by email — or, if you're in an org, attach a team to it."
+        description="Create a personal team and add people by email, or attach a team to an org you belong to."
       >
         {isLoading ? <Skeleton className="h-24" /> : <YourTeams teams={teams ?? []} orgs={orgs} />}
       </Section>
@@ -256,9 +262,10 @@ function TeamRow({ team }: { team: Team }) {
   );
 }
 
-/** A team's roster, plus the self-serve invite + leave controls (members only). */
+/** A team's roster, plus the self-serve Add person + leave controls (members only). */
 function TeamRoster({ team }: { team: Team }) {
   const toast = useToast();
+  const listId = useId();
   const { data: me } = useMe();
   const { data: roster, isLoading } = useTeamMembers(team.id);
   const add = useAddTeamMember(team.id);
@@ -267,19 +274,26 @@ function TeamRoster({ team }: { team: Team }) {
   const members = roster?.members ?? [];
   const pending = roster?.pending ?? [];
   const personal = team.orgId === null;
+  const search = email.trim();
+  const { data: suggestions = [] } = usePeopleSearch(
+    { context: "team", teamId: team.id, q: search },
+    team.mine && !personal && search.length >= 2,
+  );
 
-  async function invite() {
+  async function addPerson() {
     const value = email.trim();
     if (!value) return;
     try {
       const r = await add.mutateAsync(value);
       setEmail("");
-      // `pending` = a brand-new invitee was emailed and joins on first sign-in; `granted` = an
-      // existing user joined now.
       toast(
         r.status === "pending"
-          ? "Invitation sent — they'll join after signing in"
-          : "Added to the team",
+          ? "Team access pending until sign-in"
+          : r.status === "already_pending"
+            ? "Team access is already pending"
+            : r.status === "already_added"
+              ? "Already on the team"
+              : "Added to the team",
       );
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
@@ -300,26 +314,36 @@ function TeamRoster({ team }: { team: Team }) {
       {team.mine && (
         <div className="flex items-end gap-2">
           <Field
-            label={personal ? "Invite anyone by email" : "Add a colleague by email"}
+            label="Person's email"
             type="email"
             placeholder={personal ? "friend@example.com" : "colleague@example.com"}
+            list={personal ? undefined : listId}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                void invite();
+                void addPerson();
               }
             }}
           />
+          {!personal && (
+            <datalist id={listId}>
+              {suggestions.map((p) => (
+                <option key={p.id} value={p.email}>
+                  {p.name}
+                </option>
+              ))}
+            </datalist>
+          )}
           <Button
             size="sm"
             variant="secondary"
             loading={add.isPending}
             disabled={!email.trim()}
-            onClick={invite}
+            onClick={addPerson}
           >
-            {personal ? "Invite" : "Add"}
+            Add person
           </Button>
         </div>
       )}
@@ -353,7 +377,7 @@ function TeamRoster({ team }: { team: Team }) {
               </li>
             );
           })}
-          {/* Pending invitations: brand-new invitees who haven't signed in yet. They become
+          {/* Pending grants: brand-new invitees who haven't signed in yet. They become
               full members on their first verified login. */}
           {pending.map((p) => (
             <li
@@ -361,7 +385,7 @@ function TeamRoster({ team }: { team: Team }) {
               className="flex items-center justify-between py-2 text-sm"
             >
               <span className="min-w-0 truncate text-muted">{p.email}</span>
-              <Badge tone="neutral">Pending</Badge>
+              <Badge tone="neutral">Pending sign-in</Badge>
             </li>
           ))}
         </ul>

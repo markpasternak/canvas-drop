@@ -1,6 +1,8 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { teamsRepository } from "../db/repositories/teams.js";
@@ -23,6 +25,8 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     const orgMembers = orgMembersRepository(client);
     const teams = teamsRepository(client);
     const users = usersRepository(client);
+    const allowedEmails = allowedEmailsRepository(client);
+    const invitations = invitationsRepository(client);
     const org = await orgs.ensureOrg({ name: "Acme", slug: "acme", domains: ["acme.com"] });
     const audit = { recordAudit: () => {} };
     const svc = teamsService({
@@ -55,7 +59,7 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
       email: u.email ?? "actor@acme.com",
     });
 
-    return { orgs, orgMembers, teams, users, org, svc, mkUser, actor };
+    return { orgs, orgMembers, teams, users, allowedEmails, invitations, org, svc, mkUser, actor };
   }
 
   it("a member creates an org team; a non-member cannot attach to that org", async () => {
@@ -93,9 +97,34 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     if (!r.ok) throw new Error("setup");
     // A non-org friend can be added to a PERSONAL team (would be TARGET_NOT_MEMBER for an org team).
     expect(
-      (await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@hotmail.com")).ok,
-    ).toBe(true);
+      await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@hotmail.com"),
+    ).toEqual({ ok: true, status: "granted" });
+    expect(
+      await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@hotmail.com"),
+    ).toEqual({ ok: true, status: "already_added" });
     expect(await teams.getMembers(r.team.id)).toHaveLength(2);
+  });
+
+  it("a personal team records admitted external emails as pending and rejects inadmissible ones", async () => {
+    const { svc, teams, allowedEmails, invitations, mkUser, actor } = await setup();
+    const owner = await mkUser("o@gmail.com");
+    const r = await svc.create(actor(owner, false), { name: "Friends" });
+    if (!r.ok) throw new Error("setup");
+
+    expect(
+      await svc.addMemberByEmail(actor(owner, false), r.team.id, "stranger@external.test"),
+    ).toEqual({ ok: false, error: "TARGET_NOT_PERMITTED" });
+    expect(await teams.getMembers(r.team.id)).toHaveLength(1);
+    expect(await invitations.listPendingForTarget("team", r.team.id)).toHaveLength(0);
+
+    await allowedEmails.add("friend@external.test", owner.id);
+    expect(
+      await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test"),
+    ).toEqual({ ok: true, status: "pending" });
+    expect(
+      await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test"),
+    ).toEqual({ ok: true, status: "already_pending" });
+    expect(await invitations.listPendingForTarget("team", r.team.id)).toHaveLength(1);
   });
 
   it("team names are creator-local: same creator can't dupe, different creators can reuse", async () => {
@@ -157,8 +186,15 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
       ok: false,
       error: "TARGET_NOT_FOUND",
     });
-    // an org member can be added
-    expect((await svc.addMemberByEmail(actor(creator), teamId, "k@acme.com")).ok).toBe(true);
+    // an org member can be added; duplicate adds are an explicit no-op status.
+    expect(await svc.addMemberByEmail(actor(creator), teamId, "k@acme.com")).toEqual({
+      ok: true,
+      status: "granted",
+    });
+    expect(await svc.addMemberByEmail(actor(creator), teamId, "k@acme.com")).toEqual({
+      ok: true,
+      status: "already_added",
+    });
     // a non-org user cannot
     expect(await svc.addMemberByEmail(actor(creator), teamId, "x@gmail.com")).toEqual({
       ok: false,
