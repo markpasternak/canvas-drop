@@ -271,11 +271,11 @@ export interface CanvasSettings {
   tags?: string[];
 }
 
-/** One canvas-allowlist entry (D4 `specific_people`, U4). Members carry their org
- *  email + name; invited guests (U8) carry the invited email and a null name. */
+/** One canvas access-list entry. Members carry identity; pending rows are auth-delegated
+ *  grants that materialize on first verified sign-in. */
 export interface AllowlistEntry {
   id: string;
-  kind: "member" | "guest";
+  kind: "member" | "guest" | "pending";
   email: string | null;
   name: string | null;
   createdAt: number;
@@ -318,9 +318,8 @@ export interface TeamRoster {
   pending: TeamPendingInvite[];
 }
 
-/** Outcome of adding someone to a personal team: `granted` (existing user joined now) or
- *  `pending` (a brand-new invitee was emailed; they join on first verified login). */
-export type AddMemberStatus = "granted" | "pending";
+/** Outcome of Add person across canvas/team surfaces. */
+export type AddMemberStatus = "granted" | "already_added" | "pending" | "already_pending";
 
 /** A canvas shared with one of the caller's teams (plan 003) — display-only, the
  *  caller is NOT the owner, so no management fields. The only surface for these
@@ -960,11 +959,11 @@ export const api = {
   clearPreview: (id: string) =>
     request<Canvas>(`/api/canvases/${id}/preview`, { method: "DELETE" }),
 
-  // Access allowlist (D4 `specific_people`, U4).
+  // Access list (D4 `specific_people`, U4).
   listAllowlist: (id: string) =>
     request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
   addAllowlistMember: (id: string, email: string) =>
-    request<{ ok: true; kind: "member" | "guest" }>(
+    request<{ ok: true; status: AddMemberStatus }>(
       `/api/canvases/${id}/allowlist`,
       jsonBody({ email }),
     ),

@@ -721,31 +721,20 @@ function Allowlist({ canvasId }: { canvasId: string }) {
     if (!value) return;
     setBusy(true);
     try {
-      await api.addAllowlistMember(canvasId, value);
+      const r = await api.addAllowlistMember(canvasId, value);
       setEmail("");
       reload();
+      toast(
+        r.status === "pending"
+          ? "Access pending until sign-in"
+          : r.status === "already_pending"
+            ? "Access is already pending"
+            : r.status === "already_added"
+              ? "Access already granted"
+              : "Access granted",
+      );
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // Individual one-off invite (plan 003 U8): a DELIBERATE invite that sends a courtesy email.
-  // An existing user is granted now; a brand-new email is invited and gets access on first
-  // sign-in (KTD5: a non-admin can't invite a brand-new external email unless the admin enabled
-  // it). Distinct from the silent "Add" above.
-  async function invite() {
-    const value = email.trim();
-    if (!value) return;
-    setBusy(true);
-    try {
-      const r = await api.inviteToCanvas(canvasId, value);
-      setEmail("");
-      reload();
-      toast(r.status === "pending" ? "Invitation sent" : "Access granted");
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't invite that person", "error");
     } finally {
       setBusy(false);
     }
@@ -760,21 +749,11 @@ function Allowlist({ canvasId }: { canvasId: string }) {
     }
   }
 
-  async function resend(entryId: string) {
-    try {
-      await api.resendAllowlistInvite(canvasId, entryId);
-      toast("Invite re-sent");
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't resend the invite", "error");
-    }
-  }
-
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        Give someone access to just this canvas. <strong>Add</strong> grants an existing member
-        quietly; <strong>Invite</strong> emails them an invitation (and works for someone who hasn't
-        signed in yet — they get access on their first sign-in).
+        Give someone access to just this canvas. Existing users are added now; new emails stay
+        pending until they sign in through this instance.
       </p>
       <div className="flex items-end gap-2">
         <Field
@@ -786,41 +765,30 @@ function Allowlist({ canvasId }: { canvasId: string }) {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              void invite();
+              void add();
             }
           }}
         />
-        <Button size="sm" variant="ghost" loading={busy} disabled={!email.trim()} onClick={add}>
-          Add
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={busy}
-          disabled={!email.trim()}
-          onClick={invite}
-        >
-          Invite
+        <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
+          Add person
         </Button>
       </div>
       {entries === null ? (
         <Skeleton className="h-8" />
       ) : entries.length === 0 ? (
-        <p className="text-xs text-muted">No one added yet. Only you and admins can open this.</p>
+        <p className="text-xs text-muted">No one added yet. Only you can open this.</p>
       ) : (
         <ul className="divide-y divide-border">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center justify-between py-2 text-sm">
               <span>
                 <span className="text-fg">{e.email ?? "(unknown)"}</span>
-                {e.kind === "guest" && <span className="ml-2 text-xs text-muted">guest</span>}
+                {e.kind === "pending" && (
+                  <span className="ml-2 text-xs text-muted">pending sign-in</span>
+                )}
+                {e.kind === "guest" && <span className="ml-2 text-xs text-muted">legacy</span>}
               </span>
               <span className="flex gap-1">
-                {e.kind === "guest" && (
-                  <Button size="sm" variant="ghost" onClick={() => resend(e.id)}>
-                    Resend
-                  </Button>
-                )}
                 <Button size="sm" variant="ghost" onClick={() => remove(e.id)}>
                   Remove
                 </Button>

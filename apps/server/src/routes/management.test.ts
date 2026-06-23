@@ -10,11 +10,13 @@ import { verifyPassword } from "../canvas/password.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { hashToken } from "../db/repositories/sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
@@ -113,6 +115,7 @@ function buildApp(
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       mailer: withGuests ? logMailer(silent) : undefined,
       invites: makeInviteService(client, config),
+      invitations: invitationsRepository(client),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       screenshots,
     }),
@@ -2653,6 +2656,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       body: JSON.stringify({ email: "member@example.com" }),
     });
     expect(add.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(add)).status).toBe("granted");
 
     const listed = await jsonOf<{ entries: Array<{ id: string; kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
@@ -2705,38 +2709,123 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     expect((await jsonOf<{ code: string }>(rejected)).code).toBe("NOT_PERMITTED");
   });
 
-  it("legacy guest creation is retired on the allowlist route", async () => {
+  it("Add person records admitted external emails as pending allowlist rows", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
+    const email = "outsider@partner.com";
+    await allowedEmailsRepository(client).add(email, owner.id);
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const id = await publishedCanvas(owner.id);
+
     const res = await app.request(`/api/canvases/${id}/allowlist`, {
       method: "POST",
       headers: mut,
-      body: JSON.stringify({ email: "outsider@partner.com" }),
+      body: JSON.stringify({ email }),
     });
-    expect(res.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUEST_INVITES_RETIRED");
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("pending");
+
+    const dup = await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email }),
+    });
+    expect(dup.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(dup)).status).toBe("already_pending");
+
     const listed = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(listed.entries).toHaveLength(0);
+    expect(listed.entries).toEqual([expect.objectContaining({ kind: "pending", email })]);
     expect(await guestRepository(client).listInvitesByCanvas(id)).toHaveLength(0);
+
+    const materialized = await usersRepository(client).upsert({
+      providerSub: "external:outsider",
+      email,
+      name: "Outside Partner",
+      isAdmin: false,
+    });
+    await canvasesRepository(client).addAllowlistEntry({
+      canvasId: id,
+      principalKind: "member",
+      userId: materialized.id,
+    });
+    const afterMaterialize = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
+      await app.request(`/api/canvases/${id}/allowlist`),
+    );
+    expect(afterMaterialize.entries).toEqual([expect.objectContaining({ kind: "member", email })]);
   });
 
-  it("legacy guest creation is retired even when no guest service is wired", async () => {
+  it("removes pending Add person rows without touching other canvas invitations", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other-owner");
     const id = await publishedCanvas(owner.id);
-    // withGuests=false simulates proxy mode (no guest service / mailer).
+    const otherCanvasId = await publishedCanvas(other.id);
+    const pendingEmail = "pending@partner.com";
+    const otherEmail = "other-pending@partner.com";
+    await allowedEmailsRepository(client).add(pendingEmail, owner.id);
+    await allowedEmailsRepository(client).add(otherEmail, owner.id);
+    const invitations = invitationsRepository(client);
+    await invitations.record({
+      email: otherEmail,
+      target: { type: "canvas", id: otherCanvasId },
+      invitedBy: other.id,
+    });
+    const otherPending = (await invitations.listPendingForTarget("canvas", otherCanvasId))[0];
+    if (!otherPending) throw new Error("expected other pending invitation");
+    const calls: Array<{ method: string; canvasId: string }> = [];
+    const hub = {
+      revalidateCanvas: async (canvasId: string) => {
+        calls.push({ method: "revalidateCanvas", canvasId });
+      },
+    };
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, memStorage(), hub);
+
+    const crossCanvas = await app.request(
+      `/api/canvases/${id}/allowlist/pending:${otherPending.id}`,
+      { method: "DELETE", headers: mut },
+    );
+    expect(crossCanvas.status).toBe(404);
+    expect(await invitations.listForEmail(otherEmail)).toHaveLength(1);
+
+    const res = await app.request(`/api/canvases/${id}/allowlist`, {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ email: pendingEmail }),
+    });
+    expect(res.status).toBe(200);
+    const entry = (
+      await jsonOf<{ entries: Array<{ id: string; kind: string; email: string }> }>(
+        await app.request(`/api/canvases/${id}/allowlist`),
+      )
+    ).entries.find((e) => e.kind === "pending" && e.email === pendingEmail);
+    if (!entry) throw new Error("expected pending entry");
+
+    const del = await app.request(`/api/canvases/${id}/allowlist/${entry.id}`, {
+      method: "DELETE",
+      headers: mut,
+    });
+    expect(del.status).toBe(200);
+    expect(await invitations.listForEmail(pendingEmail)).toHaveLength(0);
+    expect(calls).toContainEqual({ method: "revalidateCanvas", canvasId: id });
+  });
+
+  it("Add person no longer depends on the legacy guest service", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const email = "outsider@partner.com";
+    await allowedEmailsRepository(client).add(email, owner.id);
+    const id = await publishedCanvas(owner.id);
     const app = buildApp(client, { id: owner.id, isAdmin: false }, undefined, undefined, false);
     const res = await app.request(`/api/canvases/${id}/allowlist`, {
       method: "POST",
       headers: mut,
-      body: JSON.stringify({ email: "outsider@partner.com" }),
+      body: JSON.stringify({ email }),
     });
-    expect(res.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUEST_INVITES_RETIRED");
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ status: string }>(res)).status).toBe("pending");
+    expect(await guestRepository(client).listInvitesByCanvas(id)).toHaveLength(0);
   });
 
   it("revoking a guest entry revokes its invite + sessions", async () => {

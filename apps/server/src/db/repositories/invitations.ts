@@ -94,6 +94,26 @@ export function invitationsRepository(client: DbClient) {
         .where(and(eq(T.id, id), isNull(T.consumedAt)));
     },
 
+    /** Cancel an unconsumed pending grant for a specific target. */
+    async cancelPendingForTarget(
+      targetType: InvitationTarget["type"],
+      targetId: string,
+      id: string,
+    ): Promise<boolean> {
+      const rows = (await db
+        .delete(T)
+        .where(
+          and(
+            eq(T.targetType, targetType),
+            eq(T.targetId, targetId),
+            eq(T.id, id),
+            isNull(T.consumedAt),
+          ),
+        )
+        .returning({ id: T.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
     /** Count un-consumed invitations recorded by an actor (the KTD9 pending cap). */
     async countPendingByActor(invitedBy: string): Promise<number> {
       const rows = (await db

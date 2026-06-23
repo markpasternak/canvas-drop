@@ -18,7 +18,6 @@ import type { GuestService } from "../auth/guest.js";
 import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
-import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { rootEntry } from "../canvas/manifest.js";
 import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
@@ -34,6 +33,7 @@ import {
   POPULAR_WINDOW_MS,
 } from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -105,6 +105,7 @@ export interface ManagementDeps extends PreviewHintDeps {
   /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
    *  it. Optional: suites that don't exercise the invite path may omit it. */
   invites?: InviteService;
+  invitations?: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
   // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
   // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
@@ -737,7 +738,7 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------
-  // Members here; invited-guest entries are added by the invite flow (U8).
+  // One Add person model: existing users are granted now; new admissible emails are pending.
 
   /** List a canvas's allowlist entries with member display identity resolved. */
   app.get("/:id/allowlist", async (c) => {
@@ -746,6 +747,7 @@ export function managementRoutes(deps: ManagementDeps) {
     const entries = await resolveAllowlistEntries(
       await deps.canvases.listAllowlist(cv.id),
       deps.users,
+      deps.invitations ? await deps.invitations.listPendingForTarget("canvas", cv.id) : [],
     );
     return c.json({ entries });
   });
@@ -760,42 +762,64 @@ export function managementRoutes(deps: ManagementDeps) {
       .transform((e) => e.trim().toLowerCase()),
   });
 
-  /** Mint + email a guest invite for `email` on `cv` via the shared helper, mapping a
-   *  guard failure to a JSON response (or null on success). */
-  async function inviteGuest(c: Context<AppEnv>, cv: Canvas, email: string) {
-    const r = await inviteGuestToCanvas(deps, {
-      canvas: cv,
-      inviterName: c.get("user").name,
-      actorId: c.get("user").id,
-      email,
-    });
-    return r.ok ? null : c.json({ code: r.code, message: r.message }, r.status);
+  function addPersonFailure(c: Context<AppEnv>, status: string) {
+    if (status === "policy_blocked") {
+      return c.json(
+        { code: "NOT_PERMITTED", message: "That email can't be added from here." },
+        403,
+      );
+    }
+    if (status === "auth_admission_required") {
+      return c.json(
+        {
+          code: "AUTH_ADMISSION_REQUIRED",
+          message: "That email must be admitted by the configured identity provider first.",
+        },
+        403,
+      );
+    }
+    if (status === "blocked") {
+      return c.json({ code: "BLOCKED", message: "That account is blocked." }, 403);
+    }
+    if (status === "rate_limited") {
+      return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);
+    }
+    return null;
   }
 
-  /** Add an org member to the allowlist by email; an outside email becomes an
-   *  email-invited guest (R9 — one mechanism for members and guests). */
+  async function addPerson(c: Context<AppEnv>, cv: Canvas, email: string, mode: "add" | "invite") {
+    if (!deps.invites)
+      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
+    const actor = c.get("user");
+    const r = await deps.invites.resolveOrInvite(
+      {
+        kind: "canvas",
+        canvasId: cv.id,
+        canvasSlug: cv.slug,
+        canvasTitle: cv.title,
+        mode,
+      },
+      email,
+      { id: actor.id, name: actor.name, email: actor.email, isAdmin: actor.isAdmin },
+    );
+    const failure = addPersonFailure(c, r.status);
+    if (failure) return failure;
+    deps.audit.recordAudit({
+      action: "allowlist_add",
+      actorId: actor.id,
+      targetId: cv.id,
+      meta: { kind: "add_person", mode, status: r.status },
+    });
+    return c.json({ ok: true, status: r.status });
+  }
+
+  /** Add person: existing user -> granted now; admissible new email -> pending. */
   app.post("/:id/allowlist", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const user = await deps.users.findByEmail(body.data.email);
-    if (user) {
-      await deps.canvases.addAllowlistEntry({
-        canvasId: cv.id,
-        principalKind: "member",
-        userId: user.id,
-      });
-      deps.audit.recordAudit({
-        action: "allowlist_add",
-        actorId: c.get("user").id,
-        targetId: cv.id,
-        meta: { kind: "member", userId: user.id },
-      });
-      return c.json({ ok: true, kind: "member" });
-    }
-    const failure = await inviteGuest(c, cv, body.data.email);
-    return failure ?? c.json({ ok: true, kind: "guest" });
+    return addPerson(c, cv, body.data.email, "add");
   });
 
   /** Individual one-off canvas invite (plan 003 U8): a DELIBERATE "invite this person to this
@@ -808,50 +832,9 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/invite", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    if (!deps.invites)
-      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    const user = c.get("user");
-    const r = await deps.invites.resolveOrInvite(
-      {
-        kind: "canvas",
-        canvasId: cv.id,
-        canvasSlug: cv.slug,
-        canvasTitle: cv.title,
-        mode: "invite",
-      },
-      body.data.email,
-      { id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin },
-    );
-    if (r.status === "policy_blocked") {
-      return c.json(
-        { code: "NOT_PERMITTED", message: "That email can't be invited from here." },
-        403,
-      );
-    }
-    if (r.status === "auth_admission_required") {
-      return c.json(
-        {
-          code: "AUTH_ADMISSION_REQUIRED",
-          message: "That email must be admitted by the configured identity provider first.",
-        },
-        403,
-      );
-    }
-    if (r.status === "blocked") {
-      return c.json({ code: "BLOCKED", message: "That account is blocked." }, 403);
-    }
-    if (r.status === "rate_limited") {
-      return c.json({ code: "RATE_LIMITED", message: "Too many invites — try again later." }, 429);
-    }
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: user.id,
-      targetId: cv.id,
-      meta: { kind: "invite", status: r.status },
-    });
-    return c.json({ ok: true, status: r.status });
+    return addPerson(c, cv, body.data.email, "invite");
   });
 
   /** Re-send a guest invite (fresh token); only valid for a guest entry. */
@@ -864,8 +847,14 @@ export function managementRoutes(deps: ManagementDeps) {
     if (entry?.principalKind !== "guest" || !entry.email) {
       return c.json({ error: "not_found" }, 404);
     }
-    const failure = await inviteGuest(c, cv, entry.email);
-    return failure ?? c.json({ ok: true });
+    return c.json(
+      {
+        code: "GUEST_INVITES_RETIRED",
+        message:
+          "Guest magic-link invites are retired. Add the person through normal sign-in access.",
+      },
+      409,
+    );
   });
 
   /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any
@@ -874,6 +863,23 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
     const entryId = c.req.param("entryId");
+    if (entryId.startsWith("pending:")) {
+      const cancelled =
+        (await deps.invitations?.cancelPendingForTarget(
+          "canvas",
+          cv.id,
+          entryId.slice("pending:".length),
+        )) ?? false;
+      if (!cancelled) return c.json({ error: "not_found" }, 404);
+      deps.audit.recordAudit({
+        action: "allowlist_remove",
+        actorId: c.get("user").id,
+        targetId: cv.id,
+        meta: { entryId, kind: "pending" },
+      });
+      await revalidate(c, cv.id);
+      return c.json({ ok: true });
+    }
     const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
     if (entry?.principalKind === "guest" && entry.email && deps.guests) {
       await deps.guests.revokeInvite(cv.id, entry.email);
