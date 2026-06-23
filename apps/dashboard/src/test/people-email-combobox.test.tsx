@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -45,6 +45,22 @@ describe("PeopleEmailCombobox", () => {
       name: /Hugo Martensson hugo\.martensson@seenthis\.se/,
     });
     await user.click(option);
+
+    expect(input).toHaveValue("hugo.martensson@seenthis.se");
+    expect(screen.queryByRole("option")).toBeNull();
+  });
+
+  it("commits a mouse selection before the menu can close", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+
+    const input = screen.getByRole("combobox", { name: "Person's email" });
+    await user.type(input, "hu");
+
+    const option = await screen.findByRole("option", {
+      name: /Hugo Martensson hugo\.martensson@seenthis\.se/,
+    });
+    fireEvent.pointerDown(option);
 
     expect(input).toHaveValue("hugo.martensson@seenthis.se");
     expect(screen.queryByRole("option")).toBeNull();

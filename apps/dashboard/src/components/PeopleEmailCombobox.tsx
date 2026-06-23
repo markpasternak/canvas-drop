@@ -46,7 +46,6 @@ export function PeopleEmailCombobox({
     inputValue: value,
     itemToString,
     labelId,
-    selectedItem: null,
     onInputValueChange: ({ inputValue }) => onChange(inputValue ?? ""),
     onSelectedItemChange: ({ selectedItem }) => {
       if (selectedItem) onChange(selectedItem.email);
@@ -73,6 +72,11 @@ export function PeopleEmailCombobox({
     },
   });
   const showMenu = isOpen && canSearch;
+  function choosePerson(person: PersonSuggestion) {
+    onChange(person.email);
+    closeMenu();
+  }
+
   const menuProps = getMenuProps(
     {
       "aria-label": "People suggestions",
@@ -100,11 +104,14 @@ export function PeopleEmailCombobox({
           },
           onKeyDown: (event) => {
             const highlighted = highlightedIndex >= 0 ? items[highlightedIndex] : null;
-            if (event.key === "Enter" && !highlighted) {
-              event.preventDefault();
-              closeMenu();
-              onSubmit();
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            if (highlighted) {
+              choosePerson(highlighted);
+              return;
             }
+            closeMenu();
+            onSubmit();
           },
         })}
       />
@@ -125,6 +132,10 @@ export function PeopleEmailCombobox({
                   "cursor-pointer rounded px-3 py-2",
                   highlightedIndex === index ? "bg-accent-subtle text-accent-strong" : "text-fg",
                 ),
+                onPointerDown: (event) => {
+                  event.preventDefault();
+                  choosePerson(person);
+                },
               })}
             >
               <div className="font-medium">{person.name}</div>
