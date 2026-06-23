@@ -331,11 +331,12 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     expect(r.status).toBe("pending");
     expect(h.mailer.sent).toHaveLength(1);
     expect(h.mailer.sent[0]?.text).toContain("access to the canvas “Board Review”");
-    expect(h.mailer.sent[0]?.text).toContain("Canvas Drop Internal");
+    expect(h.mailer.sent[0]?.text).toContain("friend@external.io");
+    expect(h.mailer.sent[0]?.text).not.toContain("Canvas Drop Internal");
     expect(h.mailer.sent[0]?.text).not.toContain("Acme");
   });
 
-  it("account invite copy uses org language only when the email maps to the org domain", async () => {
+  it("account invite copy does not depend on instance or org names", async () => {
     const h = await harness({}, orgConfig, "Canvas Drop Internal");
     const target: InviteTarget = { kind: "account" };
 
@@ -343,8 +344,11 @@ describe.each(DIALECTS)("inviteService.resolveOrInvite (plan 003 U5) [%s]", (dia
     await h.svc.resolveOrInvite(target, "contractor@external.io", h.adminActor);
 
     expect(h.mailer.sent).toHaveLength(2);
-    expect(h.mailer.sent[0]?.text).toContain("Canvas Drop Internal for Acme");
-    expect(h.mailer.sent[1]?.text).toContain("Canvas Drop Internal");
+    expect(h.mailer.sent[0]?.text).toContain("invited colleague@corp.com to sign in");
+    expect(h.mailer.sent[0]?.text).not.toContain("Canvas Drop Internal");
+    expect(h.mailer.sent[0]?.text).not.toContain("Acme");
+    expect(h.mailer.sent[1]?.text).toContain("invited contractor@external.io to sign in");
+    expect(h.mailer.sent[1]?.text).not.toContain("Canvas Drop Internal");
     expect(h.mailer.sent[1]?.text).not.toContain("Acme");
   });
 });

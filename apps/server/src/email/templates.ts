@@ -8,8 +8,9 @@ import type { EmailMessage } from "./mailer.js";
  * substituted raw in the text body + subject, and an unknown `{{var}}` renders empty (defined,
  * never a throw). No arbitrary expressions — substitution only.
  *
- * Copy is **org-agnostic** (no hardcoded instance domain); the instance name + links are
- * passed in as variables.
+ * Copy is **org-agnostic** and access-object-first: seeded defaults name the inviter, canvas,
+ * team, and sign-in action rather than relying on instance branding. Legacy variables such as
+ * `{{instanceName}}` still render for admin-customized templates.
  */
 
 export type TemplateKey =
@@ -23,6 +24,7 @@ export type TemplateKey =
 export type TemplateVars = Partial<
   Record<
     | "name"
+    | "recipientEmail"
     | "inviterName"
     | "instanceName"
     | "orgName"
@@ -49,9 +51,9 @@ const html = (subject: string, lead: string, cta: string): string =>
   `<p style="font-size:12px;color:#888">If the button doesn't work, open: {{link}}</p>` +
   `</div>`;
 
-/** Seeded defaults from before the auth-delegated access cleanup. Used only for safe rollout:
- *  rows that still exactly match one of these boot-seeded bodies can be migrated to the new
- *  defaults; admin-customized rows are preserved. */
+/** Known older seeded defaults. Used only for safe rollout: rows that still exactly match one
+ *  of these boot-seeded bodies can be migrated to the new defaults; admin-customized rows are
+ *  preserved. */
 export const PREVIOUS_DEFAULT_TEMPLATES: readonly Record<TemplateKey, TemplateBody>[] = [
   {
     account_invite: {
@@ -95,49 +97,133 @@ export const PREVIOUS_DEFAULT_TEMPLATES: readonly Record<TemplateKey, TemplateBo
         "{{inviterName}} added you to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
     },
   },
+  {
+    account_invite: {
+      subject: "You've been invited to {{instanceName}}",
+      bodyHtml: html(
+        "You've been invited to {{instanceName}}",
+        "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started.",
+        "Sign in",
+      ),
+      bodyText:
+        "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started:\n\n{{link}}\n",
+    },
+    canvas_invite: {
+      subject: "{{inviterName}} shared the canvas “{{canvasTitle}}” with you",
+      bodyHtml: html(
+        "A canvas was shared with you",
+        "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it:\n\n{{link}}\n",
+    },
+    individual_canvas_invite: {
+      subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
+      bodyHtml: html(
+        "You're invited to a canvas",
+        "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}:\n\n{{link}}\n",
+    },
+    team_invite: {
+      subject: "You've been added to the team “{{teamName}}”",
+      bodyHtml: html(
+        "Added to a team",
+        "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Canvases shared with that team are now available to you.",
+        "Open {{instanceName}}",
+      ),
+      bodyText:
+        "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
+    },
+  },
+  {
+    account_invite: {
+      subject: "{{inviterName}} invited you to sign in",
+      bodyHtml: html(
+        "You're invited to sign in",
+        "{{inviterName}} invited you to sign in with this email address. Use the button below to continue.",
+        "Sign in",
+      ),
+      bodyText:
+        "{{inviterName}} invited you to sign in with this email address. Use this link to continue:\n\n{{link}}\n",
+    },
+    canvas_invite: {
+      subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
+      bodyHtml: html(
+        "A canvas was shared with you",
+        "{{inviterName}} gave this email address access to the canvas “{{canvasTitle}}”. Sign in with this email address to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} gave this email address access to the canvas “{{canvasTitle}}”. Sign in with this email address to open it:\n\n{{link}}\n",
+    },
+    individual_canvas_invite: {
+      subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
+      bodyHtml: html(
+        "You're invited to a canvas",
+        "{{inviterName}} gave this email address access to the canvas “{{canvasTitle}}”. Sign in with this email address to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} gave this email address access to the canvas “{{canvasTitle}}”. Sign in with this email address to open it:\n\n{{link}}\n",
+    },
+    team_invite: {
+      subject: "{{inviterName}} added you to “{{teamName}}”",
+      bodyHtml: html(
+        "Added to a team",
+        "{{inviterName}} gave this email address access to the team “{{teamName}}”. Sign in with this email address to see canvases shared with the team.",
+        "Sign in",
+      ),
+      bodyText:
+        "{{inviterName}} gave this email address access to the team “{{teamName}}”. Sign in with this email address to see canvases shared with the team:\n\n{{link}}\n",
+    },
+  },
 ];
 
 /** The seeded defaults. Subjects are plain; bodies use `{{variable}}`. */
 export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateBody> = {
   account_invite: {
-    subject: "You've been invited to {{instanceName}}",
+    subject: "{{inviterName}} invited you to sign in",
     bodyHtml: html(
-      "You've been invited to {{instanceName}}",
-      "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started.",
+      "You're invited to sign in",
+      "{{inviterName}} invited {{recipientEmail}} to sign in. Use that email address to continue.",
       "Sign in",
     ),
     bodyText:
-      "{{inviterName}} invited you to sign in to {{instanceName}}{{orgContext}}. Use this email address to get started:\n\n{{link}}\n",
+      "{{inviterName}} invited {{recipientEmail}} to sign in. Use that email address to continue:\n\n{{link}}\n",
   },
   canvas_invite: {
-    subject: "{{inviterName}} shared the canvas “{{canvasTitle}}” with you",
+    subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
     bodyHtml: html(
       "A canvas was shared with you",
-      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it.",
+      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
       "Open canvas",
     ),
     bodyText:
-      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}. Sign in with this email address to open it:\n\n{{link}}\n",
+      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
   },
   individual_canvas_invite: {
     subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
     bodyHtml: html(
       "You're invited to a canvas",
-      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}.",
+      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
       "Open canvas",
     ),
     bodyText:
-      "{{inviterName}} granted you access to the canvas “{{canvasTitle}}” on {{instanceName}}:\n\n{{link}}\n",
+      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
   },
   team_invite: {
-    subject: "You've been added to the team “{{teamName}}”",
+    subject: "{{inviterName}} added you to “{{teamName}}”",
     bodyHtml: html(
       "Added to a team",
-      "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Canvases shared with that team are now available to you.",
-      "Open {{instanceName}}",
+      "{{inviterName}} gave {{recipientEmail}} access to the team “{{teamName}}”. Sign in with that email address to see canvases shared with the team.",
+      "Sign in",
     ),
     bodyText:
-      "{{inviterName}} granted you access to the team “{{teamName}}” on {{instanceName}}. Sign in to see what's shared:\n\n{{link}}\n",
+      "{{inviterName}} gave {{recipientEmail}} access to the team “{{teamName}}”. Sign in with that email address to see canvases shared with the team:\n\n{{link}}\n",
   },
 };
 

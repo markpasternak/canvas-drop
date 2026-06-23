@@ -188,6 +188,7 @@ export function inviteService(deps: InviteServiceDeps) {
       const instanceName = await deps.settings.effectiveInstanceName();
       const orgName = target.kind === "account" ? orgNameForEmail(deps.config, to) : undefined;
       const msg = renderTemplate(body, to, {
+        recipientEmail: to,
         inviterName: actor.name,
         instanceName,
         orgName,
