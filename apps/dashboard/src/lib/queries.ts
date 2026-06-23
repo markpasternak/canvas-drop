@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   type AdminCanvasesQuery,
+  type AdminPeopleQuery,
   type AdminUsersQuery,
   api,
   type CanvasesQuery,
@@ -25,6 +26,7 @@ export const keys = {
   draft: (id: string) => ["draft", id] as const,
   usage: (id: string) => ["usage", id] as const,
   adminCanvases: (query: AdminCanvasesQuery) => ["admin", "canvases", query] as const,
+  adminPeople: (query: AdminPeopleQuery) => ["admin", "people", query] as const,
   adminUsers: (query: AdminUsersQuery) => ["admin", "users", query] as const,
   adminOverview: ["admin", "overview"] as const,
   adminAiUsage: ["admin", "ai-usage"] as const,
@@ -97,7 +99,16 @@ export function useAdminCanvases(query: AdminCanvasesQuery = {}) {
   });
 }
 
-/** The admin user-management list, server-side filter/search/sort + offset paging. */
+/** The admin People directory, server-side filter/search/sort + offset paging. */
+export function useAdminPeople(query: AdminPeopleQuery = {}) {
+  return useQuery({
+    queryKey: keys.adminPeople(query),
+    queryFn: () => api.admin.listPeople(query),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The legacy admin user-management list, kept for compatibility. */
 export function useAdminUsers(query: AdminUsersQuery = {}) {
   return useQuery({
     queryKey: keys.adminUsers(query),

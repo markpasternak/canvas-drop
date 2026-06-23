@@ -5,10 +5,15 @@ import { AdminHeader } from "../components/AdminHeader.js";
 import { AdminUserTable } from "../components/AdminUserTable.js";
 import { Button } from "../components/Button.js";
 import { EmptyState } from "../components/EmptyState.js";
-import { FilterSelect } from "../components/Filters.js";
+import { FilterBar, FilterChip, FilterSelect } from "../components/Filters.js";
 import { SearchInput } from "../components/SearchInput.js";
-import { ADMIN_PAGE_SIZE, type AdminUserSort } from "../lib/api.js";
-import { useAdminUsers, useMe } from "../lib/queries.js";
+import {
+  ADMIN_PAGE_SIZE,
+  type AdminPersonKind,
+  type AdminPublicCapabilityFilter,
+  type AdminUserSort,
+} from "../lib/api.js";
+import { useAdminPeople, useMe } from "../lib/queries.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { usePagination } from "../lib/use-pagination.js";
 
@@ -16,6 +21,12 @@ import { usePagination } from "../lib/use-pagination.js";
 interface AdminUsersSearch {
   q?: string;
   sort?: AdminUserSort;
+  kind?: AdminPersonKind;
+  pending?: boolean;
+  blocked?: boolean;
+  admin?: boolean;
+  permit?: boolean;
+  publicCapability?: AdminPublicCapabilityFilter;
   page?: number;
 }
 
@@ -24,6 +35,19 @@ const USER_SORT_OPTIONS = [
   { value: "created", label: "Newest" },
   { value: "name", label: "Name A–Z" },
   { value: "canvases", label: "Most canvases" },
+];
+
+const KIND_OPTIONS = [
+  { value: "all", label: "All people" },
+  { value: "org_member", label: "Org members" },
+  { value: "external", label: "External" },
+  { value: "pending", label: "Pending sign-in" },
+];
+
+const PUBLIC_OPTIONS = [
+  { value: "all", label: "All public states" },
+  { value: "allowed", label: "Public allowed" },
+  { value: "revoked", label: "Public revoked" },
 ];
 
 /** Admin user management (plan 006) — list members with their owned-canvas count,
@@ -37,14 +61,28 @@ export default function AdminUsers() {
 
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "active";
+  const kind = search.kind;
+  const pending = search.pending === true;
+  const blocked = search.blocked === true;
+  const adminOnly = search.admin === true;
+  const permit = search.permit === true;
+  const publicCapability = search.publicCapability;
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q);
+  const filtering = Boolean(
+    q || kind || pending || blocked || adminOnly || permit || publicCapability,
+  );
 
-  const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminUsers({
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminPeople({
     q,
     sort,
+    kind,
+    pending,
+    blocked,
+    admin: adminOnly,
+    permit,
+    publicCapability,
     limit: ADMIN_PAGE_SIZE,
     offset,
   });
@@ -67,24 +105,54 @@ export default function AdminUsers() {
       }),
     });
   }
+  function setKind(next: string) {
+    navigate({
+      to: "/admin/users",
+      search: (prev) => ({
+        ...prev,
+        kind: next === "all" ? undefined : (next as AdminPersonKind),
+        page: 1,
+      }),
+    });
+  }
+  function setPublicCapability(next: string) {
+    navigate({
+      to: "/admin/users",
+      search: (prev) => ({
+        ...prev,
+        publicCapability: next === "all" ? undefined : (next as AdminPublicCapabilityFilter),
+        page: 1,
+      }),
+    });
+  }
+  function toggleFlag(flag: "pending" | "blocked" | "admin" | "permit", value: boolean) {
+    navigate({
+      to: "/admin/users",
+      search: (prev) => ({ ...prev, [flag]: value ? undefined : true, page: 1 }),
+    });
+  }
+  function clearFilters() {
+    setText("");
+    navigate({ to: "/admin/users", search: {} });
+  }
   function goToPage(next: number) {
     navigate({ to: "/admin/users", search: (prev) => ({ ...prev, page: next }) });
   }
 
-  const users = data?.users ?? [];
+  const people = data?.people ?? [];
   const total = data?.total ?? 0;
   const { from, to, hasPrev, hasNext } = usePagination({
     total,
     offset,
-    itemCount: users.length,
+    itemCount: people.length,
     page,
   });
 
   return (
     <div className="space-y-6">
       <AdminHeader
-        title="Users"
-        description="Members, their owned canvases, and governance — block access or grant admin."
+        title="People"
+        description="Signed-in members, external emails, sign-in permits, pending grants, and access governance."
       />
 
       <AddUsersPanel />
@@ -93,22 +161,58 @@ export default function AdminUsers() {
         <SearchInput
           value={text}
           onChange={setText}
-          placeholder="Search by name or email"
-          aria-label="Search users"
+          placeholder="Search people by name or email"
+          aria-label="Search people"
         />
         <FilterSelect
-          label="Sort users"
+          label="Filter people by kind"
+          options={KIND_OPTIONS}
+          value={kind ?? "all"}
+          onValueChange={setKind}
+        />
+        <FilterSelect
+          label="Filter by public publishing state"
+          options={PUBLIC_OPTIONS}
+          value={publicCapability ?? "all"}
+          onValueChange={setPublicCapability}
+        />
+        <FilterSelect
+          label="Sort people"
           options={USER_SORT_OPTIONS}
           value={sort}
           onValueChange={setSort}
         />
       </div>
 
-      {isLoading && <p className="text-sm text-muted">Loading users…</p>}
+      <FilterBar>
+        <FilterChip active={pending} onClick={() => toggleFlag("pending", pending)}>
+          Pending grants
+        </FilterChip>
+        <FilterChip active={blocked} onClick={() => toggleFlag("blocked", blocked)}>
+          Blocked
+        </FilterChip>
+        <FilterChip active={adminOnly} onClick={() => toggleFlag("admin", adminOnly)}>
+          Admins
+        </FilterChip>
+        <FilterChip active={permit} onClick={() => toggleFlag("permit", permit)}>
+          Sign-in permits
+        </FilterChip>
+        {filtering && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="h-9 px-2 text-xs font-medium text-subtle transition-colors hover:text-fg"
+          >
+            Clear all
+          </button>
+        )}
+      </FilterBar>
+
+      {isLoading && <p className="text-sm text-muted">Loading people…</p>}
       {isError && (
         <EmptyState
-          title="Couldn't load users"
-          description="Something went wrong fetching the user list."
+          title="Couldn't load people"
+          description="Something went wrong fetching the People directory."
           action={
             <Button variant="secondary" size="sm" onClick={() => refetch()}>
               Try again
@@ -116,15 +220,17 @@ export default function AdminUsers() {
           }
         />
       )}
-      {data && users.length === 0 && (
+      {data && people.length === 0 && (
         <EmptyState
-          title={filtering ? "No users match" : "No users"}
-          description={filtering ? "Try a different search." : "No members have signed in yet."}
+          title={filtering ? "No people match" : "No people"}
+          description={
+            filtering ? "Try a different search." : "No people have signed in or been invited yet."
+          }
         />
       )}
-      {users.length > 0 && (
+      {people.length > 0 && (
         <div className="space-y-3">
-          <AdminUserTable users={users} meId={me.data?.id} />
+          <AdminUserTable people={people} meId={me.data?.id} />
           <div className="flex items-center justify-between gap-3 pt-1">
             <p className="text-xs text-subtle">
               Showing {from}–{to} of {total}

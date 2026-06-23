@@ -178,6 +178,8 @@ export interface AdminCanvasesSearch {
   sort?: AdminCanvasSort;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */
   owner?: string;
+  /** Drill-down: restrict to canvases involving one canonical email. */
+  person?: string;
   page?: number;
 }
 

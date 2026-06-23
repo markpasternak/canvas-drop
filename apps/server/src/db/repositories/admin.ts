@@ -1,5 +1,5 @@
 import { type AccessRung, type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, gte, inArray, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, or, type SQL, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -19,6 +19,8 @@ export interface ListAllCanvasesQuery {
   q?: string;
   /** Drill-down: restrict to a single owner by user id ("see what they have"). */
   owner?: string;
+  /** Drill-down: restrict to canvases owned by, directly shared with, or pending for this email. */
+  person?: string;
   /** Governance filter: narrow to one access rung (e.g. find every `public_link`). */
   access?: AccessRung;
   /** Gallery filter: only canvases offered as clone-able templates (galleryTemplatable). */
@@ -40,6 +42,49 @@ export interface ListUsersQuery {
   sort?: AdminUserSort;
   limit: number;
   offset: number;
+}
+
+export type AdminPersonKind = "org_member" | "external" | "pending";
+export type AdminPublicCapabilityFilter = "allowed" | "revoked";
+
+export interface ListPeopleQuery extends ListUsersQuery {
+  kind?: AdminPersonKind;
+  pending?: boolean;
+  blocked?: boolean;
+  admin?: boolean;
+  permit?: boolean;
+  publicCapability?: AdminPublicCapabilityFilter;
+}
+
+export interface AdminPendingGrant {
+  id: string;
+  targetType: "canvas" | "team";
+  targetId: string;
+  createdAt: number;
+  invitedBy: string;
+}
+
+export interface AdminPersonRow {
+  /** Canonical merge key: lowercased email. */
+  email: string;
+  kind: AdminPersonKind;
+  orgMember: boolean;
+  userId: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  canPublishPublic: boolean | null;
+  createdAt: number | null;
+  lastSeenAt: number | null;
+  canvasCount: number;
+  permitId: string | null;
+  permitCreatedAt: number | null;
+  permitCreatedBy: string | null;
+  pendingCount: number;
+  pendingCanvasCount: number;
+  pendingTeamCount: number;
+  pendingGrants: AdminPendingGrant[];
 }
 
 /**
@@ -109,6 +154,12 @@ export function adminRepository(client: DbClient) {
   const sqlite = client.dialect === "sqlite";
   const canvasesT = sqlite ? sqliteSchema.canvases : pgSchema.canvases;
   const usersT = sqlite ? sqliteSchema.users : pgSchema.users;
+  const allowedEmailsT = sqlite ? sqliteSchema.allowedEmails : pgSchema.allowedEmails;
+  const invitationsT = sqlite ? sqliteSchema.invitations : pgSchema.invitations;
+  const orgMembersT = sqlite ? sqliteSchema.orgMembers : pgSchema.orgMembers;
+  const canvasAllowlistT = sqlite ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
+  const teamMembersT = sqlite ? sqliteSchema.teamMembers : pgSchema.teamMembers;
+  const canvasTeamsT = sqlite ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
   const filesT = sqlite ? sqliteSchema.files : pgSchema.files;
   const usageT = sqlite ? sqliteSchema.usageEvents : pgSchema.usageEvents;
   const versionsT = sqlite ? sqliteSchema.versions : pgSchema.versions;
@@ -131,6 +182,80 @@ export function adminRepository(client: DbClient) {
       if (q.status) filters.push(eq(canvasesT.status, q.status));
       else filters.push(ne(canvasesT.status, "deleted"));
       if (q.owner) filters.push(eq(canvasesT.ownerId, q.owner));
+      const person = q.person?.trim().toLowerCase();
+      if (person) {
+        const personUsers = (await db
+          .select({ id: usersT.id })
+          .from(usersT)
+          .where(sql`lower(${usersT.email}) = ${person}`)) as Array<{ id: string }>;
+        const personUserIds = personUsers.map((u) => u.id);
+        const personCanvasIds = new Set<string>();
+
+        const guestAllowlistRows = (await db
+          .select({ canvasId: canvasAllowlistT.canvasId })
+          .from(canvasAllowlistT)
+          .where(eq(canvasAllowlistT.email, person))) as Array<{ canvasId: string }>;
+        for (const row of guestAllowlistRows) personCanvasIds.add(row.canvasId);
+
+        let teamIds: string[] = [];
+        if (personUserIds.length > 0) {
+          const memberAllowlistRows = (await db
+            .select({ canvasId: canvasAllowlistT.canvasId })
+            .from(canvasAllowlistT)
+            .where(inArray(canvasAllowlistT.userId, personUserIds))) as Array<{
+            canvasId: string;
+          }>;
+          for (const row of memberAllowlistRows) personCanvasIds.add(row.canvasId);
+
+          const memberTeamRows = (await db
+            .select({ teamId: teamMembersT.teamId })
+            .from(teamMembersT)
+            .where(inArray(teamMembersT.userId, personUserIds))) as Array<{ teamId: string }>;
+          teamIds = memberTeamRows.map((r) => r.teamId);
+        }
+
+        const pendingCanvasRows = (await db
+          .select({ canvasId: invitationsT.targetId })
+          .from(invitationsT)
+          .where(
+            and(
+              eq(invitationsT.email, person),
+              eq(invitationsT.targetType, "canvas"),
+              isNull(invitationsT.consumedAt),
+            ),
+          )) as Array<{ canvasId: string }>;
+        for (const row of pendingCanvasRows) personCanvasIds.add(row.canvasId);
+
+        const pendingTeamRows = (await db
+          .select({ teamId: invitationsT.targetId })
+          .from(invitationsT)
+          .where(
+            and(
+              eq(invitationsT.email, person),
+              eq(invitationsT.targetType, "team"),
+              isNull(invitationsT.consumedAt),
+            ),
+          )) as Array<{ teamId: string }>;
+        teamIds.push(...pendingTeamRows.map((r) => r.teamId));
+        teamIds = [...new Set(teamIds)];
+
+        if (teamIds.length > 0) {
+          const teamCanvasRows = (await db
+            .select({ canvasId: canvasTeamsT.canvasId })
+            .from(canvasTeamsT)
+            .where(inArray(canvasTeamsT.teamId, teamIds))) as Array<{ canvasId: string }>;
+          for (const row of teamCanvasRows) personCanvasIds.add(row.canvasId);
+        }
+
+        const personFilters: SQL[] = [];
+        if (personUserIds.length > 0) {
+          personFilters.push(inArray(canvasesT.ownerId, personUserIds) as SQL);
+        }
+        if (personCanvasIds.size > 0) {
+          personFilters.push(inArray(canvasesT.id, [...personCanvasIds]) as SQL);
+        }
+        filters.push(personFilters.length > 0 ? (or(...personFilters) as SQL) : sql`1 = 0`);
+      }
       if (q.access) filters.push(eq(canvasesT.access, q.access));
       // Gallery facets — each maps to one boolean canvas column. `templatable`
       // implies listed at the data level, but they filter independently here so an
@@ -181,6 +306,185 @@ export function adminRepository(client: DbClient) {
         .where(where)) as Array<{ value: number }>;
 
       return { items: rows.map((r) => r.canvas), total: Number(totalRows[0]?.value ?? 0) };
+    },
+
+    /**
+     * Governance-first People directory keyed by canonical email (plan 2026-06-23 U6).
+     * Merges signed-in users, individual sign-in permits, and unconsumed pending grants
+     * so an admin sees one row per person/email instead of separate partial tables.
+     * Built in memory from bounded governance tables at single-instance scale; no
+     * behavioral data is read beyond owned-canvas counts and last-seen hygiene.
+     */
+    async listPeople(q: ListPeopleQuery): Promise<{ items: AdminPersonRow[]; total: number }> {
+      const countExpr = sql<number>`count(${canvasesT.id})`;
+      const userRows = (await db
+        .select({
+          id: usersT.id,
+          email: usersT.email,
+          name: usersT.name,
+          avatarUrl: usersT.avatarUrl,
+          isAdmin: usersT.isAdmin,
+          isBlocked: usersT.isBlocked,
+          canPublishPublic: usersT.canPublishPublic,
+          createdAt: usersT.createdAt,
+          lastSeenAt: usersT.lastSeenAt,
+          canvasCount: countExpr,
+        })
+        .from(usersT)
+        .leftJoin(canvasesT, and(eq(canvasesT.ownerId, usersT.id), ne(canvasesT.status, "deleted")))
+        .groupBy(usersT.id)) as Array<AdminUserRow>;
+
+      const orgRows = (await db
+        .select({ userId: orgMembersT.userId })
+        .from(orgMembersT)
+        .groupBy(orgMembersT.userId)) as Array<{ userId: string }>;
+      const orgUserIds = new Set(orgRows.map((r) => r.userId));
+
+      const permitRows = (await db.select().from(allowedEmailsT)) as Array<{
+        id: string;
+        email: string;
+        createdBy: string | null;
+        createdAt: number;
+      }>;
+
+      const invitationRows = (await db
+        .select({
+          id: invitationsT.id,
+          email: invitationsT.email,
+          targetType: invitationsT.targetType,
+          targetId: invitationsT.targetId,
+          createdAt: invitationsT.createdAt,
+          invitedBy: invitationsT.invitedBy,
+        })
+        .from(invitationsT)
+        .where(isNull(invitationsT.consumedAt))) as Array<{
+        id: string;
+        email: string;
+        targetType: "canvas" | "team";
+        targetId: string;
+        createdAt: number;
+        invitedBy: string;
+      }>;
+
+      const byEmail = new Map<string, AdminPersonRow>();
+      const ensure = (email: string): AdminPersonRow => {
+        const key = email.trim().toLowerCase();
+        const existing = byEmail.get(key);
+        if (existing) return existing;
+        const row: AdminPersonRow = {
+          email: key,
+          kind: "external",
+          orgMember: false,
+          userId: null,
+          name: null,
+          avatarUrl: null,
+          isAdmin: false,
+          isBlocked: false,
+          canPublishPublic: null,
+          createdAt: null,
+          lastSeenAt: null,
+          canvasCount: 0,
+          permitId: null,
+          permitCreatedAt: null,
+          permitCreatedBy: null,
+          pendingCount: 0,
+          pendingCanvasCount: 0,
+          pendingTeamCount: 0,
+          pendingGrants: [],
+        };
+        byEmail.set(key, row);
+        return row;
+      };
+
+      for (const u of userRows) {
+        const row = ensure(u.email);
+        row.userId = u.id;
+        row.name = u.name;
+        row.avatarUrl = u.avatarUrl;
+        row.isAdmin = Boolean(u.isAdmin);
+        row.isBlocked = Boolean(u.isBlocked);
+        row.canPublishPublic = Boolean(u.canPublishPublic);
+        row.createdAt = Number(u.createdAt);
+        row.lastSeenAt = u.lastSeenAt === null ? null : Number(u.lastSeenAt);
+        row.canvasCount = Number(u.canvasCount);
+        row.orgMember = orgUserIds.has(u.id);
+      }
+
+      for (const permit of permitRows) {
+        const row = ensure(permit.email);
+        row.permitId = permit.id;
+        row.permitCreatedAt = Number(permit.createdAt);
+        row.permitCreatedBy = permit.createdBy;
+      }
+
+      for (const inv of invitationRows) {
+        const row = ensure(inv.email);
+        row.pendingGrants.push({
+          id: inv.id,
+          targetType: inv.targetType,
+          targetId: inv.targetId,
+          createdAt: Number(inv.createdAt),
+          invitedBy: inv.invitedBy,
+        });
+      }
+
+      let rows = [...byEmail.values()].map((row) => {
+        row.pendingGrants.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+        row.pendingCount = row.pendingGrants.length;
+        row.pendingCanvasCount = row.pendingGrants.filter((g) => g.targetType === "canvas").length;
+        row.pendingTeamCount = row.pendingGrants.filter((g) => g.targetType === "team").length;
+        row.kind = row.orgMember
+          ? "org_member"
+          : row.userId === null && row.pendingCount > 0
+            ? "pending"
+            : "external";
+        return row;
+      });
+
+      const search = q.q?.trim().toLowerCase();
+      if (search) {
+        rows = rows.filter(
+          (row) =>
+            row.email.includes(search) || (row.name?.toLowerCase().includes(search) ?? false),
+        );
+      }
+      if (q.kind) rows = rows.filter((row) => row.kind === q.kind);
+      if (q.pending) rows = rows.filter((row) => row.pendingCount > 0);
+      if (q.blocked) rows = rows.filter((row) => row.isBlocked);
+      if (q.admin) rows = rows.filter((row) => row.isAdmin);
+      if (q.permit) rows = rows.filter((row) => row.permitId !== null);
+      if (q.publicCapability === "allowed") {
+        rows = rows.filter((row) => row.userId !== null && row.canPublishPublic === true);
+      } else if (q.publicCapability === "revoked") {
+        rows = rows.filter((row) => row.userId !== null && row.canPublishPublic === false);
+      }
+
+      rows.sort((a, b) => {
+        if (q.sort === "created") {
+          return (
+            Number(b.createdAt ?? b.permitCreatedAt ?? b.pendingGrants[0]?.createdAt ?? 0) -
+              Number(a.createdAt ?? a.permitCreatedAt ?? a.pendingGrants[0]?.createdAt ?? 0) ||
+            b.email.localeCompare(a.email)
+          );
+        }
+        if (q.sort === "name") {
+          return (
+            (a.name ?? a.email).localeCompare(b.name ?? b.email) || a.email.localeCompare(b.email)
+          );
+        }
+        if (q.sort === "canvases") {
+          return b.canvasCount - a.canvasCount || a.email.localeCompare(b.email);
+        }
+        return (
+          Number(b.lastSeenAt ?? 0) - Number(a.lastSeenAt ?? 0) ||
+          Number(b.createdAt ?? b.permitCreatedAt ?? b.pendingGrants[0]?.createdAt ?? 0) -
+            Number(a.createdAt ?? a.permitCreatedAt ?? a.pendingGrants[0]?.createdAt ?? 0) ||
+          a.email.localeCompare(b.email)
+        );
+      });
+
+      const total = rows.length;
+      return { items: rows.slice(q.offset, q.offset + q.limit), total };
     },
 
     /**

@@ -5,7 +5,7 @@ import { TabNav, type TabNavItem } from "./TabNav.js";
 const ADMIN_TABS: ReadonlyArray<TabNavItem> = [
   { to: "/admin", label: "Overview", end: true },
   { to: "/admin/canvases", label: "Canvases" },
-  { to: "/admin/users", label: "Users" },
+  { to: "/admin/users", label: "People" },
   { to: "/admin/settings", label: "Configuration" },
 ];
 

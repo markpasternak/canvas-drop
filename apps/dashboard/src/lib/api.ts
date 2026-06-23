@@ -720,6 +720,8 @@ export interface AdminCanvasesQuery {
   listed?: boolean;
   q?: string;
   owner?: string;
+  /** Email-keyed People drilldown: owned canvases plus access involving this person. */
+  person?: string;
   sort?: AdminCanvasSort;
   limit?: number;
   offset?: number;
@@ -762,6 +764,60 @@ export interface AdminUsersQuery {
 
 export interface AdminUsersPage {
   users: AdminUserRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type AdminPersonKind = "org_member" | "external" | "pending";
+export type AdminPublicCapabilityFilter = "allowed" | "revoked";
+
+export interface AdminPendingGrant {
+  id: string;
+  targetType: "canvas" | "team";
+  targetId: string;
+  createdAt: number;
+  invitedBy: string;
+}
+
+/** One email-keyed row in the admin People directory (plan 2026-06-23 U6). */
+export interface AdminPersonRow {
+  email: string;
+  kind: AdminPersonKind;
+  orgMember: boolean;
+  userId: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  isBlocked: boolean;
+  canPublishPublic: boolean | null;
+  createdAt: number | null;
+  lastSeenAt: number | null;
+  canvasCount: number;
+  permitId: string | null;
+  permitCreatedAt: number | null;
+  permitCreatedBy: string | null;
+  pendingCount: number;
+  pendingCanvasCount: number;
+  pendingTeamCount: number;
+  pendingGrants: AdminPendingGrant[];
+}
+
+export interface AdminPeopleQuery {
+  q?: string;
+  sort?: AdminUserSort;
+  kind?: AdminPersonKind;
+  pending?: boolean;
+  blocked?: boolean;
+  admin?: boolean;
+  permit?: boolean;
+  publicCapability?: AdminPublicCapabilityFilter;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AdminPeoplePage {
+  people: AdminPersonRow[];
   total: number;
   limit: number;
   offset: number;
@@ -1153,6 +1209,7 @@ export const api = {
       if (query.listed) sp.set("listed", "true");
       if (query.q) sp.set("q", query.q);
       if (query.owner) sp.set("owner", query.owner);
+      if (query.person) sp.set("person", query.person);
       if (query.sort && query.sort !== "recent") sp.set("sort", query.sort);
       if (query.limit !== undefined) sp.set("limit", String(query.limit));
       if (query.offset !== undefined) sp.set("offset", String(query.offset));
@@ -1163,6 +1220,23 @@ export const api = {
     overview: () => request<AdminOverview>("/api/admin/overview"),
 
     aiUsage: () => request<AdminAiUsage>("/api/admin/ai-usage"),
+
+    /** Email-keyed People directory with governance filters (plan 2026-06-23 U6). */
+    listPeople: (query: AdminPeopleQuery = {}) => {
+      const sp = new URLSearchParams();
+      if (query.q) sp.set("q", query.q);
+      if (query.kind) sp.set("kind", query.kind);
+      if (query.pending) sp.set("pending", "true");
+      if (query.blocked) sp.set("blocked", "true");
+      if (query.admin) sp.set("admin", "true");
+      if (query.permit) sp.set("permit", "true");
+      if (query.publicCapability) sp.set("publicCapability", query.publicCapability);
+      if (query.sort && query.sort !== "active") sp.set("sort", query.sort);
+      if (query.limit !== undefined) sp.set("limit", String(query.limit));
+      if (query.offset !== undefined) sp.set("offset", String(query.offset));
+      const qs = sp.toString();
+      return request<AdminPeoplePage>(`/api/admin/people${qs ? `?${qs}` : ""}`);
+    },
 
     /** User-management list with filter/search/sort + offset paging (plan 006). */
     listUsers: (query: AdminUsersQuery = {}) => {
@@ -1201,6 +1275,8 @@ export const api = {
       ),
     removeAllowedEmail: (id: string) =>
       request<{ ok: true }>(`/api/admin/allowed-emails/${id}`, { method: "DELETE" }),
+    cancelPendingInvitation: (id: string) =>
+      request<{ ok: true }>(`/api/admin/people/invitations/${id}`, { method: "DELETE" }),
 
     /** Email templates (plan 003 phase 3): list resolves every key (override else default);
      *  PUT overrides subject + HTML + text; DELETE resets to the seeded default. */

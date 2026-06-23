@@ -377,7 +377,7 @@ function AdminOverview() {
               {/* Headline KPIs: the first thing an admin should scan. */}
               <Metric label="Active canvases" value={byStatus.active ?? 0} emphasis />
               <Metric
-                label="Users"
+                label="Signed-in users"
                 value={ov.userCount}
                 hint={ov.newUsers > 0 ? `+${ov.newUsers} in ${ov.recentWindowDays}d` : undefined}
                 emphasis

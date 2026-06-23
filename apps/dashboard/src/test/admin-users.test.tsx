@@ -53,21 +53,31 @@ function renderAt(path: string) {
 }
 
 const ME = { id: "u-me", email: "me@x", name: "Me", avatarUrl: null, isAdmin: true };
-const userRow = (over: Record<string, unknown>) => ({
-  id: "u-bob",
+const personRow = (over: Record<string, unknown>) => ({
   email: "bob@example.com",
+  kind: "external",
+  orgMember: false,
+  userId: "u-bob",
   name: "Bob",
   avatarUrl: null,
   isAdmin: false,
   isBlocked: false,
+  canPublishPublic: true,
   createdAt: Date.now(),
   lastSeenAt: Date.now(),
   canvasCount: 1,
+  permitId: null,
+  permitCreatedAt: null,
+  permitCreatedBy: null,
+  pendingCount: 0,
+  pendingCanvasCount: 0,
+  pendingTeamCount: 0,
+  pendingGrants: [],
   ...over,
 });
 
-function usersPage(users: unknown[]) {
-  return json({ users, total: users.length, limit: 50, offset: 0 });
+function peoplePage(people: unknown[]) {
+  return json({ people, total: people.length, limit: 50, offset: 0 });
 }
 
 afterEach(() => {
@@ -76,13 +86,21 @@ afterEach(() => {
 });
 
 describe("admin users", () => {
-  it("renders the user table with canvas count, role, and status", async () => {
+  it("renders the People table with canvas count, role, and status", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),
-      "GET /api/admin/users": () =>
-        usersPage([
-          userRow({ id: "u-me", email: "me@x", name: "Me", isAdmin: true, canvasCount: 3 }),
-          userRow({}),
+      "GET /api/admin/people": () =>
+        peoplePage([
+          personRow({
+            email: "me@x",
+            name: "Me",
+            userId: "u-me",
+            kind: "org_member",
+            orgMember: true,
+            isAdmin: true,
+            canvasCount: 3,
+          }),
+          personRow({}),
         ]),
     });
     renderAt("/admin/users");
@@ -99,8 +117,11 @@ describe("admin users", () => {
   it("blocks a user via the row action", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),
-      "GET /api/admin/users": () =>
-        usersPage([userRow({ id: "u-me", email: "me@x", name: "Me", isAdmin: true }), userRow({})]),
+      "GET /api/admin/people": () =>
+        peoplePage([
+          personRow({ email: "me@x", name: "Me", userId: "u-me", isAdmin: true }),
+          personRow({}),
+        ]),
       "POST /api/admin/users/u-bob/block": () => json({ ok: true }),
     });
     renderAt("/admin/users");
@@ -119,8 +140,8 @@ describe("admin users", () => {
   it("self-protection: your own row can't be blocked or demoted", async () => {
     mockFetch({
       "GET /api/me": () => json(ME),
-      "GET /api/admin/users": () =>
-        usersPage([userRow({ id: "u-me", email: "me@x", name: "Me", isAdmin: true })]),
+      "GET /api/admin/people": () =>
+        peoplePage([personRow({ email: "me@x", name: "Me", userId: "u-me", isAdmin: true })]),
     });
     renderAt("/admin/users");
     const user = userEvent.setup();
@@ -137,6 +158,45 @@ describe("admin users", () => {
     expect(screen.getByRole("menuitem", { name: "Remove admin access" })).toHaveAttribute(
       "aria-disabled",
       "true",
+    );
+  });
+
+  it("cancels a pending grant from an email-only row", async () => {
+    mockFetch({
+      "GET /api/me": () => json(ME),
+      "GET /api/admin/people": () =>
+        peoplePage([
+          personRow({
+            email: "pending@partner.io",
+            name: null,
+            userId: null,
+            kind: "pending",
+            canPublishPublic: null,
+            pendingCount: 1,
+            pendingCanvasCount: 1,
+            pendingGrants: [
+              {
+                id: "inv-1",
+                targetType: "canvas",
+                targetId: "c1",
+                createdAt: Date.now(),
+                invitedBy: "u-me",
+              },
+            ],
+          }),
+        ]),
+      "DELETE /api/admin/people/invitations/inv-1": () => json({ ok: true }),
+    });
+    renderAt("/admin/users");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for pending@partner.io" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Cancel pending grant" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === "DELETE" && c.path === "/api/admin/people/invitations/inv-1",
+        ),
+      ).toBe(true),
     );
   });
 });
