@@ -1,10 +1,11 @@
 import { ArrowSquareOut, UsersThree } from "@phosphor-icons/react";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
+import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
@@ -266,7 +267,6 @@ function TeamRow({ team }: { team: Team }) {
 /** A team's roster, plus the self-serve Add person + leave controls (members only). */
 function TeamRoster({ team }: { team: Team }) {
   const toast = useToast();
-  const listId = useId();
   const { data: me } = useMe();
   const { data: roster, isLoading } = useTeamMembers(team.id);
   const add = useAddTeamMember(team.id);
@@ -276,9 +276,10 @@ function TeamRoster({ team }: { team: Team }) {
   const pending = roster?.pending ?? [];
   const personal = team.orgId === null;
   const search = email.trim();
-  const { data: suggestions = [] } = usePeopleSearch(
+  const searchEnabled = team.mine && !personal && search.length >= 2;
+  const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
     { context: "team", teamId: team.id, q: search },
-    team.mine && !personal && search.length >= 2,
+    searchEnabled,
   );
 
   async function addPerson() {
@@ -307,29 +308,16 @@ function TeamRoster({ team }: { team: Team }) {
     <div className="space-y-3 border-t border-border p-3">
       {team.mine && (
         <div className="flex items-end gap-2">
-          <Field
+          <PeopleEmailCombobox
             label="Person's email"
-            type="email"
             placeholder={personal ? "friend@example.com" : "colleague@example.com"}
-            list={personal ? undefined : listId}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void addPerson();
-              }
-            }}
+            onChange={setEmail}
+            onSubmit={() => void addPerson()}
+            suggestions={suggestions}
+            searchEnabled={searchEnabled}
+            searching={searchingPeople}
           />
-          {!personal && (
-            <datalist id={listId}>
-              {suggestions.map((p) => (
-                <option key={p.id} value={p.email}>
-                  {p.name}
-                </option>
-              ))}
-            </datalist>
-          )}
           <Button
             size="sm"
             variant="secondary"

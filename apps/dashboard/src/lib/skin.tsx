@@ -2,11 +2,11 @@ import { useEffect } from "react";
 import type { DesignSkin } from "./api.js";
 import { useMe } from "./queries.js";
 
-/** localStorage key the pre-paint script in index.html reads to avoid a skin flash. */
+/** localStorage key the pre-paint dashboard bootstrap reads to avoid a skin flash. */
 const KEY = "canvas-drop-skin";
 const SKINS: readonly DesignSkin[] = ["editorial", "studio", "workshop", "canvas"];
 
-/** Apply a design skin to <html data-skin>, and cache it for the pre-paint script.
+/** Apply a design skin to <html data-skin>, and cache it for the pre-paint bootstrap.
  *  editorial is the base :root, so it's represented as "no attribute" (and cleared
  *  from storage) — keeping the default path attribute-free and matching index.html. */
 function applySkin(skin: DesignSkin) {
@@ -42,7 +42,7 @@ export function commitSkin(skin: string) {
 }
 
 /** Revert a live preview to the cached real skin (e.g. when the admin leaves without
- *  saving). Reads the persisted value the pre-paint script also uses. */
+ *  saving). Reads the persisted value the pre-paint bootstrap also uses. */
 export function restoreSkinFromCache() {
   let cached: string | null = null;
   try {
@@ -56,9 +56,9 @@ export function restoreSkinFromCache() {
 /**
  * Applies the instance's design skin (the expression layer) to `<html data-skin>`.
  * The skin is instance-wide config delivered on `/api/me` (admin-set, NOT a per-user
- * preference — that axis is light/dark). Caching it in localStorage lets index.html's
- * pre-paint script set the attribute before first paint on reload, so the app never
- * flashes editorial before resolving the configured skin. Renders nothing.
+ * preference — that axis is light/dark). Caching it in localStorage lets the
+ * pre-paint dashboard bootstrap set the attribute before first paint on reload, so
+ * the app never flashes editorial before resolving the configured skin. Renders nothing.
  */
 export function SkinSync() {
   const skin = useMe().data?.designSkin;
