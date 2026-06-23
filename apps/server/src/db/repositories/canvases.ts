@@ -811,6 +811,15 @@ export function canvasesRepository(client: DbClient) {
         .orderBy(allowlistT.createdAt)) as AllowlistEntry[];
     },
 
+    /** Legacy guest allowlist rows across the instance, for the auth-delegated cutover. */
+    async listGuestAllowlistEntries(): Promise<AllowlistEntry[]> {
+      return (await db
+        .select()
+        .from(allowlistT)
+        .where(eq(allowlistT.principalKind, "guest"))
+        .orderBy(allowlistT.createdAt)) as AllowlistEntry[];
+    },
+
     /**
      * Add one allowlist entry. Atomic upsert on the (canvas, user_id) /
      * (canvas, email) unique index so a concurrent duplicate invite is a no-op,

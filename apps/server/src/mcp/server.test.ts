@@ -769,13 +769,14 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
     expect(after.entries).toHaveLength(0);
 
-    // A non-member email routes to the guest-invite path, which is unavailable in the
-    // test harness (no GuestService/mailer wired) → GUESTS_UNAVAILABLE, mirroring proxy mode.
+    // The legacy guest-invite path is retired; unknown emails will be handled by
+    // invite_to_canvas/Add person, not by minting app-owned magic links.
     const guest = await mcp.callTool({
       name: "grant_access",
       arguments: { id: cv.id, email: "outsider@example.com" },
     });
     expect(isError(guest)).toBe(true);
+    expect(text(guest)).toContain("GUEST_INVITES_RETIRED");
   });
 
   it("refuses tools against a canvas owned by another user (AE1), with no existence leak", async () => {

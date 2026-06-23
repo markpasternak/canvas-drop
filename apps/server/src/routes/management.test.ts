@@ -16,6 +16,7 @@ import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { hashToken } from "../db/repositories/sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -2704,7 +2705,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     expect((await jsonOf<{ code: string }>(rejected)).code).toBe("NOT_PERMITTED");
   });
 
-  it("a non-org email becomes an email-invited guest (U8)", async () => {
+  it("legacy guest creation is retired on the allowlist route", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
@@ -2714,18 +2715,16 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       headers: mut,
       body: JSON.stringify({ email: "outsider@partner.com" }),
     });
-    expect(res.status).toBe(200);
-    expect((await jsonOf<{ kind: string }>(res)).kind).toBe("guest");
-    // The guest now shows as a pending allowlist entry.
+    expect(res.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUEST_INVITES_RETIRED");
     const listed = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(
-      listed.entries.some((e) => e.kind === "guest" && e.email === "outsider@partner.com"),
-    ).toBe(true);
+    expect(listed.entries).toHaveLength(0);
+    expect(await guestRepository(client).listInvitesByCanvas(id)).toHaveLength(0);
   });
 
-  it("guest invites are refused when the app doesn't own sign-in (proxy mode)", async () => {
+  it("legacy guest creation is retired even when no guest service is wired", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
@@ -2737,7 +2736,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       body: JSON.stringify({ email: "outsider@partner.com" }),
     });
     expect(res.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUESTS_UNAVAILABLE");
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUEST_INVITES_RETIRED");
   });
 
   it("revoking a guest entry revokes its invite + sessions", async () => {
@@ -2745,10 +2744,24 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const id = await publishedCanvas(owner.id);
-    await app.request(`/api/canvases/${id}/allowlist`, {
-      method: "POST",
-      headers: mut,
-      body: JSON.stringify({ email: "g@partner.com" }),
+    const canvases = canvasesRepository(client);
+    const guests = guestRepository(client);
+    await canvases.addAllowlistEntry({
+      canvasId: id,
+      principalKind: "guest",
+      email: "g@partner.com",
+    });
+    const invite = await guests.createInvite({
+      canvasId: id,
+      email: "g@partner.com",
+      tokenHash: hashToken("legacy-invite-token"),
+      expiresAt: null,
+    });
+    await guests.createSession({
+      inviteId: invite.id,
+      canvasId: id,
+      tokenHash: hashToken("legacy-session-token"),
+      expiresAt: Date.now() + 60_000,
     });
     const entry = (
       await jsonOf<{ entries: Array<{ id: string; kind: string }> }>(
@@ -2765,6 +2778,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       await app.request(`/api/canvases/${id}/allowlist`),
     );
     expect(after.entries).toHaveLength(0);
+    expect(await guests.findLiveSessionByTokenHash(hashToken("legacy-session-token"))).toBeNull();
   });
 
   it("a non-owner cannot manage another canvas's allowlist (404)", async () => {

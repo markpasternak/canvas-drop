@@ -12,19 +12,18 @@ export interface CaptureResolverDeps {
 
 /**
  * Internal capture carve-out (plan 004 / U5, §12.0). The companion to
- * `guestPublicResolver`: a pre-gateway resolver that establishes the `capture`
+ * `publicCanvasResolver`: a pre-gateway resolver that establishes the `capture`
  * principal for the screenshot worker's own requests, then lets `decideCanvasAccess`
  * (U3) decide — it NEVER grants access itself.
  *
  * Identity comes only from a **server-minted, HMAC-verified** capture token carried in
  * an internal header (§12.0 #1) — a client cannot forge one without the session secret,
- * so this is safe to mount in EVERY auth mode (unlike the guest carve-out, which is
- * oidc/dev only because guest cookies are app-gated). In `proxy` mode it is how the
+ * so this is safe to mount in EVERY auth mode. In `proxy` mode it is how the
  * in-process worker's loopback request gets past the IAP-header gateway.
  *
- * Like the guest resolver: derives its own role (the classifier runs later), acts only
+ * Like the public resolver: derives its own role (the classifier runs later), acts only
  * on `canvas`/`platform-api` surfaces, and no-ops when no valid token is present (the
- * request then follows the normal guest/anonymous/org path). The token's canvas scope is
+ * request then follows the normal anonymous/org path). The token's canvas scope is
  * enforced downstream by `decideCanvasAccess` (a token for canvas A renders only A).
  */
 export function captureResolver(deps: CaptureResolverDeps) {

@@ -40,8 +40,8 @@ const MCP_BODY_LIMIT = LIMITS.maxCanvasBytes + 10 * 1024 * 1024;
  * Streamable-HTTP transport; we supply the provider (U3) and the tool server (U5).
  *
  * The whole module is mounted only when `config.mcp.enabled` — when disabled the
- * routes are not present at all (not 403'd), mirroring how proxy mode declines to
- * mount the guest resolver.
+ * routes are not present at all (not 403'd), matching the app's "absent when disabled"
+ * posture for optional pre-gateway surfaces.
  */
 export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
