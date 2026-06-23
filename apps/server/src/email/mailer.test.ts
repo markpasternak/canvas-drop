@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "../log/logger.js";
 import { logMailer } from "./log.js";
-import { renderGuestInvite } from "./mailer.js";
 import { mailgunMailer } from "./mailgun.js";
 import { noopMailer } from "./noop.js";
 
@@ -36,21 +35,21 @@ describe("noopMailer", () => {
 });
 
 describe("logMailer", () => {
-  it("logs only the envelope (to, subject) and NEVER the magic-link body", async () => {
+  it("logs only the envelope (to, subject) and never the message body", async () => {
     const info = vi.fn();
     const m = logMailer({ info } as unknown as Logger);
     expect(m.canSend).toBe(true);
-    const res = await m.send({ to: "g@x.com", subject: "hi", text: "open https://x/guest/tok" });
+    const res = await m.send({ to: "g@x.com", subject: "hi", text: "private body" });
     expect(res.ok).toBe(true);
     // Envelope is logged for dev visibility…
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({ to: "g@x.com", subject: "hi" }),
       expect.any(String),
     );
-    // …but the one-time credential body is redacted — it must never reach the logs.
+    // ...but message content is redacted.
     const [logged] = info.mock.calls[0] as [Record<string, unknown>, string];
     expect(logged).not.toHaveProperty("body");
-    expect(JSON.stringify(logged)).not.toContain("guest/tok");
+    expect(JSON.stringify(logged)).not.toContain("private body");
   });
 });
 
@@ -106,21 +105,5 @@ describe("mailgunMailer", () => {
     expect((await m.send({ to: "a@b.com", subject: "s", text: "t" })).error).toBe(
       "mailgun_unreachable",
     );
-  });
-});
-
-describe("renderGuestInvite", () => {
-  it("includes the link in both text and html, with an escaped title", async () => {
-    const msg = renderGuestInvite({
-      canvasTitle: 'A <b>bold</b> "demo"',
-      inviterName: "Mark",
-      inviteUrl: "https://x/guest/tok123",
-    });
-    expect(msg.subject).toContain("Mark");
-    expect(msg.text).toContain("https://x/guest/tok123");
-    expect(msg.html).toContain("https://x/guest/tok123");
-    // Title is HTML-escaped in the html part (no raw <b>).
-    expect(msg.html).not.toContain("<b>bold</b>");
-    expect(msg.html).toContain("&lt;b&gt;");
   });
 });

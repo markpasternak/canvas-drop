@@ -8,7 +8,6 @@ import type { GuestService } from "../auth/guest.js";
 import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import type { CloneService } from "../canvas/clone-service.js";
-import { inviteGuestToCanvas } from "../canvas/guest-invite.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
 import { DISABLED_CODE, disabledMessage } from "../canvas/owner-guard.js";
@@ -33,7 +32,6 @@ import type { DeployEngine } from "../deploy/engine.js";
 import { LIMITS } from "../deploy/errors.js";
 import { fromFilesArray, fromZip } from "../deploy/ingest.js";
 import type { DraftService } from "../draft/service.js";
-import type { Mailer } from "../email/mailer.js";
 import type { InviteService } from "../invites/service.js";
 import type { Logger } from "../log/logger.js";
 import type { RealtimeHub } from "../realtime/hub.js";
@@ -67,11 +65,10 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  the `team` canvas grant. The tools wrap the SAME service the management routes use. */
   teams: TeamsRepository;
   teamsService: TeamsService;
-  /** The invite primitive (plan 003 U9) — backs `invite_to_canvas` (individual one-off invite),
-   *  wrapping the SAME service the HTTP route uses. */
+  /** The invite primitive — backs MCP Add person tools, wrapping the SAME service the HTTP route uses. */
   invites: InviteService;
-  /** Pending invitations — the `list_team_members` roster's pending rows (HTTP-route parity). */
-  invitations: Pick<InvitationsRepository, "listPendingForTarget">;
+  /** Pending invitations — canvas/team pending rows and cancellation (HTTP-route parity). */
+  invitations: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
   canvases: CanvasesRepository;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
@@ -89,8 +86,6 @@ export interface McpToolDeps extends PreviewHintDeps {
    *  invites are refused — the IAP owns that boundary). Backs the guest-access tools
    *  and the guest-grant revocation on archive/unpublish/delete. */
   guests?: GuestService;
-  /** Mailer for guest invites (absent → invites refused with EMAIL_NOT_CONFIGURED). */
-  mailer?: Mailer;
   /** Clone-as-template service — backs `clone_canvas`. */
   clone: CloneService;
   /** Draft/editor service — backs the draft tools (get/read/write/publish/discard). */
@@ -1148,13 +1143,49 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
 
   // ---- Sharing & access (U4) -------------------------------------------------
 
+  function addPersonFailure(status: string): ToolResult | null {
+    if (status === "policy_blocked")
+      return fail("NOT_PERMITTED: that email can't be added from here");
+    if (status === "auth_admission_required")
+      return fail(
+        "AUTH_ADMISSION_REQUIRED: that email must be admitted by the configured identity provider first",
+      );
+    if (status === "blocked") return fail("BLOCKED: that account is blocked");
+    if (status === "rate_limited") return fail("RATE_LIMITED: too many invites — try again later");
+    return null;
+  }
+
+  async function addCanvasPerson(cv: Canvas, email: string, mode: "add" | "invite") {
+    const actor = await teamActorNow(); // loads the caller's name/email (isAdmin stays false)
+    const r = await deps.invites.resolveOrInvite(
+      {
+        kind: "canvas",
+        canvasId: cv.id,
+        canvasSlug: cv.slug,
+        canvasTitle: cv.title,
+        mode,
+      },
+      email,
+      { id: caller.userId, name: actor.name, email: actor.email, isAdmin: false },
+    );
+    const failure = addPersonFailure(r.status);
+    if (failure) return failure;
+    deps.audit.recordAudit({
+      action: "allowlist_add",
+      actorId: caller.userId,
+      targetId: cv.id,
+      meta: { kind: "add_person", mode, status: r.status },
+    });
+    return ok({ ok: true, status: r.status });
+  }
+
   server.registerTool(
     "list_access",
     {
       description:
-        "List who can access a canvas you own beyond the rung default — the named allowlist " +
-        "(org members) and email-invited guests (same as the Share tab's people list). Each entry " +
-        "has an `id` (use it with revoke_access), `kind` ('member'|'guest'), `email`, and `name`.",
+        "List who can access a canvas you own beyond the rung default — active named people and " +
+        "pending sign-ins, same as the Share tab's people list. Each entry has an `id` (use it " +
+        "with revoke_access), `kind` ('member'|'pending'|'guest' for legacy rows), `email`, and `name`.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -1163,6 +1194,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const entries = await resolveAllowlistEntries(
         await deps.canvases.listAllowlist(cv.id),
         deps.users,
+        await deps.invitations.listPendingForTarget("canvas", cv.id),
       );
       return ok({ entries });
     },
@@ -1173,43 +1205,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Grant a person access to a canvas you own by email (mirrors the Share tab's add-person). " +
-        "If the email is an org member, they're added to the allowlist directly; otherwise an " +
-        "email guest invite is sent (oidc/dev mode + configured email only — else fails " +
-        "GUESTS_UNAVAILABLE / EMAIL_NOT_CONFIGURED). Note: the allowlist only takes effect on the " +
-        "`specific_people` access rung — set that with update_canvas.",
+        "An existing user is granted now (`status: granted`); an admissible new email becomes a " +
+        "pending sign-in grant (`status: pending`) and materializes after verified sign-in. No " +
+        "guest magic link is created. The grant only takes effect on the `specific_people` rung — " +
+        "set that with update_canvas.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().describe("The person's email."),
       },
     },
-    async ({ id, email: rawEmail }) => {
+    async ({ id, email }) => {
       const gate = await requireMutable(id);
       if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      const email = rawEmail.trim().toLowerCase();
-      const user = await deps.users.findByEmail(email);
-      if (user) {
-        await deps.canvases.addAllowlistEntry({
-          canvasId: cv.id,
-          principalKind: "member",
-          userId: user.id,
-        });
-        deps.audit.recordAudit({
-          action: "allowlist_add",
-          actorId: caller.userId,
-          targetId: cv.id,
-          meta: { kind: "member", userId: user.id },
-        });
-        return ok({ ok: true, kind: "member" });
-      }
-      const inviter = await deps.users.findById(caller.userId);
-      const r = await inviteGuestToCanvas(deps, {
-        canvas: cv,
-        inviterName: inviter?.name ?? "A teammate",
-        actorId: caller.userId,
-        email,
-      });
-      return r.ok ? ok({ ok: true, kind: "guest" }) : fail(`${r.code}: ${r.message}`);
+      return addCanvasPerson(gate.canvas, email, "add");
     },
   );
 
@@ -1231,62 +1239,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, email }) => {
       const gate = await requireMutable(id);
       if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      const actor = await teamActorNow(); // loads the caller's name/email (isAdmin stays false)
-      const r = await deps.invites.resolveOrInvite(
-        {
-          kind: "canvas",
-          canvasId: cv.id,
-          canvasSlug: cv.slug,
-          canvasTitle: cv.title,
-          mode: "invite",
-        },
-        email,
-        { id: caller.userId, name: actor.name, email: actor.email, isAdmin: false },
-      );
-      if (r.status === "policy_blocked")
-        return fail("NOT_PERMITTED: that email can't be invited from here");
-      if (r.status === "auth_admission_required")
-        return fail(
-          "AUTH_ADMISSION_REQUIRED: that email must be admitted by the configured identity provider first",
-        );
-      if (r.status === "blocked") return fail("BLOCKED: that account is blocked");
-      if (r.status === "rate_limited") return fail("RATE_LIMITED: too many invites — try later");
-      deps.audit.recordAudit({
-        action: "allowlist_add",
-        actorId: caller.userId,
-        targetId: cv.id,
-        meta: { kind: "invite", status: r.status },
-      });
-      return ok({ status: r.status });
-    },
-  );
-
-  server.registerTool(
-    "resend_guest_invite",
-    {
-      description:
-        "Re-send a pending guest invite (fresh magic link). Pass the allowlist entry `id` from " +
-        "list_access; only valid for a 'guest' entry.",
-      inputSchema: {
-        id: z.string().describe("The canvas id."),
-        entryId: z.string().describe("The allowlist entry id (from list_access)."),
-      },
-    },
-    async ({ id, entryId }) => {
-      const gate = await requireMutable(id);
-      if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
-      if (entry?.principalKind !== "guest" || !entry.email) return fail("guest invite not found");
-      const inviter = await deps.users.findById(caller.userId);
-      const r = await inviteGuestToCanvas(deps, {
-        canvas: cv,
-        inviterName: inviter?.name ?? "A teammate",
-        actorId: caller.userId,
-        email: entry.email,
-      });
-      return r.ok ? ok({ ok: true }) : fail(`${r.code}: ${r.message}`);
+      return addCanvasPerson(gate.canvas, email, "invite");
     },
   );
 
@@ -1294,18 +1247,39 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "revoke_access",
     {
       description:
-        "Remove an allowlist entry from a canvas you own (member or guest). Pass the entry `id` " +
-        "from list_access. Revokes a guest's invite + sessions and drops any live sockets it no " +
-        "longer permits.",
+        "Remove an access entry from a canvas you own (active member, pending sign-in, or legacy " +
+        "guest row). Pass the entry `id` from list_access. Revokes legacy guest sessions and drops " +
+        "any live sockets it no longer permits.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
-        entryId: z.string().describe("The allowlist entry id (from list_access)."),
+        entryId: z.string().describe("The access entry id (from list_access)."),
       },
     },
     async ({ id, entryId }) => {
       const gate = await requireMutable(id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
+      if (entryId.startsWith("pending:")) {
+        const cancelled = await deps.invitations.cancelPendingForTarget(
+          "canvas",
+          cv.id,
+          entryId.slice("pending:".length),
+        );
+        if (!cancelled) return fail("access entry not found");
+        deps.audit.recordAudit({
+          action: "allowlist_remove",
+          actorId: caller.userId,
+          targetId: cv.id,
+          meta: { entryId, kind: "pending" },
+        });
+        if (deps.hub)
+          await deps.hub
+            .revalidateCanvas(cv.id)
+            .catch((err) =>
+              deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"),
+            );
+        return ok({ ok: true });
+      }
       const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
       if (entry?.principalKind === "guest" && entry.email && deps.guests) {
         await deps.guests.revokeInvite(cv.id, entry.email);

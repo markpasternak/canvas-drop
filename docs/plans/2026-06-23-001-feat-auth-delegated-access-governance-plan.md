@@ -183,11 +183,12 @@ and per-user revoke.
   updates template rows only if the row is absent or exactly matches a known
   previous seeded default; custom rows are preserved and surfaced as overridden.
 
-- **KTD10 - MCP compatibility favors redirecting over breaking, except guest
-  magic-link resend.** `grant_access` and `invite_to_canvas` both call the same
-  Add person service and return the same statuses as HTTP. `resend_guest_invite`
-  becomes deprecated/inert with a clear failure because there is no longer a guest
-  magic link to resend. Docs remove it from the normal tool workflow.
+- **KTD10 - Legacy owner resend surfaces are removed, not deprecated.**
+  `grant_access` and `invite_to_canvas` both call the same Add person service and
+  return the same statuses as HTTP. The old `resend_guest_invite` MCP tool, the
+  session-authenticated resend route, and the dashboard client wrapper are
+  removed. Existing guest tables and rows remain for retention, cutover, and
+  revocation; no migration destroys DB data.
 
 ## High-Level Technical Design
 
@@ -533,14 +534,17 @@ rows and show reset/update affordances in Admin -> Configuration -> Email templa
 **Requirements:** R27, R28, R29. **Dependencies:** U1, U3, U4.
 
 **Files:** `apps/server/src/mcp/server.ts`, `apps/server/src/mcp/server.test.ts`,
-`docs/site/agents/mcp.md`, `docs/site/agents/llms.md`, `README.md`.
+`apps/server/src/routes/management.ts`, `apps/server/src/routes/management.test.ts`,
+`apps/dashboard/src/lib/api.ts`, `docs/site/agents/mcp.md`,
+`docs/site/agents/llms.md`, `README.md`.
 
 **Approach:** Point `grant_access` and `invite_to_canvas` at the shared Add person
 service. Return the same statuses and denial strings as HTTP where MCP shape
 allows. Keep `list_access` in sync with the dashboard people list, including
-pending entries if the owner UI shows them. Make `resend_guest_invite` deprecated
-and inert with a clear failure. Do not add admin People/Canvases governance tools
-to the owner MCP surface.
+pending entries if the owner UI shows them. Remove the legacy
+`resend_guest_invite` tool and the old HTTP resend route/client wrapper rather
+than keeping compatibility stubs. Do not add admin People/Canvases governance
+tools to the owner MCP surface.
 
 **Test scenarios:**
 
@@ -548,7 +552,8 @@ to the owner MCP surface.
 - MCP Add person to policy-blocked external -> same denial as dashboard, no guest
   invite row.
 - MCP `list_access` shows active and pending people consistently with HTTP.
-- `resend_guest_invite` no longer creates or refreshes guest tokens.
+- The MCP tool list no longer exposes `resend_guest_invite`, and the dashboard/API
+  resend wrapper is gone.
 - A non-owned canvas still reads as not found.
 
 ### U10. Documentation clarity refresh

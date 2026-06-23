@@ -42,7 +42,6 @@ import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { DeployError } from "../deploy/errors.js";
 import { type DeployEntry, fromPasteHtml, fromZip } from "../deploy/ingest.js";
-import type { Mailer } from "../email/mailer.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { InviteService } from "../invites/service.js";
@@ -90,10 +89,9 @@ export interface ManagementDeps extends PreviewHintDeps {
    * live sockets that lost access; a newly-set password drops gated non-owners.
    */
   hub?: RealtimeHub;
-  /** Guest magic-link service + mailer (U8). Present in oidc/dev; absent in proxy
-   *  mode, where guest invites are refused (the IAP owns the boundary). */
+  /** Legacy guest service. Kept only so revoking old access rows can revoke any
+   *  retained guest sessions; new sharing never creates guest magic links. */
   guests?: GuestService;
-  mailer?: Mailer;
   /**
    * Effective operator-global resolvers (admin DB override ?? env). Optional —
    * omitted in unit tests, which fall back to the boot `config` values. Used so
@@ -838,26 +836,6 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     return addPerson(c, cv, body.data.email, "invite");
-  });
-
-  /** Re-send a guest invite (fresh token); only valid for a guest entry. */
-  app.post("/:id/allowlist/:entryId/resend", sameOrigin, async (c) => {
-    const cv = await mutableCanvas(c);
-    if (cv instanceof Response) return cv;
-    const entry = (await deps.canvases.listAllowlist(cv.id)).find(
-      (e) => e.id === c.req.param("entryId"),
-    );
-    if (entry?.principalKind !== "guest" || !entry.email) {
-      return c.json({ error: "not_found" }, 404);
-    }
-    return c.json(
-      {
-        code: "GUEST_INVITES_RETIRED",
-        message:
-          "Guest magic-link invites are retired. Add the person through normal sign-in access.",
-      },
-      409,
-    );
   });
 
   /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any

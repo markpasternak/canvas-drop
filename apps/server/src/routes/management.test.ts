@@ -25,7 +25,6 @@ import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { DeployEntry } from "../deploy/ingest.js";
-import { logMailer } from "../email/log.js";
 import type { AppEnv } from "../http/types.js";
 import { makeInviteService } from "../invites/testing.js";
 import { memStorage } from "../storage/mem.js";
@@ -56,7 +55,7 @@ function buildApp(
   storage = memStorage(),
   // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
   hub?: any,
-  // When false, simulate proxy mode (no guest service / mailer wired).
+  // When false, simulate proxy mode (no legacy guest service wired).
   withGuests = true,
   // Screenshot preview pipeline effective-enabled (plan 004); off by default so
   // existing tests see hasPreview=false (today's behavior).
@@ -114,7 +113,6 @@ function buildApp(
       aiUsage: aiUsageRepository(client),
       hub,
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
-      mailer: withGuests ? logMailer(silent) : undefined,
       invites: makeInviteService(client, config),
       invitations: invitationsRepository(client),
       publicLinksEnabled: () => Promise.resolve(true),
