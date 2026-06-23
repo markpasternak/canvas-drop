@@ -617,8 +617,8 @@ export function adminRoutes(deps: AdminRoutesDeps) {
     return c.json({ emails: await deps.allowedEmails.list() });
   });
 
-  // Add users (plan 003 U7) — the only way to permit a brand-new email to sign in. Routes
-  // through the invite primitive with the admin allowance: it permits the email (an
+  // Sign-in permits (plan 003 U7) — the only way to permit a brand-new email to sign in.
+  // Routes through Add person with the admin allowance: it permits the email (an
   // `allowed_emails` row when the domain doesn't already authenticate), records nothing to
   // materialize (org membership auto-derives from the domain on first login), and sends a
   // courtesy email. Existing allowlist entries keep working — this replaces the bare add.

@@ -2777,7 +2777,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       invitedBy: other.id,
     });
     const otherPending = (await invitations.listPendingForTarget("canvas", otherCanvasId))[0];
-    if (!otherPending) throw new Error("expected other pending invitation");
+    if (!otherPending) throw new Error("expected other pending access row");
     const calls: Array<{ method: string; canvasId: string }> = [];
     const hub = {
       revalidateCanvas: async (canvasId: string) => {

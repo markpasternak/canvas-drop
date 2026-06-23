@@ -823,12 +823,11 @@ export function managementRoutes(deps: ManagementDeps) {
     return addPerson(c, cv, body.data.email, "add");
   });
 
-  /** Individual one-off canvas invite (plan 003 U8): a DELIBERATE "invite this person to this
-   *  canvas" action, distinct from the silent Specific-people add above. Routes through the
-   *  auth-delegated invite primitive — an existing user is granted + emailed (per
-   *  `notifyOnCanvasInvite`); a brand-new email becomes a pending invitation that materializes
-   *  on their first verified login (no app-owned credential), with the individual-invite
-   *  courtesy email. KTD5-gated + rate-limited (a self-serve owner can't permit a new
+  /** Individual one-canvas access email (plan 003 U8): routes through the
+   *  auth-delegated Add person primitive. An existing user is granted + emailed (per
+   *  `notifyOnCanvasInvite`); a brand-new email becomes pending access that materializes
+   *  on their first verified login (no app-owned credential), with the individual access
+   *  email. KTD5-gated + rate-limited (a self-serve owner can't permit a new
    *  external email unless the toggle is on). */
   app.post("/:id/invite", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);

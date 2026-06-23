@@ -176,12 +176,13 @@ and per-user revoke.
   private so stale public URLs are not kept live. The per-request auth decision
   still checks the effective value as defense in depth.
 
-- **KTD9 - Email templates get instance and org context separately.** Add an
-  effective instance display name resolver (DB override, else base host). Keep
-  `org.name` only for true org membership copy. Seeded templates include
-  `instanceName`, optional `orgName`, target-specific names, and link. Rollout
-  updates template rows only if the row is absent or exactly matches a known
-  previous seeded default; custom rows are preserved and surfaced as overridden.
+- **KTD9 - Seeded email templates avoid deployment/org branding.** Keep legacy
+  `instanceName` and org variables renderable for customized templates, but do
+  not promote them in the seeded recipient copy. Seeded templates are
+  access-first and recipient-specific: inviter, recipient email, canvas/team
+  name, sign-in action, and link. Rollout updates template rows only if the row
+  is absent or exactly matches a known previous seeded default; custom rows are
+  preserved and surfaced as overridden.
 
 - **KTD10 - Legacy owner resend surfaces are removed, not deprecated.**
   `grant_access` and `invite_to_canvas` both call the same Add person service and
@@ -258,7 +259,7 @@ than recording pending grants that the upstream IAP may never admit.
 
 - Existing signed-in user -> granted now, no pending row.
 - Existing allowlist/team member -> `already_added`, no duplicate row.
-- Existing unconsumed pending invitation -> `already_pending`, no duplicate row.
+- Existing unconsumed pending access -> `already_pending`, no duplicate row.
 - App-managed auth, admin adds brand-new external -> `allowed_emails` permit +
   pending grant.
 - App-managed auth, non-admin adds brand-new external with toggle off ->
@@ -361,7 +362,7 @@ without regressing personal/org team rules.
 org-team same-org member constraints and personal-team external invite behavior, but
 return the richer statuses. Use the same member autocomplete pattern for org teams;
 personal teams can use exact email entry without external autocomplete. Roster rows
-continue merging active members and pending invitations.
+continue merging active members and pending access.
 
 **Test scenarios:**
 
@@ -509,20 +510,22 @@ private canvas/team access.
 `apps/server/src/routes/admin.ts`, `apps/dashboard/src/routes/admin.settings.tsx`,
 `docs/site/self-hosting/configuration.md`.
 
-**Approach:** Add an effective instance display name setting and pass both
-`instanceName` and optional `orgName` into the template renderer. Update defaults
-so account/org copy is distinct from canvas/team access copy. Implement
-seed-default reconciliation that updates an existing row only when it exactly
-matches a known previous seeded default or does not exist. Preserve customized
-rows and show reset/update affordances in Admin -> Configuration -> Email templates.
+**Approach:** Keep legacy `instanceName`, `orgName`, and `orgContext` variables
+renderable for existing custom templates, but update seeded defaults and admin
+editor guidance so recipient copy does not depend on deployment or org branding.
+Add `recipientEmail` and use it in the defaults so each email says which address
+was permitted or granted access. Implement seed-default reconciliation that
+updates an existing row only when it exactly matches a known previous seeded
+default or does not exist. Preserve customized rows and show reset/update
+affordances in Admin -> Configuration -> Email templates.
 
 **Test scenarios:**
 
 - External canvas invite email says access was granted to the canvas, not to the org.
-- Org account/add-user email may use org language only when the email domain maps to
-  the org.
-- `instanceName` falls back to base host and can be overridden without changing
-  `org.name`.
+- Seeded account/add-user email identifies the permitted recipient email without
+  saying they joined an org.
+- Legacy `instanceName`/org variables still render in customized templates, but
+  seeded defaults and admin editor guidance do not promote them.
 - Previous uncustomized seed rows update to the new defaults; customized rows are
   preserved.
 - HTML interpolation remains escaped; unknown vars remain empty.

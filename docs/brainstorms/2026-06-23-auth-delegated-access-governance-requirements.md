@@ -27,7 +27,7 @@ The current access system is already moving toward auth-delegated invites. READM
 - **Keep external invites gated.** Members can add existing users and org-domain people. Brand-new external emails require admin action unless the instance explicitly allows member external invites.
 - **Make Admin governance-first.** Admin -> People and Admin -> Canvases optimize for reviewing access risk and policy exceptions before routine list management.
 - **Default public links on at the instance level.** Public links are available while the instance setting is on, and admins can still revoke the capability for a specific user.
-- **Use org language only for org access.** Email templates and UI copy distinguish "you were added to this canvas/team" from "you were invited to the org."
+- **Avoid deployment/org branding in default recipient emails.** Seeded email templates and UI copy say which email was permitted or which canvas/team was shared; they do not make private access sound like joining an org or an instance.
 
 ---
 
@@ -83,7 +83,7 @@ The current access system is already moving toward auth-delegated invites. READM
 **Email and Copy**
 
 - R23. Seeded email templates should be updated so external/private canvas invites do not imply org membership.
-- R24. Email template context should distinguish deployment/instance display name from true org name.
+- R24. Seeded email template context should include the recipient email and access target. Legacy deployment/org variables may remain renderable for customized templates, but default recipient copy should not depend on them.
 - R25. Existing staging template rows should be updated during rollout only when they still match a previous seeded default, or when no override exists. Customized rows should be preserved and surfaced with a reset/update affordance rather than overwritten silently.
 - R26. UI copy should reserve "org member" for domain-derived org membership and use "external person" or "pending sign-in" for no-org access.
 
@@ -174,7 +174,7 @@ flowchart TB
 ## Dependencies and Assumptions
 
 - The existing auth-delegated invitation model remains the foundation from `docs/plans/2026-06-21-001-feat-personal-teams-and-invites-plan.md`.
-- Existing `allowed_emails` and pending invitations remain the sign-in permit and pending grant mechanisms.
+- Existing `allowed_emails` and pending access rows remain the sign-in permit and pending grant mechanisms.
 - Production deployments using proxy/IAP need operator guidance because the upstream auth layer must be able to admit external invited emails.
 - The cleanup is auth-invariant-sensitive and should be reviewed against `docs/solutions/2026-06-13-auth-invariant-checklist.md`.
 - Schema changes, if any, need dual-dialect migrations and parity tests.

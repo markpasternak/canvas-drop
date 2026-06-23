@@ -40,7 +40,7 @@ export interface TeamActor {
 type Fail = { ok: false; error: TeamError };
 type TeamResult = { ok: true; team: Team } | Fail;
 type VoidResult = { ok: true } | Fail;
-/** add-member can grant now, no-op idempotently, or record a pending invitation. */
+/** add-member can grant now, no-op idempotently, or record pending access. */
 type AddMemberResult =
   | { ok: true; status: "granted" | "already_added" | "pending" | "already_pending" }
   | Fail;
@@ -49,8 +49,8 @@ export function teamsService(deps: {
   teams: TeamsRepository;
   orgMembers: Pick<OrgMembersRepository, "isMember">;
   users: Pick<UsersRepository, "findByEmail">;
-  /** The invite primitive (plan 003 U5) — personal-team adds route through it so a brand-new
-   *  email becomes a pending invitation (KTD5-gated) instead of TARGET_NOT_FOUND. */
+  /** The Add person primitive (plan 003 U5) — personal-team adds route through it so a
+   *  brand-new email becomes pending access (KTD5-gated) instead of TARGET_NOT_FOUND. */
   invites: InviteService;
   audit: Pick<AuditLog, "recordAudit">;
 }) {
@@ -116,10 +116,10 @@ export function teamsService(deps: {
     /** Add a member to a team. Actor must be a team member (self-serve) or operator.
      *
      *  ORG team (KTD3): the target must be an EXISTING same-org member — strict, unchanged.
-     *  Brand-new same-domain people are admitted via admin Add-users, not here.
+     *  Brand-new same-domain people are admitted via admin sign-in permits, not here.
      *
-     *  PERSONAL team (plan 003 — friends & family): route through the invite primitive (U5), so
-     *  an existing user is granted now and a brand-new email becomes a pending invitation
+     *  PERSONAL team (plan 003 — friends & family): route through Add person (U5), so
+     *  an existing user is granted now and a brand-new email becomes pending access
      *  (gated by KTD5: a self-serve actor can't permit a new external email). */
     async addMemberByEmail(
       actor: TeamActor,

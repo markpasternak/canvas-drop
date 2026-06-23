@@ -31,9 +31,9 @@ One rung per canvas, stored as the `access` field (default `private`):
 > default), **Whole org** means *members of this canvas's home org*, not "anyone
 > signed in." Members pick **Personal** or the workspace when they create a canvas
 > (a [fixed choice](/docs/authoring/create-and-publish#personal-vs-workspace)); a
-> Personal canvas can't be shared org-wide, and brought-in **guests** (people on a
+> Personal canvas can't be shared org-wide, and brought-in **external people** (people on a
 > non-org domain) never see Whole-org canvases — only the specific ones they're
-> invited to. With no org configured, Whole org is simply "any signed-in user."
+> added to. With no org configured, Whole org is simply "any signed-in user."
 
 Password and expiry are modifiers you can add on top of any rung. The slug in each
 canvas URL is defense-in-depth, not a substitute for a rung — and only when it's the
@@ -42,7 +42,7 @@ default **random** slug (`quiet-otter-x7k2…`). If you give a canvas a **custom
 the dashboard shows a reminder when a canvas is both link-reachable (Whole org / Public
 link) and using a custom slug.
 
-## Inviting specific people
+## Adding specific people
 
 Choose **Specific people**, then add by email. The result is deterministic:
 
@@ -59,14 +59,12 @@ Choose **Specific people**, then add by email. The result is deterministic:
 Pending people are visible in the People list and can be removed before they ever
 sign in. Removing an active or pending person takes effect on the next request.
 
-### Add vs Invite
-
-The People list has two actions. **Add** quietly grants access when it can. **Invite**
-uses the same Add person service but also sends a courtesy email when outbound email is
-enabled. Either action can return `granted`, `pending`, `already_added`,
-`already_pending`, or a policy/error state such as `NOT_PERMITTED` or `RATE_LIMITED`.
-There is no app-owned password or magic-link account; the invitee authenticates the same
-way everyone else does.
+The People list has one **Add person** action. It grants access immediately when it can,
+or records pending access for an email that must sign in first. When outbound email is
+enabled, the person gets a courtesy sign-in/access email. The action can return
+`granted`, `pending`, `already_added`, `already_pending`, or a policy/error state such as
+`NOT_PERMITTED` or `RATE_LIMITED`. There is no app-owned password or magic-link account;
+the person authenticates the same way everyone else does.
 
 > In `proxy` mode the upstream IAP owns admission. canvas-drop can record grants for
 > existing or already-admitted people, but it cannot make a brand-new external email
@@ -76,7 +74,7 @@ way everyone else does.
 ## Sharing with a team
 
 Choose **Team** to share with one or more [teams](/docs/authoring/teams)
-— named groups you create. A team can be **personal** (friends & family — anyone you invite
+— named groups you create. A team can be **personal** (friends & family — anyone you add
 by email) or **org-attached** (a subset of your org). The share control lists only the teams
 **you belong to**; pick one or more, and every member can open and use the canvas (full
 backend, like a member). A team grant is independent of your own membership afterward — if
@@ -92,7 +90,7 @@ direct membership is the boundary.
 > Unlike **Whole org**, the **Team** rung does **not** require an org workspace: any
 > signed-in user can create a personal team and share even a
 > [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas with it. You
-> manage teams — create, invite, leave — on the **Teams** page.
+> manage teams — create, add people, leave — on the **Teams** page.
 
 ## Password & expiry
 

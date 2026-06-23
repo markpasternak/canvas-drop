@@ -317,7 +317,7 @@ export default function CreateCanvas() {
                   ))}
                 </select>
                 <span className="block text-xs text-muted">
-                  <strong>Personal</strong> — only you and people you specifically invite.{" "}
+                  <strong>Personal</strong> — only you and people you specifically add.{" "}
                   <strong>A workspace</strong> — you can later share it with everyone in that org
                   (the “Whole org” access level). This choice is fixed once the canvas is created.
                 </span>

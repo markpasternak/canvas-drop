@@ -77,7 +77,7 @@ async function main() {
   // the whole_org boundary. No-op when no org is named (tenancy inert).
   await materializeOrg({ config, orgs, log: rootLogger });
 
-  // Email templates (plan 003 phase 3): idempotently seed the default invite/notification
+  // Email templates (plan 003 phase 3): idempotently seed the default sign-in/access
   // templates so an admin always has editable rows; an existing override is never clobbered.
   const emailTemplates = emailTemplatesRepository(db);
   await seedDefaultTemplates(emailTemplates);

@@ -9,10 +9,10 @@ import { useToast } from "./Toast.js";
 
 /**
  * Admin sign-in permits (plan 003 U7) — the only way to permit a brand-new email to sign in.
- * Adding routes through the invite primitive: it permits the email (an explicit entry below
+ * Adding routes through the access primitive: it permits the email (an explicit entry below
  * when the domain doesn't already authenticate), sends a courtesy email, and — on a matching
  * org domain — makes them a member on their first verified login. There are no app-owned
- * passwords; the invitee signs in through the instance's configured auth.
+ * passwords; the person signs in through the instance's configured auth.
  *
  * The list shows the off-domain permits an admin manages here (an on-domain email needs no
  * row — it already signs in via the domain allowlist).
@@ -31,9 +31,9 @@ export function AddUsersPanel() {
     try {
       const r = await add.mutateAsync(value);
       setEmail("");
-      // `pending` = a brand-new invitee was emailed; they join on first sign-in. `granted` = an
+      // `pending` = a brand-new email was permitted; they join on first sign-in. `granted` = an
       // existing user (nothing new to permit).
-      toast(r.status === "pending" ? "Sign-in invitation sent" : "Email already permitted");
+      toast(r.status === "pending" ? "Sign-in permit added" : "Email already permitted");
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add sign-in permit", "error");
     }

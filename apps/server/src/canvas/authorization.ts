@@ -85,7 +85,7 @@ export function principalLookupKey(principal: Principal): { userId?: string; ema
   if (principal.kind === "member") return { userId: principal.id };
   // Normalize to match the allowlist's stored form (trim + lowercase, applied at
   // write time by allowlistAddSchema) so casing/whitespace can never cause a
-  // spurious denial of a legitimately-invited guest. Fail-safe either way.
+  // spurious denial of a retained legacy guest. Fail-safe either way.
   if (principal.kind === "guest") return { email: principal.email.trim().toLowerCase() };
   return {};
 }

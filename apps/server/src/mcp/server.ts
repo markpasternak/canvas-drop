@@ -1479,7 +1479,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_team_members",
     {
       description:
-        "List a team's roster: active `members` plus `pending` invitations (brand-new invitees " +
+        "List a team's roster: active `members` plus `pending` access rows (brand-new people " +
         "who haven't signed in yet — they join on first sign-in). A team you can't see reads as " +
         "not found.",
       inputSchema: { id: z.string().describe("The team id.") },

@@ -33,7 +33,7 @@ export interface AuthGatewayDeps {
   /** Resolves the caller's org membership from their verified identity (plan 002 U3).
    *  Server-derived (email domain → org), never client-asserted. */
   orgMembership: OrgMembershipResolver;
-  /** Materialize-on-verified-login (plan 003 U4): apply pending invitations for the verified
+  /** Materialize-on-verified-login (plan 003 U4): apply pending access for the verified
    *  email. Best-effort — failures never block login. Omit to disable (e.g. legacy tests). */
   invitations?: InvitationApplyDeps;
   audit?: AuthEventSink;
@@ -72,7 +72,7 @@ export function authGateway(deps: AuthGatewayDeps) {
       return c.json({ error: "forbidden" }, 403);
     }
 
-    // Materialize-on-verified-login (plan 003 U4): apply any pending invitations for this
+    // Materialize-on-verified-login (plan 003 U4): apply any pending access for this
     // verified email. The email is the server-resolved identity, never client input; the apply
     // is idempotent and best-effort, so it never blocks the request. This is the only login
     // path proxy mode has, so the hook lives here rather than in the oidc callback alone.

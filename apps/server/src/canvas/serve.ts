@@ -127,7 +127,7 @@ function recordView(
   contentType: string,
 ): void {
   if (!contentType.startsWith("text/html")) return;
-  // Attribute to the org member, the invited guest, or an anonymous public visitor
+  // Attribute to the org member, retained legacy guest, or anonymous public visitor
   // (U11) — usage_events.userId is plain text, so all principals are counted.
   void deps.usage
     .recordView({

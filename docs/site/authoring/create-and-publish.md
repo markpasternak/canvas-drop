@@ -48,7 +48,7 @@ created, the empty canvas is cleaned up for you.
 When your instance has an [org boundary configured](/docs/self-hosting/configuration)
 (off by default), the create flow asks where the canvas lives:
 
-- **Personal** — only you, plus anyone you explicitly invite. It can't be shared
+- **Personal** — only you, plus anyone you explicitly add. It can't be shared
   with the whole org.
 - **Workspace (your org)** — homed in the org, so you can later open it to the
   **Whole org** rung (members of that org). Guests (people on a non-org domain)
@@ -67,15 +67,15 @@ with, between "just me" and "everyone." Teams are **self-serve** and come in two
 fixed choice at creation:
 
 - **Personal** — friends & family. *Any* signed-in user can create one (no org required) and
-  invite *anyone* by email.
-- **Org-attached** — a subset of your org. Only org members can create one, and invitees must
+  add *anyone* by email when policy allows it.
+- **Org-attached** — a subset of your org. Only org members can create one, and added people must
   be members of that org.
 
 Manage teams on the **Teams** page (available to everyone):
 
-- **Create** a team — pick **Personal** or your org — and **invite** people by email; **leave**
-  a team at any time. An existing user joins immediately; a brand-new invitee gets a sign-in
-  invitation and shows as **Pending** until they sign in for the first time (no app-owned
+- **Create** a team — pick **Personal** or your org — and **add** people by email; **leave**
+  a team at any time. An existing user joins immediately; a brand-new person gets a sign-in
+  email and shows as **Pending sign-in** until they sign in for the first time (no app-owned
   password — they authenticate through your instance's configured auth).
 - The team's **creator** (or an admin) can **rename** or **delete** it. Deleting a team
   removes its memberships and unshares every canvas shared with it — the canvases
