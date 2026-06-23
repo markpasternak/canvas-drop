@@ -94,20 +94,21 @@ and per-user revoke.
 | Requirement | Decisions | Units |
 |---|---|---|
 | R1 One owner-facing Add person concept across dashboard/API/MCP | 1, 9 | U1, U3, U4, U9 |
-| R2 Auth-delegated external grants only when auth can admit | 2, 3 | U1, U2, U10 |
-| R3 External email does not become org member unless domain-derived | 2 | U1, U6, U10 |
+| R2 Auth-delegated external grants only when auth can admit | 2, 3 | U1, U2, U11 |
+| R3 External email does not become org member unless domain-derived | 2 | U1, U6, U11 |
 | R4 No new magic-link guest sharing | 1, 4 | U2, U3, U9 |
-| R5 Legacy guest migration/cutover | 4 | U2, U10 |
-| R6 Revocation/expiry/block/disabled still next-request effective | 2, 4, 7 | U1, U2, U5, U10 |
+| R5 Legacy guest migration/cutover | 4 | U2, U11 |
+| R6 Revocation/expiry/block/disabled still next-request effective | 2, 4, 7 | U1, U2, U5, U11 |
 | R7 One Add surface for canvas/team | 1 | U3, U4 |
 | R8 Autocomplete org members only; exact email for external | 1, 8 | U3, U4 |
-| R9 Hard-block policy/proxy-inadmissible external adds | 3 | U1, U3, U4, U10 |
+| R9 Hard-block policy/proxy-inadmissible external adds | 3 | U1, U3, U4, U11 |
 | R10 Deterministic Add result states | 1, 3 | U1, U3, U4, U9 |
 | R11-R15 Admin People directory and invitation management | 5 | U6 |
 | R16-R19 Admin Canvases exposure console and drilldowns | 5 | U7 |
-| R20-R22 Public-link default-on, global off, revoke, static-only | 6, 7 | U5, U10 |
+| R20-R22 Public-link default-on, global off, revoke, static-only | 6, 7 | U5, U11 |
 | R23-R26 Email/template/context/copy cleanup | 8 | U8 |
-| R27-R29 MCP parity and admin boundary | 9 | U9, U10 |
+| R27-R29 MCP parity and admin boundary | 9 | U9, U11 |
+| R30 Documentation clarity across repo docs and served docs site | all | U10 |
 
 ## Key Technical Decisions
 
@@ -550,27 +551,65 @@ to the owner MCP surface.
 - `resend_guest_invite` no longer creates or refreshes guest tokens.
 - A non-owned canvas still reads as not found.
 
-### U10. Docs, invariant tests, review, and ship
+### U10. Documentation clarity refresh
 
-**Goal:** Prove the access model end to end, update served docs, then ship through
-review and green CI.
+**Goal:** Make the new access model crystal clear everywhere readers encounter it:
+repo docs, served docs, agent docs, and generated public documentation.
 
-**Requirements:** all, especially R2, R5, R20-R22, R27-R29. **Dependencies:** U1-U9.
+**Requirements:** R30 plus all access-model decisions. **Dependencies:** U1-U9.
 
-**Files:** `docs/site/authoring/sharing.md`,
+**Files:** `README.md`, `BUILD_BRIEF.md`, `AGENTS.md` if the workflow text needs
+current-state corrections, `docs/solutions/`, `docs/site/authoring/sharing.md`,
 `docs/site/self-hosting/security-model.md`,
 `docs/site/self-hosting/configuration.md`, `docs/site/agents/mcp.md`,
-`docs/site/agents/llms.md`, `README.md`, `BUILD_BRIEF.md`,
-`apps/server/src/integration/invite-scenarios.test.ts`,
+`docs/site/agents/llms.md`, generated docs content under `apps/server/src/docs/`,
+and any docs integrity tests.
+
+**Approach:** Write the docs as the source of truth for operators, authors, and
+agents. Repo-facing docs must explain the migration in project terms: Add person
+is auth-delegated, legacy guest magic links are inert, pending grants carry no
+identity power, external people do not become org members unless domain-derived,
+public links default on but remain static-only, and admin People/Canvases are the
+governance surfaces. Served docs must say the same thing in user/operator terms,
+including proxy/IAP admission failure modes, email-template context, public-link
+default/revoke behavior, and the MCP tool changes. Regenerate the committed docs
+bundle so `/docs/*` and `/llms.txt` serve the updated content, then verify docs
+integrity/readback.
+
+**Test scenarios:**
+
+- Repo docs and served docs use the same vocabulary: Add person, external person,
+  pending sign-in/grant, sign-in permit, and static-only public link.
+- No normal user/operator docs describe legacy guest magic links as a live sharing
+  workflow.
+- `docs/site/authoring/sharing.md` explains owner Add person outcomes, pending
+  sign-in, teams, whole-org, public links, password/expiry, and revocation.
+- `docs/site/self-hosting/security-model.md` explains the invariant: identity is
+  only server-authenticated; pending grants have no auth power; proxy/IAP cannot
+  be widened by app-created email permits.
+- `docs/site/self-hosting/configuration.md` documents the public-link global
+  setting, external invite gates, instance display name, email-template context,
+  and operator action for proxy/IAP.
+- `docs/site/agents/mcp.md` and `docs/site/agents/llms.md` document the MCP Add
+  person behavior, statuses, and legacy guest tool retirement.
+- Generated docs output is refreshed and integrity tests/readback prove `/docs/*`
+  and `/llms.txt` contain the new model.
+
+### U11. Invariant tests, review, and ship
+
+**Goal:** Prove the access model end to end after the docs refresh, then ship
+through review and green CI.
+
+**Requirements:** all, especially R2, R5, R20-R22, R27-R29. **Dependencies:** U1-U10.
+
+**Files:** `apps/server/src/integration/invite-scenarios.test.ts`,
 `apps/server/src/integration/capability-scenarios.test.ts`,
 `apps/server/src/integration/real-infra.test.ts`.
 
-**Approach:** Update docs to describe auth-delegated Add person, no live guest
-magic-link sharing, People/Canvases governance, public-link default-on, and
-proxy/IAP operator requirements. Regenerate served docs if the repo's docs build
-requires it. Add rejection-first integration coverage over serve, runtime API,
+**Approach:** Add rejection-first integration coverage over serve, runtime API,
 realtime, MCP, and admin routes. Run `/ce-code-review` focused on auth/permission
-invariants and fix all real findings before PR.
+invariants and fix all real findings before PR. Re-run the docs readback from U10
+as part of the final gate so the shipped docs cannot drift from the shipped code.
 
 **Test scenarios:**
 
