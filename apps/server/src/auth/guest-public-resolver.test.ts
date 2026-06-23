@@ -6,13 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { requestPrincipal } from "../canvas/authorization.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
-import { guestRepository } from "../db/repositories/guest.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { makeTestDb } from "../db/testing.js";
 import { socialPreview } from "../http/social-preview.js";
 import type { AppEnv } from "../http/types.js";
-import { guestService } from "./guest.js";
-import { guestPublicResolver, onlyWhenNoPrincipal } from "./guest-public-resolver.js";
+import { onlyWhenNoPrincipal, publicCanvasResolver } from "./public-canvas-resolver.js";
 
 // oidc + path mode: socialPreview is active, and `/c/<slug>` resolves to the
 // `canvas` role (so we don't need wildcard hosts in the test).
@@ -43,7 +41,6 @@ async function seedCanvas(client: DbClient, access: AccessRung): Promise<string>
 
 /** Build the carve-out chain over a fake gateway, ending in a probe handler. */
 function appFor(client: DbClient) {
-  const guests = guestService(config, guestRepository(client));
   const canvases = canvasesRepository(client);
   // Fake org gateway: marks that it ran and sets a member user.
   const fakeGateway = createMiddleware<AppEnv>(async (c, next) => {
@@ -56,24 +53,19 @@ function appFor(client: DbClient) {
     c.set("clientIp", "1.2.3.4");
     await next();
   });
-  // Helper to mint a guest cookie.
-  app.get("/__consume", async (c) => {
-    const p = await guests.consumeMagicLink(c, c.req.query("token") ?? "");
-    return c.json({ ok: !!p });
-  });
-  app.use("*", guestPublicResolver({ config, guests, canvases }));
+  app.use("*", publicCanvasResolver({ config, canvases }));
   app.use("*", socialPreview(config));
   app.use("*", onlyWhenNoPrincipal(fakeGateway));
   app.all("*", (c) => {
     const p = requestPrincipal(c);
     return c.json({ kind: p.kind, gateway: c.res.headers.get("x-gateway") ?? "skipped" });
   });
-  return { app, guests, canvases };
+  return { app, canvases };
 }
 
 const JSON_HDR = { accept: "application/json" };
 
-describe("guestPublicResolver — bypass vectors (sqlite)", () => {
+describe("publicCanvasResolver — public-link carve-out (sqlite)", () => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
@@ -123,33 +115,31 @@ describe("guestPublicResolver — bypass vectors (sqlite)", () => {
     expect(body.gateway).toBe("ran");
   });
 
-  it("a valid guest cookie sets the guest principal and skips the gateway", async () => {
+  it("a legacy guest cookie is ignored even when it used to be valid — gateway runs", async () => {
     client = await makeTestDb("sqlite");
-    const canvasId = await seedCanvas(client, "specific_people");
-    const { app, guests } = appFor(client);
-    const { token } = await guests.createInvite(canvasId, "g@x.com");
-    const consumed = await app.request(`/__consume?token=${token}`);
-    const cookie = (consumed.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    await seedCanvas(client, "specific_people");
+    const { app } = appFor(client);
     const body = (await (
-      await app.request("/c/demo", { headers: { ...JSON_HDR, cookie } })
+      await app.request("/c/demo", {
+        headers: { ...JSON_HDR, cookie: "__canvasdrop_guest=legacy" },
+      })
     ).json()) as {
       kind: string;
       gateway: string;
     };
-    expect(body.kind).toBe("guest");
-    expect(body.gateway).toBe("skipped");
+    expect(body.kind).toBe("member");
+    expect(body.gateway).toBe("ran");
   });
 
-  it("a guest cookie on a DASHBOARD/management request is ignored — gateway runs", async () => {
+  it("a legacy guest cookie on a DASHBOARD/management request is ignored — gateway runs", async () => {
     client = await makeTestDb("sqlite");
-    const canvasId = await seedCanvas(client, "specific_people");
-    const { app, guests } = appFor(client);
-    const { token } = await guests.createInvite(canvasId, "g@x.com");
-    const consumed = await app.request(`/__consume?token=${token}`);
-    const cookie = (consumed.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    await seedCanvas(client, "specific_people");
+    const { app } = appFor(client);
     // /api/... is the management surface, not a canvas surface.
     const body = (await (
-      await app.request("/api/canvases", { headers: { ...JSON_HDR, cookie } })
+      await app.request("/api/canvases", {
+        headers: { ...JSON_HDR, cookie: "__canvasdrop_guest=legacy" },
+      })
     ).json()) as { gateway: string };
     expect(body.gateway).toBe("ran");
   });

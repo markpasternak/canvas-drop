@@ -9,9 +9,9 @@ import { anthropicProvider, type ModelProvider } from "./ai/provider.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { authGateway } from "./auth/gateway.js";
 import type { GuestService } from "./auth/guest.js";
-import { guestPublicResolver, onlyWhenNoPrincipal } from "./auth/guest-public-resolver.js";
 import { guestRoutes } from "./auth/guest-routes.js";
 import { makeOrgMembershipResolver } from "./auth/org-membership.js";
+import { onlyWhenNoPrincipal, publicCanvasResolver } from "./auth/public-canvas-resolver.js";
 import { authRoutes } from "./auth/routes.js";
 import { SESSION_COOKIE, type SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
@@ -104,7 +104,7 @@ export interface BuildAppDeps {
   engine: DeployEngine;
   audit: AuditLog;
   sessionSvc?: SessionService;
-  /** Guest magic-link service (U6/U7). Present in oidc/dev; enables the carve-out. */
+  /** Legacy guest service. Retained for cutover/revocation compatibility only. */
   guests?: GuestService;
   /** Mailer for guest invites (U8). Present in oidc/dev. */
   mailer?: Mailer;
@@ -339,20 +339,9 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // Public session-login routes.
   app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
 
-  // Public guest magic-link routes (U8) — pre-gateway (no org session). GET renders
-  // a landing page that does NOT consume the token; a same-origin POST consumes it.
-  if (deps.guests) {
-    app.route(
-      "/",
-      guestRoutes({
-        config: deps.config,
-        guests: deps.guests,
-        canvases: deps.canvases,
-        audit: deps.audit,
-        rateLimitStore: rlStore,
-      }),
-    );
-  }
+  // Retired guest magic-link routes — pre-gateway so old emailed URLs get a stable
+  // no-store 410 instead of falling through to login or consuming a token.
+  app.route("/", guestRoutes({ config: deps.config, rateLimitStore: rlStore }));
 
   // ── Shared service graph (composition root, §9.1) ─────────────────────────
   // Repositories and services used by MORE THAN ONE route mount are constructed
@@ -449,23 +438,20 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // this they'd follow the gateway's login redirect and preview the IdP's "Sign in"
   // page. Intercept those HTML navigations BEFORE the gateway and serve a generic
   // Open Graph card pointing at /og.png; real humans are redirected on to login.
-  // Guest/public carve-out (U7): runs BEFORE socialPreview + the gateway, derives
-  // the role itself, and sets a guest/anonymous principal for canvas surfaces so
-  // those requests skip the org gateway. Mounted only in app-gated modes
-  // (oidc/dev) — in proxy mode the IAP authenticates first, so it isn't mounted
-  // and a forged guest cookie still hits the gateway (KTD7).
+  // Public-link carve-out: runs BEFORE socialPreview + the gateway, derives the role itself,
+  // and sets only an anonymous principal for public_link canvas surfaces. Legacy guest cookies
+  // are intentionally ignored after the guest cutover.
   // Internal capture carve-out (plan 004 / U5): establishes the `capture` principal for
   // the screenshot worker's HMAC-token'd requests, in EVERY mode (the token is
   // unforgeable, so it's safe; in proxy mode it's how the loopback worker gets past the
-  // IAP gateway). Mounted before the guest carve-out + gateway; decideCanvasAccess gates.
+  // IAP gateway). Mounted before the public-link carve-out + gateway; decideCanvasAccess gates.
   app.use("*", captureResolver({ config: deps.config, secret: deps.config.sessionSecret }));
 
-  if (deps.config.auth.mode !== "proxy" && deps.guests) {
+  if (deps.config.auth.mode !== "proxy") {
     app.use(
       "*",
-      guestPublicResolver({
+      publicCanvasResolver({
         config: deps.config,
-        guests: deps.guests,
         canvases: deps.canvases,
       }),
     );
@@ -491,7 +477,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   );
 
   // Everything below requires an org session/identity (login on every request) —
-  // UNLESS the carve-out above already set a guest/anonymous principal, in which
+  // UNLESS the carve-out above already set an anonymous/capture principal, in which
   // case the gateway steps aside (onlyWhenNoPrincipal) and authorization is left
   // to decideCanvasAccess (the sole gate).
   app.use(

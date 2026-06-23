@@ -1,6 +1,7 @@
 import { ConfigError, loadConfig, presentEnvVars } from "@canvas-drop/shared";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
+import { runLegacyGuestCutover } from "./access/legacy-guest-cutover.js";
 import { adminSettingsService } from "./admin/settings-service.js";
 import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
@@ -15,6 +16,8 @@ import { auditRepository } from "./db/repositories/audit.js";
 import { canvasesRepository } from "./db/repositories/canvases.js";
 import { draftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
+import { guestRepository } from "./db/repositories/guest.js";
+import { invitationsRepository } from "./db/repositories/invitations.js";
 import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
@@ -124,11 +127,19 @@ async function main() {
 
   // 3b. Guest magic-link service (U6/U7) — the carve-out is app-gated, so it only
   //     exists outside proxy mode (in proxy mode the IAP authenticates first).
-  const { guestRepository } = await import("./db/repositories/guest.js");
   const { guestService } = await import("./auth/guest.js");
   const { setupMailer } = await import("./email/factory.js");
-  const guests =
-    config.auth.mode === "proxy" ? undefined : guestService(config, guestRepository(db));
+  const guestRepo = guestRepository(db);
+  await runLegacyGuestCutover({
+    config,
+    users,
+    allowedEmails,
+    invitations: invitationsRepository(db),
+    canvases,
+    guests: guestRepo,
+    log: rootLogger,
+  });
+  const guests = config.auth.mode === "proxy" ? undefined : guestService(config, guestRepo);
   const mailer = config.auth.mode === "proxy" ? undefined : setupMailer(config, rootLogger);
 
   // 4. Realtime hub (single-process, in-memory). Re-fetches the canvas + user for

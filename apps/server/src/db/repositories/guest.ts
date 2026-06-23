@@ -4,7 +4,7 @@ import {
   pgSchema,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -86,6 +86,15 @@ export function guestRepository(client: DbClient) {
         .orderBy(invites.createdAt)) as GuestInvite[];
     },
 
+    /** All non-revoked legacy invites, used by the auth-delegated cutover. */
+    async listNonRevokedInvites(): Promise<GuestInvite[]> {
+      return (await db
+        .select()
+        .from(invites)
+        .where(ne(invites.state, "revoked"))
+        .orderBy(invites.createdAt)) as GuestInvite[];
+    },
+
     /**
      * Mark an invite consumed (pending → active) on first magic-link use. Atomic
      * compare-and-swap on `state='pending'` so two concurrent consumes can't both
@@ -121,6 +130,13 @@ export function guestRepository(client: DbClient) {
         .update(sessions)
         .set({ revokedAt: Date.now() })
         .where(and(eq(sessions.canvasId, canvasId), isNull(sessions.revokedAt)));
+    },
+
+    /** Retire every legacy magic-link credential while keeping rows for retention/backups. */
+    async revokeAllInvitesAndSessions(): Promise<void> {
+      const now = Date.now();
+      await db.update(invites).set({ state: "revoked" }).where(ne(invites.state, "revoked"));
+      await db.update(sessions).set({ revokedAt: now }).where(isNull(sessions.revokedAt));
     },
 
     async createSession(input: CreateGuestSessionInput): Promise<GuestSession> {

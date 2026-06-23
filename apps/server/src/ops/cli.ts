@@ -6,15 +6,20 @@
  * they act on whichever DB + storage the instance is wired to.
  */
 import { ConfigError, loadConfig } from "@canvas-drop/shared";
+import { runLegacyGuestCutover } from "../access/legacy-guest-cutover.js";
 import { purgeDeletedCanvases } from "../canvas/purge.js";
 import type { DbClient } from "../db/factory.js";
 import { makeDb } from "../db/factory.js";
 import { runMigrations } from "../db/migrate.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
+import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { guestRepository } from "../db/repositories/guest.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
+import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import { createLogger } from "../log/logger.js";
@@ -23,7 +28,7 @@ import { makeStorage } from "../storage/factory.js";
 import { createBackup, restoreBackup } from "./backup.js";
 
 /** Subcommands handled by the CLI (anything else → start the server). */
-export const OPS_COMMANDS = ["backup", "restore", "purge"] as const;
+export const OPS_COMMANDS = ["backup", "restore", "purge", "guest-cutover"] as const;
 type OpsCommand = (typeof OPS_COMMANDS)[number];
 
 /** Retention window for the append-only metering tables (KTD-7) — stats need ~30d. */
@@ -119,10 +124,22 @@ export async function runOpsCli(argv: string[]): Promise<boolean> {
       const dir = firstNonFlag(rest);
       if (!dir) throw new Error("usage: restore <backup-dir> [--force]");
       await restoreBackup({ client: db, storage, log }, dir, { force: rest.includes("--force") });
-    } else {
+    } else if (cmd === "purge") {
       // purge
       await runMigrations(db);
       await runPurge(db, storage, log, parsePurgeArgs(rest));
+    } else {
+      await runMigrations(db);
+      const report = await runLegacyGuestCutover({
+        config,
+        users: usersRepository(db),
+        allowedEmails: allowedEmailsRepository(db),
+        invitations: invitationsRepository(db),
+        canvases: canvasesRepository(db),
+        guests: guestRepository(db),
+        log,
+      });
+      log.info(report, "guest-cutover complete");
     }
   } finally {
     await db.close();
