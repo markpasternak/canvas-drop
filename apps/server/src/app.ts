@@ -641,6 +641,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       settings: settingsSvc,
       allowedEmails,
       emailTemplates,
+      invitations,
       invites,
       audit: deps.audit,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),

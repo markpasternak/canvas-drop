@@ -17,7 +17,11 @@ import {
   seedPublishedCanvas,
   seedUndeployedCanvas,
 } from "../db/repositories/gallery-test-helpers.js";
+import { invitationsRepository } from "../db/repositories/invitations.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { settingsRepository } from "../db/repositories/settings.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -32,6 +36,7 @@ const config: Config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
 function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }) {
   const canvases = canvasesRepository(client);
+  const invitations = invitationsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -52,11 +57,12 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       settings: adminSettingsService({ settings: settingsRepository(client), config }),
       allowedEmails: allowedEmailsRepository(client),
       emailTemplates: emailTemplatesRepository(client),
+      invitations,
       invites: makeInviteService(client, config),
       audit,
     }),
   );
-  return { app, audit, canvases };
+  return { app, audit, canvases, invitations };
 }
 
 async function seedUser(client: DbClient, sub: string) {
@@ -92,6 +98,7 @@ describe("admin routes", () => {
     const cv = await canvases.create({ ownerId: owner.id, slug: "x-1111-2222", apiKeyHash: "h" });
     for (const [method, path] of [
       ["GET", "/api/admin/canvases"],
+      ["GET", "/api/admin/people"],
       ["GET", "/api/admin/users"],
       ["GET", "/api/admin/overview"],
       ["GET", "/api/admin/ai-usage"],
@@ -114,6 +121,9 @@ describe("admin routes", () => {
       const res = await app.request(`/api/admin/users/${owner.id}/${action}`, post());
       expect(res.status).toBe(404);
     }
+    expect(
+      (await app.request("/api/admin/people/invitations/i1", { method: "DELETE" })).status,
+    ).toBe(404);
   });
 
   it("admin disables a canvas with a reason (audited); enable clears it", async () => {
@@ -506,6 +516,219 @@ describe("admin routes", () => {
     expect(body.total).toBeGreaterThanOrEqual(1);
   });
 
+  it("lists People as one email-keyed row across users, permits, and pending grants", async () => {
+    client = await makeTestDb("sqlite");
+    const users = usersRepository(client);
+    const admin = await users.upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "Admin",
+      isAdmin: true,
+    });
+    const alice = await seedUser(client, "alice");
+    const signedExternal = await users.upsert({
+      providerSub: "signed-external",
+      email: "signed@partner.io",
+      name: "Signed External",
+      isAdmin: false,
+    });
+    const org = await orgsRepository(client).ensureOrg({
+      name: "Example",
+      slug: "example",
+      domains: ["example.com"],
+    });
+    await orgMembersRepository(client).upsertDomainMember(org.id, alice.id);
+    const { app, canvases, invitations } = buildAdminApp(client, {
+      id: admin.id,
+      isAdmin: true,
+    });
+    const cv = await canvases.create({
+      ownerId: alice.id,
+      slug: "alice-owned",
+      apiKeyHash: "alice-hash",
+    });
+    await allowedEmailsRepository(client).add(alice.email, admin.id);
+    await invitations.record({
+      email: alice.email,
+      target: { type: "canvas", id: cv.id },
+      invitedBy: admin.id,
+    });
+    await allowedEmailsRepository(client).add("pending@partner.io", admin.id);
+    await invitations.record({
+      email: "pending@partner.io",
+      target: { type: "team", id: "team-pending" },
+      role: "member",
+      invitedBy: admin.id,
+    });
+
+    const res = await app.request("/api/admin/people?sort=name");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      people: Array<{
+        email: string;
+        kind: string;
+        orgMember: boolean;
+        userId: string | null;
+        permitId: string | null;
+        pendingCount: number;
+        pendingCanvasCount: number;
+        pendingTeamCount: number;
+        canvasCount: number;
+        canPublishPublic: boolean | null;
+      }>;
+    };
+
+    const aliceRow = body.people.find((p) => p.email === alice.email);
+    expect(aliceRow).toMatchObject({
+      kind: "org_member",
+      orgMember: true,
+      userId: alice.id,
+      pendingCount: 1,
+      pendingCanvasCount: 1,
+      canvasCount: 1,
+      canPublishPublic: true,
+    });
+    expect(aliceRow?.permitId).toEqual(expect.any(String));
+
+    expect(body.people.find((p) => p.email === signedExternal.email)).toMatchObject({
+      kind: "external",
+      orgMember: false,
+      userId: signedExternal.id,
+    });
+
+    const pending = body.people.find((p) => p.email === "pending@partner.io");
+    expect(pending).toMatchObject({
+      kind: "pending",
+      orgMember: false,
+      userId: null,
+      pendingCount: 1,
+      pendingTeamCount: 1,
+      canvasCount: 0,
+      canPublishPublic: null,
+    });
+    expect(pending?.permitId).toEqual(expect.any(String));
+
+    const filtered = (await (await app.request("/api/admin/people?kind=pending")).json()) as {
+      people: Array<{ email: string }>;
+    };
+    expect(filtered.people.map((p) => p.email)).toEqual(["pending@partner.io"]);
+  });
+
+  it("cancels a pending People grant and removes it from the target pending list", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await usersRepository(client).upsert({
+      providerSub: "admin",
+      email: "admin@example.com",
+      name: "Admin",
+      isAdmin: true,
+    });
+    const owner = await seedUser(client, "owner");
+    const { app, canvases, invitations } = buildAdminApp(client, {
+      id: admin.id,
+      isAdmin: true,
+    });
+    const cv = await canvases.create({
+      ownerId: owner.id,
+      slug: "pending-target",
+      apiKeyHash: "pending-hash",
+    });
+    await invitations.record({
+      email: "pending@partner.io",
+      target: { type: "canvas", id: cv.id },
+      invitedBy: admin.id,
+    });
+    const pending = await invitations.listPendingForTarget("canvas", cv.id);
+    expect(pending).toHaveLength(1);
+
+    const res = await app.request(`/api/admin/people/invitations/${pending[0]?.id}`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+    expect(await invitations.listPendingForTarget("canvas", cv.id)).toHaveLength(0);
+
+    const people = (await (await app.request("/api/admin/people?kind=pending")).json()) as {
+      people: Array<{ email: string }>;
+    };
+    expect(people.people.map((p) => p.email)).not.toContain("pending@partner.io");
+  });
+
+  it("filters admin canvases by person ownership, direct access, and team/pending access", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const owner = await seedUser(client, "owner");
+    const bob = await seedUser(client, "bob");
+    const { app, canvases, invitations } = buildAdminApp(client, {
+      id: admin.id,
+      isAdmin: true,
+    });
+    const teams = teamsRepository(client);
+    const owned = await canvases.create({ ownerId: bob.id, slug: "bob-owned", apiKeyHash: "h1" });
+    const direct = await canvases.create({
+      ownerId: owner.id,
+      slug: "bob-direct",
+      apiKeyHash: "h2",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: direct.id,
+      principalKind: "member",
+      userId: bob.id,
+    });
+    const pendingDirect = await canvases.create({
+      ownerId: owner.id,
+      slug: "bob-pending",
+      apiKeyHash: "h3",
+    });
+    await invitations.record({
+      email: bob.email,
+      target: { type: "canvas", id: pendingDirect.id },
+      invitedBy: admin.id,
+    });
+    const team = await teams.create({ orgId: null, name: "Bob Team", createdBy: owner.id });
+    await teams.addMember(team.id, bob.id);
+    const teamCanvas = await canvases.create({
+      ownerId: owner.id,
+      slug: "bob-team",
+      apiKeyHash: "h4",
+    });
+    await teams.setCanvasTeams(teamCanvas.id, [team.id]);
+    await canvases.setAccess(teamCanvas.id, "team");
+
+    const pendingTeam = await teams.create({
+      orgId: null,
+      name: "Pending Team",
+      createdBy: owner.id,
+    });
+    const pendingTeamCanvas = await canvases.create({
+      ownerId: owner.id,
+      slug: "pending-team",
+      apiKeyHash: "h5",
+    });
+    await teams.setCanvasTeams(pendingTeamCanvas.id, [pendingTeam.id]);
+    await invitations.record({
+      email: "pending@partner.io",
+      target: { type: "team", id: pendingTeam.id },
+      role: "member",
+      invitedBy: admin.id,
+    });
+    const unrelated = await canvases.create({
+      ownerId: owner.id,
+      slug: "unrelated",
+      apiKeyHash: "h6",
+    });
+
+    const bobBody = (await (
+      await app.request(`/api/admin/canvases?person=${encodeURIComponent(bob.email)}`)
+    ).json()) as { canvases: Array<{ id: string }> };
+    const bobIds = new Set(bobBody.canvases.map((c) => c.id));
+    expect(bobIds).toEqual(new Set([owned.id, direct.id, pendingDirect.id, teamCanvas.id]));
+    expect(bobIds.has(unrelated.id)).toBe(false);
+
+    const pendingBody = (await (
+      await app.request("/api/admin/canvases?person=pending%40partner.io")
+    ).json()) as { canvases: Array<{ id: string }> };
+    expect(pendingBody.canvases.map((c) => c.id)).toEqual([pendingTeamCanvas.id]);
+  });
+
   it("blocks then unblocks a user (audited); the stored bit flips", async () => {
     client = await makeTestDb("sqlite");
     const bob = await seedUser(client, "bob");
@@ -672,6 +895,7 @@ describe("admin routes", () => {
     { method: "POST", path: "/api/admin/users/u1/demote" },
     { method: "POST", path: "/api/admin/users/u1/grant-public" },
     { method: "POST", path: "/api/admin/users/u1/revoke-public" },
+    { method: "DELETE", path: "/api/admin/people/invitations/i1" },
     { method: "POST", path: "/api/admin/allowed-emails" },
     { method: "DELETE", path: "/api/admin/allowed-emails/e1" },
     { method: "PUT", path: "/api/admin/settings/models" },

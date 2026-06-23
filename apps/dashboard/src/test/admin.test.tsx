@@ -176,15 +176,25 @@ const CONFIG_FIELDS = [
 ];
 
 const USER_ROW = {
-  id: "u1",
   email: "alice@example.com",
+  kind: "org_member",
+  orgMember: true,
+  userId: "u1",
   name: "Alice",
   avatarUrl: null,
   isAdmin: false,
   isBlocked: false,
+  canPublishPublic: true,
   createdAt: Date.now(),
   lastSeenAt: Date.now(),
   canvasCount: 1,
+  permitId: null,
+  permitCreatedAt: null,
+  permitCreatedBy: null,
+  pendingCount: 0,
+  pendingCanvasCount: 0,
+  pendingTeamCount: 0,
+  pendingGrants: [],
 };
 
 const ADMIN_ME = {
@@ -264,7 +274,7 @@ describe("admin dashboard", () => {
       "page",
     );
     expect(within(adminNav).getByRole("link", { name: "Canvases" })).toBeInTheDocument();
-    expect(within(adminNav).getByRole("link", { name: "Users" })).toBeInTheDocument();
+    expect(within(adminNav).getByRole("link", { name: "People" })).toBeInTheDocument();
     expect(within(adminNav).getByRole("link", { name: "Configuration" })).toBeInTheDocument();
   });
 
@@ -298,19 +308,22 @@ describe("admin dashboard", () => {
   it("links a user's canvas count to that user's filtered Canvases tab", async () => {
     mockFetch({
       "GET /api/me": () => json(ADMIN_ME),
-      "GET /api/admin/users": () => json({ users: [USER_ROW], total: 1, limit: 50, offset: 0 }),
-      "GET /api/admin/canvases?owner=u1&limit=50&offset=0": () => canvasPage([ROW]),
+      "GET /api/admin/people": () => json({ people: [USER_ROW], total: 1, limit: 50, offset: 0 }),
+      "GET /api/admin/canvases?person=alice%40example.com&limit=50&offset=0": () =>
+        canvasPage([ROW]),
     });
     renderAt("/admin/users");
     const user = userEvent.setup();
     await user.click(
-      await screen.findByRole("button", { name: "View canvases owned by alice@example.com" }),
+      await screen.findByRole("button", { name: "View canvases involving alice@example.com" }),
     );
     expect(await screen.findByRole("heading", { name: "Canvases" })).toBeInTheDocument();
-    expect(await screen.findByText(/Showing canvases owned by/)).toBeInTheDocument();
-    expect(calls.some((c) => c.path === "/api/admin/canvases?owner=u1&limit=50&offset=0")).toBe(
-      true,
-    );
+    expect(await screen.findByText(/Showing canvases involving/)).toBeInTheDocument();
+    expect(
+      calls.some(
+        (c) => c.path === "/api/admin/canvases?person=alice%40example.com&limit=50&offset=0",
+      ),
+    ).toBe(true);
   });
 
   it("filters the Canvases table by owner when an owner email is clicked", async () => {

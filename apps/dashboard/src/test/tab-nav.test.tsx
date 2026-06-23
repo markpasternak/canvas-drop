@@ -13,7 +13,7 @@ import { TabNav, type TabNavItem } from "../components/TabNav.js";
 const ITEMS: ReadonlyArray<TabNavItem> = [
   { to: "/admin", label: "Overview", end: true },
   { to: "/admin/canvases", label: "Canvases" },
-  { to: "/admin/users", label: "Users" },
+  { to: "/admin/users", label: "People" },
 ];
 
 /**
@@ -55,7 +55,7 @@ describe("TabNav", () => {
       "href",
       "/admin/canvases",
     );
-    expect(within(nav).getByRole("link", { name: "Users" })).toHaveAttribute(
+    expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute(
       "href",
       "/admin/users",
     );
@@ -68,7 +68,7 @@ describe("TabNav", () => {
       "aria-current",
       "page",
     );
-    expect(within(nav).getByRole("link", { name: "Users" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "People" })).not.toHaveAttribute("aria-current");
   });
 
   it("treats an `end` tab as exact (Overview is not active on a child route)", async () => {
@@ -76,7 +76,7 @@ describe("TabNav", () => {
     const nav = await screen.findByRole("navigation", { name: "Admin sections" });
     // Overview (end:true) must not light up just because the path starts with /admin.
     expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
-    expect(within(nav).getByRole("link", { name: "Users" })).toHaveAttribute(
+    expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute(
       "aria-current",
       "page",
     );

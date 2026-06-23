@@ -540,7 +540,10 @@ export function useAddAllowedEmail() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (email: string) => api.admin.addAllowedEmail(email),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminAllowedEmails }),
+    onSuccess: () => {
+      invalidateAdmin(qc);
+      qc.invalidateQueries({ queryKey: keys.adminAllowedEmails });
+    },
   });
 }
 
@@ -549,7 +552,23 @@ export function useRemoveAllowedEmail() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.admin.removeAllowedEmail(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminAllowedEmails }),
+    onSuccess: () => {
+      invalidateAdmin(qc);
+      qc.invalidateQueries({ queryKey: keys.adminAllowedEmails });
+    },
+  });
+}
+
+/** Cancel an unconsumed pending delegated grant from the People directory. */
+export function useCancelPendingInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.admin.cancelPendingInvitation(id),
+    onSuccess: () => {
+      invalidateAdmin(qc);
+      qc.invalidateQueries({ queryKey: keys.canvases });
+      qc.invalidateQueries({ queryKey: keys.teams });
+    },
   });
 }
 

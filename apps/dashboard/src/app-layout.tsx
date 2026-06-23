@@ -153,7 +153,7 @@ function pageNameForPath(pathname: string): string {
   if (pathname === "/new") return "Create canvas";
   if (pathname === "/onboarding") return "Get started";
   if (pathname === "/admin/canvases") return "Admin · Canvases";
-  if (pathname === "/admin/users") return "Admin · Users";
+  if (pathname === "/admin/users") return "Admin · People";
   if (pathname === "/admin/settings") return "Admin · Settings";
   if (pathname === "/admin") return "Admin";
   if (pathname.startsWith("/canvases/")) {

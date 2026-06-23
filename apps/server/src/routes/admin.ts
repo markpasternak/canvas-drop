@@ -13,12 +13,18 @@ import {
 import type { AuditLog } from "../audit/audit-log.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { canvasUrl } from "../canvas/url.js";
-import type { AdminCanvasStatus, AdminRepository } from "../db/repositories/admin.js";
+import type {
+  AdminCanvasStatus,
+  AdminPersonKind,
+  AdminPublicCapabilityFilter,
+  AdminRepository,
+} from "../db/repositories/admin.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
 import type { FilesRepository } from "../db/repositories/files.js";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS } from "../email/templates.js";
@@ -39,6 +45,8 @@ export interface AdminRoutesDeps {
   allowedEmails: AllowedEmailsRepository;
   /** Admin-editable email templates (plan 003 phase 3). */
   emailTemplates: EmailTemplatesRepository;
+  /** Pending delegated grants surfaced in the People directory. */
+  invitations: Pick<InvitationsRepository, "cancelPending">;
   /** The invite primitive (plan 003 U5) — Add-users permits + invites through it (so the new
    *  email gets a courtesy email and, on a matching domain, org membership on first login). */
   invites: InviteService;
@@ -64,16 +72,27 @@ const listQuery = z.object({
   listed: boolFlag,
   q: z.string().trim().max(200).optional(),
   owner: z.string().trim().max(100).optional(),
+  person: z.string().trim().toLowerCase().email().optional(),
   sort: z.enum(CANVAS_SORTS).optional().default("recent"),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 const USER_SORTS = ["active", "created", "name", "canvases"] as const;
+const PEOPLE_KINDS = ["org_member", "external", "pending"] as const;
+const PUBLIC_CAPABILITY_FILTERS = ["allowed", "revoked"] as const;
 const userListQuery = z.object({
   q: z.string().trim().max(200).optional(),
   sort: z.enum(USER_SORTS).optional().default("active"),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
+});
+const peopleListQuery = userListQuery.extend({
+  kind: z.enum(PEOPLE_KINDS).optional(),
+  pending: boolFlag,
+  blocked: boolFlag,
+  admin: boolFlag,
+  permit: boolFlag,
+  publicCapability: z.enum(PUBLIC_CAPABILITY_FILTERS).optional(),
 });
 const disableBody = z.object({ reason: z.string().trim().min(1).max(500) });
 const featureBody = z.object({ featured: z.boolean() });
@@ -142,6 +161,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       listed: c.req.query("listed"),
       q: c.req.query("q"),
       owner: c.req.query("owner"),
+      person: c.req.query("person"),
       sort: c.req.query("sort"),
       limit: c.req.query("limit"),
       offset: c.req.query("offset"),
@@ -155,6 +175,7 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       listed: q.data.listed,
       q: q.data.q,
       owner: q.data.owner,
+      person: q.data.person,
       sort: q.data.sort,
       limit: q.data.limit,
       offset: q.data.offset,
@@ -376,6 +397,48 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   //     promote/demote. NO per-user behavioral data is exposed. Mutations are
   //     same-origin-guarded, audited, and self-protected (server-side, not just a
   //     disabled button). ---
+
+  app.get("/people", async (c) => {
+    const q = peopleListQuery.safeParse({
+      q: c.req.query("q"),
+      sort: c.req.query("sort"),
+      kind: c.req.query("kind"),
+      pending: c.req.query("pending"),
+      blocked: c.req.query("blocked"),
+      admin: c.req.query("admin"),
+      permit: c.req.query("permit"),
+      publicCapability: c.req.query("publicCapability"),
+      limit: c.req.query("limit"),
+      offset: c.req.query("offset"),
+    });
+    if (!q.success) return c.json({ error: "invalid_query" }, 400);
+    const { items, total } = await deps.admin.listPeople({
+      q: q.data.q,
+      sort: q.data.sort,
+      kind: q.data.kind as AdminPersonKind | undefined,
+      pending: q.data.pending,
+      blocked: q.data.blocked,
+      admin: q.data.admin,
+      permit: q.data.permit,
+      publicCapability: q.data.publicCapability as AdminPublicCapabilityFilter | undefined,
+      limit: q.data.limit,
+      offset: q.data.offset,
+    });
+    return c.json({ people: items, total, limit: q.data.limit, offset: q.data.offset });
+  });
+
+  app.delete("/people/invitations/:id", sameOrigin, async (c) => {
+    const invitation = await deps.invitations.cancelPending(c.req.param("id"));
+    if (!invitation) return c.json({ error: "not_found" }, 404);
+    deps.audit.recordAudit({
+      action: "pending_invitation_cancel",
+      actorId: c.get("user").id,
+      targetType: invitation.targetType,
+      targetId: invitation.targetId,
+      meta: { email: invitation.email, invitationId: invitation.id },
+    });
+    return c.json({ ok: true });
+  });
 
   app.get("/users", async (c) => {
     const q = userListQuery.safeParse({

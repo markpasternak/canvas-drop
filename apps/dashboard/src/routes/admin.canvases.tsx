@@ -45,6 +45,7 @@ export default function AdminCanvases() {
   const templatable = search.templatable === true;
   const listed = search.listed === true;
   const owner = search.owner;
+  const person = search.person?.trim() || undefined;
   const q = search.q?.trim() || undefined;
   const sort = search.sort ?? "recent";
   // No validateSearch on this route, so coerce `page` defensively — a junk
@@ -52,7 +53,7 @@ export default function AdminCanvases() {
   const rawPage = Number(search.page ?? 1);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const offset = (page - 1) * ADMIN_PAGE_SIZE;
-  const filtering = Boolean(q || status || access || templatable || listed || owner);
+  const filtering = Boolean(q || status || access || templatable || listed || owner || person);
 
   const { data, isLoading, isError, isPlaceholderData, refetch } = useAdminCanvases({
     status,
@@ -61,6 +62,7 @@ export default function AdminCanvases() {
     listed: listed || undefined,
     q,
     owner,
+    person,
     sort,
     limit: ADMIN_PAGE_SIZE,
     offset,
@@ -125,6 +127,12 @@ export default function AdminCanvases() {
   function clearOwner() {
     navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, owner: undefined, page: 1 }) });
   }
+  function clearPerson() {
+    navigate({
+      to: "/admin/canvases",
+      search: (prev) => ({ ...prev, person: undefined, page: 1 }),
+    });
+  }
   function goToPage(next: number) {
     navigate({ to: "/admin/canvases", search: (prev) => ({ ...prev, page: next }) });
   }
@@ -160,6 +168,20 @@ export default function AdminCanvases() {
             className="font-medium text-subtle transition-colors hover:text-fg"
           >
             Clear owner filter
+          </button>
+        </div>
+      )}
+      {person && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-sunken px-3 py-2 text-sm">
+          <span className="text-muted">
+            Showing canvases involving <span className="font-medium text-fg">{person}</span>
+          </span>
+          <button
+            type="button"
+            onClick={clearPerson}
+            className="font-medium text-subtle transition-colors hover:text-fg"
+          >
+            Clear person filter
           </button>
         </div>
       )}

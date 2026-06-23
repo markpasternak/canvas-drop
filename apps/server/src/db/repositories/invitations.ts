@@ -114,6 +114,15 @@ export function invitationsRepository(client: DbClient) {
       return rows.length > 0;
     },
 
+    /** Cancel any unconsumed pending grant by id, regardless of target. Admin People uses this. */
+    async cancelPending(id: string): Promise<Invitation | null> {
+      const rows = (await db
+        .delete(T)
+        .where(and(eq(T.id, id), isNull(T.consumedAt)))
+        .returning()) as Invitation[];
+      return rows[0] ?? null;
+    },
+
     /** Count un-consumed invitations recorded by an actor (the KTD9 pending cap). */
     async countPendingByActor(invitedBy: string): Promise<number> {
       const rows = (await db
