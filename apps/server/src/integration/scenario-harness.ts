@@ -297,7 +297,7 @@ export function scenarioConfig(extra: Record<string, string> = {}): Config {
  */
 export async function connectMcp(
   h: Harness,
-  caller: { userId: string; orgIds?: Set<string>; tenancyActive?: boolean },
+  caller: { userId: string; isAdmin?: boolean; orgIds?: Set<string>; tenancyActive?: boolean },
 ): Promise<McpClient> {
   const { config, repos, storage, engine, audit } = h;
   const teams = teamsRepository(h.client);
@@ -355,6 +355,7 @@ export async function connectMcp(
     },
     {
       userId: caller.userId,
+      isAdmin: caller.isAdmin ?? false,
       orgIds: caller.orgIds ?? new Set<string>(),
       tenancyActive: caller.tenancyActive ?? false,
     },

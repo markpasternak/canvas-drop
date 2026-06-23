@@ -288,17 +288,16 @@ export function adminRepository(client: DbClient) {
     return map;
   }
 
-  async function canvasIdsWithExposure(
-    predicate: (exposure: AdminCanvasExposure) => boolean,
-  ): Promise<Set<string>> {
+  async function allCanvasIdsByExposure(): Promise<{
+    rows: Array<{ id: string }>;
+    exposure: Map<string, AdminCanvasExposure>;
+  }> {
     const rows = (await db
       .select({ id: canvasesT.id })
       .from(canvasesT)
       .where(ne(canvasesT.status, "deleted"))) as Array<{ id: string }>;
     const exposure = await exposureByCanvasIds(rows.map((r) => r.id));
-    return new Set(
-      rows.map((r) => r.id).filter((id) => predicate(exposure.get(id) ?? blankExposure())),
-    );
+    return { rows, exposure };
   }
 
   return {
@@ -333,16 +332,25 @@ export function adminRepository(client: DbClient) {
         filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
         filters.push(sql`${canvasesT.sharedExpiresAt} <= ${Date.now()}`);
       }
-      if (q.context === "personal") filters.push(isNull(canvasesT.orgId));
-      else if (q.context === "org") filters.push(isNotNull(canvasesT.orgId));
-      else if (q.context === "team") filters.push(eq(canvasesT.access, "team"));
-      if (q.external) {
-        const externalIds = await canvasIdsWithExposure((e) => e.externalPeopleCount > 0);
-        filters.push(externalIds.size > 0 ? inArray(canvasesT.id, [...externalIds]) : sql`1 = 0`);
-      }
-      if (q.pending) {
-        const pendingIds = await canvasIdsWithExposure((e) => e.pendingInviteCount > 0);
-        filters.push(pendingIds.size > 0 ? inArray(canvasesT.id, [...pendingIds]) : sql`1 = 0`);
+      if (q.context === "personal") {
+        filters.push(and(isNull(canvasesT.orgId), ne(canvasesT.access, "team")));
+      } else if (q.context === "org") {
+        filters.push(and(isNotNull(canvasesT.orgId), ne(canvasesT.access, "team")));
+      } else if (q.context === "team") filters.push(eq(canvasesT.access, "team"));
+      if (q.external || q.pending) {
+        const { rows, exposure } = await allCanvasIdsByExposure();
+        const matchingIds = new Set(
+          rows
+            .map((r) => r.id)
+            .filter((id) => {
+              const e = exposure.get(id) ?? blankExposure();
+              return (
+                (!q.external || e.externalPeopleCount > 0) &&
+                (!q.pending || e.pendingInviteCount > 0)
+              );
+            }),
+        );
+        filters.push(matchingIds.size > 0 ? inArray(canvasesT.id, [...matchingIds]) : sql`1 = 0`);
       }
       const person = q.person?.trim().toLowerCase();
       if (person) {

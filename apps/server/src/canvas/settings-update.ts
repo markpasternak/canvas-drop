@@ -42,7 +42,7 @@ export type SettingsResolution =
  * preconditions, with NO I/O. The single source of truth behind the management
  * `PATCH /:id/settings` route and the MCP `update_canvas` tool, so the two can't
  * diverge on the listability invariant (templatable ⊆ listed ⊆ shared/published/
- * unprotected), the share-requires-publish rule, or the public_link admin gate.
+ * unprotected), the share-requires-publish rule, or the effective public_link gate.
  *
  * `opts.publicLinksEnabled` and `opts.canPublishPublic` are the global + per-account
  * `public_link` gate. The caller applies the result: `updateSettings(patch)` + `setPassword(hash)`

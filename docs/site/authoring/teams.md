@@ -13,7 +13,7 @@ Teams sit on the middle rung of the per-canvas **access ladder**:
 | **Specific people** | A named few you add by email. |
 | **Team** | Members of the teams you grant — **a personal team, or a subset of your org.** |
 | **Whole org** | Anyone signed in to your organization. |
-| **Public link** | Anyone with the URL — admin-gated, and static files only. |
+| **Public link** | Anyone with the URL — static files only while the instance switch is on and the owner account has not been revoked. |
 
 See [Sharing & access](/docs/authoring/sharing) for the full ladder and the
 password / expiry modifiers.

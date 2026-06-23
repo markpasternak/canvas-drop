@@ -237,9 +237,9 @@ const rawSchema = z
     CANVAS_DROP_AI_USER_DAILY_USD: num(5),
     CANVAS_DROP_AI_CANVAS_MONTHLY_USD: num(50),
 
-    // Email (guest invites, U5). Driver-behind-interface like DB/storage, so new
-    // providers are a config change. `log` (default) writes the message + magic
-    // link to the logger — zero-setup for dev; `smtp` sends via any SMTP server;
+    // Email (auth-delegated access invites). Driver-behind-interface like DB/storage,
+    // so new providers are a config change. `log` (default) writes the message +
+    // sign-in invitation to the logger — zero-setup for dev; `smtp` sends via any SMTP server;
     // `mailgun` sends via the Mailgun HTTP API; `noop` discards. Provider secrets
     // are env-only (never DB-overridable) since invite emails are auth credentials.
     CANVAS_DROP_EMAIL_DRIVER: z.enum(["log", "smtp", "mailgun", "noop"]).optional().default("log"),

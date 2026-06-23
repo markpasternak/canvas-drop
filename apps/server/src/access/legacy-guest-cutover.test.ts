@@ -30,7 +30,15 @@ const proxyConfig = loadConfig({
   CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
 });
 
-async function seed(client: DbClient, guestEmail: string) {
+async function seed(
+  client: DbClient,
+  guestEmail: string,
+  opts: {
+    inviteExpiresAt?: number | null;
+    sessionExpiresAt?: number;
+    createSession?: boolean;
+  } = {},
+) {
   const users = usersRepository(client);
   const canvases = canvasesRepository(client);
   const guests = guestRepository(client);
@@ -51,16 +59,18 @@ async function seed(client: DbClient, guestEmail: string) {
     canvasId: cv.id,
     email: guestEmail,
     tokenHash: hashToken(`invite-${guestEmail}`),
-    expiresAt: null,
+    expiresAt: opts.inviteExpiresAt ?? null,
   });
   const sessionToken = `session-${guestEmail}`;
-  await guests.createSession({
-    inviteId: invite.id,
-    canvasId: cv.id,
-    tokenHash: hashToken(sessionToken),
-    expiresAt: Date.now() + 60_000,
-  });
-  return { owner, cv, guestEntry, sessionToken };
+  if (opts.createSession !== false) {
+    await guests.createSession({
+      inviteId: invite.id,
+      canvasId: cv.id,
+      tokenHash: hashToken(sessionToken),
+      expiresAt: opts.sessionExpiresAt ?? Date.now() + 60_000,
+    });
+  }
+  return { owner, cv, guestEntry, invite, sessionToken };
 }
 
 function cutoverDeps(client: DbClient, config: Config) {
@@ -149,6 +159,76 @@ describe.each(DIALECTS)("runLegacyGuestCutover [%s]", (dialect) => {
     expect(allowlist.some((e) => e.id === guestEntry.id)).toBe(true);
     expect(await guestRepository(client).findLiveSessionByTokenHash(hashToken(sessionToken))).toBe(
       null,
+    );
+  });
+
+  it("does not revive an expired pending invite, even if a guest allowlist row remains", async () => {
+    client = await makeTestDb(dialect);
+    const { cv, guestEntry } = await seed(client, "expired@example.net", {
+      inviteExpiresAt: Date.now() - 1_000,
+      createSession: false,
+    });
+
+    const report = await runLegacyGuestCutover(cutoverDeps(client, appConfig));
+    expect(report).toMatchObject({
+      considered: 0,
+      convertedToMembers: 0,
+      convertedToPending: 0,
+      permitsAdded: 0,
+      removedGuestAllowlistRows: 0,
+      revokedCredentials: true,
+    });
+    expect(await allowedEmailsRepository(client).isAllowed("expired@example.net")).toBe(false);
+    expect(await invitationsRepository(client).listForEmail("expired@example.net")).toHaveLength(0);
+    const allowlist = await canvasesRepository(client).listAllowlist(cv.id);
+    expect(allowlist.some((e) => e.id === guestEntry.id)).toBe(true);
+  });
+
+  it("does not revive an active invite whose retained guest session has expired", async () => {
+    client = await makeTestDb(dialect);
+    const { cv, invite, guestEntry } = await seed(client, "friend@corp.com", {
+      sessionExpiresAt: Date.now() - 1_000,
+    });
+    const guests = guestRepository(client);
+    await guests.markConsumed(invite.id);
+    const member = await usersRepository(client).upsert({
+      providerSub: "friend",
+      email: "friend@corp.com",
+      name: "Friend",
+      isAdmin: false,
+    });
+
+    const report = await runLegacyGuestCutover(cutoverDeps(client, appConfig));
+    expect(report).toMatchObject({
+      considered: 0,
+      convertedToMembers: 0,
+      convertedToPending: 0,
+      removedGuestAllowlistRows: 0,
+      revokedCredentials: true,
+    });
+    const canvases = canvasesRepository(client);
+    expect(await canvases.isPrincipalAllowed(cv.id, { userId: member.id })).toBe(false);
+    expect((await canvases.listAllowlist(cv.id)).some((e) => e.id === guestEntry.id)).toBe(true);
+  });
+
+  it("removes a newly-added sign-in permit if pending grant creation fails", async () => {
+    client = await makeTestDb(dialect);
+    await seed(client, "external@example.net");
+    const deps = cutoverDeps(client, appConfig);
+
+    await expect(
+      runLegacyGuestCutover({
+        ...deps,
+        invitations: {
+          record: async () => {
+            throw new Error("record failed");
+          },
+        },
+      }),
+    ).rejects.toThrow("record failed");
+    expect(await allowedEmailsRepository(client).isAllowed("external@example.net")).toBe(false);
+    expect(await invitationsRepository(client).listForEmail("external@example.net")).toHaveLength(
+      0,
     );
   });
 });

@@ -134,6 +134,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
       const transport = new StreamableHTTPTransport();
       const server = buildMcpServer(deps, {
         userId: auth.userId,
+        isAdmin: user?.isAdmin ?? false,
         orgIds,
         tenancyActive: !!deps.config.org.name,
       });

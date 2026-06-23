@@ -140,6 +140,10 @@ export function usersRepository(client: DbClient) {
           avatarUrl: input.avatarUrl ?? null,
           isAdmin: input.isAdmin,
           isBlocked: false,
+          // The public-link rollout is default-on. Set this explicitly rather than
+          // relying on the DB default so SQLite can avoid a destructive table rebuild
+          // just to alter an existing column default.
+          canPublishPublic: true,
           createdAt: now,
           lastSeenAt: now,
         })

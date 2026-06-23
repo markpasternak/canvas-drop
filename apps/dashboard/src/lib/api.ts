@@ -78,7 +78,8 @@ export interface CanvasCapabilitiesPatch {
  *  its own state (only the admin purge view surfaces it); computed server-side. */
 export type PublicationState = "draft" | "published" | "archived" | "disabled" | "deleted";
 
-/** Per-canvas access rung (D4 ladder). `public_link` is admin-gated (set elsewhere).
+/** Per-canvas access rung (D4 ladder). `public_link` is static-only for non-owners and
+ *  effective only while the instance switch is on and the owner account is not revoked.
  *  `team` (plan 003) shares with members of the granted teams — strictly team-scoped
  *  (never the org-wide gallery), slotted between `specific_people` and `whole_org`. */
 export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";

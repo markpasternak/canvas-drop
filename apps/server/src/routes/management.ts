@@ -685,6 +685,16 @@ export function managementRoutes(deps: ManagementDeps) {
     }
 
     let updated = cv;
+    if (password !== undefined) {
+      const hash = password === null ? null : await hashPassword(password);
+      updated = await deps.canvases.setPassword(cv.id, hash);
+      deps.audit.recordAudit({
+        action: "password_change",
+        actorId: c.get("user").id,
+        targetId: cv.id,
+        meta: { cleared: password === null },
+      });
+    }
     if (Object.keys(patch).length > 0) {
       updated = await deps.canvases.updateSettings(cv.id, patch);
     }
@@ -698,16 +708,6 @@ export function managementRoutes(deps: ManagementDeps) {
       (patch.previewMode === "auto" || patch.previewMode === "off")
     ) {
       await deletePreviewRenditions(deps.storage, cv.id);
-    }
-    if (password !== undefined) {
-      const hash = password === null ? null : await hashPassword(password);
-      updated = await deps.canvases.setPassword(cv.id, hash);
-      deps.audit.recordAudit({
-        action: "password_change",
-        actorId: c.get("user").id,
-        targetId: cv.id,
-        meta: { cleared: password === null },
-      });
     }
     // Audit a rung change, OR a grant-only change to the team set (no rung change) — the
     // latter would otherwise leave no trail when an owner re-picks the granted teams.

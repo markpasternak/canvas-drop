@@ -448,15 +448,14 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // IAP gateway). Mounted before the public-link carve-out + gateway; decideCanvasAccess gates.
   app.use("*", captureResolver({ config: deps.config, secret: deps.config.sessionSecret }));
 
-  if (deps.config.auth.mode !== "proxy") {
-    app.use(
-      "*",
-      publicCanvasResolver({
-        config: deps.config,
-        canvases: deps.canvases,
-      }),
-    );
-  }
+  app.use(
+    "*",
+    publicCanvasResolver({
+      config: deps.config,
+      canvases: deps.canvases,
+      publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
+    }),
+  );
 
   // Public marketing front door: a signed-out `GET /` renders the landing page
   // (oidc mode only). Mounted BEFORE socialPreview so crawlers scrape the real,

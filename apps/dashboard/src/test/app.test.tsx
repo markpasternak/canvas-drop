@@ -244,7 +244,7 @@ describe("dashboard app", () => {
   it("Admin is visible to admins and sits last — to the right of Gallery", async () => {
     stubFetch(true);
     renderApp("/");
-    // Wait for the admin-gated link to appear after /api/me resolves.
+    // Wait for the admin-only link to appear after /api/me resolves.
     await screen.findByRole("link", { name: "Admin" });
     // The (always-rendered) desktop section nav is the first "Sections" landmark.
     const [desktopNav] = screen.getAllByRole("navigation", { name: "Sections" });

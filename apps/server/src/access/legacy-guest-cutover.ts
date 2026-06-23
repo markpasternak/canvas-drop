@@ -1,11 +1,11 @@
 import type { Config } from "@canvas-drop/shared";
 import type { CanvasAllowlistEntry, GuestInvite } from "@canvas-drop/shared/db";
-import { isEmailDomainAllowed } from "../auth/identity-mapping.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { GuestRepository } from "../db/repositories/guest.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { resolveNewEmailAdmission } from "../invites/admission.js";
 import type { Logger } from "../log/logger.js";
 
 export interface LegacyGuestCutoverReport {
@@ -21,13 +21,16 @@ export interface LegacyGuestCutoverReport {
 export interface LegacyGuestCutoverDeps {
   config: Config;
   users: Pick<UsersRepository, "findByEmail">;
-  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed" | "add">;
+  allowedEmails: Pick<AllowedEmailsRepository, "isAllowed" | "add" | "remove">;
   invitations: Pick<InvitationsRepository, "record">;
   canvases: Pick<
     CanvasesRepository,
     "findById" | "addAllowlistEntry" | "removeAllowlistEntry" | "listGuestAllowlistEntries"
   >;
-  guests: Pick<GuestRepository, "listNonRevokedInvites" | "revokeAllInvitesAndSessions">;
+  guests: Pick<
+    GuestRepository,
+    "listNonRevokedInvites" | "listLiveSessions" | "revokeAllInvitesAndSessions"
+  >;
   log?: Logger;
 }
 
@@ -46,24 +49,32 @@ function key(canvasId: string, email: string): string {
   return `${canvasId}\0${email}`;
 }
 
-function mergeAllowlistRows(targets: Map<string, LegacyGuestTarget>, rows: CanvasAllowlistEntry[]) {
+function attachAllowlistRows(
+  targets: Map<string, LegacyGuestTarget>,
+  rows: CanvasAllowlistEntry[],
+) {
   for (const row of rows) {
     const email = normalizeEmail(row.email);
     if (!email) continue;
     const k = key(row.canvasId, email);
     const existing = targets.get(k);
-    if (existing) {
-      existing.allowlistEntryIds.add(row.id);
-    } else {
-      targets.set(k, { canvasId: row.canvasId, email, allowlistEntryIds: new Set([row.id]) });
-    }
+    if (existing) existing.allowlistEntryIds.add(row.id);
   }
 }
 
-function mergeInvites(targets: Map<string, LegacyGuestTarget>, invites: GuestInvite[]) {
+function mergeLiveInvites(
+  targets: Map<string, LegacyGuestTarget>,
+  invites: GuestInvite[],
+  liveSessionInviteIds: Set<string>,
+  now: number,
+) {
   for (const invite of invites) {
     const email = normalizeEmail(invite.email);
     if (!email) continue;
+    const inviteLive = invite.expiresAt === null || invite.expiresAt > now;
+    if (!inviteLive) continue;
+    if (invite.state === "active" && !liveSessionInviteIds.has(invite.id)) continue;
+    if (invite.state !== "pending" && invite.state !== "active") continue;
     const k = key(invite.canvasId, email);
     if (!targets.has(k)) {
       targets.set(k, { canvasId: invite.canvasId, email, allowlistEntryIds: new Set() });
@@ -92,9 +103,13 @@ async function removeLegacyAllowlistRows(
 export async function runLegacyGuestCutover(
   deps: LegacyGuestCutoverDeps,
 ): Promise<LegacyGuestCutoverReport> {
+  const now = Date.now();
   const targets = new Map<string, LegacyGuestTarget>();
-  mergeAllowlistRows(targets, await deps.canvases.listGuestAllowlistEntries());
-  mergeInvites(targets, await deps.guests.listNonRevokedInvites());
+  const invites = await deps.guests.listNonRevokedInvites();
+  const allowlistRows = await deps.canvases.listGuestAllowlistEntries();
+  const liveSessions = await deps.guests.listLiveSessions(now);
+  mergeLiveInvites(targets, invites, new Set(liveSessions.map((s) => s.inviteId)), now);
+  attachAllowlistRows(targets, allowlistRows);
 
   const report: LegacyGuestCutoverReport = {
     considered: targets.size,
@@ -137,9 +152,13 @@ export async function runLegacyGuestCutover(
       continue;
     }
 
-    const domainAllowed = isEmailDomainAllowed(target.email, deps.config);
-    const permitExists = domainAllowed || (await deps.allowedEmails.isAllowed(target.email));
-    if (deps.config.auth.mode === "proxy" && !permitExists) {
+    const admission = await resolveNewEmailAdmission({
+      config: deps.config,
+      email: target.email,
+      canCreatePermit: true,
+      allowedEmails: deps.allowedEmails,
+    });
+    if (admission.status === "auth_admission_required") {
       report.manualActionRequired.push({
         canvasId: target.canvasId,
         email: target.email,
@@ -148,20 +167,25 @@ export async function runLegacyGuestCutover(
       continue;
     }
 
-    if (!permitExists) {
-      await deps.allowedEmails.add(target.email, canvas.ownerId);
-      report.permitsAdded += 1;
+    const permit = !admission.alreadyAuthenticates
+      ? await deps.allowedEmails.add(target.email, canvas.ownerId)
+      : null;
+    try {
+      await deps.invitations.record({
+        email: target.email,
+        target: { type: "canvas", id: target.canvasId },
+        invitedBy: canvas.ownerId,
+      });
+    } catch (err) {
+      if (permit) await deps.allowedEmails.remove(permit.id);
+      throw err;
     }
-    await deps.invitations.record({
-      email: target.email,
-      target: { type: "canvas", id: target.canvasId },
-      invitedBy: canvas.ownerId,
-    });
+    if (permit) report.permitsAdded += 1;
     report.convertedToPending += 1;
     report.removedGuestAllowlistRows += await removeLegacyAllowlistRows(deps, target);
   }
 
-  if (report.considered > 0) {
+  if (report.considered > 0 || invites.length > 0 || allowlistRows.length > 0) {
     await deps.guests.revokeAllInvitesAndSessions();
     report.revokedCredentials = true;
     deps.log?.info(report, "legacy guest cutover completed");

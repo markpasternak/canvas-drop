@@ -12,7 +12,7 @@ import type { AppEnv } from "../http/types.js";
  * The page is **static and org-agnostic** — the admin's `disabledReason` is NOT
  * interpolated here (it would leak an operator's internal note to anyone with the
  * URL). The owner sees the specific reason in their authenticated dashboard
- * (the owner/admin-gated `disabledReason` projection), never on this public page.
+ * (the owner/admin `disabledReason` projection), never on this public page.
  *
  * Lives in its own module (not `serve.ts`) so `authorization.ts` can import it
  * without an `authorization.ts → serve.ts` dependency.
