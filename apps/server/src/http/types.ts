@@ -1,3 +1,4 @@
+import type { Config } from "@canvas-drop/shared";
 import type { Canvas, User } from "@canvas-drop/shared/db";
 import type { Logger } from "../log/logger.js";
 
@@ -32,6 +33,10 @@ export type Principal =
 export interface AppVariables {
   log: Logger;
   correlationId: string;
+  /** The instance's typed config, stashed on the context by an early middleware so
+   *  surfaces that render outside a route closure (the branded error pages) can
+   *  resolve the dashboard origin + auth mode without a parallel env read (§8.1). */
+  config?: Config;
   /** Real TCP socket peer IP (set by the conninfo middleware) — the immediate hop.
    *  Used for the trusted-proxy identity gate (§12.5); NEVER derived from a header. */
   peerIp?: string;

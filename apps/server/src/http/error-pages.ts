@@ -1,6 +1,7 @@
 import { rampCssVars } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { loginUrl, requestReturnTo } from "../auth/return-to.js";
 import { BRAND_MARK } from "./brand.js";
 import { baseSecurityHeaders } from "./security-headers.js";
 import type { AppEnv } from "./types.js";
@@ -14,6 +15,61 @@ export interface ErrorPageDetails {
   requestPath?: string;
   actionHref?: string;
   actionLabel?: string;
+  /** Suppress the identity footer (Signed in as … / Sign in) on this page. Set for
+   *  the public disabled-canvas page, which must look identical to every visitor
+   *  (anyone-with-URL neutrality) rather than reveal who is signed in. */
+  hideIdentity?: boolean;
+}
+
+/**
+ * The recovery affordances an error page can offer, derived from the typed config +
+ * the resolved request identity (never the client). Computed once per render so the
+ * link to the dashboard is ABSOLUTE — on a canvas subdomain a relative `/` points at
+ * the canvas, not the dashboard, which is the bug this fixes.
+ */
+interface RecoveryContext {
+  /** Absolute app/dashboard base (no trailing slash), e.g. `https://canvas.example.com`. */
+  appBase: string;
+  /** Present when a session-owning mode (oidc/dev) has a signed-in org member. */
+  identity?: { email: string };
+  /** Absolute logout URL — present iff `identity` is. */
+  logoutHref?: string;
+  /** Absolute sign-in URL (oidc, signed out) carrying where the visitor was headed. */
+  signInHref?: string;
+}
+
+/**
+ * Build the recovery context from the request. Identity + auth mode come from the
+ * server-side context (gateway-resolved `user`, configured mode) — NEVER the client,
+ * and NEVER from the access decision, so a genuine 404 and an access-denied 404 (which
+ * the §12.0 no-leak rule keeps byte-identical) render the same footer. Returns
+ * `undefined` only when config isn't on the context (unit tests with a bare app),
+ * in which case the renderer falls back to the legacy relative `/` link.
+ */
+function recoveryContext(c: Context<AppEnv>): RecoveryContext | undefined {
+  const config = c.get("config");
+  if (!config) return undefined;
+  const appBase = config.baseUrl.replace(/\/$/, "");
+  const mode = config.auth.mode;
+  // `user` is set by the auth gateway on the way in; absent on pre-gateway public
+  // pages and for anonymous/guest canvas visitors (guests set `principal`, not `user`).
+  const user = c.get("user") as { email?: string } | undefined;
+
+  // Identity footer + real logout only in session-owning modes, mirroring the
+  // dashboard UserMenu's `canSignOut = authMode !== "proxy"`. In proxy mode the IAP
+  // owns the session, so the app never offers sign-out.
+  if (mode !== "proxy" && user?.email) {
+    return { appBase, identity: { email: user.email }, logoutHref: `${appBase}/auth/logout` };
+  }
+
+  // Signed out + app-owned login (oidc only) → an absolute sign-in carrying the
+  // visitor's intended destination, so a canvas-subdomain bounce returns them there.
+  if (mode === "oidc" && !user) {
+    const returnTo = requestReturnTo(config, c.req.header("host"), c.req.url);
+    return { appBase, signInHref: `${appBase}${loginUrl(config, returnTo)}` };
+  }
+
+  return { appBase };
 }
 
 interface ErrorBody {
@@ -52,7 +108,7 @@ export function errorPageMiddleware() {
     const details = detailsFromBody(c, res.status, res.statusText, body);
     const headers = new Headers(res.headers);
     htmlHeaders(headers);
-    c.res = new Response(renderErrorPage(details), {
+    c.res = new Response(renderErrorPage(details, recoveryContext(c)), {
       status: res.status,
       statusText: res.statusText,
       headers,
@@ -72,7 +128,7 @@ export function errorResponse(
 
   if (wantsHtmlError(c.req.header("accept")) && c.req.method !== "HEAD") {
     htmlHeaders(headers);
-    return new Response(renderErrorPage(withRequestPath(c, details)), {
+    return new Response(renderErrorPage(withRequestPath(c, details), recoveryContext(c)), {
       status: details.status,
       headers,
     });
@@ -213,7 +269,7 @@ export const SYSTEM_PAGE_BRAND_INLINE = SYSTEM_PAGE_BRAND.replace(
   '<span class="brand">',
 ).replace("</div>", "</span>");
 
-function renderErrorPage(input: ErrorPageDetails): string {
+function renderErrorPage(input: ErrorPageDetails, recovery?: RecoveryContext): string {
   const details = normalizeDetails(input);
   const title = escapeHtml(details.title);
   const message = escapeHtml(details.message);
@@ -221,8 +277,27 @@ function renderErrorPage(input: ErrorPageDetails): string {
   const status = escapeHtml(String(details.status));
   const path = details.requestPath ? escapeHtml(details.requestPath) : "";
   const hint = details.hint ? escapeHtml(details.hint) : "";
-  const actionHref = escapeAttribute(details.actionHref ?? "/");
+  // The primary action: an explicit override (e.g. "Try signing in again"), else the
+  // ABSOLUTE dashboard link from config (so it works off a canvas subdomain), else the
+  // legacy relative `/` when config isn't on the context (bare unit-test apps). Read
+  // from `input` (not `details`) — normalizeDetails defaults the href to `/`, which
+  // would otherwise mask the recovery-aware fallback below.
+  const actionHref = escapeAttribute(input.actionHref ?? (recovery ? `${recovery.appBase}/` : "/"));
   const actionLabel = escapeHtml(details.actionLabel ?? "Open dashboard");
+
+  // Identity affordances — suppressed when `hideIdentity` is set (the public disabled
+  // page). A signed-out oidc visitor gets a secondary "Sign in"; a signed-in member
+  // gets a "Signed in as … · Sign out" line. Both absolute (app origin).
+  const showIdentity = recovery && !details.hideIdentity;
+  const signInHref = showIdentity ? recovery.signInHref : undefined;
+  const identity = showIdentity ? recovery.identity : undefined;
+  const signIn = signInHref
+    ? `<a class="ghost" href="${escapeAttribute(signInHref)}">Sign in</a>`
+    : "";
+  const identityLine =
+    identity && recovery?.logoutHref
+      ? `<p class="identity">Signed in as <strong>${escapeHtml(identity.email)}</strong> · <a class="textlink" href="${escapeAttribute(recovery.logoutHref)}">Sign out</a></p>`
+      : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -315,6 +390,23 @@ ${SYSTEM_PAGE_STYLES}
   a:hover { background: var(--accent-hover); }
   a:active { transform: translateY(1px); }
   a:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+  /* Secondary (outline) action — e.g. "Sign in" alongside the primary dashboard button. */
+  a.ghost { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+  a.ghost:hover { background: var(--surface-sunken); }
+  /* Quiet identity line beneath the actions, with an inline (not buttoned) Sign out link. */
+  .identity { margin: 1.25rem 0 0; color: var(--subtle); font-size: .8125rem; }
+  .identity strong { color: var(--fg); font-weight: 600; }
+  .identity a.textlink {
+    display: inline;
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  .identity a.textlink:hover { background: none; color: var(--accent-hover); }
 </style>
 </head>
 <body>
@@ -329,7 +421,8 @@ ${SYSTEM_PAGE_BRAND}
         ${path ? `<dt>Path</dt><dd>${path}</dd>` : ""}
       </dl>
       ${hint ? `<p class="hint">${hint}</p>` : ""}
-      <div class="actions"><a href="${actionHref}">${actionLabel}</a></div>
+      <div class="actions"><a href="${actionHref}">${actionLabel}</a>${signIn}</div>
+      ${identityLine}
     </section>
   </main>
 </body>
@@ -359,7 +452,8 @@ function withRequestPath(c: Context<AppEnv>, details: ErrorPageDetails): ErrorPa
 
 function normalizeDetails(
   input: ErrorPageDetails,
-): Required<Omit<ErrorPageDetails, "hint">> & Pick<ErrorPageDetails, "hint"> {
+): Required<Omit<ErrorPageDetails, "hint" | "hideIdentity">> &
+  Pick<ErrorPageDetails, "hint" | "hideIdentity"> {
   const code = input.code || `http_${input.status}`;
   return {
     status: input.status,
@@ -370,6 +464,7 @@ function normalizeDetails(
     actionHref: input.actionHref ?? "/",
     actionLabel: input.actionLabel ?? "Open dashboard",
     hint: input.hint,
+    hideIdentity: input.hideIdentity,
   };
 }
 

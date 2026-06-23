@@ -25,7 +25,10 @@ export function disabledResponse(c: Context<AppEnv>): Response {
       code: "disabled",
       title: "This canvas is disabled",
       message: "A platform administrator has taken this canvas offline.",
-      hint: "If you own it, sign in to your dashboard to see why.",
+      hint: "If you own it, open your dashboard to see why.",
+      // Public page shown to anyone with the URL — keep it identical for every visitor
+      // (no "Signed in as …" footer), so it reveals nothing about who is looking.
+      hideIdentity: true,
     },
     { error: "disabled" },
     {
