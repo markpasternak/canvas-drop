@@ -4,6 +4,7 @@ import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { loginUrl, publicOrigin, requestReturnTo } from "../auth/return-to.js";
 import { SESSION_COOKIE } from "../auth/session.js";
+import { isAnonymouslyPublic } from "../canvas/authorization.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import { resolveRequest } from "../routing/resolve-request.js";
 import { escapeAttribute, escapeHtml } from "./error-pages.js";
@@ -21,11 +22,14 @@ import type { AppEnv } from "./types.js";
  * Two cards, both pointing at the branded `/og.png` image:
  *
  *  1. **Per-canvas card** for a `public_link` canvas. The carve-out resolver sets
- *     an `anonymous` principal ONLY for `public_link` canvases (gated canvases —
- *     org-only, guest, password — never reach that branch), so the canvas's title
- *     is already public and surfacing it here cannot leak a private canvas's
- *     existence (§12.0). Served ONLY to actual crawler user-agents; a real human
- *     visitor falls through to the canvas itself.
+ *     an `anonymous` principal for any reachable `public_link` canvas — INCLUDING
+ *     password-protected ones (so they reach their gate, not org sign-in). The
+ *     per-canvas card is therefore additionally guarded by `isAnonymouslyPublic`:
+ *     only an UNGATED public link (no password, unexpired) surfaces its title/image
+ *     here; a password-protected link falls through to its gate, never leaking the
+ *     title or a per-canvas image to a crawler (§12.0, R5). Org-only/guest canvases
+ *     never reach the anonymous branch at all. Served ONLY to crawler user-agents;
+ *     a real human visitor falls through to the canvas (or its gate) itself.
  *  2. **Generic card** for any other signed-out top-level HTML navigation in `oidc`
  *     mode — one card for every gated link, leaking nothing about the target. Real
  *     humans are redirected straight on to `/auth/login` (parity with the gateway).
@@ -77,7 +81,18 @@ export function socialPreview(
           config,
         );
         const canvas = canvasSlug ? await canvases.findBySlug(canvasSlug) : null;
-        if (canvas) {
+        // Only an UNGATED public link surfaces its title/image. A password-protected
+        // link is reachable-anonymous (so it reaches its gate) but must NOT emit a
+        // per-canvas card — that would leak the title/preview to a crawler (R5).
+        if (
+          canvas &&
+          isAnonymouslyPublic(
+            canvas.access,
+            canvas.passwordHash !== null,
+            canvas.sharedExpiresAt,
+            Date.now(),
+          )
+        ) {
           const origin = publicOrigin(config, c.req.header("host"));
           const title = canvas.title?.trim() || PREVIEW_TITLE;
           // Per-canvas preview image when the pipeline is on + captured; else /og.png.

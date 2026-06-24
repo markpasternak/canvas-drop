@@ -7,6 +7,7 @@ import {
   canvasAccess,
   decideCanvasAccess,
   isAnonymouslyPublic,
+  isAnonymouslyReachable,
   principalLookupKey,
 } from "./authorization.js";
 
@@ -578,5 +579,33 @@ describe("isAnonymouslyPublic — the shared-cacheable predicate", () => {
         publicEnabled: true,
       }),
     ).toMatchObject({ action: "deny", reason: "share_expired" });
+  });
+});
+
+describe("isAnonymouslyReachable — the pre-gateway carve-out predicate", () => {
+  it("true for public_link with an unexpired share, REGARDLESS of password", () => {
+    expect(isAnonymouslyReachable("public_link", null, NOW)).toBe(true);
+    expect(isAnonymouslyReachable("public_link", NOW + 1000, NOW)).toBe(true);
+  });
+
+  it("INCLUDES password-protected public links (unlike isAnonymouslyPublic) so they reach the gate", () => {
+    // The password column isn't an input here: the carve-out only decides whether an
+    // anonymous request may proceed to the password gate, which enforces the password.
+    expect(isAnonymouslyReachable("public_link", null, NOW)).toBe(true);
+    // Contrast with the cache/social predicate, which stays password-exclusive.
+    expect(isAnonymouslyPublic("public_link", true, null, NOW)).toBe(false);
+  });
+
+  it("false for every auth-gated rung", () => {
+    expect(isAnonymouslyReachable("private", null, NOW)).toBe(false);
+    expect(isAnonymouslyReachable("whole_org", null, NOW)).toBe(false);
+    expect(isAnonymouslyReachable("team", null, NOW)).toBe(false);
+    expect(isAnonymouslyReachable("specific_people", null, NOW)).toBe(false);
+  });
+
+  it("treats the expiry boundary EXACTLY like decideCanvasAccess (<= now is expired)", () => {
+    expect(isAnonymouslyReachable("public_link", NOW, NOW)).toBe(false);
+    expect(isAnonymouslyReachable("public_link", NOW - 1, NOW)).toBe(false);
+    expect(isAnonymouslyReachable("public_link", NOW + 1, NOW)).toBe(true);
   });
 });
