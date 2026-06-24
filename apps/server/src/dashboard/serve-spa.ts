@@ -28,31 +28,42 @@ function resolveDistDir(config: Config): string {
  * fonts — so everything is `'self'`. NOTE: this governs the dashboard document,
  * not canvas documents; in path mode the canvas→management residual is handled by
  * `Sec-Fetch-Site` + `SameSite` cookies (§12.2), not by this CSP.
+ *
+ * `frame-src` is config-aware: in subdomain mode the dashboard embeds canvas
+ * subdomains in the preview pane, so the wildcard canvas host must be allowed.
+ * In path mode canvases share the dashboard origin and 'self' covers it.
  */
-const SECURITY_HEADERS: Record<string, string> = {
-  "Content-Security-Policy": [
-    "default-src 'self'",
-    "script-src 'self'",
-    // `'unsafe-inline'` for styles only: the CodeMirror 6 editor (R17) injects its
-    // base + theme CSS as a runtime <style> element and inline style= attributes
-    // (via style-mod). A nonce can't reach those from a statically-served index.html,
-    // so without this the editor renders unstyled (collapsed lines, overlapping
-    // gutter). Scripts stay strict (`script-src 'self'`) — inline CSS can't execute.
-    "style-src 'self' 'unsafe-inline'",
-    // `https:` so a user's IdP avatar (e.g. Google lh3.googleusercontent.com) can
-    // load — provider-agnostic, images only, no http:/other schemes. The avatar
-    // <img> sends no Referer (page Referrer-Policy + img referrerPolicy="no-referrer").
-    "img-src 'self' data: https:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join("; "),
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "same-origin",
-  "Cross-Origin-Opener-Policy": "same-origin",
-};
+function dashboardSecurityHeaders(config: Config): Record<string, string> {
+  const frameSrc =
+    config.urlMode === "subdomain"
+      ? `frame-src 'self' https://*.${new URL(config.baseUrl).hostname}`
+      : "frame-src 'self'";
+  return {
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      // `'unsafe-inline'` for styles only: the CodeMirror 6 editor (R17) injects its
+      // base + theme CSS as a runtime <style> element and inline style= attributes
+      // (via style-mod). A nonce can't reach those from a statically-served index.html,
+      // so without this the editor renders unstyled (collapsed lines, overlapping
+      // gutter). Scripts stay strict (`script-src 'self'`) — inline CSS can't execute.
+      "style-src 'self' 'unsafe-inline'",
+      // `https:` so a user's IdP avatar (e.g. Google lh3.googleusercontent.com) can
+      // load — provider-agnostic, images only, no http:/other schemes. The avatar
+      // <img> sends no Referer (page Referrer-Policy + img referrerPolicy="no-referrer").
+      "img-src 'self' data: https:",
+      "font-src 'self'",
+      "connect-src 'self'",
+      frameSrc,
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+  };
+}
 
 // Server-owned URL prefixes — keep in sync with the route mounts in app.ts, which
 // is the authoritative list (there's no shared const: a cross-package one would be
@@ -98,9 +109,10 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
   const distDir = resolveDistDir(deps.config);
   const indexPath = join(distDir, "index.html");
   const log = deps.log;
+  const securityHeaders = dashboardSecurityHeaders(deps.config);
 
   function indexResponse(c: Context<AppEnv>, body: Uint8Array) {
-    const headers = new Headers(SECURITY_HEADERS);
+    const headers = new Headers(securityHeaders);
     headers.set("Content-Type", "text/html; charset=utf-8");
     headers.set("Cache-Control", "no-cache");
     // biome-ignore lint/suspicious/noExplicitAny: BodyInit accepts Uint8Array at runtime
@@ -128,7 +140,7 @@ export function serveSpa(deps: { config: Config; log?: Logger }) {
 
     const fileBody = isFileReq ? await read(candidate, log) : null;
     if (fileBody !== null) {
-      const headers = new Headers(SECURITY_HEADERS);
+      const headers = new Headers(securityHeaders);
       headers.set("Content-Type", mimeFor(candidate).contentType);
       headers.set(
         "Cache-Control",

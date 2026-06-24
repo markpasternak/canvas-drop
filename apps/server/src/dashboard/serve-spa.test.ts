@@ -35,7 +35,7 @@ describe("serveSpa", () => {
     config = undefined as never;
   });
 
-  it("serves index.html (no-cache) with the strict CSP + security headers", async () => {
+  it("serves index.html (no-cache) with the strict CSP + security headers (path mode)", async () => {
     const res = await appFor(config).request("/");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
@@ -44,11 +44,30 @@ describe("serveSpa", () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
+    // path mode: canvases share the dashboard origin, so 'self' is sufficient.
+    expect(csp).toContain("frame-src 'self'");
+    expect(csp).not.toContain("frame-src 'self' https://");
     // Allows IdP avatars (e.g. Google) over https while blocking http:/other schemes.
     expect(csp).toContain("img-src 'self' data: https:");
     // CodeMirror injects its theme as runtime inline styles — required for the editor.
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("CSP includes the wildcard canvas host in frame-src for subdomain mode", async () => {
+    const subdomainConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DASHBOARD_DIST: dist,
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvas-drop.com",
+    });
+    const res = await appFor(subdomainConfig).request("/");
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("content-security-policy") ?? "";
+    // Subdomain mode: canvases live at *.canvas-drop.com, dashboard must allow framing them.
+    expect(csp).toContain("frame-src 'self' https://*.canvas-drop.com");
+    // frame-ancestors stays 'none' — the dashboard itself is never embedded.
+    expect(csp).toContain("frame-ancestors 'none'");
   });
 
   it("serves a hashed asset with an immutable cache + correct MIME", async () => {
