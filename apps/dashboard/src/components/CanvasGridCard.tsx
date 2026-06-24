@@ -138,7 +138,7 @@ export function CanvasGridCard({
     <li
       data-canvas-item
       className={cn(
-        "group relative flex aspect-[3/2] cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
+        "group relative flex aspect-[3/2] w-full max-w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface-sunken shadow-[var(--shadow-panel)]",
         cardHoverClass,
         selected && "border-accent ring-1 ring-accent",
       )}
@@ -226,7 +226,10 @@ export function CanvasGridCard({
             // Truncated to ~2 lines with an ellipsis; the full text is exposed via the
             // native title tooltip so an overflowing description is still readable.
             <p
-              className="line-clamp-2 text-xs text-white/85 [text-shadow:0_1px_2px_oklch(0_0_0_/_0.55)]"
+              className={cn(
+                "text-xs text-white/85 [text-shadow:0_1px_2px_oklch(0_0_0_/_0.55)]",
+                footer ? "line-clamp-1" : "line-clamp-2",
+              )}
               title={desc}
             >
               {desc}

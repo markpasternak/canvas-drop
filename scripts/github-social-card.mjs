@@ -10,6 +10,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "docs/site/github-social.png");
@@ -83,7 +84,7 @@ async function main() {
   const sharp = (await import("sharp")).default;
 
   mkdirSync(dirname(OUT), { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await launchChromiumWithChromeFallback(chromium);
   // Render at 2× for crisp edges, then downscale to the exact 1280×640 size.
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 2 });
   await page.setContent(HTML, { waitUntil: "networkidle" });

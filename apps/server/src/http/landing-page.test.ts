@@ -167,6 +167,7 @@ describe("landing page — rendered content", () => {
     expect(html).toContain('src="/docs/assets/landing-carousel.js"');
     expect(html).toContain('src="/docs/assets/tour-editor.webp');
     expect(html).toContain("Shared with you");
+    expect(html).toContain("Share link &amp; access");
     expect(html).toContain("Built for teams");
     expect(html).toContain("Private by design");
     expect(html).toContain("No telemetry, ever");

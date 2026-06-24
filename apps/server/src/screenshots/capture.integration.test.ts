@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CaptureContext } from "./capture.js";
 import { captureCanvas, RENDITION_SIZES } from "./capture.js";
+import { launchChromiumWithChromeFallback } from "./playwright-browser.js";
 
 /**
  * Real-Chromium proof for the capture engine (plan 004 / U4). Drives a genuine
@@ -31,7 +32,7 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const { chromium } = await import("playwright");
-    browser = await chromium.launch();
+    browser = await launchChromiumWithChromeFallback(chromium);
   });
 
   afterAll(async () => {
@@ -64,7 +65,7 @@ describe.skipIf(!RUN)("captureCanvas — real Chromium (opt-in)", () => {
     const port = (server.address() as AddressInfo).port;
     const fakeHost = "quiet-otter.canvases.example.com";
     const { chromium } = await import("playwright");
-    const mapped = await chromium.launch({
+    const mapped = await launchChromiumWithChromeFallback(chromium, {
       args: [`--host-resolver-rules=MAP ${fakeHost} 127.0.0.1:${port}`],
     });
     try {

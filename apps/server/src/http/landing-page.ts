@@ -19,20 +19,20 @@ import type { AppEnv } from "./types.js";
  *
  * Unlike the deliberately-plain legal pages (`/privacy`, `/terms`), this is a
  * designed, multi-section landing page: it introduces canvas-drop, drives
- * sign-in, and links out to docs, the gallery (as a screenshot — the live
+ * sign-in, and links out to docs, the gallery (as a screenshot; the live
  * gallery is gated), the OSS project, and the legal pages. It is self-rendered
  * static HTML with inline CSS + a sliver of vanilla JS (no SPA bundle, no
  * server-side build step) and is served BEFORE the auth gateway by `landingGate`
- * in `app.ts`, but only when the visitor has no session — a signed-in request to
+ * in `app.ts`, but only when the visitor has no session. A signed-in request to
  * `/` still falls through to the dashboard SPA.
  *
  * Visual language derives from the canonical BRAND_TOKENS (Editorial Creator OS):
  * a warm-paper / deep-navy ramp + a single deep-teal accent, authored in OKLCH,
- * via rampCssVars() — the same source the dashboard uses. Screenshots are the
+ * via rampCssVars(), the same source the dashboard uses. Screenshots are the
  * committed, regenerable dark assets served at
  * `/docs/assets/landing-*.webp` (refresh with `pnpm landing:screenshots`).
  *
- * Operator-/instance-specific copy is centralized in `SITE` below — the single
+ * Operator-/instance-specific copy is centralized in `SITE` below, the single
  * place a self-hoster edits to re-flavor the page (mirrors `OPERATOR` in
  * `legal-pages.ts`). Everything else is generic to the canvas-drop product.
  */
@@ -41,7 +41,7 @@ import type { AppEnv } from "./types.js";
 const SITE = {
   name: "canvas-drop",
   domain: "canvas-drop.com",
-  /** Hero promise — one line, product-true. */
+  /** Hero promise: one line, product-true. */
   tagline: "Deploy and share the small web tools your org builds, behind your sign-in.",
   /** Short eyebrow above the headline. */
   eyebrow: "Internal canvases for your org",
@@ -60,7 +60,7 @@ const SITE = {
 /** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
 const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyph: string }> = [
   {
-    name: "Key–value",
+    name: "Key-value",
     tag: "kv",
     blurb: "Persist state with a tiny get/set store. No database to run.",
     glyph: "M4 7h16M4 12h16M4 17h10",
@@ -99,7 +99,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Shared exactly as far as you mean",
-    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Team and Whole-org shares can stay URL-only, or appear in Shared for people who already have access. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
+    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Team and Whole-org shares can stay URL-only, or appear in Shared for people who already have access. Invite colleagues, contractors, or friends and family by email. They're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
   },
   {
     title: "Versions you can roll back",
@@ -108,20 +108,20 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
 ];
 
 /** The per-canvas access ladder (the sharing model, plan 003). Rendered as a marketing
- *  visual — the landing is the widest-reaching surface for the team + invite story. Order
+ *  visual. The landing is the widest-reaching surface for the team + invite story. Order
  *  matches the product's rung order (private → specific_people → team → whole_org → public_link). */
 const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
   { rung: "Private", who: "Just you, the owner." },
   { rung: "Specific people", who: "A named few you add or invite, by email." },
   {
     rung: "Team",
-    who: "A group you create — your colleagues, or friends & family you invite by email.",
+    who: "A group you create for colleagues, contractors, or friends and family.",
     feature: true,
   },
   { rung: "Whole org", who: "Anyone signed in to your organization." },
   {
     rung: "Public link",
-    who: "Anyone with the URL — static files only; admins can disable globally or revoke per account.",
+    who: "Anyone with the URL. Static files only; admins can disable globally or revoke per account.",
     tag: "admin",
   },
 ];
@@ -133,7 +133,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "landing-dashboard",
     label: "Your dashboard",
     caption:
-      "Every canvas your org has built — filter by tag, search by name or content, and see versions, sharing, and status at a glance.",
+      "Every canvas your org has built. Filter by tag, search by name or content, and see versions, sharing, and status at a glance.",
   },
   {
     img: "tour-editor",
@@ -150,25 +150,25 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "landing-gallery",
     label: "Opt-in gallery",
     caption:
-      "Browse, filter by tag, search, and clone public or listed org-wide canvases — featured picks up top, each with a real preview cover.",
+      "Browse, filter by tag, search, and clone public or listed org-wide canvases. Featured picks appear up top, each with a real preview cover.",
   },
   {
     img: "tour-preview",
     label: "Preview covers",
     caption:
-      "Every canvas gets an auto screenshot as its cover on publish — or turn it off, or upload your own image that sticks.",
+      "Every canvas gets an auto screenshot as its cover on publish. You can turn it off, or upload your own image that sticks.",
   },
   {
     img: "tour-sharing",
-    label: "Sharing & access",
+    label: "Share link & access",
     caption:
-      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish a static public link admins can govern. Keep Team and Whole-org shares link-only, or list them in Shared.",
+      "Copy the live URL, choose who can open it, and decide whether to keep Team and Whole-org shares link-only or list them in Shared.",
   },
   {
     img: "tour-teams",
     label: "Teams & invites",
     caption:
-      "Make a team — your colleagues, or friends & family — and invite anyone by email. They join the instant they first sign in; no password for you to manage.",
+      "Make a team for colleagues, contractors, or friends and family. Invite anyone by email. They join the instant they first sign in; no password for you to manage.",
   },
   {
     img: "tour-capabilities",
@@ -187,11 +187,11 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
   },
 ];
 
-/** "Built for teams" — admin & control capabilities. */
+/** "Built for teams": admin & control capabilities. */
 const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Teams & invites",
-    body: "Group people into a team — your colleagues, or friends & family — and share a subset of canvases with just them. Invite by email; new people get access the instant they first sign in. No app-managed passwords, no magic-link accounts.",
+    body: "Group people into a team and share a subset of canvases with just them. Invite colleagues, contractors, or friends and family by email; new people get access the instant they first sign in. No app-managed passwords, no magic-link accounts.",
   },
   {
     title: "Org sign-in (SSO)",
@@ -203,7 +203,7 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Your brand, your look",
-    body: "Flip the whole instance — dashboard, editor, and landing — to one of four design skins from the admin console. No restart, no code.",
+    body: "Flip the whole instance, including dashboard, editor, and landing, to one of four design skins from the admin console. No restart, no code.",
   },
   {
     title: "Member management",
@@ -215,7 +215,7 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
 ];
 
-/** "Private by design" — the privacy / security posture. */
+/** "Private by design": the privacy / security posture. */
 const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Org-only by default",
@@ -240,9 +240,9 @@ const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
 ];
 
 /**
- * Full document `<head>` — title, description, canonical, Open Graph + Twitter
+ * Full document `<head>`: title, description, canonical, Open Graph + Twitter
  * card, theme-color, and JSON-LD. The OG/Twitter image is the shared `/og.png`
- * card (absolute URL — crawlers require it). Unlike the gated surfaces this page
+ * card (absolute URL; crawlers require it). Unlike the gated surfaces this page
  * is `index,follow`: it is meant to be discoverable.
  */
 function head(origin: string): string {
@@ -273,15 +273,15 @@ ${skinStyleCss()}</style>`;
 
 /**
  * All page CSS. The semantic colour ramp comes from the canonical `BRAND_TOKENS`
- * (`@canvas-drop/shared`, via `rampCssVars()`) — the SAME source the dashboard and
+ * (`@canvas-drop/shared`, via `rampCssVars()`), the SAME source the dashboard and
  * every other server surface use, so the landing can't drift (the old hand-forked
  * ramp is gone). Landing-only chrome vars (--ink/--on-ink hero band, shadows,
  * easing, max width) are layered on top.
  */
 const STYLES = `
 /* Self-hosted Newsreader (the editorial serif). Served same-origin by
-   brandAssetRoutes() so this pre-gateway page needs no CDN — canvas-drop never
-   phones home. Variable weight (200–800), Latin subset; normal + italic (the
+   brandAssetRoutes() so this pre-gateway page needs no CDN. canvas-drop never
+   phones home. Variable weight (200-800), Latin subset; normal + italic (the
    hero's italic-accent clause). Matches the @fontsource definitions. */
 @font-face {
   font-family: "Newsreader Variable";
@@ -298,7 +298,7 @@ const STYLES = `
   src: url(/fonts/newsreader-latin-standard-italic.woff2) format("woff2-variations");
 }
 /* Geist (sans, the body + the canvas skin's display) and Geist Mono (the workshop
-   skin's display) — self-hosted too, so every skin renders faithfully with no CDN. */
+   skin's display) is self-hosted too, so every skin renders faithfully with no CDN. */
 @font-face {
   font-family: "Geist Variable";
   font-style: normal;
@@ -343,8 +343,8 @@ ${rampCssVars("dark", "    ")}
   }
 }
 /* Non-default skins re-voice the marketing accent: any [data-skin] remaps the
-   landing's --amber family to the active skin accent, so the hero — and the rest
-   of the page — follow the admin-chosen skin. Editorial stamps no data-skin and
+   landing's --amber family to the active skin accent, so the hero and the rest
+   of the page follow the admin-chosen skin. Editorial stamps no data-skin and
    keeps its signature amber. */
 :root[data-skin] { --amber: var(--accent); --amber-ink: var(--accent); }
 * { box-sizing: border-box; }
@@ -396,7 +396,7 @@ header {
 .btn svg { width: 1.05em; height: 1.05em; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .25rem; }
 
-/* --- hero — drenched teal→navy "Committed" band with a warm amber glow --- */
+/* hero: drenched teal→navy "Committed" band with a warm amber glow */
 .hero {
   position: relative; overflow: hidden;
   background:
@@ -441,7 +441,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .skins-figure { margin: clamp(1.5rem, 3.5vw, 2.25rem) 0 0; border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-lg); }
 .skins-figure img { display: block; width: 100%; height: auto; }
 
-/* value band — editorial cards with a coloured top-rule + big serif numeral */
+/* value band: editorial cards with a coloured top-rule + big serif numeral */
 .values { display: grid; gap: clamp(1.25rem, 3vw, 1.75rem); grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 @media (max-width: 800px) { .values { grid-template-columns: 1fr; } }
 .value { position: relative; padding: 1.7rem 1.5rem 1.5rem; border: 1px solid var(--border); border-radius: .875rem; background: var(--surface); overflow: hidden; }
@@ -456,7 +456,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .value:nth-child(3) .num { color: oklch(0.5 0.14 168); }
 .value p { margin: .25rem 0 0; color: var(--muted); }
 
-/* sharing ladder — the access model as an editorial list, the Team rung accented */
+/* sharing ladder: the access model as an editorial list, the Team rung accented */
 .ladder { display: grid; gap: .55rem; max-width: 62ch; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 .rung { display: grid; grid-template-columns: 1.6rem 1fr; gap: 1rem; align-items: start; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
 .rung .r-step { font-family: var(--font-serif); font-weight: 500; font-size: 1.5rem; line-height: 1.1; color: var(--muted); text-align: right; }
@@ -479,7 +479,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .prim h4 { margin: 0; font-family: var(--font-serif); font-weight: 500; font-size: 1.08rem; letter-spacing: -.01em; }
 .prim .tag { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: .72rem; padding: .1rem .4rem; border-radius: 6px; vertical-align: .08em; }
 .prim p { margin: .5rem 0 0; font-size: .9rem; color: var(--muted); line-height: 1.5; }
-/* per-primitive colour tints — expressive editorial pop, no indigo */
+/* per-primitive colour tints: expressive editorial pop, no indigo */
 .p-kv .ic, .p-kv .tag { color: oklch(0.45 0.10 200); }
 .p-kv .tag { background: oklch(0.93 0.05 197); }
 .p-files .ic, .p-files .tag { color: oklch(0.48 0.15 65); }
@@ -498,7 +498,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .shot { border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; box-shadow: var(--shadow-panel); background: var(--surface); }
 .shot img { display: block; width: 100%; height: auto; }
 
-/* open-source CTA — drenched teal→navy closing band with an amber glow + CTA */
+/* open-source CTA: drenched teal→navy closing band with an amber glow + CTA */
 .oss {
   position: relative; overflow: hidden; color: var(--on-ink);
   background:
@@ -523,7 +523,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .foot-links a:hover { color: var(--fg); }
 .colophon { width: 100%; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--subtle); font-size: .82rem; }
 
-/* product tour carousel — Embla (embla-carousel + autoplay), bundled at
+/* product tour carousel: Embla (embla-carousel + autoplay), bundled at
    /docs/assets/landing-carousel.js. Embla translates the container; viewport just
    clips. JS (the bundle) wires the arrows/dots/autoplay. */
 .carousel { position: relative; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
@@ -563,7 +563,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .feat h3 svg { width: 1.05rem; height: 1.05rem; flex: 0 0 auto; margin-top: .15rem; color: var(--accent); }
 .feat p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.55; }
 
-/* dark band (Private by design) — reuse the hero ink + on-ink tokens */
+/* dark band (Private by design): reuse the hero ink + on-ink tokens */
 .band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
 .band-dark .s-sub { color: var(--on-ink-muted); }
 .band-dark .kicker { color: var(--amber); }
@@ -655,7 +655,7 @@ export function renderLandingPage(
   skin: SkinName = "editorial",
 ): string {
   // Primary CTA target. A signed-in viewer (only possible on the always-public
-  // `/welcome` alias — `/` only renders this page when signed out) gets a direct
+  // `/welcome` alias. `/` only renders this page when signed out) gets a direct
   // "Open dashboard" link so the front door is never a re-login dead-end. Otherwise
   // the target depends on auth mode: only `oidc` has an app-owned login page
   // (`/auth/login`); `dev` (auto-signed-in) and `proxy` (IAP-fronted) have none, so
@@ -672,7 +672,7 @@ export function renderLandingPage(
   ).join("\n");
 
   // editorial is the attribute-free base (matches the SPA's applySkin, which removes the
-  // attribute for editorial) — only the alternates stamp data-skin, so there's no surface
+  // attribute for editorial). Only the alternates stamp data-skin, so there's no surface
   // divergence and no [data-skin="editorial"] rule is ever needed. The tag + the override
   // CSS both come from the shared skin-html helper, so the landing can't drift from docs/legal.
   return `<!doctype html>
@@ -741,11 +741,11 @@ ${values}
     <div class="wrap">
       <p class="kicker reveal">Sharing</p>
       <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
-      <p class="s-sub reveal">One rung per canvas — from just you to the whole internet, with everything in between. Teams sit in the middle: a group you create and share a subset of canvases with. Team and Whole-org shares can stay link-only, or appear in Shared for people who already have access.</p>
+      <p class="s-sub reveal">One rung per canvas, from just you to the whole internet, with everything in between. Teams sit in the middle: a group you create and share a subset of canvases with. Team and Whole-org shares can stay link-only, or appear in Shared for people who already have access.</p>
       <div class="ladder reveal">
 ${LADDER.map(ladderRung).join("\n")}
       </div>
-      <p class="ladder-note reveal"><strong>Invite anyone by email</strong> — colleagues, contractors, or friends &amp; family. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. A personal team needs no org at all.</p>
+      <p class="ladder-note reveal"><strong>Invite anyone by email</strong>. Add colleagues, contractors, or friends and family. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. A personal team needs no org at all.</p>
     </div>
   </section>
 
@@ -775,9 +775,9 @@ ${TEAM.map(featItem).join("\n")}
     <div class="wrap">
       <p class="kicker reveal">Make it yours</p>
       <h2 class="s-head reveal">One platform, your look.</h2>
-      <p class="s-sub reveal">Pick a design skin in the admin console and the whole instance re-voices — accent colour, display type, and corner shape — across the dashboard, the editor, and this landing page. Same app, your brand. No restart, no code.</p>
+      <p class="s-sub reveal">Pick a design skin in the admin console and the whole instance re-voices its accent colour, display type, and corner shape across the dashboard, editor, and landing page. Same app, your brand. No restart, no code.</p>
       <figure class="skins-figure reveal">
-        <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side — Editorial (deep-teal serif) and Canvas (violet, bold) — to show the admin-flippable skin layer." loading="lazy" decoding="async">
+        <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side: Editorial (deep-teal serif) and Canvas (violet, bold). Shows the admin-flippable skin layer." loading="lazy" decoding="async">
       </figure>
     </div>
   </section>
@@ -840,7 +840,7 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 })();
 </script>
-<!-- Product-tour carousel — Embla + autoplay (bundled, served same-origin). -->
+<!-- Product-tour carousel: Embla + autoplay (bundled, served same-origin). -->
 <script src="/docs/assets/landing-carousel.js" defer></script>
 </body>
 </html>`;
@@ -851,15 +851,15 @@ var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: re
  * step aside for everything else so the request continues to the auth gateway +
  * dashboard SPA. Mounted BEFORE `socialPreview` and the gateway in `app.ts`.
  *
- * Only active in `oidc` mode — `proxy` mode is IAP-fronted (a signed-out request
+ * Only active in `oidc` mode. `proxy` mode is IAP-fronted (a signed-out request
  * never reaches the app) and `dev` mode is always signed in (so `/` is the SPA).
  * A signed-in visitor is detected by the mere PRESENCE of the session cookie (a
  * cheap check, mirroring `socialPreview`): present → fall through so the gateway
  * resolves it and serves the dashboard. We deliberately do NOT call
- * `resolveIdentity` here — in oidc mode that slides the session (a DB write + a
+ * `resolveIdentity` here. In oidc mode that slides the session (a DB write + a
  * fresh `Set-Cookie`), and the gateway re-resolves anyway, so peeking would double
  * the work and emit two `Set-Cookie`s on the hottest authed path. An expired
- * cookie still falls through and the gateway redirects to login — never worse.
+ * cookie still falls through and the gateway redirects to login. Never worse.
  */
 export function landingGate(deps: { config: Config; skin?: () => Promise<SkinName> }) {
   return createMiddleware<AppEnv>(async (c, next) => {
@@ -871,7 +871,7 @@ export function landingGate(deps: { config: Config; skin?: () => Promise<SkinNam
     // A session cookie → (possibly) signed-in human → let the gateway serve the SPA.
     if (getCookie(c, SESSION_COOKIE)) return next();
     // Only the BASE host has a marketing front door. On a canvas subdomain, `/` is the
-    // canvas root — falling through lets social-preview/the gateway redirect to login
+    // canvas root. Falling through lets social-preview/the gateway redirect to login
     // carrying a returnTo, so a signed-out visitor lands back on the canvas after
     // sign-in instead of on the generic welcome page (which has no returnTo CTA).
     const { role } = resolveRequest(
@@ -887,7 +887,7 @@ export function landingGate(deps: { config: Config; skin?: () => Promise<SkinNam
  * HTML response for the landing page. `signedIn` (cookie-presence on the
  * always-public `/welcome` alias) swaps the CTA to "Open dashboard" so a signed-in
  * member is never sent to a re-login. The CTA varies by session, so the response
- * is `private` + `Vary: Cookie` — a shared/CDN cache must never serve one auth
+ * is `private` + `Vary: Cookie`. A shared/CDN cache must never serve one auth
  * state's page to the other.
  */
 export function landingResponse(

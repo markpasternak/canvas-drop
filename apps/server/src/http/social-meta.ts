@@ -13,12 +13,12 @@ export const FAVICON_LINKS = `<link rel="icon" href="/favicon.svg" type="image/s
 
 /**
  * One consistent block of SEO + Open Graph + Twitter card tags for the indexable,
- * self-rendered public pages — the landing (`/`), legal (`/privacy`, `/terms`),
+ * self-rendered public pages: the landing (`/`), legal (`/privacy`, `/terms`),
  * and docs (`/docs/*`). Centralizing it means every shared link unfurls
  * identically and the tags can't drift between surfaces. The image is the single
  * shared `/og.png` card (`pnpm og:build`).
  *
- * Deliberately excludes `theme-color` (page-chrome, not SEO — the legal pages are
+ * Deliberately excludes `theme-color` (page-chrome, not SEO; the legal pages are
  * light-only) and JSON-LD / `llms.txt` hints (landing-only). The signed-out
  * social-preview shells are a separate, intentionally `noindex` case and build
  * their own minimal tags.
@@ -54,7 +54,7 @@ export function ogMeta(opts: {
 <meta property="og:image" content="${image}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="canvas-drop — drop it in, share it out">
+<meta property="og:image:alt" content="canvas-drop: drop it in, share it out">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">

@@ -1,8 +1,8 @@
 // Capture the dashboard in two design skins and composite them side-by-side into
 // ONE marketing image (docs/site/assets/landing-skins.webp) the landing embeds to
 // show off the admin-flippable skin layer. Drives the RUNNING dev dashboard with
-// Playwright (dev auth auto-login), exactly like screenshots.mjs — light theme,
-// the populated dashboard grid — so it matches the other product shots.
+// Playwright (dev auth auto-login), exactly like screenshots.mjs: light theme,
+// the populated dashboard grid, so it matches the other product shots.
 //
 //   pnpm dev                # in another terminal
 //   pnpm skins:shot         # writes docs/site/assets/landing-skins.webp
@@ -12,6 +12,7 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
 const BASE = process.env.CANVAS_DROP_DASHBOARD_URL ?? "http://localhost:5173";
 const ASSETS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "docs/site/assets");
@@ -47,7 +48,7 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await chromium.launch();
+  const browser = await launchChromiumWithChromeFallback(chromium);
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
@@ -63,7 +64,7 @@ async function main() {
   const panels = [];
   for (const skin of SKINS) {
     await setSkin(page, skin.key);
-    // The full, populated grid — the cards show the skin's accent + radius too.
+    // The full, populated grid shows the skin's accent, typography, radius, and cards.
     await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
     await page.waitForTimeout(900); // let cards + fonts settle
     panels.push({ png: await page.screenshot({ fullPage: false }), label: skin.label });

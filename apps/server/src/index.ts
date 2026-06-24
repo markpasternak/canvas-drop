@@ -31,6 +31,7 @@ import { createLogger } from "./log/logger.js";
 import { runOpsCli } from "./ops/cli.js";
 import { createHub } from "./realtime/hub.js";
 import { CAPTURE_VIEWPORT, type CaptureContext } from "./screenshots/capture.js";
+import { launchChromiumWithChromeFallback } from "./screenshots/playwright-browser.js";
 import { screenshotTrigger } from "./screenshots/trigger.js";
 import { startScreenshotWorker } from "./screenshots/worker.js";
 import { makeStorage } from "./storage/factory.js";
@@ -255,7 +256,7 @@ async function main() {
         const baseHost = new URL(config.baseUrl).hostname;
         args.push(`--host-resolver-rules=MAP *.${baseHost} 127.0.0.1:${config.port}`);
       }
-      const browser = await chromium.launch({ args });
+      const browser = await launchChromiumWithChromeFallback(chromium, { args });
       return {
         // deviceScaleFactor: 2 → retina-resolution master (2× pixel density), so the
         // downscaled WebP renditions have crisp text/edges instead of looking soft.

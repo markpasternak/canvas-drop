@@ -23,6 +23,7 @@
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchChromiumWithChromeFallback } from "./playwright-launch.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(root, "docs/site/assets");
@@ -94,16 +95,18 @@ async function resolveShots(page) {
       },
     },
   ];
-  // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides — its
-  // hand-authored multi-line index.html reads as real, interesting code in the editor.
+  // Showcase the code-rich Pricing Calculator on the canvas-scoped tour slides.
   const id = await discoverCanvasId(page, "Pricing Calculator");
   if (id) {
     shots.push(
       { path: `/canvases/${id}/editor`, name: "tour-editor.webp" },
-      { path: `/canvases/${id}/share`, name: "tour-sharing.webp" },
+      // Share link + access/discoverability. Keep this at the top of the Share tab so the
+      // marketing tour shows the copyable URL, the selected audience, and the Shared
+      // listing control in one frame.
+      { path: `/canvases/${id}/share`, name: "tour-sharing.webp", scrollTo: "#share-link" },
       { path: `/canvases/${id}/capabilities`, name: "tour-capabilities.webp" },
       { path: `/canvases/${id}/usage`, name: "tour-usage.webp" },
-      // The per-canvas preview control (auto/off + custom cover) — scroll the Preview
+      // The per-canvas preview control (auto/off + custom cover). Scroll the Preview
       // section into view so the framed shot shows the control, not the page top.
       { path: `/canvases/${id}/settings`, name: "tour-preview.webp", scrollTo: "#preview" },
     );
@@ -131,7 +134,7 @@ async function main() {
   }
 
   mkdirSync(OUT_DIR, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await launchChromiumWithChromeFallback(chromium);
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
     colorScheme: COLOR_SCHEME,

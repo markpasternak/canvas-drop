@@ -40,6 +40,6 @@ export function skinnedHtmlTag(skin: SkinName, attrs = ""): string {
  * skin accents; leave it off for OS-only surfaces (the landing).
  */
 export function skinStyleCss(opts: { darkToggle?: boolean } = {}): string {
-  return `/* Design-skin overrides (expression layer) — selected by <html data-skin>. */
+  return `/* Design-skin overrides (expression layer): selected by <html data-skin>. */
 ${skinOverridesCss(opts)}`;
 }
