@@ -29,6 +29,17 @@ describe("FileTree", () => {
     expect(screen.getByText("logo.svg")).toBeInTheDocument();
   });
 
+  it("shows each file's type label and human-readable size", () => {
+    render(
+      <FileTree
+        files={[{ path: "index.html", size: 2048, mime: "text/html" }]}
+        selected={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("HTML · 2.0 KB")).toBeInTheDocument();
+  });
+
   it("calls onSelect with the full path when a file is clicked", async () => {
     const onSelect = vi.fn();
     render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={onSelect} />);
