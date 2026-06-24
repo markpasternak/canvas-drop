@@ -98,7 +98,7 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
       if (path === "/api/canvases/shared") {
         return json({ canvases: [], total: 0, limit: 30, offset: 0 });
       }
-      if (path !== "/api/canvases") return json({ error: "not_mocked" }, 500);
+      if (path !== "/api/canvases") return json({ error: "not_mocked" });
       // /api/canvases — apply the server-side filter/search the route would.
       const sp = u.searchParams;
       const q = sp.get("q")?.toLowerCase();
