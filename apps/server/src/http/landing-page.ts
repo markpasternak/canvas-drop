@@ -99,7 +99,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Shared exactly as far as you mean",
-    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
+    body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Team and Whole-org shares can stay URL-only, or appear in Shared for people who already have access. Invite anyone by email — colleagues, or friends & family — and they're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
   },
   {
     title: "Versions you can roll back",
@@ -141,10 +141,16 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     caption: "Edit files, preview, and publish a new version. No local setup, no deploy pipeline.",
   },
   {
-    img: "landing-gallery",
-    label: "Shared gallery",
+    img: "tour-shared",
+    label: "Shared with you",
     caption:
-      "Browse, filter by tag, search, and clone what the team has made — featured picks up top, each with a real preview cover, not screenshots buried in a DM.",
+      "Find canvases other people opened to you. Search, page, switch list or gallery view, and open the right one fast.",
+  },
+  {
+    img: "landing-gallery",
+    label: "Opt-in gallery",
+    caption:
+      "Browse, filter by tag, search, and clone public or listed org-wide canvases — featured picks up top, each with a real preview cover.",
   },
   {
     img: "tour-preview",
@@ -156,7 +162,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-sharing",
     label: "Sharing & access",
     caption:
-      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish a static public link admins can govern.",
+      "Per canvas: keep it private, share with a team, add a named few, open it org-wide, or publish a static public link admins can govern. Keep Team and Whole-org shares link-only, or list them in Shared.",
   },
   {
     img: "tour-teams",
@@ -735,7 +741,7 @@ ${values}
     <div class="wrap">
       <p class="kicker reveal">Sharing</p>
       <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
-      <p class="s-sub reveal">One rung per canvas — from just you to the whole internet, with everything in between. Teams sit in the middle: a group you create and share a subset of canvases with.</p>
+      <p class="s-sub reveal">One rung per canvas — from just you to the whole internet, with everything in between. Teams sit in the middle: a group you create and share a subset of canvases with. Team and Whole-org shares can stay link-only, or appear in Shared for people who already have access.</p>
       <div class="ladder reveal">
 ${LADDER.map(ladderRung).join("\n")}
       </div>

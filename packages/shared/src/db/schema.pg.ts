@@ -5,6 +5,7 @@ import { pg as c } from "./columns.js";
 // onto the CHECK-constrained text columns so callers get compile-time-checked
 // comparisons instead of raw `string`. Defined in types.js, the canonical surface.
 import type {
+  CanvasDiscoverability,
   GuestInviteState,
   McpTokenKind,
   UsageEventType,
@@ -213,6 +214,13 @@ export const canvases = pgTable(
     // Access rung (D4 ladder): private | specific_people | whole_org | public_link.
     // Replaces the former `shared` boolean — `whole_org` is its successor.
     access: c.text("access").notNull().default("private"),
+    // Enumeration policy for non-owner discovery surfaces. `link_only` preserves URL
+    // access but keeps Team/Whole-org canvases out of Shared until the owner opts in.
+    discoverability: c
+      .text("discoverability")
+      .$type<CanvasDiscoverability>()
+      .notNull()
+      .default("link_only"),
     sharedExpiresAt: c.epochMs("shared_expires_at"),
     galleryListed: c.bool("gallery_listed").notNull().default(false),
     // Opt-in "others may clone this as a template" flag. Invariant: only ever true
@@ -294,6 +302,7 @@ export const canvases = pgTable(
       "canvases_access_chk",
       sql`${t.access} in ('private', 'specific_people', 'team', 'whole_org', 'public_link')`,
     ),
+    check("canvases_discoverability_chk", sql`${t.discoverability} in ('link_only', 'listed')`),
   ],
 );
 

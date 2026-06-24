@@ -941,8 +941,11 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     expect(llmsBody).toContain("Agent-readable reference");
     expect(llmsBody.toLowerCase()).toMatch(/\bkv\b/);
 
-    // Gallery: a shared + listed canvas appears in the org gallery.
-    await h.SEND(OWNER, "PATCH", `/api/canvases/${created.id}/settings`, { galleryListed: true });
+    // Gallery: a shared + discoverable + listed canvas appears in the org gallery.
+    await h.SEND(OWNER, "PATCH", `/api/canvases/${created.id}/settings`, {
+      discoverability: "listed",
+      galleryListed: true,
+    });
     const gallery = await jsonOf<{ items: { id: string }[] }>(await h.GET(OWNER, "/api/gallery"));
     expect(gallery.items.map((i) => i.id)).toContain(created.id);
   });

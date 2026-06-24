@@ -73,12 +73,16 @@ afterward: if you later leave the team, the canvas stays shared with it until yo
 change the rung.
 
 Team canvases are **strictly team-scoped** — they never appear in the org-wide
-gallery. Members find them under **Teams → Shared with your teams** (or
-`list_shared_with_teams` over MCP).
+gallery. They are link-only by default: team members can open the URL, but the
+canvas does not appear in discovery. On the canvas **Share** tab, turn on
+**List for people with access** when members should find it under **Shared** in the
+dashboard (or through `list_shared_canvases` over MCP).
 
 ## Over MCP (agents)
 
 Everything here is available to an agent over [MCP](/docs/agents/mcp), wrapping the
 same service the dashboard uses: `create_team` (omit `orgId` for a personal team),
 `add_team_member` (returns `granted` or `pending`), `list_team_members` (members +
-pending), `grant_access`, and `update_canvas` with `access: "team"` + `teamIds`.
+pending), `grant_access`, `list_shared_canvases`, and `update_canvas` with
+`access: "team"` + `teamIds`. Add `discoverability: "listed"` when a team share should
+show in Shared; leave it unset or set `discoverability: "link_only"` for URL-only access.

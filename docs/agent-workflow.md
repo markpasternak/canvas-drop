@@ -8,24 +8,26 @@ The concrete loop both Claude and Codex follow. `AGENTS.md` is the summary; this
 deploy, dashboard, canvas-management depth, editor + draft/publish on content-addressed
 storage, the five primitives (KV, files, AI, identity, realtime) + browser SDK, admin +
 hardening, gallery, and the AI proxy + realtime. Several post-v1 features are merged too
-(the sharing access ladder, usage stats, server-side list filters, the documentation system,
-clone-as-template, the primitives showcase, owner-chosen custom slugs, the MCP server, and
-the staged/optimized upload path). `BUILD_BRIEF.md` §16 and the README Status section are the
+(the sharing access ladder, Shared discovery for canvases already opened to the viewer,
+usage stats, server-side list filters, the documentation system, clone-as-template, the
+primitives showcase, owner-chosen custom slugs, the MCP server, and the staged/optimized
+upload path). `BUILD_BRIEF.md` §16 and the README Status section are the
 authoritative status; defer to them.
 
 The only open milestone is **M10 — ops/packaging** (Docker image + compose, backup/restore
 drill, single-VPS load test, IAP pilot), which is **partial**: the `Dockerfile`, `docker-compose.yml`,
 `scripts/compose-smoke.sh`, and `.env.production.example` are shipped, but the backup/restore
 round-trip drill, the single-VPS load test, and the IAP colleague pilot are still deferred. The
-full sharing access ladder (private / specific-people / whole-org / public-link, auth-delegated
-Add person grants, admin-gated public links) is also shipped and merged.
+full sharing access ladder (private / specific-people / team / whole-org / public-link,
+auth-delegated Add person grants, admin-gated public links, and link-only/listed
+discoverability) is also shipped and merged.
 
 Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
 though their scope is merged — the header pointers are stale. The MCP ↔ user parity plan
 (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`) is `status: completed` and merged: the
-MCP server now ships a **32-tool surface** with full dashboard parity, including `update_canvas`,
-`set_canvas_preview`, `clone_canvas`, `get_canvas_usage`, the Add person tools (`grant_access`/
-`invite_to_canvas`/`revoke_access`/`list_access`), and the draft-editor loop (`get_draft`, `read_draft_file`,
+MCP server now ships a **33-tool surface** with full dashboard owner/viewer parity, including
+`update_canvas`, `set_canvas_preview`, `clone_canvas`, `get_canvas_usage`, `list_shared_canvases`,
+the access tools (`grant_access`/`invite_to_canvas`/`revoke_access`/`list_access`), and the draft-editor loop (`get_draft`, `read_draft_file`,
 `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft`).
 For overall status defer to `BUILD_BRIEF.md` §16 and the README Status section.
 

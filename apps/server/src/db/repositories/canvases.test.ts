@@ -183,6 +183,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
       access: "whole_org",
+      discoverability: "listed",
       galleryListed: true,
       galleryTemplatable: true,
     });
@@ -192,6 +193,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(after?.status).toBe("active"); // still active + editable, just Draft now
     expect(after?.currentVersionId).toBeNull();
     expect(after?.access).toBe("private"); // leaving Published reverts share
+    expect(after?.discoverability).toBe("link_only");
     expect(after?.galleryListed).toBe(false);
     expect(after?.galleryTemplatable).toBe(false);
   });
@@ -219,6 +221,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
       access: "whole_org",
+      discoverability: "listed",
       galleryListed: true,
       galleryTemplatable: true,
     });
@@ -227,6 +230,7 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const after = await repo.findById(cv.id);
     expect(after?.status).toBe("archived");
     expect(after?.access).toBe("private");
+    expect(after?.discoverability).toBe("link_only");
     expect(after?.galleryListed).toBe(false);
     expect(after?.galleryTemplatable).toBe(false);
     expect(after?.currentVersionId).not.toBeNull(); // version pointer kept for unarchive
@@ -996,6 +1000,7 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
       access: "whole_org",
+      discoverability: "listed",
       galleryListed: true,
       description: "shared in the gallery",
       tags: ["showcase"],
@@ -1011,6 +1016,34 @@ describe.each(DIALECTS)("canvasesRepository access + allowlist [%s]", (dialect) 
     expect(await ids("gallery-one")).toEqual([cv.id]); // slug
     expect(await ids("GALLERY")).toEqual([cv.id]); // case-insensitive title
     expect(await ids("nomatch")).toEqual([]);
+  });
+
+  it("listGallery includes public links and listed whole-org canvases, but excludes whole-org link_only", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const linkOnly = await repo.create({ ownerId, slug: "link-only", apiKeyHash: "lo" });
+    const listedOrg = await repo.create({ ownerId, slug: "listed-org", apiKeyHash: "org" });
+    const publicLink = await repo.create({ ownerId, slug: "public", apiKeyHash: "pub" });
+    for (const cv of [linkOnly, listedOrg, publicLink]) await deploy(client, cv.id, ownerId);
+    await repo.updateSettings(linkOnly.id, {
+      access: "whole_org",
+      discoverability: "link_only",
+      galleryListed: true,
+    });
+    await repo.updateSettings(listedOrg.id, {
+      access: "whole_org",
+      discoverability: "listed",
+      galleryListed: true,
+    });
+    await repo.updateSettings(publicLink.id, { access: "public_link", galleryListed: true });
+
+    const ids = (await repo.listGallery({ now: Date.now(), limit: 100, offset: 0 })).items.map(
+      (r) => r.canvas.id,
+    );
+    expect(ids).toContain(listedOrg.id);
+    expect(ids).toContain(publicLink.id);
+    expect(ids).not.toContain(linkOnly.id);
   });
 
   it("owner search never crosses the owner boundary (the ownerId filter ANDs ahead of searchText, §12)", async () => {

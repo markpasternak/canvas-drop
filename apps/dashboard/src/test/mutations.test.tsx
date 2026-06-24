@@ -21,6 +21,7 @@ const CANVAS: Canvas = {
   title: "Demo",
   description: null,
   access: "private",
+  discoverability: "link_only",
   teamIds: [],
   shared: false,
   orgId: null,

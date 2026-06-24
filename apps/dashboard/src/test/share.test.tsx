@@ -14,6 +14,7 @@ const CANVAS = {
   title: "My Canvas",
   description: null,
   access: "private",
+  discoverability: "link_only",
   shared: false,
   guestAiEnabled: false,
   guestAiCap: 0,
@@ -21,6 +22,7 @@ const CANVAS = {
   hasPassword: false,
   spaFallback: false,
   previewMode: "auto",
+  teamIds: [],
   galleryListed: false,
   galleryTemplatable: false,
   tags: null,
@@ -538,6 +540,7 @@ describe("share route", () => {
           ...CANVAS,
           publicationState: "published",
           access: "whole_org",
+          discoverability: "listed",
           shared: true,
           currentVersionId: "v1",
         }),
@@ -546,6 +549,66 @@ describe("share route", () => {
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
     expect(toggle).toBeEnabled();
+  });
+
+  it("gallery-listing is blocked for a Whole-org canvas that is still URL-only", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "whole_org",
+          discoverability: "link_only",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+    });
+    renderShare();
+
+    const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/list this canvas for people with access/i)).toBeInTheDocument();
+  });
+
+  it("saves the Shared discoverability toggle for Whole-org canvases", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "whole_org",
+      shared: true,
+      currentVersionId: "v1",
+    };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () => json({ ...published, discoverability: "listed" }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("switch", { name: /list for people with access/i }));
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"discoverability":"listed"');
+    });
+  });
+
+  it("does not show the Shared discoverability toggle for Public-link canvases", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "public_link",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+    });
+    renderShare();
+
+    await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(screen.queryByRole("switch", { name: /list for people with access/i })).toBeNull();
   });
 
   it("an unpublished canvas shows the locked panel, not the gallery-listing control", async () => {
@@ -570,6 +633,7 @@ describe("share route", () => {
           ...CANVAS,
           publicationState: "published",
           access: "whole_org",
+          discoverability: "listed",
           shared: true,
           currentVersionId: "v1",
           hasPassword: true,
@@ -588,6 +652,8 @@ describe("share route", () => {
         json({
           ...CANVAS,
           publicationState: "published",
+          access: "whole_org",
+          discoverability: "listed",
           shared: true,
           currentVersionId: "v1",
           galleryListed: true,
@@ -627,6 +693,8 @@ describe("share route", () => {
         json({
           ...CANVAS,
           publicationState: "published",
+          access: "whole_org",
+          discoverability: "listed",
           shared: true,
           currentVersionId: "v1",
           galleryListed: true,
@@ -652,6 +720,8 @@ describe("share route", () => {
         json({
           ...CANVAS,
           publicationState: "published",
+          access: "whole_org",
+          discoverability: "listed",
           shared: true,
           currentVersionId: "v1",
           galleryListed: true,

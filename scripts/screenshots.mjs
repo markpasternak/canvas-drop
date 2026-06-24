@@ -10,7 +10,7 @@
 //
 // The landing shots are the light, populated product imagery the marketing page
 // (apps/server/src/http/landing-page.ts) embeds — hero + the product-tour
-// carousel (dashboard, editor, gallery, sharing, capabilities, admin, usage).
+// carousel (dashboard, editor, Shared, gallery, sharing, capabilities, admin, usage).
 // Seed generic demo data first so they aren't empty: `pnpm seed:canvases`
 // (neutral tool names, @example.com owners — no real org data, so the shots stay
 // org-agnostic, R11). The landing capture DISCOVERS a canvas id from the
@@ -73,6 +73,7 @@ async function resolveShots(page) {
     // tag (seed-demo-apps) so the hero shots are exactly the 12 real-cover demo apps —
     // no generic seed canvases (generative covers) in frame.
     { path: "/?tag=showcase", name: "landing-dashboard.webp" },
+    { path: "/shared?sort=owner", name: "tour-shared.webp" },
     { path: "/gallery?tag=showcase", name: "landing-gallery.webp" },
     { path: "/admin/settings", name: "tour-admin.webp" },
     // Teams & invites (plan 003): expand the personal "Family" team's roster so the shot

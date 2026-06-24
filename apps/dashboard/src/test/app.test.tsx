@@ -241,7 +241,7 @@ describe("dashboard app", () => {
     );
   }
 
-  it("Admin is visible to admins and sits last — to the right of Gallery", async () => {
+  it("Admin is visible to admins and sits last — to the right of Teams", async () => {
     stubFetch(true);
     renderApp("/");
     // Wait for the admin-only link to appear after /api/me resolves.
@@ -252,7 +252,19 @@ describe("dashboard app", () => {
     const order = within(desktopNav)
       .getAllByRole("link")
       .map((a) => a.textContent);
-    expect(order).toEqual(["Canvases", "Gallery", "Teams", "Admin"]);
+    expect(order).toEqual(["Canvases", "Shared", "Gallery", "Teams", "Admin"]);
+  });
+
+  it("Shared has a top-level route and section nav entry", async () => {
+    stubFetch(false);
+    renderApp("/shared");
+    expect(await screen.findByRole("heading", { name: "Shared" })).toBeInTheDocument();
+    const [desktopNav] = screen.getAllByRole("navigation", { name: "Sections" });
+    if (!desktopNav) throw new Error("expected the desktop Sections nav");
+    expect(within(desktopNav).getByRole("link", { name: "Shared" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("Admin is hidden from non-admins (UX layer of the admin-only boundary)", async () => {

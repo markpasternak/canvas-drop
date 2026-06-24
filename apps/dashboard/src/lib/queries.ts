@@ -7,6 +7,7 @@ import {
   type CanvasesQuery,
   type GalleryQuery,
   type PersonSearchParams,
+  type SharedCanvasesQuery,
 } from "./api.js";
 
 export const keys = {
@@ -17,6 +18,7 @@ export const keys = {
   // Per-filter/page list key (plan 005). Prefixed under `canvases` so the existing
   // invalidations still hit it.
   canvasesList: (query: CanvasesQuery) => ["canvases", "list", query] as const,
+  sharedCanvases: (query: SharedCanvasesQuery) => ["canvases", "shared", query] as const,
   // The owner's complete tag vocabulary for the Your-canvases TagFilter (plan
   // 2026-06-19). Prefixed under `canvases` so the existing invalidations refresh it
   // when a settings edit adds/removes a tag.
@@ -47,9 +49,6 @@ export const keys = {
       params.context === "canvas" ? params.canvasId : params.teamId,
       params.q,
     ] as const,
-  // Canvases shared with the caller's teams. Prefixed under `canvases` so a settings
-  // edit that changes a team grant refreshes it alongside the owner's own lists.
-  sharedWithTeams: ["canvases", "shared-with-teams"] as const,
 };
 
 export function useMe() {
@@ -62,6 +61,14 @@ export function useCanvases(query: CanvasesQuery = {}) {
     queryFn: () => api.listCanvases(query),
     // Keep the previous page/filter result on screen while the next loads, so
     // paging and typing don't flash an empty list (mirrors useGallery).
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSharedCanvases(query: SharedCanvasesQuery = {}) {
+  return useQuery({
+    queryKey: keys.sharedCanvases(query),
+    queryFn: () => api.listSharedCanvases(query),
     placeholderData: keepPreviousData,
   });
 }
@@ -186,9 +193,4 @@ export function usePeopleSearch(params: PersonSearchParams, enabled = true) {
     queryFn: () => api.people.search(params),
     enabled,
   });
-}
-
-/** Canvases shared with one of the caller's teams (the "shared with my teams" view). */
-export function useSharedWithTeams() {
-  return useQuery({ queryKey: keys.sharedWithTeams, queryFn: api.listSharedWithTeams });
 }

@@ -11,6 +11,12 @@ future cross-owner *read* surface. Builds on
 [[2026-06-13-auth-invariant-checklist]], [[2026-06-13-dual-dialect-drizzle-seam]],
 and [[2026-06-13-dashboard-spa-patterns]].
 
+Post-v1 update: Shared discovery split listability from URL access. Read
+[[2026-06-24-shared-discovery-listability]] before changing the gallery predicate.
+Gallery now lists only `public_link` rows and `whole_org` rows with
+`discoverability='listed'`; `team`, `specific_people`, and link-only `whole_org`
+rows are not gallery entries.
+
 ## The gallery is the first cross-owner read — the §12 predicate is the whole feature
 
 A gallery shows one member pointers to *other* members' canvases, so the
@@ -20,9 +26,11 @@ inside `listGallery`, evaluated per request with no caching (same philosophy as
 all drop a canvas on the very next call:
 
 ```
-status='active' AND shared AND gallery_listed
+status='active' AND gallery_listed
+  AND (access='public_link' OR (access='whole_org' AND discoverability='listed'))
   AND (shared_expires_at IS NULL OR shared_expires_at > now)
   AND current_version_id IS NOT NULL
+  AND password_hash IS NULL
 ```
 
 - The predicate is in SQL, **not** JS-after-a-broad-fetch, so the route can't

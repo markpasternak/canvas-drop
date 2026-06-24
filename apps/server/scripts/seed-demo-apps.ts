@@ -7,8 +7,8 @@
  *   pnpm reset:data && pnpm seed:canvases && pnpm seed:demo-apps
  *
  * It also flips the admin screenshots toggle on (`config.screenshots.enabled`),
- * deploys each app as a published + gallery-listed canvas owned by the dev admin
- * with the newest timestamps (so they top the dashboard + gallery), and enqueues a
+ * deploys each app as a published + discoverable + gallery-listed canvas owned by the
+ * dev admin with the newest timestamps (so they top the dashboard + gallery), and enqueues a
  * capture job per canvas. Start `pnpm dev` with `CANVAS_DROP_SCREENSHOTS=on` and the
  * in-process worker drains the queue, producing real covers. Org-agnostic content
  * + @example.com owner (R11). Deterministic.
@@ -594,7 +594,7 @@ async function main() {
   const now = Date.now();
   let n = 0;
   let count = 0;
-  /** Deploy one app as a published, gallery-listed canvas owned by `owner`. */
+  /** Deploy one app as a published, discoverable, gallery-listed canvas owned by `owner`. */
   async function seedOne(app: DemoApp, owner: { id: string }, slug: string) {
     const canvas = await canvases.create({
       ownerId: owner.id,
@@ -610,6 +610,7 @@ async function main() {
     );
     await canvases.updateSettings(canvas.id, {
       access: "whole_org",
+      discoverability: "listed",
       galleryListed: true,
       galleryTemplatable: app.templatable,
       description: app.summary,

@@ -23,6 +23,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     ownerId: "owner",
     orgId: null,
     access: "private",
+    discoverability: "link_only",
     sharedExpiresAt: null,
     galleryListed: false,
     galleryTemplatable: false,

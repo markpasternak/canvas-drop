@@ -106,7 +106,9 @@ export default function Share() {
       ? "Publish this canvas before listing it in the gallery."
       : canvas.hasPassword
         ? "Remove the password before listing this canvas in the gallery."
-        : null;
+        : canvas.access === "whole_org" && canvas.discoverability !== "listed"
+          ? "List this canvas for people with access before adding it to the gallery."
+          : null;
 
   async function setOrClearPassword(next: string | null) {
     try {
@@ -216,6 +218,21 @@ export default function Share() {
               ),
             }}
           />
+          {(canvas.access === "team" || canvas.access === "whole_org") && (
+            <div className="border-t border-border pt-4">
+              <Toggle
+                label="List for people with access"
+                description="Show this canvas in Shared for people who can already open it. Turning this off keeps URL access working."
+                checked={canvas.discoverability === "listed"}
+                onChange={(listed) => save({ discoverability: listed ? "listed" : "link_only" })}
+              />
+              {canvas.access === "whole_org" && canvas.galleryListed && (
+                <InlineNotice tone="warning" className="mt-3 py-2 text-xs">
+                  Turning this off also removes the canvas from the gallery.
+                </InlineNotice>
+              )}
+            </div>
+          )}
           {/* Heads-up (plan 004): a custom slug is human-guessable, so for link-reachable
               audiences the URL itself is no longer a secret — lean on the access controls,
               not obscurity. Informational, never a blocker. */}

@@ -225,6 +225,13 @@
       "when": 1782245834879,
       "tag": "0031_public_links_default_on",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1782281414696,
+      "tag": "0032_canvas_discoverability",
+      "breakpoints": true
     }
   ]
 }

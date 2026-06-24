@@ -13,12 +13,17 @@ import { isTextContentType } from "../canvas/mime.js";
 import { DISABLED_CODE, disabledMessage } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
+import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
-import { type CanvasesRepository, POPULAR_WINDOW_MS } from "../db/repositories/canvases.js";
+import {
+  type CanvasesRepository,
+  CLEARED_PUBLICATION_FIELDS,
+  POPULAR_WINDOW_MS,
+} from "../db/repositories/canvases.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
@@ -45,7 +50,7 @@ import {
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
 import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
-import { listSharedWithTeams, resolveTeamGrant, resolveVisibleTeams } from "../teams/sharing.js";
+import { resolveTeamGrant, resolveVisibleTeams } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
@@ -196,8 +201,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const orgRows = (
         await Promise.all([...caller.orgIds].map((id) => deps.orgs.findById(id)))
       ).filter((o): o is NonNullable<typeof o> => o !== null);
-      // The caller's teams (plan 003 U6) — the ones they belong to, for discoverability
-      // (the share-with-a-team grant + the "shared with my teams" read reference these).
+      // The caller's teams (plan 003 U6) — the ones they belong to, used for
+      // share-with-a-team grants and display context in Shared discovery.
       const teamRows = await deps.teams.listForUser(caller.userId);
       return ok({
         id: user.id,
@@ -861,7 +866,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .catch((err) =>
             deps.log.error({ err, canvasId: cv.id }, "guests: revokeAllForCanvas failed"),
           );
-      return ok(canvasView(deps.config, { ...cv, status: "archived", currentVersionId: null }));
+      return ok(
+        canvasView(deps.config, {
+          ...cv,
+          ...CLEARED_PUBLICATION_FIELDS,
+          status: "archived",
+        }),
+      );
     },
   );
 
@@ -928,9 +939,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
         "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
         "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
-        "grant_access / revoke_access. To share with one or more teams, set access='team' AND pass " +
-        "`teamIds` (the teams you belong to — see whoami.teams / list_teams); you can only grant teams " +
-        "you're a member of, in the canvas's org. Switching off the team rung clears the grants. When " +
+        "grant_access / revoke_access. `discoverability` controls only whether Team/Whole-org " +
+        "canvases are findable in Shared (it never widens URL access). To share with one or more teams, set access='team' AND pass " +
+        "`teamIds` (the teams you belong to — see whoami.teams / list_teams); personal teams can be " +
+        "granted to any canvas you own, while org teams must match the canvas org. Switching off the team rung clears the grants. When " +
         "restricting a previously-public canvas, the response may include a `warning` string (a " +
         "plain-language CDN edge-cache staleness notice) — surface it to the user.",
       inputSchema: {
@@ -948,13 +960,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         access: z
           .enum(["private", "specific_people", "team", "whole_org", "public_link"])
           .optional(),
+        discoverability: z
+          .enum(["link_only", "listed"])
+          .optional()
+          .describe(
+            "Listing policy for Team/Whole-org canvases: link_only = URL access only; listed = " +
+              "people who already have access can find it in Shared. Does not change who can open it.",
+          ),
         teamIds: z
           .array(z.string().min(1))
           .max(50)
           .optional()
           .describe(
-            "Teams to grant when access='team' (the teams you belong to in this canvas's org). " +
-              "Required (≥1) when setting access='team'; ignored for other rungs.",
+            "Teams to grant when access='team'. Personal teams can be granted to any canvas you own; " +
+              "org teams must match the canvas org. Required (≥1) when setting access='team'; ignored for other rungs.",
           ),
         password: z
           .string()
@@ -1051,14 +1070,18 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       ) {
         await deletePreviewRenditions(deps.storage, cv.id);
       }
-      // Audit a rung change OR a grant-only change to the team set (parity with the route).
-      if (targetAccess !== undefined || teamGranted) {
+      const discoverabilityChanged =
+        patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
+      // Audit a rung/discoverability change OR a grant-only change to the team set
+      // (parity with the route).
+      if (targetAccess !== undefined || discoverabilityChanged || teamGranted) {
         deps.audit.recordAudit({
           action: "share_change",
           actorId: caller.userId,
           targetId: cv.id,
           meta: {
             access: targetAccess ?? cv.access,
+            ...(discoverabilityChanged ? { discoverability: patch.discoverability } : {}),
             ...(teamGranted ? { teamsChanged: true } : {}),
           },
         });
@@ -1401,10 +1424,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   // ---- Teams (plan 003 U6) ---------------------------------------------------
-  // Self-serve team management + the "shared with my teams" read, wrapping the SAME
-  // teamsService + teams repo the HTTP routes use (agent-native parity; identical
-  // denials + audit events). Admin cross-owner team actions are NOT here — they live
-  // on the dedicated admin routes (the parity rule's admin exception).
+  // Self-serve team management, wrapping the SAME teamsService + teams repo the HTTP
+  // routes use (agent-native parity; identical denials + audit events). Admin cross-
+  // owner team actions are NOT here — they live on the dedicated admin routes.
 
   server.registerTool(
     "create_team",
@@ -1564,29 +1586,60 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   server.registerTool(
-    "list_shared_with_teams",
+    "list_shared_canvases",
     {
       description:
-        "List canvases shared with one of your teams (the 'shared with my teams' view). These are " +
-        "strictly team-scoped — they never appear in the org gallery. Excludes your own canvases " +
-        "and anything not live. Display-only (you don't own these); open via the returned url.",
-      inputSchema: {},
+        "List non-owned canvases discoverable to you in Shared: direct Specific-people grants, " +
+        "Team canvases whose owner opted into discoverability, and Whole-org canvases whose owner " +
+        "opted into discoverability. Excludes your own canvases, public links, expired shares, " +
+        "and anything not live. Display-only; open via the returned url.",
+      inputSchema: {
+        query: z
+          .string()
+          .optional()
+          .describe(
+            "Optional forgiving text filter over title, description, tags, slug, owner name, " +
+              "and access context such as team name.",
+          ),
+        sort: z
+          .enum(["updated", "title", "owner"])
+          .optional()
+          .describe('Sort order (default "updated").'),
+        limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
+        offset: z.number().int().min(0).optional().describe("Offset for pagination (default 0)."),
+      },
     },
-    async () => {
-      // Shared read (same as the HTTP /shared-with-teams route), so the projection can't
-      // drift between surfaces. Include the same hasPreview + owner.avatarUrl the HTTP route
-      // and the other MCP canvas projections (get_canvas/list_canvases) carry.
-      const shared = await listSharedWithTeams(deps, caller.userId, caller.orgIds);
-      const previews = await previewIds(shared.map((s) => s.canvas.id));
+    async ({ query, sort, limit, offset }) => {
+      // Shared read (same as HTTP /api/canvases/shared), so projection and policy can't
+      // drift between surfaces.
+      const shared = await listSharedCanvases(deps, {
+        viewerId: caller.userId,
+        viewerOrgIds: caller.orgIds,
+        tenancyActive: caller.tenancyActive,
+        now: Date.now(),
+        q: query,
+        sort,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+      });
+      const previews = await previewIds(shared.items.map((s) => s.canvas.id));
       return ok({
-        canvases: shared.map(({ canvas: cv, owner }) => ({
+        total: shared.total,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+        canvases: shared.items.map(({ canvas: cv, owner, access }) => ({
           id: cv.id,
           slug: cv.slug,
           url: canvasUrl(deps.config, cv.slug),
           title: cv.title,
           description: cv.description,
+          tags: Array.isArray(cv.tags) ? cv.tags : [],
+          access,
+          hasPassword: cv.passwordHash !== null,
           hasPreview: previewVisible(cv, previews),
           owner,
+          createdAt: cv.createdAt,
+          updatedAt: cv.updatedAt,
         })),
       });
     },

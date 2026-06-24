@@ -4,6 +4,12 @@ import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
+export interface UserTeamCanvasGrant {
+  canvasId: string;
+  teamId: string;
+  teamName: string;
+}
+
 /**
  * Teams store (plan 003). Members-only groups that are EITHER org-attached (`org_id` set) or
  * PERSONAL (`org_id` NULL, user-owned — friends & family), plus the canvas→team grants
@@ -237,19 +243,26 @@ export function teamsRepository(client: DbClient) {
       return rows.length > 0;
     },
 
-    /** Canvases scoped to a team the user belongs to (the "shared with my teams" view).
-     *  Same widened, membership-mandatory clause as {@link teamMatch} (KTD1): personal teams
-     *  count by membership; org teams require the live org re-join. */
-    async listCanvasIdsForUserTeams(userId: string, viewerOrgIds: Set<string>): Promise<string[]> {
-      const rows = (await db
-        .selectDistinct({ canvasId: canvasTeamsT.canvasId })
+    /** Canvas→team grants the user can reach, with display team names for the Shared
+     *  page. Same membership-mandatory live-org clause as teamMatch. */
+    async listCanvasGrantsForUserTeams(
+      userId: string,
+      viewerOrgIds: Set<string>,
+    ): Promise<UserTeamCanvasGrant[]> {
+      return (await db
+        .selectDistinct({
+          canvasId: canvasTeamsT.canvasId,
+          teamId: teamsT.id,
+          teamName: teamsT.name,
+        })
         .from(canvasTeamsT)
         .innerJoin(membersT, eq(membersT.teamId, canvasTeamsT.teamId))
         .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
         .where(and(eq(membersT.userId, userId), accessOrgClause(viewerOrgIds)))) as Array<{
         canvasId: string;
+        teamId: string;
+        teamName: string;
       }>;
-      return rows.map((r) => r.canvasId);
     },
   };
 }
