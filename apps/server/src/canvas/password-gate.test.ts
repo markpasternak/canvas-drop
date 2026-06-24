@@ -25,6 +25,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     ownerId: "owner",
     orgId: null,
     access: "whole_org",
+    discoverability: "link_only",
     sharedExpiresAt: null,
     galleryListed: false,
     galleryTemplatable: false,

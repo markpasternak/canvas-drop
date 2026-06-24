@@ -5,7 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { zipSync } from "fflate";
 import { pino } from "pino";
 import sharp from "sharp";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { cloneService } from "../canvas/clone-service.js";
 import type { DbClient } from "../db/factory.js";
@@ -569,11 +569,37 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const userId = await seedUser(client, "owner@example.com");
     const mcp = await connect(client, { userId });
     const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: cv.id, zipBase64: zip({ "index.html": "<h1>x</h1>" }) },
+    });
+    const listed = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: {
+          id: cv.id,
+          access: "whole_org",
+          discoverability: "listed",
+          galleryListed: true,
+          galleryTemplatable: true,
+        },
+      }),
+    );
+    expect(listed.currentVersionId).toBeTruthy();
 
     const archived = payload(
       await mcp.callTool({ name: "archive_canvas", arguments: { id: cv.id } }),
     );
-    expect(archived.status).toBe("archived");
+    expect(archived).toMatchObject({
+      status: "archived",
+      currentVersionId: listed.currentVersionId,
+      access: "private",
+      discoverability: "link_only",
+      hasPassword: false,
+      sharedExpiresAt: null,
+      galleryListed: false,
+      galleryTemplatable: false,
+    });
     // Unarchiving a non-archived canvas would fail; this one is archived → ok.
     const active = payload(
       await mcp.callTool({ name: "unarchive_canvas", arguments: { id: cv.id } }),
@@ -1651,7 +1677,7 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(text(res)).toContain("TEAM_FORBIDDEN");
   });
 
-  it("list_shared_with_teams surfaces a team canvas to a teammate, not the owner", async () => {
+  it("list_shared_canvases surfaces only listed team canvases to a teammate, not the owner", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
@@ -1678,17 +1704,129 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       name: "update_canvas",
       arguments: { id: cv.id, access: "team", teamIds: [team.id] },
     });
-    // The owner does NOT see their own canvas in the shared-with-teams read.
-    expect(
-      payload(await ownerMcp.callTool({ name: "list_shared_with_teams", arguments: {} })).canvases,
-    ).toHaveLength(0);
-    // The teammate does.
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, password: "secret" },
+    });
     const mateMcp = await connectMember(mateId, org.id);
+    expect(
+      payload(await mateMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, discoverability: "listed" },
+    });
+    // The owner does NOT see their own canvas in Shared.
+    expect(
+      payload(await ownerMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+    // The teammate does after the owner opts the grant into discovery.
     const { canvases } = payload(
-      await mateMcp.callTool({ name: "list_shared_with_teams", arguments: {} }),
+      await mateMcp.callTool({ name: "list_shared_canvases", arguments: { query: "design" } }),
     );
     // biome-ignore lint/suspicious/noExplicitAny: JSON payload
     expect(canvases.map((c: any) => c.id)).toContain(cv.id);
+    expect(canvases[0]).toMatchObject({
+      access: { kind: "team", label: "Design", teamNames: ["Design"] },
+      hasPassword: true,
+    });
+  });
+
+  it("list_shared_canvases surfaces only listed Whole-org canvases to same-org non-owners", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const otherOrg = await orgsRepository(client).ensureOrg({
+      name: "B",
+      slug: "b",
+      domains: ["b.example"],
+    });
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const outsiderId = await member("outsider@b.example", otherOrg.id);
+    const noOrgId = await seedUser(client, "guest@example.net");
+    const ownerMcp = await connectMember(ownerId, org.id);
+    const cv = payload(
+      await ownerMcp.callTool({
+        name: "create_canvas",
+        arguments: { orgId: org.id, title: "Org Thing" },
+      }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "whole_org" },
+    });
+
+    const mateMcp = await connectMember(mateId, org.id);
+    expect(
+      payload(await mateMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, discoverability: "listed" },
+    });
+
+    expect(
+      payload(await ownerMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+    const { canvases } = payload(
+      await mateMcp.callTool({ name: "list_shared_canvases", arguments: { query: "org" } }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(canvases.map((c: any) => c.id)).toEqual([cv.id]);
+    expect(canvases[0]).toMatchObject({ access: { kind: "whole_org", label: "Whole org" } });
+
+    const outsiderMcp = await connectMember(outsiderId, otherOrg.id);
+    expect(
+      payload(await outsiderMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+    const noOrgMcp = await connect(
+      client,
+      { userId: noOrgId, orgIds: new Set(), tenancyActive: true },
+      false,
+      tenantConfig,
+    );
+    expect(
+      payload(await noOrgMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
+    ).toHaveLength(0);
+  });
+
+  it("update_canvas audits discoverability-only share changes", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const ownerMcp = await connectMember(ownerId, org.id);
+    const cv = payload(
+      await ownerMcp.callTool({
+        name: "create_canvas",
+        arguments: { orgId: org.id, title: "Audited" },
+      }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "whole_org" },
+    });
+    await ownerMcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, discoverability: "listed" },
+    });
+
+    await vi.waitFor(async () => {
+      const rows = await auditRepository(client).recent(20);
+      const discoveryAudit = rows.find((row) => {
+        const meta = row.meta;
+        return (
+          row.action === "share_change" &&
+          meta !== null &&
+          typeof meta === "object" &&
+          !Array.isArray(meta) &&
+          meta.discoverability === "listed"
+        );
+      });
+      expect(discoveryAudit?.targetId).toBe(cv.id);
+    });
   });
 
   it("clone_canvas: a team member may clone a team canvas; a non-member cannot", async () => {

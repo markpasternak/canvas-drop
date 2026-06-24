@@ -65,6 +65,8 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
         VALUES ('u1','sub-1','u@example.com','U',0);
       INSERT INTO canvases (id, slug, owner_id, api_key_hash, shared, created_at, updated_at)
         VALUES ('c1','slug-1','u1','h1',1,0,0);
+      INSERT INTO canvases (id, slug, owner_id, api_key_hash, shared, gallery_listed, created_at, updated_at)
+        VALUES ('c-gallery','slug-gallery','u1','h-gallery',1,1,0,0);
       INSERT INTO kv_entries (canvas_id, scope, key, value, updated_by, updated_at)
         VALUES ('c1','shared','k','"v"','u1',0);
     `);
@@ -94,6 +96,14 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
       sql`SELECT org_id FROM canvases WHERE id = 'c1'`,
     );
     expect(orgScoped[0]?.org_id).toBeNull();
+    const discovery = client.db.all<{ discoverability: string }>(
+      sql`SELECT discoverability FROM canvases WHERE id = 'c1'`,
+    );
+    expect(discovery[0]?.discoverability).toBe("link_only");
+    const listedDiscovery = client.db.all<{ discoverability: string }>(
+      sql`SELECT discoverability FROM canvases WHERE id = 'c-gallery'`,
+    );
+    expect(listedDiscovery[0]?.discoverability).toBe("listed");
     client.db.all(sql`SELECT 1 FROM orgs`); // table exists (no throw)
     client.db.all(sql`SELECT 1 FROM org_domains`); // table exists (no throw)
     // reserved 'team' value passes the CHECK (decideCanvasAccess rejects it at runtime in P1).
@@ -108,6 +118,14 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
       client.db.run(
         sql`INSERT INTO canvases (id, slug, owner_id, api_key_hash, access, created_at, updated_at)
             VALUES ('c3','slug-3','u1','h3','nope',0,0)`,
+      ),
+    ).toThrow();
+    // 0032 discoverability: populated rows are backfilled, and invalid enum values
+    // are rejected by the new CHECK constraint.
+    expect(() =>
+      client.db.run(
+        sql`INSERT INTO canvases (id, slug, owner_id, api_key_hash, access, discoverability, created_at, updated_at)
+            VALUES ('c4','slug-4','u1','h4','whole_org','broadcast',0,0)`,
       ),
     ).toThrow();
 

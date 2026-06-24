@@ -1,15 +1,16 @@
 /**
  * Dev seed: 100 realistic, zero-file canvases across several owners, for exercising
- * the gallery + Your-canvases filters / sort / pills (plan 004).
+ * the gallery + Shared + Your-canvases filters / sort / pills (plan 004).
  *
  * Run from the repo root (after `pnpm reset:data` for a clean slate):
  *   pnpm seed:canvases
  *
  * The admin dev user (from .env) owns 70; six other users own the remaining 30.
- * Canvases get varied tags, summaries, and states (shared / listed / templatable /
- * password-protected / never-deployed), and back-dated timestamps so the sort axes
- * are meaningful. No files are uploaded — "published" canvases just get a zero-file
- * ready version so they satisfy the gallery's `current_version_id IS NOT NULL` rule.
+ * Canvases get varied tags, summaries, and states (shared / discoverable / gallery-
+ * listed / templatable / password-protected / never-deployed), and back-dated timestamps
+ * so the sort axes are meaningful. No files are uploaded — "published" canvases just
+ * get a zero-file ready version so they satisfy the gallery's `current_version_id IS NOT
+ * NULL` rule.
  * Deterministic (seeded PRNG) so re-runs produce the same data.
  */
 import { existsSync } from "node:fs";
@@ -169,27 +170,31 @@ function tagsFor(): string[] {
 interface Profile {
   published: boolean;
   shared: boolean;
+  discoverable: boolean;
   listed: boolean;
   templatable: boolean;
   protectedCanvas: boolean;
 }
 
 /** Pick a realistic state mix. `richGallery` (the non-admin owners) leans toward
- *  shared+listed so the gallery has plenty of cross-owner content to filter. */
+ *  shared+discoverable so Shared and the gallery have plenty of cross-owner content to
+ *  filter, while some rows remain URL-only. */
 function profile(richGallery: boolean): Profile {
   const published = chance(richGallery ? 0.92 : 0.86);
   const protectedCanvas = published && chance(0.12);
   let shared = false;
+  let discoverable = false;
   let listed = false;
   let templatable = false;
   if (published && !protectedCanvas) {
     shared = chance(richGallery ? 0.85 : 0.7);
     if (shared) {
-      listed = chance(richGallery ? 0.85 : 0.72);
+      discoverable = chance(richGallery ? 0.85 : 0.65);
+      if (discoverable) listed = chance(richGallery ? 0.85 : 0.72);
       if (listed) templatable = chance(0.4);
     }
   }
-  return { published, shared, listed, templatable, protectedCanvas };
+  return { published, shared, discoverable, listed, templatable, protectedCanvas };
 }
 
 async function main() {
@@ -240,6 +245,7 @@ async function main() {
   const now = Date.now();
   const byOwner = new Map<string, number>();
   let galleryVisible = 0;
+  let sharedDiscoverable = 0;
   let neverDeployed = 0;
   let protectedCount = 0;
   const titleCounts = new Map<string, number>();
@@ -265,7 +271,7 @@ async function main() {
       title,
     });
 
-    // Zero-file "published" version so listed/shared canvases satisfy the gallery's
+    // Zero-file "published" version so discoverable/listed canvases satisfy the
     // current_version_id rule without any storage writes.
     if (p.published) {
       const v = await versions.createPending({
@@ -285,6 +291,9 @@ async function main() {
       // the route's resolveSettingsUpdate, which the seed bypasses). Set access directly,
       // else listed canvases stay `private` and the gallery renders empty.
       access: p.shared ? "whole_org" : "private",
+      // Access is not discovery. Whole-org rows remain URL-only unless we opt them into
+      // Shared/the gallery with discoverability='listed'.
+      discoverability: p.discoverable ? "listed" : "link_only",
       galleryListed: p.listed,
       galleryTemplatable: p.templatable,
       description: summary,
@@ -311,6 +320,7 @@ async function main() {
 
     byOwner.set(owner.name, (byOwner.get(owner.name) ?? 0) + 1);
     if (p.published && p.shared && p.listed && !p.protectedCanvas) galleryVisible++;
+    if (p.published && p.shared && p.discoverable && !p.protectedCanvas) sharedDiscoverable++;
   }
 
   // Teams (plan 003) — a personal "Family" team owned by the admin dev user, with one colleague
@@ -344,11 +354,12 @@ async function main() {
       "  By owner:",
       ownerLines,
       "",
+      `  Shared-visible (shared + discoverable + published + unprotected): ${sharedDiscoverable}`,
       `  Gallery-visible (shared + listed + published + unprotected): ${galleryVisible}`,
       `  Never deployed: ${neverDeployed}`,
       `  Password-protected: ${protectedCount}`,
       "",
-      "  Start the app with `pnpm dev` and browse /gallery and your canvases to test the filters.",
+      "  Start the app with `pnpm dev` and browse /shared, /gallery, and your canvases to test the filters.",
       "",
     ].join("\n"),
   );

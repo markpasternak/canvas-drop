@@ -91,11 +91,14 @@ version from the **Versions** tab. Set who can open it in the **Share** tab: the
 access ladder runs **Private** (owner only, the default — a non-owner admin is
 treated like any member and the canvas 404s for them) → **Specific
 people** (signed-in members plus pending emails that become live only after verified
-sign-in) → **Whole org** (any signed-in member with the link) → **Public link**
-(anyone with the link; static files only while the instance switch is on and the
-owner account has not been revoked — primitives are refused for public visitors).
-On top of any rung you can add a password gate or a share expiry.
-Once a version is published you can also list the canvas in the gallery.
+sign-in) → **Team** (members of selected teams) → **Whole org** (any signed-in
+member with the link) → **Public link** (anyone with the link; static files only
+while the instance switch is on and the owner account has not been revoked —
+primitives are refused for public visitors). On top of any rung you can add a
+password gate or a share expiry. Team and Whole-org shares are link-only by
+default; choose **List for people with access** when they should appear in
+**Shared**. The gallery is narrower: it only lists Public-link canvases and
+Whole-org canvases that meet the gallery preconditions.
 
 ## Deploying as an agent
 

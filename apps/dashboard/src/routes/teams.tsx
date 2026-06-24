@@ -1,14 +1,12 @@
-import { ArrowSquareOut, UsersThree } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { EmptyState } from "../components/EmptyState.js";
 import { Field } from "../components/Field.js";
 import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
-import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
+import { InlineNotice, PageHeader } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, type Team } from "../lib/api.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
@@ -19,13 +17,7 @@ import {
   useRemoveTeamMember,
   useRenameTeam,
 } from "../lib/mutations.js";
-import {
-  useMe,
-  usePeopleSearch,
-  useSharedWithTeams,
-  useTeamMembers,
-  useTeams,
-} from "../lib/queries.js";
+import { useMe, usePeopleSearch, useTeamMembers, useTeams } from "../lib/queries.js";
 
 /**
  * Teams (plan 003 P2/U6) — the self-serve team management surface + the "shared with my
@@ -53,14 +45,6 @@ export default function Teams() {
         description="Create a personal team and add people by email, or attach a team to an org you belong to."
       >
         {isLoading ? <Skeleton className="h-24" /> : <YourTeams teams={teams ?? []} orgs={orgs} />}
-      </Section>
-
-      <Section
-        id="shared-with-teams"
-        title="Shared with your teams"
-        description="Canvases other people shared with a team you belong to."
-      >
-        <SharedWithTeams />
       </Section>
     </div>
   );
@@ -372,46 +356,6 @@ function TeamRoster({ team }: { team: Team }) {
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-/** The "shared with my teams" canvas list — display-only cards linking to the live
- *  canvas (the caller isn't the owner, so there are no management actions here). */
-function SharedWithTeams() {
-  const { data: canvases, isLoading } = useSharedWithTeams();
-
-  if (isLoading) return <Skeleton className="h-24" />;
-  if (!canvases || canvases.length === 0) {
-    return (
-      <EmptyState
-        icon={<UsersThree size={26} weight="duotone" />}
-        title="Nothing shared with your teams yet"
-        description="When a colleague shares a canvas with a team you're on, it shows up here so you can open it."
-      />
-    );
-  }
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {canvases.map((cv) => (
-        <Panel key={cv.id} className="flex flex-col gap-3 p-4">
-          <div className="min-w-0 space-y-1">
-            <p className="truncate text-sm font-medium text-fg">{cv.title || "Untitled canvas"}</p>
-            {cv.description && <p className="line-clamp-2 text-xs text-muted">{cv.description}</p>}
-            {cv.owner && <p className="text-xs text-subtle">by {cv.owner.name}</p>}
-          </div>
-          <a
-            href={cv.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface-sunken px-3 text-[0.8125rem] font-medium text-fg transition-colors hover:bg-surface-hover"
-          >
-            Open
-            <ArrowSquareOut size={13} weight="bold" aria-hidden />
-          </a>
-        </Panel>
-      ))}
     </div>
   );
 }

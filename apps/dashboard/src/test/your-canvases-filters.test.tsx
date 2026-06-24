@@ -12,12 +12,16 @@ const originalClipboard = navigator.clipboard;
 /** A canvas-list row as the API serializes it (only the fields the list view reads;
  *  the fetch JSON is untyped, so we omit capability internals the row never touches). */
 function canvas(over: Record<string, unknown> = {}) {
+  const access = over.access ?? (over.shared ? "whole_org" : "private");
   return {
     id: "c1",
     slug: "s1",
     url: "http://x/c/s1",
     title: "Canvas One",
     description: null,
+    access,
+    discoverability: "link_only",
+    teamIds: [],
     shared: false,
     sharedExpiresAt: null,
     hasPassword: false,
@@ -88,6 +92,13 @@ function stub(all: Array<ReturnType<typeof canvas>>) {
         ].sort((a, b) => a.localeCompare(b));
         return json({ tags });
       }
+      // The home page peeks at Shared only to redirect truly-empty owners who have
+      // something shared with them. This fixture is an owner-list test, so keep that
+      // cross-surface peek empty and handle `/api/canvases` below exactly.
+      if (path === "/api/canvases/shared") {
+        return json({ canvases: [], total: 0, limit: 30, offset: 0 });
+      }
+      if (path !== "/api/canvases") return json({ error: "not_mocked" });
       // /api/canvases — apply the server-side filter/search the route would.
       const sp = u.searchParams;
       const q = sp.get("q")?.toLowerCase();
@@ -357,7 +368,8 @@ describe("Your canvases — server-side filters (plan 005)", () => {
 
     // U7 filtered variant: the single action is "Clear all filters".
     await userEvent.click(screen.getByRole("button", { name: "Clear all filters" }));
-    expect(await within(rows()).findByText("Shared template")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector("[data-canvas-item]")).not.toBeNull());
+    expect(within(rows()).getByText("Shared template")).toBeInTheDocument();
     expect(within(rows()).getByText("Plain shared")).toBeInTheDocument();
   });
 

@@ -84,6 +84,9 @@ export type PublicationState = "draft" | "published" | "archived" | "disabled" |
  *  (never the org-wide gallery), slotted between `specific_people` and `whole_org`. */
 export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 
+/** Listing policy for Team/Whole-org canvases. It never changes URL access. */
+export type CanvasDiscoverability = "link_only" | "listed";
+
 /** Preview policy (plan 004): "auto" screenshots on publish, "off" uses a generative
  *  cover, "custom" is an owner-uploaded image that survives publishes. */
 export type PreviewMode = "auto" | "off" | "custom";
@@ -106,6 +109,8 @@ export interface Canvas {
   description: string | null;
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
+  /** Whether Team/Whole-org shares are findable in Shared. */
+  discoverability: CanvasDiscoverability;
   /** Teams this canvas is shared with (plan 003) — populated only when access==='team'
    *  (and only on the single-canvas GET; list rows leave it []). Drives the share picker. */
   teamIds: string[];
@@ -253,6 +258,8 @@ export interface CanvasSettings {
   description?: string | null;
   /** Access rung (D4). `public_link` is accepted only while the global/user gates allow it. */
   access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
+  /** Listing policy for Team/Whole-org canvases. Does not widen access. */
+  discoverability?: CanvasDiscoverability;
   /** Teams to grant when access==='team' (plan 003). Owner may grant only teams they
    *  belong to in the canvas's org (validated server-side); ignored for other rungs. */
   teamIds?: string[];
@@ -343,17 +350,41 @@ export interface AddMemberResult {
   emailDelivery?: EmailDelivery;
 }
 
-/** A canvas shared with one of the caller's teams (plan 003) — display-only, the
- *  caller is NOT the owner, so no management fields. The only surface for these
- *  strictly-team-scoped canvases (they never appear in the org-wide gallery). */
-export interface TeamSharedCanvas {
+export type SharedCanvasAccess =
+  | { kind: "direct"; label: "Direct" }
+  | { kind: "team"; label: string; teamIds: string[]; teamNames: string[] }
+  | { kind: "whole_org"; label: "Whole org" };
+
+/** One non-owned canvas discoverable to the caller in Shared. */
+export interface SharedCanvas {
   id: string;
   slug: string;
   url: string;
   title: string;
   description: string | null;
+  tags: string[];
+  access: SharedCanvasAccess;
+  hasPassword: boolean;
   hasPreview: boolean;
   owner: { id: string; name: string; avatarUrl: string | null } | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type SharedCanvasSort = "updated" | "title" | "owner";
+
+export interface SharedCanvasesQuery {
+  q?: string;
+  sort?: SharedCanvasSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SharedCanvasesPage {
+  canvases: SharedCanvas[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /** One canvas as it appears in the opt-in gallery (M8) — display-only fields. */
@@ -461,6 +492,9 @@ export const GALLERY_PAGE_SIZE = 30;
  *  30 per page — a calmer page than the old 48. */
 export const CANVASES_PAGE_SIZE = 30;
 
+/** Shared page size: same density as Your canvases/Gallery for comparable browsing. */
+export const SHARED_PAGE_SIZE = 30;
+
 /** Human/agent-readable hints for the stable deploy + management error codes. */
 const HINTS: Record<string, string> = {
   EMPTY_DEPLOY: "The upload was empty — add at least an index.html.",
@@ -484,6 +518,8 @@ const HINTS: Record<string, string> = {
   NOT_SHARED: "Share this canvas before listing it in the gallery.",
   NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
   PASSWORD_PROTECTED: "Remove the password before listing this canvas in the gallery.",
+  NOT_DISCOVERABLE: "List this canvas for people with access before adding it to the gallery.",
+  NOT_GALLERY_ELIGIBLE: "Only Public link or listed Whole org canvases can appear in the gallery.",
   NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
   cross_origin_forbidden: "Request blocked — reload the page and retry.",
@@ -984,6 +1020,17 @@ export const api = {
     return request<CanvasesPage>(`/api/canvases${qs ? `?${qs}` : ""}`);
   },
 
+  /** Non-owned canvases discoverable to the caller in Shared. */
+  listSharedCanvases: (query: SharedCanvasesQuery = {}) => {
+    const sp = new URLSearchParams();
+    if (query.q) sp.set("q", query.q);
+    if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
+    if (query.limit !== undefined) sp.set("limit", String(query.limit));
+    if (query.offset !== undefined) sp.set("offset", String(query.offset));
+    const qs = sp.toString();
+    return request<SharedCanvasesPage>(`/api/canvases/shared${qs ? `?${qs}` : ""}`);
+  },
+
   getCanvas: (id: string) => request<Canvas>(`/api/canvases/${id}`),
 
   /** Resolve an owner's cosmetic slug to the canonical canvas id (rebrand U17). Used
@@ -1080,13 +1127,6 @@ export const api = {
       );
     },
   },
-
-  /** Canvases shared with one of the caller's teams (plan 003) — the "shared with my
-   *  teams" view. Server-scoped to the caller's live team membership; excludes their own. */
-  listSharedWithTeams: () =>
-    request<{ canvases: TeamSharedCanvas[] }>("/api/canvases/shared-with-teams").then(
-      (r) => r.canvases,
-    ),
 
   // --- Teams (plan 003 P2/U6). Self-serve: any signed-in user creates a PERSONAL team (no org)
   //     and adds people; an org member may also attach a team to their org. Management

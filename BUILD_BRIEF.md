@@ -31,7 +31,7 @@ Do not relitigate during build without flagging.
 | D1 | Trust boundary | **Authenticated-org by default; explicit, owner-controlled exceptions for named outsiders and admin-governed public links.** Recommended production uses an upstream identity-aware proxy (IAP): every request reaches the app only after Cloudflare Access, Google IAP, oauth2-proxy, or nginx+OAuth has authenticated the user; the app verifies/trusts the identity assertion it is handed (D16, §9.2). `oidc` and `dev` are explicit app-managed exceptions for self-hosters/local dev. **Two deliberate carve-outs: (a) an owner may add a *named outside email* to a single canvas as an auth-delegated pending grant that materializes only after that exact email signs in through the configured auth; in `proxy` mode a brand-new external email still requires operator admission upstream; (b) public-link publishing is available by default while the instance switch is on, and admins can turn it off globally or revoke specific accounts; public-link viewers are static-only.** Outside these, the org boundary holds. Password protection is an *additional* lock on shared rungs; identity still always comes from server-authenticated sign-in. |
 | D2 | URL / isolation model | **Configurable: `subdomain` or `path` mode.** Subdomain mode (`{slug}.canvases.example.com`, wildcard DNS + wildcard cert) gives full browser-origin isolation and is the recommended multi-user production config. Path mode (`host/c/{slug}/`) runs on one hostname — required for localhost and acceptable for trusted own-hosting/single-user use. Multi-user path mode is allowed only with an explicit unsafe opt-in and prominent warning because reduced isolation is real (§12.2). |
 | D3 | Canvas naming | **Random slug by default** (readable-random, e.g. `quiet-otter-x7k2`) — unguessable by design, regenerable to rotate a leaked URL. **Post-v1:** owners may set a custom slug (one DNS-safe grammar, reserved-word-checked, server-validated); obscurity stays defense-in-depth only, and the dashboard flags the trade-off when a custom-slugged canvas is link-reachable. |
-| D4 | Visibility | **A per-canvas access ladder, owner-only by default.** One rung per canvas: `private` (owner only) → `specific_people` (a named allowlist of signed-in members and/or pending outside emails that become users only after verified sign-in) → `whole_org` (any authenticated org member with the link — the former "shared") → `public_link` (anyone with the link; default-on while the instance switch is on and the owner account has not been revoked; static-only). Authenticated viewers at `whole_org`/`specific_people` can use the canvas-facing APIs the app makes; `public_link` is static-only. Optional password and expiry are modifiers on the rung. **Access is revocable at any time (dies on the next request) and shares can carry an optional expiry.** Owners may additionally opt a shared canvas into a small gallery with metadata; there is no automatic org-wide directory in v1. |
+| D4 | Visibility | **A per-canvas access ladder, owner-only by default.** One rung per canvas: `private` (owner only) → `specific_people` (a named allowlist of signed-in members and/or pending outside emails that become users only after verified sign-in) → `team` (members of selected personal or org teams) → `whole_org` (any authenticated org member with the link — the former "shared") → `public_link` (anyone with the link; default-on while the instance switch is on and the owner account has not been revoked; static-only). Authenticated viewers at `specific_people`/`team`/`whole_org` can use the canvas-facing APIs the app makes; `public_link` is static-only. Optional password and expiry are modifiers on the rung. **Access is revocable at any time (dies on the next request) and shares can carry an optional expiry.** Team and Whole-org shares are URL-only by default (`discoverability='link_only'`); owners can opt them into Shared for people who already have access (`discoverability='listed'`). Specific-people grants appear in those people's Shared view automatically. The gallery is narrower: only Public-link canvases and listed Whole-org canvases with owner metadata are listable. There is no automatic org-wide directory. |
 | D5 | Deploy/edit (v1) | v1 proves the fastest paths: drag-drop folder/ZIP upload, paste-HTML quick create, and HTTP deploy API (agent-usable from day one). In-browser file manager + CodeMirror editor are the **next milestone (M5)**, now backed by a draft/explicit-publish version model on content-addressed storage (D11). CLI and installable agent skills come later. |
 | D6 | Infrastructure | **Agnostic, Docker-first.** No cloud-vendor assumptions. **One application image** + composed off-the-shelf deps (§8.3); runs on any VPS/PaaS/k8s, fronted by an identity-aware proxy. Generic deploy guide in §8.4 (no specific cloud assumed). Dev = bare `npm run dev`, no containers. |
 | D7 | Canvas → API auth | **Proxy-verified identity + auto canvas ID.** Canvas code carries no secrets: the *who* comes from the IAP-verified identity on the request (an app session only in `oidc`/`dev` modes); the canvas is identified from the URL (subdomain or path segment), verified server-side against `Origin` in subdomain mode. The per-canvas **secret API key is for programmatic access only** (deploy API, scripts, agents, future CLI) and must never appear in canvas files. |
@@ -46,7 +46,7 @@ Do not relitigate during build without flagging.
 | D16 | Auth modes | **`AUTH_MODE = proxy | oidc | dev`.** **`proxy` (recommended prod):** an upstream identity-aware proxy authenticates and the app trusts a verified identity JWT (preferred — cryptographic) or a trusted-hop header (Cloudflare Access, Google IAP, oauth2-proxy, nginx+OAuth). **`oidc` (fallback):** built-in OIDC/Google login via `openid-client` for self-hosters with no IAP. **`dev`:** auto-logs-in a fake local user for localhost with zero setup. Allowed-email-domain check enforced by the app in every mode. |
 | D17 | File storage | One abstraction, two drivers: **local filesystem** and **S3-compatible** (AWS S3, MinIO, Cloudflare R2, or any S3-compatible endpoint — endpoint-configurable). |
 | D18 | Open source | **MIT license.** Org-agnostic naming and branding throughout; no telemetry/phone-home; 12-factor config via env vars; release-shaped repo hygiene (README, env.example, CONTRIBUTING, CI). Public release happens after internal pilot hardening, but v1 is built as an OSS/self-hostable product from day one. |
-| D19 | Out of v1 | Data warehouse connector, CLI, agent skills, comments, automatic directory/search, custom backends, cron jobs, team/group visibility, standing external accounts / guest self-signup, multi-provider AI. *(Auth-delegated named people on a per-canvas allowlist and default-on static public links with global/per-account revocation were added post-v1 — see D1/D4 and `docs/plans/2026-06-23-001-feat-auth-delegated-access-governance-plan.md`.)* |
+| D19 | Out of v1 | Data warehouse connector, CLI, agent skills, comments, automatic public directory/search, custom backends, cron jobs, standing external accounts / guest self-signup, multi-provider AI. *(Auth-delegated named people on a per-canvas allowlist, Team visibility, scoped Shared discovery, and default-on static public links with global/per-account revocation were added post-v1 — see D1/D4 and `docs/plans/2026-06-23-001-feat-auth-delegated-access-governance-plan.md` plus `docs/plans/2026-06-24-001-feat-shared-with-me-discovery-plan.md`.)* |
 | D20 | Design | Minimal neutral brand built on **scalable design tokens** (deployments can re-skin via tokens). Must feel extremely elegant, refined, precise. |
 | D21 | Non-negotiables | **A small set of security invariants and good performance come first** (see §12.0 for the threat model). Right-sized for a trusted org, not a public hostile surface: subdomain mode must uphold the hard invariants; path mode's reduced isolation is documented and explicitly opted into for trusted own-hosting. Everything else stays proportionate and simple. |
 | D22 | Realtime primitive (v1) | **Ephemeral pub/sub + presence, per canvas.** Each canvas gets WebSocket channels: viewers `publish`/`subscribe` to broadcast messages and see who's connected (`presence`). Messages are **not persisted** — durable state stays in KV. Same auth and access rules as the rest of the canvas API (resolved identity = who, slug = which canvas). Smallest realtime surface that makes live polls, cursors, and simple multiplayer work. |
@@ -179,17 +179,17 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 1. Login on every request via configured auth mode (D16) [v1]
 2. Allowed-email-domain restriction, verified server-side [v1]
 3. Owner-only visibility by default [v1]
-4. Access ladder (D1/D4): per-canvas visibility rung — `private` (owner only) · `specific_people` (signed-in members plus auth-delegated pending emails) · `whole_org` (any authenticated member with the link) · `public_link` (anyone with the link, static-only, while the instance switch is on and the owner account has not been revoked); each rung gates canvas-facing APIs too [v1]
+4. Access ladder (D1/D4): per-canvas visibility rung — `private` (owner only) · `specific_people` (signed-in members plus auth-delegated pending emails) · `team` (members of selected teams) · `whole_org` (any authenticated member with the link) · `public_link` (anyone with the link, static-only, while the instance switch is on and the owner account has not been revoked); each non-public rung gates canvas-facing APIs too [v1]
 5. Revoke share (instant: non-owners → 404, open realtime sockets dropped, gate cookies invalidated) [v1]
 6. Optional share expiry (timestamp; auto-revokes; owner sees countdown/expired state) [v1]
 7. Per-canvas password (argon2id; gate page; scoped cookie) [v1]
 8. Unguessable URLs as defense-in-depth (never the only control) [v1]
 9. App-managed sessions for `oidc`/`dev`: HttpOnly Secure cookies, 14-day rolling, revocation on logout [v1]
 10. View/access/API audit attribution [v1]
-11. Opt-in gallery listing for explicitly shared canvases with owner-provided metadata [v1]
+11. Opt-in gallery listing for Public-link canvases and listed Whole-org canvases with owner-provided metadata [v1]
 12. Share-to-specific-people allowlist — shipped as the `specific_people` rung with auth-delegated Add person grants [v1]
-13. Team/group visibility [later]
-14. External/anonymous access [never]
+13. Shared discovery page for non-owned direct grants, listed Team shares, and listed Whole-org shares; Team and Whole-org default to link-only unless the owner opts into listing [post-v1]
+14. Standing external accounts / guest self-signup [never]
 
 ### 6.4 KV storage primitive
 1. `canvasdrop.kv.get/set/delete/list` — canvas-global namespace [v1]
@@ -258,17 +258,18 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 1. My canvases first: title, slug, URL, status, last deploy, visit sparkline, with a dominant create action [v1]
 2. Create flow: name → method (drop folder / ZIP / paste HTML / "use the API") [v1]
 3. Canvas detail: overview, versions, settings, usage [v1]
-4. Settings: title/description, shared toggle, password, SPA fallback, regenerate slug, regenerate API key, delete [v1]
+4. Settings: title/description, access rung, discoverability, password, SPA fallback, regenerate slug, regenerate API key, delete [v1]
 5. API key shown once; regenerate invalidates; stored hashed [v1]
 6. Stats / usage tab (D24): total + unique viewers, last-viewed, 30-day view sparkline, KV ops, file storage, AI tokens/cost, peak realtime connections [v1]
 7. Copy-link/open affordances everywhere sensible [v1]
 8. Deliberate empty/error/loading states [v1]
 9. Onboarding: first-run page with the three fastest paths to live + agent snippet [v1]
 10. Keyboard-friendly, fast (SPA, optimistic UI where safe) [v1]
-11. Opt-in gallery: explicitly shared canvases can appear with owner-provided title/description/tags [v1]
-12. Asset file manager + editor [v1.1]
-13. Search own canvases [v1.1]
-14. Automatic org-wide directory/search of shared canvases [later]
+11. Shared page: find and open non-owned canvases already shared with you; search/page/switch list or gallery view with thumbnails [post-v1]
+12. Opt-in gallery: Public-link canvases and listed Whole-org canvases can appear with owner-provided title/description/tags [v1]
+13. Asset file manager + editor [v1.1]
+14. Search own canvases [v1.1]
+15. Automatic public directory/search beyond scoped Shared and the opt-in gallery [later]
 
 ### 6.10 Admin panel
 1. All canvases: owner, status, size, usage, last activity [v1]
@@ -456,7 +457,7 @@ A single Hono app determines per request: dashboard, auth, platform API, or canv
 ### 9.3 Request flow — viewing a canvas
 1. Browser → canvas URL (either mode). In `proxy` mode the request has already passed the IAP; an unauthenticated user never reaches the app (the proxy bounces them to login). In `oidc`/`dev` mode the app redirects to login itself.
 2. Gateway: resolve + verify identity per §9.2 (verify proxy JWT / trusted-hop header, or app session); enforce email-domain allowlist. No valid identity → 401/redirect.
-3. Authorization: owner-only → 404 to non-owners (don't confirm existence). Shared **and** not revoked **and** not past expiry → proceed (owner always reaches their own canvas regardless of share state). Password set → gate page unless gate cookie valid. Revoking or expiry takes effect on the next request — no stale grants.
+3. Authorization: owner-only → 404 to non-owners (don't confirm existence). A viewer allowed by the current rung **and** not revoked **and** not past expiry → proceed (owner always reaches their own canvas regardless of share state). Password set → gate page unless gate cookie valid. Revoking or expiry takes effect on the next request — no stale grants.
 4. Resolve canvas → current version → stream asset from storage driver. HTML and stable filenames get `no-cache` + ETag; only content-addressed/versioned assets get immutable cache headers. Unknown path → SPA fallback if enabled, else 404.
 5. View recorded async for usage stats.
 
@@ -499,14 +500,16 @@ sessions         id · user_id → users · token_hash (unique) · created_at ·
                   proxy mode the IAP owns the session and identity is verified per request — no app session)
 
 canvases         id (text pk) · slug (unique, random) · title · description · owner_id → users
-                 shared (bool, default false) · shared_at (nullable) · shared_expires_at (nullable)
+                 access ('private'|'specific_people'|'team'|'whole_org'|'public_link', default 'private')
+                 discoverability ('link_only'|'listed', default 'link_only')
+                 shared_at (nullable) · shared_expires_at (nullable)
                  gallery_listed (bool, default false) · gallery_tags (json)
                  gallery_published_at (nullable)
                  password_hash (nullable, argon2id)
                  spa_fallback (bool) · api_key_hash · status (active|disabled|deleted)
                  current_version_id → versions · created_at · updated_at · deleted_at
-                 (revoke = set shared=false; expiry = shared_expires_at in the past; both checked at
-                  request time so access ends instantly — no separate revocation table needed in v1)
+                 (revoke = lower access or remove allowlist/team grants; expiry = shared_expires_at in
+                  the past; both checked at request time so access ends instantly)
 
 versions         id · canvas_id → canvases · number (per-canvas seq) · created_by → users
                  source (folder|zip|paste|api) · file_count · total_bytes
@@ -578,7 +581,7 @@ Errors: typed `CanvasdropError { code, status, message }` base, with `Capability
 `GET /v1/c/:slug/me` · `GET|PUT|DELETE /v1/c/:slug/kv/:key` (+ list, `:key/increment`, `kv/user/...`) · `POST|GET /v1/c/:slug/files` · `DELETE /v1/c/:slug/files/:id` · `GET /v1/c/:slug/files/:id/content` · `POST /v1/c/:slug/ai/chat` (SSE-capable) · `GET /v1/c/:slug/realtime` (WebSocket upgrade; authenticated at handshake, §9.7).
 
 ### 11.3 Management API (session-authenticated, same-origin only)
-Canvas CRUD, settings (incl. shared toggle, **share revoke**, **share expiry**, password, SPA fallback, gallery opt-in), versions, rollback, slug regen, key regen, paste-HTML create, usage/stats queries. Admin routes (`/api/admin/...`) require `is_admin`.
+Canvas CRUD, settings (incl. access rung, discoverability, team grants, **share revoke**, **share expiry**, password, SPA fallback, gallery opt-in), versions, rollback, slug regen, key regen, paste-HTML create, usage/stats queries. Admin routes (`/api/admin/...`) require `is_admin`.
 
 ### 11.4 Programmatic API (Bearer secret key)
 `PUT /v1/canvases/:id/deploy` · `GET /v1/canvases/:id` · `GET /v1/canvases/:id/versions` · `POST /v1/canvases/:id/rollback`. A key operates only on its own canvas. Future CLI and agent skills are thin clients of exactly this.
@@ -597,7 +600,7 @@ canvas-drop runs inside a **trusted organization**: everyone reaching it has alr
 
 1. **No impersonation.** A user is always who the resolved identity says they are; identity (`me()`, write attribution, presence) comes from the server-side auth context, never from anything the client sends.
 2. **No credential or canvas theft.** A user cannot read or steal another user's session, canvas API key, or canvas content; API keys and tokens are hashed at rest and shown once.
-3. **No unauthorized access.** A canvas is reachable only by: its **owner**; at `whole_org`, any allowed org member; at `specific_people`, a signed-in principal on its allowlist (an existing user or a pending email after that exact email has verified through the configured auth); at `public_link`, anyone — but static-only and only while the instance public-link switch is on and the owner account has not been revoked. Pending grants have no auth power by themselves. All subject to not-revoked/not-expired and any password (only the owner is never prompted). **An admin gets no special access to canvases it doesn't own**: for another user's canvas an admin is treated as an ordinary org member — the rung applies (a non-owned `private` or unlisted `specific_people` canvas 404s for an admin too) and a password-protected rung prompts the admin like anyone else. Cross-owner admin authority is limited to the dedicated admin routes (the all-canvases list + disable/enable/restore); it never extends to canvas content, the owner management/editor surface (view/edit/deploy/settings/delete), the runtime API, or realtime. Everything else 404s; `private` and unshared content stays closed; an external person can never reach a canvas they were not granted. An anonymous public visitor has no identity and gets no primitives.
+3. **No unauthorized access.** A canvas is reachable only by: its **owner**; at `whole_org`, any allowed org member; at `team`, a signed-in member of a granted team; at `specific_people`, a signed-in principal on its allowlist (an existing user or a pending email after that exact email has verified through the configured auth); at `public_link`, anyone — but static-only and only while the instance public-link switch is on and the owner account has not been revoked. Pending grants have no auth power by themselves. All subject to not-revoked/not-expired and any password (only the owner is never prompted). **An admin gets no special access to canvases it doesn't own**: for another user's canvas an admin is treated as an ordinary org member — the rung applies (a non-owned `private`, non-granted `team`, or non-granted `specific_people` canvas 404s for an admin too) and a password-protected rung prompts the admin like anyone else. Cross-owner admin authority is limited to the dedicated admin routes (the all-canvases list + disable/enable/restore); it never extends to canvas content, the owner management/editor surface (view/edit/deploy/settings/delete), the runtime API, or realtime. Everything else 404s; `private` and unshared content stays closed; an external person can never reach a canvas they were not granted. An anonymous public visitor has no identity and gets no primitives.
 4. **No cross-canvas reach in subdomain mode.** One canvas (or its code/SDK/socket) cannot read, write, or act on another canvas's data, files, AI quota, or realtime channels. Path mode has reduced browser isolation and is explicitly limited to local/trusted own-hosting unless the operator opts into the risk.
 5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug regen, key regen, rung lowering, allowlist/pending-grant removal, and unpublish take effect on the next request and drop live realtime sockets — no stale grants. Legacy guest sessions retained from the old model never outlive cutover or revocation.
 
@@ -682,7 +685,7 @@ This sequence was **re-ordered after dashboard core** (2026-06-13) to match wher
 
 **M2 — Hosting + deploy (C, D). [done]** Slug serving in both modes, cache strategy for arbitrary uploads, staged deploy writes, folder/ZIP ingestion + validation, paste-HTML flow, deploy API with key auth, rollback.
 
-**M3 — Dashboard core (E). [done]** My-canvases first with a dominant create action, create flow, detail (versions, stats tab, settings incl. shared/revoke/expiry/password/gallery/slug-regen/key-regen).
+**M3 — Dashboard core (E). [done]** My-canvases first with a dominant create action, create flow, detail (versions, stats tab, settings incl. access rung/revoke/expiry/password/gallery/slug-regen/key-regen).
 
 **M4 — Canvas-management depth. [done — formalized retroactively]** The polish round that followed dashboard core: archive/unarchive, soft-delete purge with file/version reclaim, deploy-a-new-version from the UI + clearer version actions, settings redesign + section nav, password reveal/copy + theme-aware gate, list/overview stats (size, file count, deploy method, gallery indicator), and storage/DB perf passes. *Result: managing and iterating a canvas from the dashboard is excellent.*
 
@@ -692,13 +695,13 @@ This sequence was **re-ordered after dashboard core** (2026-06-13) to match wher
 
 **M7 — Admin + hardening (K, L). [done]** Admin panel (takedown/disable/restore, usage overview, quota defaults); rate limits everywhere; headers review; audit completeness; trusted-proxy/IAP verification hardening (§12.5). Lands after the primitive API surface exists so it hardens the real thing. *(Deployment, backup/restore, and load testing are deliberately NOT here — see M10.)* *Admin config later generalized into a unified Configuration view (every setting: value/source/secret-mask; DB-override the safe subset — AI key/models/quotas) so the AI provider key + model allowlist are admin-managed, not env-only.*
 
-**M8 — Gallery. [done]** Opt-in gallery browse/listing for explicitly shared canvases with owner metadata. Needs apps worth surfacing, so it follows primitives + admin.
+**M8 — Gallery. [done]** Opt-in gallery browse/listing for Public-link canvases and listed Whole-org canvases with owner metadata. Needs apps worth surfacing, so it follows primitives + admin.
 
 **M9 — AI proxy + realtime (R, H). [done]** Anthropic proxy with streaming, allowlist, quotas, metering + usage tabs; realtime ephemeral pub/sub + presence (channels/publish/subscribe with handshake auth + revoke-drops-socket), SDK additions. *Result: AI chat demo streams; a poll updates live for two users and revoking the share drops the second instantly.* *A primitives **showcase** canvas (`examples/showcase/`) exercises all five end-to-end.*
 
 **M10 — Deployment + ops hardening + OSS packaging (M, L-finish). [next]** Docker image + compose + vendor-neutral deploy docs; backup/restore drill; load test on a single modest VPS; security review of the five invariants; README/quickstart; 3 starter examples; pilot with 10–15 colleagues. *Result: pilot running behind an IAP; repo is release-shaped.*
 
-Post-v1 (rough order): CLI → agent skill → structured-output AI helper → clone → search → **WYSIWYG/visual HTML editing (code↔visual toggle in the editor, own milestone — deferred from M5 to avoid HTML round-trip/sanitization complexity)** → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history → comments → warehouse.
+Post-v1 (rough order): CLI → agent skill → structured-output AI helper → clone → search → scoped Shared discovery → **WYSIWYG/visual HTML editing (code↔visual toggle in the editor, own milestone — deferred from M5 to avoid HTML round-trip/sanitization complexity)** → public OSS release → gallery search/browse improvements → KV change-subscriptions + realtime message history → comments → warehouse.
 
 ## 17. Success metrics
 
@@ -716,5 +719,5 @@ Health: uptime; P95s vs §13; AI spend vs budget; rate-limit events; security in
 5. **Invisible AI cost growth** → metering + quotas + admin dashboard in v1, not later.
 6. **OSS maintenance burden** → small surface (D19), no telemetry, conservative dependencies, versioned releases with migration tests.
 7. **Auth gateway is the single point of failure** → keep it tiny and heavily tested; resolved-identity lookup is one indexed read.
-8. **"Private by default" mutes the ecosystem effect** that made Quick magical → opt-in gallery exists in v1, but no automatic directory; revisit broader discovery after use is real.
+8. **"Private by default" mutes the ecosystem effect** that made Quick magical → opt-in gallery exists in v1, and scoped Shared discovery now lists only canvases the viewer can already open; avoid an automatic public/org-wide directory until use proves it is worth the exposure.
 9. **Realtime tempts scope creep and breaks single-process scaling** → keep it ephemeral pub/sub + presence only (D22), durable state in KV; in-memory fan-out is fine at D13 scale but pins the app to one process — horizontal scaling later needs a broker (Redis pub/sub or similar), called out now so it isn't a surprise. Realtime is the most likely place to accidentally rebuild a database; the [later] line in §6.7 is the contract.

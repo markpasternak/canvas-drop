@@ -2,7 +2,7 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { pino } from "pino";
 import sharp from "sharp";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { guestService } from "../auth/guest.js";
 import { cloneService } from "../canvas/clone-service.js";
@@ -17,8 +17,10 @@ import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { hashToken } from "../db/repositories/sessions.js";
+import { teamsRepository } from "../db/repositories/teams.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -51,7 +53,7 @@ async function jsonOf<T>(res: Response): Promise<T> {
 /** Build a management app that authenticates as a chosen user (no gateway needed). */
 function buildApp(
   client: DbClient,
-  actor: { id: string; isAdmin: boolean; canPublishPublic?: boolean },
+  actor: { id: string; isAdmin: boolean; canPublishPublic?: boolean; orgIds?: Set<string> },
   storage = memStorage(),
   // biome-ignore lint/suspicious/noExplicitAny: optional spy hub for revoke-hook tests
   hub?: any,
@@ -65,12 +67,13 @@ function buildApp(
     ReturnType<typeof screenshotsRepository>,
     "doneCanvasIds"
   > = screenshotsRepository(client),
+  cfg: Config = config,
 ) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
-  const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+  const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
   const clone = cloneService({ canvases, versions, drafts, storage });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -82,6 +85,7 @@ function buildApp(
       email: `${actor.id}@example.com`,
       canPublishPublic: (actor as { canPublishPublic?: boolean }).canPublishPublic ?? true,
     } as never);
+    c.set("orgIds", actor.orgIds ?? new Set<string>());
     c.set("clientIp", "127.0.0.1");
     await next();
   });
@@ -100,7 +104,7 @@ function buildApp(
   app.route(
     "/api/canvases",
     managementRoutes({
-      config,
+      config: cfg,
       canvases,
       users: usersRepository(client),
       versions,
@@ -113,11 +117,12 @@ function buildApp(
       aiUsage: aiUsageRepository(client),
       hub,
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
-      invites: makeInviteService(client, config),
+      invites: makeInviteService(client, cfg),
       invitations: invitationsRepository(client),
       publicLinksEnabled: () => Promise.resolve(true),
       screenshotsEnabled: () => Promise.resolve(screenshotsEnabled),
       screenshots,
+      teams: teamsRepository(client),
     }),
   );
   return app;
@@ -1022,7 +1027,7 @@ describe("managementRoutes", () => {
         body: JSON.stringify(body),
       });
     await patch({ shared: true });
-    await patch({ galleryListed: true });
+    await patch({ discoverability: "listed", galleryListed: true });
 
     const res = await app.request(`/api/canvases/${created.id}/unpublish`, {
       method: "POST",
@@ -1141,7 +1146,7 @@ describe("managementRoutes", () => {
         body: JSON.stringify(body),
       });
     await patch({ shared: true });
-    await patch({ galleryListed: true });
+    await patch({ discoverability: "listed", galleryListed: true });
     const res = await app.request(`/api/canvases/${created.id}/archive`, {
       method: "POST",
       headers: { "Sec-Fetch-Site": "same-origin" },
@@ -2113,7 +2118,12 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     const src = await seedCanvas(storage, owner.id, {
       slug: "tmpl",
       apiKeyHash: "k1",
-      settings: { access: "whole_org", galleryListed: true, galleryTemplatable: true },
+      settings: {
+        access: "whole_org",
+        discoverability: "listed",
+        galleryListed: true,
+        galleryTemplatable: true,
+      },
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
@@ -2148,7 +2158,7 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
     const src = await seedCanvas(storage, owner.id, {
       slug: "tmpl",
       apiKeyHash: "k1",
-      settings: { access: "whole_org", galleryListed: true }, // not templatable
+      settings: { access: "whole_org", discoverability: "listed", galleryListed: true }, // not templatable
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
@@ -2186,7 +2196,12 @@ describe("managementRoutes — clone (plan 002 U4)", () => {
       slug: "tmpl",
       apiKeyHash: "k1",
       publish: false,
-      settings: { access: "whole_org", galleryListed: true, galleryTemplatable: true },
+      settings: {
+        access: "whole_org",
+        discoverability: "listed",
+        galleryListed: true,
+        galleryTemplatable: true,
+      },
     });
 
     const res = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
@@ -2242,7 +2257,11 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     expect((await patch(app, unpublished, { shared: true, galleryListed: true })).status).toBe(409);
 
     const published = await makeCanvas(owner.id, true);
-    const res = await patch(app, published, { shared: true, galleryListed: true });
+    const res = await patch(app, published, {
+      shared: true,
+      discoverability: "listed",
+      galleryListed: true,
+    });
     expect(res.status).toBe(200);
     expect((await jsonOf<{ galleryListed: boolean }>(res)).galleryListed).toBe(true);
   });
@@ -2252,7 +2271,12 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
     const id = await makeCanvas(owner.id, true);
-    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    await patch(app, id, {
+      shared: true,
+      discoverability: "listed",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
 
     const res = await patch(app, id, { password: "secret" });
     const body = await jsonOf<{
@@ -2272,7 +2296,10 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     const id = await makeCanvas(owner.id, true);
     await patch(app, id, { password: "secret" });
 
-    expect((await patch(app, id, { shared: true, galleryListed: true })).status).toBe(409);
+    expect(
+      (await patch(app, id, { shared: true, discoverability: "listed", galleryListed: true }))
+        .status,
+    ).toBe(409);
   });
 
   it("rejects templatable while unlisted, and un-listing clears templatable", async () => {
@@ -2285,7 +2312,12 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     expect((await patch(app, id, { galleryTemplatable: true })).status).toBe(409);
 
     // List + templatable, then un-list → templatable cleared.
-    await patch(app, id, { shared: true, galleryListed: true, galleryTemplatable: true });
+    await patch(app, id, {
+      shared: true,
+      discoverability: "listed",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
     const res = await patch(app, id, { galleryListed: false });
     const body = await jsonOf<{ galleryListed: boolean; galleryTemplatable: boolean }>(res);
     expect(body.galleryListed).toBe(false);
@@ -2337,6 +2369,7 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     const id = await publish(storage, owner.id, "src");
     await patch(app, id, {
       shared: true,
+      discoverability: "listed",
       galleryListed: true,
       galleryTemplatable: true,
       description: "a handy starter",
@@ -2579,13 +2612,22 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
 
   const mut = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" };
 
+  async function pasteCanvas(
+    app: ReturnType<typeof buildApp>,
+    payload: Record<string, unknown> = {},
+  ): Promise<string> {
+    const res = await app.request("/api/canvases/paste", {
+      method: "POST",
+      headers: mut,
+      body: JSON.stringify({ html: "<h1>hi</h1>", ...payload }),
+    });
+    expect(res.status).toBe(201);
+    return (await jsonOf<{ id: string }>(res)).id;
+  }
+
   /** Create a published canvas (paste create) owned by `owner`, return its id. */
   async function publishedCanvas(ownerId: string): Promise<string> {
-    const res = await buildApp(client, { id: ownerId, isAdmin: false }).request(
-      "/api/canvases/paste",
-      { method: "POST", headers: mut, body: JSON.stringify({ html: "<h1>hi</h1>" }) },
-    );
-    return (await jsonOf<{ id: string }>(res)).id;
+    return pasteCanvas(buildApp(client, { id: ownerId, isAdmin: false }));
   }
 
   it("sets the access rung to specific_people (published required)", async () => {
@@ -2681,6 +2723,321 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     );
     expect(after.entries).toHaveLength(0);
     void member;
+  });
+
+  it("GET /shared lists direct grants, but only listed team grants", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const directMember = await seedUser(client, "direct-member");
+    const teammate = await seedUser(client, "teammate");
+    const outsider = await seedUser(client, "outsider");
+    const ownerApp = buildApp(client, { id: owner.id, isAdmin: false });
+    const directCanvas = await publishedCanvas(owner.id);
+    const teamCanvas = await publishedCanvas(owner.id);
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const team = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
+    await teams.addMember(team.id, teammate.id);
+
+    await canvases.addAllowlistEntry({
+      canvasId: directCanvas,
+      principalKind: "member",
+      userId: directMember.id,
+    });
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${directCanvas}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ access: "specific_people" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${directCanvas}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ password: "secret" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${teamCanvas}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ access: "team", teamIds: [team.id] }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const teamLinkOnly = await jsonOf<{ canvases: unknown[]; total: number }>(
+      await buildApp(client, { id: teammate.id, isAdmin: false }).request("/api/canvases/shared"),
+    );
+    expect(teamLinkOnly).toMatchObject({ canvases: [], total: 0 });
+
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${teamCanvas}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ discoverability: "listed" }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const direct = await jsonOf<{
+      canvases: Array<{
+        id: string;
+        access: { kind: string };
+        hasPassword: boolean;
+        owner: { name: string } | null;
+      }>;
+      total: number;
+    }>(
+      await buildApp(client, { id: directMember.id, isAdmin: false }).request(
+        "/api/canvases/shared?q=owner",
+      ),
+    );
+    expect(direct.total).toBe(1);
+    expect(direct.canvases).toEqual([
+      expect.objectContaining({
+        id: directCanvas,
+        access: expect.objectContaining({ kind: "direct" }),
+        hasPassword: true,
+        owner: expect.objectContaining({ name: "owner" }),
+      }),
+    ]);
+
+    const teamListed = await jsonOf<{
+      canvases: Array<{
+        id: string;
+        access: { kind: string; label: string; teamNames?: string[] };
+      }>;
+      total: number;
+    }>(
+      await buildApp(client, { id: teammate.id, isAdmin: false }).request(
+        "/api/canvases/shared?q=design",
+      ),
+    );
+    expect(teamListed.total).toBe(1);
+    expect(teamListed.canvases).toEqual([
+      expect.objectContaining({
+        id: teamCanvas,
+        access: expect.objectContaining({
+          kind: "team",
+          label: "Design",
+          teamNames: ["Design"],
+        }),
+      }),
+    ]);
+
+    const ownerView = await jsonOf<{ canvases: unknown[]; total: number }>(
+      await ownerApp.request("/api/canvases/shared"),
+    );
+    expect(ownerView).toMatchObject({ canvases: [], total: 0 });
+    const outsiderView = await jsonOf<{ canvases: unknown[]; total: number }>(
+      await buildApp(client, { id: outsider.id, isAdmin: false }).request("/api/canvases/shared"),
+    );
+    expect(outsiderView).toMatchObject({ canvases: [], total: 0 });
+  });
+
+  it("GET /shared lists only discoverable Whole-org canvases for same-org non-owners", async () => {
+    client = await makeTestDb("sqlite");
+    const tenantConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "A",
+    });
+    const orgs = orgsRepository(client);
+    const orgA = await orgs.ensureOrg({ name: "A", slug: "a", domains: ["a.example"] });
+    const orgB = await orgs.ensureOrg({ name: "B", slug: "b", domains: ["b.example"] });
+    const owner = await seedUser(client, "owner");
+    const sameOrg = await seedUser(client, "same-org");
+    const otherOrg = await seedUser(client, "other-org");
+    const noOrg = await seedUser(client, "no-org");
+    const tenantApp = (actor: {
+      id: string;
+      isAdmin: boolean;
+      orgIds?: Set<string>;
+      canPublishPublic?: boolean;
+    }) => buildApp(client, actor, undefined, undefined, true, false, undefined, tenantConfig);
+    const ownerApp = tenantApp({ id: owner.id, isAdmin: false, orgIds: new Set([orgA.id]) });
+
+    const listed = await pasteCanvas(ownerApp, { title: "Listed org canvas", orgId: orgA.id });
+    const linkOnly = await pasteCanvas(ownerApp, { title: "Link-only org canvas", orgId: orgA.id });
+    const expired = await pasteCanvas(ownerApp, { title: "Expired org canvas", orgId: orgA.id });
+    const publicLink = await pasteCanvas(ownerApp, { title: "Public link canvas", orgId: orgA.id });
+
+    for (const id of [listed, linkOnly, expired]) {
+      expect(
+        (
+          await ownerApp.request(`/api/canvases/${id}/settings`, {
+            method: "PATCH",
+            headers: mut,
+            body: JSON.stringify({ access: "whole_org" }),
+          })
+        ).status,
+      ).toBe(200);
+    }
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${listed}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ discoverability: "listed" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${expired}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ discoverability: "listed", sharedExpiresAt: Date.now() - 1000 }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await ownerApp.request(`/api/canvases/${publicLink}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ access: "public_link" }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const idsFor = async (actor: { id: string; orgIds?: Set<string> }) => {
+      const body = await jsonOf<{ canvases: Array<{ id: string }>; total: number }>(
+        await tenantApp({ id: actor.id, isAdmin: false, orgIds: actor.orgIds }).request(
+          "/api/canvases/shared",
+        ),
+      );
+      return { total: body.total, ids: body.canvases.map((c) => c.id) };
+    };
+
+    expect(await idsFor({ id: sameOrg.id, orgIds: new Set([orgA.id]) })).toEqual({
+      total: 1,
+      ids: [listed],
+    });
+    expect(await idsFor({ id: owner.id, orgIds: new Set([orgA.id]) })).toEqual({
+      total: 0,
+      ids: [],
+    });
+    expect(await idsFor({ id: otherOrg.id, orgIds: new Set([orgB.id]) })).toEqual({
+      total: 0,
+      ids: [],
+    });
+    expect(await idsFor({ id: noOrg.id, orgIds: new Set() })).toEqual({ total: 0, ids: [] });
+  });
+
+  it("GET /shared search, sorting, and pagination stay server-side and stable", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const viewer = await seedUser(client, "viewer");
+    const ownerApp = buildApp(client, { id: owner.id, isAdmin: false });
+    const canvases = canvasesRepository(client);
+
+    const shareDirect = async (
+      title: string,
+      slug: string,
+      patch: { description?: string | null; tags?: string[] | null } = {},
+    ) => {
+      const id = await pasteCanvas(ownerApp, { title, slug });
+      await canvases.addAllowlistEntry({
+        canvasId: id,
+        principalKind: "member",
+        userId: viewer.id,
+      });
+      await canvases.updateSettings(id, {
+        access: "specific_people",
+        ...patch,
+      });
+      return id;
+    };
+
+    await shareDirect("Gamma Notes", "gamma-notes");
+    await shareDirect("Alpha Plan", "alpha-plan");
+    await shareDirect("Beta Revenue", "beta-revenue", {
+      description: "Quarterly finance summary",
+      tags: ["board"],
+    });
+
+    const page = await jsonOf<{
+      canvases: Array<{ title: string }>;
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      await buildApp(client, { id: viewer.id, isAdmin: false }).request(
+        "/api/canvases/shared?sort=title&limit=2&offset=1",
+      ),
+    );
+    expect(page).toMatchObject({ total: 3, limit: 2, offset: 1 });
+    expect(page.canvases.map((c) => c.title)).toEqual(["Beta Revenue", "Gamma Notes"]);
+
+    const searched = await jsonOf<{ canvases: Array<{ title: string }>; total: number }>(
+      await buildApp(client, { id: viewer.id, isAdmin: false }).request(
+        "/api/canvases/shared?q=quarterly%20board",
+      ),
+    );
+    expect(searched.total).toBe(1);
+    expect(searched.canvases.map((c) => c.title)).toEqual(["Beta Revenue"]);
+
+    const emptySearch = await jsonOf<{
+      canvases: Array<{ title: string }>;
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      await buildApp(client, { id: viewer.id, isAdmin: false }).request(
+        "/api/canvases/shared?q=&sort=title&limit=2&offset=1",
+      ),
+    );
+    expect(emptySearch).toMatchObject({ total: 3, limit: 2, offset: 1 });
+    expect(emptySearch.canvases.map((c) => c.title)).toEqual(["Beta Revenue", "Gamma Notes"]);
+  });
+
+  it("PATCH /settings audits discoverability-only share changes", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const app = buildApp(client, { id: owner.id, isAdmin: false });
+    const id = await publishedCanvas(owner.id);
+
+    expect(
+      (
+        await app.request(`/api/canvases/${id}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ access: "whole_org" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await app.request(`/api/canvases/${id}/settings`, {
+          method: "PATCH",
+          headers: mut,
+          body: JSON.stringify({ discoverability: "listed" }),
+        })
+      ).status,
+    ).toBe(200);
+
+    await vi.waitFor(async () => {
+      const rows = await auditRepository(client).recent(20);
+      const discoveryAudit = rows.find((row) => {
+        const meta = row.meta;
+        return (
+          row.action === "share_change" &&
+          meta !== null &&
+          typeof meta === "object" &&
+          !Array.isArray(meta) &&
+          meta.discoverability === "listed"
+        );
+      });
+      expect(discoveryAudit?.targetId).toBe(id);
+    });
   });
 
   it("individual invite (plan 003 U8): an existing user is granted (allowlist member); a new external email is rejected for a self-serve owner", async () => {

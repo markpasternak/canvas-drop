@@ -1,15 +1,9 @@
-import type { Canvas } from "@canvas-drop/shared/db";
-import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
-import type { UsersRepository } from "../db/repositories/users.js";
 
 /**
  * Shared team-sharing logic (plan 003). The HTTP management routes AND the MCP tools
- * wrap THESE functions — never a parallel copy — so the canvas→team grant rules, the
- * "shared with my teams" read, and the visible-team list can't drift between surfaces
- * (the agent-native parity rule; an earlier hand-copied MCP projection had already
- * dropped fields the HTTP route returned). Each caller adds its own presentation on top
- * (preview hints, URL, avatar) but the data + authz live here once.
+ * wrap THESE functions — never a parallel copy — so the canvas→team grant rules and
+ * visible-team list can't drift between surfaces (the agent-native parity rule).
  */
 
 /** The canvas→team grant action resolved from a settings update. */
@@ -71,50 +65,6 @@ export async function resolveTeamGrant(
   // Rung changing away from team → the grants are meaningless; clear them.
   if (input.targetAccess !== undefined && input.targetAccess !== "team") return { kind: "clear" };
   return { kind: "none" };
-}
-
-/** One canvas shared with the viewer via a team — the raw canvas + a display-only owner
- *  projection (never the owner email or any secret). Callers add `url` + `hasPreview`. */
-export interface SharedTeamCanvas {
-  canvas: Canvas;
-  owner: { id: string; name: string; avatarUrl: string | null } | null;
-}
-
-/**
- * The "shared with my teams" read: the live team canvases the viewer reaches via a team
- * they belong to (the KTD3 live-org re-join is in `listCanvasIdsForUserTeams`). Excludes
- * the viewer's OWN canvases (those live in Your-canvases) and anything not live
- * (unpublished/archived/disabled → unreachable anyway). Strictly team-scoped: these never
- * appear in the org-wide gallery, so this is their only enumeration surface.
- */
-export async function listSharedWithTeams(
-  deps: {
-    teams: Pick<TeamsRepository, "listCanvasIdsForUserTeams">;
-    canvases: Pick<CanvasesRepository, "findByIds">;
-    users: Pick<UsersRepository, "findByIds">;
-  },
-  userId: string,
-  orgIds: Set<string>,
-): Promise<SharedTeamCanvas[]> {
-  const ids = await deps.teams.listCanvasIdsForUserTeams(userId, orgIds);
-  if (ids.length === 0) return [];
-  const rows = (await deps.canvases.findByIds(ids)).filter(
-    (cv) =>
-      cv.ownerId !== userId &&
-      cv.access === "team" &&
-      cv.status === "active" &&
-      cv.currentVersionId !== null,
-  );
-  const owners = new Map(
-    (await deps.users.findByIds(rows.map((r) => r.ownerId))).map((u) => [u.id, u]),
-  );
-  return rows.map((cv) => {
-    const u = owners.get(cv.ownerId);
-    return {
-      canvas: cv,
-      owner: u ? { id: u.id, name: u.name, avatarUrl: u.avatarUrl ?? null } : null,
-    };
-  });
 }
 
 /** One team visible to the viewer with their membership + management flags. `orgId` is null

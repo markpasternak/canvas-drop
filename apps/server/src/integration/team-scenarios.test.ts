@@ -219,7 +219,7 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
     expect(await denied.text()).not.toContain("team secret");
   });
 
-  it("shared-with-teams lists the canvas for a member, excludes the owner and a non-member", async () => {
+  it("Shared lists only discoverable team canvases for a member, excluding owner and non-member", async () => {
     client = await makeTestDb(dialect);
     const acmeId = await seedAcme(client);
     const h = makeHarness(client, { config: teamConfig() });
@@ -228,9 +228,17 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
     const idsFor = async (email: string) =>
       (
         await jsonOf<{ canvases: Array<{ id: string }> }>(
-          await h.GET(email, "/api/canvases/shared-with-teams"),
+          await h.GET(email, "/api/canvases/shared"),
         )
       ).canvases.map((c) => c.id);
+
+    // URL access works for the team member, but Shared is still opt-in.
+    expect(await idsFor(MATE)).not.toContain(canvasId);
+    const listed = await h.SEND(OWNER, "PATCH", `/api/canvases/${canvasId}/settings`, {
+      discoverability: "listed",
+    });
+    expect(listed.status).toBe(200);
+    await listed.text();
 
     // The teammate sees it; the owner does NOT (it's their own); a non-member doesn't either.
     expect(await idsFor(MATE)).toContain(canvasId);

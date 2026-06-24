@@ -126,6 +126,17 @@ export const ACCESS_RUNGS: readonly AccessRung[] = [
 ];
 
 /**
+ * Non-owner enumeration policy for access-controlled canvases.
+ *  - `link_only` — access is by URL only; people who can open it do not see it in Shared.
+ *  - `listed`    — people who already have access may discover it in Shared.
+ *
+ * This never widens URL access. It only controls listing surfaces for `team` and
+ * `whole_org` canvases; direct `specific_people` grants are listed for the grantee.
+ */
+export type CanvasDiscoverability = "link_only" | "listed";
+export const CANVAS_DISCOVERABILITIES: readonly CanvasDiscoverability[] = ["link_only", "listed"];
+
+/**
  * Per-canvas preview policy (plan 004 follow-up):
  *  - `auto`   — capture a screenshot on every publish (the default)
  *  - `off`    — never capture; show the deterministic generative cover

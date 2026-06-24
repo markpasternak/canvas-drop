@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -30,7 +30,6 @@ function mockFetch(handlers: Record<string, () => Response>) {
   const defaults: Record<string, () => Response> = {
     "GET /api/me": () => json(ME),
     "GET /api/teams": () => json({ teams: [] }),
-    "GET /api/canvases/shared-with-teams": () => json({ canvases: [] }),
     "GET /api/people/search": () => json({ people: [] }),
   };
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -173,33 +172,5 @@ describe("teams page", () => {
     await screen.findByText("Ops");
     expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^rename$/i })).toBeNull();
-  });
-
-  it("renders canvases shared with the caller's teams", async () => {
-    mockFetch({
-      "GET /api/canvases/shared-with-teams": () =>
-        json({
-          canvases: [
-            {
-              id: "c9",
-              slug: "shared-thing",
-              url: "http://x/c/shared-thing",
-              title: "Shared Thing",
-              description: "A team canvas",
-              hasPreview: false,
-              owner: { id: "u2", name: "Colleague", avatarUrl: null },
-            },
-          ],
-        }),
-    });
-    renderTeams();
-
-    const card = (await screen.findByText("Shared Thing")).closest("section");
-    expect(card).not.toBeNull();
-    expect(within(card as HTMLElement).getByText(/by Colleague/i)).toBeInTheDocument();
-    expect(within(card as HTMLElement).getByRole("link", { name: /open/i })).toHaveAttribute(
-      "href",
-      "http://x/c/shared-thing",
-    );
   });
 });

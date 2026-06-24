@@ -22,6 +22,7 @@ import { rootEntry } from "../canvas/manifest.js";
 import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
+import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -54,21 +55,21 @@ import {
   resolvePreviewIds,
 } from "../screenshots/preview-ids.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { listSharedWithTeams, resolveTeamGrant } from "../teams/sharing.js";
+import { resolveTeamGrant } from "../teams/sharing.js";
 import { resolveHomeOrg } from "../tenancy/home-org.js";
 import { blobBodyLimit, deployBodyLimit, deployResponse } from "./deploy-common.js";
 
 export interface ManagementDeps extends PreviewHintDeps {
   /** Teams store (plan 003 U4/U5) — the canvas→team grant flow on PATCH /:id/settings,
-   *  the current-grants read on the owner canvas view, and the "shared with my teams"
-   *  list. Optional: suites that don't exercise the team rung may omit it. */
+   *  the current-grants read on the owner canvas view, and Shared discovery. Optional:
+   *  suites that don't exercise the team rung may omit it. */
   teams?: Pick<
     TeamsRepository,
     | "findById"
     | "isTeamMember"
     | "setCanvasTeams"
     | "listTeamIdsForCanvas"
-    | "listCanvasIdsForUserTeams"
+    | "listCanvasGrantsForUserTeams"
     | "teamMatch"
   >;
   config: Config;
@@ -139,6 +140,7 @@ const settingsSchema = z.object({
   // the instance-wide switch is on and the owner's per-user capability has not been
   // revoked. `shared` remains a deprecated boolean alias (true→whole_org, false→private).
   access: z.enum(["private", "specific_people", "team", "whole_org", "public_link"]).optional(),
+  discoverability: z.enum(["link_only", "listed"]).optional(),
   // Teams to grant when access='team' (plan 003 U4). Owner may grant only teams they
   // belong to in this canvas's org (validated server-side at grant time, KTD4).
   teamIds: z.array(z.string().min(1)).max(50).optional(),
@@ -188,6 +190,7 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    discoverability: cv.discoverability,
     // The teams this canvas is shared with (plan 003 U5). Empty unless access==='team'
     // (and only resolved on the single-canvas view; the list path leaves it []).
     teamIds,
@@ -271,6 +274,18 @@ const ownerListQuerySchema = z.object({
   // Active/Archived toggle). A junk value falls back to active.
   scope: z.enum(["active", "archived"]).catch("active"),
   sort: z.enum(["updated", "created", "title", "popular"]).catch("updated"),
+  limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
+  offset: z.coerce.number().int().catch(0),
+});
+
+const sharedListQuerySchema = z.object({
+  q: z
+    .preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().trim().min(1).optional(),
+    )
+    .catch(undefined),
+  sort: z.enum(["updated", "title", "owner"]).catch("updated"),
   limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
   offset: z.coerce.number().int().catch(0),
 });
@@ -587,36 +602,61 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json({ id: cv.id });
   });
 
-  // "Shared with my teams" (plan 003 U5): the team canvases the caller can reach via a
-  // team they belong to. This is the ONLY surface for strictly-team-scoped canvases —
-  // they never appear in the org-wide gallery (locked decision). Static segment, so it
-  // is registered before `/:id` (else Hono captures it as `:id="shared-with-teams"`).
-  // The repo join re-uses the caller's LIVE server-resolved orgIds (KTD3 re-join), so a
-  // user removed from the org sees nothing here. Excludes the caller's OWN canvases
-  // (those live in Your-canvases) and anything not live (unpublished/archived/disabled
-  // → unreachable anyway). Display-only projection — never leaks owner email / secrets.
-  app.get("/shared-with-teams", async (c) => {
+  async function sharedCanvasesResponse(c: Context<AppEnv>) {
     const user = c.get("user");
     const orgIds = c.get("orgIds") ?? new Set<string>();
-    if (!deps.teams) return c.json({ canvases: [] });
-    const shared = await listSharedWithTeams(
+    const parsed = sharedListQuerySchema.safeParse(c.req.query());
+    const data = parsed.success
+      ? parsed.data
+      : {
+          q: undefined,
+          sort: "updated" as const,
+          limit: CANVASES_PAGE_SIZE,
+          offset: 0,
+        };
+    const limit = Math.min(Math.max(data.limit, 1), CANVASES_MAX_LIMIT);
+    const offset = Math.max(data.offset, 0);
+    if (!deps.teams) return c.json({ canvases: [], total: 0, limit, offset });
+    const shared = await listSharedCanvases(
       { teams: deps.teams, canvases: deps.canvases, users: deps.users },
-      user.id,
-      orgIds,
+      {
+        viewerId: user.id,
+        viewerOrgIds: orgIds,
+        tenancyActive: !!deps.config.org.name,
+        now: Date.now(),
+        q: data.q,
+        sort: data.sort,
+        limit,
+        offset,
+      },
     );
-    const previews = await previewIds(shared.map((s) => s.canvas.id));
+    const previews = await previewIds(shared.items.map((s) => s.canvas.id));
     return c.json({
-      canvases: shared.map(({ canvas: cv, owner }) => ({
+      canvases: shared.items.map(({ canvas: cv, owner, access }) => ({
         id: cv.id,
         slug: cv.slug,
         url: canvasUrl(deps.config, cv.slug),
         title: cv.title,
         description: cv.description,
+        tags: Array.isArray(cv.tags) ? cv.tags : [],
+        access,
+        hasPassword: cv.passwordHash !== null,
         hasPreview: previewVisible(cv, previews),
         owner,
+        createdAt: cv.createdAt,
+        updatedAt: cv.updatedAt,
       })),
+      total: shared.total,
+      limit,
+      offset,
     });
-  });
+  }
+
+  // Shared with me: non-owned canvases discoverable to the caller by direct grant,
+  // listed team grant, or listed whole-org share. Static segment, so it is registered
+  // before `/:id` (else Hono captures it as an id). Display-only projection — never
+  // leaks owner email / secrets.
+  app.get("/shared", sharedCanvasesResponse);
 
   app.get("/:id", async (c) => {
     const cv = await ownedCanvas(c);
@@ -709,14 +749,20 @@ export function managementRoutes(deps: ManagementDeps) {
     ) {
       await deletePreviewRenditions(deps.storage, cv.id);
     }
-    // Audit a rung change, OR a grant-only change to the team set (no rung change) — the
-    // latter would otherwise leave no trail when an owner re-picks the granted teams.
-    if (targetAccess !== undefined || teamGranted) {
+    const discoverabilityChanged =
+      patch.discoverability !== undefined && patch.discoverability !== cv.discoverability;
+    // Audit a rung change, discoverability change, OR a grant-only change to the team set
+    // (no rung change) — all change who can find/open the share surface.
+    if (targetAccess !== undefined || discoverabilityChanged || teamGranted) {
       deps.audit.recordAudit({
         action: "share_change",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { access: targetAccess ?? cv.access, ...(teamGranted ? { teamsChanged: true } : {}) },
+        meta: {
+          access: targetAccess ?? cv.access,
+          ...(discoverabilityChanged ? { discoverability: patch.discoverability } : {}),
+          ...(teamGranted ? { teamsChanged: true } : {}),
+        },
       });
     }
     // Revoke-drops-socket (D-RT-6): un-share / new-expiry drop sockets that lost

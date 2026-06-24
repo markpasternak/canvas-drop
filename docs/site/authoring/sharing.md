@@ -42,6 +42,30 @@ default **random** slug (`quiet-otter-x7k2…`). If you give a canvas a **custom
 the dashboard shows a reminder when a canvas is both link-reachable (Whole org / Public
 link) and using a custom slug.
 
+## URL access vs discovery
+
+Access and discovery are separate:
+
+- The **access rung** decides who can open the URL.
+- **List for people with access** decides whether a **Team** or **Whole org** share is
+  discoverable in **Shared** for people who already have access.
+
+When listing is off, the canvas is **link-only**: anyone covered by the rung can still open
+the URL, but the canvas does not appear in Shared and cannot be added to the gallery through
+that rung. This is the default for Team and Whole-org shares, matching the "restricted but
+open with the link" model.
+
+When listing is on:
+
+- **Team** canvases appear in **Shared** for members of the granted teams. They still never
+  appear in the gallery.
+- **Whole org** canvases appear in **Shared** for members of the canvas's home org. They can
+  also be listed in the gallery if every gallery precondition is met.
+
+**Specific people** shares are already addressed to named people, so active direct grants
+appear in those people's Shared view without a separate listing switch. **Public link**
+canvases do not appear in Shared; use the gallery for intentional public/org-wide discovery.
+
 ## Adding specific people
 
 Choose **Specific people**, then add by email. The result is deterministic:
@@ -81,8 +105,9 @@ backend, like a member). A team grant is independent of your own membership afte
 you later leave the team, the canvas stays shared with it until you change the rung.
 
 Team canvases are **strictly team-scoped**: they never appear in the org-wide gallery.
-Members reach them through **Teams → Shared with your teams** in the dashboard (or
-`list_shared_with_teams` over [MCP](/docs/agents/mcp)). For an **org** team, membership is
+By default they are link-only. Turn on **List for people with access** if team members
+should be able to find them under **Shared** in the dashboard (or through
+`list_shared_canvases` over [MCP](/docs/agents/mcp)). For an **org** team, membership is
 re-checked on every request against your *live* org membership, so someone removed from the
 org loses access immediately, even if a stale team row lingers. For a **personal** team,
 direct membership is the boundary.
@@ -127,21 +152,27 @@ up to 50 characters each**. Agents set the same field with `update_canvas` (the
 
 The Share tab also has an opt-in **gallery** listing (the canvas's **description**,
 its **tags**, and an optional *use as template* toggle). A canvas can only be listed
-when it has a shared access rung, a published version, and **no password** set. The
-**description** is a single field (max 2000 characters) used everywhere the canvas is
-shown — the Overview tab, the gallery, and grid cards — there is no separate "gallery
-summary". Agents set it with `update_canvas` (the `description` parameter).
+when it is published, has **no password** set, and is either:
+
+- **Public link**, or
+- **Whole org** with **List for people with access** turned on.
+
+Team, Specific-people, and link-only Whole-org canvases never appear in the gallery.
+The **description** is a single field (max 2000 characters) used everywhere the canvas is
+shown — the Overview tab, the gallery, Shared, and grid cards — there is no separate
+"gallery summary". Agents set it with `update_canvas` (the `description` parameter).
 
 ## Finding canvases (search)
 
-Both **Your canvases** and the **gallery** share one forgiving search. A query
-matches across a canvas's **title, description, tags, and slug**, and matching is
+**Your canvases**, **Shared**, and the **gallery** share one forgiving search. A query
+matches across a canvas's **title, description, tags, and slug**; Shared also matches
+the owner name and access context such as team name. Matching is
 **case-, accent-, and whitespace-insensitive** — `café`, `Cafe`, and `caf` all find
 "Café Menu". A multi-word query is AND-matched: every word must appear somewhere
 in those fields (the words can live in different fields — e.g. a word in the
-title and another in a tag). The same forgiving search backs the MCP
-`list_canvases` `query` filter; that tool also takes a `tags` filter that matches
-any canvas carrying any of the given tags.
+title and another in a tag). The same forgiving search backs the MCP `list_canvases`
+and `list_shared_canvases` `query` filters; `list_canvases` also takes a `tags`
+filter that matches any owned canvas carrying any of the given tags.
 
 ## When an admin disables a canvas
 

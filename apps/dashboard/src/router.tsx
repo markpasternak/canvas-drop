@@ -13,6 +13,7 @@ import type {
 // Route components are lazy-loaded so the initial bundle stays small (§13.4
 // LCP / route-transition budgets — area E, U2).
 const IndexRoute = lazy(() => import("./routes/index.js"));
+const SharedRoute = lazy(() => import("./routes/shared.js"));
 const GalleryRoute = lazy(() => import("./routes/gallery.js"));
 const TeamsRoute = lazy(() => import("./routes/teams.js"));
 const NewRoute = lazy(() => import("./routes/new.js"));
@@ -92,6 +93,19 @@ const archivedRoute = createRoute({
     throw redirect({ to: "/", search: { scope: "archived" } });
   },
 });
+
+export interface SharedSearch {
+  q?: string;
+  sort?: "updated" | "title" | "owner";
+  view?: "grid" | "list";
+  page?: number;
+}
+const sharedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/shared",
+  component: SharedRoute,
+});
+
 /** Gallery browse search params (shared with the gallery view). Filters + sort
  *  (plan 004) live here too so a filtered view is shareable and back-button-able. */
 /** Mirrors `GallerySort` in `lib/api.ts` (the backend-supported axes). `featured`/
@@ -274,6 +288,7 @@ const cardDemoRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   archivedRoute,
+  sharedRoute,
   galleryRoute,
   teamsRoute,
   newRoute,

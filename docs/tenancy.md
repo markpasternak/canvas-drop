@@ -25,7 +25,7 @@ runbook for turning it on and migrating existing data.
 
 Deploying the code changes **nothing** until you name an org. With no
 `CANVAS_DROP_ORG_NAME`, tenancy is **inert**: `whole_org` keeps its legacy "any signed-in
-user" meaning and `org_id` is ignored everywhere (serve, gallery, clone). This makes the
+user" meaning and `org_id` is ignored everywhere (serve, Shared, gallery, clone). This makes the
 rollout safe — you merge first, migrate later.
 
 ## Configuration

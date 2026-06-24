@@ -50,7 +50,7 @@ import { useClipboardCopy } from "../lib/clipboard.js";
 import { cn } from "../lib/cn.js";
 import { useArchiveCanvas, useDeleteCanvas, useUnarchiveCanvas } from "../lib/mutations.js";
 import { type CanvasView, persistOwnerView, resolveOwnerView } from "../lib/owner-view.js";
-import { useCanvases, useCanvasTags } from "../lib/queries.js";
+import { useCanvases, useCanvasTags, useSharedCanvases } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { useDebouncedUrlSearch } from "../lib/use-debounced-url-search.js";
 import { useMediaQuery } from "../lib/use-media-query.js";
@@ -540,6 +540,7 @@ export default function CanvasList() {
   // The owner's complete tag vocabulary (across ALL their canvases, every page/
   // filter), for the TagFilter control — symmetric to the gallery's facets.
   const canvasTags = useCanvasTags();
+  const sharedPeek = useSharedCanvases({ limit: 1 });
 
   // A refetch that drops below the current page (e.g. a canvas was archived while
   // on the last page) snaps back to page 1 rather than showing an empty page.
@@ -739,6 +740,12 @@ export default function CanvasList() {
   // always shows its rows.
   const pristineEmpty =
     !archivedView && Boolean(data) && items.length === 0 && total === 0 && !filtering;
+
+  useEffect(() => {
+    if (pristineEmpty && summary.archived === 0 && (sharedPeek.data?.total ?? 0) > 0) {
+      navigate({ to: "/shared", replace: true });
+    }
+  }, [navigate, pristineEmpty, sharedPeek.data?.total, summary.archived]);
 
   // Whether to render the inline (xl) detail rail: only when a canvas is focused
   // AND we're showing the library (the pristine onboarding view has no rail). When

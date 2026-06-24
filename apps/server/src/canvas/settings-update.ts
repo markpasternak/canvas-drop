@@ -1,4 +1,4 @@
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, CanvasDiscoverability } from "@canvas-drop/shared/db";
 import type { CanvasSettingsPatch } from "../db/repositories/canvases.js";
 import { cdnAccessDowngradeWarning } from "../http/cdn-cache.js";
 import { isAnonymouslyPublic } from "./authorization.js";
@@ -9,6 +9,7 @@ export interface CanvasSettingsInput {
   title?: string;
   description?: string | null;
   access?: "private" | "specific_people" | "team" | "whole_org" | "public_link";
+  discoverability?: CanvasDiscoverability;
   shared?: boolean;
   guestAiEnabled?: boolean;
   guestAiCap?: number;
@@ -61,7 +62,7 @@ export function resolveSettingsUpdate(
     tenancyActive: boolean;
   },
 ): SettingsResolution {
-  const { password, shared, access, ...rest } = input;
+  const { password, shared, access, discoverability, ...rest } = input;
   // The target rung: the first-class `access` field wins; else the deprecated
   // `shared` boolean maps to whole_org/private; else unchanged (undefined).
   const targetAccess =
@@ -71,6 +72,13 @@ export function resolveSettingsUpdate(
   // predicate so the at-rest row can't reach a listed-but-invisible state.
   const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
   const effectiveAccess = targetAccess ?? cv.access;
+  const discoverableAccess = effectiveAccess === "team" || effectiveAccess === "whole_org";
+  const effectiveDiscoverability = discoverableAccess
+    ? (discoverability ?? cv.discoverability)
+    : "link_only";
+  const galleryEligible =
+    effectiveAccess === "public_link" ||
+    (effectiveAccess === "whole_org" && effectiveDiscoverability === "listed");
   const willBeShared = effectiveAccess !== "private";
   // "Published" means the full lifecycle state (active + a current version), not just
   // "has a version" — an archived canvas keeps its currentVersionId.
@@ -129,6 +137,22 @@ export function resolveSettingsUpdate(
         status: 409,
       };
     }
+    if (effectiveAccess === "whole_org" && effectiveDiscoverability !== "listed") {
+      return {
+        ok: false,
+        code: "NOT_DISCOVERABLE",
+        message: "List this canvas for people with access before listing it in the gallery.",
+        status: 409,
+      };
+    }
+    if (!galleryEligible) {
+      return {
+        ok: false,
+        code: "NOT_GALLERY_ELIGIBLE",
+        message: "Only Public link or listed Whole org canvases can be listed in the gallery.",
+        status: 409,
+      };
+    }
     if (!isPublished) {
       return {
         ok: false,
@@ -148,7 +172,7 @@ export function resolveSettingsUpdate(
   }
   // Setting a password OR un-sharing forces the canvas un-listed.
   const finalListed =
-    typeof password === "string" || !willBeShared
+    typeof password === "string" || !willBeShared || !galleryEligible
       ? false
       : (rest.galleryListed ?? cv.galleryListed);
   if (rest.galleryTemplatable === true && !finalListed) {
@@ -162,11 +186,16 @@ export function resolveSettingsUpdate(
 
   const patch: CanvasSettingsPatch = { ...rest };
   if (targetAccess !== undefined) patch.access = targetAccess;
+  if (discoverableAccess) {
+    if (discoverability !== undefined) patch.discoverability = discoverability;
+  } else if (discoverability !== undefined || targetAccess !== undefined) {
+    patch.discoverability = "link_only";
+  }
   // Dropping to private un-lists but KEEPS the tags (re-sharing restores listing);
   // a newly-set password un-lists AND clears the gallery tags (R10). The unified
   // `description` (U21) is the canvas's own overview field — NOT gallery-only — so it
   // is never cleared here; only the gallery listing + tags are reset.
-  if (targetAccess === "private") {
+  if (!galleryEligible) {
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
   }

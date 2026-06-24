@@ -21,6 +21,7 @@ const OUT = join(ASSETS_DIR, "tour.webp");
 const FRAMES = [
   "landing-dashboard.webp",
   "tour-editor.webp",
+  "tour-shared.webp",
   "landing-gallery.webp",
   "tour-sharing.webp",
   "tour-teams.webp",

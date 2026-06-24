@@ -24,6 +24,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     ownerId: "owner",
     orgId: null,
     access: "whole_org",
+    discoverability: "listed",
     sharedExpiresAt: null,
     galleryListed: false,
     galleryTemplatable: false,
@@ -164,6 +165,18 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "PASSWORD_PROTECTED", status: 409 });
   });
 
+  it("NOT_DISCOVERABLE: whole-org gallery listing requires listed discoverability", () => {
+    const r = resolve(canvas({ discoverability: "link_only" }), { galleryListed: true });
+    expect(r).toMatchObject({ ok: false, code: "NOT_DISCOVERABLE", status: 409 });
+  });
+
+  it("NOT_GALLERY_ELIGIBLE: team canvases cannot be listed in the gallery", () => {
+    const r = resolve(canvas({ access: "team", discoverability: "listed" }), {
+      galleryListed: true,
+    });
+    expect(r).toMatchObject({ ok: false, code: "NOT_GALLERY_ELIGIBLE", status: 409 });
+  });
+
   it("NOT_LISTED: enabling templatable without the canvas being listed is rejected (409)", () => {
     const r = resolve(canvas(), { galleryTemplatable: true });
     expect(r).toMatchObject({ ok: false, code: "NOT_LISTED", status: 409 });
@@ -183,6 +196,55 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     if (r.ok) {
       expect(r.patch.galleryListed).toBe(true);
       expect(r.patch.galleryTemplatable).toBe(true);
+    }
+  });
+
+  it("lists a whole-org canvas when discoverability is enabled in the same patch", () => {
+    const r = resolve(canvas({ discoverability: "link_only" }), {
+      discoverability: "listed",
+      galleryListed: true,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.discoverability).toBe("listed");
+      expect(r.patch.galleryListed).toBe(true);
+    }
+  });
+
+  it("setting whole-org discoverability back to link_only clears gallery/template flags", () => {
+    const r = resolve(
+      canvas({ discoverability: "listed", galleryListed: true, galleryTemplatable: true }),
+      { discoverability: "link_only" },
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.discoverability).toBe("link_only");
+      expect(r.patch.galleryListed).toBe(false);
+      expect(r.patch.galleryTemplatable).toBe(false);
+    }
+  });
+
+  it("persists listed discoverability for a team canvas without gallery listing", () => {
+    const r = resolve(canvas({ access: "team", discoverability: "link_only" }), {
+      discoverability: "listed",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.discoverability).toBe("listed");
+      expect(r.patch.galleryListed).toBe(false);
+    }
+  });
+
+  it("resets discoverability when access changes to a non-listable rung", () => {
+    const r = resolve(canvas({ discoverability: "listed", galleryListed: true }), {
+      access: "specific_people",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.access).toBe("specific_people");
+      expect(r.patch.discoverability).toBe("link_only");
+      expect(r.patch.galleryListed).toBe(false);
+      expect(r.patch.galleryTemplatable).toBe(false);
     }
   });
 

@@ -32,6 +32,7 @@ export function useUpdateSettings(id: string) {
         if (patch.description !== undefined) optimistic.description = patch.description;
         if (patch.tags !== undefined) optimistic.tags = patch.tags;
         if (patch.shared !== undefined) optimistic.shared = patch.shared;
+        if (patch.discoverability !== undefined) optimistic.discoverability = patch.discoverability;
         if (patch.sharedExpiresAt !== undefined) optimistic.sharedExpiresAt = patch.sharedExpiresAt;
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
@@ -49,6 +50,9 @@ export function useUpdateSettings(id: string) {
           // The team grant set is single-valued: leaving `team` clears it server-side,
           // so mirror that optimistically (the picker collapses with the rung).
           if (patch.access !== "team") optimistic.teamIds = [];
+          if (patch.access !== "team" && patch.access !== "whole_org") {
+            optimistic.discoverability = "link_only";
+          }
         }
         // A team grant change (access stays 'team', teams added/removed).
         if (patch.teamIds !== undefined) optimistic.teamIds = patch.teamIds;
@@ -63,9 +67,9 @@ export function useUpdateSettings(id: string) {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });
       qc.invalidateQueries({ queryKey: keys.canvases });
-      // A team-grant change moves the canvas in/out of others' "shared with my teams"
-      // view (the `keys.canvases` prefix above already covers this key, but be explicit).
-      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+      // Access/discoverability changes move the canvas in/out of others' Shared view
+      // (the `keys.canvases` prefix above already covers these keys, but be explicit).
+      qc.invalidateQueries({ queryKey: ["canvases", "shared"] });
     },
   });
 }
@@ -597,14 +601,14 @@ export function useRenameTeam() {
 }
 
 /** Delete a team (creator or admin). Sweeps its memberships + canvas grants server-side,
- *  so a team canvas may lose its only grant — refresh the shared-with-teams view too. */
+ *  so a team canvas may leave Shared too. */
 export function useDeleteTeam() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.teams.remove(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.teams });
-      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+      qc.invalidateQueries({ queryKey: ["canvases", "shared"] });
     },
   });
 }
@@ -618,13 +622,13 @@ export function useAddTeamMember(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.teamMembers(id) });
       qc.invalidateQueries({ queryKey: keys.teams });
-      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+      qc.invalidateQueries({ queryKey: ["canvases", "shared"] });
     },
   });
 }
 
 /** Remove a member (or leave, when userId is the caller). Leaving can change which
- *  team canvases the caller still reaches, so refresh the shared-with-teams view. */
+ *  team canvases the caller still reaches, so refresh Shared. */
 export function useRemoveTeamMember(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -632,7 +636,7 @@ export function useRemoveTeamMember(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.teamMembers(id) });
       qc.invalidateQueries({ queryKey: keys.teams });
-      qc.invalidateQueries({ queryKey: keys.sharedWithTeams });
+      qc.invalidateQueries({ queryKey: ["canvases", "shared"] });
     },
   });
 }

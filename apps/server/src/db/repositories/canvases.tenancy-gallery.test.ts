@@ -22,6 +22,13 @@ async function setTenancy(
   await db.update(t).set(patch).where(eq(t.id, id));
 }
 
+async function setDiscoverability(client: DbClient, id: string, discoverability: string) {
+  // biome-ignore lint/suspicious/noExplicitAny: dual-dialect test seam
+  const db = client.db as any;
+  const t = client.dialect === "sqlite" ? sqliteSchema.canvases : pgSchema.canvases;
+  await db.update(t).set({ discoverability }).where(eq(t.id, id));
+}
+
 describe.each(DIALECTS)("gallery org-scope (plan 002 U5) [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
@@ -119,5 +126,19 @@ describe.each(DIALECTS)("gallery org-scope (plan 002 U5) [%s]", (dialect) => {
         viewerOrgIds: new Set(),
       }),
     ).toBeNull();
+  });
+
+  it("listed Whole-org gallery rows disappear when switched to link-only discovery", async () => {
+    const { repo, orgCanvas, publicCanvas, a } = await seedOrgAndPublic();
+    await setDiscoverability(client, orgCanvas, "link_only");
+    const scope = { tenancyActive: true, viewerOrgIds: a };
+
+    const { items } = await repo.listGallery({ now: NOW, scope, limit: 24, offset: 0 });
+    expect(items.map((i) => i.canvas.id)).toEqual([publicCanvas]);
+
+    const facets = await repo.listGalleryFacets(NOW, scope);
+    expect(facets.tags).toContain("public-tag");
+    expect(facets.tags).not.toContain("org-only");
+    expect(await repo.findCloneableTemplate(orgCanvas, NOW, scope)).toBeNull();
   });
 });

@@ -45,17 +45,22 @@ client registration) and then get identity-scoped tools across every canvas you 
 `invite_to_canvas`/`revoke_access`, the team tools `list_teams`/
 `create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
 `add_team_member`/`remove_team_member`/`list_team_members`/
-`list_shared_with_teams` (plus `update_canvas` with `access: "team"` + `teamIds` to share
+`list_shared_canvases` (plus `update_canvas` with `access: "team"` + `teamIds` to share
 a canvas with a team), and the editor draft loop `get_draft`/
 `read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
 `publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
 anything an owner can do in the UI, an agent can do here. The full table is in the
-[MCP server](/docs/agents/mcp) reference. A tool only touches canvases you own. Typical
+[MCP server](/docs/agents/mcp) reference. Owner-scoped management tools only touch
+canvases you own; `list_shared_canvases` returns non-owned canvases already accessible
+to you. Typical
 flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `query`
 (matches title + description + tags + slug, case/accent/whitespace-insensitive, multi-word
 AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)
 and the canvas's unified `tags` (max 20, ≤50 chars each — one set used for both owner-list
-filtering and public gallery display, no separate "gallery summary"/"gallery tags"). When the
+filtering and public gallery display, no separate "gallery summary"/"gallery tags").
+For Team and Whole-org shares, `update_canvas.discoverability` is `link_only` by default;
+set it to `listed` only when people who already have access should find the canvas in
+Shared. When the
 instance has an org boundary configured, `whoami` also returns your `orgs`, your `teams`, and
 an `isGuest` flag; pass an org `id` as `create_canvas`'s `orgId` to home a canvas in the org so
 it can be shared org-wide (omit for personal). With no org configured these are no-ops.
@@ -116,15 +121,17 @@ Share tab (or its session-authenticated management API). The rung is one of:
   that materialize after exact-email verified sign-in.
 - `team` — members of the granted teams. A team is personal (friends & family) or
   org-attached (a subset of the org, re-checked against live org membership on every
-  request). Strictly team-scoped (never in the gallery).
-- `whole_org` — any authenticated org member with the link.
+  request). Link-only by default; set `discoverability: "listed"` to show it in Shared.
+- `whole_org` — any authenticated org member with the link. Link-only by default; set
+  `discoverability: "listed"` to show it in Shared and make it eligible for gallery listing.
 - `public_link` — anyone with the link while the instance switch is on and the owner
   account has not been revoked (`canPublishPublic`), and **static-only** for non-owners: every backend
   primitive is refused, returning `403 STATIC_ONLY`.
 
 Specific people are added through auth-delegated Add person grants: existing users are
-granted now; admissible new emails show as pending until first verified sign-in. Public links,
-password locks, share expiry, and the full access model are in
+granted now; admissible new emails show as pending until first verified sign-in. Team and
+Whole-org shares can stay URL-only or be listed in Shared for people who already have access.
+Public links, password locks, share expiry, and the full access model are in
 [Sharing & access](/docs/authoring/sharing).
 
 ## Capabilities and errors

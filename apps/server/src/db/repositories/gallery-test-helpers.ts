@@ -62,6 +62,7 @@ export async function seedListed(
   const id = await seedPublishedCanvas(client, ownerId);
   await canvasesRepository(client).updateSettings(id, {
     access: "whole_org",
+    discoverability: "listed",
     galleryListed: true,
     description: "A useful canvas",
     tags: ["charts"],

@@ -135,12 +135,14 @@ describe.each(
     expect(await teams.teamMatch(canvas.id, friend.id, new Set())).toBe(false);
   });
 
-  it("listCanvasIdsForUserTeams returns a personal team canvas for a no-org member", async () => {
+  it("listCanvasGrantsForUserTeams returns a personal team canvas for a no-org member", async () => {
     const { teams, friend, canvas } = await seedPersonal();
-    expect(await teams.listCanvasIdsForUserTeams(friend.id, new Set())).toContain(canvas.id);
+    expect(await teams.listCanvasGrantsForUserTeams(friend.id, new Set())).toEqual([
+      expect.objectContaining({ canvasId: canvas.id, teamName: "Friends" }),
+    ]);
     // A stranger gets nothing.
-    const { teams: t2, stranger, canvas: c2 } = await seedPersonal();
-    expect(await t2.listCanvasIdsForUserTeams(stranger.id, new Set())).not.toContain(c2.id);
+    const { teams: t2, stranger } = await seedPersonal();
+    expect(await t2.listCanvasGrantsForUserTeams(stranger.id, new Set())).toEqual([]);
   });
 
   it("a creator can have a personal AND an org team of the same name (creator-local naming)", async () => {

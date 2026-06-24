@@ -4,6 +4,7 @@ import {
   type AccessRung,
   type AllowlistPrincipalKind,
   type Canvas,
+  type CanvasDiscoverability,
   type CanvasStatus,
   type Json,
   type PreviewMode,
@@ -33,13 +34,14 @@ import type { DbClient } from "../factory.js";
 
 /**
  * The share + gallery columns cleared whenever a canvas leaves the Published
- * state (unpublish, archive) — invariant: listed ⟹ shared ⟹ published. The repo
- * writes spread this into their `.set()`; the management routes spread it into the
- * returned view (which is built from the pre-mutation row), so the DB write and
- * the optimistic response can never clear different fields. One source of truth.
+ * state (unpublish, archive). The repo writes spread this into their `.set()`;
+ * the management routes spread it into the returned view (which is built from
+ * the pre-mutation row), so the DB write and the optimistic response can never
+ * clear different fields. One source of truth.
  */
 export const CLEARED_PUBLICATION_FIELDS = {
   access: "private",
+  discoverability: "link_only",
   sharedExpiresAt: null,
   galleryListed: false,
   galleryTemplatable: false,
@@ -108,6 +110,7 @@ export interface CanvasSettingsPatch {
   title?: string;
   description?: string | null;
   access?: AccessRung;
+  discoverability?: CanvasDiscoverability;
   guestAiEnabled?: boolean;
   guestAiCap?: number;
   sharedExpiresAt?: number | null;
@@ -144,6 +147,11 @@ export type GallerySort = "published" | "recent" | "updated" | "title" | "featur
 export interface GalleryScope {
   tenancyActive: boolean;
   viewerOrgIds: Set<string>;
+}
+
+/** Scope for listing non-owned canvases discoverable to the signed-in viewer. */
+export interface SharedCanvasScope extends GalleryScope {
+  viewerId: string;
 }
 
 export interface GalleryListOptions {
@@ -271,10 +279,11 @@ export function canvasesRepository(client: DbClient) {
    * The §12 gallery-visibility predicate, shared by {@link listGallery} and the
    * clone-eligibility check ({@link findCloneableTemplate}) so "is this in the
    * gallery" and "may a non-owner clone this" can never drift apart (plan 002
-   * KTD4). A canvas is visible only when it is active, shared, listed, unexpired,
-   * published, AND unprotected — the `password_hash IS NULL` clause makes a
-   * protected canvas invisible even if a stale row still has it listed (plan 002
-   * R10, reversing the M8 "protected canvases are listed" decision).
+   * KTD4). A canvas is visible only when it is active, gallery-listed, on a
+   * gallery-eligible rung, unexpired, published, AND unprotected — the
+   * `password_hash IS NULL` clause makes a protected canvas invisible even if a
+   * stale row still has it listed (plan 002 R10, reversing the M8 "protected
+   * canvases are listed" decision).
    */
   const galleryVisibilityFilters = (now: number, scope?: GalleryScope) => {
     const filters: Array<SQL | undefined> = [
@@ -284,19 +293,29 @@ export function canvasesRepository(client: DbClient) {
       isNotNull(t.currentVersionId),
       isNull(t.passwordHash),
     ];
-    // The access tier (plan 002 U5). INERT (no scope / tenancy off): the legacy rule —
-    // whole_org OR public_link, org-agnostic. ACTIVE: public_link stays visible to all,
-    // but a whole_org row is enumerable only by a member of its home org (and a null
-    // org_id is never enumerable). A guest/personal viewer (∅) sees only public_link.
+    // The access tier (plan 002 U5 + Shared discovery): public_link remains gallery-
+    // visible when the owner opted into the gallery. whole_org additionally requires
+    // discoverability='listed' so "link only" org shares don't become directory entries.
+    // ACTIVE tenancy still scopes whole_org to the viewer's live org membership.
     if (!scope?.tenancyActive) {
-      filters.push(inArray(t.access, ["whole_org", "public_link"]));
+      filters.push(
+        or(
+          eq(t.access, "public_link"),
+          and(eq(t.access, "whole_org"), eq(t.discoverability, "listed")),
+        ),
+      );
     } else {
       const orgIds = [...scope.viewerOrgIds];
       filters.push(
         orgIds.length > 0
           ? or(
               eq(t.access, "public_link"),
-              and(eq(t.access, "whole_org"), isNotNull(t.orgId), inArray(t.orgId, orgIds)),
+              and(
+                eq(t.access, "whole_org"),
+                eq(t.discoverability, "listed"),
+                isNotNull(t.orgId),
+                inArray(t.orgId, orgIds),
+              ),
             )
           : eq(t.access, "public_link"),
       );
@@ -560,6 +579,57 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
+     * Direct `specific_people` shares discoverable to the viewer. This is only one
+     * candidate source for Shared; team/org candidates are resolved separately and merged
+     * by the shared-list service so access-context labels stay clear.
+     */
+    async listDirectSharedWithUser(userId: string, now: number): Promise<Canvas[]> {
+      const rows = (await db
+        .select({ canvas: t })
+        .from(t)
+        .innerJoin(allowlistT, eq(allowlistT.canvasId, t.id))
+        .where(
+          and(
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+            eq(t.access, "specific_people"),
+            ne(t.ownerId, userId),
+            eq(t.status, "active"),
+            isNotNull(t.currentVersionId),
+            or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
+          ),
+        )
+        .orderBy(desc(t.updatedAt), desc(t.id))) as Array<{ canvas: Canvas }>;
+      return rows.map((r) => r.canvas);
+    },
+
+    /**
+     * Whole-org canvases discoverable to the viewer. `discoverability='listed'` is
+     * mandatory; URL access for `link_only` rows is still enforced by the serve path, but
+     * they do not enumerate here.
+     */
+    async listWholeOrgSharedWithUser(scope: SharedCanvasScope, now: number): Promise<Canvas[]> {
+      const filters: Array<SQL | undefined> = [
+        eq(t.access, "whole_org"),
+        eq(t.discoverability, "listed"),
+        ne(t.ownerId, scope.viewerId),
+        eq(t.status, "active"),
+        isNotNull(t.currentVersionId),
+        or(isNull(t.sharedExpiresAt), gt(t.sharedExpiresAt, now)),
+      ];
+      if (scope.tenancyActive) {
+        const orgIds = [...scope.viewerOrgIds];
+        if (orgIds.length === 0) return [];
+        filters.push(isNotNull(t.orgId), inArray(t.orgId, orgIds));
+      }
+      return (await db
+        .select()
+        .from(t)
+        .where(and(...filters))
+        .orderBy(desc(t.updatedAt), desc(t.id))) as Canvas[];
+    },
+
+    /**
      * Your-canvases list with server-side filter/search/sort + offset pagination
      * (plan 005). Mirrors {@link listGallery}'s shape. The owner-scope base
      * (`ownerId = me`, status not deleted/archived) is the fixed first two filters;
@@ -735,6 +805,7 @@ export function canvasesRepository(client: DbClient) {
       if (patch.galleryListed === false) set.galleryTemplatable = false;
       if (patch.tags !== undefined) set.tags = patch.tags;
       if (patch.access !== undefined) set.access = patch.access;
+      if (patch.discoverability !== undefined) set.discoverability = patch.discoverability;
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
       if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
       // Fold the search blob into the SAME write when this patch touches any of its
@@ -987,8 +1058,8 @@ export function canvasesRepository(client: DbClient) {
       const rows = (await db
         .update(t)
         // Archiving leaves the published state, so it reverts sharing and gallery
-        // listing too (invariant: listed ⟹ shared ⟹ published). Unarchive restores
-        // the canvas at the same URL; the owner re-shares deliberately.
+        // listing too. Unarchive restores the canvas at the same URL; the owner
+        // re-shares deliberately.
         .set({ status: "archived", ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
@@ -1100,12 +1171,11 @@ export function canvasesRepository(client: DbClient) {
     /**
      * Unpublish (owner-initiated, reversible): take a published canvas back to the
      * Draft state. Clears the current-version pointer (the public URL then 404s),
-     * reverts sharing, AND clears gallery listing in the same write — leaving the
-     * published state reverts share (invariant: shared ⟹ published), and a Draft
-     * canvas can't sit in the gallery (listed ⟹ shared). Guarded to fire ONLY from
-     * an `active` row that currently has a published version, so the route 409s on a
-     * Draft/archived/disabled canvas instead of silently no-opping. The draft and
-     * version history are untouched; re-publishing (and re-sharing) brings it back.
+     * reverts sharing, AND clears gallery listing in the same write. Guarded to
+     * fire ONLY from an `active` row that currently has a published version, so
+     * the route 409s on a Draft/archived/disabled canvas instead of silently
+     * no-opping. The draft and version history are untouched; re-publishing (and
+     * re-sharing) brings it back.
      */
     async unpublish(id: string): Promise<boolean> {
       const rows = (await db
@@ -1151,10 +1221,10 @@ export function canvasesRepository(client: DbClient) {
 
     /**
      * Opt-in gallery listing (plan 008 / M8). Returns only canvases that are
-     * simultaneously active, shared, gallery-listed, unexpired, AND have a
-     * published version — the §12 visibility predicate, evaluated per request with
-     * no cached grants, so revoke / expiry / archive / disable / delete / un-list
-     * remove a canvas from the gallery on the very next call. The
+     * simultaneously active, gallery-listed, on a gallery-eligible access rung,
+     * unexpired, AND have a published version — the §12 visibility predicate,
+     * evaluated per request with no cached grants, so revoke / expiry / archive /
+     * disable / delete / un-list remove a canvas from the gallery on the very next call. The
      * `current_version_id IS NOT NULL` clause keeps a never-deployed (or
      * fully-pruned) canvas out of the gallery so it never renders as a dead link.
      *

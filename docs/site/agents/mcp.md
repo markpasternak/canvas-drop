@@ -30,8 +30,11 @@ a live token on the next request.
 
 ## Tools
 
-Every tool is scoped to your account. A canvas you don't own reads as *not found* —
-there is no cross-owner access and no existence leak.
+Owner-management tools are scoped to your account. A canvas you don't own reads as
+*not found* — there is no cross-owner owner-surface access and no existence leak.
+Identity-scoped discovery tools are explicit exceptions: `list_shared_canvases`
+returns only non-owned canvases you can already open and whose owner made them
+discoverable in Shared.
 
 | Tool | What it does |
 |---|---|
@@ -53,7 +56,7 @@ there is no cross-owner access and no existence leak.
 | `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes any retained legacy guest sessions for that canvas. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
 | `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
-| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), and retained legacy guest-session AI settings where present. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to in the canvas's org — see `list_teams`); switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs the instance switch on and the owner account not revoked; a password un-lists). |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `discoverability` (`link_only` or `listed` for Team / Whole-org shares; affects listing only, never URL access), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), and retained legacy guest-session AI settings where present. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to — see `list_teams`; personal teams can be granted to any canvas you own, while org teams must match the canvas org); add `discoverability: "listed"` when team members should find it in Shared. Switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs the instance switch on and the owner account not revoked; a password un-lists). |
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
 | `list_access` | List active named people plus pending sign-in grants for a canvas you own (each with an `id` for `revoke_access`; legacy guest rows can still appear during migration). |
 | `search_people` | Search eligible people for the Add person picker, scoped to a canvas you own or a team you can see. This mirrors the dashboard autocomplete and does not expose the admin People directory. |
@@ -67,7 +70,7 @@ there is no cross-owner access and no existence leak.
 | `rename_team` / `delete_team` | Rename or delete a team you created. Deleting unshares every canvas shared with it (the canvases are untouched). |
 | `add_team_member` / `remove_team_member` | Add someone to a team you belong to by `email`, or remove a member (pass your own user id to leave). Returns `status`: `granted` (existing user joined now) or `pending` (a brand-new person joins on first sign-in). For an org team they must be a same-org member; a brand-new external email on a personal team is refused for a non-admin unless the instance allows it. |
 | `list_team_members` | The roster of a team you belong to (`userId`, `email`, `name`). |
-| `list_shared_with_teams` | Canvases shared with one of your teams (the "shared with your teams" view) — strictly team-scoped, never in the gallery. Display-only; open via the returned `url`. |
+| `list_shared_canvases` | Non-owned canvases discoverable to you in **Shared**: direct Specific-people grants, listed Team shares, and listed Whole-org shares. Takes optional `query`, `sort` (`updated`/`title`/`owner`), `limit`, and `offset`. Display-only; open via the returned `url`. |
 | `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
 | `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |
 | `write_draft_file` | Write/replace a draft file (`create: true` refuses to overwrite). |

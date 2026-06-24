@@ -120,9 +120,10 @@ describe("landing page — rendered content", () => {
     for (const tag of ["kv", "files", "ai", "identity", "realtime"]) {
       expect(html).toContain(`>${tag}</span>`);
     }
-    // Dark, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
+    // Light, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
     // Each carries a `?v=<hash>` cache-bust, so match the path without the closing quote.
     expect(html).toContain('src="/docs/assets/landing-dashboard.webp');
+    expect(html).toContain('src="/docs/assets/tour-shared.webp');
     expect(html).toContain('src="/docs/assets/landing-gallery.webp');
   });
 
@@ -165,6 +166,7 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("data-embla");
     expect(html).toContain('src="/docs/assets/landing-carousel.js"');
     expect(html).toContain('src="/docs/assets/tour-editor.webp');
+    expect(html).toContain("Shared with you");
     expect(html).toContain("Built for teams");
     expect(html).toContain("Private by design");
     expect(html).toContain("No telemetry, ever");
@@ -181,6 +183,9 @@ describe("landing page — rendered content", () => {
     expect(html).toContain('class="rung feature"');
     // The headline differentiator: auth-delegated invites (no app-owned credentials).
     expect(html).toContain("no app-managed passwords, no magic-link accounts");
+    // Discovery is separate from access: Team/Whole-org can stay URL-only.
+    expect(html).toContain("Team and Whole-org shares can stay link-only");
+    expect(html).toContain("list them in Shared");
     // The Teams capability also appears in the "Built for teams" grid + the tour.
     expect(html).toContain("Teams &amp; invites");
     expect(html).toContain('src="/docs/assets/tour-teams.webp');

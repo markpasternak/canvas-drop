@@ -47,6 +47,7 @@ export function canvasView(
     currentVersionId: string | null;
     previewMode: string;
     access?: string;
+    discoverability?: string;
     passwordHash?: string | null;
     sharedExpiresAt?: number | null;
     spaFallback?: boolean;
@@ -82,6 +83,7 @@ export function canvasView(
     // Sharing / settings fields (parity with the Settings + Share dashboard tabs) so an
     // agent can confirm an `update_canvas` write from this response, not a second call.
     access: cv.access,
+    discoverability: cv.discoverability,
     ...(teamIds !== undefined ? { teamIds } : {}),
     hasPassword: cv.passwordHash != null,
     sharedExpiresAt: cv.sharedExpiresAt ?? null,

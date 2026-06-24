@@ -80,8 +80,9 @@ Manage teams on the **Teams** page (available to everyone):
 - The team's **creator** (or an admin) can **rename** or **delete** it. Deleting a team
   removes its memberships and unshares every canvas shared with it — the canvases
   themselves are untouched.
-- **Shared with your teams** lists the canvases other people shared with a team you're
-  on. These never appear in the org-wide gallery, so this is the place to find them.
+- **Shared** lists canvases other people shared with you directly, or listed for a
+  team / workspace you belong to. Team shares and Whole-org shares are link-only by
+  default; owners turn on **List for people with access** when they should be discoverable.
 
 Team names are **per-creator**: you can't make two teams with the same name, but different
 people can each have a team named "Design."
@@ -89,7 +90,7 @@ people can each have a team named "Design."
 To share a canvas with a team, set its access rung to **Team** on the
 [Share tab](/docs/authoring/sharing#sharing-with-a-team). Agents do all of this over
 [MCP](/docs/agents/mcp) (`create_team` — omit `orgId` for a personal team, `add_team_member`,
-`update_canvas` with `access: "team"`, …).
+`update_canvas` with `access: "team"`, `list_shared_canvases`, …).
 
 ## Drag-and-drop files or a folder
 
