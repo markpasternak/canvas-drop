@@ -24,7 +24,7 @@ import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
-import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
+import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -1123,6 +1123,37 @@ export function managementRoutes(deps: ManagementDeps) {
         // What this version serves at the canvas root (entry file / why not).
         entry: rootEntry((v.manifest ?? {}) as Manifest),
       })),
+    });
+  });
+
+  // Download all files in a specific version as a ZIP archive. GET, owner-only,
+  // no same-origin guard (browser navigation with cookies triggers the download).
+  app.get("/:id/versions/:number/download", async (c) => {
+    const cv = await ownedCanvas(c);
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const num = Number(c.req.param("number"));
+    if (!Number.isInteger(num) || num < 1) return c.json({ error: "invalid_version" }, 400);
+    const version = await deps.versions.findReadyByNumber(cv.id, num);
+    if (!version?.manifest) {
+      return c.json({ code: "NOT_FOUND", message: `no ready version ${num}` }, 404);
+    }
+    const manifest = version.manifest as Manifest;
+    const { zipSync } = await import("fflate");
+    const entries: Record<string, Uint8Array> = {};
+    for (const [path, entry] of Object.entries(manifest)) {
+      if (!entry) continue;
+      const bytes = await deps.storage.get(blobKey(cv.id, entry.hash));
+      if (bytes) entries[path] = new Uint8Array(bytes);
+    }
+    const zip = zipSync(entries);
+    const filename = `${cv.slug}-v${num}.zip`;
+    return new Response(zip, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(zip.byteLength),
+      },
     });
   });
 

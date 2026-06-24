@@ -1,4 +1,4 @@
-import { PencilSimple } from "@phosphor-icons/react";
+import { DownloadSimple, PencilSimple } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
@@ -145,6 +145,15 @@ export default function Versions() {
                       title="Load this version's files into the editable draft"
                     >
                       Edit this version
+                    </ActionMenuItem>
+                    <ActionMenuItem
+                      icon={<DownloadSimple size={15} aria-hidden />}
+                      onSelect={() => {
+                        window.location.href = `/api/canvases/${id}/versions/${v.number}/download`;
+                      }}
+                      title="Download all files in this version as a ZIP archive"
+                    >
+                      Download ZIP
                     </ActionMenuItem>
                   </ActionMenu>
                 </div>
