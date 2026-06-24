@@ -84,10 +84,19 @@ describe("socialPreview", () => {
   });
 });
 
-/** Stub repo returning a canvas with the given title (or null = not found). */
-function canvasRepo(title: string | null): CanvasesRepository {
+/** Stub repo returning a canvas with the given title (or null = not found).
+ *  Defaults to an UNGATED public_link so the per-canvas card renders; pass overrides
+ *  (e.g. a passwordHash or sharedExpiresAt) to exercise the gated path, which the card
+ *  guard (isAnonymouslyPublic) must suppress. */
+function canvasRepo(
+  title: string | null,
+  overrides: Record<string, unknown> = {},
+): CanvasesRepository {
   return {
-    findBySlug: async () => (title === null ? null : { title }),
+    findBySlug: async () =>
+      title === null
+        ? null
+        : { title, access: "public_link", passwordHash: null, sharedExpiresAt: null, ...overrides },
   } as unknown as CanvasesRepository;
 }
 
@@ -136,6 +145,30 @@ describe("socialPreview — public_link per-canvas card", () => {
     const body = await res.text();
     expect(body).not.toContain("<img src=x");
     expect(body).toContain("&lt;img");
+  });
+
+  it("does NOT serve a per-canvas card for a PASSWORD-PROTECTED public_link (gated → no title/og leak, R5)", async () => {
+    const res = await appAs(
+      oidc,
+      ANON,
+      canvasRepo("Secret Planner", { passwordHash: "hash" }),
+    ).request("/", {
+      headers: { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" },
+    });
+    // Reachable-anonymous (it reaches its password gate downstream), but the crawler
+    // card is suppressed — it falls through rather than emitting the title/image.
+    expect(res.status).toBe(418);
+  });
+
+  it("does NOT serve a per-canvas card for an EXPIRED public_link share", async () => {
+    const res = await appAs(
+      oidc,
+      ANON,
+      canvasRepo("Expired Planner", { sharedExpiresAt: 1 }),
+    ).request("/", {
+      headers: { host: "planner.canvas-drop.com", accept: "*/*", "user-agent": "Slackbot 1.0" },
+    });
+    expect(res.status).toBe(418);
   });
 
   it("does NOT serve a per-canvas card for a guest principal (semi-private)", async () => {

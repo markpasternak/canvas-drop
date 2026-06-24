@@ -129,9 +129,23 @@ describe("publicCanvasResolver — public-link carve-out (sqlite)", () => {
     expect(body.gateway).toBe("skipped");
   });
 
+  it("a PASSWORD-PROTECTED public_link sets the anonymous principal (so it reaches its gate, not org sign-in)", async () => {
+    client = await makeTestDb("sqlite");
+    await seedCanvas(client, "public_link", { passwordHash: "hash" });
+    const { app } = appFor(client);
+    const body = (await (await app.request("/c/demo", { headers: JSON_HDR })).json()) as {
+      kind: string;
+      gateway: string;
+    };
+    // The carve-out is reachable-anonymous (password-inclusive): the principal is
+    // anonymous and the gateway is skipped. The password is enforced downstream by
+    // the password gate, not by bouncing to login.
+    expect(body.kind).toBe("anonymous");
+    expect(body.gateway).toBe("skipped");
+  });
+
   it("effective public-link gates fall through to the gateway", async () => {
     for (const [name, seedOpts, appOpts] of [
-      ["passworded", { passwordHash: "hash" }, {}],
       ["expired", { sharedExpiresAt: Date.now() - 1_000 }, {}],
       ["owner revoked", { canPublishPublic: false }, {}],
       ["globally disabled", {}, { publicLinksEnabled: false }],

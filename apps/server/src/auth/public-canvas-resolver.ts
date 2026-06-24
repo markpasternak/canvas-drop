@@ -1,7 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
-import { isAnonymouslyPublic } from "../canvas/authorization.js";
+import { isAnonymouslyReachable } from "../canvas/authorization.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { AppEnv } from "../http/types.js";
 import { resolveRequest } from "../routing/resolve-request.js";
@@ -17,6 +17,12 @@ export interface PublicCanvasResolverDeps {
  * Pre-gateway carve-out for anonymous `public_link` canvases only. Legacy guest
  * cookies are intentionally ignored; authorization still flows through
  * `decideCanvasAccess`, where public viewers remain static-only.
+ *
+ * Password-protected public links are INCLUDED (isAnonymouslyReachable, not
+ * isAnonymouslyPublic): the carve-out only grants the anonymous principal so the
+ * request reaches the password gate (password-gate.ts) instead of being bounced to
+ * org sign-in. The gate, decideCanvasAccess (`needsPasswordGate`), and the
+ * password-EXCLUSIVE cache/social predicates still keep gated content private.
  */
 export function publicCanvasResolver(deps: PublicCanvasResolverDeps) {
   return createMiddleware<AppEnv>(async (c, next) => {
@@ -35,12 +41,7 @@ export function publicCanvasResolver(deps: PublicCanvasResolverDeps) {
       canvas.status === "active" &&
       publicLinksEnabled &&
       (await deps.canvases.isOwnerPublishEnabled(canvas.ownerId)) &&
-      isAnonymouslyPublic(
-        canvas.access,
-        canvas.passwordHash !== null,
-        canvas.sharedExpiresAt,
-        Date.now(),
-      )
+      isAnonymouslyReachable(canvas.access, canvas.sharedExpiresAt, Date.now())
     ) {
       const anonymous = { kind: "anonymous" as const };
       if (deps.config.auth.mode === "proxy" || getCookie(c, SESSION_COOKIE)) {

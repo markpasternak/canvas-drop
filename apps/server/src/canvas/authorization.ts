@@ -76,6 +76,31 @@ export function isAnonymouslyPublic(
 }
 
 /**
+ * True when an ANONYMOUS request may be let *through the org gateway* to reach a
+ * `public_link` canvas — an active, unexpired public link, REGARDLESS of password.
+ *
+ * This is the pre-gateway carve-out predicate (public-canvas-resolver.ts). Unlike
+ * {@link isAnonymouslyPublic} it does NOT exclude password-protected links: the
+ * carve-out only grants the anonymous principal so the request can REACH the
+ * password gate (password-gate.ts), which still enforces the password before ANY
+ * content is served. Without this, a password-protected public link bounced an
+ * anonymous visitor to org sign-in and the password prompt was unreachable.
+ *
+ * Keep DISTINCT from {@link isAnonymouslyPublic}: CDN-cache scope (serve.ts /
+ * cdn-cache.ts), the access-downgrade warning (settings-update.ts), and the
+ * per-canvas social card (social-preview.ts) must stay password-EXCLUSIVE, so a
+ * password-gated canvas is never cached or surfaced by title to a crawler (§12.2, R5).
+ */
+export function isAnonymouslyReachable(
+  access: Canvas["access"],
+  sharedExpiresAt: number | null,
+  now: number,
+): boolean {
+  const expired = sharedExpiresAt !== null && sharedExpiresAt <= now;
+  return access === "public_link" && !expired;
+}
+
+/**
  * The allowlist lookup key for a principal: a member matches by user id, a guest by
  * email, anyone else matches nothing. The single mapping shared by
  * {@link resolveAccessContext} and the realtime hub's re-auth, so a new principal

@@ -321,6 +321,88 @@ describe("buildApp", () => {
     expect((await jsonOf<{ code: string }>(api)).code).toBe("STATIC_ONLY");
   });
 
+  it("oidc: a PASSWORD-PROTECTED public_link shows its password gate to an anonymous visitor (not an org sign-in redirect)", async () => {
+    client = await makeTestDb("sqlite");
+    const oidcConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "oidc",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_OIDC_ISSUER: "https://idp.example.com",
+      CANVAS_DROP_OIDC_CLIENT_ID: "id",
+      CANVAS_DROP_OIDC_CLIENT_SECRET: "secret",
+    });
+    const { sessionBackedStrategy } = await import("./auth/session.js");
+    const { hashPassword } = await import("./canvas/password.js");
+    const users = usersRepository(client);
+    const owner = await users.upsert({
+      providerSub: "owner",
+      email: "owner@example.com",
+      name: "Owner",
+      isAdmin: false,
+    });
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({
+      config: oidcConfig,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      log: silent,
+    });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "secret-demo", apiKeyHash: "h" });
+    await engine.deploy(
+      cv,
+      "api",
+      folder({ "index.html": "<h1>protected content</h1>" }),
+      owner.id,
+    );
+    await canvases.setAccess(cv.id, "public_link");
+    await canvases.setPassword(cv.id, await hashPassword("hunter2"));
+    const a = buildApp({
+      config: oidcConfig,
+      db: client,
+      rootLogger: silent,
+      strategy: sessionBackedStrategy(
+        sessionService(oidcConfig, sessionsRepository(client)),
+        users,
+      ),
+      users,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine,
+      audit: createAuditLog(auditRepository(client), silent),
+      peerIp: () => "8.8.8.8",
+    });
+
+    const host = "secret-demo.canvases.example.com";
+
+    // Anonymous (no session cookie): the carve-out lets the request reach the gate.
+    // Before this fix it 302'd to /auth/login and the password prompt was unreachable.
+    const gated = await a.request("/", { headers: { host, accept: "text/html" } });
+    expect(gated.status).toBe(401);
+    expect(gated.headers.get("location")).toBeNull();
+    const gateBody = await gated.text();
+    expect(gateBody).toContain("is password-protected");
+    expect(gateBody).not.toContain("protected content"); // content stays gated
+
+    // A crawler must NOT get a per-canvas social card for a GATED link (no title/og leak,
+    // R5) — it falls through to the same gate.
+    const crawler = await a.request("/", {
+      headers: { host, "user-agent": "Slackbot-LinkExpanding 1.0" },
+    });
+    expect(crawler.status).toBe(401);
+    const crawlerBody = await crawler.text();
+    expect(crawlerBody).toContain("is password-protected");
+    expect(crawlerBody).not.toContain("og:title");
+  });
+
   it("public legal pages are reachable WITHOUT auth in proxy mode (mounted before the gateway)", async () => {
     client = await makeTestDb("sqlite");
     // Same proxy config where /api/canvases 401s above — here the unauthenticated
