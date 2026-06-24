@@ -6,7 +6,7 @@ import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { canvasCacheControl, effectiveEdgeTtlSec } from "../http/cdn-cache.js";
 import { errorResponse } from "../http/error-pages.js";
-import { baseSecurityHeaders } from "../http/security-headers.js";
+import { baseSecurityHeaders, canvasFrameAncestors } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -90,7 +90,7 @@ export function serveCanvas(deps: ServeDeps) {
     // 200 — the opposite of what a CDN is for. ifNoneMatchHits normalizes both sides.
     if (ifNoneMatchHits(c.req.header("if-none-match"), etag)) {
       const headers = new Headers({ ETag: etag, "Cache-Control": cacheControl });
-      securityHeaders(headers);
+      securityHeaders(headers, deps.config);
       return new Response(null, { status: 304, headers });
     }
 
@@ -107,7 +107,7 @@ export function serveCanvas(deps: ServeDeps) {
     if (deps.config.urlMode === "path" && contentType.startsWith("image/svg+xml")) {
       headers.set("Content-Disposition", "attachment");
     }
-    securityHeaders(headers);
+    securityHeaders(headers, deps.config);
     // Copy into a fresh Uint8Array so the body is a plain ArrayBuffer view.
     return new Response(new Uint8Array(bytes), { status: 200, headers });
   });
@@ -162,17 +162,16 @@ function etagValue(raw: string): string {
   return raw.trim().replace(/^W\//, "");
 }
 
-function securityHeaders(headers: Headers): void {
+function securityHeaders(headers: Headers, config: Config): void {
   // Shared §12.4 baseline (nosniff, Referrer-Policy, COOP — COOP newly added for
   // canvas content, M7 audit), plus the canvas-content-specific frame-ancestors.
   baseSecurityHeaders(headers);
-  // `'self'`, not `'none'`: a canvas may frame *itself* (same origin) so same-origin
-  // tools work — e.g. reveal.js speaker notes, which embeds the deck in an iframe. In
-  // subdomain mode (the recommended multi-user prod) every canvas is its own origin,
-  // so this still blocks framing by any OTHER canvas and by the dashboard — the
-  // cross-canvas / canvas→management isolation (§12.2) is unchanged. In path mode
-  // canvases share an origin, but that is the documented reduced-isolation mode.
-  headers.set("Content-Security-Policy", "frame-ancestors 'self'");
+  // `'self'` + dashboard origin: a canvas may frame itself (same-origin tools like
+  // reveal.js speaker notes) and the dashboard must be able to embed a canvas in its
+  // preview iframe. In subdomain mode every canvas is its own origin, so the dashboard
+  // apex (baseUrl) is explicitly added; in path mode 'self' already covers both.
+  // Cross-canvas framing between OTHER canvases remains blocked in subdomain mode.
+  headers.set("Content-Security-Policy", canvasFrameAncestors(config));
 }
 
 type NotFoundReason = "unpublished" | "no-home" | "missing";

@@ -283,15 +283,29 @@ describe("serveCanvas (integration)", () => {
     expect(res.status).toBe(304);
   });
 
-  it("sets the §12.4 security headers (incl. COOP, added M7)", async () => {
+  it("sets the §12.4 security headers (incl. COOP, added M7) — path mode", async () => {
     const { app } = await setup();
     const res = await app.request("/c/s/index.html");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
-    // 'self' (not 'none') so a canvas can frame itself (same-origin tools like
-    // reveal.js speaker notes); cross-canvas framing is still blocked in subdomain mode.
-    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'self'");
+    // path mode: 'self' covers both canvases and the dashboard (same origin).
+    expect(res.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'self'");
     expect(res.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
+  });
+
+  it("frame-ancestors includes the dashboard origin in subdomain mode", async () => {
+    const subdomainConfig: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvas-drop.com",
+    });
+    const { app } = await setup({ serveConfig: subdomainConfig });
+    // In subdomain mode there is no /c/:slug prefix; the canvas is at the root.
+    const res = await app.request("/index.html");
+    // The dashboard (apex) must be listed so it can embed canvases in iframes.
+    expect(res.headers.get("Content-Security-Policy")).toBe(
+      "frame-ancestors 'self' https://canvas-drop.com",
+    );
   });
 
   it("404 when the manifest references a hash whose blob is missing from storage", async () => {

@@ -1,3 +1,4 @@
+import type { Config } from "@canvas-drop/shared";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "./types.js";
 
@@ -24,6 +25,19 @@ export function baseSecurityHeaders(headers: Headers): void {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "same-origin");
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
+}
+
+/**
+ * `frame-ancestors` value for canvas content. In subdomain mode each canvas is
+ * its own origin, so the dashboard (the apex baseUrl) must be listed explicitly
+ * alongside 'self' so the dashboard can embed canvases in an iframe. In path
+ * mode every canvas shares the dashboard origin, so 'self' already covers it.
+ */
+export function canvasFrameAncestors(config: Config): string {
+  if (config.urlMode === "subdomain") {
+    return `frame-ancestors 'self' ${new URL(config.baseUrl).origin}`;
+  }
+  return "frame-ancestors 'self'";
 }
 
 /**

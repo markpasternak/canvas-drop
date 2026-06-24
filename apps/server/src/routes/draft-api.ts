@@ -14,6 +14,7 @@ import { DeployError } from "../deploy/errors.js";
 import { injectOnPageEditor } from "../draft/onpage.js";
 import type { DraftService } from "../draft/service.js";
 import { requireSameOrigin } from "../http/same-origin.js";
+import { canvasFrameAncestors } from "../http/security-headers.js";
 import type { AppEnv } from "../http/types.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { blobBodyLimit } from "./deploy-common.js";
@@ -247,7 +248,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
           "Referrer-Policy": "same-origin",
-          "Content-Security-Policy": "frame-ancestors 'self'",
+          "Content-Security-Policy": canvasFrameAncestors(deps.config),
         },
       });
     } catch (err) {
