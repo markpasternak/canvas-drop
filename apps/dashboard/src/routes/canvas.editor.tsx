@@ -15,7 +15,7 @@ import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
 import { CodeEditor } from "../components/CodeEditor.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { canvasRelativePath } from "../components/DeployFiles.js";
+import { canvasRelativePaths } from "../components/DeployFiles.js";
 import { Dialog } from "../components/Dialog.js";
 import { DraftPreview } from "../components/DraftPreview.js";
 import { EditorStatusBar } from "../components/EditorStatusBar.js";
@@ -263,7 +263,8 @@ export default function Editor() {
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
-    const items = files.map((file) => ({ path: canvasRelativePath(file), file }));
+    const paths = canvasRelativePaths(files);
+    const items = files.map((file, i) => ({ path: paths[i] as string, file }));
     try {
       await uploadMany.mutateAsync(items);
       setSelected(items[items.length - 1]?.path ?? selected);

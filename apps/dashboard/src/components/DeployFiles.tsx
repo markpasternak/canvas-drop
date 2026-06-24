@@ -3,19 +3,37 @@ import { useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { cn } from "../lib/cn.js";
 
-/** Canvas-relative path for an uploaded file. react-dropzone's file-selector adds
- * `path` for both dragged folders and the directory picker (the directory picker
- * also sets webkitRelativePath). Strip a leading slash and the top folder segment
- * so a dropped/selected folder deploys its contents at the canvas root. */
-export function canvasRelativePath(file: File): string {
+/** The raw upload path for a file (leading slashes stripped). react-dropzone's
+ * file-selector adds `path` for dragged folders; the directory picker sets
+ * webkitRelativePath; a lone dropped file has only its name. */
+function rawUploadPath(file: File): string {
   const withPath = file as File & { path?: string };
-  const raw = (withPath.path || file.webkitRelativePath || file.name).replace(/^\/+/, "");
-  return raw.includes("/") ? raw.slice(raw.indexOf("/") + 1) : raw;
+  return (withPath.path || file.webkitRelativePath || file.name).replace(/^\/+/, "");
+}
+
+const topSegment = (p: string): string | null =>
+  p.includes("/") ? p.slice(0, p.indexOf("/")) : null;
+
+/** Canvas-relative paths for an uploaded BATCH. We strip a SINGLE common wrapper
+ * directory — so dropping or picking one folder deploys its contents at the canvas
+ * root — but ONLY when every entry shares that same top segment. A mix of top-level
+ * files and folders, or several folders dropped together, is left intact: stripping
+ * each entry's first segment unconditionally would flatten nested assets
+ * (`assets/app.js` → `app.js`, breaking references) and collide same-named files
+ * across folders (e.g. two `index.html`s merging into one). */
+export function canvasRelativePaths(files: File[]): string[] {
+  const raws = files.map(rawUploadPath);
+  const wrapper = raws.length > 0 ? topSegment(raws[0] as string) : null;
+  const sharedWrapper = wrapper !== null && raws.every((p) => topSegment(p) === wrapper);
+  return sharedWrapper ? raws.map((p) => p.slice(p.indexOf("/") + 1)) : raws;
 }
 
 export function folderFormFromFiles(files: File[]): FormData {
   const form = new FormData();
-  for (const file of files) form.set(canvasRelativePath(file), file);
+  const paths = canvasRelativePaths(files);
+  files.forEach((file, i) => {
+    form.set(paths[i] as string, file);
+  });
   return form;
 }
 

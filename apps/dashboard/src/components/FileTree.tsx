@@ -23,6 +23,7 @@ import { useMemo, useState } from "react";
 import type { DraftFile } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { fileLabel, isImage } from "../lib/file-kind.js";
+import { formatBytes } from "../lib/format.js";
 
 interface TreeNode {
   name: string;
@@ -194,7 +195,7 @@ function TreeRow({
           <span className="block truncate font-mono text-xs">{node.name}</span>
           {node.file && (
             <span className="block text-[0.625rem] font-medium text-subtle group-aria-[current=true]:text-accent/70">
-              {fileLabel(node.file)}
+              {fileLabel(node.file)} · {formatBytes(node.file.size)}
             </span>
           )}
         </span>
