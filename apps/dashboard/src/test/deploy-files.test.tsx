@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canvasRelativePath } from "../components/DeployFiles.js";
+import { canvasRelativePaths } from "../components/DeployFiles.js";
 
 function makeFile(name: string, opts: { path?: string; webkitRelativePath?: string } = {}): File {
   const file = new File(["x"], name);
@@ -15,24 +15,48 @@ function makeFile(name: string, opts: { path?: string; webkitRelativePath?: stri
   return file;
 }
 
-describe("canvasRelativePath", () => {
-  it("strips leading slash and top folder segment from path", () => {
-    const file = makeFile("a.html", { path: "/folder/sub/a.html" });
-    expect(canvasRelativePath(file)).toBe("sub/a.html");
+describe("canvasRelativePaths", () => {
+  it("strips a single shared wrapper folder so its contents land at the canvas root", () => {
+    const files = [
+      makeFile("index.html", { path: "/site/index.html" }),
+      makeFile("a.css", { path: "/site/assets/a.css" }),
+    ];
+    expect(canvasRelativePaths(files)).toEqual(["index.html", "assets/a.css"]);
   });
 
-  it("strips leading slash when there's no subfolder (top-level file)", () => {
-    const file = makeFile("index.html", { path: "/folder/index.html" });
-    expect(canvasRelativePath(file)).toBe("index.html");
+  it("keeps webkitdirectory paths (shared top folder) and lands them at root", () => {
+    const files = [
+      makeFile("index.html", { webkitRelativePath: "myfolder/index.html" }),
+      makeFile("b.js", { webkitRelativePath: "myfolder/sub/b.js" }),
+    ];
+    expect(canvasRelativePaths(files)).toEqual(["index.html", "sub/b.js"]);
   });
 
-  it("falls back to webkitRelativePath when path is absent", () => {
-    const file = makeFile("b.js", { webkitRelativePath: "myfolder/b.js" });
-    expect(canvasRelativePath(file)).toBe("b.js");
+  it("does NOT strip when a file is dropped alongside a folder (no shared wrapper)", () => {
+    // The reported bug: dropping a top-level index.html together with assets/ and a
+    // nested folder must NOT flatten the folders (that lost the `assets/` prefix and
+    // collided the two index.html files onto one).
+    const files = [
+      makeFile("index.html", { path: "/index.html" }),
+      makeFile("logo.webp", { path: "/assets/logo.webp" }),
+      makeFile("index.html", { path: "/scrubbed-deploy/index.html" }),
+    ];
+    expect(canvasRelativePaths(files)).toEqual([
+      "index.html",
+      "assets/logo.webp",
+      "scrubbed-deploy/index.html",
+    ]);
   });
 
-  it("falls back to name when neither path nor webkitRelativePath is set", () => {
-    const file = makeFile("bare.css");
-    expect(canvasRelativePath(file)).toBe("bare.css");
+  it("does NOT strip when several folders are dropped together (differing top segments)", () => {
+    const files = [
+      makeFile("a.css", { path: "/css/a.css" }),
+      makeFile("b.js", { path: "/js/b.js" }),
+    ];
+    expect(canvasRelativePaths(files)).toEqual(["css/a.css", "js/b.js"]);
+  });
+
+  it("strips leading slashes and falls back to name when no path metadata is present", () => {
+    expect(canvasRelativePaths([makeFile("bare.css")])).toEqual(["bare.css"]);
   });
 });
