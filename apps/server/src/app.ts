@@ -1,4 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
+import type { Manifest } from "@canvas-drop/shared/db";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -15,10 +16,12 @@ import { onlyWhenNoPrincipal, publicCanvasResolver } from "./auth/public-canvas-
 import { authRoutes } from "./auth/routes.js";
 import { SESSION_COOKIE, type SessionService } from "./auth/session.js";
 import type { AuthStrategy } from "./auth/strategy.js";
+import { resolveAsset } from "./canvas/asset-resolver.js";
 import { canvasAccess } from "./canvas/authorization.js";
 import { filesService } from "./canvas/files-service.js";
 import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
+import { blobKey } from "./canvas/storage-keys.js";
 import { canvasUrl } from "./canvas/url.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
@@ -465,15 +468,35 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
 
   app.use(
     "*",
-    socialPreview(deps.config, deps.canvases, async (canvas) => {
-      // Per-canvas OG image (plan 004 / U9), public_link only (this resolver is only
-      // consulted on the anonymous card). Only when enabled AND a preview is captured;
-      // cache-bust by the captured version. Else null → branded /og.png.
-      if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
-      const job = await screenshots.findByCanvas(canvas.id);
-      if (job?.status !== "done") return null;
-      return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
-    }),
+    socialPreview(
+      deps.config,
+      deps.canvases,
+      async (canvas) => {
+        // Per-canvas OG image (plan 004 / U9), public_link only (this resolver is only
+        // consulted on the anonymous card). Only when enabled AND a preview is captured;
+        // cache-bust by the captured version. Else null → branded /og.png.
+        if (!(await settingsSvc.effectiveScreenshotsEnabled())) return null;
+        const job = await screenshots.findByCanvas(canvas.id);
+        if (job?.status !== "done") return null;
+        return `${canvasUrl(deps.config, canvas.slug)}${PREVIEW_ASSET_PATH}?rendition=og&v=${encodeURIComponent(job.versionId)}`;
+      },
+      // Reads the published home document so socialPreview can defer to a canvas that
+      // ships its own OG/Twitter tags. Bounded to the <head>-bearing prefix (64 KiB)
+      // so a large HTML doc can't turn a crawler unfurl into a big read/decode.
+      async (canvas) => {
+        if (!canvas.currentVersionId) return null;
+        const version = await deps.versions.findById(canvas.currentVersionId);
+        if (version?.status !== "ready" || !version.manifest) return null;
+        const manifest = version.manifest as Manifest;
+        const resolved = resolveAsset(manifest, "", canvas.spaFallback);
+        if (!resolved || !/\.html?$/i.test(resolved.path)) return null;
+        const entry = manifest[resolved.path];
+        if (!entry) return null;
+        const bytes = await deps.storage.get(blobKey(canvas.id, entry.hash));
+        if (!bytes) return null;
+        return new TextDecoder().decode(bytes.subarray(0, 64 * 1024));
+      },
+    ),
   );
 
   // Everything below requires an org session/identity (login on every request) —

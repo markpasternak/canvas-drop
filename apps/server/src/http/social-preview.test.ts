@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../auth/session.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
-import { socialPreview } from "./social-preview.js";
+import { htmlDeclaresSocialTags, socialPreview } from "./social-preview.js";
 import type { AppEnv, Principal } from "./types.js";
 
 const oidc: Config = loadConfig({
@@ -240,5 +240,115 @@ describe("socialPreview — per-canvas preview OG image (plan 004 / U9)", () => 
     expect(await res.text()).toContain(
       'property="og:image" content="https://planner.canvas-drop.com/og.png"',
     );
+  });
+});
+
+describe("htmlDeclaresSocialTags", () => {
+  it("detects an Open Graph property meta", () => {
+    expect(htmlDeclaresSocialTags('<meta property="og:title" content="x">')).toBe(true);
+  });
+
+  it("detects a Twitter-card name meta", () => {
+    expect(htmlDeclaresSocialTags('<meta name="twitter:card" content="summary_large_image">')).toBe(
+      true,
+    );
+  });
+
+  it("ignores a plain document with only a description/title (no og:/twitter:)", () => {
+    expect(
+      htmlDeclaresSocialTags('<head><meta name="description" content="x"><title>t</title></head>'),
+    ).toBe(false);
+  });
+});
+
+describe("socialPreview — defers to a canvas's own social tags", () => {
+  const crawler = {
+    host: "planner.canvas-drop.com",
+    accept: "*/*",
+    "user-agent": "LinkedInBot/1.0",
+  };
+
+  /** Mount socialPreview with an anonymous principal + a stub home-HTML reader. */
+  function appWithHome(html: string | null) {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("principal", ANON);
+      await next();
+    });
+    a.use(
+      "*",
+      socialPreview(
+        oidc,
+        canvasRepo("Planner"),
+        async () => null,
+        async () => html,
+      ),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    return a;
+  }
+
+  it("falls through to the real file when the home doc declares its own OG tags", async () => {
+    const res = await appWithHome(
+      '<html><head><meta property="og:title" content="Real Title"></head></html>',
+    ).request("/", { headers: crawler });
+    // Pass-through (418) → the crawler scrapes the author's own tags, not our card.
+    expect(res.status).toBe(418);
+  });
+
+  it("renders the generated card when the home doc has no social tags", async () => {
+    const res = await appWithHome("<html><head><title>Plain</title></head></html>").request("/", {
+      headers: crawler,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('property="og:title" content="Planner"');
+  });
+
+  it("renders the generated card (never 500s) when the home read throws", async () => {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("principal", ANON);
+      await next();
+    });
+    a.use(
+      "*",
+      socialPreview(
+        oidc,
+        canvasRepo("Planner"),
+        async () => null,
+        async () => {
+          throw new Error("storage blip");
+        },
+      ),
+    );
+    a.all("*", (c) => c.text("PASSED_THROUGH", 418));
+    const res = await a.request("/", { headers: crawler });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('property="og:title" content="Planner"');
+  });
+});
+
+describe("socialPreview — per-canvas card description", () => {
+  const crawler = {
+    host: "planner.canvas-drop.com",
+    accept: "*/*",
+    "user-agent": "LinkedInBot/1.0",
+  };
+
+  it("uses the owner's description when the canvas has one", async () => {
+    const res = await appAs(
+      oidc,
+      ANON,
+      canvasRepo("Planner", { description: "Plan your quarter, fast." }),
+    ).request("/", { headers: crawler });
+    const body = await res.text();
+    expect(body).toContain('property="og:description" content="Plan your quarter, fast."');
+    // The generic boilerplate must NOT appear once the owner set their own copy.
+    expect(body).not.toContain("a canvas shared on canvas-drop.");
+  });
+
+  it("falls back to the generic line when the canvas has no description", async () => {
+    const res = await appAs(oidc, ANON, canvasRepo("Planner")).request("/", { headers: crawler });
+    expect(await res.text()).toContain("a canvas shared on canvas-drop.");
   });
 });

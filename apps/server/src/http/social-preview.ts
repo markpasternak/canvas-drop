@@ -49,6 +49,17 @@ const PREVIEW_DESC =
 const CRAWLER_UA =
   /bot|crawler|spider|facebookexternalhit|facebot|slack|twitter|discord|whatsapp|telegram|linkedin|pinterest|redditbot|embedly|skype|applebot|vkshare|preview|what-?app/i;
 
+// A `<meta>` whose property/name asserts an Open Graph (`og:`) or Twitter-card
+// (`twitter:`) value. When the canvas's own home document already declares these,
+// the author is managing their own unfurl — we must NOT shadow it with a generated
+// card (a public_link's static HTML is what a real visitor gets anyway).
+const OWN_SOCIAL_META = /<meta\b[^>]*\b(?:property|name)\s*=\s*["'](?:og:|twitter:)[^"']*["']/i;
+
+/** True when an HTML document already declares its own Open Graph / Twitter tags. */
+export function htmlDeclaresSocialTags(html: string): boolean {
+  return OWN_SOCIAL_META.test(html);
+}
+
 /** Does this request look like a top-level document fetch (vs an asset/API call)? */
 function looksLikeDocument(accept: string, secFetchDest: string | undefined, ua: string): boolean {
   if (accept.includes("text/html")) return true;
@@ -64,6 +75,12 @@ export function socialPreview(
    *  `/og.png`. Only consulted for the public_link card, so a gated canvas never
    *  emits a per-canvas image (R5). */
   previewImage?: (canvas: Canvas) => Promise<string | null>,
+  /** Reads the canvas's published home document (decoded, bounded prefix), or null
+   *  when there's no published HTML home / the read fails. Only consulted for the
+   *  ungated public_link card: when that document already declares its own social
+   *  tags we serve it verbatim instead of a generated card, so an author who ships
+   *  their own OG/Twitter metadata is never overridden. */
+  homeHtml?: (canvas: Canvas) => Promise<string | null>,
 ) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const principal = c.get("principal");
@@ -93,8 +110,31 @@ export function socialPreview(
             Date.now(),
           )
         ) {
+          // Never shadow a canvas that ships its own social metadata: if its home
+          // document already declares OG/Twitter tags, fall through so the crawler
+          // scrapes the real file (the author's title/description/image win). The
+          // file is already what every real visitor of this ungated public link
+          // gets, so serving it to a crawler leaks nothing new (R5). Best-effort:
+          // a read failure falls back to the generated card, never 500s the unfurl.
+          if (homeHtml) {
+            let html: string | null = null;
+            try {
+              html = await homeHtml(canvas);
+            } catch {
+              html = null;
+            }
+            if (html && htmlDeclaresSocialTags(html)) return next();
+          }
+
           const origin = publicOrigin(config, c.req.header("host"));
           const title = canvas.title?.trim() || PREVIEW_TITLE;
+          // The owner's own description wins when set (already-public metadata for an
+          // ungated public link, escaped downstream); otherwise fall back to the
+          // generic line so an undescribed canvas still unfurls with something.
+          const ownDescription = canvas.description?.replace(/\s+/g, " ").trim();
+          const description =
+            ownDescription ||
+            `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`;
           // Per-canvas preview image when the pipeline is on + captured; else /og.png.
           // Best-effort: a resolver error (e.g. a DB blip on the settings/job lookup)
           // must fall back to the branded card, never 500 the unfurl (review #6).
@@ -107,7 +147,7 @@ export function socialPreview(
           return htmlResponse(
             renderPreviewShell(origin, c.req.path, {
               title,
-              description: `${canvas.title?.trim() ? `“${title}” — ` : ""}a canvas shared on canvas-drop.`,
+              description,
               redirect: false,
               image,
             }),
