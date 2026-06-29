@@ -47,7 +47,7 @@ const PREVIEW_DESC =
 
 // Crawlers that send a wildcard Accept (not text/html) but a recognizable UA.
 const CRAWLER_UA =
-  /bot|crawler|spider|facebookexternalhit|facebot|slack|twitter|discord|whatsapp|telegram|linkedin|pinterest|redditbot|embedly|skype|applebot|vkshare|preview|what-?app/i;
+  /bot|crawler|spider|facebookexternalhit|facebot|slack|twitter|discord|whatsapp|telegram|linkedinbot|pinterest|redditbot|embedly|skype|applebot|vkshare|preview|what-?app/i;
 
 // A `<meta>` whose property/name asserts an Open Graph (`og:`) or Twitter-card
 // (`twitter:`) value. When the canvas's own home document already declares these,

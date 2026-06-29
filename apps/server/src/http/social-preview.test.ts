@@ -138,6 +138,18 @@ describe("socialPreview — public_link per-canvas card", () => {
     expect(res.status).toBe(418);
   });
 
+  it("falls through for LinkedIn's iOS in-app browser", async () => {
+    const res = await appAs(oidc, ANON, canvasRepo("Quarterly Planner")).request("/", {
+      headers: {
+        host: "planner.canvas-drop.com",
+        ...HTML,
+        "user-agent":
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 LinkedInApp/9.1.0",
+      },
+    });
+    expect(res.status).toBe(418);
+  });
+
   it("escapes a hostile canvas title in the card (user-controlled content)", async () => {
     const res = await appAs(oidc, ANON, canvasRepo("<img src=x onerror=alert(1)>")).request("/", {
       headers: { host: "x.canvas-drop.com", accept: "*/*", "user-agent": "Twitterbot/1.0" },
