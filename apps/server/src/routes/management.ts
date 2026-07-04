@@ -101,6 +101,8 @@ export interface ManagementDeps extends PreviewHintDeps {
    */
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  /** Effective instance-wide authoring switch (DB override ?? env). Omitted → config value. */
+  authoringEnabled?: () => Promise<boolean>;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
   /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
@@ -307,6 +309,9 @@ export function managementRoutes(deps: ManagementDeps) {
         ? await deps.realtimeEnabled()
         : deps.config.realtimeEnabled,
       aiEnabled: deps.aiEnabled ? await deps.aiEnabled() : !!deps.config.ai.apiKey,
+      authoringEnabled: deps.authoringEnabled
+        ? await deps.authoringEnabled()
+        : deps.config.authoring.enabled,
     };
   }
   /** Shared cosmetic preview-existence hint — gate + degrade live in one place

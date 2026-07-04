@@ -15,9 +15,10 @@ const ALL_ON: CanvasCapabilityState = {
   capFiles: true,
   capAi: true,
   capRealtime: true,
+  capAuthoring: true,
 };
 
-const GLOBALS_ON = { realtimeEnabled: true, aiEnabled: true };
+const GLOBALS_ON = { realtimeEnabled: true, aiEnabled: true, authoringEnabled: true };
 
 describe("effectiveCapabilities", () => {
   it("backend off → every capability (incl. identity) is off regardless of flags", () => {
@@ -40,26 +41,62 @@ describe("effectiveCapabilities", () => {
   });
 
   it("realtime ANDs the operator global flag", () => {
-    const eff = effectiveCapabilities(ALL_ON, { realtimeEnabled: false, aiEnabled: true });
+    const eff = effectiveCapabilities(ALL_ON, {
+      realtimeEnabled: false,
+      aiEnabled: true,
+      authoringEnabled: true,
+    });
     expect(eff.realtime).toBe(false);
     expect(eff.kv).toBe(true); // unaffected by the realtime global
   });
 
   it("ai ANDs the operator provider flag", () => {
-    const eff = effectiveCapabilities(ALL_ON, { realtimeEnabled: true, aiEnabled: false });
+    const eff = effectiveCapabilities(ALL_ON, {
+      realtimeEnabled: true,
+      aiEnabled: false,
+      authoringEnabled: true,
+    });
     expect(eff.ai).toBe(false);
     expect(eff.realtime).toBe(true);
   });
 
+  it("authoring ANDs the operator instance switch AND its own (default-off) flag", () => {
+    // Operator switch off → authoring off even with the flag on.
+    expect(
+      effectiveCapabilities(ALL_ON, {
+        realtimeEnabled: true,
+        aiEnabled: true,
+        authoringEnabled: false,
+      }).authoring,
+    ).toBe(false);
+    // Flag off (the column default) → authoring off even with the operator switch on.
+    expect(effectiveCapabilities({ ...ALL_ON, capAuthoring: false }, GLOBALS_ON).authoring).toBe(
+      false,
+    );
+    // Both on + backend on → authoring on.
+    expect(effectiveCapabilities(ALL_ON, GLOBALS_ON).authoring).toBe(true);
+  });
+
   it("kv/files have no global switch — on whenever backend + flag are on", () => {
-    const eff = effectiveCapabilities(ALL_ON, { realtimeEnabled: false, aiEnabled: false });
+    const eff = effectiveCapabilities(ALL_ON, {
+      realtimeEnabled: false,
+      aiEnabled: false,
+      authoringEnabled: false,
+    });
     expect(eff.kv).toBe(true);
     expect(eff.files).toBe(true);
   });
 
   it("identity is on with backend even when every feature flag is off", () => {
     const eff = effectiveCapabilities(
-      { backendEnabled: true, capKv: false, capFiles: false, capAi: false, capRealtime: false },
+      {
+        backendEnabled: true,
+        capKv: false,
+        capFiles: false,
+        capAi: false,
+        capRealtime: false,
+        capAuthoring: false,
+      },
       GLOBALS_ON,
     );
     expect(eff.identity).toBe(true);
@@ -80,13 +117,13 @@ describe("isCapabilityEnabled", () => {
 describe("storedCapabilities", () => {
   it("returns the raw flags independent of backend/global state", () => {
     const stored = storedCapabilities({ ...ALL_ON, backendEnabled: false, capAi: false });
-    expect(stored).toEqual({ kv: true, files: true, ai: false, realtime: true });
+    expect(stored).toEqual({ kv: true, files: true, ai: false, realtime: true, authoring: true });
   });
 });
 
 describe("taxonomy", () => {
-  it("the four feature capabilities are exactly kv/files/ai/realtime", () => {
-    expect([...FEATURE_CAPABILITIES]).toEqual(["kv", "files", "ai", "realtime"]);
+  it("the five feature capabilities are exactly kv/files/ai/realtime/authoring", () => {
+    expect([...FEATURE_CAPABILITIES]).toEqual(["kv", "files", "ai", "realtime", "authoring"]);
   });
 
   it("every feature capability maps to a real canvas column", () => {

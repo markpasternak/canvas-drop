@@ -237,6 +237,23 @@ const rawSchema = z
     CANVAS_DROP_AI_USER_DAILY_USD: num(5),
     CANVAS_DROP_AI_CANVAS_MONTHLY_USD: num(50),
 
+    // Authoring capability (plan 2026-07-04): a signed-in viewer creates a new canvas
+    // from a backend-enabled canvas's page, as themselves. Instance-wide opt-in
+    // (default OFF — higher-privilege than the other primitives), plus per-viewer
+    // quota (daily + all-time total) and a share policy (which access rungs may be
+    // requested, and whether/how long an expiry is required). All DB-overridable via
+    // the admin settings service, resolved per request.
+    CANVAS_DROP_AUTHORING: z.enum(["on", "off"]).optional().default("off"),
+    CANVAS_DROP_AUTHORING_USER_DAILY_MAX: num(20),
+    CANVAS_DROP_AUTHORING_USER_TOTAL_MAX: num(200),
+    // Allowed access rungs a `publish` may request (DB AccessRung values). The SDK's
+    // `access: "password"` maps to the `public_link` rung + a password, so allowing
+    // `public_link` covers both. Operators widen/narrow this set.
+    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: csv(["private", "specific_people", "public_link"]),
+    // Max share-expiry in days (0 = no cap); and whether an expiry is required.
+    CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS: num(0),
+    CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: bool(false),
+
     // Email (auth-delegated access invites). Driver-behind-interface like DB/storage,
     // so new providers are a config change. `log` (default) writes the message +
     // sign-in invitation to the logger — zero-setup for dev; `smtp` sends via any SMTP server;
@@ -549,6 +566,15 @@ const rawSchema = z
         models: r.CANVAS_DROP_AI_MODELS,
         userDailyUsd: r.CANVAS_DROP_AI_USER_DAILY_USD,
         canvasMonthlyUsd: r.CANVAS_DROP_AI_CANVAS_MONTHLY_USD,
+      },
+
+      authoring: {
+        enabled: r.CANVAS_DROP_AUTHORING === "on",
+        userDailyMax: r.CANVAS_DROP_AUTHORING_USER_DAILY_MAX,
+        userTotalMax: r.CANVAS_DROP_AUTHORING_USER_TOTAL_MAX,
+        allowedRungs: r.CANVAS_DROP_AUTHORING_ALLOWED_RUNGS,
+        maxExpiryDays: r.CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS,
+        requireExpiry: r.CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY,
       },
 
       email: {

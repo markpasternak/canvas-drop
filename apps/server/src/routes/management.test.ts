@@ -1714,7 +1714,13 @@ describe("managementRoutes", () => {
     id: string;
     apiKey?: string;
     backendEnabled: boolean;
-    capabilities: { kv: boolean; files: boolean; ai: boolean; realtime: boolean };
+    capabilities: {
+      kv: boolean;
+      files: boolean;
+      ai: boolean;
+      realtime: boolean;
+      authoring: boolean;
+    };
     effective: { identity: boolean; kv: boolean; files: boolean; ai: boolean; realtime: boolean };
   };
 
@@ -1731,12 +1737,19 @@ describe("managementRoutes", () => {
     return jsonOf<CapView>(res);
   }
 
-  it("create default: backend off, all feature flags stored on, nothing effective", async () => {
+  it("create default: backend off, most feature flags stored on (authoring off), nothing effective", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const body = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }));
     expect(body.backendEnabled).toBe(false);
-    expect(body.capabilities).toEqual({ kv: true, files: true, ai: true, realtime: true });
+    // authoring is the one feature that ships stored-OFF (higher-privilege); the rest default on.
+    expect(body.capabilities).toEqual({
+      kv: true,
+      files: true,
+      ai: true,
+      realtime: true,
+      authoring: false,
+    });
     // backend off → nothing effective, including identity
     expect(body.effective.identity).toBe(false);
     expect(body.effective.kv).toBe(false);

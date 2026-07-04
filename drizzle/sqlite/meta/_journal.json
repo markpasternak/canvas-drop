@@ -232,6 +232,13 @@
       "when": 1782281414550,
       "tag": "0032_canvas_discoverability",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1783183120615,
+      "tag": "0033_canvas_authoring",
+      "breakpoints": true
     }
   ]
 }

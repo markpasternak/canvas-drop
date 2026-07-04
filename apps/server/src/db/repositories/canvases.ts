@@ -103,6 +103,7 @@ export interface CanvasCapabilitiesPatch {
   files?: boolean;
   ai?: boolean;
   realtime?: boolean;
+  authoring?: boolean;
 }
 
 /** Mutable settings (§6.3). Undefined fields are left unchanged. */

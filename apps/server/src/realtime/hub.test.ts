@@ -47,6 +47,7 @@ function fakeCanvas(over: Partial<Canvas> = {}): Canvas {
     capFiles: true,
     capAi: true,
     capRealtime: true,
+    capAuthoring: true,
     ...over,
   } as unknown as Canvas;
 }
