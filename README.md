@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/markpasternak-canvas-drop-badge.png)](https://mseep.ai/app/markpasternak-canvas-drop)
+
 # canvas-drop
 
 **Your org's place to ship the small web tools you build with AI. Drop a folder, get a secure URL, behind your own SSO, on infrastructure you control.**
