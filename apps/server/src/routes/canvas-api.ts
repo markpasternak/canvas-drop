@@ -205,6 +205,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         authoringUsage: deps.authoringUsage,
         audit: deps.audit,
         settings: deps.authoringSettings,
+        publicLinksEnabled: deps.publicLinksEnabled,
       }),
     );
   }

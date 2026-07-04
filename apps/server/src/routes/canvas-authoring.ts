@@ -14,6 +14,7 @@ import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AuthoringUsageRepository } from "../db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
 import { requireCanvas } from "../http/canvas-api-isolation.js";
@@ -39,6 +40,10 @@ export interface CanvasAuthoringDeps {
   audit: AuditLog;
   /** Effective authoring switch + policy (DB override ?? env). Omitted in unit tests → config. */
   settings?: AuthoringSettings;
+  /** Effective instance-wide public-link gate (same switch the dashboard/MCP honor).
+   *  Omitted → defaults on. A `public_link` publish is refused when this is off, so
+   *  authoring can't bypass the admin's instance switch. */
+  publicLinksEnabled?: () => Promise<boolean>;
 }
 
 /** Publish metadata (the JSON `metadata` part alongside the `bundle` file part). */
@@ -96,10 +101,10 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
    *  (Anonymous / public-link never reach here: refused static-only upstream.) */
   function requireMember(
     c: import("hono").Context<AppEnv>,
-  ): { id: string; isAdmin: boolean } | null {
+  ): { id: string; isAdmin: boolean; canPublishPublic: boolean } | null {
     const user = c.get("user");
     if (!user || c.get("principal")?.kind === "guest") return null;
-    return { id: user.id, isAdmin: !!user.isAdmin };
+    return { id: user.id, isAdmin: !!user.isAdmin, canPublishPublic: !!user.canPublishPublic };
   }
 
   const bundleLimit = bodyLimit({
@@ -141,6 +146,32 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
     if (!pol.allowedRungs.includes(rung)) {
       return c.json({ code: "INVALID_BODY", message: `access rung "${rung}" is not allowed` }, 400);
+    }
+    // A `public_link` publish must also clear the SAME admin gates the dashboard/MCP
+    // honor — the operator instance switch and the per-account grant — so authoring's
+    // `allowedRungs` config can't route around an admin who disabled public links or
+    // revoked this account's permission. Checked before any row is created.
+    if (rung === "public_link") {
+      const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
+      if (!publicLinksOn) {
+        return c.json(
+          {
+            code: "PUBLIC_LINKS_DISABLED",
+            message: "Public links are disabled for this instance.",
+          },
+          403,
+        );
+      }
+      if (!viewer.canPublishPublic) {
+        return c.json(
+          {
+            code: "PUBLIC_NOT_ALLOWED",
+            message:
+              "An administrator has revoked this account's permission to publish public links.",
+          },
+          403,
+        );
+      }
     }
     if (requestedAccess === "password" && !meta.password) {
       return c.json(
@@ -192,37 +223,20 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
         orgId: home.orgId,
       });
     } catch (err) {
+      // A caller-supplied custom slug is only format-checked pre-create; a collision
+      // surfaces as a DB unique violation here. Return a clean 409 (like every other
+      // create surface) rather than a misleading PUBLISH_FAILED with no id.
+      if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
+        return c.json({ code: "SLUG_TAKEN", message: "That slug is already taken." }, 409);
+      }
       c.get("log")?.error({ err }, "authoring: create failed");
       return c.json({ code: "PUBLISH_FAILED", message: "could not create the canvas" }, 502);
     }
 
-    // Deploy the bundle. On failure canvas B exists but is empty — return its id so the
-    // consumer can retry the deploy or revoke it (Q3: return-id, no auto-revoke).
-    try {
-      const buffer = Buffer.from(await bundle.arrayBuffer());
-      await deps.engine.deploy(canvasB, "api", fromZip(buffer), viewer.id);
-    } catch (err) {
-      c.get("log")?.error({ err, id: canvasB.id }, "authoring: deploy failed");
-      return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "deploy failed" }, 502);
-    }
-
-    // Apply share settings. A failure here also returns PUBLISH_FAILED with the id
-    // (the canvas exists + is deployed; only the share config is partial).
-    try {
-      await deps.canvases.updateSettings(canvasB.id, {
-        access: rung,
-        tags: meta.tags,
-        sharedExpiresAt: meta.expiresAt,
-      });
-      if (requestedAccess === "password" && meta.password) {
-        await deps.canvases.setPassword(canvasB.id, await hashPassword(meta.password));
-      }
-    } catch (err) {
-      c.get("log")?.error({ err, id: canvasB.id }, "authoring: configure failed");
-      return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "configure failed" }, 502);
-    }
-
-    // Meter (awaited so the quota window reflects it) + audit, only on full success.
+    // Meter on CREATION — the canvas row + slug are the bounded resource, so a later
+    // deploy/config failure still counts against quota (otherwise a loop of failing
+    // publishes mints unlimited uncounted orphan canvases). Audited here too: the
+    // security-relevant event is that this viewer authored a canvas.
     await deps.authoringUsage.record({
       actorId: viewer.id,
       sourceCanvasId: source.id,
@@ -234,6 +248,35 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       targetId: canvasB.id,
       meta: { sourceCanvasId: source.id },
     });
+
+    // Deploy the bundle. On failure canvas B exists but is empty — return its id so the
+    // consumer can retry the deploy or revoke it (Q3: return-id, no auto-revoke).
+    try {
+      const buffer = Buffer.from(await bundle.arrayBuffer());
+      await deps.engine.deploy(canvasB, "api", fromZip(buffer), viewer.id);
+    } catch (err) {
+      c.get("log")?.error({ err, id: canvasB.id }, "authoring: deploy failed");
+      return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "deploy failed" }, 502);
+    }
+
+    // Apply share settings. Set the password FIRST (while the canvas is still `private`
+    // from create) and flip access LAST, so a mid-op failure can never leave the canvas
+    // `public_link` without its intended password (a confidentiality gap). A failure
+    // here returns PUBLISH_FAILED with the id — the canvas exists + is deployed, only
+    // the share config is partial.
+    try {
+      if (requestedAccess === "password" && meta.password) {
+        await deps.canvases.setPassword(canvasB.id, await hashPassword(meta.password));
+      }
+      await deps.canvases.updateSettings(canvasB.id, {
+        access: rung,
+        tags: meta.tags,
+        sharedExpiresAt: meta.expiresAt,
+      });
+    } catch (err) {
+      c.get("log")?.error({ err, id: canvasB.id }, "authoring: configure failed");
+      return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "configure failed" }, 502);
+    }
 
     return c.json({ id: canvasB.id, url: canvasUrl(deps.config, canvasB.slug) });
   });

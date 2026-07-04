@@ -53,6 +53,9 @@ a single result.
 - The new canvas is owned by the **viewer** who called `publish`. It counts against
   their normal canvas ownership **and** a per-viewer authoring quota (a daily and an
   all-time cap the operator sets).
+- Quota is consumed the moment the canvas is **created** — a `PublishFailedError`
+  (deploy/config failed after creation) still counts, since the canvas exists. `revoke`
+  removes the canvas but does **not** refund quota.
 - `revoke` only affects the viewer's own authored canvases (or an admin's).
 - `expiresAt` uses the same share-expiry mechanism as the dashboard, so it only means
   something on a shareable rung (`public_link` / `password` / `specific_people`).

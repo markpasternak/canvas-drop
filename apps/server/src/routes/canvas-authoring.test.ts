@@ -96,14 +96,15 @@ async function makeGuestSource(client: DbClient, guestEmail: string) {
 
 type Setup = (c: import("hono").Context<AppEnv>) => void;
 const asMember =
-  (userId: string, isAdmin = false): Setup =>
+  (userId: string, opts: { isAdmin?: boolean; canPublishPublic?: boolean } = {}): Setup =>
   (c) =>
     c.set("user", {
       id: userId,
       email: "owner@example.com",
       name: "Owner",
       avatarUrl: null,
-      isAdmin,
+      isAdmin: opts.isAdmin ?? false,
+      canPublishPublic: opts.canPublishPublic ?? true,
     } as never);
 const asGuest =
   (email: string, canvasId: string): Setup =>
@@ -116,7 +117,12 @@ const asGuest =
       email,
     } as never);
 
-function buildApi(client: DbClient, setup: Setup, config = ON) {
+function buildApi(
+  client: DbClient,
+  setup: Setup,
+  config = ON,
+  opts: { publicLinksEnabled?: boolean } = {},
+) {
   const { audit, events } = fakeAudit();
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
@@ -133,6 +139,7 @@ function buildApi(client: DbClient, setup: Setup, config = ON) {
     canvasApiRoutes({
       config,
       canvases,
+      publicLinksEnabled: async () => opts.publicLinksEnabled ?? true,
       // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
       kv: {} as any,
       // biome-ignore lint/suspicious/noExplicitAny: unused primitives in this suite
@@ -298,7 +305,7 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     expect(b?.passwordHash).toBeTruthy();
   });
 
-  it("502 PUBLISH_FAILED carrying the id when the bundle can't deploy (no auto-revoke, no quota burn)", async () => {
+  it("502 PUBLISH_FAILED carries the id when deploy fails (no auto-revoke) and STILL counts against quota", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
     const { app, canvases } = buildApi(client, asMember(owner.id));
@@ -310,9 +317,44 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     const body = (await res.json()) as { code: string; id: string };
     expect(body.code).toBe("PUBLISH_FAILED");
     expect(body.id).toBeTruthy();
-    // The empty canvas still exists (return-id, not auto-revoke) and no quota was burned.
+    // The canvas still exists (return-id, not auto-revoke) AND was metered on creation,
+    // so a loop of failing publishes can't mint unlimited uncounted orphans (quota bypass fix).
     expect(await canvases.findById(body.id)).toBeTruthy();
+    expect(await authoringUsageRepository(client).countByActor(owner.id)).toBe(1);
+  });
+
+  it("public_link is refused when the instance switch is off (PUBLIC_LINKS_DISABLED) or the account is revoked (PUBLIC_NOT_ALLOWED)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    // Instance switch off → 403, and no canvas is created.
+    const off = buildApi(client, asMember(owner.id), ON, { publicLinksEnabled: false });
+    const r1 = await publish(off.app, publishBody({ title: "B", access: "public_link" }));
+    expect(r1.status).toBe(403);
+    expect(((await r1.json()) as { code: string }).code).toBe("PUBLIC_LINKS_DISABLED");
     expect(await authoringUsageRepository(client).countByActor(owner.id)).toBe(0);
+
+    // Per-account grant revoked → 403 PUBLIC_NOT_ALLOWED (instance switch on).
+    const revoked = buildApi(client, asMember(owner.id, { canPublishPublic: false }));
+    const r2 = await publish(revoked.app, publishBody({ title: "B", access: "public_link" }));
+    expect(r2.status).toBe(403);
+    expect(((await r2.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("a colliding CUSTOM slug returns 409 SLUG_TAKEN (not a misleading PUBLISH_FAILED)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    // A valid, non-reserved slug that is already taken → resolveCreateSlug passes it
+    // through (custom slugs aren't uniqueness-checked there), so the collision surfaces
+    // as a DB unique violation in create() and must map to 409, not 502.
+    await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "roadmap-snapshot",
+      apiKeyHash: "h-taken",
+    });
+    const { app } = buildApi(client, asMember(owner.id));
+    const res = await publish(app, publishBody({ title: "B", slug: "roadmap-snapshot" }));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("SLUG_TAKEN");
   });
 });
 
