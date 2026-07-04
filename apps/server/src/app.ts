@@ -83,6 +83,15 @@ import type { StorageDriver } from "./storage/driver.js";
 import { teamsService } from "./teams/service.js";
 import { composeServices } from "./wiring.js";
 
+/**
+ * Internal marker on the platform sub-app's `notFound` response so the host-scoping
+ * guard can distinguish "no platform/marketing route matched this apex request"
+ * (→ fall through to the rest of the chain) from a real platform response. Never
+ * reaches a client: a sentinel response is always swapped for `next()`.
+ */
+const PLATFORM_MISS_HEADER = "x-canvas-drop-platform-miss";
+const PLATFORM_MISS_HEADERS = { [PLATFORM_MISS_HEADER]: "1" };
+
 export interface BuildAppDeps {
   config: Config;
   db: DbClient;
@@ -296,30 +305,53 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
 
-  // Public favicon / brand icons (`/favicon.svg`, `/site.webmanifest`, `/brand/*`).
-  // Pre-gateway so the signed-out landing/legal/docs pages + crawlers get an icon
-  // (the SPA serves the same files, but behind the gateway they'd 302 to login).
-  app.route("/", brandAssetRoutes());
-
-  // Public legal pages (`/privacy`, `/terms`) — mounted BEFORE the auth gateway so
-  // the Google OAuth consent screen's reviewers can open them while signed out.
-  app.route("/", legalRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
-
-  // Public marketing landing, always-on alias (`/welcome`). Unlike `/` — which is
-  // session-branched by `landingGate` so signed-in members get the dashboard — this
-  // path ALWAYS renders the landing, so the in-app "About" link and the post-logout
-  // redirect can reach the marketing page regardless of session. Pre-gateway.
-  app.get("/welcome", async (c) =>
+  // ── Platform / marketing surface — apex host ONLY (pre-gateway) ────────────
+  // The platform's OWN public pages: favicon/brand icons + fonts (brandAssets),
+  // legal (`/privacy`, `/terms`), the `/welcome` landing alias, and docs
+  // (`/docs/*`, `/og.png`, `/llms.txt`, `/skill.zip`). Mounted BEFORE the auth
+  // gateway so signed-out crawlers/agents (and Google's OAuth consent reviewers)
+  // reach them — but HOST-SCOPED: they must serve only on the platform/apex host
+  // (`config.baseUrl`), never shadow a canvas subdomain. On a canvas host these
+  // reserved paths belong to the tenant, so its own `/docs`, `/og.png`, … win (or
+  // its 404 / SPA fallback) — the same apex-vs-canvas seam `landingGate` uses.
+  //
+  // The family lives in its own sub-app that the guard DELEGATES to per request,
+  // rather than merging into `app`: a merged route would win by registration order
+  // even on a canvas host (the shadowing bug this fixes), and there is no way to
+  // fall a merged route THROUGH to the later canvas chain. A `notFound` sentinel
+  // lets the guard tell "no platform route matched" (→ continue the parent chain,
+  // exactly as before on the apex) from a real platform response. In `path` mode
+  // every host is the apex and canvases live under `/c/{slug}`, so nothing collides.
+  const platform = new Hono<AppEnv>();
+  platform.route("/", brandAssetRoutes());
+  platform.route("/", legalRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
+  // `/welcome`: unlike `/` (session-branched by `landingGate`) this ALWAYS renders
+  // the landing, so the in-app "About" link + the post-logout redirect can reach it.
+  platform.get("/welcome", async (c) =>
     landingResponse(deps.config, {
       signedIn: !!getCookie(c, SESSION_COOKIE),
       skin: await settingsSvc.effectiveDesignSkin(),
     }),
   );
-
-  // Public docs surface (`/docs/*`, `/docs/search.js`, `/llms.txt`) — also before
-  // the gateway so signed-out agents and OSS browsers can read it on every host.
   // `/llms.txt` here REPLACES the formerly-private one in serve-sdk.ts (U4).
-  app.route("/", docsRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
+  platform.route("/", docsRoutes(deps.config, { skin: () => settingsSvc.effectiveDesignSkin() }));
+  // Sentinel: no platform route matched → let the guard continue the parent chain.
+  platform.notFound(() => new Response(null, { status: 404, headers: PLATFORM_MISS_HEADERS }));
+
+  app.use("*", async (c, next) => {
+    // Every platform page is GET/HEAD; skip the delegation for other methods.
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") return next();
+    // A canvas subdomain owns these reserved paths — fall through to the canvas chain.
+    const { role } = resolveRequest(
+      { host: c.req.header("host") ?? "", pathname: c.req.path },
+      deps.config,
+    );
+    if (role === "canvas") return next();
+    const res = await platform.fetch(c.req.raw);
+    // Unmatched on the apex → continue the normal chain (login throttle, gateway, SPA…).
+    if (res.headers.has(PLATFORM_MISS_HEADER)) return next();
+    return res;
+  });
 
   // Login throttle (§12.3) — pre-gateway, keyed by the resolved real client IP
   // (`clientIp`: the socket peer, or the X-Forwarded-For client when behind a

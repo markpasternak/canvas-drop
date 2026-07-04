@@ -452,7 +452,7 @@ describe("buildApp", () => {
     }
   });
 
-  it("public docs surface is reachable WITHOUT auth on any host; /sdk/v1.js stays private", async () => {
+  it("public docs surface is reachable WITHOUT auth on the apex host; /sdk/v1.js stays private", async () => {
     client = await makeTestDb("sqlite");
     const proxyConfig = loadConfig({
       CANVAS_DROP_AUTH_MODE: "proxy",
@@ -489,14 +489,97 @@ describe("buildApp", () => {
       peerIp: () => "8.8.8.8",
     });
 
-    // R10: docs answer before the gateway/classifier even on a canvas-subdomain host.
+    // R10: docs answer before the gateway/classifier on the platform/apex host.
     for (const path of ["/docs", "/docs/sdk/kv", "/llms.txt"]) {
-      const res = await a.request(path, { headers: { host: "abc.canvases.example.com" } });
+      const res = await a.request(path, { headers: { host: "canvases.example.com" } });
       expect(res.status, `${path} should be public`).toBe(200);
     }
     // R9: the SDK script is NOT public — it stays behind the gateway (§12.0 #1).
-    const sdk = await a.request("/sdk/v1.js", { headers: { host: "abc.canvases.example.com" } });
+    const sdk = await a.request("/sdk/v1.js", { headers: { host: "canvases.example.com" } });
     expect(sdk.status).toBe(401);
+  });
+
+  it("canvas subdomain serves the CANVAS's own reserved paths, not the platform pages", async () => {
+    // Regression: platform/marketing routes (docs, legal, og.png, llms.txt, skill.zip)
+    // were mounted at "/" globally and won by registration order on EVERY host — so a
+    // canvas that shipped its own `/docs` (etc.) was silently shadowed by canvas-drop's
+    // own pages. They must now serve ONLY on the apex host; a canvas subdomain falls
+    // through to the tenant canvas chain.
+    client = await makeTestDb("sqlite");
+    const cfg = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "proxy",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+      CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
+      CANVAS_DROP_TRUSTED_PROXY_IPS: "10.0.0.0/8",
+    });
+    const { proxyStrategy } = await import("./auth/proxy.js");
+    const users = usersRepository(client);
+    const owner = await users.upsert({
+      providerSub: "owner",
+      email: "owner@example.com",
+      name: "Owner",
+      isAdmin: false,
+    });
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "sitecanvas", apiKeyHash: "h" });
+    // A canvas whose static files collide with every reserved platform path.
+    await engine.deploy(
+      cv,
+      "api",
+      folder({
+        "index.html": "<h1>canvas home</h1>",
+        "docs/index.html": "<h1>CANVAS OWN DOCS</h1>",
+        "privacy/index.html": "<h1>CANVAS OWN PRIVACY</h1>",
+        "og.png": "CANVAS-OWN-OG-BYTES",
+        "llms.txt": "CANVAS OWN LLMS",
+        "skill.zip": "CANVAS OWN SKILL",
+      }),
+      owner.id,
+    );
+    await canvases.setAccess(cv.id, "public_link");
+    const a = buildApp({
+      config: cfg,
+      db: client,
+      rootLogger: silent,
+      strategy: proxyStrategy(cfg),
+      users,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      engine,
+      audit: createAuditLog(auditRepository(client), silent),
+      peerIp: () => "8.8.8.8",
+    });
+
+    const host = "sitecanvas.canvases.example.com";
+    // On the canvas subdomain, every reserved path serves the CANVAS's OWN content.
+    // The canvas markers never appear in any platform page, so a passing positive
+    // assertion is itself proof the platform page did not shadow the canvas.
+    const cases: Array<[string, string]> = [
+      ["/docs", "CANVAS OWN DOCS"],
+      ["/privacy", "CANVAS OWN PRIVACY"],
+      ["/og.png", "CANVAS-OWN-OG-BYTES"],
+      ["/llms.txt", "CANVAS OWN LLMS"],
+      ["/skill.zip", "CANVAS OWN SKILL"],
+    ];
+    for (const [path, expected] of cases) {
+      const res = await a.request(path, { headers: { host } });
+      expect(res.status, `${path} on the canvas host should serve the canvas`).toBe(200);
+      expect(await res.text(), `${path} should be the canvas's own content`).toContain(expected);
+    }
+
+    // Sanity: the SAME paths on the APEX host still serve the platform pages.
+    for (const path of ["/docs", "/privacy", "/llms.txt"]) {
+      const res = await a.request(path, { headers: { host: "canvases.example.com" } });
+      expect(res.status, `${path} on the apex should serve the platform page`).toBe(200);
+    }
   });
 
   it("public docs are also reachable un-authed in PATH url mode (not just subdomain)", async () => {
