@@ -50,6 +50,7 @@ canvas's **Backend** tab. A method whose capability is off throws a
 - [`canvasdrop.files`](/docs/sdk/files) — `upload`/`list`/`delete`/`url`.
 - [`canvasdrop.ai`](/docs/sdk/ai) — server-side model calls: `chat` and streaming `stream`.
 - [`canvasdrop.realtime`](/docs/sdk/realtime) — `channel(name)` for pub/sub + presence.
+- [`canvasdrop.canvases`](/docs/sdk/authoring) — `publish`/`list`/`revoke`: a signed-in viewer creates a new canvas from the page, as themselves (the **authoring** capability, off by default).
 
 ## Errors
 

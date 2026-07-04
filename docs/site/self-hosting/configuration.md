@@ -241,6 +241,25 @@ server-side only and is never exposed to the browser.
 | `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. |
 | `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. |
 
+## Authoring (optional)
+
+The authoring capability (a signed-in viewer creates a new canvas from a
+backend-enabled canvas's page) is off until `CANVAS_DROP_AUTHORING=on`. It is
+higher-privilege than the other primitives, so it is instance-off by default and
+its per-canvas Backend toggle also defaults off — both must be on.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `CANVAS_DROP_AUTHORING` | `off` | `on` \| `off`. Instance master switch for authoring. |
+| `CANVAS_DROP_AUTHORING_USER_DAILY_MAX` | `20` | Max canvases a viewer may author per UTC day. |
+| `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` | All-time cap per viewer. |
+| `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,public_link` | CSV of access rungs a publish may request. |
+| `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` | Max share-expiry in days (`0` = no cap). |
+| `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` | Require an expiry on shared rungs. |
+
+The daily and total caps are admin-tunable at runtime (they resolve DB override ??
+env, like the AI spend caps).
+
 ## Email transport
 
 Sends auth-delegated sign-in and access emails for account, canvas, and team access.

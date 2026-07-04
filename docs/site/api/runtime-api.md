@@ -183,6 +183,27 @@ the SDK's `realtime.channel(name)` API rather than driving the socket by hand; i
 handles framing, reconnection, and presence for you. See the
 [SDK reference](/docs/sdk/overview).
 
+## Authoring
+
+Capability: `authoring` (off by default; also needs the operator instance switch
+`CANVAS_DROP_AUTHORING`). Lets a signed-in **member** viewer create a new canvas as
+themselves. Guests and public-link visitors are refused (`NOT_AUTHENTICATED`).
+
+```
+POST   {base}/v1/c/{slug}/authoring          publish → { id, url }
+GET    {base}/v1/c/{slug}/authoring          list the viewer's authored canvases
+DELETE {base}/v1/c/{slug}/authoring/{id}     revoke (soft-delete) → 204
+```
+
+`POST` is `multipart/form-data`: a JSON `metadata` part (`title`, optional `slug`,
+`tags`, `access`, `password`, `expiresAt`) plus a `bundle` part (the static-site
+zip). The server creates the canvas under the viewer's account, deploys the bundle,
+and applies the share settings in one call. Errors: `CAPABILITY_DISABLED` (403),
+`NOT_AUTHENTICATED` (401), `QUOTA_EXCEEDED` (429, with `scope`), `INVALID_BODY`
+(400/413), and `PUBLISH_FAILED` (502, carrying the new canvas's `id` when the deploy
+or share-config failed after creation). Use the SDK's
+[`canvasdrop.canvases`](/docs/sdk/authoring) API rather than driving these by hand.
+
 ## Adjacent endpoints
 
 These are part of the client surface but not under `/v1/c/{slug}`:
