@@ -53,8 +53,8 @@ export interface Me {
   isGuest?: boolean;
 }
 
-/** The four toggleable backend features (plan 006). Identity is implicit (no flag). */
-export type FeatureCapability = "kv" | "files" | "ai" | "realtime";
+/** The five toggleable backend features (plan 006 + authoring). Identity is implicit (no flag). */
+export type FeatureCapability = "kv" | "files" | "ai" | "realtime" | "authoring";
 
 /** Raw stored per-feature flags (independent of backend/global state). */
 export type StoredCapabilities = Record<FeatureCapability, boolean>;
@@ -69,6 +69,7 @@ export interface CanvasCapabilitiesPatch {
   files?: boolean;
   ai?: boolean;
   realtime?: boolean;
+  authoring?: boolean;
 }
 
 /** Derived canvas lifecycle. Local mirror of `PublicationState` in

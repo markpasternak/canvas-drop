@@ -142,6 +142,7 @@ export function useUpdateCapabilities(id: string) {
           files: patch.files ?? prev.capabilities.files,
           ai: patch.ai ?? prev.capabilities.ai,
           realtime: patch.realtime ?? prev.capabilities.realtime,
+          authoring: patch.authoring ?? prev.capabilities.authoring,
         };
         // Optimistic `effective`: kv/files have no operator global, so backend &&
         // flag is authoritative. ai/realtime are ALSO gated by an operator global
@@ -162,6 +163,8 @@ export function useUpdateCapabilities(id: string) {
             files: localOn("files"),
             ai: localOn("ai") && prev.effective.ai,
             realtime: localOn("realtime") && prev.effective.realtime,
+            // authoring is operator-gated like ai/realtime — never optimistically ON.
+            authoring: localOn("authoring") && prev.effective.authoring,
           },
         };
         qc.setQueryData(keys.canvas(id), optimistic);
