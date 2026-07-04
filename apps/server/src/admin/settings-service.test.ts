@@ -385,3 +385,39 @@ describe("effectiveInviteSettings (plan 003 phase 3)", () => {
     expect((await s.effectiveInviteSettings()).maxPerActorPerHour).toBe(20);
   });
 });
+
+describe("adminSettingsService — authoring (plan 2026-07-04)", () => {
+  const authoringConfig = loadConfig({
+    CANVAS_DROP_AUTHORING: "off",
+    CANVAS_DROP_AUTHORING_USER_DAILY_MAX: "20",
+    CANVAS_DROP_AUTHORING_USER_TOTAL_MAX: "200",
+    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "private,specific_people,public_link",
+    CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS: "30",
+    CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: "true",
+  });
+
+  it("authoringEnabled follows env (off), then a DB override wins", async () => {
+    const settings = fakeSettings();
+    const s = adminSettingsService({ settings, config: authoringConfig });
+    expect(await s.authoringEnabled()).toBe(false);
+    await settings.set("config.authoring.enabled", true);
+    expect(await s.authoringEnabled()).toBe(true);
+    await settings.delete("config.authoring.enabled");
+    expect(await s.authoringEnabled()).toBe(false);
+  });
+
+  it("effectiveAuthoringPolicy resolves env quota + policy, and a DB quota override wins", async () => {
+    const settings = fakeSettings();
+    const s = adminSettingsService({ settings, config: authoringConfig });
+    const p = await s.effectiveAuthoringPolicy();
+    expect(p).toMatchObject({
+      userDailyMax: 20,
+      userTotalMax: 200,
+      allowedRungs: ["private", "specific_people", "public_link"],
+      maxExpiryDays: 30,
+      requireExpiry: true,
+    });
+    await settings.set("quota.authoring.user.daily.max", 3);
+    expect((await s.effectiveAuthoringPolicy()).userDailyMax).toBe(3);
+  });
+});
