@@ -16,10 +16,12 @@ import { requireCapability } from "../canvas/capability-guard.js";
 import type { FilesService } from "../canvas/files-service.js";
 import { GATE_COOKIE, verifyGrant } from "../canvas/password-gate.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
+import type { AuthoringUsageRepository } from "../db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { KvRepository } from "../db/repositories/kv.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
+import type { DeployEngine } from "../deploy/engine.js";
 import {
   applyCors,
   canvasApiIsolation,
@@ -28,6 +30,7 @@ import {
 import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
+import { type AuthoringSettings, canvasAuthoringRoutes } from "./canvas-authoring.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 import { canvasRealtimeRoutes } from "./canvas-realtime.js";
@@ -57,6 +60,12 @@ export interface CanvasApiDeps {
   makeAiProvider?: (apiKey: string) => ModelProvider;
   /** Unified settings (effective model allowlist + provider key); omitted in unit tests. */
   settings?: AiSettings;
+  /** Deploy engine — required to mount the authoring route (create + deploy canvas B). */
+  engine?: DeployEngine;
+  /** Authoring metering repo — required to mount the authoring route. */
+  authoringUsage?: AuthoringUsageRepository;
+  /** Effective authoring switch + policy (DB override ?? env); omitted → config fallback. */
+  authoringSettings?: AuthoringSettings;
   /**
    * Realtime wiring. Present only when a WebSocket adaptor is available (the Node
    * server in index.ts, or a WS integration test). Omitted in plain unit tests —
@@ -182,6 +191,23 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
       settings: deps.settings,
     }),
   );
+
+  // Authoring primitive (plan 2026-07-04). Behind requireCapability("authoring") inside
+  // the router. Mounted only when the deploy engine + metering repo are wired (always in
+  // production; omitted in focused unit suites that don't exercise it).
+  if (deps.engine && deps.authoringUsage && deps.audit) {
+    app.route(
+      "/authoring",
+      canvasAuthoringRoutes({
+        config: deps.config,
+        canvases: deps.canvases,
+        engine: deps.engine,
+        authoringUsage: deps.authoringUsage,
+        audit: deps.audit,
+        settings: deps.authoringSettings,
+      }),
+    );
+  }
 
   // Realtime primitive (M9, area R). Mounted only when a WebSocket adaptor is wired
   // (Node server / WS integration test). The handshake inherits the resolve +

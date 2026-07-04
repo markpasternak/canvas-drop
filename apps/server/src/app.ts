@@ -30,6 +30,7 @@ import {
   type AllowedEmailsRepository,
   allowedEmailsRepository,
 } from "./db/repositories/allowed-emails.js";
+import { authoringUsageRepository } from "./db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
@@ -593,6 +594,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       aiProvider: deps.aiProvider,
       makeAiProvider: (apiKey) => anthropicProvider({ apiKey, baseUrl: deps.config.ai.baseUrl }),
       settings: settingsSvc,
+      // Authoring primitive (plan 2026-07-04): the viewer-scoped create→deploy→configure
+      // route. Reuses the shared deploy engine + a metering repo; the settings service
+      // resolves the effective switch + policy (DB override ?? env) per request.
+      engine: deps.engine,
+      authoringUsage: authoringUsageRepository(deps.db),
+      authoringSettings: settingsSvc,
       realtime,
     }),
   );
@@ -653,6 +660,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
+      authoringEnabled: () => settingsSvc.authoringEnabled(),
       publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
       // Screenshot preview support (plan 004) for the dashboard `hasPreview` cover hint.
       screenshotsEnabled: () => settingsSvc.effectiveScreenshotsEnabled(),

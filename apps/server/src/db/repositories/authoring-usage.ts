@@ -1,5 +1,5 @@
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -52,6 +52,16 @@ export function authoringUsageRepository(client: DbClient) {
     /** Count all canvases a viewer has ever authored — the all-time total window. */
     countByActor(actorId: string): Promise<number> {
       return countWhere(eq(t.actorId, actorId));
+    },
+
+    /** The canvas ids a viewer authored, newest first (for the viewer-scoped `list`). */
+    async authoredIdsByActor(actorId: string): Promise<string[]> {
+      const rows = (await db
+        .select({ id: t.authoredCanvasId })
+        .from(t)
+        .where(eq(t.actorId, actorId))
+        .orderBy(desc(t.createdAt))) as Array<{ id: string }>;
+      return rows.map((r) => r.id);
     },
 
     /** Retention prune (mirrors ai_usage): delete rows older than the cutoff. Returns rows removed. */
