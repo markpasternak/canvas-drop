@@ -133,6 +133,7 @@ const capabilitiesSchema = z.object({
   files: z.boolean().optional(),
   ai: z.boolean().optional(),
   realtime: z.boolean().optional(),
+  authoring: z.boolean().optional(),
 });
 
 const settingsSchema = z.object({

@@ -753,9 +753,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Toggle a canvas's backend capabilities (same as the dashboard Backend tab). `backendEnabled` " +
-        "is the master switch; kv/files/ai/realtime are individual features (effective only when " +
-        "backend is on). Omitted fields are unchanged. Turning a capability (or the master) off drops " +
-        "live sockets that lost access.",
+        "is the master switch; kv/files/ai/realtime/authoring are individual features (effective only " +
+        "when backend is on). `authoring` (a signed-in viewer creating a new canvas from the page) also " +
+        "needs the operator instance switch on and defaults OFF. Omitted fields are unchanged. Turning a " +
+        "capability (or the master) off drops live sockets that lost access.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         backendEnabled: z.boolean().optional(),
@@ -763,6 +764,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         files: z.boolean().optional(),
         ai: z.boolean().optional(),
         realtime: z.boolean().optional(),
+        authoring: z.boolean().optional(),
       },
     },
     async ({ id, ...patch }) => {

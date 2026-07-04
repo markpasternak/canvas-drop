@@ -1799,14 +1799,16 @@ describe("managementRoutes", () => {
     const res = await app.request(`/api/canvases/${created.id}/capabilities`, {
       method: "PATCH",
       headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
-      body: JSON.stringify({ ai: false, backendEnabled: true }),
+      body: JSON.stringify({ ai: false, backendEnabled: true, authoring: true }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf<CapView>(res);
     expect(body.capabilities.ai).toBe(false);
     expect(body.capabilities.kv).toBe(true);
+    expect(body.capabilities.authoring).toBe(true); // default-off flag flipped on
     const stored = await canvasesRepository(client).findById(created.id);
     expect(stored?.capAi).toBe(false);
+    expect(stored?.capAuthoring).toBe(true);
   });
 
   it("PATCH /capabilities rejects an invalid body (400)", async () => {
