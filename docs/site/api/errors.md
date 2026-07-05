@@ -48,6 +48,7 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 | `AI_STREAM_TRUNCATED` | 502 | An AI stream ended before completion. |
 | `AI_UPSTREAM_ERROR` | 502 | The AI provider returned an error. |
 | `PUBLISH_FAILED` | 502 | `canvasdrop.canvases.publish` created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke. |
+| `SHARE_REVOKED` | 409 | `canvasdrop.canvases.update` was called on a revoked share; revoked shares are terminal — publish a new one instead. |
 | `REQUEST_FAILED` | 0 | A request failed without a more specific code. |
 
 `REQUEST_FAILED` carries status `0` — it's the fallback when a request fails

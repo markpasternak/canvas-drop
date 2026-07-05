@@ -287,6 +287,52 @@ describe("createClient", () => {
     expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/authoring/id%2F1");
     expect(fetch.mock.calls[0]?.[1]?.method).toBe("DELETE");
   });
+
+  it("canvases.update PUTs multipart to /authoring/:id with metadata + bundle", async () => {
+    const fetch = fetchMock(async () => res(200, { id: "cvB", url: "u", status: "live" }));
+    const client = createClient({ context: ctx, fetch });
+    const out = await client.canvases.update("cvB", {
+      title: "New",
+      metadata: { sourceApp: "product-roadmap" },
+      bundle: new ArrayBuffer(4),
+    });
+    expect(out).toMatchObject({ id: "cvB", status: "live" });
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://canvases.example.com/v1/c/foo/authoring/cvB");
+    expect(init?.method).toBe("PUT");
+    const form = init?.body as FormData;
+    expect(JSON.parse(String(form.get("metadata")))).toMatchObject({ title: "New" });
+    expect(form.get("bundle")).toBeTruthy();
+  });
+
+  it("canvases.update with no bundle omits the bundle part (settings-only)", async () => {
+    const fetch = fetchMock(async () => res(200, { id: "cvB", url: "u", status: "private" }));
+    const client = createClient({ context: ctx, fetch });
+    await client.canvases.update("cvB", { access: "private", expiresAt: null });
+    const form = (fetch.mock.calls[0]?.[1]?.body as FormData) ?? new FormData();
+    expect(form.get("bundle")).toBeNull();
+    expect(JSON.parse(String(form.get("metadata")))).toMatchObject({
+      access: "private",
+      expiresAt: null,
+    });
+  });
+
+  it("canvases.update maps 409 SHARE_REVOKED to a CanvasdropError with the code", async () => {
+    const fetch = fetchMock(async () => res(409, { code: "SHARE_REVOKED" }));
+    const client = createClient({ context: ctx, fetch });
+    const err = await client.canvases.update("cvB", { title: "x" }).catch((e) => e);
+    expect(err).toBeInstanceOf(CanvasdropError);
+    expect((err as CanvasdropError).code).toBe("SHARE_REVOKED");
+  });
+
+  it("canvases.list serializes the {sourceApp,sourceKind,tags} filter to the query string", async () => {
+    const fetch = fetchMock(async () => res(200, { canvases: [] }));
+    const client = createClient({ context: ctx, fetch });
+    await client.canvases.list({ sourceApp: "product-roadmap", tags: ["q3", "roadmap"] });
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://canvases.example.com/v1/c/foo/authoring?sourceApp=product-roadmap&tags=q3%2Croadmap",
+    );
+  });
 });
 
 // --- AI ----------------------------------------------------------------------
