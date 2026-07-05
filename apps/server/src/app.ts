@@ -373,6 +373,21 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     await next();
   });
 
+  // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
+  // since preflights carry no credentials and must not 401. In subdomain mode it echoes
+  // the validated canvas origin + `Access-Control-Allow-Credentials: true` so the SDK
+  // (credentials: "include") can call the base-host API with PUT/DELETE/PATCH.
+  //
+  // MUST be registered BEFORE the `/`-mounted routers below — the MCP OAuth router
+  // (`@hono/mcp` `mcpAuthRouter`) installs a GLOBAL, unconfigured `new Hono().use(cors())`
+  // (Hono default: `Access-Control-Allow-Origin: *`, NO credentials) that runs for every
+  // path. `cors()` short-circuits OPTIONS preflights with a 204 before route matching, so
+  // if MCP mounts first it hijacks this preflight and answers wildcard/no-credentials —
+  // which browsers reject for credentialed requests ("Failed to fetch"). Registering this
+  // handler earlier lets it claim `/v1/c/:slug/*` OPTIONS first; MCP's cors still serves
+  // its own `/mcp` + `/.well-known/*` OPTIONS (different paths). See routes.ts.
+  app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
+
   // Public session-login routes.
   app.route("/auth", authRoutes({ sessionSvc: noopSession(deps.sessionSvc), oidc: deps.oidc }));
 
@@ -466,10 +481,6 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       }),
     );
   }
-
-  // CORS preflight for the canvas runtime API (§9.4) — answered BEFORE the gateway,
-  // since preflights carry no credentials and must not 401.
-  app.options("/v1/c/:slug/*", canvasApiPreflight(deps.config));
 
   // Signed-out link unfurls (iMessage/Slack/…) carry no session cookie, so without
   // this they'd follow the gateway's login redirect and preview the IdP's "Sign in"

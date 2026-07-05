@@ -212,6 +212,38 @@ describe("buildApp", () => {
     expect(res.status).toBe(401);
   });
 
+  it("runtime-API CORS preflight stays credentialed and is NOT hijacked by the MCP router's global cors() (subdomain mode)", async () => {
+    client = await makeTestDb("sqlite");
+    // Subdomain mode with MCP ON (default) — the @hono/mcp OAuth router mounts a global
+    // `new Hono().use(cors())` (wildcard origin, no credentials) at `/`. This preflight
+    // must be claimed by canvasApiPreflight, not that wildcard cors, or credentialed
+    // PUT/DELETE (update/revoke, kv.set/delete, files.delete) fail in the browser.
+    const subConfig = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DEV_USER_EMAIL: "mark@example.com",
+      CANVAS_DROP_URL_MODE: "subdomain",
+      CANVAS_DROP_BASE_URL: "https://canvases.example.com",
+      CANVAS_DROP_SESSION_SECRET: "x".repeat(40),
+    });
+    const a = app(client, subConfig);
+    const origin = "https://roadmap.canvases.example.com";
+    const res = await a.request("/v1/c/roadmap/authoring/some-id", {
+      method: "OPTIONS",
+      headers: {
+        host: "canvases.example.com",
+        origin,
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "content-type",
+      },
+    });
+    expect(res.status).toBe(204);
+    // Echoed canvas origin + credentials — NOT the MCP router's `*` / no-credentials.
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+    // The methods list proves canvasApiPreflight answered (its set), not @hono/mcp's cors().
+    expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET,POST,PUT,DELETE,OPTIONS");
+  });
+
   it("browser unauthenticated requests in proxy mode get an HTML 401 page", async () => {
     client = await makeTestDb("sqlite");
     const proxyConfig = loadConfig({
