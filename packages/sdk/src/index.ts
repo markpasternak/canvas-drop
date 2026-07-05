@@ -59,6 +59,11 @@ export const ERROR_CODES = {
     summary:
       "canvasdrop.canvases.publish created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke.",
   },
+  SHARE_REVOKED: {
+    status: 409,
+    summary:
+      "canvasdrop.canvases.update was called on a revoked share; revoked shares are terminal — publish a new one instead.",
+  },
   REQUEST_FAILED: { status: 0, summary: "A request failed without a more specific code." },
 } as const;
 
@@ -337,35 +342,78 @@ export interface RealtimeNamespace {
   channel(name: string): Channel;
 }
 
-// --- Authoring primitive (plan 2026-07-04) ----------------------------------
+// --- Authoring / managed shares (plan 2026-07-04, v2 2026-07-05) -------------
+
+/** Access rung a share may request. `"password"` = a public link protected by a password. */
+export type ShareAccess = "private" | "specific_people" | "public_link" | "password";
+
+/** Derived lifecycle status of a managed share (mirrors the server's shared helper). */
+export type ShareStatus = "live" | "expired" | "revoked" | "private";
 
 export interface PublishOptions {
   title: string;
   /** Omit for a readable-random slug. */
   slug?: string;
   tags?: string[];
-  /** `"password"` maps to a public link protected by `password`. Operator-gated. */
-  access?: "private" | "specific_people" | "public_link" | "password";
+  access?: ShareAccess;
   password?: string;
   /** Unix ms; the operator may require and/or clamp it. */
   expiresAt?: number;
+  /** Free-form structured metadata (sourceApp/sourceKind/theme/…), round-tripped on list(). */
+  metadata?: Record<string, unknown>;
   /** The static-site bundle as a zip. */
   bundle: Blob | ArrayBuffer;
 }
+
+/** Update an existing share IN PLACE (same URL). Every field optional; `password`/
+ *  `expiresAt` accept `null` to clear. Omit `bundle` to change only settings/metadata. */
+export interface UpdateOptions {
+  title?: string;
+  tags?: string[];
+  access?: ShareAccess;
+  password?: string | null;
+  expiresAt?: number | null;
+  metadata?: Record<string, unknown>;
+  bundle?: Blob | ArrayBuffer;
+}
+
+/** A managed share as seen by its creator's management UI. */
 export interface AuthoredCanvas {
   id: string;
   url: string;
   title: string;
   tags: string[];
+  access: string;
+  status: ShareStatus;
+  createdAt: number;
+  updatedAt: number;
   expiresAt: number | null;
+  revokedAt: number | null;
+  /** The creator (owner) id. */
+  createdBy: string;
+  /** The current version id — advances on every bundle deploy (a change signal). */
+  version: string | null;
+  bundleUpdatedAt: number;
+  sourceApp: string | null;
+  sourceKind: string | null;
+  metadata: Record<string, unknown>;
 }
+
 export interface CanvasesNamespace {
-  /** Create canvas B, deploy the bundle, apply share settings — one metered op.
+  /** Create a durable share (canvas B): create → deploy the bundle → apply share settings.
    *  Throws `PublishFailedError` (with `.id`) if the deploy/config fails after create. */
-  publish(opts: PublishOptions): Promise<{ id: string; url: string }>;
-  /** The canvases THIS viewer authored (viewer-scoped). */
-  list(): Promise<AuthoredCanvas[]>;
-  /** Delete/unpublish one of the viewer's own authored canvases. */
+  publish(opts: PublishOptions): Promise<AuthoredCanvas>;
+  /** Update an existing share in place — a new version at the SAME URL, and/or changed
+   *  settings/metadata. Owner or admin only. */
+  update(id: string, opts: UpdateOptions): Promise<AuthoredCanvas>;
+  /** The shares THIS viewer authored (viewer-scoped), incl. revoked/expired. Optionally
+   *  filtered by sourceApp/sourceKind/tags. */
+  list(filter?: {
+    sourceApp?: string;
+    sourceKind?: string;
+    tags?: string[];
+  }): Promise<AuthoredCanvas[]>;
+  /** Revoke a share: the public URL becomes unavailable, but it stays in list() as "revoked". */
   revoke(id: string): Promise<void>;
 }
 
@@ -821,10 +869,37 @@ export function createClient(options: ClientOptions): CanvasdropClient {
           body: form,
         });
         if (!res.ok) throw errorFromResponse(res.status, await res.json().catch(() => null));
-        return (await res.json()) as { id: string; url: string };
+        return (await res.json()) as AuthoredCanvas;
       },
-      async list() {
-        const r = await request<{ canvases: AuthoredCanvas[] }>(opts, "GET", "/authoring");
+      async update(id: string, o: UpdateOptions) {
+        const { bundle, ...meta } = o;
+        const form = new FormData();
+        form.set("metadata", JSON.stringify(meta));
+        // A settings-only update omits the bundle part entirely (URL + version unchanged).
+        if (bundle !== undefined) {
+          const blob =
+            bundle instanceof Blob ? bundle : new Blob([bundle], { type: "application/zip" });
+          form.set("bundle", blob, "bundle.zip");
+        }
+        const res = await opts.fetch(base(`/authoring/${encodeURIComponent(id)}`), {
+          method: "PUT",
+          credentials: "include",
+          body: form,
+        });
+        if (!res.ok) throw errorFromResponse(res.status, await res.json().catch(() => null));
+        return (await res.json()) as AuthoredCanvas;
+      },
+      async list(filter?: { sourceApp?: string; sourceKind?: string; tags?: string[] }) {
+        const q = new URLSearchParams();
+        if (filter?.sourceApp) q.set("sourceApp", filter.sourceApp);
+        if (filter?.sourceKind) q.set("sourceKind", filter.sourceKind);
+        if (filter?.tags?.length) q.set("tags", filter.tags.join(","));
+        const qs = q.toString();
+        const r = await request<{ canvases: AuthoredCanvas[] }>(
+          opts,
+          "GET",
+          `/authoring${qs ? `?${qs}` : ""}`,
+        );
         return r.canvases;
       },
       async revoke(id: string) {

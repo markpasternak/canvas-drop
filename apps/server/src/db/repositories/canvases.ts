@@ -120,6 +120,8 @@ export interface CanvasSettingsPatch {
   galleryListed?: boolean;
   galleryTemplatable?: boolean;
   tags?: Json;
+  /** Authoring-share free-form metadata (authoring v2). `null` clears it. */
+  metadata?: Json;
 }
 
 /**
@@ -805,6 +807,7 @@ export function canvasesRepository(client: DbClient) {
       // clears templatable, overriding any templatable=true in the same call.
       if (patch.galleryListed === false) set.galleryTemplatable = false;
       if (patch.tags !== undefined) set.tags = patch.tags;
+      if (patch.metadata !== undefined) set.metadata = patch.metadata;
       if (patch.access !== undefined) set.access = patch.access;
       if (patch.discoverability !== undefined) set.discoverability = patch.discoverability;
       if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
@@ -1185,6 +1188,26 @@ export function canvasesRepository(client: DbClient) {
         .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
+    },
+
+    /**
+     * Revoke a managed authoring share (authoring v2). Stamps `revoked_at`, clears
+     * `current_version_id` so the public URL has no content to serve (404 → not readable),
+     * AND resets `access` to private so the anonymous-public surface (the social-preview
+     * card + the shared-CDN cache scope, both gated on `isAnonymouslyPublic`) closes too —
+     * a revoked share must not keep unfurling to crawlers. `status = active` and the
+     * tags/metadata are KEPT, so the record stays listed for the creator as status
+     * "revoked" (unlike `setStatus("deleted")`, which hides + purges it). Idempotent.
+     * Returns the updated row, or undefined if the canvas is not active (e.g. deleted).
+     */
+    async revoke(id: string): Promise<Canvas | undefined> {
+      const now = Date.now();
+      const rows = (await db
+        .update(t)
+        .set({ revokedAt: now, currentVersionId: null, access: "private", updatedAt: now })
+        .where(and(eq(t.id, id), eq(t.status, "active")))
+        .returning()) as Canvas[];
+      return rows[0];
     },
 
     /**

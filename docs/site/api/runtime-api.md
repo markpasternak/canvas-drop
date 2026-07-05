@@ -186,22 +186,39 @@ handles framing, reconnection, and presence for you. See the
 ## Authoring
 
 Capability: `authoring` (off by default; also needs the operator instance switch
-`CANVAS_DROP_AUTHORING`). Lets a signed-in **member** viewer create a new canvas as
-themselves. Guests and public-link visitors are refused (`NOT_AUTHENTICATED`).
+`CANVAS_DROP_AUTHORING`). Lets a signed-in **member** viewer create and manage
+canvases as **managed shares**. Guests and public-link visitors are refused
+(`NOT_AUTHENTICATED`).
 
 ```
-POST   {base}/v1/c/{slug}/authoring          publish → { id, url }
-GET    {base}/v1/c/{slug}/authoring          list the viewer's authored canvases
-DELETE {base}/v1/c/{slug}/authoring/{id}     revoke (soft-delete) → 204
+POST   {base}/v1/c/{slug}/authoring          publish → AuthoredCanvas
+PUT    {base}/v1/c/{slug}/authoring/{id}     update in place (same URL) → AuthoredCanvas
+GET    {base}/v1/c/{slug}/authoring          list the viewer's shares (+ filter)
+DELETE {base}/v1/c/{slug}/authoring/{id}     revoke (URL dead; stays listed) → 204
 ```
 
-`POST` is `multipart/form-data`: a JSON `metadata` part (`title`, optional `slug`,
-`tags`, `access`, `password`, `expiresAt`) plus a `bundle` part (the static-site
-zip). The server creates the canvas under the viewer's account, deploys the bundle,
-and applies the share settings in one call. Errors: `CAPABILITY_DISABLED` (403),
-`NOT_AUTHENTICATED` (401), `QUOTA_EXCEEDED` (429, with `scope`), `INVALID_BODY`
-(400/413), and `PUBLISH_FAILED` (502, carrying the new canvas's `id` when the deploy
-or share-config failed after creation). Use the SDK's
+`POST` and `PUT` are `multipart/form-data`: a JSON `metadata` part (`title`, optional
+`slug` (POST only), `tags`, `access`, `password`, `expiresAt`, and a free-form
+`metadata` object) plus a `bundle` part (the static-site zip). `POST` creates the
+canvas under the viewer's account, deploys the bundle, and applies the share settings
+in one metered call. `PUT` updates an existing share **in place** — a new immutable
+version at the same URL when a `bundle` is included (omit it to change only settings/
+metadata), owner-or-admin only, and it does **not** consume authoring quota. Both
+return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `status`,
+`createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `createdBy`, `version`,
+`bundleUpdatedAt`, `sourceApp`, `sourceKind`, `metadata`).
+
+`GET` returns the viewer's shares — **including** revoked and expired ones (each with a
+derived `status`: `revoked` › `expired` › `private` › `live`) — and accepts a
+`?sourceApp=&sourceKind=&tags=a,b` filter. `DELETE` **revokes**: the public URL is made
+unavailable, but the record stays in `list()` as `status: "revoked"` (it is not
+soft-deleted). Reader isolation: the public canvas-serve path never exposes `metadata`
+or any management field.
+
+Errors: `CAPABILITY_DISABLED` (403), `NOT_AUTHENTICATED` (401), `QUOTA_EXCEEDED` (429,
+with `scope`), `INVALID_BODY` (400/413), `SHARE_REVOKED` (409, on `PUT` to a revoked
+share), and `PUBLISH_FAILED` (502, carrying the new canvas's `id` when the deploy or
+share-config failed after creation). Use the SDK's
 [`canvasdrop.canvases`](/docs/sdk/authoring) API rather than driving these by hand.
 
 ## Adjacent endpoints

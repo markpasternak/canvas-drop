@@ -198,6 +198,39 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(after?.galleryTemplatable).toBe(false);
   });
 
+  it("revoke (authoring v2) stamps revoked_at + clears the version, but KEEPS access/tags/metadata + active status", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "share-1", apiKeyHash: "h" });
+    await deploy(client, cv.id, ownerId);
+    await repo.updateSettings(cv.id, {
+      access: "public_link",
+      tags: ["q3"],
+      metadata: { sourceApp: "product-roadmap", sourceKind: "roadmap-share" },
+    });
+
+    const revoked = await repo.revoke(cv.id);
+    expect(revoked?.status).toBe("active"); // NOT soft-deleted — stays listed for the creator
+    expect(revoked?.revokedAt).not.toBeNull();
+    expect(revoked?.currentVersionId).toBeNull(); // URL has no content → unreadable
+    expect(revoked?.access).toBe("private"); // anonymous-public surface (social card/CDN) closed
+    // Unlike unpublish, revoke preserves the descriptive fields for the "revoked" list row:
+    expect(revoked?.tags).toEqual(["q3"]);
+    expect(revoked?.metadata).toMatchObject({ sourceApp: "product-roadmap" });
+  });
+
+  it("metadata round-trips through updateSettings (null clears it)", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "meta-1", apiKeyHash: "h" });
+    await repo.updateSettings(cv.id, { metadata: { theme: "dark", itemCount: 3 } });
+    expect((await repo.findById(cv.id))?.metadata).toMatchObject({ theme: "dark", itemCount: 3 });
+    await repo.updateSettings(cv.id, { metadata: null });
+    expect((await repo.findById(cv.id))?.metadata).toBeNull();
+  });
+
   it("re-publishing after unpublish does NOT auto-restore sharing (owner re-shares deliberately)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
