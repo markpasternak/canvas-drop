@@ -9,6 +9,7 @@ import {
   type FetchLike,
   NotAuthenticatedError,
   NotFoundError,
+  PublishFailedError,
   QuotaExceededError,
   type RealtimeMessage,
   type WebSocketLike,
@@ -219,6 +220,72 @@ describe("createClient", () => {
     const client = createClient({ context: ctx, fetch });
     const result = await client.files.upload(new File(["abc"], "a.txt", { type: "text/plain" }));
     expect(result.url).toBe("https://canvases.example.com/v1/c/foo/files/abc/content");
+  });
+
+  it("canvases.publish POSTs multipart to /authoring and returns { id, url }", async () => {
+    const fetch = fetchMock(async () => res(200, { id: "cvB", url: "https://cvB.example.com/" }));
+    const client = createClient({ context: ctx, fetch });
+    const out = await client.canvases.publish({
+      title: "Snapshot",
+      access: "public_link",
+      bundle: new Blob([new Uint8Array([1, 2, 3])], { type: "application/zip" }),
+    });
+    expect(out).toEqual({ id: "cvB", url: "https://cvB.example.com/" });
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://canvases.example.com/v1/c/foo/authoring");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeInstanceOf(FormData);
+    const form = init?.body as FormData;
+    expect(JSON.parse(String(form.get("metadata")))).toMatchObject({
+      title: "Snapshot",
+      access: "public_link",
+    });
+    expect(form.get("bundle")).toBeTruthy();
+    // The bundle must NOT be inlined into the JSON metadata.
+    expect(String(form.get("metadata"))).not.toContain("bundle");
+  });
+
+  it("canvases.publish maps 502 PUBLISH_FAILED to PublishFailedError carrying the id", async () => {
+    const fetch = fetchMock(async () => res(502, { code: "PUBLISH_FAILED", id: "cvB" }));
+    const client = createClient({ context: ctx, fetch });
+    const err = await client.canvases
+      .publish({ title: "B", bundle: new ArrayBuffer(4) })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(PublishFailedError);
+    expect((err as PublishFailedError).id).toBe("cvB");
+  });
+
+  it("canvases.publish maps 401/429/403 to the shared typed errors", async () => {
+    const canvasesWith = (status: number, body: unknown) =>
+      createClient({ context: ctx, fetch: fetchMock(async () => res(status, body)) }).canvases;
+    const b = { title: "B", bundle: new ArrayBuffer(1) };
+    await expect(
+      canvasesWith(401, { code: "NOT_AUTHENTICATED" }).publish(b),
+    ).rejects.toBeInstanceOf(NotAuthenticatedError);
+    await expect(
+      canvasesWith(429, { code: "QUOTA_EXCEEDED", scope: "user_daily" }).publish(b),
+    ).rejects.toBeInstanceOf(QuotaExceededError);
+    await expect(
+      canvasesWith(403, { code: "CAPABILITY_DISABLED", capability: "authoring" }).publish(b),
+    ).rejects.toBeInstanceOf(CapabilityDisabledError);
+  });
+
+  it("canvases.list GETs /authoring and unwraps the canvases array", async () => {
+    const fetch = fetchMock(async () =>
+      res(200, { canvases: [{ id: "cvB", url: "u", title: "T", tags: [], expiresAt: null }] }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const list = await client.canvases.list();
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/authoring");
+    expect(list).toEqual([{ id: "cvB", url: "u", title: "T", tags: [], expiresAt: null }]);
+  });
+
+  it("canvases.revoke DELETEs the encoded id under /authoring", async () => {
+    const fetch = fetchMock(async () => res(204, undefined));
+    const client = createClient({ context: ctx, fetch });
+    await client.canvases.revoke("id/1");
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/authoring/id%2F1");
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe("DELETE");
   });
 });
 

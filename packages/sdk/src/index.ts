@@ -54,6 +54,11 @@ export const ERROR_CODES = {
   CONNECTION_LIMIT: { status: 429, summary: "Too many concurrent realtime connections." },
   AI_STREAM_TRUNCATED: { status: 502, summary: "An AI stream ended before completion." },
   AI_UPSTREAM_ERROR: { status: 502, summary: "The AI provider returned an error." },
+  PUBLISH_FAILED: {
+    status: 502,
+    summary:
+      "canvasdrop.canvases.publish created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke.",
+  },
   REQUEST_FAILED: { status: 0, summary: "A request failed without a more specific code." },
 } as const;
 
@@ -105,6 +110,17 @@ export class NotAuthenticatedError extends CanvasdropError {
     this.name = "NotAuthenticatedError";
   }
 }
+/** `canvasdrop.canvases.publish` created canvas B but its deploy or share-config
+ *  failed. `id` is B's id (present when the failure happened after creation) so the
+ *  caller can retry the publish or `canvasdrop.canvases.revoke(id)`. */
+export class PublishFailedError extends CanvasdropError {
+  readonly id?: string;
+  constructor(id?: string, message?: string) {
+    super("PUBLISH_FAILED", 502, message ?? "publish failed");
+    this.name = "PublishFailedError";
+    this.id = id;
+  }
+}
 
 /** Map an HTTP response (status + parsed body) to a typed error. */
 export function errorFromResponse(status: number, body: unknown): CanvasdropError {
@@ -125,6 +141,13 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     return new CapabilityDisabledError(cap, hint);
   }
   if (status === 404) return new NotFoundError();
+  if (code === "PUBLISH_FAILED") {
+    const id =
+      typeof body === "object" && body && "id" in body
+        ? String((body as { id: unknown }).id)
+        : undefined;
+    return new PublishFailedError(id);
+  }
   // Quota/limit errors map to QuotaExceededError, signalled either by code (AI:
   // 429 QUOTA_EXCEEDED, or the per-canvas guest AI cap: 429 GUEST_AI_CAP; KV
   // key-count: 409 KEY_LIMIT) or by the 413 *_TOO_LARGE size statuses. Other 409s
@@ -314,6 +337,38 @@ export interface RealtimeNamespace {
   channel(name: string): Channel;
 }
 
+// --- Authoring primitive (plan 2026-07-04) ----------------------------------
+
+export interface PublishOptions {
+  title: string;
+  /** Omit for a readable-random slug. */
+  slug?: string;
+  tags?: string[];
+  /** `"password"` maps to a public link protected by `password`. Operator-gated. */
+  access?: "private" | "specific_people" | "public_link" | "password";
+  password?: string;
+  /** Unix ms; the operator may require and/or clamp it. */
+  expiresAt?: number;
+  /** The static-site bundle as a zip. */
+  bundle: Blob | ArrayBuffer;
+}
+export interface AuthoredCanvas {
+  id: string;
+  url: string;
+  title: string;
+  tags: string[];
+  expiresAt: number | null;
+}
+export interface CanvasesNamespace {
+  /** Create canvas B, deploy the bundle, apply share settings — one metered op.
+   *  Throws `PublishFailedError` (with `.id`) if the deploy/config fails after create. */
+  publish(opts: PublishOptions): Promise<{ id: string; url: string }>;
+  /** The canvases THIS viewer authored (viewer-scoped). */
+  list(): Promise<AuthoredCanvas[]>;
+  /** Delete/unpublish one of the viewer's own authored canvases. */
+  revoke(id: string): Promise<void>;
+}
+
 export interface CanvasdropClient {
   me(): Promise<Me>;
   kv: KvNamespace & { readonly user: KvNamespace };
@@ -325,6 +380,7 @@ export interface CanvasdropClient {
   };
   ai: AiNamespace;
   realtime: RealtimeNamespace;
+  canvases: CanvasesNamespace;
 }
 
 function kvNamespace(opts: Required<ClientOptions>, base: string): KvNamespace {
@@ -749,6 +805,30 @@ export function createClient(options: ClientOptions): CanvasdropClient {
       },
       url(id: string) {
         return base(`/files/${encodeURIComponent(id)}/content`);
+      },
+    },
+    canvases: {
+      async publish(o: PublishOptions) {
+        const { bundle, ...meta } = o;
+        const form = new FormData();
+        form.set("metadata", JSON.stringify(meta));
+        const blob =
+          bundle instanceof Blob ? bundle : new Blob([bundle], { type: "application/zip" });
+        form.set("bundle", blob, "bundle.zip");
+        const res = await opts.fetch(base("/authoring"), {
+          method: "POST",
+          credentials: "include",
+          body: form,
+        });
+        if (!res.ok) throw errorFromResponse(res.status, await res.json().catch(() => null));
+        return (await res.json()) as { id: string; url: string };
+      },
+      async list() {
+        const r = await request<{ canvases: AuthoredCanvas[] }>(opts, "GET", "/authoring");
+        return r.canvases;
+      },
+      async revoke(id: string) {
+        await request(opts, "DELETE", `/authoring/${encodeURIComponent(id)}`);
       },
     },
   };

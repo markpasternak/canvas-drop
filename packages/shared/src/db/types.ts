@@ -2,6 +2,7 @@ import type {
   aiUsage,
   allowedEmails,
   auditLog,
+  authoringUsage,
   canvasAllowlist,
   canvases,
   canvasTeams,
@@ -79,6 +80,8 @@ export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
 export type AiUsage = typeof aiUsage.$inferSelect;
 export type NewAiUsage = typeof aiUsage.$inferInsert;
+export type AuthoringUsage = typeof authoringUsage.$inferSelect;
+export type NewAuthoringUsage = typeof authoringUsage.$inferInsert;
 export type GuestInvite = typeof guestInvites.$inferSelect;
 export type NewGuestInvite = typeof guestInvites.$inferInsert;
 export type GuestSession = typeof guestSessions.$inferSelect;

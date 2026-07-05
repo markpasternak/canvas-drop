@@ -254,6 +254,11 @@ export const canvases = sqliteTable(
     capFiles: c.bool("cap_files").notNull().default(true),
     capAi: c.bool("cap_ai").notNull().default(true),
     capRealtime: c.bool("cap_realtime").notNull().default(true),
+    // `cap_authoring` (plan 2026-07-04) defaults FALSE, unlike its siblings: letting a
+    // canvas's page mint new canvases as the viewer is higher-privilege, so enabling
+    // backend must not silently grant it. Effective only when backend + this flag +
+    // the operator instance switch (CANVAS_DROP_AUTHORING) are all on.
+    capAuthoring: c.bool("cap_authoring").notNull().default(false),
     // Guest-AI opt-in (U9, KTD5): AI is off for invited guests by default (the
     // metered-$ surface). The owner may opt a canvas in; `guest_ai_cap` is the
     // per-canvas monthly USD ceiling for guest AI (0 = no extra cap beyond org).
@@ -606,6 +611,36 @@ export const aiUsage = sqliteTable(
   (t) => [
     index("ai_usage_canvas_created_idx").on(t.canvasId, t.createdAt),
     index("ai_usage_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);
+
+// Authoring metering (plan 2026-07-04). ONE row per canvas authored via the
+// `authoring` capability: `actorId` is the viewer who created it, `sourceCanvasId`
+// the canvas whose page they were on, `authoredCanvasId` the new canvas. The route
+// counts rows for per-viewer daily + all-time-total quota; the two indexes serve the
+// per-actor window and the per-source rollup. Survives audit-log pruning (why a
+// dedicated table over counting audit events).
+export const authoringUsage = sqliteTable(
+  "authoring_usage",
+  {
+    id: c.text("id").primaryKey(),
+    actorId: c
+      .text("actor_id")
+      .notNull()
+      .references(() => users.id),
+    sourceCanvasId: c
+      .text("source_canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    authoredCanvasId: c
+      .text("authored_canvas_id")
+      .notNull()
+      .references(() => canvases.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    index("authoring_usage_actor_created_idx").on(t.actorId, t.createdAt),
+    index("authoring_usage_source_created_idx").on(t.sourceCanvasId, t.createdAt),
   ],
 );
 

@@ -20,6 +20,8 @@ const SCREENSHOTS_KEY = "config.screenshots.enabled";
 const DESIGN_SKIN_KEY = "config.core.designSkin";
 /** Instance-wide public-link publishing switch (editable; default on). */
 export const PUBLIC_LINKS_ENABLED_KEY = "access.publicLinksEnabled";
+/** Authoring capability instance switch (editable; default off — plan 2026-07-04). */
+const AUTHORING_ENABLED_KEY = "config.authoring.enabled";
 
 // Invite / notification email + rate settings (plan 003 phase 3; DB-only, default constants
 // mirror config-fields.ts `fromConfig`). Read by the invite primitive.
@@ -86,7 +88,9 @@ export type QuotaKey =
   | "files.bytes.file"
   | "files.bytes.canvas"
   | "ai.user.daily.usd"
-  | "ai.canvas.monthly.usd";
+  | "ai.canvas.monthly.usd"
+  | "authoring.user.daily.max"
+  | "authoring.user.total.max";
 
 export const QUOTA_KEYS: readonly QuotaKey[] = [
   "kv.keys.shared",
@@ -95,6 +99,8 @@ export const QUOTA_KEYS: readonly QuotaKey[] = [
   "files.bytes.canvas",
   "ai.user.daily.usd",
   "ai.canvas.monthly.usd",
+  "authoring.user.daily.max",
+  "authoring.user.total.max",
 ];
 
 const MODELS_KEY = "ai.models.allowlist";
@@ -214,6 +220,41 @@ export function adminSettingsService(deps: {
      */
     async effectiveRealtimeEnabled(): Promise<boolean> {
       return (await boolOverride(REALTIME_KEY)) ?? config.realtimeEnabled;
+    },
+
+    /**
+     * Effective authoring instance switch (DB override ?? env). Drives the
+     * `authoring` capability gate (ANDed with backend + the per-canvas flag) and the
+     * dashboard Backend-tab "disabled by your administrator" label.
+     */
+    async authoringEnabled(): Promise<boolean> {
+      return (await boolOverride(AUTHORING_ENABLED_KEY)) ?? config.authoring.enabled;
+    },
+
+    /**
+     * The effective authoring policy the publish route validates against: per-viewer
+     * quota (daily + all-time total, DB-overridable via `effectiveQuota`) plus the
+     * share policy (allowed access rungs, max expiry, whether an expiry is required)
+     * from env config. The route reads this once per request.
+     */
+    async effectiveAuthoringPolicy(): Promise<{
+      userDailyMax: number;
+      userTotalMax: number;
+      allowedRungs: readonly string[];
+      maxExpiryDays: number;
+      requireExpiry: boolean;
+    }> {
+      const [userDailyMax, userTotalMax] = await Promise.all([
+        this.effectiveQuota("authoring.user.daily.max", config.authoring.userDailyMax),
+        this.effectiveQuota("authoring.user.total.max", config.authoring.userTotalMax),
+      ]);
+      return {
+        userDailyMax,
+        userTotalMax,
+        allowedRungs: config.authoring.allowedRungs,
+        maxExpiryDays: config.authoring.maxExpiryDays,
+        requireExpiry: config.authoring.requireExpiry,
+      };
     },
 
     /**

@@ -42,6 +42,7 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
     capFiles: true,
     capAi: true,
     capRealtime: true,
+    capAuthoring: true,
     guestAiEnabled: false,
     guestAiCap: 0,
     apiKeyHash: "h",

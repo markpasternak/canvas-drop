@@ -139,6 +139,10 @@ function quotaFallback(config: Config, key: QuotaKey): number {
       return config.ai.userDailyUsd;
     case "ai.canvas.monthly.usd":
       return config.ai.canvasMonthlyUsd;
+    case "authoring.user.daily.max":
+      return config.authoring.userDailyMax;
+    case "authoring.user.total.max":
+      return config.authoring.userTotalMax;
   }
 }
 

@@ -209,6 +209,20 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: () => false,
   },
 
+  // ── Authoring (page-driven canvas creation, plan 2026-07-04) ─────────────
+  {
+    key: "authoring.enabled",
+    env: "CANVAS_DROP_AUTHORING",
+    group: "Core",
+    label: "Authoring enabled",
+    help: "Master switch for the authoring capability (a signed-in viewer creates a new canvas from a backend-enabled canvas's page). Off by default; also requires the per-canvas Backend toggle.",
+    type: "boolean",
+    secret: false,
+    editable: true,
+    settingKey: "config.authoring.enabled",
+    fromConfig: (c) => c.authoring.enabled,
+  },
+
   // ── AI ──────────────────────────────────────────────────────────────────
   {
     key: "ai.apiKey",
@@ -482,6 +496,28 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     editable: true,
     settingKey: "quota.ai.canvas.monthly.usd",
     fromConfig: (c) => c.ai.canvasMonthlyUsd,
+  },
+  {
+    key: "quota.authoring.user.daily.max",
+    env: "CANVAS_DROP_AUTHORING_USER_DAILY_MAX",
+    group: "Limits",
+    label: "Authoring per-viewer daily max",
+    type: "number",
+    secret: false,
+    editable: true,
+    settingKey: "quota.authoring.user.daily.max",
+    fromConfig: (c) => c.authoring.userDailyMax,
+  },
+  {
+    key: "quota.authoring.user.total.max",
+    env: "CANVAS_DROP_AUTHORING_USER_TOTAL_MAX",
+    group: "Limits",
+    label: "Authoring per-viewer total max",
+    type: "number",
+    secret: false,
+    editable: true,
+    settingKey: "quota.authoring.user.total.max",
+    fromConfig: (c) => c.authoring.userTotalMax,
   },
   {
     key: "quota.kv.keys.shared",

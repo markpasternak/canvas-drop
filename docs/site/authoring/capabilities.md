@@ -10,8 +10,10 @@ throws a `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
 1. Open the canvas and go to the **Backend** tab.
 2. Switch **Enable backend** on. This is the master switch, off by default.
 3. With the backend on, toggle the features you need: **KV**, **Files**, **AI**,
-   **Realtime**. Each is independent. (The feature toggles stay disabled while
-   the backend is off.)
+   **Realtime**, **Authoring**. Each is independent. (The feature toggles stay
+   disabled while the backend is off.) **Authoring** ships off even after you turn
+   the backend on — it is higher-privilege (it lets a viewer create canvases) and
+   also needs the operator to enable it for the instance.
 
 Then call them from the page through `window.canvasdrop`. No keys, no setup:
 
@@ -45,15 +47,34 @@ condition is true:
 | Files | Backend on **and** Files toggle on |
 | AI | Backend on **and** AI toggle on **and** the operator has configured an AI provider key |
 | Realtime | Backend on **and** Realtime toggle on **and** the operator has enabled realtime for the instance |
+| Authoring | Backend on **and** Authoring toggle on **and** the operator has enabled authoring for the instance (`CANVAS_DROP_AUTHORING`) |
 
 KV and Files have no operator-level switch: your two toggles are the whole
 story. AI needs the operator to have configured an AI provider key; Realtime
 needs the operator to have turned realtime on for the instance
-(`CANVAS_DROP_REALTIME`). Each condition is resolved per request, so an admin
+(`CANVAS_DROP_REALTIME`); Authoring needs the operator to have turned authoring
+on for the instance (`CANVAS_DROP_AUTHORING`, off by default). Each condition is
+resolved per request, so an admin
 flipping the instance setting takes effect immediately. A feature you've turned
 on can still report as off if the instance isn't set up for it: the toggle stays
 on, but the tab labels it **Disabled by your administrator** so you can see
 *why* it isn't running.
+
+## Authoring: create canvases from the page
+
+The **Authoring** capability lets a canvas offer its signed-in viewers a way to
+create a brand-new canvas from the page — **as themselves**, with real ownership
+and no secret in the browser. A viewer calls
+[`canvasdrop.canvases.publish(...)`](/docs/sdk/authoring); the server creates the
+new canvas under the viewer's own account, deploys the bundle they supply, and
+applies the share settings they ask for. The new canvas shows up in *their*
+dashboard.
+
+Because it mints canvases, authoring is the one feature that ships **off** even
+with the backend on, and it needs the operator to enable it for the instance.
+Guests and public-link visitors can't use it (creation needs a signed-in member),
+and the operator sets per-viewer quotas and which access rungs / share expiries a
+publish may request. See the [authoring SDK reference](/docs/sdk/authoring).
 
 ## Public links are static-only
 

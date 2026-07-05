@@ -36,8 +36,15 @@ const CANVAS: Canvas = {
   tags: null,
   clonedFromCanvasId: null,
   backendEnabled: false,
-  capabilities: { kv: true, files: true, ai: true, realtime: true },
-  effective: { identity: false, kv: false, files: false, ai: false, realtime: false },
+  capabilities: { kv: true, files: true, ai: true, realtime: true, authoring: true },
+  effective: {
+    identity: false,
+    kv: false,
+    files: false,
+    ai: false,
+    realtime: false,
+    authoring: false,
+  },
   status: "active",
   publicationState: "draft",
   disabledReason: null,
@@ -103,8 +110,8 @@ describe("useUpdateCapabilities (optimistic)", () => {
   const ON: Canvas = {
     ...CANVAS,
     backendEnabled: true,
-    capabilities: { kv: true, files: true, ai: true, realtime: true },
-    effective: { identity: true, kv: true, files: true, ai: true, realtime: true },
+    capabilities: { kv: true, files: true, ai: true, realtime: true, authoring: true },
+    effective: { identity: true, kv: true, files: true, ai: true, realtime: true, authoring: true },
   };
 
   it("flips a feature flag + effective immediately, then rolls back on error", async () => {

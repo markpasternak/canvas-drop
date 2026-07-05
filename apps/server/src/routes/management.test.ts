@@ -1714,7 +1714,13 @@ describe("managementRoutes", () => {
     id: string;
     apiKey?: string;
     backendEnabled: boolean;
-    capabilities: { kv: boolean; files: boolean; ai: boolean; realtime: boolean };
+    capabilities: {
+      kv: boolean;
+      files: boolean;
+      ai: boolean;
+      realtime: boolean;
+      authoring: boolean;
+    };
     effective: { identity: boolean; kv: boolean; files: boolean; ai: boolean; realtime: boolean };
   };
 
@@ -1731,12 +1737,19 @@ describe("managementRoutes", () => {
     return jsonOf<CapView>(res);
   }
 
-  it("create default: backend off, all feature flags stored on, nothing effective", async () => {
+  it("create default: backend off, most feature flags stored on (authoring off), nothing effective", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const body = await createCanvas(buildApp(client, { id: owner.id, isAdmin: false }));
     expect(body.backendEnabled).toBe(false);
-    expect(body.capabilities).toEqual({ kv: true, files: true, ai: true, realtime: true });
+    // authoring is the one feature that ships stored-OFF (higher-privilege); the rest default on.
+    expect(body.capabilities).toEqual({
+      kv: true,
+      files: true,
+      ai: true,
+      realtime: true,
+      authoring: false,
+    });
     // backend off → nothing effective, including identity
     expect(body.effective.identity).toBe(false);
     expect(body.effective.kv).toBe(false);
@@ -1786,14 +1799,16 @@ describe("managementRoutes", () => {
     const res = await app.request(`/api/canvases/${created.id}/capabilities`, {
       method: "PATCH",
       headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
-      body: JSON.stringify({ ai: false, backendEnabled: true }),
+      body: JSON.stringify({ ai: false, backendEnabled: true, authoring: true }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf<CapView>(res);
     expect(body.capabilities.ai).toBe(false);
     expect(body.capabilities.kv).toBe(true);
+    expect(body.capabilities.authoring).toBe(true); // default-off flag flipped on
     const stored = await canvasesRepository(client).findById(created.id);
     expect(stored?.capAi).toBe(false);
+    expect(stored?.capAuthoring).toBe(true);
   });
 
   it("PATCH /capabilities rejects an invalid body (400)", async () => {

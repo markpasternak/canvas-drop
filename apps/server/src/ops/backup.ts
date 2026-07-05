@@ -67,6 +67,7 @@ export const BACKUP_TABLE_ORDER = [
   "kv_entries",
   "files",
   "ai_usage",
+  "authoring_usage",
   "screenshot_jobs",
 ] as const;
 

@@ -60,7 +60,7 @@ export function capabilityDisabledDetail(
       hint: `The "${capability}" capability is off for this canvas. Enable it in the dashboard Backend tab, the set_capabilities MCP tool, or PATCH /api/canvases/:id/capabilities {"${capability}": true}.`,
     };
   }
-  // Flag is on, but the operator-level global is off (ai/realtime only).
+  // Flag is on, but the operator-level global is off (ai/realtime/authoring).
   return {
     capability,
     backendEnabled: true,
@@ -70,7 +70,9 @@ export function capabilityDisabledDetail(
         ? "AI is not configured on this deployment (no AI provider key set by the operator)."
         : capability === "realtime"
           ? "Realtime is disabled on this deployment (operator setting CANVAS_DROP_REALTIME=off)."
-          : "This capability is disabled at the deployment level by the operator.",
+          : capability === "authoring"
+            ? "Authoring is disabled on this deployment (operator setting CANVAS_DROP_AUTHORING=off)."
+            : "This capability is disabled at the deployment level by the operator.",
   };
 }
 
@@ -81,6 +83,7 @@ export function capabilityGlobals(config: Config): CapabilityGlobals {
     // Truthy check (not `!== undefined`): an empty-string key must not enable AI.
     // Config also coerces a blank key to undefined; this is belt-and-suspenders.
     aiEnabled: !!config.ai.apiKey,
+    authoringEnabled: config.authoring.enabled,
   };
 }
 
@@ -97,6 +100,7 @@ export function assertCapability(canvas: Canvas, capability: Capability, config:
 export interface CapabilityGlobalOverrides {
   aiEnabled?: () => Promise<boolean>;
   realtimeEnabled?: () => Promise<boolean>;
+  authoringEnabled?: () => Promise<boolean>;
 }
 
 /**
@@ -124,6 +128,7 @@ export function requireCapability(
     // Resolve the admin-tunable globals per request when a resolver is wired.
     if (overrides?.aiEnabled) globals.aiEnabled = await overrides.aiEnabled();
     if (overrides?.realtimeEnabled) globals.realtimeEnabled = await overrides.realtimeEnabled();
+    if (overrides?.authoringEnabled) globals.authoringEnabled = await overrides.authoringEnabled();
     if (!isCapabilityEnabled(canvas, capability, globals)) {
       // Enrich the 403 so an agent can repair it without prior doc knowledge
       // (D7/§4.5 — "errors agents can repair from"). `code` stays stable; the

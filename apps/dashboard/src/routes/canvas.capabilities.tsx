@@ -35,6 +35,12 @@ const BACKEND_FEATURES: { key: FeatureCapability; label: string; description: st
     label: "Realtime",
     description: "Ephemeral pub/sub + presence over WebSockets.",
   },
+  {
+    key: "authoring",
+    label: "Authoring",
+    description:
+      "Let signed-in viewers create a new canvas from this page, as themselves. Off by default.",
+  },
 ];
 
 /**
