@@ -228,6 +228,13 @@ export const canvases = pgTable(
     // this in the same write (plan 002 KTD6).
     galleryTemplatable: c.bool("gallery_templatable").notNull().default(false),
     tags: c.json("tags"),
+    // Managed shares (authoring v2). `revoked_at` marks a share revoked: its public URL
+    // is made unreadable (the canvas is unpublished) but the row stays `active` so it
+    // remains listed for the creator as status "revoked" (never soft-deleted). `metadata`
+    // is the authoring-share's free-form JSON blob (sourceApp/sourceKind/theme/…), set via
+    // the authoring SDK publish/update; NEVER read on the public serve path (reader isolation).
+    revokedAt: c.epochMs("revoked_at"),
+    metadata: c.json("metadata"),
     // Admin-curated editorial flag (cross-owner action; not on the per-account MCP
     // surface). Set only via the admin canvases route; surfaces in the public gallery.
     galleryFeatured: c.bool("gallery_featured").notNull().default(false),
