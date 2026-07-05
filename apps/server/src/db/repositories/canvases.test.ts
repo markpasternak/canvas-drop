@@ -214,8 +214,8 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(revoked?.status).toBe("active"); // NOT soft-deleted — stays listed for the creator
     expect(revoked?.revokedAt).not.toBeNull();
     expect(revoked?.currentVersionId).toBeNull(); // URL has no content → unreadable
-    // Unlike unpublish, revoke preserves the management fields for the "revoked" list row:
-    expect(revoked?.access).toBe("public_link");
+    expect(revoked?.access).toBe("private"); // anonymous-public surface (social card/CDN) closed
+    // Unlike unpublish, revoke preserves the descriptive fields for the "revoked" list row:
     expect(revoked?.tags).toEqual(["q3"]);
     expect(revoked?.metadata).toMatchObject({ sourceApp: "product-roadmap" });
   });

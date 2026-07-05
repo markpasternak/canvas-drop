@@ -1,5 +1,5 @@
 import { type Config, shareStatus } from "@canvas-drop/shared";
-import type { Canvas, Json } from "@canvas-drop/shared/db";
+import type { AccessRung, Canvas, Json } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import { checkAuthoringQuota } from "../authoring/quota.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { requireCapability } from "../canvas/capability-guard.js";
+import { disabledError } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
@@ -158,63 +159,80 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   }
 
   /**
-   * Shared access/password/expiry gate for publish + update. `willHavePassword` is the
-   * share's password state AFTER this op. Enforces the operator allowed-rung set, the
-   * public-link admin gates (instance switch + per-account grant), password-for-password
-   * access, and the expiry bounds. `requireExpiry` is enforced by the caller (publish
-   * only). Returns null when valid.
+   * Shared access/password/expiry gate for publish + update, validated against the
+   * share's resolved END STATE (not just the fields this request changed) — so an update
+   * that widens exposure (clearing a password, dropping an expiry) faces the same operator
+   * gates a publish would. Each caller resolves the end state and passes it in.
+   *
+   * Enforces, in order: the operator allowed-rung set (only when access is explicitly
+   * set/changed — an unchanged rung was already validated at publish); password-for-
+   * password access; the public-link admin gates (instance switch + per-account grant)
+   * whenever the op creates or widens a public link; `requireExpiry` on the resulting
+   * shareable state; and the bounds on a newly-set expiry. Returns null when valid.
    */
   async function validateGates(
     pol: Awaited<ReturnType<typeof policy>>,
     viewer: { canPublishPublic: boolean },
-    input: {
-      requestedAccess?: z.infer<typeof accessEnum>;
+    s: {
+      /** True when this request explicitly sets the access rung (publish: always). */
+      accessExplicit: boolean;
+      /** The mapped rung the request explicitly requested (meaningful when accessExplicit). */
+      requestedRung?: AccessRung;
+      /** True when the caller explicitly asked for "password" access (password-required check). */
+      wantsPasswordAccess: boolean;
+      /** The share's rung AFTER this op. */
+      effectiveRung: AccessRung;
+      /** The share's password state AFTER this op. */
       willHavePassword: boolean;
-      expiresAt: number | null | undefined;
+      /** Run the public-link admin gate — set when the op creates or widens a public link. */
+      runPublicLinkGate: boolean;
+      /** The share's expiry AFTER this op (null = none). */
+      effectiveExpiry: number | null;
+      /** A NEW expiry value being set this request (number → bounds-checked; else omit). */
+      newExpiry?: number;
       now: number;
     },
   ): Promise<ValidationError | null> {
-    const { requestedAccess } = input;
-    if (requestedAccess !== undefined) {
-      const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
-      if (!pol.allowedRungs.includes(rung)) {
+    if (s.accessExplicit && s.requestedRung && !pol.allowedRungs.includes(s.requestedRung)) {
+      return {
+        code: "INVALID_BODY",
+        message: `access rung "${s.requestedRung}" is not allowed`,
+        status: 400,
+      };
+    }
+    if (s.wantsPasswordAccess && !s.willHavePassword) {
+      return {
+        code: "INVALID_BODY",
+        message: "password required for password access",
+        status: 400,
+      };
+    }
+    if (s.runPublicLinkGate) {
+      const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
+      if (!publicLinksOn) {
         return {
-          code: "INVALID_BODY",
-          message: `access rung "${rung}" is not allowed`,
-          status: 400,
+          code: "PUBLIC_LINKS_DISABLED",
+          message: "Public links are disabled for this instance.",
+          status: 403,
         };
       }
-      if (rung === "public_link") {
-        const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
-        if (!publicLinksOn) {
-          return {
-            code: "PUBLIC_LINKS_DISABLED",
-            message: "Public links are disabled for this instance.",
-            status: 403,
-          };
-        }
-        if (!viewer.canPublishPublic) {
-          return {
-            code: "PUBLIC_NOT_ALLOWED",
-            message:
-              "An administrator has revoked this account's permission to publish public links.",
-            status: 403,
-          };
-        }
-      }
-      if (requestedAccess === "password" && !input.willHavePassword) {
+      if (!viewer.canPublishPublic) {
         return {
-          code: "INVALID_BODY",
-          message: "password required for password access",
-          status: 400,
+          code: "PUBLIC_NOT_ALLOWED",
+          message:
+            "An administrator has revoked this account's permission to publish public links.",
+          status: 403,
         };
       }
     }
-    if (typeof input.expiresAt === "number") {
-      if (input.expiresAt <= input.now) {
+    if (pol.requireExpiry && s.effectiveRung !== "private" && s.effectiveExpiry === null) {
+      return { code: "INVALID_BODY", message: "an expiry is required", status: 400 };
+    }
+    if (typeof s.newExpiry === "number") {
+      if (s.newExpiry <= s.now) {
         return { code: "INVALID_BODY", message: "expiresAt is in the past", status: 400 };
       }
-      if (pol.maxExpiryDays > 0 && input.expiresAt > input.now + pol.maxExpiryDays * 86_400_000) {
+      if (pol.maxExpiryDays > 0 && s.newExpiry > s.now + pol.maxExpiryDays * 86_400_000) {
         return { code: "INVALID_BODY", message: "expiresAt exceeds the maximum", status: 400 };
       }
     }
@@ -250,7 +268,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   }
 
   const metadataTooLarge = (m: unknown) =>
-    m !== undefined && JSON.stringify(m).length > AUTHORING_MAX_METADATA_BYTES;
+    m !== undefined && Buffer.byteLength(JSON.stringify(m), "utf8") > AUTHORING_MAX_METADATA_BYTES;
 
   const bundleLimit = bodyLimit({
     maxSize: AUTHORING_MAX_BUNDLE_BYTES,
@@ -276,19 +294,23 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     const pol = await policy();
     const now = Date.now();
+    // A fresh share always sets its rung (defaulting to private), so validate that
+    // resolved rung — an omitted access is checked against allowedRungs just like an
+    // explicit one — and enforce requireExpiry on the resulting shareable state.
     const requestedAccess = meta.access ?? "private";
-    const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
+    const rung: AccessRung = requestedAccess === "password" ? "public_link" : requestedAccess;
     const gateErr = await validateGates(pol, viewer, {
-      requestedAccess: meta.access,
+      accessExplicit: true,
+      requestedRung: rung,
+      wantsPasswordAccess: requestedAccess === "password",
+      effectiveRung: rung,
       willHavePassword: requestedAccess === "password" && !!meta.password,
-      expiresAt: meta.expiresAt,
+      runPublicLinkGate: rung === "public_link",
+      effectiveExpiry: meta.expiresAt ?? null,
+      newExpiry: meta.expiresAt,
       now,
     });
     if (gateErr) return c.json(gateErr, gateErr.status);
-    // requireExpiry is publish-only (a fresh share must carry one when the operator asks).
-    if (pol.requireExpiry && rung !== "private" && meta.expiresAt === undefined) {
-      return c.json({ code: "INVALID_BODY", message: "an expiry is required" }, 400);
-    }
 
     // Quota: per-viewer daily + all-time total (checked before any row is created).
     const [dailyCount, totalCount] = await Promise.all([
@@ -378,6 +400,9 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
       return c.json({ code: "NOT_FOUND" }, 404);
     }
+    // An admin takedown makes the canvas read-only to its owner everywhere (§12.0 #5) —
+    // ownership is checked first (above), so this 409 never leaks a non-owned row's existence.
+    if (cv.status === "disabled") return c.json(disabledError(cv), 409);
     if (cv.revokedAt != null) {
       return c.json(
         { code: "SHARE_REVOKED", message: "This share is revoked; publish a new one instead." },
@@ -399,15 +424,37 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     const pol = await policy();
     const now = Date.now();
+    // Resolve the share's END STATE (not just the changed fields) so the gate catches
+    // exposure-widening updates — clearing a password on a public link, or dropping the
+    // expiry on a shareable rung — that a field-only check would wave through.
     const requestedAccess = meta.access;
-    const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
+    const rung: AccessRung | undefined =
+      requestedAccess === undefined
+        ? undefined
+        : requestedAccess === "password"
+          ? "public_link"
+          : requestedAccess;
+    const effectiveRung = (rung ?? cv.access) as AccessRung;
     // Password state after this op: provided string sets it; null clears; undefined keeps.
     const willHavePassword =
       meta.password !== undefined ? meta.password !== null : cv.passwordHash != null;
+    const passwordCleared = meta.password === null && cv.passwordHash != null;
+    // Expiry after this op: undefined keeps the row's, null clears it, a number sets it.
+    const effectiveExpiry =
+      meta.expiresAt === undefined ? (cv.sharedExpiresAt ?? null) : meta.expiresAt;
     const gateErr = await validateGates(pol, viewer, {
-      requestedAccess,
+      accessExplicit: requestedAccess !== undefined,
+      requestedRung: rung,
+      wantsPasswordAccess: requestedAccess === "password",
+      effectiveRung,
       willHavePassword,
-      expiresAt: meta.expiresAt,
+      // Re-run the public-link admin gate whenever the op creates or WIDENS a public link
+      // (access set to public_link/password, or a password cleared on an existing one) —
+      // never on a benign edit of an already-open share.
+      runPublicLinkGate:
+        effectiveRung === "public_link" && (requestedAccess !== undefined || passwordCleared),
+      effectiveExpiry,
+      newExpiry: typeof meta.expiresAt === "number" ? meta.expiresAt : undefined,
       now,
     });
     if (gateErr) return c.json(gateErr, gateErr.status);
@@ -487,7 +534,13 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
       return c.json({ code: "NOT_FOUND" }, 404);
     }
-    await deps.canvases.revoke(cv.id); // set revoked_at + unpublish; row stays listed
+    // A disabled (admin-taken-down) canvas is read-only to its owner (§12.0 #5) — parity
+    // with every management mutation, which refuses through mutableCanvas.
+    if (cv.status === "disabled") return c.json(disabledError(cv), 409);
+    // set revoked_at + unpublish + close the anonymous-public surface; row stays listed.
+    // Honor the return: a non-active row (e.g. archived) is a no-op → 404, not a false 204.
+    const revoked = await deps.canvases.revoke(cv.id);
+    if (!revoked) return c.json({ code: "NOT_FOUND" }, 404);
     deps.audit.recordAudit({
       action: "canvas_authored_revoke",
       actorId: viewer.id,

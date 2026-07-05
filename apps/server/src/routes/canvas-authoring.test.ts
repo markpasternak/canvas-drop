@@ -493,6 +493,59 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
   });
 
+  it("publish validates the DEFAULTED (omitted) access rung against allowedRungs", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    // Operator allows only public_link — an omitted access defaults to private, which is
+    // NOT allowed, and must be rejected just like an explicit private would be.
+    const cfgNoPrivate = cfg({ CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "public_link" });
+    const { app } = buildApi(client, asMember(owner.id), cfgNoPrivate);
+    const res = await publish(app, publishBody({ title: "S" })); // no access field
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("INVALID_BODY");
+  });
+
+  it("update enforces requireExpiry on the resulting shareable state", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const cfgReq = cfg({ CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: "true" });
+    const { app } = buildApi(client, asMember(owner.id), cfgReq);
+    // A private share needs no expiry; flipping it to public_link with none must be refused.
+    const pub = (await (
+      await publish(app, publishBody({ title: "S", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    const noExpiry = await putUpdate(app, pub.id, formData({ access: "public_link" }));
+    expect(noExpiry.status).toBe(400);
+    // With an expiry it succeeds.
+    const withExpiry = await putUpdate(
+      app,
+      pub.id,
+      formData({ access: "public_link", expiresAt: Date.now() + 864e5 }),
+    );
+    expect(withExpiry.status).toBe(200);
+    // Clearing the expiry back off a shareable share is refused too.
+    const cleared = await putUpdate(app, pub.id, formData({ expiresAt: null }));
+    expect(cleared.status).toBe(400);
+  });
+
+  it("update clearing a password on a public_link share re-runs the public-link admin gate", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    // Create a password-protected public link as an account allowed to publish public links.
+    const pub = (await (
+      await publish(
+        buildApi(client, asMember(owner.id)).app,
+        publishBody({ title: "S", access: "password", password: "hunter2" }),
+      )
+    ).json()) as AuthoredCanvas;
+    // Now that account loses the grant; clearing the password would make it an OPEN public
+    // link — the exposure-widening op must re-hit the gate even though access is unchanged.
+    const revokedApp = buildApi(client, asMember(owner.id, { canPublishPublic: false })).app;
+    const res = await putUpdate(revokedApp, pub.id, formData({ password: null }));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
   it("update on a revoked share is rejected (SHARE_REVOKED)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
@@ -518,6 +571,30 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const { app } = buildApi(client, asMember(owner.id));
     const res = await putUpdate(app, otherCanvas.id, formData({ title: "hax" }));
     expect(res.status).toBe(404);
+  });
+
+  it("update + revoke are refused on an admin-disabled share (§12.0 #5 — no self-rescue)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const canvases = canvasesRepository(client);
+    const { app } = buildApi(client, asMember(owner.id));
+    const pub = (await (
+      await publish(app, publishBody({ title: "S", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    await canvases.setStatus(pub.id, "disabled"); // admin takedown
+
+    const upd = await putUpdate(
+      app,
+      pub.id,
+      formData({}, zipFile({ "index.html": "<h1>rescue</h1>" })),
+    );
+    expect(upd.status).toBe(409);
+    expect(((await upd.json()) as { code: string }).code).toBe("DISABLED");
+
+    const rev = await app.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" });
+    expect(rev.status).toBe(409);
+    // The owner could not re-deploy or flip the taken-down canvas.
+    expect((await canvases.findById(pub.id))?.status).toBe("disabled");
   });
 
   it("metadata round-trips on publish + list; sourceApp/sourceKind surfaced; filter works (AE2)", async () => {

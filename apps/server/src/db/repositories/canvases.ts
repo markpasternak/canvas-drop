@@ -1191,18 +1191,20 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Revoke a managed authoring share (authoring v2). Stamps `revoked_at` and clears
+     * Revoke a managed authoring share (authoring v2). Stamps `revoked_at`, clears
      * `current_version_id` so the public URL has no content to serve (404 → not readable),
-     * while KEEPING `status = active` and the access/tags/metadata intact — so the record
-     * stays listed for the creator as status "revoked" (unlike `setStatus("deleted")`,
-     * which hides + purges it). Idempotent. Returns the updated row, or undefined if the
-     * canvas is not active (e.g. already deleted).
+     * AND resets `access` to private so the anonymous-public surface (the social-preview
+     * card + the shared-CDN cache scope, both gated on `isAnonymouslyPublic`) closes too —
+     * a revoked share must not keep unfurling to crawlers. `status = active` and the
+     * tags/metadata are KEPT, so the record stays listed for the creator as status
+     * "revoked" (unlike `setStatus("deleted")`, which hides + purges it). Idempotent.
+     * Returns the updated row, or undefined if the canvas is not active (e.g. deleted).
      */
     async revoke(id: string): Promise<Canvas | undefined> {
       const now = Date.now();
       const rows = (await db
         .update(t)
-        .set({ revokedAt: now, currentVersionId: null, updatedAt: now })
+        .set({ revokedAt: now, currentVersionId: null, access: "private", updatedAt: now })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning()) as Canvas[];
       return rows[0];
