@@ -1,5 +1,5 @@
-import type { Config } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import { type Config, shareStatus } from "@canvas-drop/shared";
+import type { Canvas, Json } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -32,6 +32,10 @@ export type AuthoringSettings = Pick<
  *  the UNZIPPED content, so this only bounds the transport buffer. */
 export const AUTHORING_MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
 
+/** Max serialized `metadata` blob (authoring v2). Bounds the free-form JSON stored on
+ *  the share row so a consumer can't stuff megabytes of state into a canvas. */
+export const AUTHORING_MAX_METADATA_BYTES = 16 * 1024;
+
 export interface CanvasAuthoringDeps {
   config: Config;
   canvases: CanvasesRepository;
@@ -46,30 +50,47 @@ export interface CanvasAuthoringDeps {
   publicLinksEnabled?: () => Promise<boolean>;
 }
 
+const accessEnum = z.enum(["private", "specific_people", "public_link", "password"]);
+const metadataSchema = z.record(z.string(), z.unknown());
+
 /** Publish metadata (the JSON `metadata` part alongside the `bundle` file part). */
 const publishMeta = z.object({
   title: z.string().trim().min(1).max(200),
   slug: z.string().optional(),
   tags: z.array(z.string().min(1).max(64)).max(20).optional(),
-  access: z.enum(["private", "specific_people", "public_link", "password"]).optional(),
+  access: accessEnum.optional(),
   password: z.string().min(1).max(200).optional(),
   expiresAt: z.number().int().positive().optional(),
+  metadata: metadataSchema.optional(),
 });
 
+/** Update metadata (authoring v2). Every field optional; `password`/`expiresAt` accept
+ *  `null` to explicitly clear. Omitted fields leave the share unchanged. */
+const updateMeta = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  tags: z.array(z.string().min(1).max(64)).max(20).optional(),
+  access: accessEnum.optional(),
+  password: z.string().min(1).max(200).nullable().optional(),
+  expiresAt: z.number().int().positive().nullable().optional(),
+  metadata: metadataSchema.optional(),
+});
+
+type ValidationError = { code: string; message?: string; status: 400 | 403 };
+
 /**
- * Authoring primitive route (plan 2026-07-04), mounted at `/v1/c/:slug/authoring`.
- * Mirrors `canvas-ai.ts`: behind `requireCapability("authoring")` (→ 403
- * CAPABILITY_DISABLED when backend off, per-canvas `cap_authoring` off, or the
- * operator instance switch off). Lets a backend-enabled canvas's signed-in members
- * create → deploy → configure a NEW canvas AS THEMSELVES.
+ * Authoring primitive route (plan 2026-07-04, extended to managed shares 2026-07-05),
+ * mounted at `/v1/c/:slug/authoring`. Behind `requireCapability("authoring")`. Lets a
+ * backend-enabled canvas's signed-in members create → deploy → configure a NEW canvas
+ * AS THEMSELVES, then manage it as a durable **share**.
  *
- * The pipeline already refuses static-only (anonymous / public-link) requests before
- * a primitive runs, so the only extra identity check here is rejecting a legacy
- * GUEST principal — creation needs a real org member (NOT_AUTHENTICATED).
+ * The runtime pipeline already refuses static-only (anonymous / public-link) requests
+ * before a primitive runs, so the only extra identity check is rejecting a legacy GUEST
+ * principal — creation needs a real org member (NOT_AUTHENTICATED).
  *
  *  - `POST /`        publish: create + deploy the zip bundle + apply share settings.
- *  - `GET /`         list the viewer's own authored canvases.
- *  - `DELETE /:id`   revoke (soft-delete) one of the viewer's authored canvases.
+ *  - `PUT /:id`      update in place: new version (stable URL) and/or settings/metadata.
+ *  - `GET /`         list the viewer's authored shares (management projection + filter).
+ *  - `DELETE /:id`   revoke: URL made unreadable, record stays listed as "revoked".
  */
 export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -107,90 +128,166 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     return { id: user.id, isAdmin: !!user.isAdmin, canPublishPublic: !!user.canPublishPublic };
   }
 
-  const bundleLimit = bodyLimit({
-    maxSize: AUTHORING_MAX_BUNDLE_BYTES,
-    onError: (c) => c.json({ code: "INVALID_BODY", message: "bundle too large" }, 413),
-  });
+  /** The management projection (authoring v2). Assembled ONLY here (the authenticated
+   *  management API) — the public canvas-serve path never reads `metadata`, so a reader
+   *  structurally cannot receive author/management data (reader isolation). */
+  function toAuthoredCanvas(cv: Canvas) {
+    const now = Date.now();
+    const metadata = (cv.metadata ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    return {
+      id: cv.id,
+      url: canvasUrl(deps.config, cv.slug),
+      title: cv.title,
+      tags: (cv.tags as string[] | null) ?? [],
+      access: cv.access,
+      status: shareStatus(cv.access, cv.sharedExpiresAt ?? null, cv.revokedAt ?? null, now),
+      createdAt: cv.createdAt,
+      updatedAt: cv.updatedAt,
+      expiresAt: cv.sharedExpiresAt ?? null,
+      revokedAt: cv.revokedAt ?? null,
+      createdBy: cv.ownerId,
+      // The bundle-change signal: `currentVersionId` advances on every deploy;
+      // `bundleUpdatedAt` is the row's last-write stamp (deploy or settings).
+      version: cv.currentVersionId,
+      bundleUpdatedAt: cv.updatedAt,
+      sourceApp: str(metadata.sourceApp),
+      sourceKind: str(metadata.sourceKind),
+      metadata,
+    };
+  }
 
-  app.post("/", bundleLimit, async (c) => {
-    const viewer = requireMember(c);
-    if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
-    const source = requireCanvas(c); // canvas A (the page the viewer is on)
+  /**
+   * Shared access/password/expiry gate for publish + update. `willHavePassword` is the
+   * share's password state AFTER this op. Enforces the operator allowed-rung set, the
+   * public-link admin gates (instance switch + per-account grant), password-for-password
+   * access, and the expiry bounds. `requireExpiry` is enforced by the caller (publish
+   * only). Returns null when valid.
+   */
+  async function validateGates(
+    pol: Awaited<ReturnType<typeof policy>>,
+    viewer: { canPublishPublic: boolean },
+    input: {
+      requestedAccess?: z.infer<typeof accessEnum>;
+      willHavePassword: boolean;
+      expiresAt: number | null | undefined;
+      now: number;
+    },
+  ): Promise<ValidationError | null> {
+    const { requestedAccess } = input;
+    if (requestedAccess !== undefined) {
+      const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
+      if (!pol.allowedRungs.includes(rung)) {
+        return {
+          code: "INVALID_BODY",
+          message: `access rung "${rung}" is not allowed`,
+          status: 400,
+        };
+      }
+      if (rung === "public_link") {
+        const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
+        if (!publicLinksOn) {
+          return {
+            code: "PUBLIC_LINKS_DISABLED",
+            message: "Public links are disabled for this instance.",
+            status: 403,
+          };
+        }
+        if (!viewer.canPublishPublic) {
+          return {
+            code: "PUBLIC_NOT_ALLOWED",
+            message:
+              "An administrator has revoked this account's permission to publish public links.",
+            status: 403,
+          };
+        }
+      }
+      if (requestedAccess === "password" && !input.willHavePassword) {
+        return {
+          code: "INVALID_BODY",
+          message: "password required for password access",
+          status: 400,
+        };
+      }
+    }
+    if (typeof input.expiresAt === "number") {
+      if (input.expiresAt <= input.now) {
+        return { code: "INVALID_BODY", message: "expiresAt is in the past", status: 400 };
+      }
+      if (pol.maxExpiryDays > 0 && input.expiresAt > input.now + pol.maxExpiryDays * 86_400_000) {
+        return { code: "INVALID_BODY", message: "expiresAt exceeds the maximum", status: 400 };
+      }
+    }
+    return null;
+  }
 
-    // Parse the multipart body: a JSON `metadata` part + a `bundle` zip file part.
+  /** Parse the multipart body → JSON metadata part + (optional) bundle File. */
+  async function parseForm(
+    c: import("hono").Context<AppEnv>,
+    bundleRequired: boolean,
+  ): Promise<{ metaJson: unknown; bundle: File | null } | ValidationError> {
     let form: FormData;
     try {
       form = await c.req.formData();
     } catch {
-      return c.json({ code: "INVALID_BODY", message: "expected multipart/form-data" }, 400);
+      return { code: "INVALID_BODY", message: "expected multipart/form-data", status: 400 };
     }
     const metaRaw = form.get("metadata");
     const bundle = form.get("bundle");
-    if (typeof metaRaw !== "string" || !(bundle instanceof File)) {
-      return c.json({ code: "INVALID_BODY", message: "metadata + bundle required" }, 400);
+    if (typeof metaRaw !== "string") {
+      return { code: "INVALID_BODY", message: "metadata required", status: 400 };
+    }
+    if (bundleRequired && !(bundle instanceof File)) {
+      return { code: "INVALID_BODY", message: "bundle required", status: 400 };
     }
     let metaJson: unknown;
     try {
       metaJson = JSON.parse(metaRaw);
     } catch {
-      return c.json({ code: "INVALID_BODY", message: "metadata is not valid JSON" }, 400);
+      return { code: "INVALID_BODY", message: "metadata is not valid JSON", status: 400 };
     }
-    const parsed = publishMeta.safeParse(metaJson);
+    return { metaJson, bundle: bundle instanceof File ? bundle : null };
+  }
+
+  const metadataTooLarge = (m: unknown) =>
+    m !== undefined && JSON.stringify(m).length > AUTHORING_MAX_METADATA_BYTES;
+
+  const bundleLimit = bodyLimit({
+    maxSize: AUTHORING_MAX_BUNDLE_BYTES,
+    onError: (c) => c.json({ code: "INVALID_BODY", message: "bundle too large" }, 413),
+  });
+
+  // ── POST / — publish (create + deploy + configure a new share) ──────────────
+  app.post("/", bundleLimit, async (c) => {
+    const viewer = requireMember(c);
+    if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    const source = requireCanvas(c); // canvas A (the page the viewer is on)
+
+    const form = await parseForm(c, true);
+    if ("code" in form) return c.json(form, form.status);
+    const parsed = publishMeta.safeParse(form.metaJson);
     if (!parsed.success) return c.json({ code: "INVALID_BODY" }, 400);
     const meta = parsed.data;
+    const bundle = form.bundle as File;
     if (bundle.size === 0) return c.json({ code: "INVALID_BODY", message: "empty bundle" }, 400);
+    if (metadataTooLarge(meta.metadata)) {
+      return c.json({ code: "INVALID_BODY", message: "metadata too large" }, 400);
+    }
 
-    // Validate access rung + password + expiry against the operator policy.
     const pol = await policy();
+    const now = Date.now();
     const requestedAccess = meta.access ?? "private";
     const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
-    if (!pol.allowedRungs.includes(rung)) {
-      return c.json({ code: "INVALID_BODY", message: `access rung "${rung}" is not allowed` }, 400);
-    }
-    // A `public_link` publish must also clear the SAME admin gates the dashboard/MCP
-    // honor — the operator instance switch and the per-account grant — so authoring's
-    // `allowedRungs` config can't route around an admin who disabled public links or
-    // revoked this account's permission. Checked before any row is created.
-    if (rung === "public_link") {
-      const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
-      if (!publicLinksOn) {
-        return c.json(
-          {
-            code: "PUBLIC_LINKS_DISABLED",
-            message: "Public links are disabled for this instance.",
-          },
-          403,
-        );
-      }
-      if (!viewer.canPublishPublic) {
-        return c.json(
-          {
-            code: "PUBLIC_NOT_ALLOWED",
-            message:
-              "An administrator has revoked this account's permission to publish public links.",
-          },
-          403,
-        );
-      }
-    }
-    if (requestedAccess === "password" && !meta.password) {
-      return c.json(
-        { code: "INVALID_BODY", message: "password required for password access" },
-        400,
-      );
-    }
-    const shareable = rung !== "private";
-    const now = Date.now();
-    if (pol.requireExpiry && shareable && meta.expiresAt === undefined) {
+    const gateErr = await validateGates(pol, viewer, {
+      requestedAccess: meta.access,
+      willHavePassword: requestedAccess === "password" && !!meta.password,
+      expiresAt: meta.expiresAt,
+      now,
+    });
+    if (gateErr) return c.json(gateErr, gateErr.status);
+    // requireExpiry is publish-only (a fresh share must carry one when the operator asks).
+    if (pol.requireExpiry && rung !== "private" && meta.expiresAt === undefined) {
       return c.json({ code: "INVALID_BODY", message: "an expiry is required" }, 400);
-    }
-    if (meta.expiresAt !== undefined) {
-      if (meta.expiresAt <= now) {
-        return c.json({ code: "INVALID_BODY", message: "expiresAt is in the past" }, 400);
-      }
-      if (pol.maxExpiryDays > 0 && meta.expiresAt > now + pol.maxExpiryDays * 86_400_000) {
-        return c.json({ code: "INVALID_BODY", message: "expiresAt exceeds the maximum" }, 400);
-      }
     }
 
     // Quota: per-viewer daily + all-time total (checked before any row is created).
@@ -204,13 +301,11 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     });
     if (!quota.ok) return c.json({ code: "QUOTA_EXCEEDED", scope: quota.scope }, 429);
 
-    // Resolve a slug (readable-random unless a valid custom one is supplied).
     const resolved = await resolveCreateSlug(meta.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ code: "INVALID_BODY", reason: resolved.error }, 400);
     const home = resolveHomeOrg(undefined, c.get("orgIds") ?? new Set<string>());
     if ("error" in home) return c.json({ code: "INVALID_BODY", reason: home.error }, 400);
 
-    // Create canvas B under the VIEWER's principal (real per-user ownership).
     const apiKey = generateApiKey();
     let canvasB: Canvas;
     try {
@@ -223,9 +318,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
         orgId: home.orgId,
       });
     } catch (err) {
-      // A caller-supplied custom slug is only format-checked pre-create; a collision
-      // surfaces as a DB unique violation here. Return a clean 409 (like every other
-      // create surface) rather than a misleading PUBLISH_FAILED with no id.
       if (resolved.custom && isUniqueViolation(err, SLUG_UNIQUE)) {
         return c.json({ code: "SLUG_TAKEN", message: "That slug is already taken." }, 409);
       }
@@ -234,9 +326,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     }
 
     // Meter on CREATION — the canvas row + slug are the bounded resource, so a later
-    // deploy/config failure still counts against quota (otherwise a loop of failing
-    // publishes mints unlimited uncounted orphan canvases). Audited here too: the
-    // security-relevant event is that this viewer authored a canvas.
+    // deploy/config failure still counts against quota. Audited here too.
     await deps.authoringUsage.record({
       actorId: viewer.id,
       sourceCanvasId: source.id,
@@ -249,8 +339,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       meta: { sourceCanvasId: source.id },
     });
 
-    // Deploy the bundle. On failure canvas B exists but is empty — return its id so the
-    // consumer can retry the deploy or revoke it (Q3: return-id, no auto-revoke).
     try {
       const buffer = Buffer.from(await bundle.arrayBuffer());
       await deps.engine.deploy(canvasB, "api", fromZip(buffer), viewer.id);
@@ -259,11 +347,8 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "deploy failed" }, 502);
     }
 
-    // Apply share settings. Set the password FIRST (while the canvas is still `private`
-    // from create) and flip access LAST, so a mid-op failure can never leave the canvas
-    // `public_link` without its intended password (a confidentiality gap). A failure
-    // here returns PUBLISH_FAILED with the id — the canvas exists + is deployed, only
-    // the share config is partial.
+    // Configure. Password FIRST (while still private) then flip access LAST, so a mid-op
+    // failure can never leave the canvas public without its intended password.
     try {
       if (requestedAccess === "password" && meta.password) {
         await deps.canvases.setPassword(canvasB.id, await hashPassword(meta.password));
@@ -272,32 +357,127 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
         access: rung,
         tags: meta.tags,
         sharedExpiresAt: meta.expiresAt,
+        metadata: meta.metadata as Json | undefined,
       });
     } catch (err) {
       c.get("log")?.error({ err, id: canvasB.id }, "authoring: configure failed");
       return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "configure failed" }, 502);
     }
 
-    return c.json({ id: canvasB.id, url: canvasUrl(deps.config, canvasB.slug) });
+    const finalCv = (await deps.canvases.findById(canvasB.id)) ?? canvasB;
+    return c.json(toAuthoredCanvas(finalCv));
   });
 
+  // ── PUT /:id — update in place (new version and/or settings; stable URL) ─────
+  app.put("/:id", bundleLimit, async (c) => {
+    const viewer = requireMember(c);
+    if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
+    const id = c.req.param("id");
+    const cv = await deps.canvases.findById(id);
+    // Owner or admin only; a non-owned / missing id reads as not-found (no existence leak).
+    if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
+      return c.json({ code: "NOT_FOUND" }, 404);
+    }
+    if (cv.revokedAt != null) {
+      return c.json(
+        { code: "SHARE_REVOKED", message: "This share is revoked; publish a new one instead." },
+        409,
+      );
+    }
+
+    const form = await parseForm(c, false);
+    if ("code" in form) return c.json(form, form.status);
+    const parsed = updateMeta.safeParse(form.metaJson);
+    if (!parsed.success) return c.json({ code: "INVALID_BODY" }, 400);
+    const meta = parsed.data;
+    if (form.bundle && form.bundle.size === 0) {
+      return c.json({ code: "INVALID_BODY", message: "empty bundle" }, 400);
+    }
+    if (metadataTooLarge(meta.metadata)) {
+      return c.json({ code: "INVALID_BODY", message: "metadata too large" }, 400);
+    }
+
+    const pol = await policy();
+    const now = Date.now();
+    const requestedAccess = meta.access;
+    const rung = requestedAccess === "password" ? "public_link" : requestedAccess;
+    // Password state after this op: provided string sets it; null clears; undefined keeps.
+    const willHavePassword =
+      meta.password !== undefined ? meta.password !== null : cv.passwordHash != null;
+    const gateErr = await validateGates(pol, viewer, {
+      requestedAccess,
+      willHavePassword,
+      expiresAt: meta.expiresAt,
+      now,
+    });
+    if (gateErr) return c.json(gateErr, gateErr.status);
+
+    // Deploy a new immutable version (stable URL) when a bundle is supplied.
+    if (form.bundle) {
+      try {
+        const buffer = Buffer.from(await form.bundle.arrayBuffer());
+        await deps.engine.deploy(cv, "api", fromZip(buffer), viewer.id);
+      } catch (err) {
+        c.get("log")?.error({ err, id: cv.id }, "authoring: update deploy failed");
+        return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "deploy failed" }, 502);
+      }
+    }
+
+    // Apply settings. Password FIRST (mirrors publish's ordering safety).
+    try {
+      if (meta.password !== undefined) {
+        await deps.canvases.setPassword(
+          cv.id,
+          meta.password === null ? null : await hashPassword(meta.password),
+        );
+      }
+      await deps.canvases.updateSettings(cv.id, {
+        title: meta.title,
+        access: rung,
+        tags: meta.tags,
+        sharedExpiresAt: meta.expiresAt,
+        metadata: meta.metadata as Json | undefined,
+      });
+    } catch (err) {
+      c.get("log")?.error({ err, id: cv.id }, "authoring: update configure failed");
+      return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "configure failed" }, 502);
+    }
+
+    deps.audit.recordAudit({
+      action: "canvas_authored_update",
+      actorId: viewer.id,
+      targetId: cv.id,
+    });
+    const finalCv = (await deps.canvases.findById(cv.id)) ?? cv;
+    return c.json(toAuthoredCanvas(finalCv));
+  });
+
+  // ── GET / — list the viewer's authored shares (+ filter) ────────────────────
   app.get("/", async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
     const ids = await deps.authoringUsage.authoredIdsByActor(viewer.id);
     const rows = await Promise.all(ids.map((id) => deps.canvases.findById(id)));
-    const canvases = rows
+    // Include revoked shares (they stay `active` + revoked_at); exclude only truly deleted.
+    let shares = rows
       .filter((cv): cv is Canvas => !!cv && cv.status !== "deleted" && cv.ownerId === viewer.id)
-      .map((cv) => ({
-        id: cv.id,
-        url: canvasUrl(deps.config, cv.slug),
-        title: cv.title,
-        tags: cv.tags ?? [],
-        expiresAt: cv.sharedExpiresAt ?? null,
-      }));
-    return c.json({ canvases });
+      .map(toAuthoredCanvas);
+
+    // In-memory filter (the per-viewer set is bounded by the authoring total cap).
+    const fSourceApp = c.req.query("sourceApp");
+    const fSourceKind = c.req.query("sourceKind");
+    const fTags = (c.req.query("tags") ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (fSourceApp) shares = shares.filter((s) => s.sourceApp === fSourceApp);
+    if (fSourceKind) shares = shares.filter((s) => s.sourceKind === fSourceKind);
+    if (fTags.length) shares = shares.filter((s) => fTags.every((t) => s.tags.includes(t)));
+
+    return c.json({ canvases: shares });
   });
 
+  // ── DELETE /:id — revoke (URL unreadable; record stays listed as "revoked") ──
   app.delete("/:id", async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
@@ -307,7 +487,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
       return c.json({ code: "NOT_FOUND" }, 404);
     }
-    await deps.canvases.setStatus(cv.id, "deleted");
+    await deps.canvases.revoke(cv.id); // set revoked_at + unpublish; row stays listed
     deps.audit.recordAudit({
       action: "canvas_authored_revoke",
       actorId: viewer.id,
