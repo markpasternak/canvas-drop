@@ -138,7 +138,15 @@ the `system` field, not a message role). `maxTokens` defaults to 1024, hard max 
 
 Success is an SSE stream (`text/event-stream`): zero or more
 `{ type: "delta", text }` events, then a terminal
-`{ type: "done", usage: { inputTokens, outputTokens }, cost }`.
+`{ type: "done", usage: { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens }, cost }`.
+`inputTokens` is the total prompt input-token count. The cache fields report
+Anthropic prompt-cache writes and reads when available, default to `0`, and are
+included in the returned `cost` at Anthropic's prompt-cache rates.
+
+When the effective provider is Anthropic, the server automatically marks the
+stable prompt prefix for 5-minute ephemeral prompt caching: the `system` prompt
+when present, plus the prior conversation before the newest user turn. The
+newest user turn is not marked as a cache breakpoint.
 
 Errors are split by when they occur:
 

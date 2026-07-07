@@ -1,0 +1,2 @@
+ALTER TABLE "ai_usage" ADD COLUMN "cache_creation_input_tokens" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "ai_usage" ADD COLUMN "cache_read_input_tokens" bigint DEFAULT 0 NOT NULL;

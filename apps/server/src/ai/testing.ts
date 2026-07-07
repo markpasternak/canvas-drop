@@ -4,7 +4,7 @@ export interface FakeProviderOptions {
   /** Text chunks to emit, in order. */
   deltas: string[];
   /** Final usage (defaults to small non-zero counts). */
-  usage?: ChatUsage;
+  usage?: Partial<ChatUsage>;
   /** Throw mid-stream after emitting this many deltas (simulates upstream error). */
   throwAfter?: number;
   /** Observe each call's input (assert allowlist/abort wiring, capture last call). */
@@ -17,7 +17,12 @@ export interface FakeProviderOptions {
  * abandoned-stream handling is testable.
  */
 export function fakeProvider(opts: FakeProviderOptions): ModelProvider {
-  const usage: ChatUsage = opts.usage ?? { inputTokens: 10, outputTokens: 5 };
+  const usage: ChatUsage = {
+    inputTokens: opts.usage?.inputTokens ?? 10,
+    outputTokens: opts.usage?.outputTokens ?? 5,
+    cacheCreationInputTokens: opts.usage?.cacheCreationInputTokens ?? 0,
+    cacheReadInputTokens: opts.usage?.cacheReadInputTokens ?? 0,
+  };
   return {
     streamChat(input: StreamChatInput): ChatStream {
       opts.onCall?.(input);

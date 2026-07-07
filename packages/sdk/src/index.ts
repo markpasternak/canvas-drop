@@ -297,6 +297,8 @@ export interface AiMessage {
 }
 export interface AiUsage {
   inputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
   outputTokens: number;
 }
 export interface AiChatOptions {
@@ -524,6 +526,30 @@ function aiErrorFromFrame(frame: SseFrame): CanvasdropError {
   return new CanvasdropError(code, 502, message);
 }
 
+function zeroAiUsage(): AiUsage {
+  return {
+    inputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    outputTokens: 0,
+  };
+}
+
+function numberField(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function aiUsageFromFrame(value: unknown): AiUsage {
+  if (!value || typeof value !== "object") return zeroAiUsage();
+  const usage = value as Record<string, unknown>;
+  return {
+    inputTokens: numberField(usage.inputTokens),
+    cacheCreationInputTokens: numberField(usage.cacheCreationInputTokens),
+    cacheReadInputTokens: numberField(usage.cacheReadInputTokens),
+    outputTokens: numberField(usage.outputTokens),
+  };
+}
+
 function aiNamespace(opts: Required<ClientOptions>, base: (p: string) => string): AiNamespace {
   async function open(messages: AiMessage[], options: AiChatOptions): Promise<Response> {
     const res = await opts.fetch(base("/ai/chat"), {
@@ -560,7 +586,7 @@ function aiNamespace(opts: Required<ClientOptions>, base: (p: string) => string)
     async chat(messages, options) {
       const res = await open(messages, options);
       let text = "";
-      let usage: AiUsage = { inputTokens: 0, outputTokens: 0 };
+      let usage: AiUsage = zeroAiUsage();
       let cost = 0;
       let terminal = false;
       for await (const frame of readSSE(res)) {
@@ -568,7 +594,7 @@ function aiNamespace(opts: Required<ClientOptions>, base: (p: string) => string)
         else if (frame.type === "error") throw aiErrorFromFrame(frame);
         else if (frame.type === "done") {
           terminal = true;
-          usage = (frame.usage as AiUsage) ?? usage;
+          usage = aiUsageFromFrame(frame.usage);
           cost = typeof frame.cost === "number" ? frame.cost : 0;
         }
       }

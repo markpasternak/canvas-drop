@@ -101,8 +101,55 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     const totals = await repo.canvasTotals(canvasId);
     expect(totals.calls).toBe(2);
     expect(totals.inputTokens).toBe(200);
+    expect(totals.cacheCreationInputTokens).toBe(0);
+    expect(totals.cacheReadInputTokens).toBe(0);
     expect(totals.outputTokens).toBe(100);
     expect(totals.costUsd).toBeCloseTo(0.3, 10);
+  });
+
+  it("records and aggregates prompt-cache token fields", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const repo = aiUsageRepository(client);
+    await repo.record({
+      canvasId,
+      userId,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 1000,
+      cacheCreationInputTokens: 200,
+      cacheReadInputTokens: 300,
+      outputTokens: 50,
+      costUsd: 0.25,
+    });
+    await repo.record({
+      canvasId,
+      userId,
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      inputTokens: 2000,
+      cacheCreationInputTokens: 400,
+      cacheReadInputTokens: 600,
+      outputTokens: 75,
+      costUsd: 0.75,
+    });
+
+    expect(await repo.canvasTotals(canvasId)).toEqual({
+      inputTokens: 3000,
+      cacheCreationInputTokens: 600,
+      cacheReadInputTokens: 900,
+      outputTokens: 125,
+      costUsd: 1,
+      calls: 2,
+    });
+    expect(await repo.platformSpend()).toEqual({
+      costUsd: 1,
+      inputTokens: 3000,
+      cacheCreationInputTokens: 600,
+      cacheReadInputTokens: 900,
+      outputTokens: 125,
+      calls: 2,
+    });
   });
 
   it("canvasTotals is zeroed for a canvas with no AI calls", async () => {
@@ -111,6 +158,8 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     const repo = aiUsageRepository(client);
     expect(await repo.canvasTotals(canvasId)).toEqual({
       inputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
       calls: 0,
@@ -129,6 +178,8 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     const total = await repo.platformSpend();
     expect(total.calls).toBe(2);
     expect(total.inputTokens).toBe(200);
+    expect(total.cacheCreationInputTokens).toBe(0);
+    expect(total.cacheReadInputTokens).toBe(0);
     expect(total.outputTokens).toBe(100);
     expect(total.costUsd).toBeCloseTo(4.0, 10);
   });
@@ -138,6 +189,8 @@ describe.each(DIALECTS)("aiUsageRepository [%s]", (dialect) => {
     expect(await aiUsageRepository(client).platformSpend()).toEqual({
       costUsd: 0,
       inputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
       outputTokens: 0,
       calls: 0,
     });

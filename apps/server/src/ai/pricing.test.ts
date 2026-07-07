@@ -14,8 +14,23 @@ describe("ai pricing", () => {
     expect(costUsd("claude-haiku-4-5", 500, 100)).toBeCloseTo(0.001, 10);
   });
 
+  it("prices 5-minute prompt-cache writes at 1.25x and reads at 0.1x input", () => {
+    // haiku-4-5: 500 uncached input, 200 cache-write input, 300 cache-read input.
+    // 500*1 + 200*1.25 + 300*0.1 = 780 token-rate units = $0.00078.
+    expect(costUsd("claude-haiku-4-5", 1000, 0, 200, 300)).toBeCloseTo(0.00078, 10);
+    // sonnet-4-6: 1000 uncached + 1000 write + 1000 read + 500 output.
+    // input: (1000*3 + 1000*3.75 + 1000*0.3) / 1e6; output: 500*15 / 1e6.
+    expect(costUsd("claude-sonnet-4-6", 3000, 500, 1000, 1000)).toBeCloseTo(0.01455, 10);
+    // opus-4-8: no uncached input, all cache read, plus output.
+    expect(costUsd("claude-opus-4-8", 1000, 200, 0, 1000)).toBeCloseTo(0.0055, 10);
+  });
+
+  it("defensively clamps uncached input when cache details exceed total input", () => {
+    expect(costUsd("claude-haiku-4-5", 100, 0, 90, 90)).toBeCloseTo(0.0001215, 10);
+  });
+
   it("unknown model costs 0 and is flagged unpriced (never throws)", () => {
-    expect(costUsd("some-future-model", 1000, 1000)).toBe(0);
+    expect(costUsd("some-future-model", 1000, 1000, 100, 100)).toBe(0);
     expect(isPricedModel("some-future-model")).toBe(false);
     expect(isPricedModel("claude-sonnet-4-6")).toBe(true);
   });

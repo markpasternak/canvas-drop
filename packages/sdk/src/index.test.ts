@@ -357,7 +357,16 @@ describe("ai", () => {
       sseRes([
         { type: "delta", text: "Hel" },
         { type: "delta", text: "lo" },
-        { type: "done", usage: { inputTokens: 5, outputTokens: 3 }, cost: 0.0123 },
+        {
+          type: "done",
+          usage: {
+            inputTokens: 5,
+            outputTokens: 3,
+            cacheCreationInputTokens: 2,
+            cacheReadInputTokens: 1,
+          },
+          cost: 0.0123,
+        },
       ]),
     );
     const client = createClient({ context: ctx, fetch });
@@ -365,8 +374,32 @@ describe("ai", () => {
       model: "claude-haiku-4-5",
     });
     expect(r.text).toBe("Hello");
-    expect(r.usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+    expect(r.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 3,
+      cacheCreationInputTokens: 2,
+      cacheReadInputTokens: 1,
+    });
     expect(r.cost).toBeCloseTo(0.0123, 6);
+  });
+
+  it("chat() defaults cache usage fields to zero for old done frames", async () => {
+    const fetch = fetchMock(async () =>
+      sseRes([
+        { type: "delta", text: "ok" },
+        { type: "done", usage: { inputTokens: 5, outputTokens: 3 }, cost: 0.0123 },
+      ]),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const r = await client.ai.chat([{ role: "user", content: "hi" }], {
+      model: "claude-haiku-4-5",
+    });
+    expect(r.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 3,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    });
   });
 
   it("stream() yields the text deltas", async () => {

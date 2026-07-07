@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { AdminSettingsService } from "../admin/settings-service.js";
 import { costUsd, isPricedModel } from "../ai/pricing.js";
-import type { ModelProvider } from "../ai/provider.js";
+import type { ChatUsage, ModelProvider } from "../ai/provider.js";
 import { checkQuota, dayStartUtc, monthStartUtc } from "../ai/quota.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
@@ -26,6 +26,13 @@ export const AI_MAX_TOKENS = 8192;
 export const AI_MAX_BODY_BYTES = 256 * 1024;
 /** Max wait for the provider's usage promise before recording with 0 tokens. */
 export const USAGE_SETTLE_TIMEOUT_MS = 5_000;
+
+const ZERO_CHAT_USAGE: ChatUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+};
 
 export interface CanvasAiDeps {
   config: Config;
@@ -179,19 +186,25 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
       // abort — so an abandoned stream still counts against the quota (D-AI-5 /
       // adversarial F5: otherwise abandon-and-retry silently bypasses the cap).
       const persist = async () => {
-        if (recorded) return { inputTokens: 0, outputTokens: 0, cost: 0 };
+        if (recorded) return { ...ZERO_CHAT_USAGE, cost: 0 };
         recorded = true;
         // Race the provider's usage promise against a timeout: on a client abort the
         // upstream usage promise may never settle, which would hang the recording and
         // re-open the abandon-and-retry quota bypass. Record whatever we have within
         // the window (0 tokens worst case — the call is still counted).
         const u = await Promise.race([
-          chat.usage.catch(() => ({ inputTokens: 0, outputTokens: 0 })),
-          new Promise<{ inputTokens: number; outputTokens: number }>((resolve) =>
-            setTimeout(() => resolve({ inputTokens: 0, outputTokens: 0 }), USAGE_SETTLE_TIMEOUT_MS),
+          chat.usage.catch(() => ZERO_CHAT_USAGE),
+          new Promise<ChatUsage>((resolve) =>
+            setTimeout(() => resolve(ZERO_CHAT_USAGE), USAGE_SETTLE_TIMEOUT_MS),
           ),
         ]);
-        const cost = costUsd(model, u.inputTokens, u.outputTokens);
+        const cost = costUsd(
+          model,
+          u.inputTokens,
+          u.outputTokens,
+          u.cacheCreationInputTokens,
+          u.cacheReadInputTokens,
+        );
         await deps.aiUsage
           .record({
             canvasId: canvas.id,
@@ -199,6 +212,8 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
             provider: deps.config.ai.provider,
             model,
             inputTokens: u.inputTokens,
+            cacheCreationInputTokens: u.cacheCreationInputTokens,
+            cacheReadInputTokens: u.cacheReadInputTokens,
             outputTokens: u.outputTokens,
             costUsd: cost,
           })
@@ -218,7 +233,12 @@ export function canvasAiRoutes(deps: CanvasAiDeps): Hono<AppEnv> {
           await stream.writeSSE({
             data: JSON.stringify({
               type: "done",
-              usage: { inputTokens: r.inputTokens, outputTokens: r.outputTokens },
+              usage: {
+                inputTokens: r.inputTokens,
+                outputTokens: r.outputTokens,
+                cacheCreationInputTokens: r.cacheCreationInputTokens,
+                cacheReadInputTokens: r.cacheReadInputTokens,
+              },
               cost: r.cost,
             }),
           });
