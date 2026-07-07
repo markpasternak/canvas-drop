@@ -10,8 +10,19 @@ export interface AiUsageInput {
   provider: string;
   model: string;
   inputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
   outputTokens: number;
   costUsd: number;
+}
+
+export interface AiUsageTotals {
+  inputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  calls: number;
 }
 
 /**
@@ -66,6 +77,8 @@ export function aiUsageRepository(client: DbClient) {
         provider: input.provider,
         model: input.model,
         inputTokens: input.inputTokens,
+        cacheCreationInputTokens: input.cacheCreationInputTokens ?? 0,
+        cacheReadInputTokens: input.cacheReadInputTokens ?? 0,
         outputTokens: input.outputTokens,
         costUsd: input.costUsd,
         createdAt: Date.now(),
@@ -83,12 +96,12 @@ export function aiUsageRepository(client: DbClient) {
     },
 
     /** Sum tokens + cost for a canvas over all time (owner usage tab, D24). */
-    async canvasTotals(
-      canvasId: string,
-    ): Promise<{ inputTokens: number; outputTokens: number; costUsd: number; calls: number }> {
+    async canvasTotals(canvasId: string): Promise<AiUsageTotals> {
       const rows = (await db
         .select({
           inputTokens: sql<number>`coalesce(sum(${t.inputTokens}), 0)`,
+          cacheCreationInputTokens: sql<number>`coalesce(sum(${t.cacheCreationInputTokens}), 0)`,
+          cacheReadInputTokens: sql<number>`coalesce(sum(${t.cacheReadInputTokens}), 0)`,
           outputTokens: sql<number>`coalesce(sum(${t.outputTokens}), 0)`,
           costUsd: sql<number>`coalesce(sum(${t.costUsd}), 0)`,
           calls: sql<number>`count(*)`,
@@ -96,6 +109,8 @@ export function aiUsageRepository(client: DbClient) {
         .from(t)
         .where(eq(t.canvasId, canvasId))) as Array<{
         inputTokens: number;
+        cacheCreationInputTokens: number;
+        cacheReadInputTokens: number;
         outputTokens: number;
         costUsd: number;
         calls: number;
@@ -103,6 +118,8 @@ export function aiUsageRepository(client: DbClient) {
       const r = rows[0];
       return {
         inputTokens: Number(r?.inputTokens ?? 0),
+        cacheCreationInputTokens: Number(r?.cacheCreationInputTokens ?? 0),
+        cacheReadInputTokens: Number(r?.cacheReadInputTokens ?? 0),
         outputTokens: Number(r?.outputTokens ?? 0),
         costUsd: Number(r?.costUsd ?? 0),
         calls: Number(r?.calls ?? 0),
@@ -113,6 +130,8 @@ export function aiUsageRepository(client: DbClient) {
     async platformSpend(): Promise<{
       costUsd: number;
       inputTokens: number;
+      cacheCreationInputTokens: number;
+      cacheReadInputTokens: number;
       outputTokens: number;
       calls: number;
     }> {
@@ -120,12 +139,16 @@ export function aiUsageRepository(client: DbClient) {
         .select({
           costUsd: sql<number>`coalesce(sum(${t.costUsd}), 0)`,
           inputTokens: sql<number>`coalesce(sum(${t.inputTokens}), 0)`,
+          cacheCreationInputTokens: sql<number>`coalesce(sum(${t.cacheCreationInputTokens}), 0)`,
+          cacheReadInputTokens: sql<number>`coalesce(sum(${t.cacheReadInputTokens}), 0)`,
           outputTokens: sql<number>`coalesce(sum(${t.outputTokens}), 0)`,
           calls: sql<number>`count(*)`,
         })
         .from(t)) as Array<{
         costUsd: number;
         inputTokens: number;
+        cacheCreationInputTokens: number;
+        cacheReadInputTokens: number;
         outputTokens: number;
         calls: number;
       }>;
@@ -133,6 +156,8 @@ export function aiUsageRepository(client: DbClient) {
       return {
         costUsd: Number(r?.costUsd ?? 0),
         inputTokens: Number(r?.inputTokens ?? 0),
+        cacheCreationInputTokens: Number(r?.cacheCreationInputTokens ?? 0),
+        cacheReadInputTokens: Number(r?.cacheReadInputTokens ?? 0),
         outputTokens: Number(r?.outputTokens ?? 0),
         calls: Number(r?.calls ?? 0),
       };

@@ -14,6 +14,9 @@ export interface ModelRate {
   outputPerMTok: number;
 }
 
+const PROMPT_CACHE_WRITE_MULTIPLIER = 1.25;
+const PROMPT_CACHE_READ_MULTIPLIER = 0.1;
+
 export const PRICING: Readonly<Record<string, ModelRate>> = {
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-7": { inputPerMTok: 5, outputPerMTok: 25 },
@@ -29,13 +32,30 @@ export function isPricedModel(model: string): boolean {
 }
 
 /**
- * Compute the USD cost of a call. Unknown model → 0 (caller should warn via
+ * Compute the USD cost of a call. `inputTokens` is the total prompt-token count
+ * returned by the provider; cache read/write counts are priced with Anthropic's
+ * 5-minute prompt-cache multipliers. Unknown model → 0 (caller should warn via
  * {@link isPricedModel}); the per-MTok division keeps fractional cents intact.
  */
-export function costUsd(model: string, inputTokens: number, outputTokens: number): number {
+export function costUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  cacheCreationInputTokens = 0,
+  cacheReadInputTokens = 0,
+): number {
   const rate = PRICING[model];
   if (!rate) return 0;
+  const uncachedInputTokens = Math.max(
+    0,
+    inputTokens - cacheCreationInputTokens - cacheReadInputTokens,
+  );
   return (
-    (inputTokens / 1_000_000) * rate.inputPerMTok + (outputTokens / 1_000_000) * rate.outputPerMTok
+    ((uncachedInputTokens +
+      cacheCreationInputTokens * PROMPT_CACHE_WRITE_MULTIPLIER +
+      cacheReadInputTokens * PROMPT_CACHE_READ_MULTIPLIER) /
+      1_000_000) *
+      rate.inputPerMTok +
+    (outputTokens / 1_000_000) * rate.outputPerMTok
   );
 }

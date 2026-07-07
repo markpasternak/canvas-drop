@@ -11,7 +11,7 @@ const { text, usage, cost } = await canvasdrop.ai.chat(
   { model: "claude-haiku-4-5" },
 );
 // text:  the model's reply (string)
-// usage: { inputTokens, outputTokens }
+// usage: { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens }
 // cost:  number (USD)
 ```
 
@@ -29,6 +29,15 @@ must be on the instance's [model allowlist](#models).
 `{ text, usage, cost }` (the snippet above). It throws if the model is not
 allowlisted, a quota is exceeded, or the stream ends early — see
 [Limits and errors](#limits-and-errors).
+
+For Anthropic models, prompt caching is automatic and best-effort. The server
+marks stable prompt prefixes for Anthropic's 5-minute ephemeral cache: the
+system prompt when present, plus the prior conversation before the newest user
+turn. `usage.inputTokens` is the total input-token count, while
+`usage.cacheCreationInputTokens` and `usage.cacheReadInputTokens` show how many
+of those input tokens wrote to or read from the prompt cache. They are `0` when
+the provider does not return cache metrics, when the prompt is too short to
+cache, or when the prefix did not match.
 
 ## Stream
 
@@ -51,6 +60,13 @@ type AiChatOptions = {
   model: string;       // required; must be allowlisted
   system?: string;     // system prompt (not a message role)
   maxTokens?: number;  // > 0; default 1024, hard max 8192
+};
+
+type AiUsage = {
+  inputTokens: number;                // total prompt input tokens
+  outputTokens: number;
+  cacheCreationInputTokens: number;   // Anthropic prompt-cache writes, else 0
+  cacheReadInputTokens: number;       // Anthropic prompt-cache reads, else 0
 };
 ```
 
@@ -78,7 +94,9 @@ Use the exact model id as configured.
 - **Spend quotas.** AI spend is capped per user per day
   (`CANVAS_DROP_AI_USER_DAILY_USD`, default `5`) and per canvas per month
   (`CANVAS_DROP_AI_CANVAS_MONTHLY_USD`, default `50`). Exceeding a cap throws
-  `QuotaExceededError` (`code: "QUOTA_EXCEEDED"`, HTTP 429).
+  `QuotaExceededError` (`code: "QUOTA_EXCEEDED"`, HTTP 429). Anthropic prompt
+  cache writes and reads are metered at their cache rates, so cached follow-up
+  turns contribute their discounted cost to quota windows.
 - **Token limit.** `maxTokens` defaults to `1024` and is clamped to a hard max
   of `8192`.
 - **Capability off.** If the `ai` capability is disabled for the canvas — or no

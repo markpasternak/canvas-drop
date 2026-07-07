@@ -1,5 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { type ModelMessage, streamText } from "ai";
+import { type LanguageModelUsage, type ModelMessage, streamText } from "ai";
 
 /**
  * AI provider factory (plan 009 / M9, D-AI-1). The Vercel AI SDK is the chosen
@@ -32,6 +32,8 @@ export interface StreamChatInput {
 export interface ChatUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
 }
 
 export interface ChatStream {
@@ -43,6 +45,63 @@ export interface ChatStream {
 
 export interface ModelProvider {
   streamChat(input: StreamChatInput): ChatStream;
+}
+
+const ANTHROPIC_EPHEMERAL_CACHE_CONTROL = {
+  anthropic: { cacheControl: { type: "ephemeral" } },
+} as const;
+
+function isCacheableText(content: string): boolean {
+  return content.trim().length > 0;
+}
+
+function withAnthropicCacheControl(message: ModelMessage): ModelMessage {
+  return {
+    ...message,
+    providerOptions: ANTHROPIC_EPHEMERAL_CACHE_CONTROL,
+  };
+}
+
+export function buildAnthropicPromptWithCacheControl(input: {
+  system?: string;
+  messages: ChatMessage[];
+}): ModelMessage[] {
+  const messages: ModelMessage[] = [];
+  if (input.system && isCacheableText(input.system)) {
+    messages.push(
+      withAnthropicCacheControl({
+        role: "system",
+        content: input.system,
+      }),
+    );
+  }
+
+  const conversationOffset = messages.length;
+  messages.push(...(input.messages as ModelMessage[]));
+
+  const newestUserIndex = input.messages.findLastIndex((message) => message.role === "user");
+  if (newestUserIndex <= 0) return messages;
+
+  for (let i = newestUserIndex - 1; i >= 0; i--) {
+    if (isCacheableText(input.messages[i]?.content ?? "")) {
+      const providerMessageIndex = conversationOffset + i;
+      messages[providerMessageIndex] = withAnthropicCacheControl(
+        messages[providerMessageIndex] as ModelMessage,
+      );
+      break;
+    }
+  }
+
+  return messages;
+}
+
+export function chatUsageFromLanguageModelUsage(u: LanguageModelUsage): ChatUsage {
+  return {
+    inputTokens: u.inputTokens ?? 0,
+    outputTokens: u.outputTokens ?? 0,
+    cacheCreationInputTokens: u.inputTokenDetails?.cacheWriteTokens ?? 0,
+    cacheReadInputTokens: u.inputTokenDetails?.cacheReadTokens ?? 0,
+  };
 }
 
 /**
@@ -64,8 +123,8 @@ export function anthropicProvider(opts: { apiKey?: string; baseUrl?: string }): 
     streamChat({ model, system, messages, maxTokens, signal }) {
       const result = streamText({
         model: anthropic(model),
-        system,
-        messages: messages as ModelMessage[],
+        messages: buildAnthropicPromptWithCacheControl({ system, messages }),
+        allowSystemInMessages: true,
         maxOutputTokens: maxTokens,
         maxRetries: 2,
         abortSignal: signal,
@@ -73,12 +132,7 @@ export function anthropicProvider(opts: { apiKey?: string; baseUrl?: string }): 
       return {
         textStream: result.textStream,
         // totalUsage is a PromiseLike; wrap so ChatStream.usage is a real Promise.
-        usage: Promise.resolve(result.totalUsage).then(
-          (u): ChatUsage => ({
-            inputTokens: u.inputTokens ?? 0,
-            outputTokens: u.outputTokens ?? 0,
-          }),
-        ),
+        usage: Promise.resolve(result.totalUsage).then(chatUsageFromLanguageModelUsage),
       };
     },
   };

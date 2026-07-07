@@ -102,9 +102,10 @@ are auto-detected from the canvas URL; every call hits
   per-viewer, the root scope is shared.
 - `canvasdrop.files` — `upload(file)` → `{ id, name, size, url }`, `list()`,
   `delete(id)`, `url(id)` (synchronous; returns the content URL).
-- `canvasdrop.ai` — `chat(messages, { model })` → `{ text, usage, cost }`, and
-  `stream(messages, { model })` → `AsyncIterable<string>` (SSE; the provider key
-  is server-side only). `model` is required.
+- `canvasdrop.ai` — `chat(messages, { model })` →
+  `{ text, usage: { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens }, cost }`,
+  and `stream(messages, { model })` → `AsyncIterable<string>` (SSE; the provider
+  key is server-side only). `model` is required.
 - `canvasdrop.realtime.channel(name)` — `publish(event, data)`,
   `subscribe(handler)`, `unsubscribe()`, `presence()`, `onPresence`, `onJoin`,
   `onLeave`, `close()`. There is no generic `.on(...)`.

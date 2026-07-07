@@ -611,6 +611,8 @@ export const aiUsage = sqliteTable(
     provider: c.text("provider").notNull(),
     model: c.text("model").notNull(),
     inputTokens: c.int("input_tokens").notNull(),
+    cacheCreationInputTokens: c.int("cache_creation_input_tokens").notNull().default(0),
+    cacheReadInputTokens: c.int("cache_read_input_tokens").notNull().default(0),
     outputTokens: c.int("output_tokens").notNull(),
     costUsd: c.real("cost_usd").notNull(),
     createdAt: c.epochMs("created_at").notNull(),

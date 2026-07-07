@@ -203,15 +203,76 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
       " world",
     ]);
     const done = events.find((e) => e.type === "done") as
-      | { usage: { inputTokens: number; outputTokens: number }; cost: number }
+      | {
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheCreationInputTokens: number;
+            cacheReadInputTokens: number;
+          };
+          cost: number;
+        }
       | undefined;
-    expect(done?.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
+    expect(done?.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    });
     // haiku: 10/1e6*1 + 20/1e6*5 = 0.00011
     expect(done?.cost).toBeCloseTo(0.00011, 8);
 
     // metering row written against the SERVER-resolved user/canvas (§12.0 #2)
     const spend = await aiUsageRepository(client).userSpendSince(owner.id, 0);
     expect(spend).toBeCloseTo(0.00011, 8);
+  });
+
+  it("emits cache usage fields, records them, and prices cache reads/writes", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv } = await makeCanvas(client);
+    const provider = fakeProvider({
+      deltas: ["cached"],
+      usage: {
+        inputTokens: 1000,
+        cacheCreationInputTokens: 200,
+        cacheReadInputTokens: 300,
+        outputTokens: 20,
+      },
+    });
+    const res = await post(buildApi(client, owner.id, provider), {
+      model: "claude-haiku-4-5",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(200);
+    const events = parseSSE(await res.text());
+    const done = events.find((e) => e.type === "done") as
+      | {
+          usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheCreationInputTokens: number;
+            cacheReadInputTokens: number;
+          };
+          cost: number;
+        }
+      | undefined;
+    expect(done?.usage).toEqual({
+      inputTokens: 1000,
+      outputTokens: 20,
+      cacheCreationInputTokens: 200,
+      cacheReadInputTokens: 300,
+    });
+    // haiku: (500 uncached + 200*1.25 write + 300*0.1 read)/1e6 + 20*5/1e6
+    expect(done?.cost).toBeCloseTo(0.00088, 10);
+
+    const totals = await aiUsageRepository(client).canvasTotals(cv.id);
+    expect(totals).toMatchObject({
+      inputTokens: 1000,
+      outputTokens: 20,
+      cacheCreationInputTokens: 200,
+      cacheReadInputTokens: 300,
+    });
+    expect(totals.costUsd).toBeCloseTo(0.00088, 10);
   });
 
   it("rejects a model not in the admin allowlist (403 MODEL_NOT_ALLOWED)", async () => {
@@ -461,7 +522,12 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     ac.abort(); // already-aborted request signal
     const provider = fakeProvider({
       deltas: ["a", "b", "c"],
-      usage: { inputTokens: 4, outputTokens: 2 },
+      usage: {
+        inputTokens: 4,
+        outputTokens: 2,
+        cacheCreationInputTokens: 2,
+        cacheReadInputTokens: 1,
+      },
     });
     await Promise.resolve(
       post(
@@ -475,7 +541,7 @@ describe("canvasAiRoutes (POST /ai/chat)", () => {
     ).catch(() => {});
     // usage was still recorded against the quota despite the abort
     const spend = await aiUsageRepository(client).userSpendSince(owner.id, 0);
-    // haiku: 4/1e6*1 + 2/1e6*5 = 0.000014
-    expect(spend).toBeCloseTo(0.000014, 9);
+    // haiku: (1 uncached + 2*1.25 write + 1*0.1 read)/1e6 + 2*5/1e6
+    expect(spend).toBeCloseTo(0.0000136, 10);
   });
 });
