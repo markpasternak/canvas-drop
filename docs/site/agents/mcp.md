@@ -42,7 +42,8 @@ discoverable in Shared.
 | `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). Optional `orgId` homes it in an org you belong to (from `whoami.orgs`) so it can be shared org-wide; omit or `null` for a personal canvas. Only meaningful when an org boundary is configured. |
 | `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
-| `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`). |
+| `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`, `downloadUrl`). |
+| `delete_version` | Permanently delete one non-current ready version. The current version and disabled canvases are protected; shared draft/version blobs are retained. |
 | `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
 | `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
 | `add_files` | Stage files into an open upload (text as UTF-8, binary as base64); call repeatedly to chunk a large set. |
@@ -86,7 +87,7 @@ canvas is live in one round trip, and no per-canvas key is ever handled by the a
 the read tools (`get_canvas`, `list_versions`, `get_canvas_usage`, `get_draft`, …) keep
 working, but every mutation tool — settings/sharing via `update_canvas`, capabilities,
 slug, preview, access tools, deploy / publish / rollback, archive / unpublish,
-`delete_canvas`, and the draft-edit tools — fails with `DISABLED: <reason>` (the same
+`delete_canvas`, `delete_version`, and the draft-edit tools — fails with `DISABLED: <reason>` (the same
 contract as the management API's `409 { code: "DISABLED" }`). The owner can still read
 the canvas and the admin's takedown reason; only an admin can re-enable it.
 
@@ -146,6 +147,12 @@ instead:
 - Over curl, the same read-back is `GET {apiBase}/files` (and `?path=` for raw bytes,
   no size cap) — `apiBase` comes from the `deploy` block `create_canvas` returned, so
   there's nothing to probe.
+
+Each `list_versions` row also carries a `downloadUrl` for a complete ZIP export of that
+immutable version. Fetch it with the same OAuth access token in the
+`Authorization: Bearer …` header. The export route does not accept a token in the query
+string or a dashboard cookie, and it fails rather than returning a partial archive if a
+referenced blob is missing.
 
 `create_canvas` (and `get_canvas`) return a `deploy` block with the **exact curl
 endpoints** for the canvas — `apiBase`, `zipUpload`, the staged URLs, `readback`, and a

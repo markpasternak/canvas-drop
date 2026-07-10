@@ -5,10 +5,12 @@ import { buildApp } from "../app.js";
 import { createAuditLog } from "../audit/audit-log.js";
 import { devStrategy } from "../auth/dev.js";
 import { sessionService } from "../auth/session.js";
+import { blobKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { oauthRepository } from "../db/repositories/oauth.js";
 import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -18,11 +20,10 @@ import { memStorage } from "../storage/mem.js";
 
 const silent = pino({ level: "silent" });
 
-function app(client: DbClient, config: Config) {
+function app(client: DbClient, config: Config, storage = memStorage()) {
   const canvases = canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
-  const storage = memStorage();
   return buildApp({
     config,
     db: client,
@@ -132,5 +133,87 @@ describe("MCP routes (config-gated mount)", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it("streams an owned version ZIP through the MCP bearer export route", async () => {
+    const { unzipSync } = await import("fflate");
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const a = app(client, onConfig, storage);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const owner = await users.upsert({
+      providerSub: "export-owner",
+      email: "export-owner@example.com",
+      name: "Export owner",
+      isAdmin: false,
+    });
+    const canvas = await canvases.create({
+      ownerId: owner.id,
+      slug: "export-me",
+      apiKeyHash: "export-key",
+    });
+    const pending = await versions.createPending({
+      canvasId: canvas.id,
+      number: 1,
+      createdBy: owner.id,
+      source: "api",
+    });
+    const bytes = new TextEncoder().encode("<h1>export</h1>");
+    const hash = "export-hash";
+    await storage.put(blobKey(canvas.id, hash), bytes);
+    await versions.markReady(pending.id, {
+      fileCount: 1,
+      totalBytes: bytes.byteLength,
+      manifest: { "index.html": { size: bytes.byteLength, hash, mime: "text/html" } },
+    });
+    await canvases.setCurrentVersion(canvas.id, pending.id);
+    const token = "mcp-export-access-token";
+    await oauthRepository(client).tokens.create({
+      token,
+      kind: "access",
+      clientId: "test-client",
+      userId: owner.id,
+      scopes: ["canvas-drop"],
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const res = await a.request(`/mcp/canvases/${canvas.id}/versions/1/download`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    expect(res.headers.get("content-disposition")).toContain("export-me-v1.zip");
+    const entries = unzipSync(new Uint8Array(await res.arrayBuffer()));
+    expect(new TextDecoder().decode(entries["index.html"])).toBe("<h1>export</h1>");
+
+    const noToken = await a.request(`/mcp/canvases/${canvas.id}/versions/1/download`);
+    expect(noToken.status).toBe(401);
+
+    const queryToken = await a.request(
+      `/mcp/canvases/${canvas.id}/versions/1/download?access_token=${token}`,
+    );
+    expect(queryToken.status).toBe(401);
+
+    const other = await users.upsert({
+      providerSub: "export-other",
+      email: "export-other@example.com",
+      name: "Export other",
+      isAdmin: false,
+    });
+    const otherToken = "mcp-export-other-token";
+    await oauthRepository(client).tokens.create({
+      token: otherToken,
+      kind: "access",
+      clientId: "test-client",
+      userId: other.id,
+      scopes: ["canvas-drop"],
+      expiresAt: Date.now() + 60_000,
+    });
+    const denied = await a.request(`/mcp/canvases/${canvas.id}/versions/1/download`, {
+      headers: { authorization: `Bearer ${otherToken}` },
+    });
+    expect(denied.status).toBe(404);
   });
 });

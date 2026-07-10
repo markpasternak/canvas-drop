@@ -24,9 +24,10 @@ import { hashPassword } from "../canvas/password.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
-import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
+import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
+import { VersionHistoryError, type VersionHistoryService } from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -79,6 +80,8 @@ export interface ManagementDeps extends PreviewHintDeps {
   clone: CloneService;
   audit: AuditLog;
   engine: DeployEngine;
+  /** Shared archive/delete seam used by both dashboard HTTP and MCP. */
+  versionHistory: VersionHistoryService;
   /** Blob store — backs the custom-preview upload (PUT/DELETE /:id/preview). */
   storage: StorageDriver;
   usage: UsageEventsRepository;
@@ -1139,28 +1142,60 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     const num = Number(c.req.param("number"));
     if (!Number.isInteger(num) || num < 1) return c.json({ error: "invalid_version" }, 400);
-    const version = await deps.versions.findReadyByNumber(cv.id, num);
-    if (!version?.manifest) {
-      return c.json({ code: "NOT_FOUND", message: `no ready version ${num}` }, 404);
+    try {
+      const archive = await deps.versionHistory.archive(cv, num);
+      return new Response(archive.bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="${archive.filename}"`,
+          "Content-Length": String(archive.bytes.byteLength),
+          "Cache-Control": "private, no-store",
+        },
+      });
+    } catch (err) {
+      if (err instanceof VersionHistoryError) {
+        if (err.code === "VERSION_NOT_FOUND") {
+          return c.json({ code: "NOT_FOUND", message: err.message }, 404);
+        }
+        c.get("log")?.error({ err, canvasId: cv.id, version: num }, "version archive incomplete");
+        return c.json({ code: "VERSION_INCOMPLETE", message: err.message }, 503);
+      }
+      throw err;
     }
-    const manifest = version.manifest as Manifest;
-    const { zipSync } = await import("fflate");
-    const entries: Record<string, Uint8Array> = {};
-    for (const [path, entry] of Object.entries(manifest)) {
-      if (!entry) continue;
-      const bytes = await deps.storage.get(blobKey(cv.id, entry.hash));
-      if (bytes) entries[path] = new Uint8Array(bytes);
+  });
+
+  // Delete one historical ready version. The service's repository operation
+  // atomically excludes the live pointer; mark-sweep reclaims only unreferenced
+  // content-addressed blobs. Mutation → same-origin + owner/mutable gates.
+  app.delete("/:id/versions/:number", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const num = Number(c.req.param("number"));
+    if (!Number.isInteger(num) || num < 1) return c.json({ error: "invalid_version" }, 400);
+    const result = await deps.versionHistory.deleteHistorical(cv.id, num, c.get("user").id);
+    switch (result.kind) {
+      case "deleted":
+        return c.json({ ok: true, version: result.version.number });
+      case "current":
+        return c.json(
+          {
+            code: "CURRENT_VERSION",
+            message: "Make another version current before deleting this one.",
+          },
+          409,
+        );
+      case "not_found":
+        return c.json({ code: "NOT_FOUND", message: `no ready version ${num}` }, 404);
+      case "unavailable":
+        return c.json(
+          {
+            code: "VERSION_UNAVAILABLE",
+            message: "That version was just removed; refresh history.",
+          },
+          409,
+        );
     }
-    const zip = zipSync(entries);
-    const filename = `${cv.slug}-v${num}.zip`;
-    return new Response(zip, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(zip.byteLength),
-      },
-    });
   });
 
   // One-click rollback (§6.1.12). Mutation → same-origin guard. `findReadyByNumber`

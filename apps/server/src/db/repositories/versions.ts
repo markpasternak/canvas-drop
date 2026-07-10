@@ -126,6 +126,35 @@ export function versionsRepository(client: DbClient) {
     },
 
     /**
+     * Delete one ready historical version without ever removing the version the
+     * canvas currently serves. The live-pointer exclusion is evaluated inside
+     * the DELETE, not from a caller snapshot, so a rollback that wins the race
+     * protects its target exactly like {@link pruneBeyond} does.
+     *
+     * Returns the deleted row, or null when the version is missing, not ready,
+     * belongs to another canvas, or is current. Storage is intentionally left
+     * alone; the caller runs the per-canvas mark-sweep after row deletion.
+     */
+    async deleteReadyNonCurrent(canvasId: string, number: number): Promise<Version | null> {
+      const liveCurrent = db
+        .select({ id: canvasesT.currentVersionId })
+        .from(canvasesT)
+        .where(and(eq(canvasesT.id, canvasId), isNotNull(canvasesT.currentVersionId)));
+      const deleted = (await db
+        .delete(t)
+        .where(
+          and(
+            eq(t.canvasId, canvasId),
+            eq(t.number, number),
+            eq(t.status, "ready"),
+            notInArray(t.id, liveCurrent),
+          ),
+        )
+        .returning()) as Version[];
+      return deleted[0] ?? null;
+    },
+
+    /**
      * Prune ready version **rows** beyond the newest `keep`, never the live
      * current one. Returns the rows actually deleted so the caller knows which
      * versions are gone. Storage is NOT touched here: under content-addressed

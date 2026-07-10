@@ -2,6 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { AdminSettingsService } from "./admin/settings-service.js";
 import type { AuditLog } from "./audit/audit-log.js";
 import { type CloneService, cloneService } from "./canvas/clone-service.js";
+import { type VersionHistoryService, versionHistoryService } from "./canvas/version-history.js";
 import type { DbClient } from "./db/factory.js";
 import { aiUsageRepository } from "./db/repositories/ai-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
@@ -63,6 +64,8 @@ export interface ServiceGraph {
   oauth: ReturnType<typeof oauthRepository>;
   upload: UploadService;
   clone: CloneService;
+  /** Shared complete-export + historical-deletion behavior for dashboard and MCP. */
+  versionHistory: VersionHistoryService;
   /** The draft *service* — one instance, screenshot trigger always wired, shared by
    *  EVERY publish path (the editor's draft API AND the MCP `publish_draft` tool). */
   drafts: DraftService;
@@ -95,6 +98,13 @@ export function composeServices(deps: ServiceGraphDeps): ServiceGraph {
       versions: deps.versions,
       drafts: deps.draftsRepo,
       storage: deps.storage,
+    }),
+
+    versionHistory: versionHistoryService({
+      versions: deps.versions,
+      storage: deps.storage,
+      engine: deps.engine,
+      audit: deps.audit,
     }),
 
     drafts: draftService({

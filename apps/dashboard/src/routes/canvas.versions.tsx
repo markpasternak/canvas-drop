@@ -1,7 +1,6 @@
-import { DownloadSimple, PencilSimple } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, DownloadSimple, Trash } from "@phosphor-icons/react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { ActionMenu, ActionMenuItem } from "../components/ActionMenu.js";
 import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame, TabEmptyState } from "../components/CanvasDetail.js";
@@ -13,7 +12,7 @@ import { useToast } from "../components/Toast.js";
 import { ApiError, type VersionInfo } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
-import { useRestoreToDraft, useRollback } from "../lib/mutations.js";
+import { useDeleteVersion, useRestoreToDraft, useRollback } from "../lib/mutations.js";
 import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
 
 /** Versions tab: version history (newest first), forward "Publish files", and
@@ -26,13 +25,16 @@ export default function Versions() {
   const { data: draft } = useDraft(id);
   const rollback = useRollback(id);
   const restore = useRestoreToDraft(id);
+  const deleteVersion = useDeleteVersion(id);
   const navigate = useNavigate();
   const toast = useToast();
   const [target, setTarget] = useState<VersionInfo | null>(null);
   // Version awaiting a "this overwrites your unpublished draft" confirmation.
   const [restoreTarget, setRestoreTarget] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   // Deploy + make-live target the live canvas. Disabled while archived/disabled.
   const isActive = canvas?.status === "active";
+  const isDisabled = canvas?.status === "disabled";
 
   if (isLoading) {
     return (
@@ -89,6 +91,17 @@ export default function Versions() {
     }
   }
 
+  async function confirmDelete() {
+    if (deleteTarget === null) return;
+    try {
+      await deleteVersion.mutateAsync(deleteTarget);
+      toast(`Version ${deleteTarget} deleted`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't delete the version", "error");
+    }
+  }
+
   return (
     <TabContentFrame>
       <Section
@@ -105,7 +118,7 @@ export default function Versions() {
             <li
               key={v.number}
               className={cn(
-                "flex items-center gap-4 rounded-lg border px-4 py-3 transition-colors",
+                "flex flex-col gap-3 rounded-lg border px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-4",
                 v.current ? "border-border-strong bg-surface-raised" : "border-border bg-surface",
               )}
             >
@@ -131,31 +144,49 @@ export default function Versions() {
                   <span>{formatBytes(v.totalBytes)}</span>
                 </div>
               </div>
-              {v.status === "ready" && isActive && (
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {!v.current && (
+              {v.status === "ready" && (
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                  <a
+                    href={`/api/canvases/${id}/versions/${v.number}/download`}
+                    className="inline-flex h-8 items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border-strong bg-surface-raised px-3 text-[0.8125rem] font-medium text-fg transition-all duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover active:translate-y-px"
+                    title="Download all files in this version as a ZIP archive"
+                  >
+                    <DownloadSimple size={15} aria-hidden />
+                    Download ZIP
+                  </a>
+                  {!isDisabled && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => requestRestore(v.number)}
+                      title="Restore this version's files to the editable draft"
+                    >
+                      <ArrowCounterClockwise size={15} aria-hidden />
+                      Restore
+                    </Button>
+                  )}
+                  {!v.current && isActive && (
                     <Button variant="secondary" size="sm" onClick={() => setTarget(v)}>
                       Make current
                     </Button>
                   )}
-                  <ActionMenu label={`More actions for version ${v.number}`}>
-                    <ActionMenuItem
-                      icon={<PencilSimple size={15} aria-hidden />}
-                      onSelect={() => requestRestore(v.number)}
-                      title="Load this version's files into the editable draft"
+                  {!isDisabled && !v.current && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-danger hover:bg-danger-subtle hover:text-danger"
+                      onClick={() => setDeleteTarget(v.number)}
                     >
-                      Edit this version
-                    </ActionMenuItem>
-                    <ActionMenuItem
-                      icon={<DownloadSimple size={15} aria-hidden />}
-                      onSelect={() => {
-                        window.location.href = `/api/canvases/${id}/versions/${v.number}/download`;
-                      }}
-                      title="Download all files in this version as a ZIP archive"
-                    >
-                      Download ZIP
-                    </ActionMenuItem>
-                  </ActionMenu>
+                      <Trash size={15} aria-hidden />
+                      Delete
+                    </Button>
+                  )}
+                  {v.current && !isDisabled && (
+                    <span className="text-xs text-subtle">Current version can't be deleted</span>
+                  )}
+                  {isDisabled && (
+                    <span className="text-xs text-subtle">Read-only while disabled</span>
+                  )}
                 </div>
               )}
             </li>
@@ -186,6 +217,19 @@ export default function Versions() {
       >
         Your draft has unpublished changes. Loading this version's files into the draft discards
         those changes. The published version isn't affected until you publish.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        title={`Delete version ${deleteTarget ?? ""}?`}
+        actionLabel="Delete version"
+        destructive
+        loading={deleteVersion.isPending}
+      >
+        This permanently removes version {deleteTarget} from history. Files still used by another
+        version or the draft are kept.
       </ConfirmDialog>
     </TabContentFrame>
   );

@@ -158,6 +158,56 @@ describe.each(DIALECTS)("versionsRepository [%s]", (dialect) => {
     expect(dropped.map((v) => v.number).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 
+  it("deleteReadyNonCurrent removes exactly one historical ready version", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const canvases = canvasesRepository(client);
+    const first = await repo.createPending({
+      canvasId,
+      number: 1,
+      createdBy: userId,
+      source: "api",
+    });
+    const second = await repo.createPending({
+      canvasId,
+      number: 2,
+      createdBy: userId,
+      source: "api",
+    });
+    await repo.markReady(first.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+    await repo.markReady(second.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+    await canvases.setCurrentVersion(canvasId, second.id);
+
+    const deleted = await repo.deleteReadyNonCurrent(canvasId, 1);
+
+    expect(deleted?.id).toBe(first.id);
+    expect(await repo.findById(first.id)).toBeNull();
+    expect(await repo.findById(second.id)).not.toBeNull();
+    expect((await canvases.findById(canvasId))?.currentVersionId).toBe(second.id);
+  });
+
+  it("deleteReadyNonCurrent atomically protects the live version", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seedCanvas(client);
+    const repo = versionsRepository(client);
+    const canvases = canvasesRepository(client);
+    const target = await repo.createPending({
+      canvasId,
+      number: 1,
+      createdBy: userId,
+      source: "api",
+    });
+    await repo.markReady(target.id, { fileCount: 1, totalBytes: 1, manifest: MANIFEST });
+
+    // This pointer update represents a rollback that wins immediately before the
+    // guarded DELETE executes. The repository must re-read it inside the statement.
+    await canvases.setCurrentVersion(canvasId, target.id);
+    expect(await repo.deleteReadyNonCurrent(canvasId, 1)).toBeNull();
+    expect(await repo.findById(target.id)).not.toBeNull();
+    expect((await canvases.findById(canvasId))?.currentVersionId).toBe(target.id);
+  });
+
   it("deletePending removes a pending row by id but never a ready one (status-guarded)", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seedCanvas(client);

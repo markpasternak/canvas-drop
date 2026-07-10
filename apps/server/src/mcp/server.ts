@@ -18,6 +18,7 @@ import { resolveCreateSlug } from "../canvas/slug.js";
 import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
+import type { VersionHistoryService } from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -81,6 +82,8 @@ export interface McpToolDeps extends PreviewHintDeps {
   publicLinksEnabled?: () => Promise<boolean>;
   versions: VersionsRepository;
   engine: DeployEngine;
+  /** Shared complete-export + historical-deletion behavior (dashboard parity). */
+  versionHistory: VersionHistoryService;
   upload: UploadService;
   /** Blob store — read-only here, backs the `get_canvas_file` verification tool. */
   storage: StorageDriver;
@@ -396,8 +399,44 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           fileCount: v.fileCount,
           totalBytes: v.totalBytes,
           current: v.id === cv.currentVersionId,
+          downloadUrl: new URL(
+            `/mcp/canvases/${cv.id}/versions/${v.number}/download`,
+            deps.config.baseUrl,
+          ).toString(),
         })),
       });
+    },
+  );
+
+  server.registerTool(
+    "delete_version",
+    {
+      description:
+        "Permanently delete one non-current published version you own. The current live version " +
+        "is protected; make another version current first. Shared draft/version blobs are retained.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        version: z.number().int().positive().describe("The historical version number to delete."),
+      },
+    },
+    async ({ id, version }) => {
+      const gate = await requireMutable(id);
+      if ("error" in gate) return gate.error;
+      const result = await deps.versionHistory.deleteHistorical(
+        gate.canvas.id,
+        version,
+        caller.userId,
+      );
+      switch (result.kind) {
+        case "deleted":
+          return ok({ ok: true, version: result.version.number });
+        case "current":
+          return fail("CURRENT_VERSION: make another version current before deleting this one");
+        case "not_found":
+          return fail("VERSION_NOT_FOUND: no ready version with that number");
+        case "unavailable":
+          return fail("VERSION_UNAVAILABLE: that version was just removed; list versions again");
+      }
     },
   );
 

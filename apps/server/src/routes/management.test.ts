@@ -8,6 +8,7 @@ import { guestService } from "../auth/guest.js";
 import { cloneService } from "../canvas/clone-service.js";
 import { verifyPassword } from "../canvas/password.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
+import { versionHistoryService } from "../canvas/version-history.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
@@ -75,6 +76,7 @@ function buildApp(
   const audit = createAuditLog(auditRepository(client), silent);
   const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
   const clone = cloneService({ canvases, versions, drafts, storage });
+  const versionHistory = versionHistoryService({ versions, storage, engine, audit });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
@@ -111,6 +113,7 @@ function buildApp(
       clone,
       audit,
       engine,
+      versionHistory,
       storage,
       usage: usageEventsRepository(client),
       files: filesRepository(client),
@@ -593,6 +596,7 @@ describe("managementRoutes", () => {
         ["POST", `/api/canvases/${id}/unarchive`, {}],
         ["POST", `/api/canvases/${id}/unpublish`, {}],
         ["POST", `/api/canvases/${id}/rollback`, { version: 1 }],
+        ["DELETE", `/api/canvases/${id}/versions/1`, undefined],
         ["DELETE", `/api/canvases/${id}`, undefined],
       ];
       for (const [method, path, body] of cases) {
@@ -1617,6 +1621,72 @@ describe("managementRoutes", () => {
       `/api/canvases/${created.id}/versions`,
     );
     expect(denied.status).toBe(404);
+  });
+
+  it("versions: owner downloads and deletes history, while current/non-owner/cross-origin delete are protected", async () => {
+    const { zipSync, unzipSync } = await import("fflate");
+    const { Buffer } = await import("node:buffer");
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const other = await seedUser(client, "other");
+    const storage = memStorage();
+    const app = buildApp(client, { id: owner.id, isAdmin: false }, storage);
+    const created = await jsonOf<{ id: string }>(
+      await app.request("/api/canvases", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    const zip = (n: string) => Buffer.from(zipSync({ "index.html": new TextEncoder().encode(n) }));
+    for (const n of ["<h1>one</h1>", "<h1>two</h1>"]) {
+      await app.request(`/api/canvases/${created.id}/deploy/zip`, {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "same-origin" },
+        body: zip(n),
+      });
+    }
+
+    const download = await app.request(`/api/canvases/${created.id}/versions/1/download`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toContain("-v1.zip");
+    expect(download.headers.get("cache-control")).toBe("private, no-store");
+    const entries = unzipSync(new Uint8Array(await download.arrayBuffer()));
+    expect(new TextDecoder().decode(entries["index.html"])).toBe("<h1>one</h1>");
+
+    const currentDelete = await app.request(`/api/canvases/${created.id}/versions/2`, {
+      method: "DELETE",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(currentDelete.status).toBe(409);
+    expect(await jsonOf<{ code: string }>(currentDelete)).toMatchObject({
+      code: "CURRENT_VERSION",
+    });
+
+    const crossOrigin = await app.request(`/api/canvases/${created.id}/versions/1`, {
+      method: "DELETE",
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(crossOrigin.status).toBe(403);
+    const denied = await buildApp(client, { id: other.id, isAdmin: false }, storage).request(
+      `/api/canvases/${created.id}/versions/1`,
+      { method: "DELETE", headers: { "Sec-Fetch-Site": "same-origin" } },
+    );
+    expect(denied.status).toBe(404);
+
+    const deleted = await app.request(`/api/canvases/${created.id}/versions/1`, {
+      method: "DELETE",
+      headers: { "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(deleted.status).toBe(200);
+    expect(await jsonOf<{ ok: boolean; version: number }>(deleted)).toEqual({
+      ok: true,
+      version: 1,
+    });
+    const history = await jsonOf<{ versions: { number: number }[] }>(
+      await app.request(`/api/canvases/${created.id}/versions`),
+    );
+    expect(history.versions.map((version) => version.number)).toEqual([2]);
   });
 
   it("rollback: moves the pointer, rejects bad/cross-canvas versions, non-owner, cross-origin", async () => {

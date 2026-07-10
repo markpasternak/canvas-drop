@@ -883,10 +883,13 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     expect(await (await h.GET(OWNER, `/c/${created.slug}/`)).text()).toContain("mcp v1");
 
     // list_versions, a second publish, and rollback restore an earlier version.
-    expect(
-      mcpPayload(await mcp.callTool({ name: "list_versions", arguments: { id: created.id } }))
-        .versions,
-    ).toHaveLength(1);
+    const firstVersions = mcpPayload(
+      await mcp.callTool({ name: "list_versions", arguments: { id: created.id } }),
+    ).versions;
+    expect(firstVersions).toHaveLength(1);
+    expect(firstVersions[0].downloadUrl).toContain(
+      `/mcp/canvases/${created.id}/versions/1/download`,
+    );
     await mcp.callTool({
       name: "write_draft_file",
       arguments: { id: created.id, path: "index.html", content: "<h1>mcp v2</h1>" },
@@ -897,6 +900,15 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     ).toBe(2);
     await mcp.callTool({ name: "rollback_canvas", arguments: { id: created.id, version: 1 } });
     expect(await (await h.GET(OWNER, `/c/${created.slug}/`)).text()).toContain("mcp v1");
+    expect(
+      mcpPayload(
+        await mcp.callTool({ name: "delete_version", arguments: { id: created.id, version: 2 } }),
+      ),
+    ).toMatchObject({ ok: true, version: 2 });
+    expect(
+      mcpPayload(await mcp.callTool({ name: "list_versions", arguments: { id: created.id } }))
+        .versions,
+    ).toHaveLength(1);
 
     // share via update_canvas; clone yields a fresh unpublished draft owned by the caller; usage reads back.
     await mcp.callTool({

@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
 import { cloneService } from "../canvas/clone-service.js";
+import { versionHistoryService } from "../canvas/version-history.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
@@ -97,6 +98,7 @@ async function connect(
       canvases,
       versions,
       engine,
+      versionHistory: versionHistoryService({ versions, storage, engine, audit }),
       upload: uploadService({
         config,
         canvases,
@@ -468,6 +470,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       },
       { name: "finalize_deploy", args: { id: cv.id, uploadId: "nope" } },
       { name: "rollback_canvas", args: { id: cv.id, version: 1 } },
+      { name: "delete_version", args: { id: cv.id, version: 1 } },
       // Draft EDIT tools share the same gate.
       { name: "write_draft_file", args: { id: cv.id, path: "a.html", content: "x" } },
       { name: "delete_draft_file", args: { id: cv.id, path: "a.html" } },
@@ -764,6 +767,35 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(Array.isArray(usage.viewsByDay)).toBe(true);
   });
 
+  it("list_versions exposes bearer download URLs and delete_version removes only history", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    for (const html of ["<h1>one</h1>", "<h1>two</h1>"]) {
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: cv.id, zipBase64: zip({ "index.html": html }) },
+      });
+    }
+
+    const before = payload(await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }));
+    expect(before.versions.map((version: { number: number }) => version.number)).toEqual([2, 1]);
+    expect(before.versions[0].downloadUrl).toBe(
+      `http://localhost:3000/mcp/canvases/${cv.id}/versions/2/download`,
+    );
+
+    expect(
+      isError(await mcp.callTool({ name: "delete_version", arguments: { id: cv.id, version: 2 } })),
+    ).toBe(true);
+    expect(
+      payload(await mcp.callTool({ name: "delete_version", arguments: { id: cv.id, version: 1 } })),
+    ).toEqual({ ok: true, version: 1 });
+
+    const after = payload(await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }));
+    expect(after.versions.map((version: { number: number }) => version.number)).toEqual([2]);
+  });
+
   it("clone_canvas copies an owned canvas into a fresh unpublished canvas", async () => {
     client = await makeTestDb(dialect);
     const userId = await seedUser(client, "owner@example.com");
@@ -935,6 +967,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     for (const name of [
       "get_canvas",
       "list_versions",
+      "delete_version",
       "unpublish_canvas",
       "rollback_canvas",
       "get_canvas_file",

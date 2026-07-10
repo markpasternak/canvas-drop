@@ -1,10 +1,11 @@
 import { mcpAuthRouter, StreamableHTTPTransport } from "@hono/mcp";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
+import { VersionHistoryError } from "../canvas/version-history.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
 import { LIMITS } from "../deploy/errors.js";
@@ -72,6 +73,79 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   // would otherwise advertise an http:// metadata URL on an https instance.
   const resourceMetadataUrl = `${new URL(deps.config.baseUrl).origin}/.well-known/oauth-protected-resource`;
 
+  /** Shared live-token + per-caller throttle for JSON-RPC and binary exports. */
+  const bearerGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const challenge = `Bearer error="Unauthorized", resource_metadata="${resourceMetadataUrl}"`;
+    const deny = () => {
+      c.header("WWW-Authenticate", challenge);
+      return c.json({ error: "unauthorized" }, 401);
+    };
+    const token = bearerToken(c.req.header("authorization"));
+    if (!token) return deny();
+    let userId: string | undefined;
+    try {
+      const info = await provider.verifyAccessToken(token);
+      userId = (info.extra as { userId?: string } | undefined)?.userId;
+      if (!userId) return deny();
+      c.set("mcpAuth", { token, clientId: info.clientId, userId, scopes: info.scopes });
+    } catch {
+      return deny();
+    }
+    if (deps.rateLimitStore && deps.config.rateLimit.enabled) {
+      const r = takeToken(
+        deps.rateLimitStore,
+        `mcp:${userId}`,
+        deps.config.rateLimit.canvasApiPerMin,
+      );
+      if (!r.allowed) {
+        c.header("Retry-After", String(r.retryAfterSec));
+        return c.json({ error: "rate_limited" }, 429);
+      }
+    }
+    await next();
+  };
+
+  // Binary handoff for complete version exports. MCP returns this URL rather
+  // than the archive bytes; the client streams it with the same OAuth bearer so
+  // large canvases never enter model context.
+  app.get("/mcp/canvases/:id/versions/:number/download", bearerGuard, async (c) => {
+    const auth = c.get("mcpAuth");
+    if (!auth) return c.json({ error: "unauthorized" }, 401);
+    const canvas = await deps.canvases.findById(c.req.param("id"));
+    if (!canvas || canvas.status === "deleted" || canvas.ownerId !== auth.userId) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const number = Number(c.req.param("number"));
+    if (!Number.isInteger(number) || number < 1) {
+      return c.json({ error: "invalid_version" }, 400);
+    }
+    try {
+      const archive = await deps.versionHistory.archive(canvas, number);
+      return new Response(archive.bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="${archive.filename}"`,
+          "Content-Length": String(archive.bytes.byteLength),
+          "Cache-Control": "private, no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      });
+    } catch (err) {
+      if (err instanceof VersionHistoryError) {
+        if (err.code === "VERSION_NOT_FOUND") {
+          return c.json({ code: "NOT_FOUND", message: err.message }, 404);
+        }
+        deps.log.error(
+          { err, canvasId: canvas.id, version: number },
+          "MCP version archive incomplete",
+        );
+        return c.json({ code: "VERSION_INCOMPLETE", message: err.message }, 503);
+      }
+      throw err;
+    }
+  });
+
   // The MCP endpoint, guarded by a verified access token. The bearer check resolves
   // the caller's identity from the token store (never the request) and stashes it for
   // the tool layer. A failure returns 401 directly (not a thrown HTTPException, which
@@ -87,38 +161,7 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
       maxSize: MCP_BODY_LIMIT,
       onError: (c) => c.json({ error: "payload_too_large" }, 413),
     }),
-    async (c, next) => {
-      const challenge = `Bearer error="Unauthorized", resource_metadata="${resourceMetadataUrl}"`;
-      const deny = () => {
-        c.header("WWW-Authenticate", challenge);
-        return c.json({ error: "unauthorized" }, 401);
-      };
-      const token = bearerToken(c.req.header("authorization"));
-      if (!token) return deny();
-      let userId: string | undefined;
-      try {
-        const info = await provider.verifyAccessToken(token);
-        userId = (info.extra as { userId?: string } | undefined)?.userId;
-        if (!userId) return deny();
-        c.set("mcpAuth", { token, clientId: info.clientId, userId, scopes: info.scopes });
-      } catch {
-        return deny();
-      }
-      // Per-caller throttle (proportionate to the trusted-org model) — reuses the
-      // canvas-API class limit, keyed by the verified user, not the request.
-      if (deps.rateLimitStore && deps.config.rateLimit.enabled) {
-        const r = takeToken(
-          deps.rateLimitStore,
-          `mcp:${userId}`,
-          deps.config.rateLimit.canvasApiPerMin,
-        );
-        if (!r.allowed) {
-          c.header("Retry-After", String(r.retryAfterSec));
-          return c.json({ error: "rate_limited" }, 429);
-        }
-      }
-      await next();
-    },
+    bearerGuard,
     async (c) => {
       const auth = c.get("mcpAuth");
       if (!auth) return c.json({ error: "unauthorized" }, 401);

@@ -12,7 +12,7 @@ describe("FileTree", () => {
     expect(screen.getByText(/no draft files/i)).toBeInTheDocument();
   });
 
-  it("nests paths into directories and lists files", () => {
+  it("starts folders collapsed while keeping root files visible", async () => {
     render(
       <FileTree
         files={[f("index.html"), f("assets/app.css"), f("assets/img/logo.svg")]}
@@ -20,13 +20,16 @@ describe("FileTree", () => {
         onSelect={() => {}}
       />,
     );
-    // Directory rows for assets/ and img/.
+    // Root directory row + root file are visible; nested content starts hidden.
     expect(screen.getByText("assets/")).toBeInTheDocument();
-    expect(screen.getByText("img/")).toBeInTheDocument();
-    // Leaf file names (basename only in the tree).
     expect(screen.getByText("index.html")).toBeInTheDocument();
+    expect(screen.queryByText("img/")).not.toBeInTheDocument();
+    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
+    expect(screen.queryByText("logo.svg")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("assets/"));
+    expect(screen.getByText("img/")).toBeInTheDocument();
     expect(screen.getByText("app.css")).toBeInTheDocument();
-    expect(screen.getByText("logo.svg")).toBeInTheDocument();
   });
 
   it("shows each file's type label and human-readable size", () => {
@@ -43,6 +46,7 @@ describe("FileTree", () => {
   it("calls onSelect with the full path when a file is clicked", async () => {
     const onSelect = vi.fn();
     render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={onSelect} />);
+    await userEvent.click(screen.getByText("assets/"));
     await userEvent.click(screen.getByText("app.css"));
     expect(onSelect).toHaveBeenCalledWith("assets/app.css");
   });
@@ -53,29 +57,28 @@ describe("FileTree", () => {
     expect(button).toHaveAttribute("aria-current", "true");
   });
 
-  it("collapses a folder on click — children hide and aria-expanded flips to false", async () => {
+  it("starts collapsed and expands a folder on click", async () => {
     render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={() => {}} />);
     const folder = screen.getByText("assets/").closest("button");
     if (!folder) throw new Error("expected the assets/ folder button");
-    // Starts expanded with its child visible.
-    expect(folder).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("app.css")).toBeInTheDocument();
-
-    await userEvent.click(folder);
     expect(folder).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("app.css")).not.toBeInTheDocument();
+
+    await userEvent.click(folder);
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("app.css")).toBeInTheDocument();
   });
 
-  it("re-expands a collapsed folder on a second click", async () => {
+  it("collapses an expanded folder on a second click", async () => {
     render(<FileTree files={[f("assets/app.css")]} selected={null} onSelect={() => {}} />);
     const folder = screen.getByText("assets/").closest("button");
     if (!folder) throw new Error("expected the assets/ folder button");
 
-    await userEvent.click(folder); // collapse
-    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
-    await userEvent.click(folder); // re-expand
-    expect(folder).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(folder); // expand
     expect(screen.getByText("app.css")).toBeInTheDocument();
+    await userEvent.click(folder); // collapse
+    expect(folder).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
   });
 
   it("collapses nested folders independently", async () => {
@@ -86,16 +89,36 @@ describe("FileTree", () => {
         onSelect={() => {}}
       />,
     );
+    const outer = screen.getByText("assets/").closest("button");
+    if (!outer) throw new Error("expected the assets/ folder button");
+    await userEvent.click(outer);
     const nested = screen.getByText("img/").closest("button");
     if (!nested) throw new Error("expected the nested img/ folder button");
 
-    // Collapsing the nested folder hides only its child; the sibling under assets/ stays.
+    // Opening the nested folder reveals only its child; the sibling stays visible.
     await userEvent.click(nested);
-    expect(nested).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("logo.svg")).not.toBeInTheDocument();
+    expect(nested).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("logo.svg")).toBeInTheDocument();
     expect(screen.getByText("app.css")).toBeInTheDocument();
-    // The outer assets/ folder is unaffected and still expanded.
-    const outer = screen.getByText("assets/").closest("button");
+    // The outer assets/ folder is unaffected and remains expanded.
     expect(outer).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps a folder added after mount collapsed until the user expands it", () => {
+    const { rerender } = render(
+      <FileTree files={[f("index.html")]} selected={null} onSelect={() => {}} />,
+    );
+
+    rerender(
+      <FileTree
+        files={[f("index.html"), f("assets/app.css")]}
+        selected="assets/app.css"
+        onSelect={() => {}}
+      />,
+    );
+
+    const folder = screen.getByText("assets/").closest("button");
+    expect(folder).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("app.css")).not.toBeInTheDocument();
   });
 });
