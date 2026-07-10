@@ -253,7 +253,7 @@ its per-canvas Backend toggle also defaults off — both must be on.
 | `CANVAS_DROP_AUTHORING` | `off` | `on` \| `off`. Instance master switch for authoring. |
 | `CANVAS_DROP_AUTHORING_USER_DAILY_MAX` | `20` | Max canvases a viewer may author per UTC day. |
 | `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` | All-time cap per viewer. |
-| `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,public_link` | CSV of access rungs a publish may request. |
+| `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` | CSV of access rungs a publish may request. |
 | `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` | Max share-expiry in days (`0` = no cap). |
 | `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` | Require an expiry on shared rungs. |
 

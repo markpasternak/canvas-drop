@@ -133,6 +133,14 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     typeof body === "object" && body && "code" in body
       ? String((body as { code: unknown }).code)
       : "";
+  const message =
+    typeof body === "object" && body && "message" in body
+      ? String((body as { message: unknown }).message)
+      : undefined;
+  const responseHint =
+    typeof body === "object" && body && "hint" in body
+      ? String((body as { hint: unknown }).hint)
+      : undefined;
   if (status === 401) return new NotAuthenticatedError();
   if (status === 403 && code === "CAPABILITY_DISABLED") {
     const cap =
@@ -166,7 +174,12 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
   ) {
     return new QuotaExceededError(code || undefined, status);
   }
-  return new CanvasdropError(code || "REQUEST_FAILED", status);
+  return new CanvasdropError(
+    code || "REQUEST_FAILED",
+    status,
+    responseHint ?? message,
+    responseHint,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +360,7 @@ export interface RealtimeNamespace {
 // --- Authoring / managed shares (plan 2026-07-04, v2 2026-07-05) -------------
 
 /** Access rung a share may request. `"password"` = a public link protected by a password. */
-export type ShareAccess = "private" | "specific_people" | "public_link" | "password";
+export type ShareAccess = "private" | "specific_people" | "whole_org" | "public_link" | "password";
 
 /** Derived lifecycle status of a managed share (mirrors the server's shared helper). */
 export type ShareStatus = "live" | "expired" | "revoked" | "private";

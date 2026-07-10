@@ -391,7 +391,7 @@ describe("adminSettingsService — authoring (plan 2026-07-04)", () => {
     CANVAS_DROP_AUTHORING: "off",
     CANVAS_DROP_AUTHORING_USER_DAILY_MAX: "20",
     CANVAS_DROP_AUTHORING_USER_TOTAL_MAX: "200",
-    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "private,specific_people,public_link",
+    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "private,specific_people,whole_org,public_link",
     CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS: "30",
     CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: "true",
   });
@@ -413,7 +413,7 @@ describe("adminSettingsService — authoring (plan 2026-07-04)", () => {
     expect(p).toMatchObject({
       userDailyMax: 20,
       userTotalMax: 200,
-      allowedRungs: ["private", "specific_people", "public_link"],
+      allowedRungs: ["private", "specific_people", "whole_org", "public_link"],
       maxExpiryDays: 30,
       requireExpiry: true,
     });

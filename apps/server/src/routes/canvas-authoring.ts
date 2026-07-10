@@ -51,7 +51,7 @@ export interface CanvasAuthoringDeps {
   publicLinksEnabled?: () => Promise<boolean>;
 }
 
-const accessEnum = z.enum(["private", "specific_people", "public_link", "password"]);
+const accessEnum = z.enum(["private", "specific_people", "whole_org", "public_link", "password"]);
 const metadataSchema = z.record(z.string(), z.unknown());
 
 /** Publish metadata (the JSON `metadata` part alongside the `bundle` file part). */

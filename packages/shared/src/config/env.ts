@@ -249,7 +249,12 @@ const rawSchema = z
     // Allowed access rungs a `publish` may request (DB AccessRung values). The SDK's
     // `access: "password"` maps to the `public_link` rung + a password, so allowing
     // `public_link` covers both. Operators widen/narrow this set.
-    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: csv(["private", "specific_people", "public_link"]),
+    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: csv([
+      "private",
+      "specific_people",
+      "whole_org",
+      "public_link",
+    ]),
     // Max share-expiry in days (0 = no cap); and whether an expiry is required.
     CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS: num(0),
     CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: bool(false),

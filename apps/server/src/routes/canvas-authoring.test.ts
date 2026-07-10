@@ -25,7 +25,7 @@ function cfg(over: Record<string, string> = {}): Config {
     CANVAS_DROP_AUTHORING: "on",
     CANVAS_DROP_AUTHORING_USER_DAILY_MAX: "20",
     CANVAS_DROP_AUTHORING_USER_TOTAL_MAX: "200",
-    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "private,specific_people,public_link",
+    CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "private,specific_people,whole_org,public_link",
     CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS: "0",
     CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY: "false",
     ...over,
@@ -289,6 +289,26 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
       targetId: body.id,
       meta: { sourceCanvasId: cv.id },
     });
+  });
+
+  it("publishes a whole-org share when that rung is allowed", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const config = cfg({ CANVAS_DROP_AUTHORING_ALLOWED_RUNGS: "whole_org" });
+    const { app, canvases } = buildApi(client, asMember(owner.id), config);
+
+    const res = await publish(
+      app,
+      publishBody({
+        title: "Roadmap snapshot",
+        access: "whole_org",
+        expiresAt: Date.now() + 5 * 86_400_000,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string };
+    expect((await canvases.findById(body.id))?.access).toBe("whole_org");
   });
 
   it("password access sets a password + public_link rung", async () => {

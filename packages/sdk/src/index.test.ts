@@ -87,6 +87,16 @@ describe("errorFromResponse", () => {
     expect(withHint.message).toContain("backend is off");
   });
 
+  it("surfaces a server validation message instead of only INVALID_BODY", () => {
+    const err = errorFromResponse(400, {
+      code: "INVALID_BODY",
+      message: 'access rung "whole_org" is not allowed',
+    });
+    expect(err).toBeInstanceOf(CanvasdropError);
+    expect(err.code).toBe("INVALID_BODY");
+    expect(err.message).toBe('access rung "whole_org" is not allowed');
+  });
+
   it("maps the 429 GUEST_AI_CAP to QuotaExceededError (per-canvas guest-AI cap)", () => {
     const err = errorFromResponse(429, { code: "GUEST_AI_CAP" });
     expect(err).toBeInstanceOf(QuotaExceededError);
@@ -227,7 +237,7 @@ describe("createClient", () => {
     const client = createClient({ context: ctx, fetch });
     const out = await client.canvases.publish({
       title: "Snapshot",
-      access: "public_link",
+      access: "whole_org",
       bundle: new Blob([new Uint8Array([1, 2, 3])], { type: "application/zip" }),
     });
     expect(out).toEqual({ id: "cvB", url: "https://cvB.example.com/" });
@@ -238,7 +248,7 @@ describe("createClient", () => {
     const form = init?.body as FormData;
     expect(JSON.parse(String(form.get("metadata")))).toMatchObject({
       title: "Snapshot",
-      access: "public_link",
+      access: "whole_org",
     });
     expect(form.get("bundle")).toBeTruthy();
     // The bundle must NOT be inlined into the JSON metadata.

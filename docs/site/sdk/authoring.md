@@ -15,7 +15,7 @@ use it — creation needs a signed-in org member.
 // Create a durable share once.
 const share = await canvasdrop.canvases.publish({
   title: "Team roadmap — Q3 snapshot",
-  access: "public_link",             // "private" | "specific_people" | "public_link" | "password"
+  access: "public_link",             // "private" | "specific_people" | "whole_org" | "public_link" | "password"
   tags: ["roadmap"],
   metadata: { sourceApp: "product-roadmap", sourceKind: "roadmap-share", theme: "light" },
   expiresAt: Date.now() + 7 * 864e5, // optional; the operator may require/limit it
@@ -72,7 +72,7 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | `bundle` | `Blob \| ArrayBuffer` | required — the static-site **zip** |
 | `slug` | `string?` | omit for a readable-random slug |
 | `tags` | `string[]?` | |
-| `access` | `"private" \| "specific_people" \| "public_link" \| "password"?` | operator restricts the allowed set; `"password"` = a public link protected by `password` |
+| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | operator restricts the allowed set; `"password"` = a public link protected by `password` |
 | `password` | `string?` | required when `access` is `"password"` |
 | `expiresAt` | `number?` | unix ms; the operator may require an expiry and cap how far out it may be |
 | `metadata` | `Record<string, unknown>?` | free-form structured state (`sourceApp`/`sourceKind`/`theme`/…), bounded in size |
@@ -88,7 +88,7 @@ settings/metadata (the URL and current version stay put).
 | `bundle` | `Blob \| ArrayBuffer?` | a new static-site **zip** → a new immutable version at the **same URL** |
 | `title` | `string?` | |
 | `tags` | `string[]?` | |
-| `access` | `"private" \| "specific_people" \| "public_link" \| "password"?` | re-checks the same operator gates as publish |
+| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | re-checks the same operator gates as publish |
 | `password` | `string \| null?` | set, or `null` to clear |
 | `expiresAt` | `number \| null?` | set, or `null` to clear |
 | `metadata` | `Record<string, unknown>?` | replaces the stored blob |
@@ -136,7 +136,7 @@ await canvasdrop.canvases.list({ sourceKind: "roadmap-share", tags: ["q3"] });
 - `update`, `list`, and `revoke` are scoped to the viewer's own shares (or an admin's);
   a share id you don't own reads as **not-found**.
 - `expiresAt` uses the same share-expiry mechanism as the dashboard, so it only means
-  something on a shareable rung (`public_link` / `password` / `specific_people`).
+  something on a shareable rung (`public_link` / `password` / `whole_org` / `specific_people`).
 
 ## Errors
 

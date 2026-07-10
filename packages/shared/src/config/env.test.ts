@@ -15,6 +15,12 @@ describe("loadConfig", () => {
     expect(config.storage.driver).toBe("local");
     expect(config.auth.mode).toBe("dev");
     expect(config.log.format).toBe("pretty"); // non-production default
+    expect(config.authoring.allowedRungs).toEqual([
+      "private",
+      "specific_people",
+      "whole_org",
+      "public_link",
+    ]);
   });
 
   it("tenancy: org is inert by default (no name) and domains default to allowed-email domains", () => {
