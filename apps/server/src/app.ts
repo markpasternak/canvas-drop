@@ -402,19 +402,20 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   // service instances (the agent-native parity rule) — see wiring.ts. (Repos used
   // by exactly one mount — kv, admin, settings, allowedEmails — stay inline at
   // their use site; promote them here if a second consumer appears.)
-  const { usage, screenshots, files, aiUsage, oauth, upload, clone, drafts } = composeServices({
-    config: deps.config,
-    db: deps.db,
-    log: deps.rootLogger,
-    users: deps.users,
-    canvases: deps.canvases,
-    versions: deps.versions,
-    draftsRepo: deps.drafts,
-    storage: deps.storage,
-    engine: deps.engine,
-    audit: deps.audit,
-    settings: settingsSvc,
-  });
+  const { usage, screenshots, files, aiUsage, oauth, upload, clone, versionHistory, drafts } =
+    composeServices({
+      config: deps.config,
+      db: deps.db,
+      log: deps.rootLogger,
+      users: deps.users,
+      canvases: deps.canvases,
+      versions: deps.versions,
+      draftsRepo: deps.drafts,
+      storage: deps.storage,
+      engine: deps.engine,
+      audit: deps.audit,
+      settings: settingsSvc,
+    });
 
   // Bearer-key deploy API — its own auth, BEFORE the session gateway.
   app.route(
@@ -458,6 +459,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         storage: deps.storage,
         guests: deps.guests,
         clone,
+        versionHistory,
         drafts,
         usage,
         files,
@@ -660,6 +662,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       clone,
       audit: deps.audit,
       engine: deps.engine,
+      versionHistory,
       storage: deps.storage,
       usage,
       files,

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, DeploySource, Draft, Manifest, Version } from "@canvas-drop/shared/db";
 import { looksLikeApiKey } from "../canvas/api-key.js";
-import { collectGarbage } from "../canvas/blob-gc.js";
+import { collectGarbage as collectBlobGarbage } from "../canvas/blob-gc.js";
 import { manifestsEqual, soleHtmlEntry } from "../canvas/manifest.js";
 import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
 import { blobKey } from "../canvas/storage-keys.js";
@@ -308,7 +308,17 @@ export function deployEngine(deps: DeployEngineDeps) {
       }
       // Blob GC runs after row-pruning so dropped versions are out of the live set.
       // Best-effort and self-contained (logs its own failures).
-      await collectGarbage(
+      await this.collectGarbage(canvasId);
+    },
+
+    /**
+     * Reclaim blobs no surviving ready version, draft, or active upload session
+     * references. Kept separate from row pruning so an explicit historical
+     * version deletion can sweep only the bytes it orphaned without pruning any
+     * additional history.
+     */
+    async collectGarbage(canvasId: string): Promise<void> {
+      await collectBlobGarbage(
         {
           versions: deps.versions,
           drafts: deps.drafts,

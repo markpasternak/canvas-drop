@@ -14,6 +14,7 @@ import { guestService } from "../auth/guest.js";
 import { sessionService } from "../auth/session.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { cloneService } from "../canvas/clone-service.js";
+import { versionHistoryService } from "../canvas/version-history.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
@@ -321,6 +322,12 @@ export async function connectMcp(
       canvases: repos.canvases,
       versions: repos.versions,
       engine,
+      versionHistory: versionHistoryService({
+        versions: repos.versions,
+        storage,
+        engine,
+        audit,
+      }),
       upload: uploadService({
         config,
         canvases: repos.canvases,
