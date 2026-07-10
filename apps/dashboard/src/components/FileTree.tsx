@@ -67,6 +67,7 @@ function buildTree(files: DraftFile[]): TreeNode {
   return root;
 }
 
+/** Collect every real directory path so a newly mounted tree starts folded. */
 export interface FileTreeProps {
   files: DraftFile[];
   selected: string | null;
@@ -74,13 +75,14 @@ export interface FileTreeProps {
 }
 
 /** Draft file tree (R16). Read affordance only; add/rename/delete live in the toolbar.
- * Folders start expanded; clicking one collapses its subtree (state is per-path). */
+ * Folders start collapsed; clicking one expands its subtree (state is per-path). */
 export function FileTree({ files, selected, onSelect }: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
-  // Collapsed folder paths. Empty = everything expanded (the prior behaviour).
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  // Store the exception rather than every default: unknown/new folders stay collapsed
+  // until the user explicitly expands them.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (path: string) =>
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
@@ -103,7 +105,7 @@ export function FileTree({ files, selected, onSelect }: FileTreeProps) {
           node={node}
           selected={selected}
           onSelect={onSelect}
-          collapsed={collapsed}
+          expanded={expanded}
           onToggle={toggle}
         />
       ))}
@@ -129,26 +131,26 @@ function TreeRow({
   node,
   selected,
   onSelect,
-  collapsed,
+  expanded,
   onToggle,
 }: {
   node: TreeNode;
   selected: string | null;
   onSelect: (path: string) => void;
-  collapsed: ReadonlySet<string>;
+  expanded: ReadonlySet<string>;
   onToggle: (path: string) => void;
 }) {
   if (node.isDir) {
-    const isCollapsed = collapsed.has(node.path);
+    const isExpanded = expanded.has(node.path);
     return (
       <li>
         <button
           type="button"
           onClick={() => onToggle(node.path)}
-          aria-expanded={!isCollapsed}
+          aria-expanded={isExpanded}
           className="group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 [transition-timing-function:var(--ease-out)] hover:bg-surface-hover"
         >
-          <Chevron state={isCollapsed ? "closed" : "open"} />
+          <Chevron state={isExpanded ? "open" : "closed"} />
           {/* Matching icon tile so the folder carries the same weight as file rows. */}
           <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-raised text-muted group-hover:text-fg">
             <FolderSimple size={16} weight="duotone" aria-hidden />
@@ -157,7 +159,7 @@ function TreeRow({
             {node.name}/
           </span>
         </button>
-        {!isCollapsed && (
+        {isExpanded && (
           // Indent + a vertical guide line so it's clear which files live in this folder.
           // The guide sits under the folder's chevron column (ml ≈ row px + half-chevron).
           <ul className="mt-1 ml-[0.9375rem] space-y-1 border-l border-border pl-2">
@@ -167,7 +169,7 @@ function TreeRow({
                 node={child}
                 selected={selected}
                 onSelect={onSelect}
-                collapsed={collapsed}
+                expanded={expanded}
                 onToggle={onToggle}
               />
             ))}

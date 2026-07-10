@@ -156,8 +156,7 @@ describe("Versions route — restore to draft", () => {
     expect(await screen.findByText("v1")).toBeInTheDocument();
     expect(container.querySelector(".rounded-xl")).toBeNull();
 
-    await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Restore" }));
 
     // No destructive confirm dialog is shown for a clean draft.
     expect(
@@ -178,8 +177,7 @@ describe("Versions route — restore to draft", () => {
     });
     const { router } = renderVersions();
 
-    await userEvent.click(await screen.findByRole("button", { name: /more actions for version/i }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: /edit this version/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Restore" }));
 
     // Dirty draft → destructive confirm dialog, no restore call yet.
     const confirm = await screen.findByRole("button", { name: /load and discard changes/i });
@@ -192,5 +190,76 @@ describe("Versions route — restore to draft", () => {
     );
     // Confirming navigates to the editor.
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/editor"));
+  });
+});
+
+describe("Versions route — direct download and safe delete", () => {
+  it("shows direct actions and deletes only a non-current version after confirmation", async () => {
+    const current = { ...VERSION, number: 2, current: true };
+    const historical = { ...VERSION, number: 1, current: false };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, currentVersionId: "v2" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [current, historical] }),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "DELETE /api/canvases/c1/versions/1": () => json({ ok: true, version: 1 }),
+    });
+    renderVersions();
+
+    const currentRow = (await screen.findByText("v2")).closest("li") as HTMLElement;
+    const historicalRow = screen.getByText("v1").closest("li") as HTMLElement;
+    expect(within(currentRow).getByRole("link", { name: "Download ZIP" })).toHaveAttribute(
+      "href",
+      "/api/canvases/c1/versions/2/download",
+    );
+    expect(within(currentRow).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(within(currentRow).queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(within(currentRow).getByText(/current version can't be deleted/i)).toBeInTheDocument();
+
+    await userEvent.click(within(historicalRow).getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/permanently removes version 1/i)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete version" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) => call.method === "DELETE" && call.url === "/api/canvases/c1/versions/1",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("keeps archived history editable but removes live-pointer actions", async () => {
+    const historical = { ...VERSION, current: false };
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...CANVAS, status: "archived" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [historical] }),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+    });
+    renderVersions();
+
+    const row = (await screen.findByText("v1")).closest("li") as HTMLElement;
+    expect(within(row).getByRole("link", { name: "Download ZIP" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Make current" })).toBeNull();
+  });
+
+  it("makes disabled history read-only except for downloads", async () => {
+    const current = { ...VERSION, number: 2, current: true };
+    const historical = { ...VERSION, number: 1, current: false };
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, status: "disabled", disabledReason: "policy" }),
+      "GET /api/canvases/c1/versions": () => json({ versions: [current, historical] }),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+    });
+    renderVersions();
+
+    const row = (await screen.findByText("v1")).closest("li") as HTMLElement;
+    expect(within(row).getByRole("link", { name: "Download ZIP" })).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Restore" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Make current" })).toBeNull();
+    expect(within(row).getByText("Read-only while disabled")).toBeInTheDocument();
   });
 });

@@ -20,6 +20,13 @@ import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
+import {
+  applyCreateAudience,
+  type CreateAudienceChoice,
+  type CreateAudienceState,
+  defaultCreateAudience,
+  resetAudienceForDestination,
+} from "../lib/create-audience.js";
 import { deployCurl } from "../lib/deploy-curl.js";
 import { useMe } from "../lib/queries.js";
 import type { SlugStatus } from "../lib/use-slug-availability.js";
@@ -95,6 +102,7 @@ export default function CreateCanvas() {
   // Backend-group master switch chosen at create time (plan 006). Off by default;
   // changeable later in the canvas Backend tab.
   const [backendEnabled, setBackendEnabled] = useState(false);
+  const [audience, setAudience] = useState(defaultCreateAudience);
   const [html, setHtml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +115,7 @@ export default function CreateCanvas() {
     apiKey: string;
     id: string;
     deployed: boolean;
+    shareFailed: boolean;
   } | null>(null);
   const [apiResult, setApiResult] = useState<{ id: string; apiKey: string; url: string } | null>(
     null,
@@ -118,11 +127,28 @@ export default function CreateCanvas() {
     setProgress(null);
   }
 
+  const audienceBlocked =
+    audience.choice === "public" && audience.requirePassword && audience.password.trim() === "";
+
+  function validateAudience(): boolean {
+    if (!audienceBlocked) return true;
+    setError("Enter a password, or turn off Require password.");
+    return false;
+  }
+
+  async function revealPublished(id: string, apiKey: string) {
+    const outcome = await applyCreateAudience(id, audience, api.updateSettings);
+    setBusy(false);
+    setProgress(null);
+    setRevealed({ apiKey, id, deployed: true, shareFailed: outcome.kind === "failed" });
+  }
+
   async function createPaste() {
     if (slugBlocked) {
       setError("Pick an available slug, or clear it for a random one.");
       return;
     }
+    if (!validateAudience()) return;
     setBusy(true);
     setError(null);
     try {
@@ -133,7 +159,7 @@ export default function CreateCanvas() {
         slug: slug.slug || undefined,
         orgId: homeOrgId,
       });
-      setRevealed({ apiKey: res.apiKey, id: res.id, deployed: true });
+      await revealPublished(res.id, res.apiKey);
     } catch (err) {
       fail(err);
     }
@@ -145,6 +171,7 @@ export default function CreateCanvas() {
       setError("Pick an available slug, or clear it for a random one.");
       return;
     }
+    if (!validateAudience()) return;
     setBusy(true);
     setError(null);
     setProgress(0);
@@ -171,7 +198,7 @@ export default function CreateCanvas() {
         await api.deleteCanvas(canvas.id).catch(() => {});
         throw deployErr;
       }
-      setRevealed({ apiKey: canvas.apiKey, id: canvas.id, deployed: true });
+      await revealPublished(canvas.id, canvas.apiKey);
     } catch (err) {
       fail(err);
     }
@@ -198,7 +225,11 @@ export default function CreateCanvas() {
     }
   }
 
-  function finish(id: string, deployed: boolean) {
+  function finish(id: string, deployed: boolean, shareFailed = false) {
+    if (shareFailed) {
+      navigate({ to: "/canvases/$id/share", params: { id } });
+      return;
+    }
     navigate({ to: "/canvases/$id", params: { id }, search: deployed ? { live: true } : {} });
   }
 
@@ -236,6 +267,7 @@ export default function CreateCanvas() {
                   aria-pressed={active}
                   onClick={() => {
                     setMethod(m.id);
+                    if (m.id === "api") setAudience(defaultCreateAudience());
                     setError(null);
                     setApiResult(null);
                   }}
@@ -306,7 +338,10 @@ export default function CreateCanvas() {
                 <span className="text-sm font-medium text-fg">Workspace</span>
                 <select
                   value={homeOrgId ?? ""}
-                  onChange={(e) => setWorkspace(e.target.value === "" ? null : e.target.value)}
+                  onChange={(e) => {
+                    setWorkspace(e.target.value === "" ? null : e.target.value);
+                    setAudience(resetAudienceForDestination);
+                  }}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-xs focus:border-accent focus:outline-none"
                 >
                   <option value="">Personal</option>
@@ -322,6 +357,29 @@ export default function CreateCanvas() {
                   (the “Whole org” access level). This choice is fixed once the canvas is created.
                 </span>
               </label>
+            )}
+
+            {method !== "api" && (
+              <CreateAudience
+                workspaceName={orgs.find((org) => org.id === homeOrgId)?.name}
+                canPublishPublic={me?.canPublishPublic ?? false}
+                audience={audience}
+                onChoice={(choice) =>
+                  setAudience({
+                    ...defaultCreateAudience(),
+                    choice,
+                  })
+                }
+                onListed={(listed) => setAudience((current) => ({ ...current, listed }))}
+                onRequirePassword={(requirePassword) =>
+                  setAudience((current) => ({
+                    ...current,
+                    requirePassword,
+                    password: requirePassword ? current.password : "",
+                  }))
+                }
+                onPassword={(password) => setAudience((current) => ({ ...current, password }))}
+              />
             )}
 
             {/* Step 3 — optional backend capability. Deliberately after the source
@@ -346,7 +404,11 @@ export default function CreateCanvas() {
                   onChange={(e) => setHtml(e.target.value)}
                   placeholder={"<!doctype html>\n<h1>Hello</h1>"}
                 />
-                <Button onClick={createPaste} loading={busy} disabled={!html.trim() || slugBlocked}>
+                <Button
+                  onClick={createPaste}
+                  loading={busy}
+                  disabled={!html.trim() || slugBlocked || audienceBlocked}
+                >
                   Create and publish
                   <ArrowRight size={16} weight="bold" aria-hidden />
                 </Button>
@@ -393,10 +455,149 @@ export default function CreateCanvas() {
       {revealed && (
         <ApiKeyReveal
           apiKey={revealed.apiKey}
-          onClose={() => finish(revealed.id, revealed.deployed)}
+          notice={
+            revealed.shareFailed
+              ? {
+                  title: "Sharing wasn't applied",
+                  description:
+                    "Your canvas is published and still private. Save the key, then update access in Share.",
+                }
+              : undefined
+          }
+          actionLabel={revealed.shareFailed ? "Save key and open Share" : undefined}
+          onClose={() => finish(revealed.id, revealed.deployed, revealed.shareFailed)}
         />
       )}
     </div>
+  );
+}
+
+function CreateAudience({
+  workspaceName,
+  canPublishPublic,
+  audience,
+  onChoice,
+  onListed,
+  onRequirePassword,
+  onPassword,
+}: {
+  workspaceName?: string;
+  canPublishPublic: boolean;
+  audience: CreateAudienceState;
+  onChoice: (choice: CreateAudienceChoice) => void;
+  onListed: (listed: boolean) => void;
+  onRequirePassword: (required: boolean) => void;
+  onPassword: (password: string) => void;
+}) {
+  const widerChoice: CreateAudienceChoice = workspaceName ? "workspace" : "public";
+  const widerLabel = workspaceName ? `Everyone in ${workspaceName}` : "Public link";
+  const publicDisabled = !workspaceName && !canPublishPublic;
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-surface-sunken p-4">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-fg">Audience</h3>
+        <p className="text-xs text-muted">Choose who can open this canvas after it publishes.</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {[
+          {
+            value: "private" as const,
+            label: "Only me",
+            description: "Keep it private. You can share it later.",
+            disabled: false,
+          },
+          {
+            value: widerChoice,
+            label: widerLabel,
+            description: workspaceName
+              ? "Anyone in this workspace with the link can open it."
+              : "Anyone with the link can open it.",
+            disabled: publicDisabled,
+          },
+        ].map((option) => (
+          <label
+            key={option.value}
+            className={cn(
+              "flex cursor-pointer gap-3 rounded-lg border px-3 py-3",
+              audience.choice === option.value
+                ? "border-accent/45 bg-accent-subtle/70"
+                : "border-border bg-surface",
+              option.disabled && "cursor-not-allowed opacity-55",
+            )}
+          >
+            <input
+              type="radio"
+              aria-label={option.label}
+              name="create-audience"
+              value={option.value}
+              checked={audience.choice === option.value}
+              disabled={option.disabled}
+              onChange={() => onChoice(option.value)}
+              className="mt-0.5 size-4 accent-[var(--color-accent)]"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-fg">{option.label}</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+                {option.description}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {publicDisabled && (
+        <p className="text-xs text-muted">Public links are unavailable for your account.</p>
+      )}
+
+      {audience.choice === "workspace" && (
+        <label className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5">
+          <input
+            type="checkbox"
+            aria-label="List in Shared"
+            checked={audience.listed}
+            onChange={(event) => onListed(event.target.checked)}
+            className="mt-0.5 size-4 accent-[var(--color-accent)]"
+          />
+          <span>
+            <span className="block text-sm font-medium text-fg">List in Shared</span>
+            <span className="block text-xs text-muted">
+              Help workspace members find it without changing who has access.
+            </span>
+          </span>
+        </label>
+      )}
+
+      {audience.choice === "public" && (
+        <div className="space-y-3 rounded-lg border border-border bg-surface px-3 py-2.5">
+          <label className="flex items-start gap-2.5">
+            <input
+              type="checkbox"
+              aria-label="Require password"
+              checked={audience.requirePassword}
+              onChange={(event) => onRequirePassword(event.target.checked)}
+              className="mt-0.5 size-4 accent-[var(--color-accent)]"
+            />
+            <span>
+              <span className="block text-sm font-medium text-fg">Require password</span>
+              <span className="block text-xs text-muted">
+                Visitors enter this password before the canvas opens.
+              </span>
+            </span>
+          </label>
+          {audience.requirePassword && (
+            <Field
+              label="Password"
+              type="password"
+              value={audience.password}
+              onChange={(event) => onPassword(event.target.value)}
+              placeholder="Enter a password"
+              autoComplete="new-password"
+            />
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

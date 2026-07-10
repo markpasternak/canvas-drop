@@ -1178,6 +1178,11 @@ export const api = {
   listVersions: (id: string) =>
     request<{ versions: VersionInfo[] }>(`/api/canvases/${id}/versions`).then((r) => r.versions),
 
+  deleteVersion: (id: string, version: number) =>
+    request<{ ok: true; version: number }>(`/api/canvases/${id}/versions/${version}`, {
+      method: "DELETE",
+    }),
+
   rollback: (id: string, version: number) =>
     request<Canvas & { version: number }>(`/api/canvases/${id}/rollback`, jsonBody({ version })),
 
