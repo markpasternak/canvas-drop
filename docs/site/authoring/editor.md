@@ -28,7 +28,8 @@ disabled by an admin, both are blocked (`409 NOT_ACTIVE`). You can still edit th
 
 Use the file tree to add, rename, delete, upload, replace, and download files
 (drag-and-drop works too). Relative paths are preserved, so a `css/site.css`
-reference resolves the way you'd expect.
+reference resolves the way you'd expect. Folders start collapsed each time the editor
+mounts; expand only the branch you need. Files at the canvas root remain visible.
 
 Name your home page `index.html` at the canvas root. The root URL serves `index.html`
 if it exists; if the draft has exactly one HTML file it's served as the entry even
@@ -73,15 +74,18 @@ From the **Versions** tab you can:
 
 - See version history with the source (editor, folder, ZIP, paste, the deploy
   API, or a staged upload), when it was published, file count, and total size.
+- **Download ZIP** for any ready version.
+- **Restore** any ready version to the editor draft. If the draft has unpublished
+  changes, canvas-drop asks before replacing them.
 - Make any version the served one with the **Make current** button (confirm in the
   dialog). It re-points the canvas to that version — forward or back — as a guarded
   pointer swap, so visitors get it immediately.
+- **Delete** a non-current historical version after confirmation. The current version
+  cannot be deleted, and files still referenced by another version or the draft are kept.
 
-To pick up editing from an earlier version, use **Edit this version**: it loads a
-published version back into the draft so you can change it and publish again. If the
-draft already has unpublished changes, you're prompted to confirm before they're
-discarded. Making a version current changes what visitors see; editing a version
-changes what's in your draft.
+To inspect or download individual files from an older version, **Restore** it to the
+draft and use the editor's normal file controls. Making a version current changes what
+visitors see; restoring a version only changes what's in your draft until you publish.
 
 Storage is content-addressed: files are keyed by content hash, so unchanged files
 across versions are stored once and only changed files are written.

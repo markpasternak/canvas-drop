@@ -60,6 +60,23 @@ canvas might ever need org-wide sharing. With no org configured you won't see th
 choice, and every canvas behaves as it always has. See
 [Sharing & access](/docs/authoring/sharing).
 
+## Audience shortcut
+
+Folder, ZIP, and pasted-HTML creates include an **Audience** section for the common
+first-share choices. The canvas stays **Only me** unless you widen it explicitly:
+
+- A **Workspace** canvas can be opened to **Everyone in the workspace**. You can also
+  opt into **List in Shared** so workspace members can discover it; listing is off by
+  default.
+- A **Personal** canvas can use a **Public link** when the instance and your account
+  allow public links. Requiring a password is a separate, off-by-default option.
+
+Audience follows the selected destination. Switching between Personal and Workspace
+resets the audience to **Only me** so a wider choice is never carried to a different
+home accidentally. The **API** create method also starts private and leaves sharing
+until after the first deploy; use the canvas's **Share** tab for the full access ladder,
+named people, teams, expiry, and later changes.
+
 ## Teams
 
 A **team** is a named group you share canvases with — the subset you actually collaborate
@@ -190,5 +207,8 @@ exposes `GET /v1/canvases/:id` (status JSON), `GET .../versions`, `GET .../files
 Every publish creates a new immutable version; the canvas always serves its
 **current** version. Roll back to an earlier version from the dashboard (the
 **Versions** tab → **Make current**) or the API (`POST /v1/canvases/:id/rollback`).
-Files are content-addressed — only changed files are stored and re-publishing
-identical files is cheap. The last 10 versions are kept.
+The Versions tab also lets you download any ready version as a ZIP, restore its files
+to the editor draft, or permanently delete a non-current historical version. The
+current version is protected from deletion. Files are content-addressed — only changed
+files are stored and re-publishing identical files is cheap. The last 10 versions are
+kept.

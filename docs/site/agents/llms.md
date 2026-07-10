@@ -37,7 +37,7 @@ keys. You sign in once through the instance's normal org login (OAuth, with auto
 client registration) and then get identity-scoped tools across every canvas you own:
 `whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
 `deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
-`rollback_canvas`, `unpublish_canvas`, plus the full management surface
+`rollback_canvas`, `delete_version`, `unpublish_canvas`, plus the full management surface
 (`update_canvas` settings/sharing/`previewMode`, `set_canvas_preview` custom cover,
 `set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
@@ -78,6 +78,10 @@ access. `create_canvas` returns a `deploy` block with the exact curl endpoints (
 that block to confirm the live files, or call `get_canvas_file` (no `path` lists the
 manifest; a `path` reads back content, capped at 256 KiB). Full reference:
 [MCP server](/docs/agents/mcp).
+
+`list_versions` returns a bearer-authenticated `downloadUrl` for each complete historical
+ZIP. `delete_version` permanently removes only a non-current ready version; the current
+version and disabled canvases are protected.
 
 ## Backend capability: the browser SDK
 
