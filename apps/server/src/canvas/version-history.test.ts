@@ -25,6 +25,7 @@ const manifest = (entries: Record<string, string>): Manifest =>
   );
 
 const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger;
+const config = loadConfig({ CANVAS_DROP_AUTH_MODE: "dev" });
 
 describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
   let client: DbClient;
@@ -52,7 +53,7 @@ describe.each(DIALECTS)("versionHistoryService [%s]", (dialect) => {
       apiKeyHash: `key-${dialect}`,
     });
     const engine = deployEngine({
-      config: loadConfig(),
+      config,
       canvases,
       versions,
       drafts,
