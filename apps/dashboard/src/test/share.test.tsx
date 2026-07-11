@@ -561,8 +561,7 @@ describe("share route", () => {
       currentVersionId: "v1",
     };
     const calls = mockFetch({
-      "GET /api/canvases/c1": () =>
-        json(published),
+      "GET /api/canvases/c1": () => json(published),
       "PATCH /api/canvases/c1/settings": () =>
         json({ ...published, discoverability: "listed", galleryListed: true }),
     });
@@ -571,7 +570,9 @@ describe("share route", () => {
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
     expect(toggle).toBeEnabled();
-    expect(screen.getByText(/anyone in your organization can discover and open/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/anyone in your organization can discover and open/i),
+    ).toBeInTheDocument();
     await user.click(toggle);
     await vi.waitFor(() => {
       const patch = calls.find(
