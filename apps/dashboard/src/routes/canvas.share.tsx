@@ -114,6 +114,14 @@ export default function Share() {
       : canvas.access === "public_link"
         ? "Anyone signed in can discover this canvas; anyone with the link can open it."
         : "Show this canvas in the opt-in gallery with its title, description, and tags.";
+  const galleryMetadataHint =
+    canvas.access === "whole_org"
+      ? "visible to your organization in the gallery when this canvas is listed"
+      : "shown publicly in the gallery when this canvas is listed";
+  const galleryTagsGuidance =
+    canvas.access === "whole_org"
+      ? "They are visible to your organization once this canvas is listed."
+      : "They show here publicly once this canvas is listed.";
 
   async function setOrClearPassword(next: string | null) {
     try {
@@ -385,7 +393,7 @@ export default function Share() {
             <>
               <Field
                 label="Description"
-                hint="shown publicly in the gallery when this canvas is listed"
+                hint={galleryMetadataHint}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 onBlur={() => save({ description: description || null })}
@@ -400,7 +408,7 @@ export default function Share() {
                 >
                   Overview
                 </Link>
-                . They show here publicly once this canvas is listed.
+                . {galleryTagsGuidance}
               </InlineNotice>
               <Toggle
                 label="Allow others to use as a template"

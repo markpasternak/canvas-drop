@@ -37,6 +37,9 @@ export function useUpdateSettings(id: string) {
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
+        if (patch.galleryListed === true && optimistic.access === "whole_org") {
+          optimistic.discoverability = "listed";
+        }
         if (patch.galleryTemplatable !== undefined)
           optimistic.galleryTemplatable = patch.galleryTemplatable;
         if (patch.guestAiEnabled !== undefined) optimistic.guestAiEnabled = patch.guestAiEnabled;
@@ -63,6 +66,9 @@ export function useUpdateSettings(id: string) {
     },
     onError: (_err, _patch, ctx) => {
       if (ctx?.prev) qc.setQueryData(keys.canvas(id), ctx.prev);
+    },
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });

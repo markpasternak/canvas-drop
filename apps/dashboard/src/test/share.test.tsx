@@ -686,6 +686,9 @@ describe("share route", () => {
     expect(
       await screen.findByRole("switch", { name: /allow others to use as a template/i }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/visible to your organization in the gallery/i)).toBeInTheDocument();
+    expect(screen.getByText(/visible to your organization once/i)).toBeInTheDocument();
+    expect(screen.queryByText(/shown publicly in the gallery/i)).toBeNull();
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: /set password/i }));
     expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();

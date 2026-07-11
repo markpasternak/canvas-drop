@@ -177,6 +177,14 @@ describe("resolveSettingsUpdate — denial paths", () => {
     }
   });
 
+  it("rejects contradictory Whole-org gallery and link-only discovery intent", () => {
+    const r = resolve(canvas({ discoverability: "listed", galleryListed: true }), {
+      discoverability: "link_only",
+      galleryListed: true,
+    });
+    expect(r).toMatchObject({ ok: false, code: "DISCOVERY_CONFLICT", status: 409 });
+  });
+
   it("NOT_GALLERY_ELIGIBLE: team canvases cannot be listed in the gallery", () => {
     const r = resolve(canvas({ access: "team", discoverability: "listed" }), {
       galleryListed: true,

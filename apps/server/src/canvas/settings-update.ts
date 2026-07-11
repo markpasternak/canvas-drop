@@ -144,6 +144,14 @@ export function resolveSettingsUpdate(
         status: 409,
       };
     }
+    if (effectiveAccess === "whole_org" && discoverability === "link_only") {
+      return {
+        ok: false,
+        code: "DISCOVERY_CONFLICT",
+        message: "A Whole-org canvas cannot be gallery-listed and link-only at the same time.",
+        status: 409,
+      };
+    }
     if (!galleryEligible) {
       return {
         ok: false,

@@ -64,6 +64,34 @@ function wrapper(qc: QueryClient) {
 }
 
 describe("useUpdateSettings (optimistic)", () => {
+  it("keeps Whole-org gallery and discoverability state coherent before and after success", async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const wholeOrg = { ...CANVAS, access: "whole_org" as const, shared: true };
+    qc.setQueryData(keys.canvas("c1"), wholeOrg);
+    let resolve: (canvas: Canvas) => void = () => {};
+    vi.spyOn(api, "updateSettings").mockReturnValue(
+      new Promise((res) => {
+        resolve = res;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateSettings("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ galleryListed: true });
+
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))).toMatchObject({
+        discoverability: "listed",
+        galleryListed: true,
+      }),
+    );
+    resolve({ ...wholeOrg, discoverability: "listed", galleryListed: true });
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledTimes(1));
+    expect(qc.getQueryData<Canvas>(keys.canvas("c1"))).toMatchObject({
+      discoverability: "listed",
+      galleryListed: true,
+    });
+  });
+
   it("applies the toggle immediately then rolls back on error", async () => {
     const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     qc.setQueryData(keys.canvas("c1"), CANVAS);
