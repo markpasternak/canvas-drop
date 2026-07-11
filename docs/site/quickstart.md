@@ -98,7 +98,8 @@ primitives are refused for public visitors). On top of any rung you can add a
 password gate or a share expiry. Team and Whole-org shares are link-only by
 default; choose **List for people with access** when they should appear in
 **Shared**. The gallery is narrower: it only lists Public-link canvases and
-Whole-org canvases that meet the gallery preconditions.
+Whole-org canvases their owners explicitly add. Adding a Whole-org canvas to the
+gallery also enables member discovery, and the entry is visible only inside its home org.
 
 ## Deploying as an agent
 
