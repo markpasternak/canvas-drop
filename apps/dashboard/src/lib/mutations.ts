@@ -37,9 +37,6 @@ export function useUpdateSettings(id: string) {
         if (patch.spaFallback !== undefined) optimistic.spaFallback = patch.spaFallback;
         if (patch.previewMode !== undefined) optimistic.previewMode = patch.previewMode;
         if (patch.galleryListed !== undefined) optimistic.galleryListed = patch.galleryListed;
-        if (patch.galleryListed === true && optimistic.access === "whole_org") {
-          optimistic.discoverability = "listed";
-        }
         if (patch.galleryTemplatable !== undefined)
           optimistic.galleryTemplatable = patch.galleryTemplatable;
         if (patch.guestAiEnabled !== undefined) optimistic.guestAiEnabled = patch.guestAiEnabled;
@@ -56,6 +53,9 @@ export function useUpdateSettings(id: string) {
           if (patch.access !== "team" && patch.access !== "whole_org") {
             optimistic.discoverability = "link_only";
           }
+        }
+        if (patch.galleryListed === true && optimistic.access === "whole_org") {
+          optimistic.discoverability = "listed";
         }
         // A team grant change (access stays 'team', teams added/removed).
         if (patch.teamIds !== undefined) optimistic.teamIds = patch.teamIds;

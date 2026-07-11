@@ -92,6 +92,23 @@ describe("useUpdateSettings (optimistic)", () => {
     });
   });
 
+  it("uses the target access when Whole-org and gallery listing change together", async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    qc.setQueryData(keys.canvas("c1"), CANVAS);
+    vi.spyOn(api, "updateSettings").mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useUpdateSettings("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ access: "whole_org", galleryListed: true });
+
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))).toMatchObject({
+        access: "whole_org",
+        discoverability: "listed",
+        galleryListed: true,
+      }),
+    );
+  });
+
   it("applies the toggle immediately then rolls back on error", async () => {
     const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     qc.setQueryData(keys.canvas("c1"), CANVAS);
