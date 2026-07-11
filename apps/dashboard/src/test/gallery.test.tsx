@@ -374,9 +374,23 @@ describe("Gallery view", () => {
     expect(screen.queryByRole("heading", { name: "Featured" })).not.toBeInTheDocument();
   });
 
-  it("renders the Recently published discovery strip above the grid", async () => {
+  it("hides Recently published when the sparse gallery would only duplicate Browse all", async () => {
     stubGallery(
       () => page([item({ id: "grid1", title: "Grid only" })]),
+      { owners: [], tags: [] },
+      (p) =>
+        p.get("sort") === "recent" ? page([item({ id: "r1", title: "Fresh canvas" })]) : page([]),
+    );
+    renderGallery();
+    await screen.findByRole("link", { name: "Grid only" });
+    expect(screen.queryByRole("heading", { name: "Recently published" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Browse all" })).not.toBeInTheDocument();
+  });
+
+  it("renders Recently published once the gallery is larger than the discovery shelf", async () => {
+    const grid = Array.from({ length: 7 }, (_, i) => item({ id: `g${i}`, title: `Grid ${i}` }));
+    stubGallery(
+      () => page(grid),
       { owners: [], tags: [] },
       (p) =>
         p.get("sort") === "recent" ? page([item({ id: "r1", title: "Fresh canvas" })]) : page([]),

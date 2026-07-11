@@ -551,23 +551,35 @@ describe("share route", () => {
     expect(toggle).toBeEnabled();
   });
 
-  it("gallery-listing is blocked for a Whole-org canvas that is still URL-only", async () => {
-    mockFetch({
-      "GET /api/canvases/c1": () =>
-        json({
-          ...CANVAS,
-          publicationState: "published",
-          access: "whole_org",
-          discoverability: "link_only",
-          shared: true,
-          currentVersionId: "v1",
-        }),
+  it("lists a URL-only Whole-org canvas in one action and explains the org audience", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "whole_org" as const,
+      discoverability: "link_only" as const,
+      shared: true,
+      currentVersionId: "v1",
+    };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...published, discoverability: "listed", galleryListed: true }),
     });
+    const user = userEvent.setup();
     renderShare();
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/list this canvas for people with access/i)).toBeInTheDocument();
+    expect(toggle).toBeEnabled();
+    expect(
+      screen.getByText(/anyone in your organization can discover and open/i),
+    ).toBeInTheDocument();
+    await user.click(toggle);
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"galleryListed":true');
+    });
   });
 
   it("saves the Shared discoverability toggle for Whole-org canvases", async () => {
@@ -608,6 +620,7 @@ describe("share route", () => {
     renderShare();
 
     await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(screen.getByText(/anyone signed in can discover this canvas/i)).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: /list for people with access/i })).toBeNull();
   });
 
@@ -673,6 +686,9 @@ describe("share route", () => {
     expect(
       await screen.findByRole("switch", { name: /allow others to use as a template/i }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/visible to your organization in the gallery/i)).toBeInTheDocument();
+    expect(screen.getByText(/visible to your organization once/i)).toBeInTheDocument();
+    expect(screen.queryByText(/shown publicly in the gallery/i)).toBeNull();
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: /set password/i }));
     expect(await screen.findByText(/add a password and unlist/i)).toBeInTheDocument();

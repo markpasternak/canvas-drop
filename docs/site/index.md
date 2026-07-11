@@ -46,7 +46,9 @@ that communicates better as a working artifact than as a screenshot or a slide.
   switch is on and the owner account has not been revoked). Layer on a
   per-canvas password or a share expiry. Team and Whole-org shares can stay
   link-only or be listed in **Shared** for people who already have access; the
-  gallery is only for Public-link canvases and listed Whole-org canvases. A
+  gallery is only for Public-link canvases and Whole-org canvases their owners
+  explicitly add. The Whole-org gallery action also enables member discovery,
+  and that entry remains scoped to the canvas's home org. A
   canvas must be published before any shared rung takes effect. With an optional
   [org boundary](/docs/self-hosting/configuration) configured, `whole_org` is
   scoped to the canvas's home org and external people are kept out unless they

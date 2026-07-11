@@ -106,9 +106,22 @@ export default function Share() {
       ? "Publish this canvas before listing it in the gallery."
       : canvas.hasPassword
         ? "Remove the password before listing this canvas in the gallery."
-        : canvas.access === "whole_org" && canvas.discoverability !== "listed"
-          ? "List this canvas for people with access before adding it to the gallery."
-          : null;
+        : null;
+
+  const galleryDescription =
+    canvas.access === "whole_org"
+      ? "Anyone in your organization can discover and open this canvas."
+      : canvas.access === "public_link"
+        ? "Anyone signed in can discover this canvas; anyone with the link can open it."
+        : "Show this canvas in the opt-in gallery with its title, description, and tags.";
+  const galleryMetadataHint =
+    canvas.access === "whole_org"
+      ? "visible to your organization in the gallery when this canvas is listed"
+      : "shown publicly in the gallery when this canvas is listed";
+  const galleryTagsGuidance =
+    canvas.access === "whole_org"
+      ? "They are visible to your organization once this canvas is listed."
+      : "They show here publicly once this canvas is listed.";
 
   async function setOrClearPassword(next: string | null) {
     try {
@@ -366,7 +379,7 @@ export default function Share() {
         >
           <Toggle
             label="List in the gallery"
-            description="Show this canvas in the opt-in gallery with a title, summary, and tags."
+            description={galleryDescription}
             checked={canvas.galleryListed}
             disabled={listBlocker !== null}
             onChange={(galleryListed) => void saveGallery({ galleryListed })}
@@ -380,7 +393,7 @@ export default function Share() {
             <>
               <Field
                 label="Description"
-                hint="shown publicly in the gallery when this canvas is listed"
+                hint={galleryMetadataHint}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 onBlur={() => save({ description: description || null })}
@@ -395,7 +408,7 @@ export default function Share() {
                 >
                   Overview
                 </Link>
-                . They show here publicly once this canvas is listed.
+                . {galleryTagsGuidance}
               </InlineNotice>
               <Toggle
                 label="Allow others to use as a template"

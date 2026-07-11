@@ -54,6 +54,9 @@ export function useUpdateSettings(id: string) {
             optimistic.discoverability = "link_only";
           }
         }
+        if (patch.galleryListed === true && optimistic.access === "whole_org") {
+          optimistic.discoverability = "listed";
+        }
         // A team grant change (access stays 'team', teams added/removed).
         if (patch.teamIds !== undefined) optimistic.teamIds = patch.teamIds;
         if (patch.password !== undefined) optimistic.hasPassword = patch.password !== null;
@@ -63,6 +66,9 @@ export function useUpdateSettings(id: string) {
     },
     onError: (_err, _patch, ctx) => {
       if (ctx?.prev) qc.setQueryData(keys.canvas(id), ctx.prev);
+    },
+    onSuccess: (canvas) => {
+      qc.setQueryData(keys.canvas(id), canvas);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: keys.canvas(id) });

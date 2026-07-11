@@ -51,16 +51,16 @@ Access and discovery are separate:
   discoverable in **Shared** for people who already have access.
 
 When listing is off, the canvas is **link-only**: anyone covered by the rung can still open
-the URL, but the canvas does not appear in Shared and cannot be added to the gallery through
-that rung. This is the default for Team and Whole-org shares, matching the "restricted but
-open with the link" model.
+the URL, but the canvas does not appear in Shared. This is the default for Team and Whole-org
+shares, matching the "restricted but open with the link" model. Explicitly adding a Whole-org
+canvas to the gallery turns listing on as part of that same action.
 
 When listing is on:
 
 - **Team** canvases appear in **Shared** for members of the granted teams. They still never
   appear in the gallery.
 - **Whole org** canvases appear in **Shared** for members of the canvas's home org. They can
-  also be listed in the gallery if every gallery precondition is met.
+  also be added to that org's gallery; the gallery action supplies this listing opt-in.
 
 **Specific people** shares are already addressed to named people, so active direct grants
 appear in those people's Shared view without a separate listing switch. **Public link**
@@ -151,13 +151,17 @@ up to 50 characters each**. Agents set the same field with `update_canvas` (the
 ## Listing in the gallery
 
 The Share tab also has an opt-in **gallery** listing (the canvas's **description**,
-its **tags**, and an optional *use as template* toggle). A canvas can only be listed
-when it is published, has **no password** set, and is either:
+its **tags**, and an optional *use as template* toggle). Enabling it for **Whole org**
+also turns on **List for people with access**, so one owner action makes the canvas
+discoverable in Shared and in the organization-scoped gallery. A canvas can only be
+listed when it is published, has **no password** set, and is either:
 
 - **Public link**, or
-- **Whole org** with **List for people with access** turned on.
+- **Whole org**; gallery listing automatically enables organization discovery.
 
-Team, Specific-people, and link-only Whole-org canvases never appear in the gallery.
+Team, Specific-people, and Whole-org canvases that have not been explicitly gallery-listed
+never appear there. Whole-org entries are returned only to authenticated members of the
+canvas's home org; Public-link entries remain discoverable to signed-in gallery viewers.
 The **description** is a single field (max 2000 characters) used everywhere the canvas is
 shown — the Overview tab, the gallery, Shared, and grid cards — there is no separate
 "gallery summary". Agents set it with `update_canvas` (the `description` parameter).

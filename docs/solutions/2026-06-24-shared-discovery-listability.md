@@ -40,9 +40,17 @@ automatic directory the product intentionally avoids.
 **Gallery** is broader public/org discovery and deliberately narrower:
 
 - `public_link` canvases can be gallery-listed when the gallery preconditions hold.
-- `whole_org` canvases can be gallery-listed only when `discoverability='listed'`.
+- Enabling gallery listing on a `whole_org` canvas atomically sets
+  `discoverability='listed'`; the gallery remains an explicit owner opt-in rather
+  than following automatically from the access rung.
 - `team`, `specific_people`, and link-only `whole_org` canvases never appear in
   the gallery.
+
+Keep that implication in `resolveSettingsUpdate`, the shared seam behind HTTP and
+MCP. A dashboard-only compound patch would make agent parity dependent on callers
+remembering an implementation prerequisite. Explicitly setting a listed Whole-org
+canvas back to `discoverability='link_only'` still clears its gallery and template
+flags, preserving the at-rest predicate in both directions.
 
 Both surfaces must keep explicit projections and exact-key response tests. They
 are cross-owner read surfaces, so never row-spread a `canvas` or `user`.

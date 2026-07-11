@@ -73,9 +73,16 @@ export function resolveSettingsUpdate(
   const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
   const effectiveAccess = targetAccess ?? cv.access;
   const discoverableAccess = effectiveAccess === "team" || effectiveAccess === "whole_org";
-  const effectiveDiscoverability = discoverableAccess
-    ? (discoverability ?? cv.discoverability)
-    : "link_only";
+  // Gallery listing is itself an explicit discovery opt-in. For Whole-org canvases,
+  // make that single owner action supply the narrower `discoverability='listed'` fact
+  // used by both Shared and the org-scoped gallery predicate. Keeping this resolution
+  // here preserves HTTP/MCP parity and persists both fields atomically.
+  const galleryEnablesOrgDiscovery = rest.galleryListed === true && effectiveAccess === "whole_org";
+  const effectiveDiscoverability = galleryEnablesOrgDiscovery
+    ? "listed"
+    : discoverableAccess
+      ? (discoverability ?? cv.discoverability)
+      : "link_only";
   const galleryEligible =
     effectiveAccess === "public_link" ||
     (effectiveAccess === "whole_org" && effectiveDiscoverability === "listed");
@@ -137,11 +144,11 @@ export function resolveSettingsUpdate(
         status: 409,
       };
     }
-    if (effectiveAccess === "whole_org" && effectiveDiscoverability !== "listed") {
+    if (effectiveAccess === "whole_org" && discoverability === "link_only") {
       return {
         ok: false,
-        code: "NOT_DISCOVERABLE",
-        message: "List this canvas for people with access before listing it in the gallery.",
+        code: "DISCOVERY_CONFLICT",
+        message: "A Whole-org canvas cannot be gallery-listed and link-only at the same time.",
         status: 409,
       };
     }
@@ -187,7 +194,8 @@ export function resolveSettingsUpdate(
   const patch: CanvasSettingsPatch = { ...rest };
   if (targetAccess !== undefined) patch.access = targetAccess;
   if (discoverableAccess) {
-    if (discoverability !== undefined) patch.discoverability = discoverability;
+    if (galleryEnablesOrgDiscovery) patch.discoverability = "listed";
+    else if (discoverability !== undefined) patch.discoverability = discoverability;
   } else if (discoverability !== undefined || targetAccess !== undefined) {
     patch.discoverability = "link_only";
   }
