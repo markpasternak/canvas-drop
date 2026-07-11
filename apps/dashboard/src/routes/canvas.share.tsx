@@ -106,9 +106,14 @@ export default function Share() {
       ? "Publish this canvas before listing it in the gallery."
       : canvas.hasPassword
         ? "Remove the password before listing this canvas in the gallery."
-        : canvas.access === "whole_org" && canvas.discoverability !== "listed"
-          ? "List this canvas for people with access before adding it to the gallery."
-          : null;
+        : null;
+
+  const galleryDescription =
+    canvas.access === "whole_org"
+      ? "Anyone in your organization can discover and open this canvas."
+      : canvas.access === "public_link"
+        ? "Anyone signed in can discover this canvas; anyone with the link can open it."
+        : "Show this canvas in the opt-in gallery with its title, description, and tags.";
 
   async function setOrClearPassword(next: string | null) {
     try {
@@ -366,7 +371,7 @@ export default function Share() {
         >
           <Toggle
             label="List in the gallery"
-            description="Show this canvas in the opt-in gallery with a title, summary, and tags."
+            description={galleryDescription}
             checked={canvas.galleryListed}
             disabled={listBlocker !== null}
             onChange={(galleryListed) => void saveGallery({ galleryListed })}

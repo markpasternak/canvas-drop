@@ -551,23 +551,34 @@ describe("share route", () => {
     expect(toggle).toBeEnabled();
   });
 
-  it("gallery-listing is blocked for a Whole-org canvas that is still URL-only", async () => {
-    mockFetch({
+  it("lists a URL-only Whole-org canvas in one action and explains the org audience", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "whole_org" as const,
+      discoverability: "link_only" as const,
+      shared: true,
+      currentVersionId: "v1",
+    };
+    const calls = mockFetch({
       "GET /api/canvases/c1": () =>
-        json({
-          ...CANVAS,
-          publicationState: "published",
-          access: "whole_org",
-          discoverability: "link_only",
-          shared: true,
-          currentVersionId: "v1",
-        }),
+        json(published),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...published, discoverability: "listed", galleryListed: true }),
     });
+    const user = userEvent.setup();
     renderShare();
 
     const toggle = await screen.findByRole("switch", { name: /list in the gallery/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/list this canvas for people with access/i)).toBeInTheDocument();
+    expect(toggle).toBeEnabled();
+    expect(screen.getByText(/anyone in your organization can discover and open/i)).toBeInTheDocument();
+    await user.click(toggle);
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"galleryListed":true');
+    });
   });
 
   it("saves the Shared discoverability toggle for Whole-org canvases", async () => {
@@ -608,6 +619,7 @@ describe("share route", () => {
     renderShare();
 
     await screen.findByRole("switch", { name: /list in the gallery/i });
+    expect(screen.getByText(/anyone signed in can discover this canvas/i)).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: /list for people with access/i })).toBeNull();
   });
 

@@ -519,7 +519,6 @@ const HINTS: Record<string, string> = {
   NOT_SHARED: "Share this canvas before listing it in the gallery.",
   NOT_PUBLISHED: "Publish this canvas before listing it in the gallery.",
   PASSWORD_PROTECTED: "Remove the password before listing this canvas in the gallery.",
-  NOT_DISCOVERABLE: "List this canvas for people with access before adding it to the gallery.",
   NOT_GALLERY_ELIGIBLE: "Only Public link or listed Whole org canvases can appear in the gallery.",
   NOT_LISTED: "List this canvas in the gallery before allowing templates.",
   not_found: "Not found.",
