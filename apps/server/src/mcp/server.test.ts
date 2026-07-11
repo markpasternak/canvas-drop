@@ -656,6 +656,16 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     expect(shared.id).toBe(cv.id);
 
+    // Gallery intent is the Whole-org discovery opt-in: MCP shares the settings
+    // resolver with HTTP, so one call persists both facts and returns read-your-writes.
+    const listed = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, galleryListed: true },
+      }),
+    );
+    expect(listed).toMatchObject({ discoverability: "listed", galleryListed: true });
+
     // public_link is default-on, then denied after a per-user revoke.
     expect(
       isError(

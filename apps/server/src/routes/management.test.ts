@@ -2342,13 +2342,12 @@ describe("managementRoutes — listability rules (plan 002 U5)", () => {
     expect((await patch(app, unpublished, { shared: true, galleryListed: true })).status).toBe(409);
 
     const published = await makeCanvas(owner.id, true);
-    const res = await patch(app, published, {
-      shared: true,
+    const res = await patch(app, published, { shared: true, galleryListed: true });
+    expect(res.status).toBe(200);
+    expect(await jsonOf<{ discoverability: string; galleryListed: boolean }>(res)).toMatchObject({
       discoverability: "listed",
       galleryListed: true,
     });
-    expect(res.status).toBe(200);
-    expect((await jsonOf<{ galleryListed: boolean }>(res)).galleryListed).toBe(true);
   });
 
   it("setting a password on a listed canvas un-lists it and clears templatable", async () => {

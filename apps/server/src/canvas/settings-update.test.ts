@@ -168,9 +168,13 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "PASSWORD_PROTECTED", status: 409 });
   });
 
-  it("NOT_DISCOVERABLE: whole-org gallery listing requires listed discoverability", () => {
+  it("listing a link-only whole-org canvas enables discoverability atomically", () => {
     const r = resolve(canvas({ discoverability: "link_only" }), { galleryListed: true });
-    expect(r).toMatchObject({ ok: false, code: "NOT_DISCOVERABLE", status: 409 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.patch.discoverability).toBe("listed");
+      expect(r.patch.galleryListed).toBe(true);
+    }
   });
 
   it("NOT_GALLERY_ELIGIBLE: team canvases cannot be listed in the gallery", () => {
