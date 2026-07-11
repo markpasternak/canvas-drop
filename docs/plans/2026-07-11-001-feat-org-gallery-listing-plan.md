@@ -35,6 +35,7 @@ The gallery already scopes listed Whole-org canvases to authenticated members of
 - R5. Dashboard copy distinguishes organization-scoped gallery visibility from public gallery visibility and no longer asks owners to satisfy a separate discoverability prerequisite.
 - R6. HTTP and MCP callers receive the same behavior through `resolveSettingsUpdate`; no interface-specific implementation is introduced.
 - R7. Authoring and architecture documentation describe gallery listing as the action that opts a Whole-org canvas into organization discovery.
+- R8. A sparse gallery does not repeat the same canvases in a Recently published shelf and the Browse-all collection; the shelf appears only when it can summarize a larger collection.
 
 ### Acceptance Examples
 
@@ -88,20 +89,28 @@ The gallery already scopes listed Whole-org canvases to authenticated members of
 - **Test scenarios:** Documentation search finds no instruction requiring owners to pre-enable `List for people with access` before gallery listing; generated docs build succeeds.
 - **Verification:** `pnpm build` and targeted text audit pass.
 
+### U4. Remove redundant recency hierarchy from sparse galleries
+
+- **Goal:** Keep Browse all as the only collection when the complete gallery fits within the six-card recency shelf.
+- **Files:** Modify `apps/dashboard/src/routes/gallery.tsx` and `apps/dashboard/src/test/gallery.test.tsx`.
+- **Patterns:** Preserve the existing unfiltered-grid discovery rules and `RECENT_CAP`; gate only the recency shelf, not Featured curation.
+- **Test scenarios:** One-item and six-item galleries omit Recently published and Browse all headings; a seven-item gallery renders the capped recency shelf above Browse all.
+- **Verification:** Focused Gallery view tests pass at the sparse and first-rich boundaries.
+
 ---
 
 ## Verification Contract
 
 | Gate | Applies to | Done signal |
 |---|---|---|
-| Focused server and dashboard tests | U1, U2 | New and existing gallery/settings/share scenarios pass |
-| `pnpm lint` | U1-U3 | Biome reports no errors |
-| `pnpm typecheck` | U1-U3 | All workspaces typecheck |
-| `pnpm test` | U1-U3 | SQLite and PGlite suites pass |
-| `pnpm build` | U1-U3 | SDK, dashboard, server, and generated docs build |
-| `ce-code-review` | U1-U3 | All real P0/P1 and high-value P2 findings are fixed and regression-tested |
-| GitHub CI matrix | U1-U3 | Required PR checks are green before merge |
-| Production smoke | U1-U3 | Deploy from merged `main`; health and user-facing docs respond successfully |
+| Focused server and dashboard tests | U1, U2, U4 | New and existing gallery/settings/share scenarios pass |
+| `pnpm lint` | U1-U4 | Biome reports no errors |
+| `pnpm typecheck` | U1-U4 | All workspaces typecheck |
+| `pnpm test` | U1-U4 | SQLite and PGlite suites pass |
+| `pnpm build` | U1-U4 | SDK, dashboard, server, and generated docs build |
+| `ce-code-review` | U1-U4 | All real P0/P1 and high-value P2 findings are fixed and regression-tested |
+| GitHub CI matrix | U1-U4 | Required PR checks are green before merge |
+| Production smoke | U1-U4 | Deploy from merged `main`; health and user-facing docs respond successfully |
 
 ---
 
@@ -111,4 +120,5 @@ The gallery already scopes listed Whole-org canvases to authenticated members of
 - Organization boundaries and every existing gallery exclusion remain enforced by tests.
 - Dashboard copy clearly communicates the effective audience.
 - Product, authoring, and architecture docs agree with the shipped behavior.
+- Sparse galleries render each canvas once instead of duplicating the complete set in a recency shelf.
 - Issue #75 is closed by a merged green PR; the feature branch/worktree are removed; production is deployed and smoke-verified from `main`.

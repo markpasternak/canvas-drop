@@ -370,7 +370,11 @@ export default function Gallery() {
   // carries live+listed+published+featured items. Cap defensively in case the server
   // returns more than the requested limit.
   const featuredItems = (featuredQuery.data?.items ?? []).slice(0, FEATURED_CAP);
-  const recentItems = (recentQuery.data?.items ?? []).slice(0, RECENT_CAP);
+  // A recency shelf only adds information when it is a slice of a larger gallery.
+  // At or below the shelf cap it merely repeats every Browse-all card (especially
+  // awkward for a one-item gallery), so let the main collection carry the page alone.
+  const recentItems =
+    (data?.total ?? 0) > RECENT_CAP ? (recentQuery.data?.items ?? []).slice(0, RECENT_CAP) : [];
 
   // A fresh refetch that drops below the current page (e.g. an item was un-listed
   // while on the last page) snaps back to page 1 rather than showing an empty page.
