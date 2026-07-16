@@ -127,9 +127,12 @@ describe("admin users", () => {
     renderAt("/admin/users");
     const user = userEvent.setup();
     await screen.findByText("Bob");
-    // Open Bob's row overflow menu (me's own row blocks itself), then Block.
+    // Open Bob's row overflow menu (me's own row blocks itself), then Block —
+    // which now confirms first (destructive action from a hover menu).
     await user.click(screen.getByRole("button", { name: "Actions for Bob" }));
     await user.click(await screen.findByRole("menuitem", { name: "Block user" }));
+    const dialog = await screen.findByRole("dialog", { name: "Block Bob?" });
+    await user.click(within(dialog).getByRole("button", { name: "Block" }));
     await waitFor(() =>
       expect(
         calls.some((c) => c.method === "POST" && c.path === "/api/admin/users/u-bob/block"),

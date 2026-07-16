@@ -202,6 +202,11 @@ export default function Editor() {
             signal: AbortSignal.timeout(5000),
             expectedBaseVersionId,
           })
+          .then(() => {
+            // Write through the per-file content cache so remounting the editor
+            // within staleTime doesn't re-seed from the pre-flush content.
+            qc.setQueryData(keys.draftFile(id, path), body);
+          })
           .catch((err) => {
             console.warn(`canvas-drop: failed to flush pending edit to ${path} on exit`, err);
           })
@@ -213,7 +218,7 @@ export default function Editor() {
   }, [id, qc]);
 
   const content = useQuery({
-    queryKey: ["draft-file", id, selected],
+    queryKey: keys.draftFile(id, selected ?? ""),
     queryFn: () => api.getDraftFile(id, selected as string),
     enabled: selected !== null && editable,
   });
@@ -227,12 +232,15 @@ export default function Editor() {
     }
   }, [content.data, selected, editable]);
 
-  const flush = async (): Promise<void> => {
+  /** Persist the autosave buffer. Returns false when the save failed — callers that
+   *  would overwrite the buffer (file switch, surface switch, publish) must abort so
+   *  the unsaved edit isn't silently lost. */
+  const flush = async (): Promise<boolean> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (!dirtyRef.current || bufferPathRef.current === null) return;
+    if (!dirtyRef.current || bufferPathRef.current === null) return true;
     const path = bufferPathRef.current;
     const body = bufferRef.current;
     try {
@@ -240,8 +248,10 @@ export default function Editor() {
       loadedRef.current = body;
       dirtyRef.current = false;
       setRefreshKey((k) => k + 1);
+      return true;
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      return false;
     }
   };
 
@@ -255,7 +265,9 @@ export default function Editor() {
 
   const selectFile = async (path: string) => {
     if (path === selected) return;
-    await flush();
+    // A failed flush keeps the unsaved edit in the buffer; switching files would
+    // overwrite the buffer with the next file's content and lose it for good.
+    if (!(await flush())) return;
     setSelected(path);
     setPane("code");
     setMode("code");
@@ -320,10 +332,19 @@ export default function Editor() {
     }
   }
 
+  /** Keep a pending autosave from resurrecting a just-renamed file at its old path:
+   *  persist the buffer first, then retarget it to the new path after the rename
+   *  (covers a failed flush leaving `dirtyRef` set — the mirror of the delete guard). */
+  async function guardedRename(from: string, to: string): Promise<void> {
+    await flush();
+    await rename.mutateAsync({ from, to });
+    if (bufferPathRef.current === from) bufferPathRef.current = to;
+  }
+
   async function renameFileToIndex(path: string) {
     if (!indexPathAvailable || path === ROOT_HTML) return;
     try {
-      await rename.mutateAsync({ from: path, to: ROOT_HTML });
+      await guardedRename(path, ROOT_HTML);
       if (selected === path) setSelected(ROOT_HTML);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -337,7 +358,7 @@ export default function Editor() {
     if (!to || to === renaming) return setRenaming(null);
     if (renameDuplicate) return;
     try {
-      await rename.mutateAsync({ from: renaming, to });
+      await guardedRename(renaming, normalizeDraftPath(to) ?? to);
       if (selected === renaming) setSelected(normalizeDraftPath(to) ?? to);
       setRenaming(null);
       setRefreshKey((k) => k + 1);
@@ -371,7 +392,9 @@ export default function Editor() {
 
   async function enterOnPage() {
     if (!htmlFile || !onPageAvailable) return;
-    await flush(); // persist any pending code edit before switching surfaces
+    // Persist any pending code edit before switching surfaces; abort on failure so
+    // the on-page seeding doesn't overwrite the unsaved buffer.
+    if (!(await flush())) return;
     setSelected(htmlFile.path);
     setMode("onpage");
     setPane("onpage");
@@ -380,11 +403,10 @@ export default function Editor() {
   async function onPageSave(html: string) {
     if (!htmlFile) return;
     try {
+      // useSaveDraftFile writes the saved HTML through the per-file content cache,
+      // so switching back to Code shows the on-page edits (not a stale buffer that
+      // would otherwise overwrite them on the next code edit).
       await save.mutateAsync({ path: htmlFile.path, content: html });
-      // The HTML file changed underneath the Code editor — invalidate its content
-      // query so switching back to Code shows the on-page edits (not a stale buffer
-      // that would otherwise overwrite them on the next code edit).
-      qc.invalidateQueries({ queryKey: ["draft-file", id, htmlFile.path] });
       setRefreshKey((k) => k + 1);
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
@@ -392,7 +414,8 @@ export default function Editor() {
   }
 
   async function onPublish() {
-    await flush();
+    // Don't publish a version that's missing the edit we just failed to save.
+    if (!(await flush())) return;
     try {
       const result = await publish.mutateAsync();
       toast(`Published version ${result.version}`);
@@ -416,6 +439,9 @@ export default function Editor() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        // A dialog owns the keyboard while open (Add file / Rename / Delete) —
+        // publishing the draft from inside one would be a surprise.
+        if (document.querySelector('[role="dialog"]')) return;
         e.preventDefault();
         publishShortcutRef.current();
       }

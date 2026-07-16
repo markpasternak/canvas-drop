@@ -358,13 +358,16 @@ export default function Gallery() {
   // in list mode so they never duplicate or fight the focused result set.
   const showDiscovery =
     view === "grid" && !q && selectedTags.length === 0 && !owner && !templatable;
-  const featuredQuery = useGallery({
-    featured: true,
-    sort: "featured",
-    limit: FEATURED_CAP,
-    offset: 0,
-  });
-  const recentQuery = useGallery({ sort: "recent", limit: RECENT_CAP, offset: 0 });
+  const featuredQuery = useGallery(
+    {
+      featured: true,
+      sort: "featured",
+      limit: FEATURED_CAP,
+      offset: 0,
+    },
+    showDiscovery,
+  );
+  const recentQuery = useGallery({ sort: "recent", limit: RECENT_CAP, offset: 0 }, showDiscovery);
   // Admin-curation can leave a stale-true flag on a now-unlisted canvas; the gallery
   // visibility predicate already filters those at query time, so the row only ever
   // carries live+listed+published+featured items. Cap defensively in case the server

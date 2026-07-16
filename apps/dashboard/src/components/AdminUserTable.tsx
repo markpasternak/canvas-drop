@@ -1,5 +1,6 @@
 import { Check, Globe, Prohibit, ShieldChevron, XCircle } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import type { AdminPersonRow } from "../lib/api.js";
 import { ApiError } from "../lib/api.js";
 import { relativeTime } from "../lib/format.js";
@@ -11,6 +12,7 @@ import {
 } from "../lib/mutations.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { Badge } from "./Badge.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 import { DataTable } from "./DataTable.js";
 import { useToast } from "./Toast.js";
 
@@ -29,6 +31,10 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
   const userId = person.userId;
   const isSelf = userId === meId;
   const firstPending = person.pendingGrants[0];
+  // The destructive directions (block / revoke public) confirm first — they fire
+  // from a hover menu, and revoke sweeps every public canvas the person owns back
+  // to private. The restorative directions (unblock / restore) stay one-click.
+  const [confirming, setConfirming] = useState<"block" | "revoke" | null>(null);
 
   if (!userId && !firstPending) return <span className="text-subtle">—</span>;
 
@@ -39,12 +45,14 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
         id: userId,
         allowed: person.canPublishPublic !== true,
       });
+      setConfirming(null);
       toast(
         person.canPublishPublic === true
           ? "Public publishing revoked"
           : "Public publishing restored",
       );
     } catch (err) {
+      setConfirming(null);
       toast(err instanceof ApiError ? err.hint : "Couldn't update", "error");
     }
   }
@@ -63,8 +71,10 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
     if (!userId) return;
     try {
       await block.mutateAsync({ id: userId, blocked: !person.isBlocked });
+      setConfirming(null);
       toast(person.isBlocked ? "User unblocked" : "User blocked");
     } catch (err) {
+      setConfirming(null);
       toast(err instanceof ApiError ? err.hint : "Couldn't update block status", "error");
     }
   }
@@ -80,55 +90,86 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
   }
 
   return (
-    <ActionMenu label={`Actions for ${person.name || person.email}`}>
-      {firstPending && (
-        <ActionMenuItem
-          danger
-          icon={<XCircle size={MENU_ICON} aria-hidden />}
-          title="Cancel this pending canvas or team access"
-          onSelect={cancelFirstPending}
-        >
-          Cancel pending access
-        </ActionMenuItem>
-      )}
-      {userId && (
-        <>
+    <>
+      <ActionMenu label={`Actions for ${person.name || person.email}`}>
+        {firstPending && (
           <ActionMenuItem
-            icon={<Globe size={MENU_ICON} aria-hidden />}
-            title="Revoke or restore this account's ability to publish canvases as static public links"
-            onSelect={togglePublic}
+            danger
+            icon={<XCircle size={MENU_ICON} aria-hidden />}
+            title="Cancel this pending canvas or team access"
+            onSelect={cancelFirstPending}
           >
-            {person.canPublishPublic === true
-              ? "Revoke public publishing"
-              : "Restore public publishing"}
+            Cancel pending access
           </ActionMenuItem>
-          <ActionMenuItem
-            icon={<ShieldChevron size={MENU_ICON} aria-hidden />}
-            // You can't demote yourself; promoting yourself is a no-op but harmless.
-            disabled={isSelf && person.isAdmin}
-            title={isSelf && person.isAdmin ? "You can't remove your own admin access" : undefined}
-            onSelect={togglePromote}
-          >
-            {person.isAdmin ? "Remove admin access" : "Promote to admin"}
-          </ActionMenuItem>
-          <ActionMenuItem
-            danger={!person.isBlocked}
-            icon={
-              person.isBlocked ? (
-                <Check size={MENU_ICON} aria-hidden />
-              ) : (
-                <Prohibit size={MENU_ICON} aria-hidden />
-              )
-            }
-            disabled={isSelf}
-            title={isSelf ? "You can't block yourself" : undefined}
-            onSelect={toggleBlock}
-          >
-            {person.isBlocked ? "Unblock user" : "Block user"}
-          </ActionMenuItem>
-        </>
-      )}
-    </ActionMenu>
+        )}
+        {userId && (
+          <>
+            <ActionMenuItem
+              icon={<Globe size={MENU_ICON} aria-hidden />}
+              title="Revoke or restore this account's ability to publish canvases as static public links"
+              onSelect={() =>
+                person.canPublishPublic === true ? setConfirming("revoke") : void togglePublic()
+              }
+            >
+              {person.canPublishPublic === true
+                ? "Revoke public publishing"
+                : "Restore public publishing"}
+            </ActionMenuItem>
+            <ActionMenuItem
+              icon={<ShieldChevron size={MENU_ICON} aria-hidden />}
+              // You can't demote yourself; promoting yourself is a no-op but harmless.
+              disabled={isSelf && person.isAdmin}
+              title={
+                isSelf && person.isAdmin ? "You can't remove your own admin access" : undefined
+              }
+              onSelect={togglePromote}
+            >
+              {person.isAdmin ? "Remove admin access" : "Promote to admin"}
+            </ActionMenuItem>
+            <ActionMenuItem
+              danger={!person.isBlocked}
+              icon={
+                person.isBlocked ? (
+                  <Check size={MENU_ICON} aria-hidden />
+                ) : (
+                  <Prohibit size={MENU_ICON} aria-hidden />
+                )
+              }
+              disabled={isSelf}
+              title={isSelf ? "You can't block yourself" : undefined}
+              onSelect={() => (person.isBlocked ? void toggleBlock() : setConfirming("block"))}
+            >
+              {person.isBlocked ? "Unblock user" : "Block user"}
+            </ActionMenuItem>
+          </>
+        )}
+      </ActionMenu>
+      {/* Outside the menu: the menu's portal unmounts on close, which would tear
+          these down before they ever render. */}
+      <ConfirmDialog
+        open={confirming === "block"}
+        onClose={() => setConfirming(null)}
+        onConfirm={toggleBlock}
+        title={`Block ${person.name || person.email}?`}
+        actionLabel="Block"
+        destructive
+        loading={block.isPending}
+      >
+        They'll be signed out and unable to sign in until unblocked. Their canvases stay up.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={confirming === "revoke"}
+        onClose={() => setConfirming(null)}
+        onConfirm={togglePublic}
+        title={`Revoke public publishing for ${person.name || person.email}?`}
+        actionLabel="Revoke"
+        destructive
+        loading={publishPublic.isPending}
+      >
+        Every canvas they've shared as a public link goes back to private immediately. You can
+        restore the permission later, but their links won't re-open on their own.
+      </ConfirmDialog>
+    </>
   );
 }
 

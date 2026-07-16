@@ -1,5 +1,7 @@
 import { useParams } from "@tanstack/react-router";
+import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
+import { EmptyState } from "../components/EmptyState.js";
 import { Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { Sparkline } from "../components/Sparkline.js";
@@ -26,8 +28,24 @@ export default function Usage() {
   const { id } = useParams({ strict: false }) as { id: string };
   const { data: canvas, isLoading: canvasLoading } = useCanvas(id);
   // Views apply to all canvases, so the usage query always runs (KTD-5).
-  const { data: usage, isLoading: usageLoading } = useUsage(id);
+  const { data: usage, isLoading: usageLoading, isError, refetch } = useUsage(id);
   const backendOn = canvas?.backendEnabled ?? false;
+
+  if (isError) {
+    return (
+      <TabContentFrame>
+        <EmptyState
+          title="Couldn't load usage"
+          description="We couldn't reach the usage stats just now. Try again."
+          action={
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
+              Try again
+            </Button>
+          }
+        />
+      </TabContentFrame>
+    );
+  }
 
   if (canvasLoading || !canvas || usageLoading || !usage) {
     return (
