@@ -165,6 +165,30 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
     });
   });
 
+  it("a personal team's NON-creator member can add, cancel a pending invite, and leave (membership counts as visibility)", async () => {
+    const { svc, teams, allowedEmails, invitations, mkUser, actor } = await setup();
+    const owner = await mkUser("o@gmail.com");
+    const buddy = await mkUser("buddy@hotmail.com");
+    const r = await svc.create(actor(owner, false), { name: "Friends" });
+    if (!r.ok) throw new Error("setup");
+    await svc.addMemberByEmail(actor(owner, false), r.team.id, "buddy@hotmail.com");
+
+    // The non-creator member adds someone (previously 404'd by creator-only visible()).
+    await allowedEmails.add("friend@external.test", owner.id);
+    expect(
+      (await svc.addMemberByEmail(actor(buddy, false), r.team.id, "friend@external.test")).ok,
+    ).toBe(true);
+    // ...and cancels the pending invite they just created.
+    const inv = (await invitations.listPendingForTarget("team", r.team.id))[0];
+    if (!inv) throw new Error("expected a pending invitation");
+    expect(await svc.cancelPendingInvite(actor(buddy, false), r.team.id, inv.id)).toEqual({
+      ok: true,
+    });
+    // ...and can leave the team themselves.
+    expect(await svc.removeMember(actor(buddy, false), r.team.id, buddy.id)).toEqual({ ok: true });
+    expect((await teams.getMembers(r.team.id)).map((m) => m.userId)).toEqual([owner.id]);
+  });
+
   it("team names are creator-local: same creator can't dupe, different creators can reuse", async () => {
     const { svc, org, mkUser, actor } = await setup();
     const alice = await mkUser("a@acme.com", { member: true });

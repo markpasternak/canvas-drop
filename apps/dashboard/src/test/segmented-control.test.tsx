@@ -91,8 +91,8 @@ describe("SegmentedControl", () => {
       />,
     );
     // The count is appended to the visible label, so it is part of the name.
-    expect(screen.getByRole("button", { name: /Active\s?3/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Archived\s?1/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Active 3/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Archived 1/ })).toBeInTheDocument();
   });
 
   it("uses the label as the accessible name for icon-only items", () => {

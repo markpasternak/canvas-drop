@@ -904,13 +904,13 @@ export function managementRoutes(deps: ManagementDeps) {
           "canvas",
           cv.id,
           entryId.slice("pending:".length),
-        )) ?? false;
+        )) ?? null;
       if (!cancelled) return c.json({ error: "not_found" }, 404);
       deps.audit.recordAudit({
         action: "allowlist_remove",
         actorId: c.get("user").id,
         targetId: cv.id,
-        meta: { entryId, kind: "pending" },
+        meta: { entryId, kind: "pending", email: cancelled.email },
       });
       await revalidate(c, cv.id);
       return c.json({ ok: true });

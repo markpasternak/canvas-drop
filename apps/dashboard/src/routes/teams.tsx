@@ -287,11 +287,11 @@ function TeamRoster({ team }: { team: Team }) {
   async function kick(userId: string, isSelf: boolean) {
     try {
       await removeMember.mutateAsync(userId);
-      setConfirmLeave(false);
       toast(isSelf ? "You left the team" : "Removed from the team");
     } catch (err) {
-      setConfirmLeave(false);
       toast(err instanceof ApiError ? err.hint : "Couldn't remove that member", "error");
+    } finally {
+      setConfirmLeave(false);
     }
   }
 
@@ -367,10 +367,7 @@ function TeamRoster({ team }: { team: Team }) {
               full members on their first verified login. Any member can cancel one
               (the self-serve mirror of Add person — no admin needed for a typo). */}
           {pending.map((p) => (
-            <li
-              key={`pending:${p.email}`}
-              className="flex items-center justify-between gap-2 py-2 text-sm"
-            >
+            <li key={p.id} className="flex items-center justify-between gap-2 py-2 text-sm">
               <span className="min-w-0 truncate text-muted">{p.email}</span>
               <span className="flex shrink-0 items-center gap-1">
                 <Badge tone="neutral">Pending sign-in</Badge>
@@ -388,7 +385,8 @@ function TeamRoster({ team }: { team: Team }) {
       <ConfirmDialog
         open={confirmLeave}
         onClose={() => setConfirmLeave(false)}
-        onConfirm={() => kick(me?.id ?? "", true)}
+        // Guard rather than a sentinel: an empty id would fire DELETE /members/ (404).
+        onConfirm={() => me && void kick(me.id, true)}
         title={`Leave “${team.name}”?`}
         actionLabel="Leave team"
         destructive

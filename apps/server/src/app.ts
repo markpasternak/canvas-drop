@@ -696,10 +696,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
   );
 
   // Team management (plan 003 P2) — session-authenticated, behind the gateway.
-  app.route(
-    "/api/teams",
-    teamsRoutes({ config: deps.config, service: teamsSvc, teams, users: deps.users, invitations }),
-  );
+  app.route("/api/teams", teamsRoutes({ config: deps.config, service: teamsSvc, teams }));
 
   // Admin-only management surface (§6.10, M7). Behind the gateway; `requireAdmin`
   // (server-resolved isAdmin) gates the whole router. Distinct base from /api/canvases.

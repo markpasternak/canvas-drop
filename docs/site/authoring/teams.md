@@ -62,9 +62,11 @@ Expanding a team shows its **members** plus any **pending sign-ins** (email-only
 rows for people who haven't signed in yet). Remove a member at any time — including
 a **pending** invite, so a typo'd email can be taken back without an admin — or
 **leave** a team yourself (leaving asks you to confirm: you can't re-add yourself).
-The team's creator (or an admin) can rename or delete it — deleting a team removes
-its memberships and unshares every canvas shared with it, but the canvases
-themselves are untouched.
+Canceling a pending invite removes the team access it would have granted; if the
+add also newly admitted that address to sign in to the instance, an admin can
+revoke the sign-in permit from the **People** directory. The team's creator (or an
+admin) can rename or delete it — deleting a team removes its memberships and
+unshares every canvas shared with it, but the canvases themselves are untouched.
 
 ## Sharing a canvas with a team
 

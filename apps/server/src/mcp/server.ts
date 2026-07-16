@@ -182,7 +182,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     NOT_A_MEMBER: "NOT_A_MEMBER: you are not a member of that org",
     TEAM_NOT_FOUND: "TEAM_NOT_FOUND: team not found",
     TEAM_NAME_TAKEN: "TEAM_NAME_TAKEN: you already have a team with that name",
-    FORBIDDEN: "FORBIDDEN: only the team's creator can do that over MCP",
+    FORBIDDEN: "FORBIDDEN: you don't have permission for that on this team",
     TARGET_NOT_FOUND: "TARGET_NOT_FOUND: no account with that email has signed in yet",
     TARGET_NOT_MEMBER: "TARGET_NOT_MEMBER: that person is not a member of this org",
     TARGET_NOT_PERMITTED:
@@ -1376,7 +1376,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           action: "allowlist_remove",
           actorId: caller.userId,
           targetId: cv.id,
-          meta: { entryId, kind: "pending" },
+          meta: { entryId, kind: "pending", email: cancelled.email },
         });
         if (deps.hub)
           await deps.hub
@@ -1599,7 +1599,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     },
     async ({ id, inviteId }) => {
       const r = await deps.teamsService.cancelPendingInvite(await teamActorNow(), id, inviteId);
-      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      if (!r.ok) {
+        // The shared TARGET_NOT_FOUND text is written for add/remove ("no account with
+        // that email...") and would steer an agent wrong here — the id is stale/consumed.
+        if (r.error === "TARGET_NOT_FOUND") {
+          return fail(
+            "TARGET_NOT_FOUND: no such pending invite on this team — it may already be " +
+              "consumed or canceled; refresh list_team_members",
+          );
+        }
+        return fail(TEAM_FAIL[r.error]);
+      }
       return ok({ ok: true });
     },
   );
@@ -1614,35 +1624,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: { id: z.string().describe("The team id.") },
     },
     async ({ id }) => {
-      const team = await deps.teams.findById(id);
-      if (!team) return fail("team not found");
-      // Org team → visible to any member of its org; personal team (org_id null, plan 003) →
-      // its creator + members. Otherwise opaque not-found.
-      const canSee =
-        team.orgId !== null
-          ? caller.orgIds.has(team.orgId)
-          : team.createdBy === caller.userId ||
-            (await deps.teams.isTeamMember(team.id, caller.userId));
-      if (!canSee) return fail("team not found");
-      const rows = await deps.teams.getMembers(team.id);
-      const users = await deps.users.findByIds(rows.map((m) => m.userId));
-      const byId = new Map(users.map((u) => [u.id, u]));
-      // Pending invitations (parity with the HTTP roster, plan 003 U6/U9) — email-only rows,
-      // minus any whose email already became a member.
-      const memberEmails = new Set(
-        rows.map((m) => byId.get(m.userId)?.email).filter((e): e is string => !!e),
-      );
-      const pending = (await deps.invitations.listPendingForTarget("team", team.id))
-        .filter((inv) => !memberEmails.has(inv.email))
-        // `id` powers cancel_team_invite (parity with the HTTP roster).
-        .map((inv) => ({ id: inv.id, email: inv.email, invitedAt: inv.createdAt }));
-      return ok({
-        members: rows.map((m) => {
-          const u = byId.get(m.userId);
-          return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
-        }),
-        pending,
-      });
+      // Wraps teamsService.roster — the SAME implementation as the HTTP roster route
+      // (agent-native parity), so pending rows carry the `id` cancel_team_invite needs.
+      const r = await deps.teamsService.roster(await teamActorNow(), id);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok(r.roster);
     },
   );
 
