@@ -502,7 +502,9 @@ function phasesFor(mode, args) {
         ...phase,
         args: withFileReporter([
           "--pool=forks",
-          "--poolOptions.forks.singleFork",
+          // vitest 4 removed --poolOptions.forks.singleFork; one worker with
+          // file parallelism off is the same single-fork semantics.
+          "--maxWorkers=1",
           "--no-file-parallelism",
           ...targetArgs,
         ]),
