@@ -151,6 +151,45 @@ describe("Editor route", () => {
     expect(await screen.findByRole("button", { name: "Publish" })).toBeDisabled();
   });
 
+  it("typing shows Unsaved changes immediately (local buffer truth beats the server dirty flag)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+      // Keep the autosave from settling within the test — never resolves to "saved".
+      "PUT /api/canvases/c1/draft/file": () => json(draftView({ dirty: true })),
+    });
+    renderEditor();
+    expect(await screen.findByText(/all changes published/i)).toBeInTheDocument();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe("x"));
+
+    fireEvent.change(editor, { target: { value: "edited" } });
+    // Before any autosave lands, the bar must already say unsaved — and Publish
+    // must be enabled (publishing flushes the buffer first).
+    expect(await screen.findByText(/unsaved changes/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+  });
+
+  it("a failed autosave surfaces 'Save failed' in the status bar instead of claiming published", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView({ dirty: false })),
+      "GET /api/canvases/c1/draft/file": () => new Response("x", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => json({ error: "boom" }, 500),
+    });
+    renderEditor();
+    const editor = await screen.findByTestId("code-editor");
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe("x"));
+
+    fireEvent.change(editor, { target: { value: "edited" } });
+    // The 700ms debounce fires, the PUT 500s, and the bar reports the failure.
+    expect(
+      await screen.findByText(/save failed/i, undefined, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/all changes published/i)).not.toBeInTheDocument();
+  });
+
   it("enables Page text and shows the live inline preview for a static single-HTML draft", async () => {
     mockFetch({
       "GET /api/canvases/c1": () => json(CANVAS),

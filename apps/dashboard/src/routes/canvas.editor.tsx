@@ -25,7 +25,7 @@ import { FileTree } from "../components/FileTree.js";
 import { IconButton, IconLink } from "../components/IconButton.js";
 import { NonEditableFileView } from "../components/NonEditableFileView.js";
 import { OnPageEditor } from "../components/OnPageEditor.js";
-import { type EditorPane, PublishBar } from "../components/PublishBar.js";
+import { type EditorPane, type LocalDirtyState, PublishBar } from "../components/PublishBar.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
@@ -119,6 +119,10 @@ export default function Editor() {
   const loadedRef = useRef<string>("");
   const dirtyRef = useRef<boolean>(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The reactive twin of dirtyRef, for the status bar: "unsaved" while an edit sits
+  // in the debounce window, "failed" after a flush error — so the bar never claims
+  // "All changes published" while the buffer holds the only copy of an edit.
+  const [localDirty, setLocalDirty] = useState<LocalDirtyState>("clean");
   // The draft fork-point the current buffer is based on. Sent as the unmount-flush
   // precondition (If-Draft-Base) so a stale flush landing after a restore is rejected.
   const baseVersionRef = useRef<string | null>(null);
@@ -229,6 +233,7 @@ export default function Editor() {
       bufferRef.current = content.data;
       bufferPathRef.current = selected;
       dirtyRef.current = false;
+      setLocalDirty("clean");
     }
   }, [content.data, selected, editable]);
 
@@ -247,9 +252,12 @@ export default function Editor() {
       await save.mutateAsync({ path, content: body });
       loadedRef.current = body;
       dirtyRef.current = false;
+      // Only report clean if no NEW edit landed while the save was in flight.
+      if (bufferRef.current === body || bufferPathRef.current !== path) setLocalDirty("clean");
       setRefreshKey((k) => k + 1);
       return true;
     } catch (err) {
+      setLocalDirty("failed");
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
       return false;
     }
@@ -259,6 +267,7 @@ export default function Editor() {
     if (bufferPathRef.current !== selected) return;
     bufferRef.current = next;
     dirtyRef.current = next !== loadedRef.current;
+    setLocalDirty(dirtyRef.current ? "unsaved" : "clean");
     if (timerRef.current) clearTimeout(timerRef.current);
     if (dirtyRef.current) timerRef.current = setTimeout(() => void flush(), AUTOSAVE_MS);
   };
@@ -379,6 +388,7 @@ export default function Editor() {
       }
       dirtyRef.current = false;
       bufferPathRef.current = null;
+      setLocalDirty("clean");
     }
     try {
       const next = await del.mutateAsync(deleting);
@@ -432,7 +442,8 @@ export default function Editor() {
   const publishShortcutRef = useRef<() => void>(() => {});
   publishShortcutRef.current = () => {
     if (!draft || publish.isPending) return;
-    const publishable = draft.files.length > 0 && (draft.dirty || draft.stale);
+    const publishable =
+      draft.files.length > 0 && (draft.dirty || draft.stale || localDirty !== "clean");
     if (!publishable) return;
     void onPublish();
   };
@@ -505,7 +516,10 @@ export default function Editor() {
       />
     );
 
-  const canPublish = draft.files.length > 0 && (draft.dirty || draft.stale);
+  // Local buffer dirtiness counts: an edit inside the debounce window (or one whose
+  // save failed) is publishable — onPublish flushes it first.
+  const canPublish =
+    draft.files.length > 0 && (draft.dirty || draft.stale || localDirty !== "clean");
   const workspaceHeight = "h-[calc(100dvh-18.5rem)] min-h-[34rem]";
   const paneVisible = (target: EditorPane) => pane === target;
   const selectedIsHtml = selectedFile ? isHtmlFile(selectedFile) : false;
@@ -736,6 +750,7 @@ export default function Editor() {
       <PublishBar
         dirty={draft.dirty}
         stale={draft.stale}
+        localDirty={localDirty}
         saving={save.isPending}
         publishing={publish.isPending}
         canPublish={canPublish}

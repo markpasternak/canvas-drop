@@ -15,9 +15,16 @@ import { SegmentedControl } from "./SegmentedControl.js";
 export type EditorSurface = "code" | "onpage";
 export type EditorPane = "files" | "code" | "preview" | "onpage";
 
+/** The editor buffer's local (pre-autosave) state — the truthful counterpart to the
+ *  server-side `dirty`: "unsaved" while an edit sits in the debounce window, "failed"
+ *  after a flush error (the buffer holds the only copy until a retry lands). */
+export type LocalDirtyState = "clean" | "unsaved" | "failed";
+
 export interface PublishBarProps {
   dirty: boolean;
   stale: boolean;
+  /** Local buffer state — takes precedence over the server `dirty` in the status line. */
+  localDirty?: LocalDirtyState;
   saving: boolean;
   publishing: boolean;
   canPublish: boolean;
@@ -42,6 +49,7 @@ export interface PublishBarProps {
 export function PublishBar({
   dirty,
   stale,
+  localDirty = "clean",
   saving,
   publishing,
   canPublish,
@@ -57,13 +65,19 @@ export function PublishBar({
   previewAvailable,
   onPublish,
 }: PublishBarProps) {
+  // Local buffer truth first: never claim "All changes published" while an edit
+  // sits unsaved in the buffer (or a save just failed and needs a retry).
   const status = saving
     ? { label: "Saving...", tone: "text-subtle", icon: FloppyDisk }
-    : dirty
-      ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
-      : stale
-        ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
-        : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
+    : localDirty === "failed"
+      ? { label: "Save failed — changes not saved", tone: "text-danger", icon: WarningCircle }
+      : localDirty === "unsaved"
+        ? { label: "Unsaved changes", tone: "text-muted", icon: FloppyDisk }
+        : dirty
+          ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
+          : stale
+            ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
+            : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
   const StatusIcon = status.icon;
 
   return (
