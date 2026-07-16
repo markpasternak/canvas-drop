@@ -252,7 +252,13 @@ export function useSaveDraftFile(id: string) {
     scope: { id: `draft-${id}` },
     mutationFn: (input: { path: string; content: string }) =>
       api.putDraftFile(id, input.path, input.content),
-    onSuccess: (draft) => qc.setQueryData(keys.draft(id), draft),
+    onSuccess: (draft, input) => {
+      qc.setQueryData(keys.draft(id), draft);
+      // Write the saved content through to the per-file cache: a stale entry would
+      // re-seed the editor with pre-edit content on file switch, and the next
+      // autosave would clobber the edits that were just saved.
+      qc.setQueryData(keys.draftFile(id, input.path), input.content);
+    },
   });
 }
 
@@ -277,7 +283,10 @@ export function useUploadDraftFile(id: string) {
     scope: { id: `draft-${id}` },
     mutationFn: (input: { path: string; file: Blob }) =>
       api.uploadDraftFile(id, input.path, input.file),
-    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+    onSuccess: (draft: DraftView, input) => {
+      qc.setQueryData(keys.draft(id), draft);
+      qc.removeQueries({ queryKey: keys.draftFile(id, input.path) });
+    },
   });
 }
 
@@ -294,7 +303,10 @@ export function useUploadDraftFiles(id: string) {
       for (const f of files) await api.uploadDraftFile(id, f.path, f.file);
       return files.length;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.draft(id) }),
+    onSuccess: (_count, files) => {
+      qc.invalidateQueries({ queryKey: keys.draft(id) });
+      for (const f of files) qc.removeQueries({ queryKey: keys.draftFile(id, f.path) });
+    },
   });
 }
 
@@ -302,8 +314,12 @@ export function useUploadDraftFiles(id: string) {
 export function useDeleteDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
+    scope: { id: `draft-${id}` },
     mutationFn: (path: string) => api.deleteDraftFile(id, path),
-    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+    onSuccess: (draft: DraftView, path) => {
+      qc.setQueryData(keys.draft(id), draft);
+      qc.removeQueries({ queryKey: keys.draftFile(id, path) });
+    },
   });
 }
 
@@ -311,9 +327,17 @@ export function useDeleteDraftFile(id: string) {
 export function useRenameDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
+    scope: { id: `draft-${id}` },
     mutationFn: (input: { from: string; to: string }) =>
       api.renameDraftFile(id, input.from, input.to),
-    onSuccess: (draft: DraftView) => qc.setQueryData(keys.draft(id), draft),
+    onSuccess: (draft: DraftView, input) => {
+      qc.setQueryData(keys.draft(id), draft);
+      // Carry the old path's cached content to the new path so re-opening the
+      // renamed file doesn't refetch (or worse, show another file's stale entry).
+      const cached = qc.getQueryData<string>(keys.draftFile(id, input.from));
+      qc.removeQueries({ queryKey: keys.draftFile(id, input.from) });
+      if (cached !== undefined) qc.setQueryData(keys.draftFile(id, input.to), cached);
+    },
   });
 }
 
@@ -338,6 +362,9 @@ export function useRestoreToDraft(id: string) {
     mutationFn: (version: number) => api.restoreToDraft(id, version),
     onSuccess: (draft: DraftView) => {
       qc.setQueryData(keys.draft(id), draft);
+      // Every draft file's content may have changed — drop the per-file content
+      // cache wholesale so the editor can't show (and then re-save) pre-restore text.
+      qc.removeQueries({ queryKey: keys.draftFiles(id) });
       // A restore changes which version the draft mirrors — refresh the Versions
       // tab (count / current pointer / dirty-state guard), mirroring useUnpublishCanvas.
       qc.invalidateQueries({ queryKey: keys.versions(id) });

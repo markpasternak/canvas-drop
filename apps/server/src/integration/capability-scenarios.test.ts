@@ -598,7 +598,7 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
       // alice sees bob join + a presence snapshot listing both members.
       await alice.waitFor((m) => m.type === "join");
       const presence = bob.messages.find((m) => m.type === "presence");
-      expect((presence?.users as Array<{ id: string }>).length).toBe(2);
+      expect(((presence?.users ?? []) as Array<{ id: string }>).length).toBe(2);
       // a publish fans out to subscribers.
       alice.send({ type: "publish", channel: "poll", event: "vote", data: { n: 1 } });
       const got = await bob.waitFor((m) => m.type === "message");

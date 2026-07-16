@@ -299,6 +299,20 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     // explicit one — and enforce requireExpiry on the resulting shareable state.
     const requestedAccess = meta.access ?? "private";
     const rung: AccessRung = requestedAccess === "password" ? "public_link" : requestedAccess;
+    const home = resolveHomeOrg(undefined, c.get("orgIds") ?? new Set<string>());
+    if ("error" in home) return c.json({ code: "INVALID_BODY", reason: home.error }, 400);
+    // Mirror resolveSettingsUpdate's ORG_REQUIRED guard: this route writes `access`
+    // via the repo directly, so without this an org-less viewer under active tenancy
+    // could mint a whole_org share that decideCanvasAccess denies to everyone.
+    if (rung === "whole_org" && deps.config.org.name && home.orgId === null) {
+      return c.json(
+        {
+          code: "ORG_REQUIRED",
+          message: "Only a canvas homed in an org can be shared with the whole org.",
+        },
+        409,
+      );
+    }
     const gateErr = await validateGates(pol, viewer, {
       accessExplicit: true,
       requestedRung: rung,
@@ -325,8 +339,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     const resolved = await resolveCreateSlug(meta.slug, (s) => deps.canvases.slugTaken(s));
     if ("error" in resolved) return c.json({ code: "INVALID_BODY", reason: resolved.error }, 400);
-    const home = resolveHomeOrg(undefined, c.get("orgIds") ?? new Set<string>());
-    if ("error" in home) return c.json({ code: "INVALID_BODY", reason: home.error }, 400);
 
     const apiKey = generateApiKey();
     let canvasB: Canvas;
@@ -435,6 +447,18 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
           ? "public_link"
           : requestedAccess;
     const effectiveRung = (rung ?? cv.access) as AccessRung;
+    // Mirror resolveSettingsUpdate's ORG_REQUIRED guard (same rationale as publish):
+    // an org-less canvas under active tenancy must not switch to whole_org — that
+    // rung would be a dead share decideCanvasAccess denies to everyone.
+    if (rung === "whole_org" && deps.config.org.name && cv.orgId === null) {
+      return c.json(
+        {
+          code: "ORG_REQUIRED",
+          message: "Only a canvas homed in an org can be shared with the whole org.",
+        },
+        409,
+      );
+    }
     // Password state after this op: provided string sets it; null clears; undefined keeps.
     const willHavePassword =
       meta.password !== undefined ? meta.password !== null : cv.passwordHash != null;

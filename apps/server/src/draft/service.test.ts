@@ -124,9 +124,9 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
     // v1 row is untouched and immutable.
     const v1After = await versions.findReadyByNumber(canvas.id, 1);
     expect(v1After?.id).toBe(v1?.id);
-    expect((v1After?.manifest as Record<string, { hash: string }>)["index.html"]?.hash).toBe(
-      (v1?.manifest as Record<string, { hash: string }>)["index.html"]?.hash,
-    );
+    expect(
+      ((v1After?.manifest ?? {}) as Record<string, { hash: string }>)["index.html"]?.hash,
+    ).toBe(((v1?.manifest ?? {}) as Record<string, { hash: string }>)["index.html"]?.hash);
   });
 
   it("a direct deploy under a held draft keeps the draft but flags it stale (AE5/F3)", async () => {
@@ -143,7 +143,7 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
 
     const draft = await drafts.getByCanvas(canvas.id);
     expect(draft?.stale).toBe(true);
-    expect((draft?.manifest as Record<string, unknown>)["index.html"]).toBeDefined(); // draft intact
+    expect(((draft?.manifest ?? {}) as Record<string, unknown>)["index.html"]).toBeDefined(); // draft intact
   });
 
   it("a direct deploy with no draft seeds an in-sync draft (matches production)", async () => {

@@ -1,10 +1,12 @@
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
+import type { FilesRepository } from "../db/repositories/files.js";
+import type { KvRepository } from "../db/repositories/kv.js";
 import type { ScreenshotsRepository } from "../db/repositories/screenshots.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
-import { canvasBlobPrefix, screenshotPrefix } from "./storage-keys.js";
+import { canvasBlobPrefix, canvasFilesPrefix, screenshotPrefix } from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -17,6 +19,11 @@ export interface PurgeDeps {
   /** Screenshot jobs (plan 004 / U10) — the canvas's preview prefix + job row are
    *  reclaimed alongside its blobs. Optional (absent when the pipeline isn't wired). */
   screenshots?: Pick<ScreenshotsRepository, "deleteByCanvas">;
+  /** Files-primitive metadata (§6.5): its `files/{id}/` storage prefix holds up to
+   *  1 GB of viewer uploads per canvas — without these the purge leaks them forever. */
+  files?: Pick<FilesRepository, "deleteByCanvas">;
+  /** KV-primitive rows (§6.4) — reclaimed with the canvas. */
+  kv?: Pick<KvRepository, "deleteByCanvas">;
 }
 
 export interface PurgeOptions {
@@ -86,27 +93,38 @@ export async function purgeDeletedCanvases(
       // reclaims them all (the canvas dies whole — no refcounting, KTD-1; includes
       // draft-only blobs). The canvas's one preview set (plan 004 / U10) lives
       // under its own prefix and is reclaimed in the same pass.
-      const [versions, draft, keys, shotKeys] = await Promise.all([
+      const [versions, draft, keys, shotKeys, fileKeys] = await Promise.all([
         deps.versions.listByCanvas(canvas.id),
         deps.drafts.getByCanvas(canvas.id),
         deps.storage.list(canvasBlobPrefix(canvas.id)),
         deps.storage.list(screenshotPrefix(canvas.id)),
+        // Files-primitive uploads live under their own prefix (up to 1 GB/canvas)
+        // and are invisible to the blob GC — purge is the only sweep for them.
+        deps.storage.list(canvasFilesPrefix(canvas.id)),
       ]);
 
       // Nothing reclaimable — leave the tombstone untouched and don't count it
       // (keeps re-runs idempotent: a second pass reports zero).
-      if (versions.length === 0 && draft === null && keys.length === 0 && shotKeys.length === 0) {
+      if (
+        versions.length === 0 &&
+        draft === null &&
+        keys.length === 0 &&
+        shotKeys.length === 0 &&
+        fileKeys.length === 0
+      ) {
         continue;
       }
 
       if (!dryRun) {
-        await deps.storage.deleteMany([...keys, ...shotKeys]);
+        await deps.storage.deleteMany([...keys, ...shotKeys, ...fileKeys]);
         await deps.versions.deleteByCanvas(canvas.id);
         await deps.drafts.deleteByCanvas(canvas.id);
         await deps.screenshots?.deleteByCanvas(canvas.id);
+        await deps.files?.deleteByCanvas(canvas.id);
+        await deps.kv?.deleteByCanvas(canvas.id);
         await deps.canvases.clearCurrentVersion(canvas.id);
       }
-      const objects = keys.length + shotKeys.length;
+      const objects = keys.length + shotKeys.length + fileKeys.length;
       summary.canvasesPurged++;
       summary.versionsPurged += versions.length;
       summary.objectsDeleted += objects;

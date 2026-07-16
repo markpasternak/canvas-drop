@@ -222,6 +222,28 @@ describe("canvas KV routes", () => {
     });
   }
 
+  it("PUT with a JSON null body → 400 INVALID_BODY (the value column is NOT NULL — no constraint 500)", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    const app = buildApi(client, ownerId);
+    const res = await app.request("/v1/c/app/kv/k", json(null));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("INVALID_BODY");
+    // Nothing was stored.
+    expect((await app.request("/v1/c/app/kv/k")).status).toBe(404);
+  });
+
+  it("list with a non-numeric limit falls back to the default instead of erroring", async () => {
+    client = await makeTestDb("sqlite");
+    const { ownerId } = await setup(client);
+    const app = buildApi(client, ownerId);
+    await app.request("/v1/c/app/kv/k", json(1));
+    const res = await app.request("/v1/c/app/kv?limit=abc");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: unknown[] };
+    expect(body.entries).toHaveLength(1);
+  });
+
   it("a new key past the per-scope limit → 409 KEY_LIMIT", async () => {
     client = await makeTestDb("sqlite");
     const { ownerId } = await setup(client);

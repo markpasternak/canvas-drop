@@ -800,7 +800,12 @@ export function canvasesRepository(client: DbClient) {
       if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
       if (patch.galleryListed !== undefined) {
         set.galleryListed = patch.galleryListed;
-        set.galleryPublishedAt = patch.galleryListed ? Date.now() : null;
+        // Stamp only the unlisted→listed transition: a settings save that re-sends
+        // an unchanged `listed: true` must keep the original date, or it would
+        // silently reorder the gallery's "recently published" sort.
+        set.galleryPublishedAt = patch.galleryListed
+          ? sql`case when ${t.galleryListed} then ${t.galleryPublishedAt} else ${Date.now()} end`
+          : null;
       }
       if (patch.galleryTemplatable !== undefined) set.galleryTemplatable = patch.galleryTemplatable;
       // Invariant (KTD6): templatable ⊆ listed. Un-listing in this same patch always

@@ -103,7 +103,15 @@ export function uploadService(deps: UploadServiceDeps) {
     // aggregate cap). Referenced (manifest) hashes carry an authoritative size.
     const manifest = (session.manifest as Manifest | null) ?? {};
     const expected = Object.values(manifest).find((e) => e.hash === hash);
-    if (expected && bytes.byteLength !== expected.size) {
+    if (!expected) {
+      // A blob outside the begin-manifest can never be finalized; accepting it
+      // would write unreferenced bytes (GC debt) with no aggregate-cap coverage.
+      throw new DeployError(
+        "UPLOAD_UNEXPECTED_BLOB",
+        `blob ${hash} is not referenced by this upload's manifest`,
+      );
+    }
+    if (bytes.byteLength !== expected.size) {
       throw new DeployError(
         "BLOB_HASH_MISMATCH",
         `staged size ${bytes.byteLength} != declared ${expected.size} for ${hash}`,
@@ -114,7 +122,7 @@ export function uploadService(deps: UploadServiceDeps) {
     // time scan so the staged-upload channel surfaces the same lint (review
     // server-canvas-11). The deploy engine emits this in the deploy result's warnings;
     // the staging channel has no per-blob warning surface, so it logs instead.
-    if (expected && isTextContentType(expected.mime) && looksLikeApiKey(decodeText(bytes))) {
+    if (isTextContentType(expected.mime) && looksLikeApiKey(decodeText(bytes))) {
       deps.log?.warn(
         { canvasId: session.canvasId, hash },
         "staged file may contain a canvas API key — remove it before deploying",
@@ -153,6 +161,23 @@ export function uploadService(deps: UploadServiceDeps) {
       }
       if (Object.keys(manifest).length === 0) {
         throw new DeployError("INVALID_MANIFEST", "manifest has no deployable files");
+      }
+
+      // Same content, same size: two entries sharing a hash but disagreeing on size
+      // would let the unchecked one lie its way into the version manifest (stageOne
+      // validates staged bytes against only the FIRST entry with that hash), skewing
+      // totalBytes and the aggregate cap.
+      const sizeByHash = new Map<string, number>();
+      for (const [path, e] of Object.entries(manifest)) {
+        const prior = sizeByHash.get(e.hash);
+        if (prior !== undefined && prior !== e.size) {
+          throw new DeployError(
+            "INVALID_MANIFEST",
+            `entries sharing hash ${e.hash} declare different sizes`,
+            path,
+          );
+        }
+        sizeByHash.set(e.hash, e.size);
       }
 
       // Fail fast on the declared manifest: reject oversized files / total / count

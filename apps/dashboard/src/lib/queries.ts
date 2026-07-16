@@ -26,6 +26,12 @@ export const keys = {
   canvas: (id: string) => ["canvas", id] as const,
   versions: (id: string) => ["versions", id] as const,
   draft: (id: string) => ["draft", id] as const,
+  // Per-file draft content cache (the editor's CodeMirror source of truth on file
+  // switch). Every draft write that can change a file's content MUST write through
+  // or drop this key — a stale entry re-seeds the editor with pre-edit content and
+  // the next autosave clobbers the saved edits.
+  draftFiles: (id: string) => ["draft-file", id] as const,
+  draftFile: (id: string, path: string) => ["draft-file", id, path] as const,
   usage: (id: string) => ["usage", id] as const,
   adminCanvases: (query: AdminCanvasesQuery) => ["admin", "canvases", query] as const,
   adminPeople: (query: AdminPeopleQuery) => ["admin", "people", query] as const,
@@ -147,10 +153,11 @@ export function useAdminEmailTemplates() {
   });
 }
 
-export function useGallery(query: GalleryQuery) {
+export function useGallery(query: GalleryQuery, enabled = true) {
   return useQuery({
     queryKey: keys.gallery(query),
     queryFn: () => api.listGallery(query),
+    enabled,
     // Keep the previous page on screen while the next page / search loads so
     // paging and typing don't flash an empty grid.
     placeholderData: keepPreviousData,

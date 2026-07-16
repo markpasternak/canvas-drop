@@ -1,5 +1,5 @@
 import { type Json, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, asc, eq, gt, gte, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Thrown by `increment` when the existing value is present but not a number. */
@@ -35,13 +35,23 @@ export function kvRepository(client: DbClient) {
   const t = isSqlite ? sqliteSchema.kvEntries : pgSchema.kvEntries;
 
   return {
-    async get(canvasId: string, scope: string, key: string): Promise<Json | null> {
-      const rows = await db
+    /**
+     * Row-aware lookup: `null` means the key is absent; `{ value }` means it exists
+     * (the value itself may be JSON `null`). Use this wherever existence matters —
+     * `get`'s `Json | null` return can't tell a stored `null` from a missing key.
+     */
+    async find(canvasId: string, scope: string, key: string): Promise<{ value: Json } | null> {
+      const rows = (await db
         .select({ value: t.value })
         .from(t)
         .where(and(eq(t.canvasId, canvasId), eq(t.scope, scope), eq(t.key, key)))
-        .limit(1);
-      return (rows[0]?.value as Json | undefined) ?? null;
+        .limit(1)) as Array<{ value: Json }>;
+      return rows[0] ?? null;
+    },
+
+    async get(canvasId: string, scope: string, key: string): Promise<Json | null> {
+      const row = await this.find(canvasId, scope, key);
+      return row?.value ?? null;
     },
 
     async set(
@@ -64,6 +74,11 @@ export function kvRepository(client: DbClient) {
       await db.delete(t).where(and(eq(t.canvasId, canvasId), eq(t.scope, scope), eq(t.key, key)));
     },
 
+    /** Hard-delete every KV row of a canvas, all scopes (purge of a soft-deleted canvas). */
+    async deleteByCanvas(canvasId: string): Promise<void> {
+      await db.delete(t).where(eq(t.canvasId, canvasId));
+    },
+
     async list(
       canvasId: string,
       scope: string,
@@ -71,9 +86,14 @@ export function kvRepository(client: DbClient) {
     ): Promise<KvListResult> {
       const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000);
       const conds = [eq(t.canvasId, canvasId), eq(t.scope, scope)];
-      // Prefix as a [prefix, prefix+￿) range — no LIKE escaping needed.
+      // Prefix as an escaped LIKE — NOT a [prefix, prefix+U+FFFF) range: in SQLite's
+      // byte order any key whose next char is astral (e.g. emoji, UTF-8 > EF BF BF)
+      // sorts above that bound and silently vanishes, and Postgres locale collations
+      // order the range differently from SQLite anyway. LIKE membership is
+      // collation-independent and identical on both dialects.
       if (opts.prefix) {
-        conds.push(gte(t.key, opts.prefix), lt(t.key, `${opts.prefix}￿`));
+        const escaped = opts.prefix.replace(/([\\%_])/g, "\\$1");
+        conds.push(sql`${t.key} like ${`${escaped}%`} escape '\\'`);
       }
       if (opts.cursor) conds.push(gt(t.key, opts.cursor));
       const rows = (await db
@@ -108,9 +128,11 @@ export function kvRepository(client: DbClient) {
       userId: string,
     ): Promise<number> {
       // Guard: reject a present non-numeric value (benign race on the error path
-      // only; the numeric increment itself is atomic below).
-      const existing = await this.get(canvasId, scope, key);
-      if (existing !== null && typeof existing !== "number") throw new KvNotNumericError();
+      // only; the numeric increment itself is atomic below). Row-aware so a stored
+      // JSON `null` is rejected as non-numeric on BOTH dialects — without it, SQLite's
+      // CAST('null' AS REAL) yields 0 while Postgres's 'null'::numeric throws a 500.
+      const existing = await this.find(canvasId, scope, key);
+      if (existing !== null && typeof existing.value !== "number") throw new KvNotNumericError();
 
       const now = Date.now();
       // Dialect-specific atomic numeric expression on the row's own value. Use a

@@ -4,6 +4,7 @@ import type { QuotaResolver } from "../admin/settings-service.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
+import { canvasFileKey } from "./storage-keys.js";
 
 /** Files primitive limits (§6.5.5). Admin-tunable defaults (M7). */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB/file
@@ -33,9 +34,9 @@ export interface CreateFileInput {
   userId: string;
 }
 
-/** The per-canvas storage key for a file blob. */
+/** The per-canvas storage key for a file blob (shared with purge via storage-keys). */
 export function fileStorageKey(canvasId: string, id: string): string {
-  return `files/${canvasId}/${id}`;
+  return canvasFileKey(canvasId, id);
 }
 
 /**

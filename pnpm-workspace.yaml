@@ -4,3 +4,9 @@ packages:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+# Force transitive esbuild past known dev-server advisories:
+# GHSA-67mh-4wv8-2f99 (<=0.24.2, via drizzle-kit's @esbuild-kit loader)
+# GHSA-g7r4-m6w7-qqqr (>=0.27.3 <0.28.1, via vitest -> vite)
+overrides:
+  "esbuild@<=0.24.2": "^0.25.12"
+  "esbuild@>=0.27.3 <0.28.1": "^0.28.1"

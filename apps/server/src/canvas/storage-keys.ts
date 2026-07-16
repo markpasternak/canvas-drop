@@ -26,6 +26,20 @@ export function hashFromBlobKey(canvasId: string, key: string): string {
 }
 
 /**
+ * Files-primitive uploads (§6.5, M6): viewer-uploaded bytes, one object per file
+ * row, OUTSIDE {@link canvasBlobPrefix} (they're not content-addressed deploy
+ * blobs and the blob GC must never sweep them). Purge reclaims the whole prefix.
+ */
+export function canvasFilesPrefix(canvasId: string): string {
+  return `files/${canvasId}/`;
+}
+
+/** Storage key for one files-primitive upload: `files/{canvasId}/{fileId}`. */
+export function canvasFileKey(canvasId: string, fileId: string): string {
+  return canvasFilesPrefix(canvasId) + fileId;
+}
+
+/**
  * Screenshot renditions (plan 004, KTD-6). A canvas has exactly ONE preview set,
  * stored at **canvas-stable** keys and **overwritten** on each publish — no
  * per-version history. Which version the current preview reflects is recorded on

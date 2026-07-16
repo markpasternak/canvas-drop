@@ -11,7 +11,10 @@ export function normalizeEntryPath(raw: string): string | null {
   let p = raw.replace(/\\/g, "/").replace(/^\.?\//, "");
   if (p === "" || p.endsWith("/")) return null; // empty or directory marker
 
-  const segments = p.split("/");
+  // Interior "." segments are no-op path components (`a/./b` = `a/b`), not
+  // dotfiles — drop the segment, don't drop the file.
+  const segments = p.split("/").filter((seg) => seg !== ".");
+  if (segments.length === 0 || segments[segments.length - 1] === "") return null;
   for (const seg of segments) {
     if (seg === "..") {
       throw new DeployError("ZIP_SLIP_REJECTED", `path escapes the canvas root: ${raw}`, raw);

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { filesRepository } from "../db/repositories/files.js";
+import { kvRepository } from "../db/repositories/kv.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -11,7 +13,14 @@ import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import { memStorage } from "../storage/mem.js";
 import { purgeDeletedCanvases } from "./purge.js";
-import { blobKey, canvasBlobPrefix, screenshotKey, screenshotPrefix } from "./storage-keys.js";
+import {
+  blobKey,
+  canvasBlobPrefix,
+  canvasFileKey,
+  canvasFilesPrefix,
+  screenshotKey,
+  screenshotPrefix,
+} from "./storage-keys.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const log = { info() {}, error() {} } as unknown as Logger;
@@ -27,6 +36,8 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     versions: versionsRepository(client),
     drafts: draftsRepository(client),
     screenshots: screenshotsRepository(client),
+    files: filesRepository(client),
+    kv: kvRepository(client),
     storage,
     log,
   });
@@ -113,6 +124,37 @@ describe.each(DIALECTS)("purgeDeletedCanvases [%s]", (dialect) => {
     expect(summary.canvasesPurged).toBe(1);
     expect(await drafts.getByCanvas(id)).toBeNull();
     expect(await storage.list(canvasBlobPrefix(id))).toHaveLength(0);
+  });
+
+  it("reclaims Files-primitive uploads (bytes + rows) and KV rows — not just deploy blobs", async () => {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const ownerId = await seedOwner(client);
+    const canvases = canvasesRepository(client);
+    const files = filesRepository(client);
+    const kv = kvRepository(client);
+
+    const id = await seedCanvas(client, storage, ownerId, "with-primitives");
+    // A viewer upload via the Files primitive (bytes under files/{id}/, row in `files`).
+    await storage.put(canvasFileKey(id, "f1"), new TextEncoder().encode("upload"));
+    await files.insert({
+      id: "f1",
+      canvasId: id,
+      filename: "u.bin",
+      mime: "application/octet-stream",
+      sizeBytes: 6,
+      storageKey: canvasFileKey(id, "f1"),
+      uploadedBy: ownerId,
+    });
+    await kv.set(id, "shared", "k", 1, ownerId);
+    await canvases.setStatus(id, "deleted");
+
+    const summary = await purgeDeletedCanvases(deps(storage));
+    expect(summary.canvasesPurged).toBe(1);
+    expect(summary.objectsDeleted).toBe(2); // deploy blob + files-primitive upload
+    expect(await storage.list(canvasFilesPrefix(id))).toHaveLength(0);
+    expect(await files.list(id)).toEqual([]);
+    expect(await kv.find(id, "shared", "k")).toBeNull();
   });
 
   it("is idempotent: a never-deployed canvas is skipped and a second sweep reclaims nothing", async () => {

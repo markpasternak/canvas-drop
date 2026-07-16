@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { EXIT_MS } from "../lib/use-exit-transition.js";
 
 type Toast = { id: number; message: string; tone: "default" | "error"; exiting?: boolean };
@@ -14,17 +14,36 @@ const MAX_TOASTS = 3;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Live dismiss timers, cleared on unmount — a timer firing after the provider
+  // is gone calls setState on a dead tree (and crashes vitest's torn-down jsdom
+  // with "window is not defined" as an unhandled error).
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
 
   const push = useCallback<ToastFn>((message, tone = "default") => {
     const id = nextId++;
+    const arm = (fn: () => void, ms: number) => {
+      const handle = setTimeout(() => {
+        timersRef.current.delete(handle);
+        fn();
+      }, ms);
+      timersRef.current.add(handle);
+    };
     // Cap the stack so a burst of failures can't pile up off-screen.
     setToasts((t) => [...t, { id, message, tone }].slice(-MAX_TOASTS));
-    setTimeout(() => {
+    arm(() => {
       // Two phase: mark exiting (data-state="closed" plays the exit anim), then
       // remove after the exit delay. Reduced-motion collapses the anim to ~0ms,
       // so the toast still clears promptly.
       setToasts((t) => t.map((x) => (x.id === id ? { ...x, exiting: true } : x)));
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), EXIT_MS);
+      arm(() => setToasts((t) => t.filter((x) => x.id !== id)), EXIT_MS);
     }, 2600);
   }, []);
 

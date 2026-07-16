@@ -15,8 +15,10 @@ import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
+import { kvRepository } from "../db/repositories/kv.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -57,6 +59,8 @@ export async function runPurge(
       versions: versionsRepository(db),
       drafts: draftsRepository(db),
       screenshots: screenshotsRepository(db),
+      files: filesRepository(db),
+      kv: kvRepository(db),
       storage,
       log,
     },

@@ -56,6 +56,29 @@ describe.each(DIALECTS)("kvRepository [%s]", (dialect) => {
     expect((await kv.list(canvasId, "shared", { prefix: "a:" })).entries).toHaveLength(3);
   });
 
+  it("find distinguishes an existing row from an absent key", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const kv = kvRepository(client);
+    await kv.set(canvasId, "shared", "k", false, userId);
+    expect(await kv.find(canvasId, "shared", "k")).toEqual({ value: false });
+    expect(await kv.find(canvasId, "shared", "missing")).toBeNull();
+  });
+
+  it("list prefix matches astral-plane (emoji) keys and escapes LIKE metacharacters", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const kv = kvRepository(client);
+    await kv.set(canvasId, "shared", "emoji:😀", 1, userId);
+    await kv.set(canvasId, "shared", "emoji:z", 2, userId);
+    await kv.set(canvasId, "shared", "a_c", 3, userId); // `_` must not match "abc"
+    await kv.set(canvasId, "shared", "abc", 4, userId);
+    const emoji = await kv.list(canvasId, "shared", { prefix: "emoji:" });
+    expect(emoji.entries.map((e) => e.key).sort()).toEqual(["emoji:z", "emoji:😀"].sort());
+    const underscore = await kv.list(canvasId, "shared", { prefix: "a_" });
+    expect(underscore.entries.map((e) => e.key)).toEqual(["a_c"]);
+  });
+
   it("increment: missing starts at by; sequential accumulates; returns new total", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

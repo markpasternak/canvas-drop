@@ -266,39 +266,40 @@ describe("cross-dialect restore (the driver-migration path)", () => {
     ["sqlite", "postgres"],
     ["postgres", "sqlite"],
   ];
-  it.each(
-    PAIRS,
-  )("restores a %s backup into a fresh %s target with types intact", async (src, tgt) => {
-    const source = src === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
-    const srcStore = memStorage();
-    const { user, canvas } = await seed(source, srcStore);
+  it.each(PAIRS)(
+    "restores a %s backup into a fresh %s target with types intact",
+    async (src, tgt) => {
+      const source = src === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
+      const srcStore = memStorage();
+      const { user, canvas } = await seed(source, srcStore);
 
-    const dir = await freshDir();
-    const meta = await createBackup({ client: source, storage: srcStore, log }, dir);
-    expect(meta.dialect).toBe(src);
+      const dir = await freshDir();
+      const meta = await createBackup({ client: source, storage: srcStore, log }, dir);
+      expect(meta.dialect).toBe(src);
 
-    const target = tgt === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
-    const tgtStore = memStorage();
-    const summary = await restoreBackup({ client: target, storage: tgtStore, log }, dir);
-    expect(summary.tableRows).toEqual(meta.tableRows);
+      const target = tgt === "sqlite" ? await makeTestDb("sqlite") : await makeFreshPgTestDb();
+      const tgtStore = memStorage();
+      const summary = await restoreBackup({ client: target, storage: tgtStore, log }, dir);
+      expect(summary.tableRows).toEqual(meta.tableRows);
 
-    // Read back through the typed repositories (the app's real read path) to prove the row
-    // crossed the dialect boundary with its types intact:
-    const restoredUser = await usersRepository(target).findById(user.id);
-    expect(restoredUser?.isAdmin).toBe(true); // boolean: sqlite int 0/1 <-> pg bool
-    expect(restoredUser?.email).toBe("owner@example.com"); // text
-    const restoredCanvas = await canvasesRepository(target).findById(canvas.id);
-    expect(restoredCanvas?.slug).toBe("lucky-yak");
-    expect(restoredCanvas?.title).toBe("Three.js demo");
-    // JSON value fidelity (settings.value is a JSON column):
-    expect(await settingsRepository(target).get("config.core.designSkin")).toBe("workshop");
-    // Blobs serve verbatim on the target driver.
-    const html = await tgtStore.get(`canvas/${canvas.id}/index.html`);
-    expect(new TextDecoder().decode(html ?? new Uint8Array())).toContain("<h1>hi</h1>");
+      // Read back through the typed repositories (the app's real read path) to prove the row
+      // crossed the dialect boundary with its types intact:
+      const restoredUser = await usersRepository(target).findById(user.id);
+      expect(restoredUser?.isAdmin).toBe(true); // boolean: sqlite int 0/1 <-> pg bool
+      expect(restoredUser?.email).toBe("owner@example.com"); // text
+      const restoredCanvas = await canvasesRepository(target).findById(canvas.id);
+      expect(restoredCanvas?.slug).toBe("lucky-yak");
+      expect(restoredCanvas?.title).toBe("Three.js demo");
+      // JSON value fidelity (settings.value is a JSON column):
+      expect(await settingsRepository(target).get("config.core.designSkin")).toBe("workshop");
+      // Blobs serve verbatim on the target driver.
+      const html = await tgtStore.get(`canvas/${canvas.id}/index.html`);
+      expect(new TextDecoder().decode(html ?? new Uint8Array())).toContain("<h1>hi</h1>");
 
-    await target.close();
-    await source.close();
-  });
+      await target.close();
+      await source.close();
+    },
+  );
 });
 
 describe.each(DIALECTS)("restore failure recovery + force [%s]", (dialect) => {

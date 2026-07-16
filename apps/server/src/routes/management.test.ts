@@ -855,17 +855,18 @@ describe("managementRoutes", () => {
     // the real driver error, whose shape differs (better-sqlite3 vs pglite-under-.cause).
     // The rest of this suite is sqlite-only by design (see file header); this case
     // specifically guards the dialect-aware catch in the route (KTD7).
-    it.each(
-      DIALECTS,
-    )("create returns 409 when the custom slug is already taken [%s]", async (dialect) => {
-      client = await makeTestDb(dialect);
-      const owner = await seedUser(client, "owner");
-      const app = buildApp(client, { id: owner.id, isAdmin: false });
-      expect((await post(app, "/api/canvases", { slug: "taken-one" })).status).toBe(201);
-      const dup = await post(app, "/api/canvases", { slug: "taken-one" });
-      expect(dup.status).toBe(409);
-      expect((await jsonOf<{ error: string }>(dup)).error).toBe("slug_taken");
-    });
+    it.each(DIALECTS)(
+      "create returns 409 when the custom slug is already taken [%s]",
+      async (dialect) => {
+        client = await makeTestDb(dialect);
+        const owner = await seedUser(client, "owner");
+        const app = buildApp(client, { id: owner.id, isAdmin: false });
+        expect((await post(app, "/api/canvases", { slug: "taken-one" })).status).toBe(201);
+        const dup = await post(app, "/api/canvases", { slug: "taken-one" });
+        expect(dup.status).toBe(409);
+        expect((await jsonOf<{ error: string }>(dup)).error).toBe("slug_taken");
+      },
+    );
 
     it("paste accepts a custom slug; a taken slug 409s and leaves no orphan", async () => {
       client = await makeTestDb("sqlite");

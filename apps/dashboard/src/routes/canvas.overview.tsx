@@ -47,7 +47,15 @@ function currentVersionLabel(current?: VersionInfo): string {
   return `v${current.number} via ${sourceLabel(current.source)}, ${relativeTime(current.createdAt)}`;
 }
 
-function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo }) {
+function HealthCard({
+  canvas,
+  current,
+  versionsReady,
+}: {
+  canvas: Canvas;
+  current?: VersionInfo;
+  versionsReady: boolean;
+}) {
   const entry = current?.entry;
   const sharedSuffix = canvas.shared ? " The shared link is affected too." : "";
 
@@ -80,6 +88,10 @@ function HealthCard({ canvas, current }: { canvas: Canvas; current?: VersionInfo
   }
 
   if (!current) {
+    // Only claim "not published" when the versions list actually loaded — while
+    // it's still loading (or failed), `current` is merely unknown, and a false
+    // warning on a published canvas is alarming.
+    if (!versionsReady) return null;
     return (
       <StateCard
         tone="warning"
@@ -226,7 +238,7 @@ export default function Overview() {
   const { live } = useSearch({ strict: false }) as { live?: boolean };
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
-  const { data: versions } = useVersions(id);
+  const { data: versions, isSuccess: versionsReady } = useVersions(id);
   const update = useUpdateSettings(id);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -320,7 +332,7 @@ export default function Overview() {
         />
       </Section>
 
-      <HealthCard canvas={canvas} current={current} />
+      <HealthCard canvas={canvas} current={current} versionsReady={versionsReady} />
 
       <section className={flatBandClass}>
         <dl className="-mx-4 grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-6">
