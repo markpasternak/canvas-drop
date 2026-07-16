@@ -1,5 +1,6 @@
 import type { Team } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -49,13 +50,21 @@ type AddMemberResult =
     }
   | Fail;
 
+/** A team's full roster: active members + not-yet-signed-in pending invite rows. */
+export interface TeamRoster {
+  members: Array<{ userId: string; email: string | null; name: string | null }>;
+  pending: Array<{ id: string; email: string; invitedAt: number }>;
+}
+
 export function teamsService(deps: {
   teams: TeamsRepository;
   orgMembers: Pick<OrgMembersRepository, "isMember">;
-  users: Pick<UsersRepository, "findByEmail">;
+  users: Pick<UsersRepository, "findByEmail" | "findByIds">;
   /** The Add person primitive (plan 003 U5) — personal-team adds route through it so a
    *  brand-new email becomes pending access (KTD5-gated) instead of TARGET_NOT_FOUND. */
   invites: InviteService;
+  /** Pending-invite rows — listed on the roster, canceled self-serve by team members. */
+  invitations: Pick<InvitationsRepository, "cancelPendingForTarget" | "listPendingForTarget">;
   audit: Pick<AuditLog, "recordAudit">;
 }) {
   /** Can the actor even SEE this team exists (else opaque NOT-FOUND, §12.0)? An ORG team is
@@ -75,6 +84,23 @@ export function teamsService(deps: {
     if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
     if (!actor.isAdmin && team.createdBy !== actor.id) return { ok: false, error: "FORBIDDEN" };
     return { ok: true, team };
+  }
+
+  /** Load a team + assert the actor may act as a MEMBER on it (the self-serve tier:
+   *  add / cancel-pending / remove). Membership counts as visibility — `visible()`
+   *  alone reads a PERSONAL team as creator-only, which wrongly 404'd its other
+   *  members (the roster surfaces have always shown it to them). A stranger still
+   *  gets an opaque TEAM_NOT_FOUND (§12.0); a visible non-member gets FORBIDDEN. */
+  async function memberAccessible(
+    actor: TeamActor,
+    teamId: string,
+  ): Promise<TeamResult & { isMember?: boolean }> {
+    const team = await deps.teams.findById(teamId);
+    if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+    const isMember = await deps.teams.isTeamMember(teamId, actor.id);
+    if (!visible(actor, team) && !isMember) return { ok: false, error: "TEAM_NOT_FOUND" };
+    if (!actor.isAdmin && !isMember) return { ok: false, error: "FORBIDDEN" };
+    return { ok: true, team, isMember };
   }
 
   return {
@@ -130,10 +156,9 @@ export function teamsService(deps: {
       teamId: string,
       email: string,
     ): Promise<AddMemberResult> {
-      const team = await deps.teams.findById(teamId);
-      if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
-      if (!actor.isAdmin && !(await deps.teams.isTeamMember(teamId, actor.id)))
-        return { ok: false, error: "FORBIDDEN" };
+      const gate = await memberAccessible(actor, teamId);
+      if (!gate.ok) return gate;
+      const team = gate.team;
 
       if (team.orgId !== null) {
         // Org team: existing same-org member only.
@@ -166,17 +191,85 @@ export function teamsService(deps: {
         : { ok: true, status: r.status };
     },
 
-    /** Remove a member. A team member or operator may remove anyone; anyone may remove self. */
+    /** The roster (active members + pending invites) — THE single implementation both
+     *  the HTTP route and the MCP `list_team_members` tool wrap (agent-native parity;
+     *  they previously each assembled it and had to be edited in lockstep). Roster
+     *  visibility is wider than mutation access: an ORG team's roster is visible to
+     *  any member of its org; a PERSONAL team's to its creator + members; operators
+     *  see all. Anyone else gets an opaque TEAM_NOT_FOUND (§12.0). */
+    async roster(
+      actor: TeamActor,
+      teamId: string,
+    ): Promise<{ ok: true; roster: TeamRoster } | Fail> {
+      const team = await deps.teams.findById(teamId);
+      if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+      const canSee = visible(actor, team) || (await deps.teams.isTeamMember(teamId, actor.id));
+      if (!canSee) return { ok: false, error: "TEAM_NOT_FOUND" };
+      const [rows, invites] = await Promise.all([
+        deps.teams.getMembers(teamId),
+        deps.invitations.listPendingForTarget("team", teamId),
+      ]);
+      const users = await deps.users.findByIds(rows.map((m) => m.userId));
+      const byId = new Map(users.map((u) => [u.id, u]));
+      // Pending access (plan 003 U6): brand-new people who haven't signed in yet.
+      // Email-only rows (plus the `id` that powers the self-serve cancel) until their
+      // first verified login materializes the membership; suppress any whose email
+      // already became a member.
+      const memberEmails = new Set(
+        rows.map((m) => byId.get(m.userId)?.email).filter((e): e is string => !!e),
+      );
+      return {
+        ok: true,
+        roster: {
+          members: rows.map((m) => {
+            const u = byId.get(m.userId);
+            return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
+          }),
+          pending: invites
+            .filter((inv) => !memberEmails.has(inv.email))
+            .map((inv) => ({ id: inv.id, email: inv.email, invitedAt: inv.createdAt })),
+        },
+      };
+    },
+
+    /** Cancel a pending (un-consumed) invite on a team. Same self-serve rule as the
+     *  add: any team member (or operator) may cancel — the member who typo'd an
+     *  email must be able to take it back without escalating to an admin. An
+     *  unknown/consumed/foreign invite id reads as TARGET_NOT_FOUND (no leak). */
+    async cancelPendingInvite(
+      actor: TeamActor,
+      teamId: string,
+      inviteId: string,
+    ): Promise<VoidResult> {
+      const gate = await memberAccessible(actor, teamId);
+      if (!gate.ok) return gate;
+      const cancelled = await deps.invitations.cancelPendingForTarget("team", teamId, inviteId);
+      if (!cancelled) return { ok: false, error: "TARGET_NOT_FOUND" };
+      // Audit the email too: the row is hard-deleted, so this is the only record of
+      // WHOSE pending access was taken back (mirrors the admin People cancel).
+      deps.audit.recordAudit({
+        action: "team_invite_cancel",
+        actorId: actor.id,
+        targetId: teamId,
+        meta: { inviteId, email: cancelled.email },
+      });
+      return { ok: true };
+    },
+
+    /** Remove a member. A team member or operator may remove anyone; anyone may remove self.
+     *  Membership counts as visibility (like memberAccessible) so a personal team's
+     *  non-creator members can actually LEAVE — `visible()` alone 404'd their self-leave. */
     async removeMember(
       actor: TeamActor,
       teamId: string,
       targetUserId: string,
     ): Promise<VoidResult> {
       const team = await deps.teams.findById(teamId);
-      if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
+      if (!team) return { ok: false, error: "TEAM_NOT_FOUND" };
+      const isMember = await deps.teams.isTeamMember(teamId, actor.id);
+      if (!visible(actor, team) && !isMember) return { ok: false, error: "TEAM_NOT_FOUND" };
       const selfLeave = targetUserId === actor.id;
-      if (!selfLeave && !actor.isAdmin && !(await deps.teams.isTeamMember(teamId, actor.id)))
-        return { ok: false, error: "FORBIDDEN" };
+      if (!selfLeave && !actor.isAdmin && !isMember) return { ok: false, error: "FORBIDDEN" };
       await deps.teams.removeMember(teamId, targetUserId);
       deps.audit.recordAudit({ action: "team_member_remove", actorId: actor.id, targetId: teamId });
       return { ok: true };

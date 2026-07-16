@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "moduleResolution": "bundler",
+    // Tests run under vitest/jsdom on node and may use node builtins (fs, url,
+    // process.env.TZ). App code stays node-free via tsconfig.json (see there).
+    "types": ["vite/client", "@testing-library/jest-dom", "node"],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

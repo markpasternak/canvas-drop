@@ -12,6 +12,7 @@ import { ApiError, type Team } from "../lib/api.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
 import {
   useAddTeamMember,
+  useCancelTeamInvite,
   useCreateTeam,
   useDeleteTeam,
   useRemoveTeamMember,
@@ -255,7 +256,11 @@ function TeamRoster({ team }: { team: Team }) {
   const { data: roster, isLoading } = useTeamMembers(team.id);
   const add = useAddTeamMember(team.id);
   const removeMember = useRemoveTeamMember(team.id);
+  const cancelInvite = useCancelTeamInvite(team.id);
   const [email, setEmail] = useState("");
+  // Leaving confirms first: you can't re-add yourself to a team you don't manage,
+  // so a stray click on your own row would lock you out until someone re-invites you.
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const members = roster?.members ?? [];
   const pending = roster?.pending ?? [];
   const personal = team.orgId === null;
@@ -285,6 +290,17 @@ function TeamRoster({ team }: { team: Team }) {
       toast(isSelf ? "You left the team" : "Removed from the team");
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't remove that member", "error");
+    } finally {
+      setConfirmLeave(false);
+    }
+  }
+
+  async function cancelPending(inviteId: string) {
+    try {
+      await cancelInvite.mutateAsync(inviteId);
+      toast("Pending invite canceled");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't cancel that invite", "error");
     }
   }
 
@@ -336,7 +352,11 @@ function TeamRoster({ team }: { team: Team }) {
                   )}
                 </span>
                 {team.mine && (
-                  <Button size="sm" variant="ghost" onClick={() => kick(m.userId, isSelf)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => (isSelf ? setConfirmLeave(true) : void kick(m.userId, false))}
+                  >
                     {isSelf ? "Leave" : "Remove"}
                   </Button>
                 )}
@@ -344,18 +364,37 @@ function TeamRoster({ team }: { team: Team }) {
             );
           })}
           {/* Pending access: brand-new people who haven't signed in yet. They become
-              full members on their first verified login. */}
+              full members on their first verified login. Any member can cancel one
+              (the self-serve mirror of Add person — no admin needed for a typo). */}
           {pending.map((p) => (
-            <li
-              key={`pending:${p.email}`}
-              className="flex items-center justify-between py-2 text-sm"
-            >
+            <li key={p.id} className="flex items-center justify-between gap-2 py-2 text-sm">
               <span className="min-w-0 truncate text-muted">{p.email}</span>
-              <Badge tone="neutral">Pending sign-in</Badge>
+              <span className="flex shrink-0 items-center gap-1">
+                <Badge tone="neutral">Pending sign-in</Badge>
+                {team.mine && (
+                  <Button size="sm" variant="ghost" onClick={() => void cancelPending(p.id)}>
+                    Remove
+                  </Button>
+                )}
+              </span>
             </li>
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmLeave}
+        onClose={() => setConfirmLeave(false)}
+        // Guard rather than a sentinel: an empty id would fire DELETE /members/ (404).
+        onConfirm={() => me && void kick(me.id, true)}
+        title={`Leave “${team.name}”?`}
+        actionLabel="Leave team"
+        destructive
+        loading={removeMember.isPending}
+      >
+        You'll lose access to canvases shared with this team, and you can't re-add yourself — a
+        member would have to invite you back.
+      </ConfirmDialog>
     </div>
   );
 }

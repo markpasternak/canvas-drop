@@ -79,7 +79,17 @@ export function SegmentedControl<V extends string>({
             key={item.value}
             type="button"
             aria-pressed={active}
-            aria-label={iconOnly ? item.label : undefined}
+            // Explicit name when icon-only (no text) OR when a count is shown:
+            // adjacent inline elements contribute no separator to the computed
+            // accessible name, so "<span>Active</span><span>3</span>" reads as the
+            // fused "Active3" to screen readers without it.
+            aria-label={
+              iconOnly
+                ? item.label
+                : item.count !== undefined
+                  ? `${item.label} ${item.count}`
+                  : undefined
+            }
             title={item.title ?? item.label}
             disabled={item.disabled}
             onClick={() => onChange(item.value)}

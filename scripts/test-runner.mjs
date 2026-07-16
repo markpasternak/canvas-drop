@@ -502,7 +502,11 @@ function phasesFor(mode, args) {
         ...phase,
         args: withFileReporter([
           "--pool=forks",
-          "--poolOptions.forks.singleFork",
+          // vitest 4 removed --poolOptions.forks.singleFork. One worker with file
+          // parallelism off runs files sequentially like singleFork did, but keeps
+          // vitest's default per-file isolation (singleFork shared one module
+          // registry across files) — stricter, and fine for filtered runs.
+          "--maxWorkers=1",
           "--no-file-parallelism",
           ...targetArgs,
         ]),

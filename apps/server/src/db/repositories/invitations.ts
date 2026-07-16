@@ -94,12 +94,14 @@ export function invitationsRepository(client: DbClient) {
         .where(and(eq(T.id, id), isNull(T.consumedAt)));
     },
 
-    /** Cancel an unconsumed pending grant for a specific target. */
+    /** Cancel an unconsumed pending grant for a specific target. Returns the deleted
+     *  row (or null) so callers can audit WHO was uninvited — the row is hard-deleted,
+     *  so the audit trail is the only place the email survives. */
     async cancelPendingForTarget(
       targetType: InvitationTarget["type"],
       targetId: string,
       id: string,
-    ): Promise<boolean> {
+    ): Promise<Invitation | null> {
       const rows = (await db
         .delete(T)
         .where(
@@ -110,8 +112,8 @@ export function invitationsRepository(client: DbClient) {
             isNull(T.consumedAt),
           ),
         )
-        .returning({ id: T.id })) as Array<{ id: string }>;
-      return rows.length > 0;
+        .returning()) as Invitation[];
+      return rows[0] ?? null;
     },
 
     /** Cancel any unconsumed pending grant by id, regardless of target. Admin People uses this. */

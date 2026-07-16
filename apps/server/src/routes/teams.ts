@@ -2,9 +2,7 @@ import type { Config } from "@canvas-drop/shared";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
-import type { UsersRepository } from "../db/repositories/users.js";
 import { requireSameOrigin } from "../http/same-origin.js";
 import type { AppEnv } from "../http/types.js";
 import type { TeamActor, TeamError, TeamsService } from "../teams/service.js";
@@ -18,13 +16,8 @@ import { resolveVisibleTeams } from "../teams/sharing.js";
 export interface TeamsRoutesDeps {
   config: Config;
   service: TeamsService;
-  teams: Pick<
-    TeamsRepository,
-    "listByOrg" | "findById" | "listForUser" | "getMembers" | "isTeamMember"
-  >;
-  users: Pick<UsersRepository, "findByIds">;
-  /** Un-consumed invitations for a team's pending roster rows (plan 003 U6). */
-  invitations: Pick<InvitationsRepository, "listPendingForTarget">;
+  /** List/visibility reads for resolveVisibleTeams; roster assembly lives in the service. */
+  teams: Pick<TeamsRepository, "listByOrg" | "findById" | "listForUser" | "isTeamMember">;
 }
 
 const HTTP: Record<TeamError, 403 | 404 | 409 | 429> = {
@@ -113,38 +106,12 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     return c.json({ ok: true });
   });
 
-  // Roster — opaque 404 unless the caller may see the team. An ORG team's roster is visible
-  // to any member of its org; a PERSONAL team's (org_id null, plan 003) to its creator + its
-  // members. Cross-org/foreign personal teams read as not-found (no existence leak).
+  // Roster — opaque 404 unless the caller may see the team (visibility + assembly live
+  // in teamsService.roster, the SAME implementation the MCP list_team_members wraps).
   app.get("/:id/members", async (c) => {
-    const actor = actorOf(c);
-    const team = await deps.teams.findById(c.req.param("id"));
-    if (!team) return c.json({ error: "not_found" }, 404);
-    const canSee =
-      actor.isAdmin ||
-      (team.orgId !== null
-        ? actor.orgIds.has(team.orgId)
-        : team.createdBy === actor.id || (await deps.teams.isTeamMember(team.id, actor.id)));
-    if (!canSee) return c.json({ error: "not_found" }, 404);
-    const rows = await deps.teams.getMembers(team.id);
-    const users = await deps.users.findByIds(rows.map((m) => m.userId));
-    const byId = new Map(users.map((u) => [u.id, u]));
-    // Pending access (plan 003 U6): brand-new people who haven't signed in yet. They
-    // appear as email-only "Pending" rows (no userId) until their first verified login
-    // materializes the membership. Suppress any whose email already became a member.
-    const memberEmails = new Set(
-      rows.map((m) => byId.get(m.userId)?.email).filter((e): e is string => !!e),
-    );
-    const pending = (await deps.invitations.listPendingForTarget("team", team.id))
-      .filter((inv) => !memberEmails.has(inv.email))
-      .map((inv) => ({ email: inv.email, invitedAt: inv.createdAt }));
-    return c.json({
-      members: rows.map((m) => {
-        const u = byId.get(m.userId);
-        return { userId: m.userId, email: u?.email ?? null, name: u?.name ?? null };
-      }),
-      pending,
-    });
+    const r = await deps.service.roster(actorOf(c), c.req.param("id"));
+    if (!r.ok) return c.json({ error: "not_found" }, 404);
+    return c.json(r.roster);
   });
 
   app.post("/:id/members", sameOrigin, async (c) => {
@@ -159,6 +126,19 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
 
   app.delete("/:id/members/:userId", sameOrigin, async (c) => {
     const r = await deps.service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"));
+    if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
+    return c.json({ ok: true });
+  });
+
+  // Cancel a pending (un-consumed) invite — the self-serve mirror of the add, so a
+  // member who typo'd an email doesn't need an admin. `inviteId` comes from the
+  // roster's pending rows.
+  app.delete("/:id/pending/:inviteId", sameOrigin, async (c) => {
+    const r = await deps.service.cancelPendingInvite(
+      actorOf(c),
+      c.req.param("id"),
+      c.req.param("inviteId"),
+    );
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     return c.json({ ok: true });
   });

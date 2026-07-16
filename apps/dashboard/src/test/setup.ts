@@ -26,6 +26,8 @@ globalThis.ResizeObserver ??= class ResizeObserver {
 globalThis.IntersectionObserver ??= class IntersectionObserver {
   readonly root = null;
   readonly rootMargin = "";
+  // Newer DOM lib (TS 7) requires scrollMargin on the interface.
+  readonly scrollMargin = "";
   readonly thresholds = [];
 
   observe() {}

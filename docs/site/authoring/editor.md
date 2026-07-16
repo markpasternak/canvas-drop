@@ -10,9 +10,14 @@ Every canvas has one **draft**: a working copy separate from what viewers see.
 When you open a new canvas's draft it starts empty; otherwise it's seeded from the
 current published version. Your edits autosave to the draft as you type (debounced
 ~700ms, with a final flush when you leave the editor); the canvas keeps serving its
-published version until you explicitly **publish**. If the draft changed in another
-tab or session since you loaded it, a flush is rejected rather than overwriting that
-newer state, so you don't silently clobber edits made elsewhere.
+published version until you explicitly **publish**. The status bar tells the truth
+about where your edit is: **Unsaved changes** while it's still in the autosave
+window, **Saving…**, **Save failed** if the autosave errored (keep the tab open and
+edit or publish to retry — publishing saves first), **Unpublished changes** once
+it's safely in the draft, and **All changes published** when draft and live match.
+If the draft changed in another tab or session since you loaded it, a flush is
+rejected rather than overwriting that newer state, so you don't silently clobber
+edits made elsewhere.
 
 The loop:
 

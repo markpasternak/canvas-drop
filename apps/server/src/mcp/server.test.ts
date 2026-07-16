@@ -91,6 +91,7 @@ async function connect(
         orgMembers,
         users: usersRepository(client),
         invites: makeInviteService(client, cfg),
+        invitations: invitationsRepository(client),
         audit,
       }),
       invites: makeInviteService(client, cfg),
@@ -1639,6 +1640,62 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     });
     expect(isError(refused)).toBe(true);
     expect(text(refused)).toContain("TARGET_NOT_PERMITTED");
+  });
+
+  it("cancel_team_invite removes a pending roster row (parity with the HTTP cancel); foreign/unknown ids fail", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedUser(client, "owner@nowhere.test");
+    const strangerId = await seedUser(client, "stranger@nowhere.test");
+    const invitations = invitationsRepository(client);
+    const mcp = await connect(client, {
+      userId: ownerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { name: "Family" } }),
+    );
+    await invitations.record({
+      email: "friend@external.test",
+      target: { type: "team", id: team.id },
+      invitedBy: ownerId,
+    });
+
+    // The pending row surfaces with its cancelable id.
+    const roster = payload(
+      await mcp.callTool({ name: "list_team_members", arguments: { id: team.id } }),
+    );
+    expect(roster.pending).toHaveLength(1);
+    const inviteId = roster.pending[0].id as string;
+    expect(inviteId).toBeTruthy();
+
+    // A non-member can't see the team, so the cancel reads as not-found.
+    const strangerMcp = await connect(client, {
+      userId: strangerId,
+      orgIds: new Set<string>(),
+      tenancyActive: false,
+    });
+    const denied = await strangerMcp.callTool({
+      name: "cancel_team_invite",
+      arguments: { id: team.id, inviteId },
+    });
+    expect(isError(denied)).toBe(true);
+
+    // A member cancels it; the roster's pending list empties; a re-cancel fails.
+    payload(
+      await mcp.callTool({ name: "cancel_team_invite", arguments: { id: team.id, inviteId } }),
+    );
+    const after = payload(
+      await mcp.callTool({ name: "list_team_members", arguments: { id: team.id } }),
+    );
+    expect(after.pending).toHaveLength(0);
+    const again = await mcp.callTool({
+      name: "cancel_team_invite",
+      arguments: { id: team.id, inviteId },
+    });
+    expect(isError(again)).toBe(true);
+    expect(text(again)).toContain("TARGET_NOT_FOUND");
   });
 
   it("invite_to_canvas mirrors the HTTP denials: existing user granted, brand-new external rejected (plan 003 U9)", async () => {
