@@ -124,8 +124,10 @@ Authorization: Bearer cd_...
 ```
 
 `204` on success. The bytes must hash to `{hash}` (else `400 BLOB_HASH_MISMATCH`),
-the blob is capped at 25 MB (`413 FILE_TOO_LARGE`), and a handle minted for a
-different canvas is rejected `404 UPLOAD_HANDLE_INVALID` (no existence leak).
+the hash must be one the `begin` manifest referenced (else
+`400 UPLOAD_UNEXPECTED_BLOB`), the blob is capped at 25 MB (`413 FILE_TOO_LARGE`),
+and a handle minted for a different canvas is rejected `404 UPLOAD_HANDLE_INVALID`
+(no existence leak).
 
 **3 — finalize** to publish a version from the staged manifest:
 
@@ -249,7 +251,9 @@ The staged-upload routes use a richer status mapping than the blanket `400`:
 `INVALID_MANIFEST` (`400`), `UPLOAD_HANDLE_INVALID` (`404` — unknown / wrong-owner /
 wrong-canvas handle, no existence leak), `UPLOAD_EXPIRED` (`400`),
 `UPLOAD_ALREADY_FINALIZED` / `UPLOAD_IN_PROGRESS` (`409`), `UPLOAD_MISSING_BLOB`
-(`400`), `BLOB_HASH_MISMATCH` (`400`), `INVALID_ENCODING` (`400`). On these routes
+(`400`), `UPLOAD_UNEXPECTED_BLOB` (`400` — the staged hash is not referenced by
+the upload's begin manifest), `BLOB_HASH_MISMATCH` (`400`), `INVALID_ENCODING`
+(`400`). On these routes
 the size caps surface as `413`, not `400`: `CANVAS_TOO_LARGE`, `TOO_MANY_FILES`,
 `FILE_TOO_LARGE`.
 

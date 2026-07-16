@@ -177,6 +177,17 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
     expect(after?.currentVersionId).toBeTruthy();
   });
 
+  it("rejects staging a blob not referenced by the begin-manifest", async () => {
+    const { svc, storage, canvas, ownerId } = await setup();
+    const { uploadId } = await svc.begin(canvas, ownerId, manifestFor({ "index.html": "a" }));
+    // Correct hash for its bytes, but never declared at begin — could never
+    // finalize, so it must not reach storage.
+    await expect(
+      svc.stageBlob(uploadId, ownerId, canvas.id, sha("sneaky"), enc("sneaky")),
+    ).rejects.toMatchObject({ code: "UPLOAD_UNEXPECTED_BLOB" });
+    expect(await storage.get(blobKey(canvas.id, sha("sneaky")))).toBeNull();
+  });
+
   it("rejects a blob whose bytes do not match its declared hash", async () => {
     const { svc, canvas, ownerId } = await setup();
     const { uploadId } = await svc.begin(canvas, ownerId, manifestFor({ "index.html": "a" }));

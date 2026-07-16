@@ -198,15 +198,19 @@ export function teamsRepository(client: DbClient) {
 
     // ---- canvas → team grants (the `team` rung; consumed by U4) ----
 
-    /** Replace a canvas's granted teams with exactly `teamIds` (idempotent set semantics). */
+    /** Replace a canvas's granted teams with exactly `teamIds` (idempotent set semantics).
+     *  Transactional: a failure between the delete and the insert would otherwise leave a
+     *  `team`-rung canvas granted to nobody — an accidental deny-to-everyone. */
     async setCanvasTeams(canvasId: string, teamIds: string[]): Promise<void> {
-      await db.delete(canvasTeamsT).where(eq(canvasTeamsT.canvasId, canvasId));
-      if (teamIds.length === 0) return;
-      const now = Date.now();
-      await db
-        .insert(canvasTeamsT)
-        .values(teamIds.map((teamId) => ({ canvasId, teamId, createdAt: now })))
-        .onConflictDoNothing();
+      await tx(async (q) => {
+        await q.delete(canvasTeamsT).where(eq(canvasTeamsT.canvasId, canvasId));
+        if (teamIds.length === 0) return;
+        const now = Date.now();
+        await q
+          .insert(canvasTeamsT)
+          .values(teamIds.map((teamId) => ({ canvasId, teamId, createdAt: now })))
+          .onConflictDoNothing();
+      });
     },
 
     async listTeamIdsForCanvas(canvasId: string): Promise<string[]> {

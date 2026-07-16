@@ -407,8 +407,12 @@ export function createHub(deps: HubDeps) {
         }
         // Fail closed on a transient error too: drop the socket and keep sweeping
         // the rest, never abort the loop (mirrors the isPrincipalAllowed guard above).
+        // Members only: a guest's conn.user.id is the synthetic `guest:<inviteId>`,
+        // which the users table can never resolve — checking it would drop every
+        // legacy-guest socket as "user inactive" on the first sweep. Guest liveness
+        // is already re-decided above (allowlist match + decideCanvasAccess).
         let isActive = true;
-        if (deps.isUserActive) {
+        if (deps.isUserActive && principal.kind === "member") {
           try {
             isActive = await deps.isUserActive(conn.user.id);
           } catch (err) {

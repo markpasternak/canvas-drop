@@ -29,6 +29,8 @@ credentials to handle.
 `null` when the key is absent.
 
 `set(key, value)` and `delete(key)` return nothing. `delete` is idempotent.
+`value` may be any JSON value except `null` — `null` is `get`'s absent-key
+sentinel, so setting it is rejected (400); `delete` the key instead.
 
 `increment(key, by = 1)` is atomic and returns the new number — safe for
 concurrent polls, counters, and votes. It throws `NOT_NUMERIC` (409) if the

@@ -271,6 +271,32 @@ describe("RealtimeHub", () => {
     expect(ownerSock.closed).toBeNull();
   });
 
+  it("revalidateCanvas keeps an allowlisted guest — isUserActive is a member check and must not see the synthetic guest id", async () => {
+    // A guest's conn.user.id is `guest:<inviteId>`, which the users table can never
+    // resolve. If revalidation ran isUserActive against it, every legacy-guest socket
+    // would flap: dropped "user inactive" on the first sweep, reconnect, dropped again.
+    const activeUsers = new Set(["owner"]); // no guest ids in the users table
+    const hub = makeHub(
+      fakeCanvas({ access: "specific_people" }),
+      async (id) => activeUsers.has(id),
+      async (_canvasId, p) => p.email === "g@x.com", // guest is on the allowlist
+    );
+    const guestSock = new FakeSocket();
+    const guestUser: ConnUser = {
+      ...user("guest:inv1"),
+      principal: {
+        kind: "guest",
+        id: "guest:inv1",
+        inviteId: "inv1",
+        canvasId: "c1",
+        email: "g@x.com",
+      },
+    };
+    mc(hub, "c1", guestUser, guestSock);
+    await hub.revalidateCanvas("c1");
+    expect(guestSock.closed).toBeNull();
+  });
+
   it("revalidateCanvas drops a non-owner socket when the canvas becomes public_link (static-only), keeps the owner", async () => {
     // public_link is static-only for non-owners: no realtime. A live socket from
     // before the rung change must be dropped instantly (§12.0 #5 lifecycle).

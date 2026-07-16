@@ -58,7 +58,9 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
    *  The limit is the admin-tunable global default (M7) with the hard constant as
    *  the fallback when no resolver/override is present. */
   async function overKeyLimit(cId: string, scope: string, key: string): Promise<boolean> {
-    const exists = (await deps.kv.get(cId, scope, key)) !== null;
+    // Row-aware: a key holding JSON `null` still exists — its update must not be
+    // charged against the key quota as if it were a new key.
+    const exists = (await deps.kv.find(cId, scope, key)) !== null;
     if (exists) return false; // updates don't count against the limit
     const fallback = scope === "shared" ? KV_MAX_KEYS_SHARED : KV_MAX_KEYS_USER;
     const quotaKey = scope === "shared" ? "kv.keys.shared" : "kv.keys.user";
@@ -71,21 +73,25 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
 
     app.get(listPath, async (c) => {
       const scope = scopeOf(c);
-      const limitQ = c.req.query("limit");
+      // Repository clamps to [1, 1000]; drop non-numeric values here so NaN
+      // never reaches the SQL LIMIT clause.
+      const limitN = Number(c.req.query("limit"));
       const res = await deps.kv.list(canvasId(c), scope, {
         prefix: c.req.query("prefix") ?? undefined,
         cursor: c.req.query("cursor") ?? undefined,
-        limit: limitQ ? Number(limitQ) : undefined,
+        limit: Number.isFinite(limitN) ? limitN : undefined,
       });
       meter(c, "list");
       return c.json(res);
     });
 
     app.get(`${prefix}/:key`, async (c) => {
-      const value = await deps.kv.get(canvasId(c), scopeOf(c), c.req.param("key"));
+      // Row-aware lookup: a key that was set to JSON `null` exists and must read
+      // back as `{ value: null }`, not 404 (only a truly absent key is NOT_FOUND).
+      const row = await deps.kv.find(canvasId(c), scopeOf(c), c.req.param("key"));
       meter(c, "get");
-      if (value === null) return c.json({ code: "NOT_FOUND" }, 404);
-      return c.json({ value });
+      if (row === null) return c.json({ code: "NOT_FOUND" }, 404);
+      return c.json({ value: row.value });
     });
 
     app.put(`${prefix}/:key`, async (c) => {
@@ -99,7 +105,16 @@ export function canvasKvRoutes(deps: CanvasKvDeps): Hono<AppEnv> {
       } catch {
         return c.json({ code: "INVALID_BODY" }, 400);
       }
-      if (Buffer.byteLength(JSON.stringify(value ?? null)) > KV_MAX_VALUE_BYTES) {
+      // JSON `null` can't be stored (the value column is NOT NULL) — reject it
+      // cleanly instead of letting the insert 500 on the constraint. Deleting the
+      // key is the way to express "no value".
+      if (value === null) {
+        return c.json(
+          { code: "INVALID_BODY", message: "value must not be null — DELETE the key instead" },
+          400,
+        );
+      }
+      if (Buffer.byteLength(JSON.stringify(value)) > KV_MAX_VALUE_BYTES) {
         return c.json({ code: "VALUE_TOO_LARGE" }, 413);
       }
       const scope = scopeOf(c);

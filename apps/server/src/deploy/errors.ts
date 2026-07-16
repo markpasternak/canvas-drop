@@ -31,6 +31,10 @@ export type DeployErrorCode =
   | "UPLOAD_IN_PROGRESS"
   // Finalize referenced a manifest hash whose blob was never staged / is absent.
   | "UPLOAD_MISSING_BLOB"
+  // A staged blob's hash is not referenced by the session's begin-manifest, so it
+  // could never be finalized — rejecting it keeps unreferenced bytes out of
+  // storage and keeps the aggregate size cap authoritative at stage time.
+  | "UPLOAD_UNEXPECTED_BLOB"
   // A staged blob's sha256 did not match the hash it was uploaded under.
   | "BLOB_HASH_MISMATCH"
   // A `files[]` entry declared an encoding other than utf8/base64.

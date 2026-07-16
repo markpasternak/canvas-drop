@@ -71,9 +71,10 @@ export function cloneService(deps: CloneServiceDeps) {
       //    a clone's key is revealed on demand via Settings → Regenerate key, so it
       //    never transits the wire (plan 002). backendEnabled is NOT carried — a
       //    clone starts static-first (create defaults it off + cap_* on).
-      const slug = await generateUniqueSlug(
-        async (s) => (await deps.canvases.findBySlug(s)) !== null,
-      );
+      // slugTaken, not findBySlug: the unique index is status-unaware, so a slug
+      // colliding with a deleted tombstone (which findBySlug hides) would throw an
+      // uncaught unique violation (plan 004 KTD8 — same check every create path uses).
+      const slug = await generateUniqueSlug((s) => deps.canvases.slugTaken(s));
       const canvas = await deps.canvases.create({
         ownerId,
         slug,

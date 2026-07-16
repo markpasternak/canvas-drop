@@ -49,6 +49,11 @@ export function filesRepository(client: DbClient) {
       return (rows[0] as FileRow | undefined) ?? null;
     },
 
+    /** Hard-delete every file row of a canvas (purge of a soft-deleted canvas). */
+    async deleteByCanvas(canvasId: string): Promise<void> {
+      await db.delete(t).where(eq(t.canvasId, canvasId));
+    },
+
     /** Delete the row if it belongs to the canvas; returns it (for blob cleanup) or null. */
     async remove(canvasId: string, id: string): Promise<FileRow | null> {
       const rows = (await db
