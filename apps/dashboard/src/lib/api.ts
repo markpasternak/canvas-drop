@@ -315,8 +315,10 @@ export interface TeamMember {
 }
 
 /** Pending access on a team's roster (plan 003 U6): a brand-new person who hasn't
- *  signed in yet. They join (become a TeamMember) on their first verified login. */
+ *  signed in yet. They join (become a TeamMember) on their first verified login.
+ *  `id` powers the self-serve cancel (any team member can take back a typo'd email). */
 export interface TeamPendingInvite {
+  id: string;
   email: string;
   invitedAt: number;
 }
@@ -1152,6 +1154,9 @@ export const api = {
       request<AddMemberResult>(`/api/teams/${id}/members`, jsonBody({ email })),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/api/teams/${id}/members/${userId}`, { method: "DELETE" }),
+    /** Cancel a pending invite (self-serve mirror of addMember). */
+    cancelPending: (id: string, inviteId: string) =>
+      request<{ ok: true }>(`/api/teams/${id}/pending/${inviteId}`, { method: "DELETE" }),
   },
 
   updateCapabilities: (id: string, patch: CanvasCapabilitiesPatch) =>

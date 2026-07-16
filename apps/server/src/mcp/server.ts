@@ -1586,6 +1586,25 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   );
 
   server.registerTool(
+    "cancel_team_invite",
+    {
+      description:
+        "Cancel a pending invite on a team you belong to (a person invited by email who hasn't " +
+        "signed in yet). Pass the pending row's `id` from list_team_members. The self-serve " +
+        "mirror of add_team_member — no admin needed to take back a typo'd email.",
+      inputSchema: {
+        id: z.string().describe("The team id."),
+        inviteId: z.string().describe("The pending invite id (from list_team_members)."),
+      },
+    },
+    async ({ id, inviteId }) => {
+      const r = await deps.teamsService.cancelPendingInvite(await teamActorNow(), id, inviteId);
+      if (!r.ok) return fail(TEAM_FAIL[r.error]);
+      return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
     "list_team_members",
     {
       description:
@@ -1615,7 +1634,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       );
       const pending = (await deps.invitations.listPendingForTarget("team", team.id))
         .filter((inv) => !memberEmails.has(inv.email))
-        .map((inv) => ({ email: inv.email, invitedAt: inv.createdAt }));
+        // `id` powers cancel_team_invite (parity with the HTTP roster).
+        .map((inv) => ({ id: inv.id, email: inv.email, invitedAt: inv.createdAt }));
       return ok({
         members: rows.map((m) => {
           const u = byId.get(m.userId);

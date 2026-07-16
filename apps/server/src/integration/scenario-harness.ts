@@ -315,6 +315,7 @@ export async function connectMcp(
         orgMembers,
         users: repos.users,
         invites: makeInviteService(h.client, config),
+        invitations: invitationsRepository(h.client),
         audit,
       }),
       invites: makeInviteService(h.client, config),

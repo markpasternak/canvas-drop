@@ -34,6 +34,7 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
       orgMembers,
       users,
       invites: makeInviteService(client, config),
+      invitations,
       audit,
     });
 
@@ -129,6 +130,39 @@ describe.each(DIALECTS)("teamsService (plan 003 U3) [%s]", (dialect) => {
       await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test"),
     ).toEqual({ ok: true, status: "already_pending" });
     expect(await invitations.listPendingForTarget("team", r.team.id)).toHaveLength(1);
+  });
+
+  it("cancelPendingInvite: a member can take back a pending invite; outsiders read not-found; unknown ids are TARGET_NOT_FOUND", async () => {
+    const { svc, allowedEmails, invitations, mkUser, actor } = await setup();
+    const owner = await mkUser("o@gmail.com");
+    const stranger = await mkUser("s@gmail.com");
+    const r = await svc.create(actor(owner, false), { name: "Friends" });
+    if (!r.ok) throw new Error("setup");
+
+    await allowedEmails.add("friend@external.test", owner.id);
+    await svc.addMemberByEmail(actor(owner, false), r.team.id, "friend@external.test");
+    const inv = (await invitations.listPendingForTarget("team", r.team.id))[0];
+    if (!inv) throw new Error("expected a pending invitation");
+
+    // A non-member can't even see the personal team (opaque not-found, §12.0).
+    expect(await svc.cancelPendingInvite(actor(stranger, false), r.team.id, inv.id)).toEqual({
+      ok: false,
+      error: "TEAM_NOT_FOUND",
+    });
+    // An unknown invite id reads as TARGET_NOT_FOUND.
+    expect(await svc.cancelPendingInvite(actor(owner, false), r.team.id, "nope")).toEqual({
+      ok: false,
+      error: "TARGET_NOT_FOUND",
+    });
+    // A member cancels it; the pending row is gone and a re-cancel is not-found.
+    expect(await svc.cancelPendingInvite(actor(owner, false), r.team.id, inv.id)).toEqual({
+      ok: true,
+    });
+    expect(await invitations.listPendingForTarget("team", r.team.id)).toHaveLength(0);
+    expect(await svc.cancelPendingInvite(actor(owner, false), r.team.id, inv.id)).toEqual({
+      ok: false,
+      error: "TARGET_NOT_FOUND",
+    });
   });
 
   it("team names are creator-local: same creator can't dupe, different creators can reuse", async () => {

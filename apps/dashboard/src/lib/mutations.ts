@@ -689,6 +689,18 @@ export function useRemoveTeamMember(id: string) {
   });
 }
 
+/** Cancel a pending team invite (self-serve mirror of the add). Refreshes the roster;
+ *  the person never had access, so Shared/teams lists are unaffected. */
+export function useCancelTeamInvite(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => api.teams.cancelPending(id, inviteId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.teamMembers(id) });
+    },
+  });
+}
+
 /** Set or clear (value === null) a DB override for an editable config setting. */
 /** Email templates (plan 003 phase 3): override one template's subject/HTML/text, or reset
  *  it to the seeded default. Both refetch the templates list so the editor reflects the

@@ -137,7 +137,8 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
     );
     const pending = (await deps.invitations.listPendingForTarget("team", team.id))
       .filter((inv) => !memberEmails.has(inv.email))
-      .map((inv) => ({ email: inv.email, invitedAt: inv.createdAt }));
+      // `id` powers the self-serve cancel (DELETE /:id/pending/:inviteId).
+      .map((inv) => ({ id: inv.id, email: inv.email, invitedAt: inv.createdAt }));
     return c.json({
       members: rows.map((m) => {
         const u = byId.get(m.userId);
@@ -159,6 +160,19 @@ export function teamsRoutes(deps: TeamsRoutesDeps): Hono<AppEnv> {
 
   app.delete("/:id/members/:userId", sameOrigin, async (c) => {
     const r = await deps.service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"));
+    if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
+    return c.json({ ok: true });
+  });
+
+  // Cancel a pending (un-consumed) invite — the self-serve mirror of the add, so a
+  // member who typo'd an email doesn't need an admin. `inviteId` comes from the
+  // roster's pending rows.
+  app.delete("/:id/pending/:inviteId", sameOrigin, async (c) => {
+    const r = await deps.service.cancelPendingInvite(
+      actorOf(c),
+      c.req.param("id"),
+      c.req.param("inviteId"),
+    );
     if (!r.ok) return c.json({ error: r.error }, HTTP[r.error]);
     return c.json({ ok: true });
   });

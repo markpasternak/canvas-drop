@@ -222,6 +222,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     orgMembers,
     users: deps.users,
     invites,
+    invitations,
     audit: deps.audit,
   });
 

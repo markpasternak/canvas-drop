@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast.js";
@@ -134,7 +134,7 @@ describe("teams page", () => {
       "GET /api/teams/t1/members": () =>
         json({
           members: [{ userId: "u2", email: "ada@example.com", name: "Ada Lovelace" }],
-          pending: [{ email: "waiting@example.com", invitedAt: 1 }],
+          pending: [{ id: "inv1", email: "waiting@example.com", invitedAt: 1 }],
         }),
       "POST /api/teams/t1/members": () =>
         json({ ok: true, status: "pending", emailDelivery: { status: "sent" } }),
@@ -157,6 +157,67 @@ describe("teams page", () => {
       const post = calls.find((c) => c.method === "POST" && c.url === "/api/teams/t1/members");
       expect(post?.body).toContain("new@example.com");
     });
+  });
+
+  it("a member can cancel a pending invite from its roster row", async () => {
+    const calls = mockFetch({
+      "GET /api/teams": () =>
+        json({
+          teams: [
+            { id: "t1", orgId: "o1", name: "Design", slug: "design", mine: true, canManage: true },
+          ],
+        }),
+      "GET /api/teams/t1/members": () =>
+        json({
+          members: [{ userId: "u2", email: "ada@example.com", name: "Ada Lovelace" }],
+          pending: [{ id: "inv1", email: "waiting@example.com", invitedAt: 1 }],
+        }),
+      "DELETE /api/teams/t1/pending/inv1": () => json({ ok: true }),
+    });
+    const user = userEvent.setup();
+    renderTeams();
+
+    await user.click(await screen.findByRole("button", { name: /^members$/i }));
+    const pendingRow = (await screen.findByText("waiting@example.com")).closest("li");
+    expect(pendingRow).not.toBeNull();
+    await user.click(within(pendingRow as HTMLElement).getByRole("button", { name: /remove/i }));
+
+    expect(await screen.findByText("Pending invite canceled")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/teams/t1/pending/inv1")).toBe(
+      true,
+    );
+  });
+
+  it("leaving a team asks for confirmation first", async () => {
+    const calls = mockFetch({
+      "GET /api/me": () => json({ ...ME, id: "u-me", email: "me@example.com", name: "Me" }),
+      "GET /api/teams": () =>
+        json({
+          teams: [
+            { id: "t1", orgId: "o1", name: "Design", slug: "design", mine: true, canManage: false },
+          ],
+        }),
+      "GET /api/teams/t1/members": () =>
+        json({
+          members: [{ userId: "u-me", email: "me@example.com", name: "Me" }],
+          pending: [],
+        }),
+      "DELETE /api/teams/t1/members/u-me": () => json({ ok: true }),
+    });
+    const user = userEvent.setup();
+    renderTeams();
+
+    await user.click(await screen.findByRole("button", { name: /^members$/i }));
+    await user.click(await screen.findByRole("button", { name: /^leave$/i }));
+    // Nothing fired yet — the confirm dialog owns the action.
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    const dialog = await screen.findByRole("dialog", { name: /leave .*design/i });
+    await user.click(within(dialog).getByRole("button", { name: /leave team/i }));
+
+    expect(await screen.findByText("You left the team")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/teams/t1/members/u-me")).toBe(
+      true,
+    );
   });
 
   it("does NOT offer rename/delete for a team the caller can't manage", async () => {

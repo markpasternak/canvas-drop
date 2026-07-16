@@ -1,5 +1,6 @@
 import type { Team } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
@@ -56,6 +57,8 @@ export function teamsService(deps: {
   /** The Add person primitive (plan 003 U5) — personal-team adds route through it so a
    *  brand-new email becomes pending access (KTD5-gated) instead of TARGET_NOT_FOUND. */
   invites: InviteService;
+  /** Pending-invite rows — canceled self-serve by team members (mirror of the add). */
+  invitations: Pick<InvitationsRepository, "cancelPendingForTarget">;
   audit: Pick<AuditLog, "recordAudit">;
 }) {
   /** Can the actor even SEE this team exists (else opaque NOT-FOUND, §12.0)? An ORG team is
@@ -164,6 +167,30 @@ export function teamsService(deps: {
       return r.emailDelivery
         ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }
         : { ok: true, status: r.status };
+    },
+
+    /** Cancel a pending (un-consumed) invite on a team. Same self-serve rule as the
+     *  add: any team member (or operator) may cancel — the member who typo'd an
+     *  email must be able to take it back without escalating to an admin. An
+     *  unknown/consumed/foreign invite id reads as TARGET_NOT_FOUND (no leak). */
+    async cancelPendingInvite(
+      actor: TeamActor,
+      teamId: string,
+      inviteId: string,
+    ): Promise<VoidResult> {
+      const team = await deps.teams.findById(teamId);
+      if (!team || !visible(actor, team)) return { ok: false, error: "TEAM_NOT_FOUND" };
+      if (!actor.isAdmin && !(await deps.teams.isTeamMember(teamId, actor.id)))
+        return { ok: false, error: "FORBIDDEN" };
+      const cancelled = await deps.invitations.cancelPendingForTarget("team", teamId, inviteId);
+      if (!cancelled) return { ok: false, error: "TARGET_NOT_FOUND" };
+      deps.audit.recordAudit({
+        action: "team_invite_cancel",
+        actorId: actor.id,
+        targetId: teamId,
+        meta: { inviteId },
+      });
+      return { ok: true };
     },
 
     /** Remove a member. A team member or operator may remove anyone; anyone may remove self. */

@@ -70,7 +70,8 @@ discoverable in Shared.
 | `create_team` | Create a team. **Omit `orgId`** for a *personal* team (friends & family — add people by email when policy allows it); pass an `orgId` from `whoami.orgs` to attach it to that org. You become its first member and manager. |
 | `rename_team` / `delete_team` | Rename or delete a team you created. Deleting unshares every canvas shared with it (the canvases are untouched). |
 | `add_team_member` / `remove_team_member` | Add someone to a team you belong to by `email`, or remove a member (pass your own user id to leave). Returns `status`: `granted` (existing user joined now) or `pending` (a brand-new person joins on first sign-in). For an org team they must be a same-org member; a brand-new external email on a personal team is refused for a non-admin unless the instance allows it. |
-| `list_team_members` | The roster of a team you belong to (`userId`, `email`, `name`). |
+| `list_team_members` | The roster of a team you belong to: active `members` (`userId`, `email`, `name`) plus `pending` invite rows (`id`, `email`, `invitedAt`) for people who haven't signed in yet. |
+| `cancel_team_invite` | Cancel a pending invite on a team you belong to — the self-serve mirror of `add_team_member` (take back a typo'd email without an admin). Pass the pending row's `id` from `list_team_members`. |
 | `list_shared_canvases` | Non-owned canvases discoverable to you in **Shared**: direct Specific-people grants, listed Team shares, and listed Whole-org shares. Takes optional `query`, `sort` (`updated`/`title`/`owner`), `limit`, and `offset`. Display-only; open via the returned `url`. |
 | `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
 | `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |

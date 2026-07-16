@@ -44,7 +44,7 @@ client registration) and then get identity-scoped tools across every canvas you 
 `clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
 `invite_to_canvas`/`revoke_access`, the team tools `list_teams`/
 `create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
-`add_team_member`/`remove_team_member`/`list_team_members`/
+`add_team_member`/`remove_team_member`/`cancel_team_invite`/`list_team_members`/
 `list_shared_canvases` (plus `update_canvas` with `access: "team"` + `teamIds` to share
 a canvas with a team), and the editor draft loop `get_draft`/
 `read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/

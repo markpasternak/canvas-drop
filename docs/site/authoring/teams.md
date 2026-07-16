@@ -59,10 +59,12 @@ for the full picture.
 ## The roster
 
 Expanding a team shows its **members** plus any **pending sign-ins** (email-only
-rows for people who haven't signed in yet). Remove a member at any time, or **leave**
-a team yourself. The team's creator (or an admin) can rename or delete it — deleting
-a team removes its memberships and unshares every canvas shared with it, but the
-canvases themselves are untouched.
+rows for people who haven't signed in yet). Remove a member at any time — including
+a **pending** invite, so a typo'd email can be taken back without an admin — or
+**leave** a team yourself (leaving asks you to confirm: you can't re-add yourself).
+The team's creator (or an admin) can rename or delete it — deleting a team removes
+its memberships and unshares every canvas shared with it, but the canvases
+themselves are untouched.
 
 ## Sharing a canvas with a team
 
@@ -82,7 +84,8 @@ dashboard (or through `list_shared_canvases` over MCP).
 
 Everything here is available to an agent over [MCP](/docs/agents/mcp), wrapping the
 same service the dashboard uses: `create_team` (omit `orgId` for a personal team),
-`add_team_member` (returns `granted` or `pending`), `list_team_members` (members +
+`add_team_member` (returns `granted` or `pending`), `cancel_team_invite` (take back
+a pending invite by its roster `id`), `list_team_members` (members +
 pending), `grant_access`, `list_shared_canvases`, and `update_canvas` with
 `access: "team"` + `teamIds`. Add `discoverability: "listed"` when a team share should
 show in Shared; leave it unset or set `discoverability: "link_only"` for URL-only access.
