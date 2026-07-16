@@ -1106,21 +1106,21 @@ describe("admin routes", () => {
     { method: "PUT", path: "/api/admin/config/ai.models" },
     { method: "DELETE", path: "/api/admin/config/ai.models" },
   ];
-  it.each(adminMutations)("rejects $method $path when Sec-Fetch-Site is cross-site", async ({
-    method,
-    path,
-  }) => {
-    client = await makeTestDb("sqlite");
-    const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
-    const res = await app.request(path, {
-      method,
-      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
-      body: JSON.stringify({}),
-    });
-    // The same-origin guard runs before any handler logic, so the cross-site
-    // request is rejected with 403 regardless of whether the target id exists.
-    expect(res.status).toBe(403);
-  });
+  it.each(adminMutations)(
+    "rejects $method $path when Sec-Fetch-Site is cross-site",
+    async ({ method, path }) => {
+      client = await makeTestDb("sqlite");
+      const { app } = buildAdminApp(client, { id: "admin", isAdmin: true });
+      const res = await app.request(path, {
+        method,
+        headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+        body: JSON.stringify({}),
+      });
+      // The same-origin guard runs before any handler logic, so the cross-site
+      // request is rejected with 403 regardless of whether the target id exists.
+      expect(res.status).toBe(403);
+    },
+  );
 
   it("GET /config returns every setting; secrets never carry a raw value", async () => {
     client = await makeTestDb("sqlite");

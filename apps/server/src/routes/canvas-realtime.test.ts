@@ -334,7 +334,7 @@ describe("realtime WebSocket route", () => {
     expect((join.user as { id: string }).id).toBe("bob");
     // bob's presence snapshot lists both
     const presence = b.messages.find((m) => m.type === "presence");
-    expect((presence?.users as Array<{ id: string }>).map((u) => u.id).sort()).toEqual([
+    expect(((presence?.users ?? []) as Array<{ id: string }>).map((u) => u.id).sort()).toEqual([
       "alice",
       "bob",
     ]);
