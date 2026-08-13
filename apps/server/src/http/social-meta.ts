@@ -12,12 +12,17 @@ export const FAVICON_LINKS = `<link rel="icon" href="/favicon.svg" type="image/s
 <link rel="manifest" href="/site.webmanifest">`;
 
 /**
- * Strip HTML tags to a fixpoint. One pass of `<[^>]+>` is not enough: on
- * `<<b>script>` it removes the inner `<b>` and the leftovers re-form `<script>`,
- * so a single pass can hand back markup it was asked to remove. Repeat until the
- * string stops changing (each changed pass removes at least one `<`, so this
- * terminates). The caller escapes the result regardless — this keeps the
- * description reading cleanly and keeps the strip from being walked backwards.
+ * Strip HTML tags, repeating until the string stops changing.
+ *
+ * `<[^>]+>` is in fact idempotent — a `<` only survives a pass when no `>`
+ * follows it at all, and removing earlier text cannot put one there — so the
+ * second pass never changes anything today. The loop is not load-bearing for
+ * this regex; it makes the function robust to the regex being edited into one
+ * that IS walkable (the `.replace("<script>", "")` class, where `<<script>script>`
+ * re-forms the tag), and it clears code scanning's
+ * `js/incomplete-multi-character-sanitization`, which flags single-pass tag
+ * strips as a category. What actually makes this output safe is the `escapeHtml`
+ * the caller applies to it; the strip is about the description reading cleanly.
  */
 function stripTags(html: string): string {
   let out = html;

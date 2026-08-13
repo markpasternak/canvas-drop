@@ -83,11 +83,13 @@ function escapeText(text) {
     .replace(/'/g, "&#39;");
 }
 
-/** Remove HTML tags to a fixpoint, replacing each with `fill`.
- *  One pass is not enough: on `<<b>script>` it removes the inner `<b>` and the
- *  leftovers re-form `<script>`, so a single pass can hand back the very markup
- *  it was asked to strip. Repeat until the string stops changing — each changed
- *  pass drops at least one `<`, so this terminates. */
+/** Remove HTML tags, replacing each with `fill`, until the string stops changing.
+ *  `<[^>]*>` is idempotent as written (a `<` survives only when no `>` follows it,
+ *  and deleting earlier text cannot put one there), so the second pass is a no-op
+ *  today. The loop keeps that from being load-bearing if the regex is ever edited
+ *  into a walkable one, and clears code scanning's
+ *  js/incomplete-multi-character-sanitization, which flags single-pass strips as a
+ *  category. Callers embedding the result in HTML must still escape it. */
 function stripHtmlTags(html, fill) {
   let out = html;
   for (;;) {

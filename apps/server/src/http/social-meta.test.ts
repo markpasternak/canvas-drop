@@ -3,11 +3,12 @@ import { ogMeta } from "./social-meta.js";
 
 const base = { origin: "https://canvas-drop.com", path: "/docs", title: "Docs" };
 
+// These pin the property that actually protects the emitted tags — no raw angle
+// bracket reaches an attribute value — rather than the tag strip in isolation.
+// The strip is cosmetic; `escapeHtml` is what makes the output safe, so these
+// hold for any strip implementation and would catch its removal.
 describe("ogMeta description sanitization", () => {
-  it("strips tags nested so a single pass would re-form them", () => {
-    // A one-pass `<[^>]+>` strip removes the inner `<b>` and leaves the outer
-    // fragments touching, re-forming `<script>` in the output. The strip must
-    // run to a fixpoint (CodeQL js/incomplete-multi-character-sanitization).
+  it("emits no raw markup even for nested-tag input", () => {
     const d = ogMeta({ ...base, description: "<<b>script>alert(1)<</b>/script>hi" });
     expect(d).not.toContain("<script");
     expect(d).not.toContain("</script");

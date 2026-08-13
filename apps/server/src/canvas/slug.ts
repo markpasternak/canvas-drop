@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { validateSlug } from "@canvas-drop/shared";
 
 /**
@@ -100,16 +100,13 @@ function randomBase32(chars: number): string {
 }
 
 function pick<T>(arr: readonly T[]): T {
-  // Rejection sampling. `byte % len` is only unbiased when len divides 256 — it
-  // happens to today (both lists are 32), which is why the plain modulo here was
-  // in fact uniform. That is a silent precondition though: dropping or adding a
-  // single word would make the first (256 % len) entries come up more often with
-  // nothing to catch it. Discarding the ragged tail above the last whole multiple
-  // of len keeps the guarantee whatever the lists hold.
-  const limit = Math.floor(256 / arr.length) * arr.length;
-  let byte = randomBytes(1)[0] as number;
-  while (byte >= limit) byte = randomBytes(1)[0] as number;
-  return arr[byte % arr.length] as T;
+  // `randomInt` rejection-samples internally and is uniform for any bound. The
+  // previous `randomBytes(1)[0] % arr.length` was only unbiased because both
+  // lists happen to be 32 long — an unstated precondition that adding or dropping
+  // a single word would have broken silently, over-weighting the first
+  // (256 % len) entries. Let the platform hold that invariant instead of the
+  // wordlists. (Slug unguessability rests on the base32 suffix either way.)
+  return arr[randomInt(arr.length)] as T;
 }
 
 /** ≥64 bits of entropy: 13 base32 chars × 5 bits = 65 bits. */
