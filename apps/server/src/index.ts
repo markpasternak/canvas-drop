@@ -123,6 +123,7 @@ async function main() {
           allowedEmails,
           sessionSvc,
           getConfig: makeOidcConfigLoader(config),
+          audit,
         })
       : undefined;
 
