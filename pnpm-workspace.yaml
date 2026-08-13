@@ -4,9 +4,39 @@ packages:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
-# Force transitive esbuild past known dev-server advisories:
-# GHSA-67mh-4wv8-2f99 (<=0.24.2, via drizzle-kit's @esbuild-kit loader)
-# GHSA-g7r4-m6w7-qqqr (>=0.27.3 <0.28.1, via vitest -> vite)
+# Force transitive dependencies past known advisories. Each entry is here because
+# the vulnerable package has no direct dependent we control — it arrives under a
+# third-party tree (vite/vitest, jsdom, sanitize-html, the MCP SDK), so bumping our
+# own package.json ranges cannot reach it. Direct dependencies are fixed by raising
+# their range in package.json instead, never here.
+#
+# esbuild   GHSA-67mh-4wv8-2f99 (<=0.24.2, via drizzle-kit's @esbuild-kit loader)
+#           GHSA-g7r4-m6w7-qqqr (>=0.27.3 <0.28.1, via vitest -> vite)
+# postcss   GHSA-fxqj-rqcc-2cmp  (<=8.5.22, via vite and sanitize-html)
+# nanoid    GHSA-2v37-7h3g-55p8  (<3.3.17, via postcss)
+# undici    GHSA-4cwx-7wf7-3272, GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5,
+#           GHSA-jr45-8vmc-qm54, GHSA-v3r7-h72x-cjcm (<7.29.0, via jsdom)
+# dompurify GHSA-55q2-fjhq-7xh7  (<=3.4.12, via mermaid)
+# fast-uri  GHSA-7p8r-x3mc-p8w7, GHSA-v2hh-gcrm-f6hx (<3.1.5, via ajv <- MCP SDK)
+# ip-address GHSA-mwp4-54f8-5fhr, GHSA-4xrf-jv44-h6hh, GHSA-22jq-vg5j-6vgg
+#           (<10.3.1, via express-rate-limit <- MCP SDK)
+# hono      GHSA-8j4g-w8fx-2239, GHSA-f23p-vx2j-j53r, GHSA-79qm-7rj5-m7r9,
+#           GHSA-54fx-42gc-7vw4 (<4.12.34, via @hono/mcp and the MCP SDK)
+# @hono/node-server GHSA-frvp-7c67-39w9 (1.x <1.19.15, via the MCP SDK; our own
+#           direct dependency is on the 2.x line, raised in apps/server/package.json)
+#
+# Every matcher is bounded at BOTH ends, always to the major the fix landed in.
+# An open-ended `pkg@<X` also matches every earlier major, so a future transitive
+# dep on (say) postcss ^7 would be force-resolved to 8 and break on the APIs that
+# major removed — a bounded matcher leaves it alone instead.
 overrides:
   "esbuild@<=0.24.2": "^0.25.12"
   "esbuild@>=0.27.3 <0.28.1": "^0.28.1"
+  "postcss@>=8.0.0 <8.5.23": "^8.5.23"
+  "nanoid@>=3.0.0 <3.3.17": "^3.3.17"
+  "undici@>=7.0.0 <7.29.0": "^7.29.0"
+  "dompurify@>=3.0.0 <3.4.13": "^3.4.13"
+  "fast-uri@>=3.0.0 <3.1.5": "^3.1.5"
+  "ip-address@>=10.0.0 <10.3.1": "^10.3.1"
+  "hono@>=4.0.0 <4.12.34": "^4.12.34"
+  "@hono/node-server@>=1.0.0 <1.19.15": "^1.19.15"

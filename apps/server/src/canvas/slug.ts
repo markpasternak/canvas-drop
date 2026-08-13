@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { validateSlug } from "@canvas-drop/shared";
 
 /**
@@ -100,9 +100,13 @@ function randomBase32(chars: number): string {
 }
 
 function pick<T>(arr: readonly T[]): T {
-  // unbiased index from a random byte pool
-  const idx = randomBytes(1)[0] as number;
-  return arr[idx % arr.length] as T;
+  // `randomInt` rejection-samples internally and is uniform for any bound. The
+  // previous `randomBytes(1)[0] % arr.length` was only unbiased because both
+  // lists happen to be 32 long — an unstated precondition that adding or dropping
+  // a single word would have broken silently, over-weighting the first
+  // (256 % len) entries. Let the platform hold that invariant instead of the
+  // wordlists. (Slug unguessability rests on the base32 suffix either way.)
+  return arr[randomInt(arr.length)] as T;
 }
 
 /** ≥64 bits of entropy: 13 base32 chars × 5 bits = 65 bits. */

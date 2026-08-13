@@ -73,3 +73,33 @@ describe("build-docs renderMarkdown", () => {
     expect(html).toContain('src="https://example.com/x.png"');
   });
 });
+
+describe("build-docs text extraction", () => {
+  it("does not double-unescape entities into markup", () => {
+    // `&amp;lt;b&amp;gt;` is the author writing the literal text `&lt;b&gt;`.
+    // Unescaping `&amp;` before `&lt;` turned it into a real `<b>` tag — the
+    // CodeQL js/double-escaping finding. `&amp;` must be resolved last.
+    const { headings, text } = renderMarkdown("# T\n\n## A &amp;lt;b&amp;gt; tag");
+    expect(headings[0].text).toBe("A &lt;b&gt; tag");
+    expect(text).not.toContain("<b>");
+  });
+
+  it("still unescapes ordinary entities once", () => {
+    const { headings } = renderMarkdown("# T\n\n## Tom &amp; Jerry &lt;here&gt;");
+    expect(headings[0].text).toBe("Tom & Jerry <here>");
+  });
+
+  it("extracts plain text, leaving escaping to whoever embeds it", () => {
+    // stripTags produces TEXT, so unescaped `<` in the result is correct — this
+    // feeds the search index and (via summarize) the og:description, and it is
+    // ogMeta that escapes it for HTML. See social-meta.test.ts for that half.
+    const { text } = renderMarkdown("# T\n\n<p><<b>script>alert(1)<</b>/script></p>");
+    expect(text).toContain("<script>");
+    expect(text).not.toContain("&lt;");
+  });
+
+  it("drops HTML tags rather than leaking their markup into the text", () => {
+    const { text } = renderMarkdown("# T\n\n<p>hello <em>there</em></p>");
+    expect(text).toBe("T hello there");
+  });
+});

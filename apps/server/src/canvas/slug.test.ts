@@ -17,6 +17,23 @@ describe("generateSlug", () => {
     const suffix = generateSlug().split("-").pop() as string;
     expect(suffix.length).toBe(13);
   });
+
+  it("can reach every word in both lists", () => {
+    // Uniformity itself is `randomInt`'s guarantee, and asserting a frequency
+    // band here would just add a flaky required check. What is worth pinning is
+    // reachability: an off-by-one in the index bound (the realistic bug) would
+    // strand the last word, and over 20k draws a reachable word is missed with
+    // probability ~(31/32)^20000 — effectively never.
+    const adjectives = new Set<string>();
+    const nouns = new Set<string>();
+    for (let i = 0; i < 20_000; i++) {
+      const [adjective, noun] = generateSlug().split("-") as [string, string];
+      adjectives.add(adjective);
+      nouns.add(noun);
+    }
+    expect(adjectives.size).toBe(32);
+    expect(nouns.size).toBe(32);
+  });
 });
 
 describe("generateUniqueSlug", () => {

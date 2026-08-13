@@ -32,6 +32,15 @@ jobs:
       - run: pnpm docs:build
       - name: Assert generated docs are up to date
         run: git diff --exit-code -- apps/server/src/docs/generated-content.ts
+      # The Mermaid renderer served at /docs/mermaid.js is a committed esbuild
+      # bundle, so a dependency bump does NOT reach visitors until it is rebuilt.
+      # It went stale exactly that way once: the tree carried DOMPurify 3.4.11
+      # (GHSA-55q2-fjhq-7xh7) for a bump that had already closed the advisory in
+      # the lockfile. Same esbuild + same lockfile is byte-reproducible, so drift
+      # here means someone changed a dep without rebuilding.
+      - run: pnpm docs:mermaid
+      - name: Assert the bundled Mermaid renderer is up to date
+        run: git diff --exit-code -- docs/site/assets/mermaid.js
       - run: pnpm lint
       - run: pnpm typecheck
 

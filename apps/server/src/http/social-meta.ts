@@ -12,6 +12,28 @@ export const FAVICON_LINKS = `<link rel="icon" href="/favicon.svg" type="image/s
 <link rel="manifest" href="/site.webmanifest">`;
 
 /**
+ * Strip HTML tags, repeating until the string stops changing.
+ *
+ * `<[^>]+>` is in fact idempotent — a `<` only survives a pass when no `>`
+ * follows it at all, and removing earlier text cannot put one there — so the
+ * second pass never changes anything today. The loop is not load-bearing for
+ * this regex; it makes the function robust to the regex being edited into one
+ * that IS walkable (the `.replace("<script>", "")` class, where `<<script>script>`
+ * re-forms the tag), and it clears code scanning's
+ * `js/incomplete-multi-character-sanitization`, which flags single-pass tag
+ * strips as a category. What actually makes this output safe is the `escapeHtml`
+ * the caller applies to it; the strip is about the description reading cleanly.
+ */
+function stripTags(html: string): string {
+  let out = html;
+  for (;;) {
+    const next = out.replace(/<[^>]+>/g, "");
+    if (next === out) return out;
+    out = next;
+  }
+}
+
+/**
  * One consistent block of SEO + Open Graph + Twitter card tags for the indexable,
  * self-rendered public pages: the landing (`/`), legal (`/privacy`, `/terms`),
  * and docs (`/docs/*`). Centralizing it means every shared link unfurls
@@ -37,12 +59,7 @@ export function ogMeta(opts: {
   const url = escapeHtml(`${base}${opts.path}`);
   const image = escapeHtml(`${base}/og.png`);
   const t = escapeHtml(opts.title);
-  const d = escapeHtml(
-    opts.description
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
+  const d = escapeHtml(stripTags(opts.description).replace(/\s+/g, " ").trim());
   return `<meta name="description" content="${d}">
 <link rel="canonical" href="${url}">
 <meta name="robots" content="index,follow">

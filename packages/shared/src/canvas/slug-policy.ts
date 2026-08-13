@@ -57,10 +57,18 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
  * trim leading/trailing hyphens. NOT authoritative — the server still validates.
  */
 export function normalizeSlug(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  return (
+    raw
+      .toLowerCase()
+      // Collapse every run of disallowed characters — hyphens included — to a
+      // single hyphen, so the result can never hold two hyphens in a row.
+      .replace(/[^a-z0-9]+/g, "-")
+      // Given that invariant, one optional hyphen at each end is all there can
+      // be. Trimming with `^-+|-+$` instead would backtrack quadratically on a
+      // long run of hyphens, and this runs on live keystrokes from the slug
+      // field (polynomial ReDoS on attacker-supplied input).
+      .replace(/^-|-$/g, "")
+  );
 }
 
 /** Why a slug failed validation. `taken` is layered on by the caller (DB), not here. */

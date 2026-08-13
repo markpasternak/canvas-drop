@@ -4,7 +4,20 @@ import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
-/** SHA-256 hex of a high-entropy token — only the hash is ever stored (§12.1.3). */
+/**
+ * SHA-256 hex of a high-entropy token — only the hash is ever stored (§12.1.3).
+ *
+ * A fast digest is the right primitive here, not an oversight. Code scanning
+ * reports `js/insufficient-password-hash` against this line because callers name
+ * their argument `apiKey`, but these are never user-chosen passwords: every input
+ * is a 256-bit `randomBytes` value (see {@link generateSessionToken}), so there is
+ * no guessable keyspace for a slow KDF to protect. Putting a deliberate-cost hash
+ * here would instead run argon2 on *every* authenticated request — a DoS lever.
+ * Real user passwords are argon2-hashed in `canvas/password.ts`.
+ *
+ * The alert is dismissed in the Security tab ("won't fix"); CodeQL honours no
+ * in-source suppression comment, so this note is the only durable record of why.
+ */
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }

@@ -18,6 +18,23 @@ describe("normalizeSlug", () => {
     expect(normalizeSlug("!!!")).toBe("");
     expect(normalizeSlug("🎨✨")).toBe("");
   });
+
+  it("trims runs of hyphens at both ends", () => {
+    expect(normalizeSlug("---hello---")).toBe("hello");
+    expect(normalizeSlug("-".repeat(50))).toBe("");
+  });
+
+  it("stays fast on a long run of hyphens", () => {
+    // Guards the trim against a future rewrite that backtracks — this runs on
+    // live keystrokes, so the input is attacker-controlled. Note the collapse
+    // above already reduces any hyphen run to one character, so the old
+    // `^-+|-+$` trim never actually saw a long run either; the quadratic shape
+    // was reachable only if that collapse were changed.
+    const started = process.hrtime.bigint();
+    expect(normalizeSlug("-".repeat(200_000))).toBe("");
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    expect(elapsedMs).toBeLessThan(1000);
+  });
 });
 
 describe("validateSlug", () => {
