@@ -12,6 +12,23 @@ export const FAVICON_LINKS = `<link rel="icon" href="/favicon.svg" type="image/s
 <link rel="manifest" href="/site.webmanifest">`;
 
 /**
+ * Strip HTML tags to a fixpoint. One pass of `<[^>]+>` is not enough: on
+ * `<<b>script>` it removes the inner `<b>` and the leftovers re-form `<script>`,
+ * so a single pass can hand back markup it was asked to remove. Repeat until the
+ * string stops changing (each changed pass removes at least one `<`, so this
+ * terminates). The caller escapes the result regardless — this keeps the
+ * description reading cleanly and keeps the strip from being walked backwards.
+ */
+function stripTags(html: string): string {
+  let out = html;
+  for (;;) {
+    const next = out.replace(/<[^>]+>/g, "");
+    if (next === out) return out;
+    out = next;
+  }
+}
+
+/**
  * One consistent block of SEO + Open Graph + Twitter card tags for the indexable,
  * self-rendered public pages: the landing (`/`), legal (`/privacy`, `/terms`),
  * and docs (`/docs/*`). Centralizing it means every shared link unfurls
@@ -37,12 +54,7 @@ export function ogMeta(opts: {
   const url = escapeHtml(`${base}${opts.path}`);
   const image = escapeHtml(`${base}/og.png`);
   const t = escapeHtml(opts.title);
-  const d = escapeHtml(
-    opts.description
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
+  const d = escapeHtml(stripTags(opts.description).replace(/\s+/g, " ").trim());
   return `<meta name="description" content="${d}">
 <link rel="canonical" href="${url}">
 <meta name="robots" content="index,follow">

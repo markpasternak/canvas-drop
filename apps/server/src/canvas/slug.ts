@@ -100,9 +100,16 @@ function randomBase32(chars: number): string {
 }
 
 function pick<T>(arr: readonly T[]): T {
-  // unbiased index from a random byte pool
-  const idx = randomBytes(1)[0] as number;
-  return arr[idx % arr.length] as T;
+  // Rejection sampling. `byte % len` is only unbiased when len divides 256 — it
+  // happens to today (both lists are 32), which is why the plain modulo here was
+  // in fact uniform. That is a silent precondition though: dropping or adding a
+  // single word would make the first (256 % len) entries come up more often with
+  // nothing to catch it. Discarding the ragged tail above the last whole multiple
+  // of len keeps the guarantee whatever the lists hold.
+  const limit = Math.floor(256 / arr.length) * arr.length;
+  let byte = randomBytes(1)[0] as number;
+  while (byte >= limit) byte = randomBytes(1)[0] as number;
+  return arr[byte % arr.length] as T;
 }
 
 /** ≥64 bits of entropy: 13 base32 chars × 5 bits = 65 bits. */

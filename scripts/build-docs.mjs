@@ -83,25 +83,41 @@ function escapeText(text) {
     .replace(/'/g, "&#39;");
 }
 
+/** Remove HTML tags to a fixpoint, replacing each with `fill`.
+ *  One pass is not enough: on `<<b>script>` it removes the inner `<b>` and the
+ *  leftovers re-form `<script>`, so a single pass can hand back the very markup
+ *  it was asked to strip. Repeat until the string stops changing — each changed
+ *  pass drops at least one `<`, so this terminates. */
+function stripHtmlTags(html, fill) {
+  let out = html;
+  for (;;) {
+    const next = out.replace(/<[^>]*>/g, fill);
+    if (next === out) return out;
+    out = next;
+  }
+}
+
 function slugify(text) {
-  return text
-    .toLowerCase()
-    .replace(/<[^>]*>/g, "")
+  return stripHtmlTags(text.toLowerCase(), "")
     .trim()
     .replace(/[^\w]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 
 function stripTags(html) {
-  return html
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    stripHtmlTags(html, " ")
+      // `&amp;` must be unescaped LAST. Doing it first double-unescapes: the
+      // literal text `&amp;lt;` would become `&lt;` here and then `<` on the
+      // next line, re-materializing markup the author had escaped on purpose.
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /** Render one markdown string; returns { title, html, headings, text }. */

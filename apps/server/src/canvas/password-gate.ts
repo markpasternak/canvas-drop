@@ -21,6 +21,16 @@ const GATE_COOKIE = "__canvasdrop_gate";
  * HMAC-sign a gate grant bound to the canvas id + its current passwordVersion.
  * Rotating the password bumps passwordVersion (U14), so outstanding cookies stop
  * validating — revocation invalidates gate cookies (D23).
+ *
+ * Code scanning reports `js/insufficient-password-hash` against this line purely
+ * because of the name `passwordVersion`. It is not a password hash: both inputs
+ * are non-secret (a canvas id and a monotonic counter), and the unforgeability
+ * comes from the HMAC key — `config.sessionSecret` — not from the cost of the
+ * digest, which is exactly what an HMAC is for. The real password check is argon2
+ * via {@link verifyPassword} in the gate POST below.
+ *
+ * The alert is dismissed in the Security tab ("won't fix"); CodeQL honours no
+ * in-source suppression comment, so this note is the only durable record of why.
  */
 function signGrant(secret: string, canvasId: string, passwordVersion: number): string {
   const mac = createHmac("sha256", secret).update(`${canvasId}.${passwordVersion}`).digest("hex");

@@ -18,6 +18,20 @@ describe("normalizeSlug", () => {
     expect(normalizeSlug("!!!")).toBe("");
     expect(normalizeSlug("🎨✨")).toBe("");
   });
+
+  it("trims runs of hyphens at both ends", () => {
+    expect(normalizeSlug("---hello---")).toBe("hello");
+    expect(normalizeSlug("-".repeat(50))).toBe("");
+  });
+
+  it("stays linear on a long run of hyphens (no polynomial backtracking)", () => {
+    // The old `^-+|-+$` trim backtracked quadratically here; this runs on live
+    // keystrokes in the slug field, so the input is attacker-controlled.
+    const started = process.hrtime.bigint();
+    expect(normalizeSlug("-".repeat(200_000))).toBe("");
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    expect(elapsedMs).toBeLessThan(1000);
+  });
 });
 
 describe("validateSlug", () => {
