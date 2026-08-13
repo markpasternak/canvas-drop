@@ -6,6 +6,7 @@ import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.
 import type { UsersRepository } from "../db/repositories/users.js";
 import { errorResponse } from "../http/error-pages.js";
 import type { AppEnv } from "../http/types.js";
+import type { AuthEventSink } from "./gateway.js";
 import { claimsToIdentity, isEmailAllowed, mapIdentityToUser } from "./identity-mapping.js";
 import { loginUrl, safeReturnTo } from "./return-to.js";
 import type { SessionService } from "./session.js";
@@ -33,18 +34,27 @@ function txCookieOptions(config: Config) {
 }
 
 /**
- * A recoverable sign-in failure (stale/missing transaction, token exchange hiccup):
- * render a friendly page whose action restarts login — carrying the returnTo when we
- * still have it — instead of dead-ending the visitor on a raw error. Falls back to
- * JSON for non-browser clients via the shared error-page seam.
+ * A recoverable sign-in failure (stale/missing transaction, token exchange hiccup,
+ * a rejected identity): render a friendly page whose action restarts login — carrying
+ * the returnTo when we still have it — instead of dead-ending the visitor on a raw
+ * error. Falls back to JSON for non-browser clients via the shared error-page seam.
+ *
+ * Every rejection here is ALSO recorded as `auth_denied` (audit row) plus a warn log
+ * line. Without it a blocked colleague is invisible: the callback answers a bare 400
+ * and, for the domain/allowlist rejection, nothing at all reaches the log — the exact
+ * blind spot that made a real "I can't sign in" report un-diagnosable from the logs.
+ * The audit row carries the email (admin-only surface, mirroring the gateway's
+ * `domain_not_allowed`); the log line carries the DOMAIN only (data-minimisation,
+ * mirroring the pre-existing email_not_verified line).
  */
 function recoverableAuthError(
   c: Context<AppEnv>,
-  config: Config,
+  deps: OidcDeps,
   code: string,
   message: string,
-  returnTo?: string,
+  opts: { returnTo?: string; email?: string; actorId?: string } = {},
 ) {
+  recordAuthDenied(c, deps, code, opts);
   return errorResponse(
     c,
     {
@@ -52,10 +62,33 @@ function recoverableAuthError(
       code,
       title: "Sign-in didn't finish",
       message,
-      actionHref: loginUrl(config, returnTo),
+      actionHref: loginUrl(deps.config, opts.returnTo),
       actionLabel: "Try signing in again",
     },
     { error: code },
+  );
+}
+
+/** Record a sign-in rejection to the audit log + the request log (see above). */
+function recordAuthDenied(
+  c: Context<AppEnv>,
+  deps: OidcDeps,
+  reason: string,
+  opts: { email?: string; actorId?: string } = {},
+) {
+  deps.audit?.record({
+    action: "auth_denied",
+    reason,
+    ...(opts.email ? { email: opts.email } : {}),
+    ...(opts.actorId ? { actorId: opts.actorId } : {}),
+    ip: c.get("clientIp"),
+  });
+  c.get("log")?.warn(
+    {
+      reason,
+      ...(opts.email ? { emailDomain: opts.email.slice(opts.email.lastIndexOf("@") + 1) } : {}),
+    },
+    "oidc sign-in denied",
   );
 }
 
@@ -67,6 +100,9 @@ export interface OidcDeps {
   sessionSvc: SessionService;
   /** Lazily-resolved, discovery-cached openid-client configuration. */
   getConfig: () => Promise<client.Configuration>;
+  /** Best-effort audit sink (U10) — records `auth_denied` for every rejected sign-in.
+   *  Optional so legacy tests can construct the strategy without a sink. */
+  audit?: AuthEventSink;
 }
 
 /**
@@ -149,7 +185,7 @@ export function makeOidc(deps: OidcDeps) {
       if (!tx) {
         return recoverableAuthError(
           c,
-          deps.config,
+          deps,
           "missing_oidc_state",
           "This sign-in link expired or was already used. Start again and we'll take you where you were headed.",
         );
@@ -160,10 +196,10 @@ export function makeOidc(deps: OidcDeps) {
       if (!stateParam || stateParam !== tx.state) {
         return recoverableAuthError(
           c,
-          deps.config,
+          deps,
           "state_mismatch",
           "Your sign-in didn't match this browser's request. Start over and we'll take you where you were going.",
-          tx.returnTo,
+          { returnTo: tx.returnTo },
         );
       }
 
@@ -185,41 +221,33 @@ export function makeOidc(deps: OidcDeps) {
         c.get("log")?.error({ err }, "oidc token exchange failed");
         return recoverableAuthError(
           c,
-          deps.config,
+          deps,
           "token_exchange_failed",
           "We couldn't complete sign-in with your identity provider. Please try again.",
-          tx.returnTo,
+          { returnTo: tx.returnTo },
         );
       }
 
       const identity = claims ? claimsToIdentity(claims, "oidc") : null;
       if (!identity) {
-        c.get("log")?.warn({}, "oidc callback: no email claim in the ID token");
         return recoverableAuthError(
           c,
-          deps.config,
+          deps,
           "no_email_claim",
           "Your identity provider didn't share an email address, which we need to sign you in. Please try again.",
-          tx.returnTo,
+          { returnTo: tx.returnTo },
         );
       }
       // Defense-in-depth: never trust an email the IdP explicitly says it did not
       // verify (a permissive provider could let a user self-assert an allowlisted
       // address). Log the domain only — never the full address (data-minimisation).
       if (claims && emailExplicitlyUnverified(claims)) {
-        c.get("log")?.warn(
-          {
-            emailDomain: identity.email.slice(identity.email.lastIndexOf("@") + 1),
-            emailVerified: false,
-          },
-          "oidc email not verified",
-        );
         return recoverableAuthError(
           c,
-          deps.config,
+          deps,
           "email_not_verified",
           "Your identity provider hasn't verified your email address. Verify it with them, then try again.",
-          tx.returnTo,
+          { returnTo: tx.returnTo, email: identity.email },
         );
       }
       return completeLogin(deps, c, identity, tx.returnTo);
@@ -265,16 +293,19 @@ export async function completeLogin(
   if (!(await isEmailAllowed(identity.email, deps.config, deps.allowedEmails, c.get("log")))) {
     return recoverableAuthError(
       c,
-      deps.config,
+      deps,
       "email_domain_not_allowed",
       "Your account isn't allowed to sign in to this instance. Ask an administrator to add you.",
-      returnTo,
+      { returnTo, email: identity.email },
     );
   }
   const user = await mapIdentityToUser(deps.users, identity, deps.config);
   // Blocked is a deliberate admin action — keep it terse and don't offer a retry
   // loop (a "try again" button would just bounce them back here).
-  if (user.isBlocked) return c.json({ error: "forbidden" }, 403);
+  if (user.isBlocked) {
+    recordAuthDenied(c, deps, "blocked", { email: user.email, actorId: user.id });
+    return c.json({ error: "forbidden" }, 403);
+  }
   await deps.sessionSvc.issue(c, user.id);
   // Re-validate at the seam: the tx cookie is httpOnly but unsigned, so never trust
   // its returnTo without re-checking it can't escape this instance (defense in depth).

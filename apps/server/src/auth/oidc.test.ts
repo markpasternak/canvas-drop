@@ -8,6 +8,7 @@ import { sessionsRepository } from "../db/repositories/sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import type { AppEnv } from "../http/types.js";
+import type { AuthEvent, AuthEventSink } from "./gateway.js";
 import {
   callbackUrl,
   completeLogin,
@@ -35,7 +36,18 @@ const config: Config = loadConfig({
 
 const OIDC_TX_COOKIE = "__canvasdrop_oidc";
 
-function deps(client: DbClient): OidcDeps {
+/** Capturing audit sink — the assertion surface for "every rejection is recorded". */
+function recordingAudit(): AuthEventSink & { events: AuthEvent[] } {
+  const events: AuthEvent[] = [];
+  return {
+    events,
+    record(event) {
+      events.push(event);
+    },
+  };
+}
+
+function deps(client: DbClient, audit?: AuthEventSink): OidcDeps {
   return {
     config,
     users: usersRepository(client),
@@ -43,11 +55,12 @@ function deps(client: DbClient): OidcDeps {
     sessionSvc: sessionService(config, sessionsRepository(client)),
     // Discovery must NOT run in these tests — they exercise pre-/post-exchange logic.
     getConfig: () => Promise.reject(new Error("discovery should not run")),
+    audit,
   };
 }
 
-function buildApp(client: DbClient) {
-  const d = deps(client);
+function buildApp(client: DbClient, audit?: AuthEventSink) {
+  const d = deps(client, audit);
   const oidc = makeOidc(d);
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -282,5 +295,77 @@ describe("makeOidcConfigLoader — failed discovery is not cached", () => {
     // The failure must have cleared the cache — the next call retries and succeeds.
     await expect(loader()).resolves.toBe(fake);
     expect(calls).toBe(2);
+  });
+});
+
+describe.each(DIALECTS)("oidc denials are audited [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  // Regression: a colleague reported "I can't sign in" and the logs held nothing but a
+  // bare 400 — `email_domain_not_allowed` wrote no audit row and no log line, so the
+  // reason was only recoverable by elimination. Every rejection must now name itself.
+  it("records email_domain_not_allowed WITH the rejected email", async () => {
+    client = await makeTestDb(dialect);
+    const audit = recordingAudit();
+    const res = await buildApp(client, audit).request("/complete?email=thomas@other-domain.com");
+    expect(res.status).toBe(400);
+    expect(audit.events).toEqual([
+      {
+        action: "auth_denied",
+        reason: "email_domain_not_allowed",
+        email: "thomas@other-domain.com",
+        ip: "127.0.0.1",
+      },
+    ]);
+  });
+
+  it("records the pre-exchange guards (no transaction cookie / state mismatch)", async () => {
+    client = await makeTestDb(dialect);
+    const missing = recordingAudit();
+    await buildApp(client, missing).request("/auth/callback?state=abc&code=x");
+    expect(missing.events).toEqual([
+      { action: "auth_denied", reason: "missing_oidc_state", ip: "127.0.0.1" },
+    ]);
+
+    const mismatch = recordingAudit();
+    const tx = encodeURIComponent(JSON.stringify({ state: "s1", verifier: "v1" }));
+    await buildApp(client, mismatch).request("/auth/callback?state=s2&code=x", {
+      headers: { Cookie: `${OIDC_TX_COOKIE}=${tx}` },
+    });
+    expect(mismatch.events).toEqual([
+      { action: "auth_denied", reason: "state_mismatch", ip: "127.0.0.1" },
+    ]);
+  });
+
+  it("records a blocked user with their actor id (403 path, not the 400 page)", async () => {
+    client = await makeTestDb(dialect);
+    await buildApp(client).request("/complete?email=ada@example.com");
+    const repo = usersRepository(client);
+    const user = await repo.findByProviderSub("s");
+    await repo.setBlocked(user?.id ?? "", true);
+
+    const audit = recordingAudit();
+    const res = await buildApp(client, audit).request("/complete?email=ada@example.com");
+    expect(res.status).toBe(403);
+    expect(audit.events).toEqual([
+      {
+        action: "auth_denied",
+        reason: "blocked",
+        email: "ada@example.com",
+        actorId: user?.id,
+        ip: "127.0.0.1",
+      },
+    ]);
+  });
+
+  it("records nothing on a successful sign-in (denials only — no access log)", async () => {
+    client = await makeTestDb(dialect);
+    const audit = recordingAudit();
+    const res = await buildApp(client, audit).request("/complete?email=ada@example.com");
+    expect(res.status).toBe(302);
+    expect(audit.events).toEqual([]);
   });
 });
