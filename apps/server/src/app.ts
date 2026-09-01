@@ -209,6 +209,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     invitations,
     teams,
     canvases: deps.canvases,
+    orgs,
     settings: settingsSvc,
     templates: emailTemplates,
     mailer,

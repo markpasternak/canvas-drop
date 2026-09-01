@@ -5,7 +5,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
-import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
@@ -19,7 +18,9 @@ import {
   OWNER_ONLY_MESSAGE,
 } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
+import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import {
+  accessRoleSchema,
   loadManagementGrant,
   type ManagementRole,
   resolveManagementGrant,
@@ -89,7 +90,10 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** The invite primitive — backs MCP Add person tools, wrapping the SAME service the HTTP route uses. */
   invites: InviteService;
   /** Pending invitations — canvas/team pending rows and cancellation (HTTP-route parity). */
-  invitations: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
+  invitations: Pick<
+    InvitationsRepository,
+    "listPendingForTarget" | "cancelPendingForTarget" | "findPendingForTarget" | "setPendingRole"
+  >;
   canvases: CanvasesRepository;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
@@ -1260,7 +1264,31 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     },
   );
 
-  // ---- Sharing & access (U4) -------------------------------------------------
+  // ---- Sharing & access (U4 / editor-roles plan U4-U5) --------------------------
+  // Every people-list tool wraps the SAME people service the management routes wrap.
+
+  const people = peopleService({
+    canvases: deps.canvases,
+    users: deps.users,
+    invitations: deps.invitations,
+    teams: deps.teams,
+    invites: deps.invites,
+    guests: deps.guests,
+    audit: deps.audit,
+    hub: deps.hub,
+    log: deps.log,
+  });
+
+  const peopleActorNow = async (role: ManagementRole) => ({
+    id: caller.userId,
+    ...(await identityNow()),
+    isAdmin: caller.isAdmin,
+    role,
+  });
+
+  const peopleFail = (err: PeopleError): ToolResult =>
+    err.code === "NOT_FOUND" ? fail("access entry not found") : fail(`${err.code}: ${err.message}`);
+  void PEOPLE_ERROR_STATUS;
 
   function addPersonFailure(status: string): ToolResult | null {
     if (status === "policy_blocked")
@@ -1274,32 +1302,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     return null;
   }
 
-  async function addCanvasPerson(cv: Canvas, email: string, mode: "add" | "invite") {
-    const actor = await identityNow();
-    const r = await deps.invites.resolveOrInvite(
-      {
-        kind: "canvas",
-        canvasId: cv.id,
-        canvasSlug: cv.slug,
-        canvasTitle: cv.title,
-        mode,
-      },
-      email,
-      { id: caller.userId, name: actor.name, email: actor.email, isAdmin: caller.isAdmin },
-    );
-    const failure = addPersonFailure(r.status);
+  async function addCanvasPerson(
+    gate: { canvas: Canvas; role: ManagementRole },
+    input: { email: string; role?: "viewer" | "editor"; mode: "add" | "invite" },
+  ) {
+    const r = await people.addPerson(gate.canvas, await peopleActorNow(gate.role), input);
+    if (!r.ok) return peopleFail(r);
+    const failure = addPersonFailure(r.result.status);
     if (failure) return failure;
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: caller.userId,
-      targetId: cv.id,
-      meta: { kind: "add_person", mode, status: r.status },
+    return ok({
+      ok: true,
+      status: r.result.status,
+      ...(r.result.emailDelivery ? { emailDelivery: r.result.emailDelivery } : {}),
+      role: r.role,
     });
-    return ok(
-      r.emailDelivery
-        ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }
-        : { ok: true, status: r.status },
-    );
   }
 
   server.registerTool(
@@ -1340,21 +1356,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_access",
     {
       description:
-        "List who can access a canvas you own beyond the rung default — active named people and " +
-        "pending sign-ins, same as the Share tab's people list. Each entry has an `id` (use it " +
-        "with revoke_access), `kind` ('member'|'pending'|'guest' for legacy rows), `email`, and `name`.",
+        "List a canvas's people list — the owner first, then named people, pending sign-ins, " +
+        "and team grants — each with a `role` ('owner'|'editor'|'viewer'), same as the Share " +
+        "dialog. Each entry has a stable `id` ('owner', 'member:<id>', 'guest:<id>', " +
+        "'pending:<id>', 'team:<teamId>') for set_access_role / revoke_access, a `kind`, " +
+        "`email`, `name`, `userId`, and `teamId`. Available to the owner and editors.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
       const gate = await requireRole("list_access", id);
       if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      const entries = await resolveAllowlistEntries(
-        await deps.canvases.listAllowlist(cv.id),
-        deps.users,
-        await deps.invitations.listPendingForTarget("canvas", cv.id),
-      );
-      return ok({ entries });
+      return ok({ entries: await people.list(gate.canvas) });
     },
   );
 
@@ -1362,20 +1374,37 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "grant_access",
     {
       description:
-        "Grant a person access to a canvas you own by email (mirrors the Share tab's add-person). " +
-        "An existing user is granted now (`status: granted`); an admissible new email becomes a " +
-        "pending sign-in grant (`status: pending`) and materializes after verified sign-in. No " +
-        "app-owned credential is created. The grant only takes effect on the `specific_people` rung — " +
-        "set that with update_canvas.",
+        "Add a person (by email) or a team (by teamId) to a canvas's people list with a role " +
+        "(mirrors the Share dialog's add-person / add-team). `role` is 'viewer' (default) or " +
+        "'editor'; only org members and teams can be editors (GUEST_VIEWER_ONLY otherwise). An " +
+        "existing user is granted now (`status: granted`; an existing entry's role is updated " +
+        "when you pass one — `status: role_changed` — and never changed when you omit it); an " +
+        "admissible new email becomes a pending sign-in grant (`status: pending`) that " +
+        "materializes after verified sign-in, carrying the role. A viewer grant takes effect " +
+        "on the `specific_people` / `team` rungs (set with update_canvas); an editor always has " +
+        "access. Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
-        email: z.string().email().describe("The person's email."),
+        email: z.string().email().optional().describe("The person's email (or pass teamId)."),
+        teamId: z.string().optional().describe("A team to grant (or pass email)."),
+        role: accessRoleSchema.optional().describe("'viewer' (default) or 'editor'."),
       },
     },
-    async ({ id, email }) => {
+    async ({ id, email, teamId, role }) => {
+      if ((email ? 1 : 0) + (teamId ? 1 : 0) !== 1) {
+        return fail("INVALID_REQUEST: pass exactly one of email or teamId");
+      }
       const gate = await requireMutable("grant_access", id);
       if ("error" in gate) return gate.error;
-      return addCanvasPerson(gate.canvas, email, "add");
+      if (teamId) {
+        const r = await people.addTeam(gate.canvas, await peopleActorNow(gate.role), {
+          teamId,
+          role: role ?? "viewer",
+        });
+        if (!r.ok) return peopleFail(r);
+        return ok({ ok: true, status: "granted", role: role ?? "viewer" });
+      }
+      return addCanvasPerson(gate, { email: email as string, role, mode: "add" });
     },
   );
 
@@ -1392,12 +1421,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().describe("The person's email."),
+        role: accessRoleSchema
+          .optional()
+          .describe("'viewer' (default) or 'editor' (org members only)."),
       },
     },
-    async ({ id, email }) => {
+    async ({ id, email, role }) => {
       const gate = await requireMutable("invite_to_canvas", id);
       if ("error" in gate) return gate.error;
-      return addCanvasPerson(gate.canvas, email, "invite");
+      return addCanvasPerson(gate, { email, role, mode: "invite" });
     },
   );
 
@@ -1405,9 +1437,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "revoke_access",
     {
       description:
-        "Remove an access entry from a canvas you own (active member, pending sign-in, or legacy " +
-        "guest row). Pass the entry `id` from list_access. Revokes legacy guest sessions and drops " +
-        "any live sockets it no longer permits.",
+        "Remove a people-list entry from a canvas (a person — another editor included, or " +
+        "yourself — a pending sign-in, a legacy guest row, or a team grant). Pass the entry `id` " +
+        "from list_access (legacy bare row ids still work). The `owner` entry cannot be removed " +
+        "(OWNER_ONLY) — transfer ownership instead. Revokes legacy guest sessions and drops any " +
+        "live sockets it no longer permits. Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         entryId: z.string().describe("The access entry id (from list_access)."),
@@ -1416,43 +1450,33 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id, entryId }) => {
       const gate = await requireMutable("revoke_access", id);
       if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      if (entryId.startsWith("pending:")) {
-        const cancelled = await deps.invitations.cancelPendingForTarget(
-          "canvas",
-          cv.id,
-          entryId.slice("pending:".length),
-        );
-        if (!cancelled) return fail("access entry not found");
-        deps.audit.recordAudit({
-          action: "allowlist_remove",
-          actorId: caller.userId,
-          targetId: cv.id,
-          meta: { entryId, kind: "pending", email: cancelled.email },
-        });
-        if (deps.hub)
-          await deps.hub
-            .revalidateCanvas(cv.id)
-            .catch((err) =>
-              deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"),
-            );
-        return ok({ ok: true });
-      }
-      const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
-      if (entry?.principalKind === "guest" && entry.email && deps.guests) {
-        await deps.guests.revokeInvite(cv.id, entry.email);
-      }
-      await deps.canvases.removeAllowlistEntry(cv.id, entryId);
-      deps.audit.recordAudit({
-        action: "allowlist_remove",
-        actorId: caller.userId,
-        targetId: cv.id,
-        meta: { entryId, kind: entry?.principalKind ?? null },
-      });
-      if (deps.hub)
-        await deps.hub
-          .revalidateCanvas(cv.id)
-          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
+      const r = await people.remove(gate.canvas, await peopleActorNow(gate.role), entryId);
+      if (!r.ok) return peopleFail(r);
+      return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "set_access_role",
+    {
+      description:
+        "Change a people-list entry's role on a canvas (mirrors the Share dialog's role " +
+        "control). Pass the entry `id` from list_access and `role` 'viewer' or 'editor'. " +
+        "Works on people, pending sign-ins, and team grants; a guest row can only be a viewer " +
+        "(GUEST_VIEWER_ONLY); the `owner` entry is owner-only (OWNER_ONLY) — only " +
+        "transfer_canvas changes who the owner is. Demoting drops live editor sockets. " +
+        "Available to the owner and editors (you may demote yourself).",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        entryId: z.string().describe("The access entry id (from list_access)."),
+        role: accessRoleSchema.describe("'viewer' or 'editor'."),
+      },
+    },
+    async ({ id, entryId, role }) => {
+      const gate = await requireMutable("set_access_role", id);
+      if ("error" in gate) return gate.error;
+      const r = await people.setRole(gate.canvas, await peopleActorNow(gate.role), entryId, role);
+      if (!r.ok) return peopleFail(r);
       return ok({ ok: true });
     },
   );

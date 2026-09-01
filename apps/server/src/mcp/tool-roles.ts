@@ -51,6 +51,7 @@ export const TOOL_MIN_ROLE = {
   grant_access: "editor",
   invite_to_canvas: "editor",
   revoke_access: "editor",
+  set_access_role: "editor",
   get_draft: "editor",
   read_draft_file: "editor",
   write_draft_file: "editor",

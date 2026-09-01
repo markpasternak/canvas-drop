@@ -17,7 +17,8 @@ export type TemplateKey =
   | "account_invite"
   | "canvas_invite"
   | "individual_canvas_invite"
-  | "team_invite";
+  | "team_invite"
+  | "canvas_editor_granted_owner";
 
 /** The variables a caller may supply (the allow-list — any `{{var}}` outside this set, or
  *  absent from the supplied map, renders empty). */
@@ -31,7 +32,13 @@ export type TemplateVars = Partial<
     | "orgContext"
     | "canvasTitle"
     | "teamName"
-    | "link",
+    | "link"
+    // Editor-roles plan (R21): the role granted ("editor" | "viewer"), its phrasing for
+    // copy ("editor" | "view", as in "editor access" / "view access"), and — on the
+    // owner's notice — the person who was granted.
+    | "role"
+    | "accessLabel"
+    | "personEmail",
     string
   >
 >;
@@ -41,6 +48,7 @@ export const TEMPLATE_KEYS: readonly TemplateKey[] = [
   "canvas_invite",
   "individual_canvas_invite",
   "team_invite",
+  "canvas_editor_granted_owner",
 ];
 
 const html = (subject: string, lead: string, cta: string): string =>
@@ -54,7 +62,30 @@ const html = (subject: string, lead: string, cta: string): string =>
 /** Known older seeded defaults. Used only for safe rollout: rows that still exactly match one
  *  of these boot-seeded bodies can be migrated to the new defaults; admin-customized rows are
  *  preserved. */
-export const PREVIOUS_DEFAULT_TEMPLATES: readonly Record<TemplateKey, TemplateBody>[] = [
+export const PREVIOUS_DEFAULT_TEMPLATES: readonly Partial<Record<TemplateKey, TemplateBody>>[] = [
+  // The pre-editor-roles defaults (no role in the canvas copy).
+  {
+    canvas_invite: {
+      subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
+      bodyHtml: html(
+        "A canvas was shared with you",
+        "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+    },
+    individual_canvas_invite: {
+      subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
+      bodyHtml: html(
+        "You're invited to a canvas",
+        "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
+        "Open canvas",
+      ),
+      bodyText:
+        "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+    },
+  },
   {
     account_invite: {
       subject: "You've been invited to {{instanceName}}",
@@ -199,21 +230,31 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateBody> = {
     subject: "{{inviterName}} shared “{{canvasTitle}}” with you",
     bodyHtml: html(
       "A canvas was shared with you",
-      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
+      "{{inviterName}} gave {{recipientEmail}} {{accessLabel}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
       "Open canvas",
     ),
     bodyText:
-      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+      "{{inviterName}} gave {{recipientEmail}} {{accessLabel}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
   },
   individual_canvas_invite: {
     subject: "{{inviterName}} invited you to “{{canvasTitle}}”",
     bodyHtml: html(
       "You're invited to a canvas",
-      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
+      "{{inviterName}} gave {{recipientEmail}} {{accessLabel}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it.",
       "Open canvas",
     ),
     bodyText:
-      "{{inviterName}} gave {{recipientEmail}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+      "{{inviterName}} gave {{recipientEmail}} {{accessLabel}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+  },
+  canvas_editor_granted_owner: {
+    subject: "{{inviterName}} made {{personEmail}} an editor of “{{canvasTitle}}”",
+    bodyHtml: html(
+      "A new editor on your canvas",
+      "{{inviterName}} gave {{personEmail}} editor access to your canvas “{{canvasTitle}}”. Editors can change its content, settings, and sharing. Open the canvas to review who has access.",
+      "Review access",
+    ),
+    bodyText:
+      "{{inviterName}} gave {{personEmail}} editor access to your canvas “{{canvasTitle}}”. Editors can change its content, settings, and sharing. Review who has access:\n\n{{link}}\n",
   },
   team_invite: {
     subject: "{{inviterName}} added you to “{{teamName}}”",

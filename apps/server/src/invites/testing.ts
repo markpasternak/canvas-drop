@@ -5,6 +5,7 @@ import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { emailTemplatesRepository } from "../db/repositories/email-templates.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { settingsRepository } from "../db/repositories/settings.js";
 import { teamsRepository } from "../db/repositories/teams.js";
 import { usersRepository } from "../db/repositories/users.js";
@@ -26,6 +27,7 @@ export function makeInviteService(client: DbClient, config: Config): InviteServi
     invitations: invitationsRepository(client),
     teams: teamsRepository(client),
     canvases: canvasesRepository(client),
+    orgs: orgsRepository(client),
     settings: adminSettingsService({ settings: settingsRepository(client), config }),
     templates: emailTemplatesRepository(client),
     mailer: noopMailer(),

@@ -1,6 +1,10 @@
 import type { Canvas } from "@canvas-drop/shared/db";
+import { z } from "zod";
 import type { CanvasesRepository, EditorScope } from "../db/repositories/canvases.js";
 import type { Principal } from "../http/types.js";
+
+/** The zod boundary for a people-list role (KTD3: unchecked column, validated here). */
+export const accessRoleSchema = z.enum(["viewer", "editor"]);
 
 /**
  * The per-canvas role of a principal (editor-roles plan, KTD1):

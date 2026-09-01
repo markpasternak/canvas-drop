@@ -15,7 +15,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
-import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
@@ -27,7 +26,8 @@ import {
   requireCanvasRole,
 } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
-import { type MinRole, resolveManagementGrant } from "../canvas/role.js";
+import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
+import { accessRoleSchema, type MinRole, resolveManagementGrant } from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -79,6 +79,9 @@ export interface ManagementDeps extends PreviewHintDeps {
     | "listTeamIdsForCanvas"
     | "listCanvasGrantsForUserTeams"
     | "teamMatch"
+    | "listCanvasTeamGrants"
+    | "setCanvasTeamRole"
+    | "removeCanvasTeam"
   >;
   config: Config;
   canvases: CanvasesRepository;
@@ -118,7 +121,10 @@ export interface ManagementDeps extends PreviewHintDeps {
   /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
    *  it. Optional: suites that don't exercise the invite path may omit it. */
   invites?: InviteService;
-  invitations?: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
+  invitations?: Pick<
+    InvitationsRepository,
+    "listPendingForTarget" | "cancelPendingForTarget" | "findPendingForTarget" | "setPendingRole"
+  >;
   // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
   // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
@@ -822,30 +828,65 @@ export function managementRoutes(deps: ManagementDeps) {
     return c.json(warning ? { ...view, warning } : view);
   });
 
-  // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------
-  // One Add person model: existing users are granted now; new admissible emails are pending.
+  // --- People list: people, pending invitees, and teams, each with a role ----------
+  // (editor-roles plan U4/U5, KTD5). One Add person model: existing users are granted
+  // now; new admissible emails are pending. Every mutation wraps the shared people
+  // service the MCP tools also wrap.
 
-  /** List a canvas's allowlist entries with member display identity resolved. */
+  const people = peopleService({
+    canvases: deps.canvases,
+    users: deps.users,
+    invitations: deps.invitations,
+    teams: deps.teams,
+    invites: deps.invites,
+    guests: deps.guests,
+    audit: deps.audit,
+    hub: deps.hub,
+  });
+
+  /** The acting user for a people-list change — identity from the gateway, role from the
+   *  gate that admitted this request (`canvasRole`). */
+  const peopleActor = (c: Context<AppEnv>) => {
+    const u = c.get("user");
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      isAdmin: u.isAdmin,
+      role: c.get("canvasRole") ?? ("editor" as const),
+    };
+  };
+
+  const peopleFailure = (c: Context<AppEnv>, err: PeopleError) =>
+    err.code === "NOT_FOUND"
+      ? c.json({ error: "not_found" }, 404)
+      : c.json({ code: err.code, message: err.message }, PEOPLE_ERROR_STATUS[err.code]);
+
+  /** The unified people list (owner, people, pending invitees, teams — with roles). */
   app.get("/:id/allowlist", async (c) => {
     const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const entries = await resolveAllowlistEntries(
-      await deps.canvases.listAllowlist(cv.id),
-      deps.users,
-      deps.invitations ? await deps.invitations.listPendingForTarget("canvas", cv.id) : [],
-    );
-    return c.json({ entries });
+    return c.json({ entries: await people.list(cv) });
   });
 
   // Normalize at the boundary (trim + lowercase) so allowlist/invite dedup on the
   // unique (canvas_id, email) index is case-insensitive and member matching is
   // consistent — "Alice@x.com" and "alice@x.com" are one principal.
-  const allowlistAddSchema = z.object({
-    email: z
-      .string()
-      .email()
-      .transform((e) => e.trim().toLowerCase()),
-  });
+  const emailField = z
+    .string()
+    .email()
+    .transform((e) => e.trim().toLowerCase());
+  const allowlistAddSchema = z
+    .object({
+      email: emailField.optional(),
+      teamId: z.string().min(1).optional(),
+      role: accessRoleSchema.optional(),
+    })
+    .refine((v) => (v.email ? 1 : 0) + (v.teamId ? 1 : 0) === 1, {
+      message: "exactly one of email or teamId",
+    });
+  const inviteSchema = z.object({ email: emailField, role: accessRoleSchema.optional() });
+  const roleSchema = z.object({ role: accessRoleSchema });
 
   function addPersonFailure(c: Context<AppEnv>, status: string) {
     if (status === "policy_blocked") {
@@ -872,39 +913,43 @@ export function managementRoutes(deps: ManagementDeps) {
     return null;
   }
 
-  async function addPerson(c: Context<AppEnv>, cv: Canvas, email: string, mode: "add" | "invite") {
-    if (!deps.invites)
-      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
-    const actor = c.get("user");
-    const r = await deps.invites.resolveOrInvite(
-      {
-        kind: "canvas",
-        canvasId: cv.id,
-        canvasSlug: cv.slug,
-        canvasTitle: cv.title,
-        mode,
-      },
-      email,
-      { id: actor.id, name: actor.name, email: actor.email, isAdmin: actor.isAdmin },
-    );
-    const failure = addPersonFailure(c, r.status);
+  async function addPerson(
+    c: Context<AppEnv>,
+    cv: Canvas,
+    input: { email: string; role?: "viewer" | "editor"; mode: "add" | "invite" },
+  ) {
+    const r = await people.addPerson(cv, peopleActor(c), input);
+    if (!r.ok) return peopleFailure(c, r);
+    const failure = addPersonFailure(c, r.result.status);
     if (failure) return failure;
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: actor.id,
-      targetId: cv.id,
-      meta: { kind: "add_person", mode, status: r.status },
+    return c.json({
+      ok: true,
+      status: r.result.status,
+      emailDelivery: r.result.emailDelivery,
+      role: r.role,
     });
-    return c.json({ ok: true, status: r.status, emailDelivery: r.emailDelivery });
   }
 
-  /** Add person: existing user -> granted now; admissible new email -> pending. */
+  /** Add a person (existing user → granted now; admissible new email → pending) or a
+   *  team, each with an optional role (default viewer). */
   app.post("/:id/allowlist", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    return addPerson(c, cv, body.data.email, "add");
+    if (body.data.teamId) {
+      const r = await people.addTeam(cv, peopleActor(c), {
+        teamId: body.data.teamId,
+        role: body.data.role ?? "viewer",
+      });
+      if (!r.ok) return peopleFailure(c, r);
+      return c.json({ ok: true, status: "granted", role: body.data.role ?? "viewer" });
+    }
+    return addPerson(c, cv, {
+      email: body.data.email as string,
+      role: body.data.role,
+      mode: "add",
+    });
   });
 
   /** Individual one-canvas access email (plan 003 U8): routes through the
@@ -916,46 +961,30 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/invite", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
+    const body = inviteSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    return addPerson(c, cv, body.data.email, "invite");
+    return addPerson(c, cv, { email: body.data.email, role: body.data.role, mode: "invite" });
   });
 
-  /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any
-   *  live sockets it no longer permits. */
+  /** Change an entry's role (editor-roles plan, R8). The `owner` entry is owner-only
+   *  (403 OWNER_ONLY) for everyone; a guest is never an editor (400 GUEST_VIEWER_ONLY). */
+  app.patch("/:id/allowlist/:entryId", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const body = roleSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const r = await people.setRole(cv, peopleActor(c), c.req.param("entryId"), body.data.role);
+    if (!r.ok) return peopleFailure(c, r);
+    return c.json({ ok: true });
+  });
+
+  /** Remove an entry (person, pending invitee, legacy guest, or team grant); revoke a
+   *  guest's invite + sessions, and drop any live sockets it no longer permits. */
   app.delete("/:id/allowlist/:entryId", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const entryId = c.req.param("entryId");
-    if (entryId.startsWith("pending:")) {
-      const cancelled =
-        (await deps.invitations?.cancelPendingForTarget(
-          "canvas",
-          cv.id,
-          entryId.slice("pending:".length),
-        )) ?? null;
-      if (!cancelled) return c.json({ error: "not_found" }, 404);
-      deps.audit.recordAudit({
-        action: "allowlist_remove",
-        actorId: c.get("user").id,
-        targetId: cv.id,
-        meta: { entryId, kind: "pending", email: cancelled.email },
-      });
-      await revalidate(c, cv.id);
-      return c.json({ ok: true });
-    }
-    const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
-    if (entry?.principalKind === "guest" && entry.email && deps.guests) {
-      await deps.guests.revokeInvite(cv.id, entry.email);
-    }
-    await deps.canvases.removeAllowlistEntry(cv.id, entryId);
-    deps.audit.recordAudit({
-      action: "allowlist_remove",
-      actorId: c.get("user").id,
-      targetId: cv.id,
-      meta: { entryId, kind: entry?.principalKind ?? null },
-    });
-    await revalidate(c, cv.id);
+    const r = await people.remove(cv, peopleActor(c), c.req.param("entryId"));
+    if (!r.ok) return peopleFailure(c, r);
     return c.json({ ok: true });
   });
 

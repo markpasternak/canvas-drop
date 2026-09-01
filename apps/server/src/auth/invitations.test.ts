@@ -167,3 +167,47 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(await invitations.listForEmail("dup@x.com")).toHaveLength(1);
   });
 });
+
+describe.each(DIALECTS)("materialize — pending role (editor-roles plan U4) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("a pending EDITOR invite materializes an editor row; a legacy null-role invite a viewer row", async () => {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const teams = teamsRepository(client);
+    const canvases = canvasesRepository(client);
+    const invitations = invitationsRepository(client);
+    const inviter = await users.upsert({
+      providerSub: "inviter",
+      email: "inviter@e.com",
+      name: "I",
+      isAdmin: false,
+    });
+    const a = await canvases.create({ ownerId: inviter.id, slug: "a", apiKeyHash: "k" });
+    const b = await canvases.create({ ownerId: inviter.id, slug: "b", apiKeyHash: "k2" });
+    await invitations.record({
+      email: "new@e.com",
+      target: { type: "canvas", id: a.id },
+      role: "editor",
+      invitedBy: inviter.id,
+    });
+    await invitations.record({
+      email: "new@e.com",
+      target: { type: "canvas", id: b.id },
+      invitedBy: inviter.id,
+    });
+    const person = await users.upsert({
+      providerSub: "new",
+      email: "new@e.com",
+      name: "N",
+      isAdmin: false,
+    });
+    await materializePendingInvitations({ invitations, teams, canvases }, person);
+    expect((await canvases.findMemberEntry(a.id, person.id))?.role).toBe("editor");
+    expect((await canvases.findMemberEntry(b.id, person.id))?.role).toBe("viewer");
+    expect(await invitations.listForEmail("new@e.com")).toEqual([]);
+  });
+});

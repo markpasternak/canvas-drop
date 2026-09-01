@@ -841,18 +841,24 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(granted).toMatchObject({ ok: true, status: "granted" });
 
     const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(access.entries).toHaveLength(1);
-    expect(access.entries[0]).toMatchObject({ kind: "member", email: "teammate@example.com" });
+    // The owner row is pinned first (KTD5); the granted member follows with its role.
+    expect(access.entries).toHaveLength(2);
+    expect(access.entries[0]).toMatchObject({ id: "owner", kind: "owner", role: "owner" });
+    expect(access.entries[1]).toMatchObject({
+      kind: "member",
+      email: "teammate@example.com",
+      role: "viewer",
+    });
 
     const ok = payload(
       await mcp.callTool({
         name: "revoke_access",
-        arguments: { id: cv.id, entryId: access.entries[0].id },
+        arguments: { id: cv.id, entryId: access.entries[1].id },
       }),
     );
     expect(ok.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries).toHaveLength(1);
 
     // The legacy guest-invite path is retired; unknown self-serve external emails are denied
     // through the shared Add person policy, not by minting app-owned magic links.
@@ -879,8 +885,8 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(pending).toMatchObject({ ok: true, status: "pending" });
 
     const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(access.entries).toHaveLength(1);
-    expect(access.entries[0]).toMatchObject({
+    expect(access.entries).toHaveLength(2);
+    expect(access.entries[1]).toMatchObject({
       kind: "pending",
       email: "new-person@example.com",
     });
@@ -888,12 +894,12 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const revoked = payload(
       await mcp.callTool({
         name: "revoke_access",
-        arguments: { id: cv.id, entryId: access.entries[0].id },
+        arguments: { id: cv.id, entryId: access.entries[1].id },
       }),
     );
     expect(revoked.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries).toHaveLength(1);
   });
 
   it("admin owners can admit a never-seen external email through grant_access", async () => {
@@ -2241,5 +2247,143 @@ describe.each(DIALECTS)("MCP — editor staged deploy (editor-roles plan U3) [%s
     expect(result.version).toBe(1);
     const [v] = await versionsRepository(client).listByCanvas(cv.id);
     expect(v?.createdBy).toBe(editor);
+  });
+});
+
+describe.each(DIALECTS)("MCP — people-list roles (editor-roles plan U4/U5) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("grant_access with role, list_access roles + ids, set_access_role, owner/guest refusals, team grants", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const colleague = await seedUser(client, "colleague@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "roles", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "g@partner.com",
+    });
+    const mcp = await connect(client, { userId: owner });
+
+    const granted = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "colleague@example.com", role: "editor" },
+      }),
+    );
+    expect(granted).toMatchObject({ ok: true, status: "granted", role: "editor" });
+    expect((await repo.findMemberEntry(cv.id, colleague))?.role).toBe("editor");
+
+    const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(access.entries[0]).toMatchObject({ id: "owner", kind: "owner", role: "owner" });
+    const member = access.entries.find((e: { kind: string }) => e.kind === "member");
+    expect(member).toMatchObject({ role: "editor", email: "colleague@example.com" });
+    expect(member.id).toMatch(/^member:/);
+    const guest = access.entries.find((e: { kind: string }) => e.kind === "guest");
+    expect(guest).toMatchObject({ role: "viewer" });
+
+    // Demote via set_access_role; the colleague's tools then read not-found.
+    const demoted = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: member.id, role: "viewer" },
+    });
+    expect(isError(demoted)).toBe(false);
+    const asColleague = await connect(client, { userId: colleague });
+    expect(text(await asColleague.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      "canvas not found",
+    );
+
+    // Guest → editor and the owner row are refused with the shared prefixes.
+    const guestUp = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: guest.id, role: "editor" },
+    });
+    expect(text(guestUp)).toMatch(/^GUEST_VIEWER_ONLY: /);
+    const ownerUp = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: "owner", role: "viewer" },
+    });
+    expect(text(ownerUp)).toMatch(/^OWNER_ONLY: /);
+    const ownerDel = await mcp.callTool({
+      name: "revoke_access",
+      arguments: { id: cv.id, entryId: "owner" },
+    });
+    expect(text(ownerDel)).toMatch(/^OWNER_ONLY: /);
+
+    // A team grant with a role through grant_access (teamId); its member becomes an editor.
+    const teams = teamsRepository(client);
+    const design = await teams.create({ orgId: null, name: "Design", createdBy: owner });
+    await teams.addMember(design.id, colleague);
+    const teamGrant = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, teamId: design.id, role: "editor" },
+      }),
+    );
+    expect(teamGrant).toMatchObject({ ok: true, role: "editor" });
+    expect(
+      isError(await asColleague.callTool({ name: "get_canvas", arguments: { id: cv.id } })),
+    ).toBe(false);
+    const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(after.entries).toContainEqual(
+      expect.objectContaining({ id: `team:${design.id}`, kind: "team", role: "editor" }),
+    );
+    const both = await mcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, email: "x@example.com", teamId: design.id },
+    });
+    expect(text(both)).toMatch(/^INVALID_REQUEST: /);
+  });
+
+  it("an editor can manage the people list over MCP (add / promote / remove), never the owner row", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    await seedUser(client, "newbie@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "edit-people", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const mcp = await connect(client, { userId: editor });
+    const added = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "newbie@example.com" },
+      }),
+    );
+    expect(added).toMatchObject({ ok: true, status: "granted", role: null });
+    const entries = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }))
+      .entries as Array<{ id: string; email: string | null; role: string }>;
+    const newbie = entries.find((e) => e.email === "newbie@example.com");
+    expect(newbie?.role).toBe("viewer");
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_access_role",
+          arguments: { id: cv.id, entryId: (newbie as { id: string }).id, role: "editor" },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "revoke_access",
+          arguments: { id: cv.id, entryId: (newbie as { id: string }).id },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      text(
+        await mcp.callTool({ name: "revoke_access", arguments: { id: cv.id, entryId: "owner" } }),
+      ),
+    ).toMatch(/^OWNER_ONLY: /);
   });
 });

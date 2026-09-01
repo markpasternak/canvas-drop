@@ -211,17 +211,22 @@ export function teamsRepository(client: DbClient) {
 
     // ---- canvas → team grants (the `team` rung; consumed by U4) ----
 
-    /** Replace a canvas's granted teams with exactly `teamIds` (idempotent set semantics).
-     *  Transactional: a failure between the delete and the insert would otherwise leave a
-     *  `team`-rung canvas granted to nobody — an accidental deny-to-everyone. */
+    /** Replace a canvas's VIEWER-role team grants with exactly `teamIds` (idempotent set
+     *  semantics — the `team` rung's grant set). Editor-role grants are owned solely by
+     *  the people-list path (editor-roles plan, KTD4): the replace-delete is scoped to
+     *  viewer rows and the insert never demotes an existing editor row, so no rung/teams
+     *  write can remove or downgrade an editor team. Transactional: a failure between the
+     *  delete and the insert would otherwise leave a `team`-rung canvas granted to nobody. */
     async setCanvasTeams(canvasId: string, teamIds: string[]): Promise<void> {
       await tx(async (q) => {
-        await q.delete(canvasTeamsT).where(eq(canvasTeamsT.canvasId, canvasId));
+        await q
+          .delete(canvasTeamsT)
+          .where(and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.role, "viewer")));
         if (teamIds.length === 0) return;
         const now = Date.now();
         await q
           .insert(canvasTeamsT)
-          .values(teamIds.map((teamId) => ({ canvasId, teamId, createdAt: now })))
+          .values(teamIds.map((teamId) => ({ canvasId, teamId, role: "viewer", createdAt: now })))
           .onConflictDoNothing();
       });
     },

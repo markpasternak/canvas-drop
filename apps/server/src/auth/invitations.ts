@@ -1,3 +1,4 @@
+import type { AccessRole } from "@canvas-drop/shared/db";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { Logger } from "../log/logger.js";
 
@@ -11,6 +12,7 @@ export interface InvitationApplyDeps {
       principalKind: "member" | "guest";
       userId?: string | null;
       email?: string | null;
+      role?: AccessRole;
     }): Promise<unknown>;
   };
 }
@@ -42,10 +44,15 @@ export async function materializePendingInvitations(
       if (inv.targetType === "team") {
         await deps.teams.addMember(inv.targetId, user.id);
       } else if (inv.targetType === "canvas") {
+        // The invited role rides through (editor-roles plan, KTD2). A legacy null role is
+        // a viewer; an omitted role never changes an existing row (KTD3). Whether an
+        // editor row is EFFECTIVE is decided live by the role resolver (org membership),
+        // so a person who signs in without org membership holds view access only (AE15).
         await deps.canvases.addAllowlistEntry({
           canvasId: inv.targetId,
           principalKind: "member",
           userId: user.id,
+          ...(inv.role === "editor" ? { role: "editor" as const } : {}),
         });
       } else {
         continue; // unknown target_type (DB check should prevent this) — leave un-consumed

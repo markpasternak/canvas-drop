@@ -78,6 +78,49 @@ export function invitationsRepository(client: DbClient) {
       return rows.length > 0;
     },
 
+    /** One un-consumed invitation by id, scoped to its target (null when absent / consumed). */
+    async findPendingForTarget(
+      targetType: InvitationTarget["type"],
+      targetId: string,
+      id: string,
+    ): Promise<Invitation | null> {
+      const rows = (await db
+        .select()
+        .from(T)
+        .where(
+          and(
+            eq(T.targetType, targetType),
+            eq(T.targetId, targetId),
+            eq(T.id, id),
+            isNull(T.consumedAt),
+          ),
+        )
+        .limit(1)) as Invitation[];
+      return rows[0] ?? null;
+    },
+
+    /** Change a pending grant's role (editor-roles plan), scoped to its target. */
+    async setPendingRole(
+      targetType: InvitationTarget["type"],
+      targetId: string,
+      id: string,
+      role: string,
+    ): Promise<Invitation | null> {
+      const rows = (await db
+        .update(T)
+        .set({ role })
+        .where(
+          and(
+            eq(T.targetType, targetType),
+            eq(T.targetId, targetId),
+            eq(T.id, id),
+            isNull(T.consumedAt),
+          ),
+        )
+        .returning()) as Invitation[];
+      return rows[0] ?? null;
+    },
+
     /** Un-consumed invitations for a (lowercased) email — the apply set on first login. */
     async listForEmail(email: string): Promise<Invitation[]> {
       return (await db
