@@ -19,6 +19,7 @@ import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
+import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { rootEntry } from "../canvas/manifest.js";
 import {
   classifyMutability,
@@ -36,7 +37,11 @@ import { resolveCreateSlug } from "../canvas/slug.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
-import { VersionHistoryError, type VersionHistoryService } from "../canvas/version-history.js";
+import {
+  resolveVersionCreators,
+  VersionHistoryError,
+  type VersionHistoryService,
+} from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -733,7 +738,9 @@ export function managementRoutes(deps: ManagementDeps) {
     // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
     const resolution = resolveSettingsUpdate(cv, body.data, {
       publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
-      canPublishPublic: c.get("user").canPublishPublic,
+      // The public-link entitlement follows the OWNER's account, whoever acts (KD7/R10).
+      ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+      actorIsOwner: c.get("canvasRole") === "owner",
       publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
       now: Date.now(),
       tenancyActive: !!deps.config.org.name,
@@ -1078,9 +1085,13 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/regenerate-key", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const apiKey = generateApiKey();
-    await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
-    deps.audit.recordAudit({ action: "key_regen", actorId: c.get("user").id, targetId: cv.id });
+    // Shared with the MCP tool (editor-roles plan U8/KTD11): audited with the acting
+    // role; a rotation by a non-owner emails the owner naming the actor.
+    const { apiKey } = await rotateDeployKey(
+      { canvases: deps.canvases, users: deps.users, audit: deps.audit, notify: deps.invites },
+      cv,
+      peopleActor(c),
+    );
     return c.json({ apiKey }); // shown once
   });
 
@@ -1220,12 +1231,16 @@ export function managementRoutes(deps: ManagementDeps) {
     const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const versions = await deps.versions.listByCanvas(cv.id);
+    // Who created each version (R18) — one batched identity lookup, shared with MCP.
+    const creators = await resolveVersionCreators(deps.users, versions);
     return c.json({
       versions: versions.map((v) => ({
         number: v.number,
         source: v.source,
         status: v.status,
         createdBy: v.createdBy,
+        createdByName: creators.get(v.createdBy)?.name ?? null,
+        createdByEmail: creators.get(v.createdBy)?.email ?? null,
         createdAt: v.createdAt,
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,

@@ -62,14 +62,16 @@ function canvas(overrides: Partial<Canvas> = {}): Canvas {
 
 const PUBLIC_OK = {
   publicLinksEnabled: true,
-  canPublishPublic: true,
+  ownerCanPublishPublic: true,
+  actorIsOwner: true,
   publicEdgeCacheTtlSec: 300,
   now: NOW,
   tenancyActive: false,
 };
 const PUBLIC_DENIED = {
   publicLinksEnabled: true,
-  canPublishPublic: false,
+  ownerCanPublishPublic: false,
+  actorIsOwner: true,
   publicEdgeCacheTtlSec: 300,
   now: NOW,
   tenancyActive: false,
@@ -344,7 +346,8 @@ function publicCanvas(over: Partial<Canvas> = {}): Canvas {
 
 const cdnOpts = {
   publicLinksEnabled: true,
-  canPublishPublic: true,
+  ownerCanPublishPublic: true,
+  actorIsOwner: true,
   publicEdgeCacheTtlSec: 300,
   now: NOW,
   tenancyActive: false,
@@ -421,5 +424,43 @@ describe("resolveSettingsUpdate — CDN downgrade warning", () => {
     const r = resolveSettingsUpdate(publicCanvas(), { access: "whole_org" }, cdnOpts);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.warning).toMatch(/CDN/);
+  });
+});
+
+// --- Editor-roles plan U8: the OWNER's entitlement gates public links; guest AI is owner-only ---
+
+describe("resolveSettingsUpdate — owner entitlement and owner-only fields (editor-roles plan)", () => {
+  const published = () => canvas({ status: "active", currentVersionId: "v1" });
+  const asEditor = { ...PUBLIC_OK, actorIsOwner: false };
+
+  it("an editor may switch to public_link when the OWNER's account has the entitlement", () => {
+    expect(resolve(published(), { access: "public_link" }, asEditor).ok).toBe(true);
+  });
+
+  it("AE6: an editor is refused PUBLIC_LINK_OWNER_GATED when the owner lacks it; the owner hears PUBLIC_NOT_ALLOWED", () => {
+    const gated = resolve(
+      published(),
+      { access: "public_link" },
+      { ...asEditor, ownerCanPublishPublic: false },
+    );
+    expect(gated).toMatchObject({ ok: false, code: "PUBLIC_LINK_OWNER_GATED", status: 403 });
+    const owner = resolve(published(), { access: "public_link" }, PUBLIC_DENIED);
+    expect(owner).toMatchObject({ ok: false, code: "PUBLIC_NOT_ALLOWED", status: 403 });
+  });
+
+  it("the guest-AI opt-in and cap are OWNER_ONLY for a non-owner; other settings still resolve", () => {
+    expect(resolve(published(), { guestAiEnabled: true }, asEditor)).toMatchObject({
+      ok: false,
+      code: "OWNER_ONLY",
+      status: 403,
+    });
+    expect(resolve(published(), { guestAiCap: 5 }, asEditor)).toMatchObject({
+      ok: false,
+      code: "OWNER_ONLY",
+    });
+    expect(resolve(published(), { title: "renamed", guestAiCap: undefined }, asEditor).ok).toBe(
+      true,
+    );
+    expect(resolve(published(), { guestAiEnabled: true, guestAiCap: 5 }, PUBLIC_OK).ok).toBe(true);
   });
 });

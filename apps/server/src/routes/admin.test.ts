@@ -1335,6 +1335,7 @@ describe("admin routes", () => {
       "account_invite",
       "canvas_editor_granted_owner",
       "canvas_invite",
+      "canvas_key_regenerated_owner",
       "canvas_ownership_reassigned",
       "canvas_ownership_received",
       "individual_canvas_invite",

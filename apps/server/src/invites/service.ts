@@ -420,6 +420,20 @@ export function inviteService(deps: InviteServiceDeps) {
       return notify(target, to.trim().toLowerCase(), actor, settings);
     },
 
+    /** The owner's notice that a NON-owner regenerated the deploy key (KTD11). Never throws. */
+    async notifyOwnerOfKeyRegen(input: {
+      canvasSlug: string;
+      canvasTitle: string;
+      ownerEmail: string;
+      actor: InviteActor;
+    }): Promise<InviteEmailDelivery> {
+      return sendKeyed("canvas_key_regenerated_owner", input.ownerEmail, {
+        inviterName: input.actor.name,
+        canvasTitle: input.canvasTitle,
+        link: canvasUrl(deps.config, input.canvasSlug),
+      });
+    },
+
     /** The new owner's notice after a transfer / admin reassign (KTD7). Never throws. */
     async notifyOwnershipReceived(input: {
       canvasSlug: string;

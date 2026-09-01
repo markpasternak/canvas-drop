@@ -20,7 +20,8 @@ export type TemplateKey =
   | "team_invite"
   | "canvas_editor_granted_owner"
   | "canvas_ownership_received"
-  | "canvas_ownership_reassigned";
+  | "canvas_ownership_reassigned"
+  | "canvas_key_regenerated_owner";
 
 /** The variables a caller may supply (the allow-list — any `{{var}}` outside this set, or
  *  absent from the supplied map, renders empty). */
@@ -54,6 +55,7 @@ export const TEMPLATE_KEYS: readonly TemplateKey[] = [
   "canvas_editor_granted_owner",
   "canvas_ownership_received",
   "canvas_ownership_reassigned",
+  "canvas_key_regenerated_owner",
 ];
 
 const html = (subject: string, lead: string, cta: string): string =>
@@ -270,6 +272,16 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateBody> = {
     ),
     bodyText:
       "An administrator ({{inviterName}}) reassigned your canvas “{{canvasTitle}}” to {{personEmail}}. Reason: {{reason}}. You keep editor access; the deploy key was rotated:\n\n{{link}}\n",
+  },
+  canvas_key_regenerated_owner: {
+    subject: "{{inviterName}} regenerated the deploy key for “{{canvasTitle}}”",
+    bodyHtml: html(
+      "The deploy key changed",
+      "{{inviterName}} regenerated the deploy key for your canvas “{{canvasTitle}}”. Any saved copy of the old key stops working. Open Settings to issue a new one if you need it.",
+      "Open canvas",
+    ),
+    bodyText:
+      "{{inviterName}} regenerated the deploy key for your canvas “{{canvasTitle}}”. Any saved copy of the old key stops working. Open Settings to issue a new one if you need it:\n\n{{link}}\n",
   },
   canvas_editor_granted_owner: {
     subject: "{{inviterName}} made {{personEmail}} an editor of “{{canvasTitle}}”",

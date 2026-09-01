@@ -2745,6 +2745,8 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
+    // The gate reads the OWNER's account entitlement (editor-roles plan, KD7).
+    await usersRepository(client).setPublishPublic(owner.id, false);
     const res = await buildApp(client, {
       id: owner.id,
       isAdmin: false,
@@ -3897,5 +3899,131 @@ describe("managementRoutes — POST /:id/transfer", () => {
       (await as(editor).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so }))
         .status,
     ).toBe(200);
+  });
+});
+
+// --- Owner entitlement gates, key rotation visibility, version creators (editor-roles plan U8) ---
+
+describe("managementRoutes — owner entitlements, key rotation, version creators", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedU8() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const repo = canvasesRepository(client);
+    const users = usersRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage,
+      log: silent,
+    });
+    const cv = await repo.create({ ownerId: owner.id, slug: "ent", apiKeyHash: "k" });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const as = (u: { id: string }, canPublishPublic = true) =>
+      buildApp(client, { id: u.id, isAdmin: false, canPublishPublic }, storage);
+    const patch = (u: { id: string }, body: unknown, canPublishPublic = true) =>
+      as(u, canPublishPublic).request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    return { repo, users, engine, cv, owner, editor, as, patch };
+  }
+
+  it("AE6: editor WITH the entitlement, owner WITHOUT → PUBLIC_LINK_OWNER_GATED; owner WITH, editor WITHOUT → editor succeeds", async () => {
+    const { users, owner, editor, patch } = await seedU8();
+    await users.setPublishPublic(owner.id, false);
+    await users.setPublishPublic(editor.id, true);
+    const gated = await patch(editor, { access: "public_link" }, true);
+    expect(gated.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(gated)).code).toBe("PUBLIC_LINK_OWNER_GATED");
+    await users.setPublishPublic(owner.id, true);
+    await users.setPublishPublic(editor.id, false);
+    const ok = await patch(editor, { access: "public_link" }, false);
+    expect(ok.status).toBe(200);
+    expect((await jsonOf<{ access: string }>(ok)).access).toBe("public_link");
+  });
+
+  it("an editor's settings save touching the guest-AI fields → 403 OWNER_ONLY; their other settings writes succeed; the owner may set them", async () => {
+    const { owner, editor, patch } = await seedU8();
+    const refused = await patch(editor, { guestAiEnabled: true });
+    expect(refused.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(refused)).code).toBe("OWNER_ONLY");
+    expect((await patch(editor, { guestAiCap: 2 })).status).toBe(403);
+    expect((await patch(editor, { title: "by editor" })).status).toBe(200);
+    expect((await patch(owner, { guestAiEnabled: true, guestAiCap: 2 })).status).toBe(200);
+  });
+
+  it("AE19: an editor regenerates the deploy key (response as today); audit meta byRole editor; the owner's rotation is byRole owner", async () => {
+    const { cv, owner, editor, as } = await seedU8();
+    const res = await as(editor).request(`/api/canvases/${cv.id}/regenerate-key`, {
+      method: "POST",
+      headers: so,
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ apiKey: string }>(res)).apiKey).toMatch(/^cd_/);
+    await as(owner).request(`/api/canvases/${cv.id}/regenerate-key`, {
+      method: "POST",
+      headers: so,
+    });
+    const events = (await auditRepository(client).recent(20)).filter(
+      (e) => e.action === "key_regen",
+    );
+    expect(events.map((e) => [e.actorId, (e.meta as { byRole: string }).byRole])).toEqual(
+      expect.arrayContaining([
+        [editor.id, "editor"],
+        [owner.id, "owner"],
+      ]),
+    );
+  });
+
+  it("R18: versions list who created each version — an editor's publish names the editor; the owner's names the owner", async () => {
+    const { repo, engine, cv, owner, editor, as } = await seedU8();
+    const row = (await repo.findById(cv.id)) as NonNullable<
+      Awaited<ReturnType<typeof repo.findById>>
+    >;
+    await engine.deploy(row, "folder", folder({ "index.html": "<h1>v2</h1>" }), editor.id);
+    const res = await as(editor).request(`/api/canvases/${cv.id}/versions`);
+    expect(res.status).toBe(200);
+    const { versions } = await jsonOf<{
+      versions: Array<{ number: number; createdBy: string; createdByName: string | null }>;
+    }>(res);
+    expect(versions.map((v) => [v.number, v.createdBy, v.createdByName])).toEqual([
+      [2, editor.id, "editor"],
+      [1, owner.id, "owner"],
+    ]);
+  });
+
+  it("R11: per-canvas usage and attribution are unchanged by an editor's actions", async () => {
+    const { cv, owner, editor, as } = await seedU8();
+    const ownerView = await jsonOf<Record<string, unknown>>(
+      await as(owner).request(`/api/canvases/${cv.id}/usage`),
+    );
+    const editorView = await jsonOf<Record<string, unknown>>(
+      await as(editor).request(`/api/canvases/${cv.id}/usage`),
+    );
+    expect(editorView).toEqual(ownerView);
+    // The canvas is still attributed to its owner after the editor's settings write.
+    await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ title: "edited" }),
+    });
+    expect((await canvasesRepository(client).findById(cv.id))?.ownerId).toBe(owner.id);
   });
 });

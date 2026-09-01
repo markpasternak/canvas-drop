@@ -506,7 +506,9 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
         publishBody({ title: "S", access: "private" }),
       )
     ).json()) as AuthoredCanvas;
-    // Same owner, but public-publish revoked → update to public_link is refused.
+    // Same owner, but public-publish revoked → update to public_link is refused. The gate
+    // reads the OWNER's account entitlement (editor-roles plan, KD7), so revoke it there.
+    await usersRepository(client).setPublishPublic(owner.id, false);
     const revokedApp = buildApi(client, asMember(owner.id, { canPublishPublic: false })).app;
     const res = await putUpdate(revokedApp, pub.id, formData({ access: "public_link" }));
     expect(res.status).toBe(403);
@@ -560,6 +562,7 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     ).json()) as AuthoredCanvas;
     // Now that account loses the grant; clearing the password would make it an OPEN public
     // link — the exposure-widening op must re-hit the gate even though access is unchanged.
+    await usersRepository(client).setPublishPublic(owner.id, false);
     const revokedApp = buildApi(client, asMember(owner.id, { canPublishPublic: false })).app;
     const res = await putUpdate(revokedApp, pub.id, formData({ password: null }));
     expect(res.status).toBe(403);
@@ -730,5 +733,41 @@ describe("canvasAuthoringRoutes — editor role (admin allowance retained)", () 
       (await asEditor.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" })).status,
     ).toBe(204);
     expect((await canvasesRepository(client).findById(pub.id))?.revokedAt).not.toBeNull();
+  });
+});
+
+describe("canvasAuthoringRoutes — public link follows the OWNER's entitlement (editor-roles plan U8)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("AE6: an editor's update to public_link is PUBLIC_LINK_OWNER_GATED when the owner lacks the entitlement, and succeeds when the owner has it (editor's own flag irrelevant)", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner, cv: source } = await makeSource(client);
+    await canvasesRepository(client).setAccess(source.id, "whole_org");
+    const editor = await seedUser(client, "editor");
+    const pub = (await (
+      await publish(
+        buildApi(client, asMember(owner.id)).app,
+        publishBody({ title: "S", access: "private" }),
+      )
+    ).json()) as AuthoredCanvas;
+    await canvasesRepository(client).addAllowlistEntry({
+      canvasId: pub.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const users = usersRepository(client);
+    await users.setPublishPublic(owner.id, false);
+    const editorApp = buildApi(client, asMember(editor.id, { canPublishPublic: true })).app;
+    const gated = await putUpdate(editorApp, pub.id, formData({ access: "public_link" }));
+    expect(gated.status).toBe(403);
+    expect(((await gated.json()) as { code: string }).code).toBe("PUBLIC_LINK_OWNER_GATED");
+    await users.setPublishPublic(owner.id, true);
+    const editorNoFlag = buildApi(client, asMember(editor.id, { canPublishPublic: false })).app;
+    const ok = await putUpdate(editorNoFlag, pub.id, formData({ access: "public_link" }));
+    expect(ok.status).toBe(200);
   });
 });

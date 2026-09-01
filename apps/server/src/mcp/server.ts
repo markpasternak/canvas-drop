@@ -9,6 +9,7 @@ import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
+import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
 import {
@@ -34,6 +35,7 @@ import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { VersionHistoryService } from "../canvas/version-history.js";
+import { resolveVersionCreators } from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -226,6 +228,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     }
     return cachedIdentity;
   };
+  /** The acting user with the role that admitted this call (people list, key rotation). */
+  const peopleActorNow = async (role: ManagementRole) => ({
+    id: caller.userId,
+    ...(await identityNow()),
+    isAdmin: caller.isAdmin,
+    role,
+  });
   const teamActorNow = async (): Promise<TeamActor> => {
     return { id: caller.userId, isAdmin: false, orgIds: caller.orgIds, ...(await identityNow()) };
   };
@@ -446,11 +455,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const versions = await deps.versions.listByCanvas(cv.id);
+      // Who created each version (R18) — one batched identity lookup, shared with HTTP.
+      const creators = await resolveVersionCreators(deps.users, versions);
       return ok({
         versions: versions.map((v) => ({
           number: v.number,
           source: v.source,
           status: v.status,
+          createdBy: v.createdBy,
+          createdByName: creators.get(v.createdBy)?.name ?? null,
+          createdByEmail: creators.get(v.createdBy)?.email ?? null,
           createdAt: v.createdAt,
           fileCount: v.fileCount,
           totalBytes: v.totalBytes,
@@ -933,9 +947,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const gate = await requireMutable("regenerate_deploy_key", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      const apiKey = generateApiKey();
-      await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
-      deps.audit.recordAudit({ action: "key_regen", actorId: caller.userId, targetId: cv.id });
+      // Shared with the HTTP route (editor-roles plan U8/KTD11): audited with the acting
+      // role; a rotation by a non-owner emails the owner naming the actor.
+      const { apiKey } = await rotateDeployKey(
+        { canvases: deps.canvases, users: deps.users, audit: deps.audit, notify: deps.invites },
+        cv,
+        await peopleActorNow(gate.role),
+      );
       return ok({ apiKey, deploy: deployEndpoints(deps.config, cv.id, apiKey) });
     },
   );
@@ -1106,10 +1124,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const gate = await requireMutable("update_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      const user = await deps.users.findById(caller.userId);
       const resolution = resolveSettingsUpdate(cv, input, {
         publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
-        canPublishPublic: user?.canPublishPublic ?? false,
+        // The public-link entitlement follows the OWNER's account, whoever acts (KD7/R10).
+        ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+        actorIsOwner: gate.role === "owner",
         publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
         now: Date.now(),
         tenancyActive: !!deps.config.org.name,
@@ -1279,13 +1298,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     audit: deps.audit,
     hub: deps.hub,
     log: deps.log,
-  });
-
-  const peopleActorNow = async (role: ManagementRole) => ({
-    id: caller.userId,
-    ...(await identityNow()),
-    isAdmin: caller.isAdmin,
-    role,
   });
 
   const peopleFail = (err: PeopleError): ToolResult =>

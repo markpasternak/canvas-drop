@@ -1,5 +1,6 @@
 import type { Canvas, Manifest, Version } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import type { StorageDriver } from "../storage/driver.js";
@@ -39,6 +40,21 @@ export interface VersionHistoryDeps {
  * own owner/mutability gates; this service keeps archive and row-deletion
  * semantics identical across dashboard HTTP and MCP.
  */
+/**
+ * Who created each version (editor-roles plan U8, R18): one batched lookup of the
+ * creators' display identity, shared by the management versions route and the MCP
+ * `list_versions` tool. Every version already records `createdBy`; a creator whose
+ * account is gone resolves to no entry (the caller shows the id / nothing).
+ */
+export async function resolveVersionCreators(
+  users: Pick<UsersRepository, "findByIds">,
+  versions: readonly Pick<Version, "createdBy">[],
+): Promise<Map<string, { name: string; email: string }>> {
+  const ids = [...new Set(versions.map((v) => v.createdBy))];
+  if (ids.length === 0) return new Map();
+  return new Map((await users.findByIds(ids)).map((u) => [u.id, { name: u.name, email: u.email }]));
+}
+
 export function versionHistoryService(deps: VersionHistoryDeps) {
   return {
     /** Build an all-or-nothing ZIP for one ready version. */

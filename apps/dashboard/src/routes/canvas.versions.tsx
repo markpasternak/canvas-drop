@@ -136,6 +136,15 @@ export default function Versions() {
                   <span className="font-medium text-muted">{sourceLabel(v.source)}</span>
                   <span aria-hidden>·</span>
                   <span>{relativeTime(v.createdAt)}</span>
+                  {/* Who published it (editor-roles plan, R18) — Docs-style authorship. */}
+                  {(v.createdByName || v.createdByEmail) && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span title={v.createdByEmail ?? undefined}>
+                        by {v.createdByName || v.createdByEmail}
+                      </span>
+                    </>
+                  )}
                   <span aria-hidden>·</span>
                   <span>
                     {v.fileCount} {v.fileCount === 1 ? "file" : "files"}

@@ -192,6 +192,9 @@ export interface VersionInfo {
   source: string;
   status: string;
   createdBy: string;
+  /** The creator's display identity (editor-roles plan, R18); null when the account is gone. */
+  createdByName?: string | null;
+  createdByEmail?: string | null;
   createdAt: number;
   fileCount: number;
   totalBytes: number;

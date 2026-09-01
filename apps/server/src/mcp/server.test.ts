@@ -2447,3 +2447,94 @@ describe.each(DIALECTS)("MCP — transfer_canvas (editor-roles plan U7) [%s]", (
     ).toMatch(/^OWNER_ONLY: /);
   });
 });
+
+describe.each(DIALECTS)(
+  "MCP — owner entitlements + version creators (editor-roles plan U8) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    it("AE6 over MCP: update_canvas access=public_link by an editor follows the OWNER's entitlement; guest-AI fields are OWNER_ONLY; list_versions names creators", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const users = usersRepository(client);
+      const repo = canvasesRepository(client);
+      const storage = memStorage();
+      const asOwner = await connect(client, { userId: owner }, false, config, storage);
+      const made = payload(await asOwner.callTool({ name: "create_canvas", arguments: {} }));
+      await asOwner.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, zipBase64: zip({ "index.html": "<h1>v1</h1>" }) },
+      });
+      await repo.addAllowlistEntry({
+        canvasId: made.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const asEditor = await connect(client, { userId: editor }, false, config, storage);
+
+      await users.setPublishPublic(owner, false);
+      await users.setPublishPublic(editor, true);
+      const gated = await asEditor.callTool({
+        name: "update_canvas",
+        arguments: { id: made.id, access: "public_link" },
+      });
+      expect(text(gated)).toMatch(/^PUBLIC_LINK_OWNER_GATED: /);
+      await users.setPublishPublic(owner, true);
+      await users.setPublishPublic(editor, false);
+      const ok = await asEditor.callTool({
+        name: "update_canvas",
+        arguments: { id: made.id, access: "public_link" },
+      });
+      expect(isError(ok)).toBe(false);
+      expect(payload(ok).access).toBe("public_link");
+
+      expect(
+        text(
+          await asEditor.callTool({
+            name: "update_canvas",
+            arguments: { id: made.id, guestAiEnabled: true },
+          }),
+        ),
+      ).toMatch(/^OWNER_ONLY: /);
+      expect(
+        isError(
+          await asOwner.callTool({
+            name: "update_canvas",
+            arguments: { id: made.id, guestAiEnabled: true },
+          }),
+        ),
+      ).toBe(false);
+
+      // The editor publishes v2 through the draft loop; list_versions names both creators.
+      await asEditor.callTool({
+        name: "write_draft_file",
+        arguments: { id: made.id, path: "index.html", content: "<h1>v2</h1>" },
+      });
+      const published = await asEditor.callTool({
+        name: "publish_draft",
+        arguments: { id: made.id },
+      });
+      expect(isError(published)).toBe(false);
+      const listed = payload(
+        await asOwner.callTool({ name: "list_versions", arguments: { id: made.id } }),
+      );
+      expect(
+        listed.versions.map(
+          (v: { number: number; createdBy: string; createdByName: string | null }) => [
+            v.number,
+            v.createdBy,
+            v.createdByName,
+          ],
+        ),
+      ).toEqual([
+        [2, editor, "editor@example.com"],
+        [1, owner, "owner@example.com"],
+      ]);
+    });
+  },
+);
