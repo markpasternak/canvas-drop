@@ -509,6 +509,15 @@ export function useAdminDisableCanvas() {
   });
 }
 
+export function useAdminReassignOwner() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, toUserId, reason }: { id: string; toUserId: string; reason: string }) =>
+      api.admin.reassignOwner(id, { toUserId, reason }),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
 export function useAdminEnableCanvas() {
   const qc = useQueryClient();
   return useMutation({

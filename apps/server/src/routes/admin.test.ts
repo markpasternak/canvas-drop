@@ -1335,6 +1335,8 @@ describe("admin routes", () => {
       "account_invite",
       "canvas_editor_granted_owner",
       "canvas_invite",
+      "canvas_ownership_reassigned",
+      "canvas_ownership_received",
       "individual_canvas_invite",
       "team_invite",
     ]);
@@ -1402,5 +1404,60 @@ describe("admin routes", () => {
       .canvases;
     expect(rows.map((r) => r.slug)).toEqual(["pub"]);
     expect(rows[0]?.access).toBe("public_link");
+  });
+});
+
+describe("admin routes — reassign owner (editor-roles plan U7)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("reassigns to another member with a reason (audited), rotating the deploy key; refuses the owner, the admin themself, and a blocked target; a non-admin is 404", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const owner = await seedUser(client, "owner");
+    const target = await seedUser(client, "target");
+    const blocked = await seedUser(client, "blocked");
+    await usersRepository(client).setBlocked(blocked.id, true);
+    const { app, canvases, audit } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const cv = await canvases.create({ ownerId: owner.id, slug: "re", apiKeyHash: "k-before" });
+
+    const url = `/api/admin/canvases/${cv.id}/reassign-owner`;
+    expect((await app.request(url, post({ toUserId: owner.id, reason: "r" }))).status).toBe(409);
+    expect((await app.request(url, post({ toUserId: admin.id, reason: "r" }))).status).toBe(409);
+    expect((await app.request(url, post({ toUserId: blocked.id, reason: "r" }))).status).toBe(409);
+    expect((await app.request(url, post({ toUserId: target.id }))).status).toBe(400); // reason required
+    expect(
+      (
+        await app.request(
+          `/api/admin/canvases/nope/reassign-owner`,
+          post({ toUserId: target.id, reason: "r" }),
+        )
+      ).status,
+    ).toBe(404);
+
+    const res = await app.request(url, post({ toUserId: target.id, reason: "owner offboarded" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ ok: true, previousOwnerEditor: true, deployKeyRotated: true });
+    expect(JSON.stringify(body)).not.toContain("cd_"); // no plaintext key
+    const after = await canvases.findById(cv.id);
+    expect(after?.ownerId).toBe(target.id);
+    expect(after?.apiKeyHash).not.toBe("k-before");
+    expect((await canvases.listAllowlist(cv.id)).map((e) => [e.userId, e.role])).toEqual([
+      [owner.id, "editor"],
+    ]);
+    await audit.flush();
+    const events = await auditRepository(client).recent(50);
+    expect(events.map((e) => e.action)).toEqual(
+      expect.arrayContaining(["canvas_reassign_owner", "key_regen"]),
+    );
+
+    // A non-admin cannot reach the admin router at all (opaque 404, no existence leak).
+    const asMember = buildAdminApp(client, { id: owner.id, isAdmin: false }).app;
+    expect((await asMember.request(url, post({ toUserId: target.id, reason: "r" }))).status).toBe(
+      404,
+    );
   });
 });

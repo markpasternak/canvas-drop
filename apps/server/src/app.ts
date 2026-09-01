@@ -673,6 +673,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       guests: deps.guests,
       invites,
       invitations,
+      orgMembership,
       // Effective operator globals (admin DB override ?? env) for the capabilities view.
       aiEnabled: () => settingsSvc.aiEnabled(),
       realtimeEnabled: () => settingsSvc.effectiveRealtimeEnabled(),
@@ -718,6 +719,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       invites,
       audit: deps.audit,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
+      orgMembership,
+      hub: deps.hub,
     }),
   );
 

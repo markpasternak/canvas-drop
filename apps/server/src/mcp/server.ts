@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
@@ -17,6 +18,7 @@ import {
   OWNER_ONLY_CODE,
   OWNER_ONLY_MESSAGE,
 } from "../canvas/owner-guard.js";
+import { ownershipService } from "../canvas/ownership.js";
 import { hashPassword } from "../canvas/password.js";
 import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import {
@@ -1453,6 +1455,56 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const r = await people.remove(gate.canvas, await peopleActorNow(gate.role), entryId);
       if (!r.ok) return peopleFail(r);
       return ok({ ok: true });
+    },
+  );
+
+  // ---- Ownership transfer (editor-roles plan U7) — owner-only -------------------------
+  const ownership = ownershipService({
+    canvases: deps.canvases,
+    users: deps.users,
+    orgMembership: makeOrgMembershipResolver(deps.orgs, deps.orgMembers),
+    tenancyActive: caller.tenancyActive,
+    audit: deps.audit,
+    hub: deps.hub,
+    notify: deps.invites,
+    log: deps.log,
+  });
+
+  server.registerTool(
+    "transfer_canvas",
+    {
+      description:
+        "Transfer ownership of a canvas you OWN to one of its existing editors (an org member). " +
+        "Instant — no pending state: the recipient becomes the owner and you stay on as an " +
+        "editor; the public-link entitlement now follows their account (a public link they are " +
+        "not entitled to is reverted — see `publicLinkReverted`). Pass the recipient's user id " +
+        "(from list_access / search_people), never an email; a team cannot receive a canvas. " +
+        "Editors get OWNER_ONLY; a recipient who is not an editor gets NOT_ELIGIBLE.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        toUserId: z
+          .string()
+          .min(1)
+          .refine((v) => !v.includes("@"), "toUserId is a user id, not an email")
+          .describe("The recipient's user id (an existing editor) — never an email."),
+      },
+    },
+    async ({ id, toUserId }) => {
+      const gate = await requireMutable("transfer_canvas", id);
+      if ("error" in gate) return gate.error;
+      const identity = await identityNow();
+      const r = await ownership.transfer(
+        gate.canvas,
+        { id: caller.userId, name: identity.name },
+        toUserId,
+      );
+      if (!r.ok) return fail(`${r.code}: ${r.message}`);
+      return ok({
+        ok: true,
+        canvas: canvasView(deps.config, r.canvas),
+        previousOwnerEditor: r.previousOwnerEditor,
+        publicLinkReverted: r.publicLinkReverted,
+      });
     },
   );
 

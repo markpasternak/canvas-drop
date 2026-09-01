@@ -18,7 +18,9 @@ export type TemplateKey =
   | "canvas_invite"
   | "individual_canvas_invite"
   | "team_invite"
-  | "canvas_editor_granted_owner";
+  | "canvas_editor_granted_owner"
+  | "canvas_ownership_received"
+  | "canvas_ownership_reassigned";
 
 /** The variables a caller may supply (the allow-list — any `{{var}}` outside this set, or
  *  absent from the supplied map, renders empty). */
@@ -38,7 +40,8 @@ export type TemplateVars = Partial<
     // owner's notice — the person who was granted.
     | "role"
     | "accessLabel"
-    | "personEmail",
+    | "personEmail"
+    | "reason",
     string
   >
 >;
@@ -49,6 +52,8 @@ export const TEMPLATE_KEYS: readonly TemplateKey[] = [
   "individual_canvas_invite",
   "team_invite",
   "canvas_editor_granted_owner",
+  "canvas_ownership_received",
+  "canvas_ownership_reassigned",
 ];
 
 const html = (subject: string, lead: string, cta: string): string =>
@@ -245,6 +250,26 @@ export const DEFAULT_TEMPLATES: Record<TemplateKey, TemplateBody> = {
     ),
     bodyText:
       "{{inviterName}} gave {{recipientEmail}} {{accessLabel}} access to the canvas “{{canvasTitle}}”. Sign in with that email address to open it:\n\n{{link}}\n",
+  },
+  canvas_ownership_received: {
+    subject: "You now own “{{canvasTitle}}”",
+    bodyHtml: html(
+      "A canvas was transferred to you",
+      "{{inviterName}} made {{recipientEmail}} the owner of the canvas “{{canvasTitle}}”. Its sharing, public-link entitlement, and deploy key now follow your account.",
+      "Open canvas",
+    ),
+    bodyText:
+      "{{inviterName}} made {{recipientEmail}} the owner of the canvas “{{canvasTitle}}”. Its sharing, public-link entitlement, and deploy key now follow your account:\n\n{{link}}\n",
+  },
+  canvas_ownership_reassigned: {
+    subject: "“{{canvasTitle}}” was reassigned to {{personEmail}}",
+    bodyHtml: html(
+      "A canvas you owned was reassigned",
+      "An administrator ({{inviterName}}) reassigned your canvas “{{canvasTitle}}” to {{personEmail}}. Reason: {{reason}}. You keep editor access; the deploy key was rotated.",
+      "Open canvas",
+    ),
+    bodyText:
+      "An administrator ({{inviterName}}) reassigned your canvas “{{canvasTitle}}” to {{personEmail}}. Reason: {{reason}}. You keep editor access; the deploy key was rotated:\n\n{{link}}\n",
   },
   canvas_editor_granted_owner: {
     subject: "{{inviterName}} made {{personEmail}} an editor of “{{canvasTitle}}”",

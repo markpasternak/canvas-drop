@@ -42,6 +42,21 @@ export interface RoleDeps {
   tenancyActive: boolean;
 }
 
+/**
+ * KTD2's org predicate as a pure function (mirrors the SQL predicate in the canvases
+ * repo): under inert tenancy any member qualifies; under active tenancy the member needs
+ * a non-empty live org set that contains the canvas's home org when it has one.
+ */
+export function editorOrgPredicate(
+  canvas: Pick<Canvas, "orgId">,
+  orgIds: Set<string>,
+  tenancyActive: boolean,
+): boolean {
+  if (!tenancyActive) return true;
+  if (orgIds.size === 0) return false;
+  return canvas.orgId === null || orgIds.has(canvas.orgId);
+}
+
 /** The editor-predicate scope for a member principal (KTD2). */
 export function editorScopeFor(
   principal: { orgIds: Set<string> },

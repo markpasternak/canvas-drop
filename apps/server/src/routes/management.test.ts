@@ -3809,3 +3809,93 @@ describe("managementRoutes — people-list roles", () => {
     expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(200);
   });
 });
+
+// --- Ownership transfer over HTTP (editor-roles plan U7) -----------------------------------
+
+describe("managementRoutes — POST /:id/transfer", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedTransfer() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const nobody = await seedUser(client, "nobody");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner.id, slug: "xfer", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    const hub = {
+      calls: [] as Array<{ method: string; canvasId: string }>,
+      async revalidateCanvas(canvasId: string) {
+        this.calls.push({ method: "revalidateCanvas", canvasId });
+      },
+      async dropGatedNonOwners(canvasId: string) {
+        this.calls.push({ method: "dropGatedNonOwners", canvasId });
+      },
+    };
+    const as = (u: { id: string }) =>
+      buildApp(client, { id: u.id, isAdmin: false }, undefined, hub);
+    const transfer = (u: { id: string }, toUserId: string, headers: Record<string, string> = so) =>
+      as(u).request(`/api/canvases/${cv.id}/transfer`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ toUserId }),
+      });
+    return { repo, cv, owner, editor, viewer, nobody, hub, as, transfer };
+  }
+
+  it("owner-only: an editor gets 403 OWNER_ONLY, viewer/no-role 404; a cross-origin request is refused before the gate (403, no OWNER_ONLY/404 signal)", async () => {
+    const { editor, viewer, nobody, transfer } = await seedTransfer();
+    const asEditor = await transfer(editor, viewer.id);
+    expect(asEditor.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asEditor)).code).toBe("OWNER_ONLY");
+    expect((await transfer(viewer, editor.id)).status).toBe(404);
+    expect((await transfer(nobody, editor.id)).status).toBe(404);
+    const crossSite = await transfer(nobody, editor.id, {
+      "Sec-Fetch-Site": "cross-site",
+      "content-type": "application/json",
+    });
+    expect(crossSite.status).toBe(403);
+    expect(JSON.stringify(await crossSite.json())).not.toContain("OWNER_ONLY");
+  });
+
+  it("AE7: owner → editor succeeds (previous owner becomes editor, sockets revalidated); to a non-editor → 409 NOT_ELIGIBLE; an email → 400", async () => {
+    const { repo, cv, owner, editor, viewer, hub, as, transfer } = await seedTransfer();
+    const bad = await transfer(owner, viewer.id);
+    expect(bad.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(bad)).code).toBe("NOT_ELIGIBLE");
+    expect((await transfer(owner, "editor@example.com")).status).toBe(400);
+    const ok = await transfer(owner, editor.id);
+    expect(ok.status).toBe(200);
+    const body = await jsonOf<{
+      ok: boolean;
+      previousOwnerEditor: boolean;
+      canvas: { id: string };
+    }>(ok);
+    expect(body).toMatchObject({ ok: true, previousOwnerEditor: true });
+    expect((await repo.findById(cv.id))?.ownerId).toBe(editor.id);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    // The previous owner is now an editor: manages, but delete is owner-only.
+    expect((await as(owner).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    const del = await as(owner).request(`/api/canvases/${cv.id}`, {
+      method: "DELETE",
+      headers: so,
+    });
+    expect(del.status).toBe(403);
+    // The new owner may delete.
+    expect(
+      (await as(editor).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so }))
+        .status,
+    ).toBe(200);
+  });
+});

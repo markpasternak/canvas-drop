@@ -276,6 +276,27 @@ export interface OwnerCanvasSummary {
   neverDeployed: number;
 }
 
+/** Thrown inside the transfer transaction when the conditional owner swap matched no row. */
+class TransferConflict extends Error {}
+
+/** Input of the composite ownership write (editor-roles plan, KTD7). */
+export interface TransferOwnerInput {
+  canvasId: string;
+  /** The owner the caller observed — the swap is CONDITIONAL on it still holding. */
+  fromUserId: string;
+  toUserId: string;
+  /** Upsert a direct editor row for the previous owner (written FIRST). */
+  previousOwnerEditor: boolean;
+  /** Revert a `public_link` rung (the new owner lacks the entitlement). */
+  revertPublicLink: boolean;
+  /** Admin reassign: rotate the deploy key in the same write. */
+  newApiKeyHash?: string;
+}
+
+export type TransferOwnerResult =
+  | { swapped: true; canvas: Canvas; publicLinkReverted: boolean }
+  | { swapped: false };
+
 /**
  * Canvases repository (§10). Dual-dialect seam typed `any` (KTD-1); inputs and
  * the {@link Canvas} row shape stay strongly typed.
@@ -910,6 +931,81 @@ export function canvasesRepository(client: DbClient) {
         return rows[0] as Canvas;
       };
       return touchesSearchBlob ? inTransaction(apply) : apply(db);
+    },
+
+    /**
+     * The composite ownership write (editor-roles plan, KTD7) — transfer and admin
+     * reassign share it. Runs in the transaction helper (a real transaction on Postgres;
+     * a passthrough on SQLite, where the WRITE ORDER is the safety net):
+     *  1. previous owner's direct editor row (upsert → editor) — first, so a failure
+     *     after the swap still leaves both parties with access;
+     *  2. `owner_id` swap in ONE conditional update (`owner_id = fromUserId` must still
+     *     hold → two concurrent transfers: exactly one succeeds; the loser reads
+     *     `swapped: false`);
+     *  3. delete the new owner's own people-list row (one row each, AE16);
+     *  4. revert a `public_link` rung when asked (the new owner lacks the entitlement).
+     * The audit event is the caller's, written after this returns.
+     */
+    async transferOwner(input: TransferOwnerInput): Promise<TransferOwnerResult> {
+      const now = Date.now();
+      try {
+        return await inTransaction(async (q) => {
+          if (input.previousOwnerEditor) {
+            await q
+              .insert(allowlistT)
+              .values({
+                id: uuidv7(),
+                canvasId: input.canvasId,
+                principalKind: "member",
+                userId: input.fromUserId,
+                email: null,
+                role: "editor",
+                createdAt: now,
+              })
+              .onConflictDoUpdate({
+                target: [allowlistT.canvasId, allowlistT.userId],
+                set: { role: "editor" },
+              });
+          }
+          const swapped = (await q
+            .update(t)
+            .set({
+              ownerId: input.toUserId,
+              updatedAt: now,
+              ...(input.newApiKeyHash ? { apiKeyHash: input.newApiKeyHash } : {}),
+            })
+            .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
+            .returning({ id: t.id })) as Array<{ id: string }>;
+          if (swapped.length === 0) throw new TransferConflict();
+          await q
+            .delete(allowlistT)
+            .where(
+              and(
+                eq(allowlistT.canvasId, input.canvasId),
+                eq(allowlistT.principalKind, "member"),
+                eq(allowlistT.userId, input.toUserId),
+              ),
+            );
+          let publicLinkReverted = false;
+          if (input.revertPublicLink) {
+            const reverted = (await q
+              .update(t)
+              .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: now })
+              .where(and(eq(t.id, input.canvasId), eq(t.access, "public_link")))
+              .returning({ id: t.id })) as Array<{ id: string }>;
+            publicLinkReverted = reverted.length > 0;
+          }
+          const rows = (await q
+            .select()
+            .from(t)
+            .where(eq(t.id, input.canvasId))
+            .limit(1)) as Canvas[];
+          return { swapped: true as const, canvas: rows[0] as Canvas, publicLinkReverted };
+        });
+      } catch (e) {
+        if (e instanceof TransferConflict) return { swapped: false as const };
+        throw e;
+      }
     },
 
     /** Revoke-sweep: flip an owner's public_link canvases back to private when an admin

@@ -1378,6 +1378,16 @@ export const api = {
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),
 
+    /** Reassign a canvas's owner to another member with a reason (editor-roles plan U7).
+     *  The deploy key is rotated server-side; the previous owner stays on as an editor. */
+    reassignOwner: (id: string, input: { toUserId: string; reason: string }) =>
+      request<{
+        ok: true;
+        previousOwnerEditor: boolean;
+        publicLinkReverted: boolean;
+        deployKeyRotated: boolean;
+      }>(`/api/admin/canvases/${id}/reassign-owner`, jsonBody(input)),
+
     enableCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/enable`, { method: "POST" }),
 

@@ -2387,3 +2387,63 @@ describe.each(DIALECTS)("MCP — people-list roles (editor-roles plan U4/U5) [%s
     ).toMatch(/^OWNER_ONLY: /);
   });
 });
+
+describe.each(DIALECTS)("MCP — transfer_canvas (editor-roles plan U7) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("owner transfers to an editor; an editor gets OWNER_ONLY; an email is rejected by the schema; a non-editor recipient is NOT_ELIGIBLE", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const viewer = await seedUser(client, "viewer@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-xfer", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+
+    const asEditor = await connect(client, { userId: editor });
+    expect(
+      text(
+        await asEditor.callTool({
+          name: "transfer_canvas",
+          arguments: { id: cv.id, toUserId: viewer },
+        }),
+      ),
+    ).toMatch(/^OWNER_ONLY: /);
+    const asOwner = await connect(client, { userId: owner });
+    const byEmail = await asOwner.callTool({
+      name: "transfer_canvas",
+      arguments: { id: cv.id, toUserId: "editor@example.com" },
+    });
+    expect(isError(byEmail)).toBe(true);
+    expect(text(byEmail)).toMatch(/toUserId|email|Invalid/i);
+    expect(
+      text(
+        await asOwner.callTool({
+          name: "transfer_canvas",
+          arguments: { id: cv.id, toUserId: viewer },
+        }),
+      ),
+    ).toMatch(/^NOT_ELIGIBLE: /);
+    const ok = payload(
+      await asOwner.callTool({
+        name: "transfer_canvas",
+        arguments: { id: cv.id, toUserId: editor },
+      }),
+    );
+    expect(ok).toMatchObject({ ok: true, previousOwnerEditor: true, publicLinkReverted: false });
+    expect((await repo.findById(cv.id))?.ownerId).toBe(editor);
+    // The previous owner is an editor now: delete_canvas reads OWNER_ONLY for them.
+    expect(
+      text(await asOwner.callTool({ name: "delete_canvas", arguments: { id: cv.id } })),
+    ).toMatch(/^OWNER_ONLY: /);
+  });
+});

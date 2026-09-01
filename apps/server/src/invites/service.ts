@@ -252,6 +252,32 @@ export function inviteService(deps: InviteServiceDeps) {
     return { status: "failed" };
   }
 
+  /** Render + send one keyed notice under the master email toggles. Never throws. */
+  async function sendKeyed(
+    key: TemplateKey,
+    rawTo: string,
+    vars: Omit<Parameters<typeof renderTemplate>[2], "recipientEmail" | "instanceName">,
+  ): Promise<InviteEmailDelivery> {
+    const settings = await deps.settings.effectiveInviteSettings();
+    if (!settings.emailEnabled) return { status: "skipped", reason: "email_disabled" };
+    if (!deps.mailer.canSend) return { status: "skipped", reason: "mailer_disabled" };
+    try {
+      const body = await effectiveTemplate(deps.templates, key);
+      const to = rawTo.trim().toLowerCase();
+      const msg = renderTemplate(body, to, {
+        ...vars,
+        recipientEmail: to,
+        instanceName: await deps.settings.effectiveInstanceName(),
+      });
+      const res = await deps.mailer.send(msg);
+      if (res.ok) return { status: "sent" };
+      deps.log?.error({ error: res.error, key }, "notice: send failed");
+    } catch (err) {
+      deps.log?.error({ err, key }, "notice: render/send threw (write unaffected)");
+    }
+    return { status: "failed" };
+  }
+
   return {
     /**
      * Resolve an email to a grant. Existing user → granted now; brand-new email → permit +
@@ -392,6 +418,39 @@ export function inviteService(deps: InviteServiceDeps) {
       const settings = await deps.settings.effectiveInviteSettings();
       if (!notifyExisting(target, settings)) return { status: "skipped", reason: "event_disabled" };
       return notify(target, to.trim().toLowerCase(), actor, settings);
+    },
+
+    /** The new owner's notice after a transfer / admin reassign (KTD7). Never throws. */
+    async notifyOwnershipReceived(input: {
+      canvasSlug: string;
+      canvasTitle: string;
+      to: string;
+      actorName: string;
+      mode: "transfer" | "reassign";
+    }): Promise<InviteEmailDelivery> {
+      return sendKeyed("canvas_ownership_received", input.to, {
+        inviterName: input.actorName,
+        canvasTitle: input.canvasTitle,
+        link: canvasUrl(deps.config, input.canvasSlug),
+      });
+    },
+
+    /** The outgoing owner's notice after an admin reassign (R14). Never throws. */
+    async notifyOwnershipReassignedAway(input: {
+      canvasSlug: string;
+      canvasTitle: string;
+      to: string;
+      actorName: string;
+      newOwnerEmail: string;
+      reason: string;
+    }): Promise<InviteEmailDelivery> {
+      return sendKeyed("canvas_ownership_reassigned", input.to, {
+        inviterName: input.actorName,
+        canvasTitle: input.canvasTitle,
+        personEmail: input.newOwnerEmail,
+        reason: input.reason,
+        link: canvasUrl(deps.config, input.canvasSlug),
+      });
     },
 
     /**

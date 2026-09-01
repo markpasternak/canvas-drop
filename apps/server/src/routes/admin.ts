@@ -11,7 +11,9 @@ import {
   type QuotaKey,
 } from "../admin/settings-service.js";
 import type { AuditLog } from "../audit/audit-log.js";
+import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
+import { OWNERSHIP_ERROR_STATUS, ownershipService } from "../canvas/ownership.js";
 import { canvasUrl } from "../canvas/url.js";
 import type {
   AdminCanvasContextFilter,
@@ -56,6 +58,11 @@ export interface AdminRoutesDeps {
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
   revokeMcpTokensForUser?: (userId: string) => Promise<void>;
+  /** Live org-membership resolver (editor-roles plan, KTD7): the reassign target must be
+   *  a live member of the canvas's org. Optional — absent ⇒ ∅ (inert tenancy needs none). */
+  orgMembership?: OrgMembershipResolver;
+  /** Realtime hub — a reassign revalidates the canvas's live sockets. */
+  hub?: { revalidateCanvas(canvasId: string): Promise<void> };
 }
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
@@ -399,6 +406,44 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       targetId: id,
     });
     return c.json({ ok: true });
+  });
+
+  // --- Reassign owner (editor-roles plan U7, R14/KD5): a cross-owner admin action that
+  //     moves ownership between OTHER members with a recorded reason. Never confers
+  //     content access on the acting admin; the deploy key is rotated (plaintext never
+  //     returned). Existence-404 like disable/enable/restore. ---
+  const ownership = ownershipService({
+    canvases: deps.canvases,
+    users: deps.users,
+    orgMembership: deps.orgMembership,
+    tenancyActive: !!deps.config.org.name,
+    audit: deps.audit,
+    hub: deps.hub,
+    notify: deps.invites,
+  });
+  const reassignBody = z.object({
+    toUserId: z.string().min(1),
+    reason: z.string().trim().min(1).max(500),
+  });
+  app.post("/canvases/:id/reassign-owner", sameOrigin, async (c) => {
+    const cv = await loadCanvas(deps, c.req.param("id"));
+    if (!cv) return c.json({ error: "not_found" }, 404);
+    const body = reassignBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const admin = c.get("user");
+    const r = await ownership.reassign(
+      cv,
+      { id: admin.id, name: admin.name },
+      body.data.toUserId,
+      body.data.reason,
+    );
+    if (!r.ok) return c.json({ code: r.code, message: r.message }, OWNERSHIP_ERROR_STATUS[r.code]);
+    return c.json({
+      ok: true,
+      previousOwnerEditor: r.previousOwnerEditor,
+      publicLinkReverted: r.publicLinkReverted,
+      deployKeyRotated: r.deployKeyRotated,
+    });
   });
 
   // --- Gallery curation (plan 2026-06-19 KTD3): set/unset the admin-curated

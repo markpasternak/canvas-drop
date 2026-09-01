@@ -15,6 +15,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
+import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
@@ -25,6 +26,7 @@ import {
   ownerOnlyError,
   requireCanvasRole,
 } from "../canvas/owner-guard.js";
+import { OWNERSHIP_ERROR_STATUS, ownershipService } from "../canvas/ownership.js";
 import { hashPassword } from "../canvas/password.js";
 import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import { accessRoleSchema, type MinRole, resolveManagementGrant } from "../canvas/role.js";
@@ -103,6 +105,9 @@ export interface ManagementDeps extends PreviewHintDeps {
    * live sockets that lost access; a newly-set password drops gated non-owners.
    */
   hub?: RealtimeHub;
+  /** Live org-membership resolver (editor-roles plan, KTD2/KTD7): transfer eligibility
+   *  re-resolves the recipient's org set. Optional — absent ⇒ ∅ (fine under inert tenancy). */
+  orgMembership?: OrgMembershipResolver;
   /** Legacy guest service. Kept only so revoking old access rows can revoke any
    *  retained guest sessions; new sharing never creates app-owned credentials. */
   guests?: GuestService;
@@ -986,6 +991,42 @@ export function managementRoutes(deps: ManagementDeps) {
     const r = await people.remove(cv, peopleActor(c), c.req.param("entryId"));
     if (!r.ok) return peopleFailure(c, r);
     return c.json({ ok: true });
+  });
+
+  // --- Ownership transfer (editor-roles plan U7, R12/R13) — owner-only ---------------
+  const ownership = ownershipService({
+    canvases: deps.canvases,
+    users: deps.users,
+    orgMembership: deps.orgMembership,
+    tenancyActive: !!deps.config.org.name,
+    audit: deps.audit,
+    hub: deps.hub,
+    notify: deps.invites,
+  });
+  const transferSchema = z.object({
+    // A user id, never an email (KTD7): the recipient must already be an editor.
+    toUserId: z
+      .string()
+      .min(1)
+      .refine((v) => !v.includes("@"), "toUserId is a user id, not an email"),
+  });
+
+  /** Transfer ownership to an existing editor (instant; the caller becomes an editor).
+   *  Owner-only (an editor reads 403 OWNER_ONLY); takes a user id, never an email. */
+  app.post("/:id/transfer", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c, "owner");
+    if (cv instanceof Response) return cv;
+    const body = transferSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = c.get("user");
+    const r = await ownership.transfer(cv, { id: user.id, name: user.name }, body.data.toUserId);
+    if (!r.ok) return c.json({ code: r.code, message: r.message }, OWNERSHIP_ERROR_STATUS[r.code]);
+    return c.json({
+      ok: true,
+      canvas: await canvasView(r.canvas),
+      previousOwnerEditor: r.previousOwnerEditor,
+      publicLinkReverted: r.publicLinkReverted,
+    });
   });
 
   app.patch("/:id/capabilities", sameOrigin, async (c) => {

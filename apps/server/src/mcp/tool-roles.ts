@@ -61,6 +61,7 @@ export const TOOL_MIN_ROLE = {
   restore_draft: "editor",
 
   delete_canvas: "owner",
+  transfer_canvas: "owner",
 } as const satisfies Record<string, MinRole | "any">;
 
 export type ToolName = keyof typeof TOOL_MIN_ROLE;
