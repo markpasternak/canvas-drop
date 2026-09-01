@@ -287,6 +287,7 @@ describe("createClient", () => {
     const client = createClient({ context: ctx, fetch });
     const list = await client.canvases.list();
     expect(fetch.mock.calls[0]?.[0]).toBe("https://canvases.example.com/v1/c/foo/authoring");
+    expect(fetch.mock.calls[0]?.[1]?.cache).toBe("no-store");
     expect(list).toEqual([{ id: "cvB", url: "u", title: "T", tags: [], expiresAt: null }]);
   });
 

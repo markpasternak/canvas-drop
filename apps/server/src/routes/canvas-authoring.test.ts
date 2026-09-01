@@ -418,17 +418,32 @@ describe("canvasAuthoringRoutes — list + revoke", () => {
       slug: "other",
       apiKeyHash: "h-o",
     });
+    const archived = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "archived",
+      apiKeyHash: "h-a",
+    });
+    const deleted = await canvasesRepository(client).create({
+      ownerId: owner.id,
+      slug: "deleted",
+      apiKeyHash: "h-d",
+    });
     const usage = authoringUsageRepository(client);
     await usage.record({ actorId: owner.id, sourceCanvasId: cv.id, authoredCanvasId: cv.id });
+    await usage.record({ actorId: owner.id, sourceCanvasId: cv.id, authoredCanvasId: archived.id });
+    await usage.record({ actorId: owner.id, sourceCanvasId: cv.id, authoredCanvasId: deleted.id });
     await usage.record({
       actorId: other.id,
       sourceCanvasId: otherCanvas.id,
       authoredCanvasId: otherCanvas.id,
     });
+    await canvasesRepository(client).archive(archived.id);
+    await canvasesRepository(client).setStatus(deleted.id, "deleted");
 
     const { app } = buildApi(client, asMember(owner.id));
     const res = await app.request("/v1/c/app/authoring", { method: "GET" });
     expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
     const { canvases } = (await res.json()) as { canvases: Array<{ id: string }> };
     expect(canvases.map((c) => c.id)).toEqual([cv.id]);
   });
@@ -473,6 +488,7 @@ const putUpdate = (app: Hono<AppEnv>, id: string, body: FormData) =>
 type AuthoredCanvas = {
   id: string;
   url: string;
+  title: string;
   status: string;
   version: string | null;
   tags: string[];
@@ -648,17 +664,33 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect((await canvases.findById(published.id))?.passwordHash).toBe(originalHash);
   });
 
-  it("update on a revoked share is rejected (SHARE_REVOKED)", async () => {
+  it("update with a bundle republishes an unpublished share at the same URL", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
-    const { app } = buildApi(client, asMember(owner.id));
+    const { app, canvases } = buildApi(client, asMember(owner.id));
     const pub = (await (
       await publish(app, publishBody({ title: "S", access: "private" }))
     ).json()) as AuthoredCanvas;
     await app.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" });
-    const res = await putUpdate(app, pub.id, formData({ title: "S2" }));
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("SHARE_REVOKED");
+    const settingsOnly = await putUpdate(app, pub.id, formData({ title: "Still unpublished" }));
+    expect(settingsOnly.status).toBe(409);
+    expect(((await settingsOnly.json()) as { code: string }).code).toBe("SHARE_REVOKED");
+
+    const res = await putUpdate(
+      app,
+      pub.id,
+      formData({ title: "S2", access: "public_link" }, zipFile({ "index.html": "republished" })),
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()) as AuthoredCanvas).toMatchObject({
+      id: pub.id,
+      url: pub.url,
+      title: "S2",
+      access: "public_link",
+      status: "live",
+    });
+    expect((await canvases.findById(pub.id))?.revokedAt).toBeNull();
   });
 
   it("update on another owner's share is 404 (no leak)", async () => {
