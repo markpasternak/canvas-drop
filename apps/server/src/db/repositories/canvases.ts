@@ -32,6 +32,7 @@ import {
 } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
+import { teamOrgClause } from "./teams.js";
 
 /**
  * The share + gallery columns cleared whenever a canvas leaves the Published
@@ -363,10 +364,6 @@ export function canvasesRepository(client: DbClient) {
           ),
         ),
     );
-    const teamOrgClause =
-      orgIds.length === 0
-        ? isNull(teamsT.orgId)
-        : (or(isNull(teamsT.orgId), inArray(teamsT.orgId, orgIds)) as SQL);
     const teamEditor = exists(
       db
         .select({ one: sql`1` })
@@ -378,7 +375,7 @@ export function canvasesRepository(client: DbClient) {
             eq(canvasTeamsT.canvasId, t.id),
             eq(canvasTeamsT.role, "editor"),
             eq(teamMembersT.userId, userId),
-            teamOrgClause,
+            teamOrgClause(teamsT, orgIds),
           ),
         ),
     );

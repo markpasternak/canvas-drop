@@ -34,6 +34,21 @@ export interface CanvasTeamGrant {
  * org clause only NARROWS — a personal team grants by membership alone, an org team additionally
  * re-joins the LIVE `viewerOrgIds` (so a removed-from-org user is denied even with a stale row).
  */
+/**
+ * The live-org clause every team-scoped predicate shares (plan 003 KTD3; editor-roles
+ * review #9): a PERSONAL team (no org) always joins; an org team only for a viewer who is
+ * currently in that org. Takes the dialect-resolved `teams` table so the canvases repo's
+ * editor predicate and the teams repo's own queries use ONE definition.
+ */
+export function teamOrgClause(
+  teamsTable: { orgId: Parameters<typeof isNull>[0] & Parameters<typeof inArray>[0] },
+  viewerOrgIds: readonly string[],
+): SQL {
+  return viewerOrgIds.length === 0
+    ? isNull(teamsTable.orgId)
+    : (or(isNull(teamsTable.orgId), inArray(teamsTable.orgId, [...viewerOrgIds])) as SQL);
+}
+
 export function teamsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
@@ -58,9 +73,7 @@ export function teamsRepository(client: DbClient) {
    *  alone (`org_id IS NULL`); an org team additionally requires its org in the viewer's
    *  LIVE orgIds. Empty `viewerOrgIds` ⇒ only the personal arm (we never emit `IN ()`). */
   const accessOrgClause = (viewerOrgIds: Set<string>): SQL =>
-    viewerOrgIds.size === 0
-      ? isNull(teamsT.orgId)
-      : (or(isNull(teamsT.orgId), inArray(teamsT.orgId, [...viewerOrgIds])) as SQL);
+    teamOrgClause(teamsT, [...viewerOrgIds]);
 
   /** A free slug within the team's namespace: org teams dedupe within the org; PERSONAL
    *  teams (no org) dedupe within the creator's own personal teams (the slug isn't a
@@ -113,6 +126,15 @@ export function teamsRepository(client: DbClient) {
     async findById(id: string): Promise<Team | null> {
       const rows = (await db.select().from(teamsT).where(eq(teamsT.id, id)).limit(1)) as Team[];
       return rows[0] ?? null;
+    },
+
+    /** Batched lookup (review #14) — the people list resolves every team grant in one query. */
+    async findByIds(ids: readonly string[]): Promise<Team[]> {
+      if (ids.length === 0) return [];
+      return (await db
+        .select()
+        .from(teamsT)
+        .where(inArray(teamsT.id, [...ids]))) as Team[];
     },
 
     /**

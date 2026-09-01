@@ -87,6 +87,9 @@ export interface ManagementDeps extends PreviewHintDeps {
   teams?: Pick<
     TeamsRepository,
     | "findById"
+    | "findByIds"
+    | "getMembers"
+    | "listEditorTeamIds"
     | "isTeamMember"
     | "setCanvasTeams"
     | "listTeamIdsForCanvas"
@@ -924,7 +927,12 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/:id/allowlist", async (c) => {
     const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    return c.json({ entries: await people.list(cv) });
+    // The owner also gets the transfer-candidate projection (review #7): effective editors
+    // including the people behind editor teams. Owner-only information — editors don't
+    // see it (they can't transfer).
+    const entries = await people.list(cv);
+    if (roleOf(c) !== "owner") return c.json({ entries });
+    return c.json({ entries, transferCandidates: await ownership.transferCandidates(cv) });
   });
 
   // Normalize at the boundary (trim + lowercase) so allowlist/invite dedup on the
@@ -998,10 +1006,10 @@ export function managementRoutes(deps: ManagementDeps) {
     if (body.data.teamId) {
       const r = await people.addTeam(cv, peopleActor(c), {
         teamId: body.data.teamId,
-        role: body.data.role ?? "viewer",
+        role: body.data.role,
       });
       if (!r.ok) return peopleFailure(c, r);
-      return c.json({ ok: true, status: "granted", role: body.data.role ?? "viewer" });
+      return c.json({ ok: true, status: r.status, role: r.role, from: r.from });
     }
     return addPerson(c, cv, {
       email: body.data.email as string,
@@ -1050,6 +1058,7 @@ export function managementRoutes(deps: ManagementDeps) {
   const ownership = ownershipService({
     canvases: deps.canvases,
     users: deps.users,
+    teams: deps.teams,
     orgMembership: deps.orgMembership,
     tenancyActive: !!deps.config.org.name,
     audit: deps.audit,

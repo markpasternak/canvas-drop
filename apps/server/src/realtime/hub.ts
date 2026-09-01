@@ -53,6 +53,8 @@ export interface Socket {
 export interface ConnUser {
   id: string;
   name: string;
+  /** The account email — what the live org-membership resolver keys on (review #5). */
+  email?: string;
   isAdmin: boolean;
   /** The caller's org membership at handshake (plan 002 U3), server-resolved. Used by
    *  the re-auth fabrication fallback so a member's live `whole_org` socket keeps the
@@ -98,6 +100,11 @@ export interface HubDeps {
    *  connected (and exempt from the password gate) exactly where the HTTP gates admit
    *  them. Omitted ⇒ nobody is an editor (fail-closed). */
   isEffectiveEditor?(canvasId: string, userId: string, scope: EditorScope): Promise<boolean>;
+  /** Live org membership for a member (review #5): re-resolved on every sweep so a socket
+   *  opened before an org departure loses its org-scoped grants (whole_org, team, editor)
+   *  on the next heartbeat, exactly like HTTP and MCP do per request. Omitted ⇒ the
+   *  handshake-time set is kept. A resolver error fails closed (the socket is dropped). */
+  resolveOrgIds?(user: { id: string; email: string }): Promise<Set<string>>;
 }
 
 type PresenceUser = { id: string; name: string };
@@ -146,6 +153,28 @@ export function createHub(deps: HubDeps) {
         "realtime: role resolve error — failing closed",
       );
       return "none";
+    }
+  }
+
+  /**
+   * Refresh a member connection's org set from the live resolver (review #5). Returns
+   * false when the resolver failed — callers drop the socket (fail closed) rather than
+   * trust a stale grant. Guests and connections without an email keep their set.
+   */
+  async function refreshOrgIds(conn: Conn): Promise<boolean> {
+    if (!deps.resolveOrgIds || !conn.user.email) return true;
+    if (conn.user.principal && conn.user.principal.kind !== "member") return true;
+    try {
+      const fresh = await deps.resolveOrgIds({ id: conn.user.id, email: conn.user.email });
+      conn.user.orgIds = fresh;
+      if (conn.user.principal?.kind === "member") conn.user.principal.orgIds = fresh;
+      return true;
+    } catch (err) {
+      deps.log?.error(
+        { err, canvasId: conn.canvasId, userId: conn.user.id },
+        "realtime: org membership resolve error — failing closed",
+      );
+      return false;
     }
   }
 
@@ -386,6 +415,11 @@ export function createHub(deps: HubDeps) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "canvas gone");
           continue;
         }
+        // The org set is LIVE per sweep (review #5), like HTTP/MCP per request.
+        if (!(await refreshOrgIds(conn))) {
+          dropConn(conn, CLOSE_UNAUTHORIZED, "revalidation_error");
+          continue;
+        }
         // Re-decide against the socket's actual principal (member or guest, U9) so a
         // guest isn't mistaken for a member. Resolve allowlist membership for a
         // specific_people canvas (member by id, guest by email).
@@ -499,6 +533,10 @@ export function createHub(deps: HubDeps) {
       }
       for (const conn of live) {
         if (conn.closed) continue;
+        if (!(await refreshOrgIds(conn))) {
+          dropConn(conn, CLOSE_UNAUTHORIZED, "password gate");
+          continue;
+        }
         const exempt = !!canvas && (await roleOf(canvas, conn)) !== "none";
         if (!exempt) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "password gate");

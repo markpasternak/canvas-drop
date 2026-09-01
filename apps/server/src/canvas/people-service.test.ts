@@ -280,7 +280,21 @@ describe.each(DIALECTS)("peopleService [%s]", (dialect) => {
     ).toMatchObject({ ok: false, code: "TEAM_FORBIDDEN" });
     expect(
       await svc.addTeam(canvas, actor(owner, "owner"), { teamId: design.id, role: "editor" }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: true, status: "granted", role: "editor", from: null });
+    // Review #15: re-adding the team WITHOUT a role never changes the grant (KTD3, like
+    // people) — it stays an editor team; an explicit viewer is a role change.
+    expect(await svc.addTeam(canvas, actor(owner, "owner"), { teamId: design.id })).toEqual({
+      ok: true,
+      status: "already_added",
+      role: "editor",
+      from: "editor",
+    });
+    expect(
+      await svc.addTeam(canvas, actor(owner, "owner"), { teamId: design.id, role: "viewer" }),
+    ).toEqual({ ok: true, status: "role_changed", role: "viewer", from: "editor" });
+    expect(
+      await svc.addTeam(canvas, actor(owner, "owner"), { teamId: design.id, role: "editor" }),
+    ).toEqual({ ok: true, status: "role_changed", role: "editor", from: "viewer" });
     expect(await svc.list(canvas)).toContainEqual(
       expect.objectContaining({
         id: `team:${design.id}`,
@@ -351,5 +365,30 @@ describe.each(DIALECTS)("peopleService [%s]", (dialect) => {
       ok: false,
       code: "NOT_FOUND",
     });
+  });
+
+  it("review #3: a set-role on a pending invite that login already consumed reads NOT_FOUND (never a phantom success)", async () => {
+    const { svc, invitations, canvas, owner, actor, events } = await seed();
+    await invitations.record({
+      email: "late@example.com",
+      target: { type: "canvas", id: canvas.id },
+      role: "editor",
+      invitedBy: owner.id,
+    });
+    const pending = (await svc.list(canvas)).find((e) => e.kind === "pending") as { id: string };
+    const id = pending.id;
+    // Login materialization consumed it in between.
+    await invitations.consume(id.slice("pending:".length));
+    expect(await svc.setRole(canvas, actor(owner, "owner"), id, "viewer")).toMatchObject({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(
+      events.filter(
+        (e) =>
+          e.action === "allowlist_role_change" &&
+          (e.meta as { kind?: string } | undefined)?.kind === "pending",
+      ),
+    ).toHaveLength(0);
   });
 });

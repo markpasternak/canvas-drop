@@ -454,7 +454,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas",
     {
       description:
-        "Get the current state of a canvas you own. Also returns a `deploy` block with the exact " +
+        "Get the current state of a canvas you own or edit. Also returns a `deploy` block with the exact " +
         "curl endpoints for this canvas (apiBase, zipUpload, staged URLs, readback, and a " +
         "copy-paste `curl` with a $CANVAS_KEY placeholder — substitute the key from create_canvas). " +
         "Use this to get the runnable deploy command for an existing canvas without probing.",
@@ -483,7 +483,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "list_versions",
     {
-      description: "List the published versions of a canvas you own.",
+      description: "List the published versions of a canvas you own or edit.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -518,7 +518,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "delete_version",
     {
       description:
-        "Permanently delete one non-current published version you own. The current live version " +
+        "Permanently delete one non-current published version of a canvas you own or edit. The current live version " +
         "is protected; make another version current first. Shared draft/version blobs are retained.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -550,7 +550,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "deploy_canvas",
     {
       description:
-        "Deploy a canvas you own in ONE call. NOTE: if you can run shell commands, PREFER curl " +
+        "Deploy a canvas you own or edit in ONE call. NOTE: if you can run shell commands, PREFER curl " +
         "over the keyed HTTP Deploy API instead of this tool — request that permission if you " +
         "don't have it. The exact, ready-to-run curl command + endpoints are in the `deploy` " +
         "block that create_canvas (with the key filled in) and get_canvas return — use those " +
@@ -638,7 +638,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "begin_deploy",
     {
       description:
-        "Open a staged deploy for a canvas you own. PREFER THIS over deploy_canvas whenever the " +
+        "Open a staged deploy for a canvas you own or edit. PREFER THIS over deploy_canvas whenever the " +
         "canvas already has content (any re-deploy) or has many/large/binary files. Give the " +
         "file manifest (path, sha256 hash, size); returns an uploadId and missingHashes — the " +
         "files NOT already stored — so you resend only what changed (a re-deploy of mostly-" +
@@ -754,7 +754,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas_file",
     {
       description:
-        "Read back what is LIVE on a canvas you own — the way to verify a deploy. The live URL " +
+        "Read back what is LIVE on a canvas you own or edit — the way to verify a deploy. The live URL " +
         "is access-controlled (an unauthenticated GET returns a login page, not your files), so " +
         "confirm a deploy through here, never by fetching the URL. Omit `path` to list the live " +
         "version's files (path, size, mime, hash); pass `path` (e.g. 'index.html') to get that " +
@@ -823,7 +823,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "rollback_canvas",
     {
-      description: "Point a canvas you own back at a previously published version number.",
+      description: "Point a canvas you own or edit back at a previously published version number.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         version: z.number().int().describe("The version number to make current."),
@@ -860,7 +860,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "unpublish_canvas",
     {
-      description: "Take a published canvas you own back to draft (clears the live version).",
+      description:
+        "Take a published canvas you own or edit back to draft (clears the live version).",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -918,7 +919,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-      if (Object.keys(fields).length === 0) return ok(canvasView(deps.config, cv));
+      if (Object.keys(fields).length === 0) return ok(await viewWithIdentity(cv, gate.role));
       const updated = await deps.canvases.updateCapabilities(cv.id, fields);
       deps.audit.recordAudit({
         action: "capabilities_update",
@@ -930,7 +931,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub
           .revalidateCanvas(cv.id)
           .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
-      return ok(canvasView(deps.config, updated));
+      return ok(await viewWithIdentity(updated, gate.role));
     },
   );
 
@@ -974,7 +975,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "regenerate_deploy_key",
     {
       description:
-        "Mint a NEW deploy API key for a canvas you own and invalidate the old one (same as Settings → " +
+        "Mint a NEW deploy API key for a canvas you own or edit and invalidate the old one (same as Settings → " +
         "Regenerate key). Returns the new `cd_…` key ONCE, plus a refreshed `deploy` block with the " +
         "key embedded in the curl command. Use this if the key leaked or you lost it.",
       inputSchema: { id: z.string().describe("The canvas id.") },
@@ -998,7 +999,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "archive_canvas",
     {
       description:
-        "Archive a canvas you own (reversible) — takes its public URL offline and moves it to the " +
+        "Archive a canvas you own or edit (reversible) — takes its public URL offline and moves it to the " +
         "Archive view. Revokes guest grants. Use unarchive_canvas to restore it.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
@@ -1035,7 +1036,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "unarchive_canvas",
     {
-      description: "Restore an archived canvas you own back to active. Fails if it isn't archived.",
+      description:
+        "Restore an archived canvas you own or edit back to active. Fails if it isn't archived.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
@@ -1049,7 +1051,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         actorId: caller.userId,
         targetId: cv.id,
       });
-      return ok(canvasView(deps.config, { ...cv, status: "active" }));
+      return ok(await viewWithIdentity({ ...cv, status: "active" }, gate.role));
     },
   );
 
@@ -1090,7 +1092,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "update_canvas",
     {
       description:
-        "Update a canvas you own (mirrors the dashboard Settings + Share tabs). All fields optional; " +
+        "Update a canvas you own or edit (mirrors the dashboard Settings + Share tabs). All fields optional; " +
         "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
         "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
@@ -1250,7 +1252,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // Echo the resolved team grants when the canvas is team-scoped (read-your-writes).
       const teamIds =
         updated.access === "team" ? await deps.teams.listTeamIdsForCanvas(updated.id) : undefined;
-      const view = canvasView(deps.config, updated, false, teamIds);
+      // Identity rides on the mutation's echo too (review #10): the doc promises
+      // `role`/`owner` on update_canvas exactly like get_canvas.
+      const view = await viewWithIdentity(updated, gate.role, false, teamIds);
       return ok(warning ? { ...view, warning } : view);
     },
   );
@@ -1281,7 +1285,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const cv = gate.canvas;
       if (image === undefined) {
         // Clear is custom-only — never delete a legitimately auto-captured screenshot.
-        if (cv.previewMode !== "custom") return ok(canvasView(deps.config, cv));
+        if (cv.previewMode !== "custom") return ok(await viewWithIdentity(cv, gate.role));
         await deletePreviewRenditions(deps.storage, cv.id);
         const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
         deps.audit.recordAudit({
@@ -1290,7 +1294,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           targetId: cv.id,
           meta: { previewMode: "auto" },
         });
-        return ok(canvasView(deps.config, updated));
+        return ok(await viewWithIdentity(updated, gate.role));
       }
       const bytes = new Uint8Array(Buffer.from(image, "base64"));
       if (bytes.byteLength === 0) return fail("INVALID_IMAGE: empty image");
@@ -1321,7 +1325,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         targetId: cv.id,
         meta: { previewMode: "custom" },
       });
-      return ok(canvasView(deps.config, updated));
+      return ok(await viewWithIdentity(updated, gate.role));
     },
   );
 
@@ -1377,7 +1381,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Search eligible people for an Add person flow, mirroring the dashboard picker. " +
-        "Use context='canvas' with canvasId for a canvas you own, or context='team' with teamId " +
+        "Use context='canvas' with canvasId for a canvas you own or edit, or context='team' with teamId " +
         "for a team you can see. Returns scoped suggestions only; it does not expose admin People.",
       inputSchema: {
         context: z.enum(["canvas", "team"]).describe("Which picker context to search."),
@@ -1420,7 +1424,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       const gate = await requireRole("list_access", id);
       if ("error" in gate) return gate.error;
-      return ok({ entries: await people.list(gate.canvas) });
+      const entries = await people.list(gate.canvas);
+      // Owner-only projection (review #7), the same one the dashboard's picker uses.
+      if (gate.role !== "owner") return ok({ entries });
+      return ok({ entries, transferCandidates: await ownership.transferCandidates(gate.canvas) });
     },
   );
 
@@ -1453,10 +1460,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (teamId) {
         const r = await people.addTeam(gate.canvas, await peopleActorNow(gate.role), {
           teamId,
-          role: role ?? "viewer",
+          role,
         });
         if (!r.ok) return peopleFail(r);
-        return ok({ ok: true, status: "granted", role: role ?? "viewer" });
+        return ok({ ok: true, status: r.status, role: r.role, from: r.from });
       }
       return addCanvasPerson(gate, { email: email as string, role, mode: "add" });
     },
@@ -1466,7 +1473,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "invite_to_canvas",
     {
       description:
-        "Deliberately invite a person to a canvas you own, by email — distinct from grant_access " +
+        "Deliberately invite a person to a canvas you own or edit, by email — distinct from grant_access " +
         "(the silent add). Sends a courtesy email: an existing user is granted now " +
         "(`status: granted`); a brand-new email gets a sign-in invitation and reaches the canvas " +
         "on their first sign-in (`status: pending`). A brand-new EXTERNAL email is refused for a " +
@@ -1514,6 +1521,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   const ownership = ownershipService({
     canvases: deps.canvases,
     users: deps.users,
+    teams: deps.teams,
     orgMembership: makeOrgMembershipResolver(deps.orgs, deps.orgMembers),
     tenancyActive: caller.tenancyActive,
     audit: deps.audit,
@@ -1634,7 +1642,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas_usage",
     {
       description:
-        "Usage stats for a canvas you own (same as the dashboard usage panel): view stats + a " +
+        "Usage stats for a canvas you own or edit (same as the dashboard usage panel): view stats + a " +
         "30-day sparkline, and — for backend-on canvases — KV/file/AI/realtime op counts, file " +
         "storage, and AI tokens/cost.",
       inputSchema: { id: z.string().describe("The canvas id.") },

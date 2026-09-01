@@ -30,7 +30,9 @@ export type MinRole = ManagementRole;
 
 const RANK: Record<CanvasRole, number> = { none: 0, viewer: 1, editor: 2, owner: 3 };
 
-/** THE owner comparison — the resolver's owner branch. Nothing else compares `ownerId`;
+/** THE owner comparison — the resolver's owner branch. The only other `ownerId`
+ *  comparison is the pure view-access decision table in `authorization.ts` (its owner
+ *  bypass, which has no principal-with-role to hand this function);
  *  the few non-gate uses (a list label, an "already the owner" refusal, hiding the owner's
  *  stale people-list row) call this so the comparison lives in exactly one place. */
 export function isOwnerOf(canvas: Pick<Canvas, "ownerId">, userId: string): boolean {

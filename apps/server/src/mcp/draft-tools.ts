@@ -67,7 +67,7 @@ export function registerDraftTools(
     "get_draft",
     {
       description:
-        "Get the editor DRAFT of a canvas you own — its file list + state (dirty = differs from the " +
+        "Get the editor DRAFT of a canvas you own or edit — its file list + state (dirty = differs from the " +
         "live version). Creates the draft from the live version on first open. Use read_draft_file " +
         "for contents, write/delete/rename to edit, then publish_draft.",
       inputSchema: { id: z.string().describe("The canvas id.") },
@@ -84,7 +84,7 @@ export function registerDraftTools(
     "read_draft_file",
     {
       description:
-        "Read one file's content from the DRAFT of a canvas you own (text as UTF-8, binary as " +
+        "Read one file's content from the DRAFT of a canvas you own or edit (text as UTF-8, binary as " +
         "base64). For the live version use get_canvas_file instead.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -118,7 +118,7 @@ export function registerDraftTools(
     "write_draft_file",
     {
       description:
-        "Write/replace a file in the DRAFT of a canvas you own (text as utf8, binary as base64). " +
+        "Write/replace a file in the DRAFT of a canvas you own or edit (text as utf8, binary as base64). " +
         "Set create=true to refuse overwriting an existing path. Returns the updated draft view. " +
         "Publish with publish_draft when ready.",
       inputSchema: {
@@ -155,7 +155,7 @@ export function registerDraftTools(
     "delete_draft_file",
     {
       description:
-        "Delete a file from the DRAFT of a canvas you own. Returns the updated draft view.",
+        "Delete a file from the DRAFT of a canvas you own or edit. Returns the updated draft view.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         path: z.string().describe("File path within the draft."),
@@ -183,7 +183,7 @@ export function registerDraftTools(
     "rename_draft_file",
     {
       description:
-        "Rename/move a file within the DRAFT of a canvas you own. Returns the updated draft view.",
+        "Rename/move a file within the DRAFT of a canvas you own or edit. Returns the updated draft view.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         from: z.string().describe("Current path."),
@@ -212,7 +212,7 @@ export function registerDraftTools(
     "publish_draft",
     {
       description:
-        "Publish the DRAFT of a canvas you own as a new live version (the editor's Publish button). " +
+        "Publish the DRAFT of a canvas you own or edit as a new live version (the editor's Publish button). " +
         "Fails DISABLED if an admin has taken down the canvas, or NOT_ACTIVE if it is archived. " +
         "Returns the new version details.",
       inputSchema: { id: z.string().describe("The canvas id.") },
@@ -237,7 +237,7 @@ export function registerDraftTools(
     "restore_draft",
     {
       description:
-        "Reset the DRAFT of a canvas you own to a previously published version's files (the editor's " +
+        "Reset the DRAFT of a canvas you own or edit to a previously published version's files (the editor's " +
         "Restore). Pass the version number. Returns the updated draft view.",
       inputSchema: {
         id: z.string().describe("The canvas id."),

@@ -89,7 +89,12 @@ export interface PeopleServiceDeps {
   >;
   teams?: Pick<
     TeamsRepository,
-    "listCanvasTeamGrants" | "findById" | "isTeamMember" | "setCanvasTeamRole" | "removeCanvasTeam"
+    | "listCanvasTeamGrants"
+    | "findById"
+    | "findByIds"
+    | "isTeamMember"
+    | "setCanvasTeamRole"
+    | "removeCanvasTeam"
   >;
   /** The Add person primitive — grants, pending invites, courtesy emails. Optional: a
    *  deployment without it can list / set roles / remove, but not add by email. */
@@ -104,6 +109,14 @@ export interface PeopleServiceDeps {
 
 export type AddPersonOutcome = { ok: true; result: InviteResult; role: AccessRole | null };
 export type PeopleOk = { ok: true };
+/** A team grant's outcome — mirrors addPerson's statuses so callers can tell a fresh
+ *  grant from a role change (review #15). */
+export type TeamGrantOk = {
+  ok: true;
+  status: "granted" | "role_changed" | "already_added";
+  role: AccessRole;
+  from: AccessRole | null;
+};
 
 export function peopleService(deps: PeopleServiceDeps) {
   const revalidate = async (canvasId: string) => {
@@ -125,6 +138,18 @@ export function peopleService(deps: PeopleServiceDeps) {
       personEmail,
       actor: { id: actor.id, name: actor.name, email: actor.email, isAdmin: actor.isAdmin },
     });
+  }
+
+  /** A member/guest/legacy row entry by parsed id, scoped to THIS canvas (§12.0); a
+   *  prefixed id whose kind disagrees with the row reads as not found. */
+  async function resolveRowEntry(
+    canvas: Canvas,
+    parsed: { kind: "member" | "guest" | "row"; rowId: string },
+  ) {
+    const entry = await deps.canvases.findAllowlistEntry(canvas.id, parsed.rowId);
+    if (!entry) return null;
+    if (parsed.kind !== "row" && parsed.kind !== entry.principalKind) return null;
+    return entry;
   }
 
   return {
@@ -192,15 +217,21 @@ export function peopleService(deps: PeopleServiceDeps) {
     async addTeam(
       canvas: Canvas,
       actor: PeopleActor,
-      input: { teamId: string; role: AccessRole },
-    ): Promise<PeopleOk | PeopleError> {
+      input: { teamId: string; role?: AccessRole },
+    ): Promise<TeamGrantOk | PeopleError> {
       if (!deps.teams) return ERR.teamForbidden();
       const team = await canGrantTeam(deps.teams, actor.id, canvas.orgId, input.teamId);
       if (!team) return ERR.teamForbidden();
       const existing = (await deps.teams.listCanvasTeamGrants(canvas.id)).find(
         (g) => g.teamId === input.teamId,
       );
-      await deps.teams.setCanvasTeamRole(canvas.id, input.teamId, input.role);
+      // An omitted role never changes an existing grant (KTD3, the same rule as people;
+      // review #15): re-adding an editor team keeps it an editor.
+      const role: AccessRole = input.role ?? existing?.role ?? "viewer";
+      if (existing && existing.role === role) {
+        return { ok: true, status: "already_added", role, from: existing.role };
+      }
+      await deps.teams.setCanvasTeamRole(canvas.id, input.teamId, role);
       deps.audit.recordAudit({
         action: "share_change",
         actorId: actor.id,
@@ -208,12 +239,17 @@ export function peopleService(deps: PeopleServiceDeps) {
         meta: {
           kind: "team_grant",
           teamId: input.teamId,
-          role: input.role,
+          role,
           from: existing?.role ?? null,
         },
       });
-      if (existing && existing.role !== input.role) await revalidate(canvas.id);
-      return { ok: true };
+      if (existing && existing.role !== role) await revalidate(canvas.id);
+      return {
+        ok: true,
+        status: existing ? "role_changed" : "granted",
+        role,
+        from: existing?.role ?? null,
+      };
     },
 
     /**
@@ -265,7 +301,16 @@ export function peopleService(deps: PeopleServiceDeps) {
         ) {
           return ERR.guestViewerOnly();
         }
-        await deps.invitations.setPendingRole("canvas", canvas.id, parsed.invitationId, role);
+        // Conditional on the invite still being pending (review #3): if login
+        // materialization consumed it in between, the row is gone and reporting success
+        // here would audit a role change that never applied.
+        const changed = await deps.invitations.setPendingRole(
+          "canvas",
+          canvas.id,
+          parsed.invitationId,
+          role,
+        );
+        if (!changed) return ERR.notFound();
         deps.audit.recordAudit({
           action: "allowlist_role_change",
           actorId: actor.id,
@@ -277,9 +322,8 @@ export function peopleService(deps: PeopleServiceDeps) {
       }
 
       // member / guest / legacy bare row id — scoped to THIS canvas by the repo (§12.0).
-      const entry = await deps.canvases.findAllowlistEntry(canvas.id, parsed.rowId);
+      const entry = await resolveRowEntry(canvas, parsed);
       if (!entry) return ERR.notFound();
-      if (parsed.kind !== "row" && parsed.kind !== entry.principalKind) return ERR.notFound();
       if (entry.principalKind === "guest") {
         return role === "editor" ? ERR.guestViewerOnly() : { ok: true };
       }
@@ -370,9 +414,8 @@ export function peopleService(deps: PeopleServiceDeps) {
         return { ok: true };
       }
 
-      const entry = await deps.canvases.findAllowlistEntry(canvas.id, parsed.rowId);
+      const entry = await resolveRowEntry(canvas, parsed);
       if (!entry) return ERR.notFound();
-      if (parsed.kind !== "row" && parsed.kind !== entry.principalKind) return ERR.notFound();
       if (entry.principalKind === "guest" && entry.email && deps.guests) {
         await deps.guests.revokeInvite(canvas.id, entry.email);
       }

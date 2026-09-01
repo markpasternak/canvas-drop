@@ -243,8 +243,12 @@ export function deployEngine(deps: DeployEngineDeps) {
           });
         } else if (await this.draftHasUnpublishedEdits(draft)) {
           await deps.drafts.markStale(canvas.id);
-        } else {
-          await deps.drafts.resetToBase(canvas.id, stamped, version.id);
+        } else if (
+          !(await deps.drafts.resetToBase(canvas.id, stamped, version.id, draft.updatedAt))
+        ) {
+          // The draft moved on while we deployed (review #4): those are held edits over
+          // the new version — flag stale rather than erase them.
+          await deps.drafts.markStale(canvas.id);
         }
       } catch (err) {
         deps.log.warn({ err, canvasId: canvas.id }, "post-deploy draft sync failed");

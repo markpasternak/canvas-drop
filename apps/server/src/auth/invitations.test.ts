@@ -166,6 +166,46 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(await invitations.countPendingByActor(inviter.id)).toBe(1);
     expect(await invitations.listForEmail("dup@x.com")).toHaveLength(1);
   });
+  it("review #3: a demotion that lands between apply and consume wins — the invitee ends up a viewer and the invite is consumed", async () => {
+    const { users, canvases, invitations, deps, inviter } = await harness();
+    const canvas = await canvases.create({ ownerId: inviter.id, slug: "race", apiKeyHash: "k" });
+    await invitations.record({
+      email: "late@x.com",
+      target: { type: "canvas", id: canvas.id },
+      role: "editor",
+      invitedBy: inviter.id,
+    });
+    const inv = (await invitations.listForEmail("late@x.com"))[0] as { id: string };
+    const invitee = await users.upsert({
+      providerSub: "dev:late",
+      email: "late@x.com",
+      name: "Late",
+      isAdmin: false,
+    });
+    // Interpose on the first consume: the owner demotes the pending entry just before it.
+    const original = invitations.consumeIfRole.bind(invitations);
+    let demoted = false;
+    const racing: InvitationApplyDeps = {
+      ...deps,
+      invitations: {
+        ...invitations,
+        listForEmail: invitations.listForEmail.bind(invitations),
+        consume: invitations.consume.bind(invitations),
+        findPendingById: invitations.findPendingById.bind(invitations),
+        consumeIfRole: async (id, role) => {
+          if (!demoted) {
+            demoted = true;
+            await invitations.setPendingRole("canvas", canvas.id, inv.id, "viewer");
+          }
+          return original(id, role);
+        },
+      },
+    };
+    await materializePendingInvitations(racing, { id: invitee.id, email: "late@x.com" });
+    const row = await canvases.findMemberEntry(canvas.id, invitee.id);
+    expect(row?.role).toBe("viewer");
+    expect(await invitations.findPendingById(inv.id)).toBeNull(); // consumed after re-apply
+  });
 });
 
 describe.each(DIALECTS)("materialize — pending role (editor-roles plan U4) [%s]", (dialect) => {

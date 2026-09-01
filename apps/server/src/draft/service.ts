@@ -114,7 +114,37 @@ const manifestStats = (manifest: Manifest): { fileCount: number; totalBytes: num
  * Blobs written here are reclaimed by the same per-canvas mark-sweep GC as deploys
  * (KTD-4) — draft churn (a file edited h1→h2) leaves h1 for the next sweep.
  */
+/** CAS attempts before a mutation gives up on a draft under heavy concurrent writing. */
+const MAX_COMMIT_ATTEMPTS = 5;
+
 export function draftService(deps: DraftServiceDeps) {
+  /**
+   * Commit a manifest mutation with optimistic concurrency (review #4): read the draft,
+   * let `mutate` build the next manifest from the CURRENT one (re-running its own
+   * precondition), then compare-and-swap on the row's `updatedAt`. A miss means another
+   * writer landed in between — re-read and rebuild, so a disjoint-path change merges and a
+   * same-path change is refused by the precondition as DRAFT_CONFLICT, never overwritten.
+   */
+  async function commitManifest(
+    canvas: Canvas,
+    mutate: (current: Manifest, draft: Draft) => Promise<Manifest | null> | Manifest | null,
+  ): Promise<Draft> {
+    let draft = await service.getOrCreate(canvas);
+    for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
+      const next = await mutate(draft.manifest as Manifest, draft);
+      if (next === null) return draft; // no-op mutation
+      const saved = await deps.drafts.setManifest(canvas.id, next, draft.updatedAt);
+      if (saved) return saved;
+      const fresh = await deps.drafts.getByCanvas(canvas.id);
+      if (!fresh) throw new DeployError("DRAFT_GONE", "the draft no longer exists");
+      draft = fresh;
+    }
+    throw new DeployError(
+      "DRAFT_BUSY",
+      "the draft is being changed by other writers — retry in a moment",
+    );
+  }
+
   /** The precondition check (KTD8), shared by write / delete / rename. */
   async function assertFresh(
     path: string,
@@ -247,45 +277,43 @@ export function draftService(deps: DraftServiceDeps) {
       if (size > LIMITS.maxFileBytes) {
         throw new DeployError("FILE_TOO_LARGE", `${path} exceeds 25 MB`, path);
       }
-      const draft = await service.getOrCreate(canvas);
-      if (opts.mustNotExist && (draft.manifest as Manifest)[path]) {
-        throw new DeployError("PATH_EXISTS", `a file already exists at ${path}`, path);
-      }
-      await assertFresh(path, (draft.manifest as Manifest)[path], opts);
-      const next: Manifest = { ...(draft.manifest as Manifest) };
       const hash = sha256(bytes);
       const mime = mimeFor(path).contentType;
-      next[path] = {
-        size,
-        hash,
-        mime,
-        ...(opts.actor ? { updatedBy: opts.actor, updatedAt: Date.now() } : {}),
-      };
-
-      // Warn (don't block) if a text file edited in the in-browser editor / via the
-      // MCP write_draft_file channel appears to embed a canvas API key (§12.1.2 —
-      // keys are server-side only). Mirrors the deploy engine's deploy-time scan so
-      // every ingestion path surfaces the same lint (review server-canvas-11).
+      // Blob first (content-addressed, idempotent), then the manifest under CAS.
+      if (!(await deps.storage.exists(blobKey(canvas.id, hash)))) {
+        await deps.storage.put(blobKey(canvas.id, hash), bytes);
+      }
       if (isTextContentType(mime) && looksLikeApiKey(decodeText(bytes))) {
+        // Warn (don't block) if a text file edited in the in-browser editor / via the
+        // MCP write_draft_file channel appears to embed a canvas API key (§12.1.2 —
+        // keys are server-side only). Mirrors the deploy engine's deploy-time scan so
+        // every ingestion path surfaces the same lint (review server-canvas-11).
         deps.log.warn(
           { canvasId: canvas.id, path },
           "draft file may contain a canvas API key — remove it before publishing",
         );
       }
-
-      const stats = manifestStats(next);
-      if (stats.totalBytes > LIMITS.maxCanvasBytes) {
-        throw new DeployError("CANVAS_TOO_LARGE", "draft exceeds 100 MB total");
-      }
-      if (stats.fileCount > LIMITS.maxFiles) {
-        throw new DeployError("TOO_MANY_FILES", "draft exceeds 2000 files");
-      }
-
-      // Idempotent: an identical blob (same content elsewhere in the canvas) is reused.
-      if (!(await deps.storage.exists(blobKey(canvas.id, hash)))) {
-        await deps.storage.put(blobKey(canvas.id, hash), bytes);
-      }
-      return deps.drafts.setManifest(canvas.id, next);
+      return commitManifest(canvas, async (current) => {
+        if (opts.mustNotExist && current[path]) {
+          throw new DeployError("PATH_EXISTS", `a file already exists at ${path}`, path);
+        }
+        await assertFresh(path, current[path], opts);
+        const next: Manifest = { ...current };
+        next[path] = {
+          size,
+          hash,
+          mime,
+          ...(opts.actor ? { updatedBy: opts.actor, updatedAt: Date.now() } : {}),
+        };
+        const stats = manifestStats(next);
+        if (stats.totalBytes > LIMITS.maxCanvasBytes) {
+          throw new DeployError("CANVAS_TOO_LARGE", "draft exceeds 100 MB total");
+        }
+        if (stats.fileCount > LIMITS.maxFiles) {
+          throw new DeployError("TOO_MANY_FILES", `draft exceeds ${LIMITS.maxFiles} files`);
+        }
+        return next;
+      });
     },
 
     /** Remove a file from the draft (blob left for GC). Honours the precondition (KTD8). */
@@ -302,12 +330,13 @@ export function draftService(deps: DraftServiceDeps) {
       if (path === null) {
         throw new DeployError("INVALID_PATH", `not a writable file path: ${rawPath}`, rawPath);
       }
-      const draft = await service.getOrCreate(canvas);
-      const next: Manifest = { ...(draft.manifest as Manifest) };
-      if (!next[path]) throw new DeployError("INVALID_PATH", `no such draft file: ${path}`, path);
-      await assertFresh(path, next[path], opts);
-      delete next[path];
-      return deps.drafts.setManifest(canvas.id, next);
+      return commitManifest(canvas, async (current) => {
+        const next: Manifest = { ...current };
+        if (!next[path]) throw new DeployError("INVALID_PATH", `no such draft file: ${path}`, path);
+        await assertFresh(path, next[path], opts);
+        delete next[path];
+        return next;
+      });
     },
 
     /** Move a file within the draft (same blob, new path) — rename or relocate. The
@@ -329,20 +358,21 @@ export function draftService(deps: DraftServiceDeps) {
       if (to === null) {
         throw new DeployError("INVALID_PATH", `not a writable file path: ${rawTo}`, rawTo);
       }
-      const draft = await service.getOrCreate(canvas);
-      const next: Manifest = { ...(draft.manifest as Manifest) };
-      const entry = next[from];
-      if (!entry) throw new DeployError("INVALID_PATH", `no such draft file: ${from}`, from);
-      if (to === from) return draft; // no-op rename (after normalization) — nothing to do
-      await assertFresh(from, entry, opts);
-      // Renaming onto a different existing file would silently destroy that file —
-      // refuse it (the editor surfaces PATH_EXISTS as inline validation).
-      if (next[to]) {
-        throw new DeployError("PATH_EXISTS", `a file already exists at ${to}`, to);
-      }
-      delete next[from];
-      next[to] = opts.actor ? { ...entry, updatedBy: opts.actor, updatedAt: Date.now() } : entry;
-      return deps.drafts.setManifest(canvas.id, next);
+      return commitManifest(canvas, async (current) => {
+        const next: Manifest = { ...current };
+        const entry = next[from];
+        if (!entry) throw new DeployError("INVALID_PATH", `no such draft file: ${from}`, from);
+        if (to === from) return null; // no-op rename (after normalization) — nothing to do
+        await assertFresh(from, entry, opts);
+        // Renaming onto a different existing file would silently destroy that file —
+        // refuse it (the editor surfaces PATH_EXISTS as inline validation).
+        if (next[to]) {
+          throw new DeployError("PATH_EXISTS", `a file already exists at ${to}`, to);
+        }
+        delete next[from];
+        next[to] = opts.actor ? { ...entry, updatedBy: opts.actor, updatedAt: Date.now() } : entry;
+        return next;
+      });
     },
 
     /**
@@ -376,8 +406,18 @@ export function draftService(deps: DraftServiceDeps) {
       // an action that actually succeeded, and a retry would double-publish). Best-
       // effort: log and continue; the worst case is a draft that still shows
       // unpublished-changes until the next edit/publish.
+      // Compare-and-swap against the snapshot we published (review #4): a save that
+      // landed after the snapshot is real unpublished work — leave the draft alone so it
+      // shows as dirty against the new version instead of being erased.
       await deps.drafts
-        .resetToBase(canvas.id, manifest, version.id)
+        .resetToBase(canvas.id, manifest, version.id, draft.updatedAt)
+        .then((reset) => {
+          if (!reset)
+            deps.log.info(
+              { canvasId: canvas.id },
+              "post-publish draft reset skipped — the draft changed during publish",
+            );
+        })
         .catch((err) =>
           deps.log.warn({ err, canvasId: canvas.id }, "post-publish draft reset failed"),
         );
@@ -405,13 +445,26 @@ export function draftService(deps: DraftServiceDeps) {
         // server-canvas-7).
         throw new DeployError("VERSION_UNAVAILABLE", `no ready version ${versionNumber}`);
       }
-      await service.getOrCreate(canvas); // ensure the draft row exists
       // Every entry moves: stamp them all with the restoring actor (KTD8) so a save
-      // pinned to the pre-restore hash is refused (this replaces `If-Draft-Base`).
-      return deps.drafts.resetToBase(
-        canvas.id,
-        stampAll(target.manifest as Manifest, actor, Date.now()),
-        target.id,
+      // pinned to the pre-restore hash is refused (this replaces `If-Draft-Base`). The
+      // reset is a compare-and-swap like every other manifest write (review #4); a
+      // restore replaces the whole draft, so a miss just re-reads and re-applies.
+      let draft = await service.getOrCreate(canvas);
+      for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
+        const reset = await deps.drafts.resetToBase(
+          canvas.id,
+          stampAll(target.manifest as Manifest, actor, Date.now()),
+          target.id,
+          draft.updatedAt,
+        );
+        if (reset) return reset;
+        const fresh = await deps.drafts.getByCanvas(canvas.id);
+        if (!fresh) throw new DeployError("DRAFT_GONE", "the draft no longer exists");
+        draft = fresh;
+      }
+      throw new DeployError(
+        "DRAFT_BUSY",
+        "the draft is being changed by other writers — retry in a moment",
       );
     },
 

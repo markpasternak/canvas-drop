@@ -2,6 +2,7 @@ import type { Canvas, User } from "@canvas-drop/shared/db";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { Logger } from "../log/logger.js";
 import { generateApiKey, hashApiKey } from "./api-key.js";
@@ -85,9 +86,11 @@ export interface OwnershipNotifier {
 export interface OwnershipDeps {
   canvases: Pick<
     CanvasesRepository,
-    "transferOwner" | "isEffectiveEditor" | "isOwnerPublishEnabled"
+    "transferOwner" | "isEffectiveEditor" | "isOwnerPublishEnabled" | "listAllowlist"
   >;
-  users: Pick<UsersRepository, "findById">;
+  users: Pick<UsersRepository, "findById" | "findByIds">;
+  /** Team grants + members, for the transfer-candidate projection (review #7). Optional. */
+  teams?: Pick<TeamsRepository, "listEditorTeamIds" | "getMembers">;
   /** Live org membership per user (KTD2). Optional: absent ⇒ ∅ (inert tenancy needs none). */
   orgMembership?: OrgMembershipResolver;
   tenancyActive: boolean;
@@ -139,6 +142,36 @@ export function ownershipService(deps: OwnershipDeps) {
   }
 
   return {
+    /**
+     * Who the owner may hand the canvas to (review #7): every EFFECTIVE editor — a direct
+     * editor row, or a member of an editor-role team — filtered through the same live org
+     * predicate `transfer` enforces, so the picker never offers someone the service would
+     * refuse (and, unlike the people list's team ROW, it names the people behind a team).
+     */
+    async transferCandidates(canvas: Canvas): Promise<Array<Pick<User, "id" | "name" | "email">>> {
+      const ids = new Set<string>();
+      for (const e of await deps.canvases.listAllowlist(canvas.id)) {
+        if (e.principalKind === "member" && e.role === "editor" && e.userId) ids.add(e.userId);
+      }
+      if (deps.teams) {
+        for (const teamId of await deps.teams.listEditorTeamIds(canvas.id)) {
+          for (const m of await deps.teams.getMembers(teamId)) ids.add(m.userId);
+        }
+      }
+      ids.delete(canvas.ownerId);
+      const people = await deps.users.findByIds([...ids]);
+      const out: Array<Pick<User, "id" | "name" | "email">> = [];
+      for (const u of people) {
+        if (u.isBlocked) continue;
+        const eligible = await deps.canvases.isEffectiveEditor(canvas.id, u.id, {
+          tenancyActive: deps.tenancyActive,
+          viewerOrgIds: await orgIdsOf(u),
+        });
+        if (eligible) out.push({ id: u.id, name: u.name, email: u.email });
+      }
+      return out.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    },
+
     /**
      * Owner-initiated transfer to an existing editor (R12/R13, AE7): instant, no pending
      * state; the previous owner becomes an editor. The caller has already passed the

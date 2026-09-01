@@ -11,6 +11,7 @@ import { fakeProvider } from "../ai/testing.js";
 import { buildApp } from "../app.js";
 import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import { guestService } from "../auth/guest.js";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { sessionService } from "../auth/session.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { cloneService } from "../canvas/clone-service.js";
@@ -188,6 +189,7 @@ export function makeHarness(
       teamsRepository(client).teamMatch(canvasId, userId, viewerOrgIds),
     isEffectiveEditor: (canvasId, userId, scope) =>
       canvases.isEffectiveEditor(canvasId, userId, scope),
+    resolveOrgIds: makeOrgMembershipResolver(orgsRepository(client), orgMembersRepository(client)),
   });
   const mailer = captureMailer();
 

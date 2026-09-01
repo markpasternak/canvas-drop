@@ -596,4 +596,53 @@ describe("RealtimeHub — editor role", () => {
     await hub.revalidateCanvas("c1");
     expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
   });
+
+  it("review #5: the org set is LIVE per sweep — an editor whose org membership ends is dropped, like HTTP/MCP", async () => {
+    const tenancy: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "Acme",
+    });
+    let orgs = new Set(["acme"]);
+    const hub = createHub({
+      config: tenancy,
+      resolveCanvas: async () =>
+        fakeCanvas({ access: "private", orgId: "acme" } as Partial<Canvas>),
+      // The editor grant is effective only with a live org (the SQL predicate's contract).
+      isEffectiveEditor: async (_c, userId, scope) =>
+        userId === "editor" && scope.viewerOrgIds.has("acme"),
+      resolveOrgIds: async () => orgs,
+    });
+    const editorSock = new FakeSocket();
+    mc(
+      hub,
+      "c1",
+      { ...user("editor", false, new Set(["acme"])), email: "editor@acme.test" },
+      editorSock,
+    );
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed).toBeNull();
+    // The operator drops their org membership; the handshake-time set no longer matters.
+    orgs = new Set();
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("review #5: a failing org resolver fails closed — the socket is dropped, never kept on a stale set", async () => {
+    const tenancy: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "Acme",
+    });
+    const hub = createHub({
+      config: tenancy,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isEffectiveEditor: async () => true,
+      resolveOrgIds: async () => {
+        throw new Error("db down");
+      },
+    });
+    const sock = new FakeSocket();
+    mc(hub, "c1", { ...user("editor", false, new Set(["acme"])), email: "editor@acme.test" }, sock);
+    await hub.revalidateCanvas("c1");
+    expect(sock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
 });

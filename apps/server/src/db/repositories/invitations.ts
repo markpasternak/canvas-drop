@@ -137,6 +137,36 @@ export function invitationsRepository(client: DbClient) {
         .where(and(eq(T.id, id), isNull(T.consumedAt)));
     },
 
+    /**
+     * Consume only if the invitation still carries `role` (review #3): the materializer
+     * applied that role, so a concurrent set-role that changed it in between must win —
+     * false tells the caller to re-read and re-apply.
+     */
+    async consumeIfRole(id: string, role: string | null): Promise<boolean> {
+      const rows = (await db
+        .update(T)
+        .set({ consumedAt: Date.now() })
+        .where(
+          and(
+            eq(T.id, id),
+            isNull(T.consumedAt),
+            role === null ? isNull(T.role) : eq(T.role, role),
+          ),
+        )
+        .returning({ id: T.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /** One un-consumed invitation by id (the materializer's re-read after a lost race). */
+    async findPendingById(id: string): Promise<Invitation | null> {
+      const rows = (await db
+        .select()
+        .from(T)
+        .where(and(eq(T.id, id), isNull(T.consumedAt)))
+        .limit(1)) as Invitation[];
+      return rows[0] ?? null;
+    },
+
     /** Cancel an unconsumed pending grant for a specific target. Returns the deleted
      *  row (or null) so callers can audit WHO was uninvited — the row is hard-deleted,
      *  so the audit trail is the only place the email survives. */

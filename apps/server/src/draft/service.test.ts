@@ -311,6 +311,79 @@ describe.each(DIALECTS)("draftService (%s)", (dialect) => {
       await client2.close();
     }
   });
+  it("review #4: two writers on DIFFERENT paths never lose each other — the second write merges under CAS", async () => {
+    const { svc, drafts, canvas, owner } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("<h1>base</h1>"), { actor: owner.id });
+    // Simulate the race: B's manifest write lands between A's read and A's write by
+    // hijacking A's first CAS attempt.
+    const original = drafts.setManifest.bind(drafts);
+    let raced = false;
+    drafts.setManifest = async (canvasId, manifest, expected) => {
+      if (!raced && manifest["a.css"]) {
+        raced = true;
+        // B saves b.js first (unconditional relative to A: B read the same base).
+        const current = (await drafts.getByCanvas(canvasId)) as NonNullable<
+          Awaited<ReturnType<typeof drafts.getByCanvas>>
+        >;
+        await original(
+          canvasId,
+          {
+            ...(current.manifest as Manifest),
+            "b.js": { size: 1, hash: "b".repeat(64), mime: "text/javascript" },
+          },
+          current.updatedAt,
+        );
+      }
+      return original(canvasId, manifest, expected);
+    };
+    const after = await svc.writeFile(canvas, "a.css", enc("body{}"), { actor: owner.id });
+    const paths = Object.keys(after.manifest as Manifest).sort();
+    // Both entries survive: A's first attempt missed the CAS and re-merged over B's write.
+    expect(paths).toEqual(["a.css", "b.js", "index.html"]);
+    expect(raced).toBe(true);
+  });
+
+  it("review #4: a same-path race still refuses with DRAFT_CONFLICT after the CAS retry (no silent overwrite)", async () => {
+    const { svc, drafts, canvas, owner } = await setup();
+    const other = "other-user";
+    await svc.writeFile(canvas, "index.html", enc("<h1>base</h1>"), { actor: owner.id });
+    const base = await svc.getOrCreate(canvas);
+    const baseHash = (base.manifest as Manifest)["index.html"]?.hash as string;
+    const original = drafts.setManifest.bind(drafts);
+    let raced = false;
+    drafts.setManifest = async (canvasId, manifest, expected) => {
+      if (!raced) {
+        raced = true;
+        const current = (await drafts.getByCanvas(canvasId)) as NonNullable<
+          Awaited<ReturnType<typeof drafts.getByCanvas>>
+        >;
+        await original(
+          canvasId,
+          {
+            ...(current.manifest as Manifest),
+            "index.html": {
+              size: 2,
+              hash: "c".repeat(64),
+              mime: "text/html",
+              updatedBy: other,
+              updatedAt: Date.now(),
+            },
+          },
+          current.updatedAt,
+        );
+      }
+      return original(canvasId, manifest, expected);
+    };
+    await expect(
+      svc.writeFile(canvas, "index.html", enc("<h1>mine</h1>"), {
+        actor: owner.id,
+        expectedHash: baseHash,
+      }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    // The other writer's entry is intact.
+    const now = await svc.getOrCreate(canvas);
+    expect((now.manifest as Manifest)["index.html"]?.hash).toBe("c".repeat(64));
+  });
 });
 
 const enabledConfig: Config = loadConfig({

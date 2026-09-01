@@ -254,6 +254,9 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     // The owner-facing tags round-trip through update_canvas (agent-native parity).
     expect(updated.tags).toEqual(["Alpha", "beta"]);
+    // Review #10: the mutation's echo carries the same identity as get_canvas.
+    expect(updated.role).toBe("owner");
+    expect(updated.owner).toMatchObject({ id: userId, email: "owner@example.com" });
 
     // The tag write recomputes the forgiving-search blob (integration with U2): the
     // owner-list query finds the canvas by a tag substring it had no other source for.

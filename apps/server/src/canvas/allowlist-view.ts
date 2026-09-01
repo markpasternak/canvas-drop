@@ -29,6 +29,9 @@ export interface PeopleEntry {
   userId: string | null;
   /** The team behind a team row. */
   teamId: string | null;
+  /** The team's org (null = a personal team) so the UI can label scope truthfully even
+   *  when the viewer isn't on that team (review #20). Null on non-team rows. */
+  teamOrgId: string | null;
   createdAt: number;
 }
 
@@ -38,7 +41,7 @@ export interface PeopleListDeps {
   /** Pending (auth-delegated) invitations. Optional: suites without invites omit it. */
   invitations?: Pick<InvitationsRepository, "listPendingForTarget">;
   /** Team grants. Optional: suites that don't exercise teams omit it. */
-  teams?: Pick<TeamsRepository, "listCanvasTeamGrants" | "findById">;
+  teams?: Pick<TeamsRepository, "listCanvasTeamGrants" | "findByIds">;
 }
 
 /** Resolve the unified people list for a canvas — one batched user lookup, no N+1 on people. */
@@ -63,6 +66,7 @@ export async function resolvePeopleList(
     name: owner?.name ?? null,
     userId: canvas.ownerId,
     teamId: null,
+    teamOrgId: null,
     createdAt: canvas.createdAt,
   };
 
@@ -81,6 +85,7 @@ export async function resolvePeopleList(
         name: u?.name ?? null,
         userId: kind === "member" ? (e.userId ?? null) : null,
         teamId: null,
+        teamOrgId: null,
         createdAt: e.createdAt,
       };
     });
@@ -100,13 +105,19 @@ export async function resolvePeopleList(
       name: null,
       userId: null,
       teamId: null,
+      teamOrgId: null,
       createdAt: inv.createdAt,
     }));
 
   const teamRows: PeopleEntry[] = [];
   if (deps.teams) {
-    for (const grant of await deps.teams.listCanvasTeamGrants(canvas.id)) {
-      const team = await deps.teams.findById(grant.teamId);
+    const grants = await deps.teams.listCanvasTeamGrants(canvas.id);
+    // One batched team lookup (review #14) — the same shape as the member lookup above.
+    const teamById = new Map(
+      (await deps.teams.findByIds(grants.map((g) => g.teamId))).map((tm) => [tm.id, tm]),
+    );
+    for (const grant of grants) {
+      const team = teamById.get(grant.teamId);
       teamRows.push({
         id: `team:${grant.teamId}`,
         kind: "team",
@@ -115,6 +126,7 @@ export async function resolvePeopleList(
         name: team?.name ?? null,
         userId: null,
         teamId: grant.teamId,
+        teamOrgId: team?.orgId ?? null,
         createdAt: grant.createdAt,
       });
     }

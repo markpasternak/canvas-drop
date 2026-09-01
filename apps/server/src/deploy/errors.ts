@@ -16,6 +16,8 @@ export type DeployErrorCode =
   // silently overwrite (and destroy) the file already there. The editor refuses it
   // so the operation is non-destructive — pick a different path or replace the file.
   | "PATH_EXISTS"
+  | "DRAFT_BUSY"
+  | "DRAFT_GONE"
   // Rollback target was pruned between selection and the pointer swap (a
   // concurrent deploy's prune won the race); the client should refresh + retry.
   | "VERSION_UNAVAILABLE"

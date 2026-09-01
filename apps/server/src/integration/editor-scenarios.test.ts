@@ -373,4 +373,45 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
     // ...and the previous owner now sits in it as an editor.
     expect(entries.find((e) => e.email === OWNER)).toMatchObject({ role: "editor" });
   });
+
+  it("review #7/#15: the owner's people list carries transfer candidates from editor TEAMS; re-adding a team without a role keeps it an editor", async () => {
+    client = await makeTestDb(dialect);
+    const acmeId = await seedAcme(client);
+    const h = makeHarness(client, { config: editorConfig() });
+    const { canvasId } = await setupCanvas(h, [OWNER, EDITOR, MATE]);
+    const editorId = await userId(client, EDITOR);
+    const mateId = await userId(client, MATE);
+
+    // MATE becomes an editor only through a team; EDITOR directly.
+    const teamRes = await h.SEND(OWNER, "POST", "/api/teams", { orgId: acmeId, name: "Design" });
+    const { team } = await jsonOf<{ team: { id: string } }>(teamRes);
+    const add = await h.SEND(OWNER, "POST", `/api/teams/${team.id}/members`, { email: MATE });
+    expect(add.status).toBe(200);
+    await add.text();
+    await grant(h, canvasId, { teamId: team.id, role: "editor" });
+    await grant(h, canvasId, { email: EDITOR, role: "editor" });
+
+    // The owner sees BOTH as transfer candidates (team-derived editors included).
+    const owned = await h.GET(OWNER, `/api/canvases/${canvasId}/allowlist`);
+    const body = await jsonOf<{ transferCandidates?: Array<{ id: string }> }>(owned);
+    expect((body.transferCandidates ?? []).map((c) => c.id).sort()).toEqual(
+      [editorId, mateId].sort(),
+    );
+    // An editor sees no candidates at all (owner-only projection).
+    const asEditor = await h.GET(EDITOR, `/api/canvases/${canvasId}/allowlist`);
+    expect(
+      (await jsonOf<{ transferCandidates?: unknown }>(asEditor)).transferCandidates,
+    ).toBeUndefined();
+
+    // Re-adding the team with NO role must not demote it (review #15).
+    const again = await h.SEND(OWNER, "POST", `/api/canvases/${canvasId}/allowlist`, {
+      teamId: team.id,
+    });
+    expect(again.status).toBe(200);
+    expect(await jsonOf<{ status: string; role: string }>(again)).toMatchObject({
+      status: "already_added",
+      role: "editor",
+    });
+    expect(await roleOf(h, MATE, canvasId)).toBe("editor");
+  });
 });
