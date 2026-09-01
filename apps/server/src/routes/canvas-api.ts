@@ -107,7 +107,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         deps.teams ?? { teamMatch: async () => false },
         canvas,
         principal,
-        { publicLinksEnabled: deps.publicLinksEnabled },
+        { publicLinksEnabled: deps.publicLinksEnabled, tenancyActive: !!deps.config.org.name },
       );
       const decision = decideCanvasAccess(canvas, principal, Date.now(), {
         ...ctx,

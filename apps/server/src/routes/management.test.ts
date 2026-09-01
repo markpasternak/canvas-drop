@@ -3328,3 +3328,140 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// --- Role matrix (editor-roles plan U2, KTD1): owner / editor / viewer / no role ×
+//     read / mutate / owner-only. Rejection paths first. -----------------------------
+
+describe("managementRoutes — role matrix (editor-roles plan)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedRoles() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const nobody = await seedUser(client, "nobody");
+    const admin = await seedUser(client, "admin", true);
+    const repo = canvasesRepository(client);
+    // General access stays PRIVATE: an editor must reach the surface regardless (AE2).
+    const cv = await repo.create({ ownerId: owner.id, slug: "matrix", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    const as = (u: { id: string }, isAdmin = false) => buildApp(client, { id: u.id, isAdmin });
+    return { repo, cv, owner, editor, viewer, nobody, admin, as };
+  }
+
+  it("READ (GET /:id, /versions, /usage): owner + editor 200; viewer, no-role, admin 404", async () => {
+    const { cv, owner, editor, viewer, nobody, admin, as } = await seedRoles();
+    for (const path of [
+      `/api/canvases/${cv.id}`,
+      `/api/canvases/${cv.id}/versions`,
+      `/api/canvases/${cv.id}/usage`,
+    ]) {
+      expect((await as(viewer).request(path)).status, `viewer ${path}`).toBe(404);
+      expect((await as(nobody).request(path)).status, `nobody ${path}`).toBe(404);
+      expect((await as(admin, true).request(path)).status, `admin ${path}`).toBe(404);
+      expect((await as(owner).request(path)).status, `owner ${path}`).toBe(200);
+      expect((await as(editor).request(path)).status, `editor ${path}`).toBe(200);
+    }
+  });
+
+  it("MUTATE (PATCH /:id/settings, /capabilities): owner + editor 200; viewer, no-role, admin 404", async () => {
+    const { cv, owner, editor, viewer, nobody, admin, as } = await seedRoles();
+    const patch = (
+      u: { id: string },
+      isAdmin = false,
+      path = "settings",
+      body: unknown = { title: "t" },
+    ) =>
+      as(u, isAdmin).request(`/api/canvases/${cv.id}/${path}`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    expect((await patch(viewer)).status).toBe(404);
+    expect((await patch(nobody)).status).toBe(404);
+    expect((await patch(admin, true)).status).toBe(404);
+    expect((await patch(owner)).status).toBe(200);
+    const res = await patch(editor, false, "settings", { title: "by editor" });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ title: string }>(res)).title).toBe("by editor");
+    expect((await patch(editor, false, "capabilities", { kv: false })).status).toBe(200);
+  });
+
+  it("OWNER-ONLY (DELETE /:id): editor → 403 OWNER_ONLY; viewer / no-role → 404; owner → 200 (AE4)", async () => {
+    const { repo, cv, owner, editor, viewer, nobody, as } = await seedRoles();
+    const del = (u: { id: string }) =>
+      as(u).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so });
+    expect((await del(viewer)).status).toBe(404);
+    expect((await del(nobody)).status).toBe(404);
+    const asEditor = await del(editor);
+    expect(asEditor.status).toBe(403);
+    expect(await jsonOf<{ code: string }>(asEditor)).toEqual({
+      code: "OWNER_ONLY",
+      message: expect.stringMatching(/owner/i),
+    });
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+    expect((await del(owner)).status).toBe(200);
+    expect((await repo.findById(cv.id))?.status).toBe("deleted");
+  });
+
+  it("check order is role → owner-only → disabled: on a DISABLED canvas an editor's delete is 403 OWNER_ONLY (not 409), no-role is 404, owner is 409", async () => {
+    const { repo, cv, owner, editor, nobody, as } = await seedRoles();
+    await repo.setDisabled(cv.id, "abuse");
+    const del = (u: { id: string }) =>
+      as(u).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so });
+    expect((await del(nobody)).status).toBe(404);
+    const asEditor = await del(editor);
+    expect(asEditor.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asEditor)).code).toBe("OWNER_ONLY");
+    const asOwner = await del(owner);
+    expect(asOwner.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(asOwner)).code).toBe("DISABLED");
+    // An editor's ordinary mutation on the disabled canvas is the shared 409; reads stay 200.
+    const patch = await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(patch.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(patch)).code).toBe("DISABLED");
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+  });
+
+  it("GET /by-slug/:slug resolves for the owner AND an editor; viewer / no-role 404", async () => {
+    const { cv, owner, editor, viewer, nobody, as } = await seedRoles();
+    const get = (u: { id: string }) => as(u).request(`/api/canvases/by-slug/${cv.slug}`);
+    expect((await get(viewer)).status).toBe(404);
+    expect((await get(nobody)).status).toBe(404);
+    expect(await jsonOf<{ id: string }>(await get(owner))).toEqual({ id: cv.id });
+    expect(await jsonOf<{ id: string }>(await get(editor))).toEqual({ id: cv.id });
+  });
+
+  it("removal takes effect on the next request: a demoted editor is 404 on read and mutate", async () => {
+    const { repo, cv, editor, as } = await seedRoles();
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    const entry = await repo.findMemberEntry(cv.id, editor.id);
+    await repo.setAllowlistRole(cv.id, (entry as { id: string }).id, "viewer");
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+    await repo.removeAllowlistEntry(cv.id, (entry as { id: string }).id);
+    expect(
+      (
+        await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+          method: "PATCH",
+          headers: so,
+          body: JSON.stringify({ title: "x" }),
+        })
+      ).status,
+    ).toBe(404);
+  });
+});

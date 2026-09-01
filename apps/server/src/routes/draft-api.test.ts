@@ -566,3 +566,111 @@ describe("draftApiRoutes", () => {
     expect((await jsonOf<{ code: string }>(res)).code).toBe("ZIP_SLIP_REJECTED");
   });
 });
+
+// --- Editor role on the draft surface (editor-roles plan U2, AE2) ----------------------
+
+describe("draftApiRoutes — editor role", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function setup() {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const audit = createAuditLog(auditRepository(client), silent);
+    const svc = draftService({ config, canvases, versions, drafts, storage, audit, log: silent });
+    const mk = (sub: string) =>
+      users.upsert({ providerSub: sub, email: `${sub}@e.com`, name: sub, isAdmin: false });
+    const owner = await mk("o");
+    const editor = await mk("e");
+    const viewer = await mk("v");
+    const nobody = await mk("n");
+    // General access stays PRIVATE (the default) — an editor reaches the draft regardless.
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "k" });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: viewer.id,
+    });
+
+    function appAs(userId: string, isAdmin = false) {
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("user", { id: userId, isAdmin } as never);
+        c.set("orgIds", new Set<string>());
+        c.set("clientIp", "127.0.0.1");
+        await next();
+      });
+      app.route(
+        "/api/canvases",
+        draftApiRoutes({ config, canvases, versions, storage, drafts: svc }),
+      );
+      return app;
+    }
+    return { canvases, versions, owner, editor, viewer, nobody, canvas: cv, appAs };
+  }
+
+  it("a viewer-role member and a no-role member get 404 on read AND write draft routes", async () => {
+    const { appAs, viewer, nobody, canvas } = await setup();
+    for (const u of [viewer, nobody]) {
+      const app = appAs(u.id);
+      expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(404);
+      const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=a.html`, {
+        method: "PUT",
+        headers: SO,
+        body: enc("x"),
+      });
+      expect(put.status).toBe(404);
+      expect(
+        (await app.request(`/api/canvases/${canvas.id}/publish`, { method: "POST", headers: SO }))
+          .status,
+      ).toBe(404);
+    }
+  });
+
+  it("an editor can open the draft, save a file, and publish on a PRIVATE canvas; the version records the editor (AE2, R18)", async () => {
+    const { appAs, editor, canvas, versions, canvases } = await setup();
+    const app = appAs(editor.id);
+    expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(200);
+    const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>by editor</h1>"),
+    });
+    expect(put.status).toBe(200);
+    const pub = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(pub.status).toBe(200);
+    const live = await canvases.findById(canvas.id);
+    expect(live?.currentVersionId).not.toBeNull();
+    const [v] = await versions.listByCanvas(canvas.id);
+    expect(v?.createdBy).toBe(editor.id);
+  });
+
+  it("an editor's draft EDIT on a DISABLED canvas is the shared 409 DISABLED; the draft READ stays 200", async () => {
+    const { appAs, editor, canvas, canvases } = await setup();
+    await canvases.setDisabled(canvas.id, "policy");
+    const app = appAs(editor.id);
+    expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(200);
+    const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=a.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("x"),
+    });
+    expect(put.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(put)).code).toBe("DISABLED");
+  });
+});

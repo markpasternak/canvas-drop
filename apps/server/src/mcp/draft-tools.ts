@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
-import type { Canvas, Manifest } from "@canvas-drop/shared/db";
+import type { Manifest } from "@canvas-drop/shared/db";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { isTextContentType, mimeFor } from "../canvas/mime.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import type { DraftService } from "../draft/service.js";
-import type { McpCaller, RequireMutable } from "./server.js";
+import type { McpCaller, RequireMutable, RequireRole } from "./server.js";
 import { fail, failDeploy, ok } from "./tool-kit.js";
 
 interface DraftToolDeps {
@@ -19,16 +19,16 @@ interface DraftToolDeps {
  * DRAFT, publish it as a version, or restore a published version into it. Split out of
  * `server.ts` to keep the tool registry under the file-size bar; each tool still wraps
  * the same DraftService the `/api/canvases/:id/draft*` routes use, gated by the shared
- * `requireOwned` owner check (no existence leak, §12.0). Draft READS (get/read) use
- * `requireOwned`; draft EDITS (write/delete/rename/publish/restore) use `requireMutable`,
- * so a disabled (admin-taken-down) canvas is read-only to its owner here too — exactly
- * as on the HTTP draft routes (the shared DISABLED contract).
+ * role check (owner or editor; no existence leak for a no-role caller, §12.0). Draft
+ * READS (get/read) use `requireRole`; draft EDITS (write/delete/rename/publish/restore)
+ * use `requireMutable`, so a disabled (admin-taken-down) canvas is read-only here too —
+ * exactly as on the HTTP draft routes (the shared DISABLED contract).
  */
 export function registerDraftTools(
   server: McpServer,
   deps: DraftToolDeps,
   caller: McpCaller,
-  requireOwned: (id: string) => Promise<Canvas | null>,
+  requireRole: RequireRole,
   requireMutable: RequireMutable,
 ): void {
   /** Serialize a draft like the editor's draftView (file list + dirty/stale state). */
@@ -63,8 +63,9 @@ export function registerDraftTools(
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("get_draft", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       return ok(await draftViewFor(cv, await deps.drafts.getOrCreate(cv)));
     },
   );
@@ -81,8 +82,9 @@ export function registerDraftTools(
       },
     },
     async ({ id, path }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("read_draft_file", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const bytes = await deps.drafts.readFile(cv, path);
       if (!bytes) return fail(`no draft file at "${path}"`);
       const text = isTextContentType(mimeFor(path).contentType);
@@ -113,7 +115,7 @@ export function registerDraftTools(
       },
     },
     async ({ id, path, content, encoding, create }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("write_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const bytes = new Uint8Array(Buffer.from(content, encoding === "base64" ? "base64" : "utf8"));
@@ -139,7 +141,7 @@ export function registerDraftTools(
       },
     },
     async ({ id, path }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("delete_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
@@ -162,7 +164,7 @@ export function registerDraftTools(
       },
     },
     async ({ id, from, to }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("rename_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
@@ -185,7 +187,7 @@ export function registerDraftTools(
     async ({ id }) => {
       // A disabled canvas rejects with the shared DISABLED contract; an archived one keeps
       // the NOT_ACTIVE "unarchive first" message (requireMutable only catches disabled).
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("publish_draft", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (cv.status !== "active")
@@ -214,7 +216,7 @@ export function registerDraftTools(
       },
     },
     async ({ id, version }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("restore_draft", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {

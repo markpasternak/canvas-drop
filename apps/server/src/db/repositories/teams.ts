@@ -292,34 +292,6 @@ export function teamsRepository(client: DbClient) {
     },
 
     /**
-     * Auth-critical (editor-roles plan, KTD1/KTD4): is `userId` a LIVE member of an
-     * EDITOR-role team granted on this canvas? Same membership-mandatory live-org
-     * clause as {@link teamMatch}, narrowed to `role = 'editor'` rows. The caller
-     * (the role resolver) applies the canvas-level org predicate (KTD2) itself.
-     */
-    async editorTeamMatch(
-      canvasId: string,
-      userId: string,
-      viewerOrgIds: Set<string>,
-    ): Promise<boolean> {
-      const rows = (await db
-        .select({ one: sql`1` })
-        .from(canvasTeamsT)
-        .innerJoin(membersT, eq(membersT.teamId, canvasTeamsT.teamId))
-        .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
-        .where(
-          and(
-            eq(canvasTeamsT.canvasId, canvasId),
-            eq(canvasTeamsT.role, "editor"),
-            eq(membersT.userId, userId),
-            accessOrgClause(viewerOrgIds),
-          ),
-        )
-        .limit(1)) as Array<unknown>;
-      return rows.length > 0;
-    },
-
-    /**
      * Auth-critical (KTD1, plan 003): may `userId` (whose LIVE org membership is `viewerOrgIds`)
      * reach this `team` canvas? Membership is a MANDATORY inner join, so access without a
      * `team_members` row is impossible. The org clause only narrows: a PERSONAL team

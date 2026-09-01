@@ -119,10 +119,10 @@ describe.each(DIALECTS)("canvas access roles — repository writes [%s]", (diale
     expect((await canvases.findAllowlistEntry(canvas.id, row.id))?.role).toBe("viewer");
     const updated = await canvases.setAllowlistRole(canvas.id, row.id, "editor");
     expect(updated?.role).toBe("editor");
-    expect((await canvases.findEditorGrant(canvas.id, colleague.id))?.id).toBe(row.id);
+    expect((await canvases.findMemberEntry(canvas.id, colleague.id))?.role).toBe("editor");
     const demoted = await canvases.setAllowlistRole(canvas.id, row.id, "viewer");
     expect(demoted?.role).toBe("viewer");
-    expect(await canvases.findEditorGrant(canvas.id, colleague.id)).toBeNull();
+    expect((await canvases.findMemberEntry(canvas.id, colleague.id))?.role).toBe("viewer");
   });
 
   it("setCanvasTeamRole upserts a grant with a role; listEditorTeamIds returns editor grants only", async () => {
@@ -145,21 +145,30 @@ describe.each(DIALECTS)("canvas access roles — repository writes [%s]", (diale
     expect(await teams.listEditorTeamIds(canvas.id)).toEqual([design.id]);
   });
 
-  it("editorTeamMatch matches live members of editor-role teams only, under the live org clause", async () => {
-    const { teams, org, owner, colleague, other, canvas } = await seed();
+  it("isEffectiveEditor: live members of editor-role teams only, under the live org clause", async () => {
+    const { canvases, teams, org, owner, colleague, other, canvas } = await seed();
+    const live = { tenancyActive: true, viewerOrgIds: new Set([org.id]) };
     const eng = await teams.create({ orgId: org.id, name: "Eng", createdBy: owner.id });
     await teams.addMember(eng.id, colleague.id);
     await teams.setCanvasTeamRole(canvas.id, eng.id, "viewer");
-    expect(await teams.editorTeamMatch(canvas.id, colleague.id, new Set([org.id]))).toBe(false);
+    expect(await canvases.isEffectiveEditor(canvas.id, colleague.id, live)).toBe(false);
     await teams.setCanvasTeamRole(canvas.id, eng.id, "editor");
-    expect(await teams.editorTeamMatch(canvas.id, colleague.id, new Set([org.id]))).toBe(true);
+    expect(await canvases.isEffectiveEditor(canvas.id, colleague.id, live)).toBe(true);
     // Not a team member → no match, even as an org member.
-    expect(await teams.editorTeamMatch(canvas.id, other.id, new Set([org.id]))).toBe(false);
+    expect(await canvases.isEffectiveEditor(canvas.id, other.id, live)).toBe(false);
     // An org team requires the org in the LIVE set (removed-from-org → denied).
-    expect(await teams.editorTeamMatch(canvas.id, colleague.id, new Set())).toBe(false);
+    expect(
+      await canvases.isEffectiveEditor(canvas.id, colleague.id, {
+        tenancyActive: true,
+        viewerOrgIds: new Set(),
+      }),
+    ).toBe(false);
+    // Scoped per canvas: the grant on this canvas never reaches another.
+    const other2 = await canvases.create({ ownerId: owner.id, slug: "other2", apiKeyHash: "k9" });
+    expect(await canvases.isEffectiveEditor(other2.id, colleague.id, live)).toBe(false);
     // Leaving the team drops the match on the next call.
     await teams.removeMember(eng.id, colleague.id);
-    expect(await teams.editorTeamMatch(canvas.id, colleague.id, new Set([org.id]))).toBe(false);
+    expect(await canvases.isEffectiveEditor(canvas.id, colleague.id, live)).toBe(false);
   });
 
   it("listEditedCanvasIds: direct editor rows + editor-role team membership; never viewer rows/teams", async () => {

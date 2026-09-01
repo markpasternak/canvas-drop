@@ -2087,3 +2087,95 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(me.teams.map((t: any) => t.id)).toContain(team.id);
   });
 });
+
+// --- Editor role gates (editor-roles plan U2, KTD1/KTD10) --------------------------------
+
+describe.each(DIALECTS)("MCP — editor role gates [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seedRoles() {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const viewer = await seedUser(client, "viewer@example.com");
+    const nobody = await seedUser(client, "nobody@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-roles", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+    return { repo, cv, owner, editor, viewer, nobody };
+  }
+
+  it("get_canvas / update_canvas as editor succeed on a PRIVATE canvas; viewer and no-role read the bare not-found", async () => {
+    const { cv, editor, viewer, nobody } = await seedRoles();
+    const asEditor = await connect(client, { userId: editor });
+    const got = await asEditor.callTool({ name: "get_canvas", arguments: { id: cv.id } });
+    expect(isError(got)).toBe(false);
+    expect(payload(got).id).toBe(cv.id);
+    const upd = await asEditor.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "by editor" },
+    });
+    expect(isError(upd)).toBe(false);
+    expect(payload(upd).title).toBe("by editor");
+    for (const uid of [viewer, nobody]) {
+      const c = await connect(client, { userId: uid });
+      for (const name of ["get_canvas", "update_canvas", "delete_canvas", "get_draft"]) {
+        const res = await c.callTool({ name, arguments: { id: cv.id } });
+        expect(isError(res), `${name} as ${uid}`).toBe(true);
+        expect(text(res)).toBe("canvas not found");
+      }
+    }
+  });
+
+  it("delete_canvas as editor fails with the OWNER_ONLY: prefix — before the disabled state; the owner's delete on a disabled canvas is DISABLED", async () => {
+    const { repo, cv, owner, editor } = await seedRoles();
+    const asEditor = await connect(client, { userId: editor });
+    const refused = await asEditor.callTool({ name: "delete_canvas", arguments: { id: cv.id } });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toMatch(/^OWNER_ONLY: /);
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+
+    await repo.setDisabled(cv.id, "abuse");
+    const stillOwnerOnly = await asEditor.callTool({
+      name: "delete_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(text(stillOwnerOnly)).toMatch(/^OWNER_ONLY: /);
+    const editorMutation = await asEditor.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "x" },
+    });
+    expect(text(editorMutation)).toMatch(/^DISABLED: /);
+    expect(isError(await asEditor.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    const asOwner = await connect(client, { userId: owner });
+    const ownerDelete = await asOwner.callTool({ name: "delete_canvas", arguments: { id: cv.id } });
+    expect(text(ownerDelete)).toMatch(/^DISABLED: /);
+  });
+
+  it("KTD2 over MCP: an editor with an EMPTY live org set under active tenancy reads not-found; inert tenancy admits them", async () => {
+    const { cv, editor } = await seedRoles();
+    const active = await connect(client, {
+      userId: editor,
+      orgIds: new Set(),
+      tenancyActive: true,
+    });
+    const res = await active.callTool({ name: "get_canvas", arguments: { id: cv.id } });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toBe("canvas not found");
+    const inert = await connect(client, { userId: editor, tenancyActive: false });
+    expect(isError(await inert.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+  });
+});

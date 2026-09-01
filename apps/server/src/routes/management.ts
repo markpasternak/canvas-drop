@@ -17,10 +17,17 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
 import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rootEntry } from "../canvas/manifest.js";
-import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
+import {
+  classifyMutability,
+  disabledError,
+  ownerOnlyError,
+  requireCanvasRole,
+} from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
+import { type MinRole, resolveManagementGrant } from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -167,7 +174,7 @@ const settingsSchema = z.object({
 
 /**
  * OWNER canvas view (never leaks `api_key_hash` / `password_hash`). Every
- * caller of this projection is gated by `ownedCanvas` (owner-only) or
+ * caller of this projection is gated by `managedCanvas` (owner-only) or
  * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
  * sees why"). It is NOT a public/shared projection: any future non-owner-facing
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
@@ -332,23 +339,39 @@ export function managementRoutes(deps: ManagementDeps) {
     return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds);
   }
 
-  /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
-   *  surface, shared with draft-api.ts so the two can't drift. A non-owner admin is
-   *  treated like any other member here (404); cross-owner admin power is the admin
-   *  routes only (list + disable/enable/restore). */
-  const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
+  /** The role resolver's deps (editor-roles plan, KTD1/KTD2): the live org predicate
+   *  switches on whether an org is configured. */
+  const roleDeps = { canvases: deps.canvases, tenancyActive: !!deps.config.org.name };
 
-  /** Load a canvas the caller OWNS *and* may still mutate, else send the refusal.
+  /** Resolve the caller's management grant on `:id` (owner / editor), else null. */
+  const grantFor = (c: Context<AppEnv>) => requireCanvasRole(c, roleDeps);
+
+  /** Load a canvas the caller may MANAGE (owner or editor), else null → 404. The role
+   *  gate for the management surface, shared with draft-api.ts so the two can't drift.
+   *  A no-role caller — including a non-owner admin — is treated like any other member
+   *  (404); cross-owner admin power is the admin routes only (list + disable/enable/
+   *  restore/reassign). */
+  const managedCanvas = async (c: Context<AppEnv>): Promise<Canvas | null> =>
+    (await grantFor(c))?.canvas ?? null;
+
+  /** Load a canvas the caller may MANAGE *and* may still mutate, else send the refusal.
    *  Returns the canvas, or a Response the handler must return as-is:
-   *   - 404 (`{ error: "not_found" }`) when not owned / missing / deleted (no existence leak)
+   *   - 404 (`{ error: "not_found" }`) when no role / missing / deleted (no existence leak)
+   *   - 403 (`{ code: "OWNER_ONLY", … }`) when `min` is owner and the caller is an editor
    *   - 409 (`{ code: "DISABLED", … }`) when an admin has taken the canvas down (§12.0 #5).
-   *  A disabled canvas is read-only to its owner: every owner MUTATION goes through this,
-   *  while reads keep using `ownedCanvas` so the owner can still see the canvas + reason. */
-  const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
-    const outcome = classifyMutability(await ownedCanvas(c));
+   *  Check order is role → owner-only → disabled (KTD1). A disabled canvas is read-only:
+   *  every MUTATION goes through this, while reads keep using `managedCanvas` so the
+   *  canvas + takedown reason stay visible. */
+  const mutableCanvas = async (
+    c: Context<AppEnv>,
+    min: MinRole = "editor",
+  ): Promise<Canvas | Response> => {
+    const outcome = classifyMutability(await grantFor(c), min);
     switch (outcome.kind) {
       case "not-found":
         return c.json({ error: "not_found" }, 404);
+      case "owner-only":
+        return c.json(ownerOnlyError(), 403);
       case "disabled":
         return c.json(disabledError(outcome.canvas), 409);
       case "ok":
@@ -604,11 +627,14 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/by-slug/:slug", async (c) => {
     const slug = c.req.param("slug");
     if (!slug) return c.json({ error: "not_found" }, 404);
-    const cv = await deps.canvases.findBySlug(slug);
-    if (!cv || cv.status === "deleted" || cv.ownerId !== c.get("user").id) {
-      return c.json({ error: "not_found" }, 404);
-    }
-    return c.json({ id: cv.id });
+    // Owner OR editor (editor-roles plan, KTD9): edited canvases resolve like owned ones.
+    const grant = await resolveManagementGrant(
+      await deps.canvases.findBySlug(slug),
+      memberPrincipal(c.get("user"), c.get("orgIds") ?? new Set<string>()),
+      roleDeps,
+    );
+    if (!grant) return c.json({ error: "not_found" }, 404);
+    return c.json({ id: grant.canvas.id });
   });
 
   async function sharedCanvasesResponse(c: Context<AppEnv>) {
@@ -668,18 +694,18 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/shared", sharedCanvasesResponse);
 
   app.get("/:id", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     return c.json(await canvasView(cv));
   });
 
   // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
   // realtime connect count (M9), derived from usage_events + files + ai_usage.
-  // Owner-only (ownedCanvas), dashboard-session gated — NOT the runtime router.
+  // Owner-only (managedCanvas), dashboard-session gated — NOT the runtime router.
   // Realtime is ephemeral, so "peak concurrent connections" isn't derivable; we
   // surface the connect count (rt_connect events) instead.
   app.get("/:id/usage", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     return c.json(await fetchCanvasUsage(deps, cv.id));
   });
@@ -798,7 +824,7 @@ export function managementRoutes(deps: ManagementDeps) {
 
   /** List a canvas's allowlist entries with member display identity resolved. */
   app.get("/:id/allowlist", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const entries = await resolveAllowlistEntries(
       await deps.canvases.listAllowlist(cv.id),
@@ -1041,8 +1067,10 @@ export function managementRoutes(deps: ManagementDeps) {
     // having an admin restore it would launder the takedown into an active canvas. It
     // must be `enable`d (admin route) first. This holds for every owner — there is no
     // admin shortcut, and an admin has no owner access to someone else's canvas anyway.
-    // `mutableCanvas` enforces this with the shared `DISABLED` contract.
-    const cv = await mutableCanvas(c);
+    // `mutableCanvas` enforces this with the shared `DISABLED` contract. Delete is an
+    // OWNER-ONLY act (R7): an editor is refused with the explicit OWNER_ONLY 403, checked
+    // before the disabled state (KTD1).
+    const cv = await mutableCanvas(c, "owner");
     if (cv instanceof Response) return cv;
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
@@ -1054,7 +1082,7 @@ export function managementRoutes(deps: ManagementDeps) {
 
   // Archive (owner-initiated, reversible) — takes the canvas offline (its public
   // URL 404s) and moves it to the Archive view. The guarded repo transition
-  // returns false only for an already-deleted row, which ownedCanvas already 404s.
+  // returns false only for an already-deleted row, which managedCanvas already 404s.
   app.post("/:id/archive", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
@@ -1116,7 +1144,7 @@ export function managementRoutes(deps: ManagementDeps) {
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
   // endpoint — owner-only, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const versions = await deps.versions.listByCanvas(cv.id);
     return c.json({
@@ -1138,7 +1166,7 @@ export function managementRoutes(deps: ManagementDeps) {
   // Download all files in a specific version as a ZIP archive. GET, owner-only,
   // no same-origin guard (browser navigation with cookies triggers the download).
   app.get("/:id/versions/:number/download", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const num = Number(c.req.param("number"));
     if (!Number.isInteger(num) || num < 1) return c.json({ error: "invalid_version" }, 400);

@@ -1081,24 +1081,23 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * The user's DIRECT editor grant on the canvas (a member row with role editor),
-     * or null. One arm of the role resolver (KTD1); the team arm is
-     * `teamsRepository.editorTeamMatch`.
+     * Auth-critical (editor-roles plan, KTD1/KTD2): is `userId` an effective editor
+     * of this canvas — a direct editor row or membership of an editor-role team, under
+     * the live org predicate? The SAME SQL predicate as {@link listEditedCanvasIds},
+     * evaluated for one row, so the role resolver and the owned-or-edited list can
+     * never disagree about who edits what.
      */
-    async findEditorGrant(canvasId: string, userId: string): Promise<AllowlistEntry | null> {
+    async isEffectiveEditor(
+      canvasId: string,
+      userId: string,
+      scope: EditorScope,
+    ): Promise<boolean> {
       const rows = (await db
-        .select()
-        .from(allowlistT)
-        .where(
-          and(
-            eq(allowlistT.canvasId, canvasId),
-            eq(allowlistT.principalKind, "member"),
-            eq(allowlistT.userId, userId),
-            eq(allowlistT.role, "editor"),
-          ),
-        )
-        .limit(1)) as AllowlistEntry[];
-      return rows[0] ?? null;
+        .select({ id: t.id })
+        .from(t)
+        .where(and(eq(t.id, canvasId), editedByPredicate(userId, scope)))
+        .limit(1)) as Array<{ id: string }>;
+      return rows.length > 0;
     },
 
     /**

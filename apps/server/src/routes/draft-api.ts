@@ -6,7 +6,12 @@ import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
 import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
-import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
+import {
+  classifyMutability,
+  disabledError,
+  ownerOnlyError,
+  requireCanvasRole,
+} from "../canvas/owner-guard.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
@@ -74,19 +79,26 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   const app = new Hono<AppEnv>();
   const sameOrigin = requireSameOrigin(deps.config);
 
-  // Owner-only gate (shared with management.ts) — a non-owner admin gets 404 here too,
-  // since the editor/draft/preview surface exposes canvas content.
-  const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
+  // The role gate (shared with management.ts, editor-roles plan KTD1): owner OR editor;
+  // a no-role caller — a non-owner admin included — gets 404 here too, since the
+  // editor/draft/preview surface exposes canvas content.
+  const roleDeps = { canvases: deps.canvases, tenancyActive: !!deps.config.org.name };
+  const grantFor = (c: Context<AppEnv>) => requireCanvasRole(c, roleDeps);
+  const managedCanvas = async (c: Context<AppEnv>): Promise<Canvas | null> =>
+    (await grantFor(c))?.canvas ?? null;
 
-  /** Owner-and-mutable gate (mirrors management.ts): a disabled (admin-taken-down) canvas
-   *  is read-only to its owner, so every draft EDIT rejects with the shared `DISABLED`
-   *  contract while the draft READS (get/file/preview) keep using `ownedCanvas`. Returns
-   *  the canvas, or a Response the handler returns as-is (404 not-owned / 409 disabled). */
+  /** Role-and-mutable gate (mirrors management.ts): a disabled (admin-taken-down) canvas
+   *  is read-only, so every draft EDIT rejects with the shared `DISABLED` contract while
+   *  the draft READS (get/file/preview) keep using `managedCanvas`. Every draft route is
+   *  min editor. Returns the canvas, or a Response the handler returns as-is (404 no
+   *  role / 409 disabled). */
   const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
-    const outcome = classifyMutability(await ownedCanvas(c));
+    const outcome = classifyMutability(await grantFor(c), "editor");
     switch (outcome.kind) {
       case "not-found":
         return c.json({ error: "not_found" }, 404);
+      case "owner-only":
+        return c.json(ownerOnlyError(), 403);
       case "disabled":
         return c.json(disabledError(outcome.canvas), 409);
       case "ok":
@@ -101,7 +113,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   // Draft state + file list (creates the draft from the live version on first open, R10).
   app.get("/:id/draft", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const draft = await deps.drafts.getOrCreate(cv);
     return viewOf(c, cv, draft);
@@ -109,7 +121,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   // Raw draft-file bytes for the editor to load (owner-only, never cached).
   app.get("/:id/draft/file", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
@@ -215,7 +227,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
   // versions. Never cached (the draft is mutable). The `*` wildcard carries the
   // asset path after `/preview`.
   const servePreview = async (c: Context<AppEnv>): Promise<Response> => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     try {
       const draft = await deps.drafts.getOrCreate(cv);
