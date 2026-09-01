@@ -152,3 +152,19 @@ describe("dual-dialect schema parity (KTD-1)", () => {
     expect(sqNames).toEqual(expected);
   });
 });
+
+// Editor-roles plan (KTD3): the role columns are unchecked text with a 'viewer'
+// default on BOTH dialects, so every pre-existing grant row reads back as a viewer.
+describe("canvas access role columns (editor-roles plan)", () => {
+  it.each([
+    ["canvasAllowlist", pg.canvasAllowlist, sq.canvasAllowlist],
+    ["canvasTeams", pg.canvasTeams, sq.canvasTeams],
+  ] as const)("%s.role defaults to 'viewer' on both dialects", (_key, pgTable, sqTable) => {
+    const pgRole = getTableColumns(pgTable).role;
+    const sqRole = getTableColumns(sqTable).role;
+    expect(pgRole.notNull).toBe(true);
+    expect(sqRole.notNull).toBe(true);
+    expect(pgRole.default).toBe("viewer");
+    expect(sqRole.default).toBe("viewer");
+  });
+});

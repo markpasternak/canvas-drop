@@ -1,6 +1,7 @@
 import { computeSearchText, searchTextPatterns } from "@canvas-drop/shared";
 import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
+  type AccessRole,
   type AccessRung,
   type AllowlistPrincipalKind,
   type Canvas,
@@ -252,8 +253,18 @@ export interface AllowlistEntry {
   principalKind: AllowlistPrincipalKind;
   userId: string | null;
   email: string | null;
+  /** viewer | editor (editor-roles plan). Guest rows are always `viewer`. */
+  role: AccessRole;
   createdAt: number;
 }
+
+/**
+ * Scope for the editor predicate (editor-roles plan, KTD2). Editor privilege is a LIVE
+ * predicate: when tenancy is active the caller needs a non-empty live org set that
+ * contains the canvas's home org (when it has one); when tenancy is inert any member
+ * qualifies. Same shape as {@link GalleryScope} so callers pass the one they already build.
+ */
+export type EditorScope = GalleryScope;
 
 export interface OwnerCanvasSummary {
   active: number;
@@ -277,6 +288,63 @@ export function canvasesRepository(client: DbClient) {
   const usersT = client.dialect === "sqlite" ? sqliteSchema.users : pgSchema.users;
   const allowlistT =
     client.dialect === "sqlite" ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
+  const canvasTeamsT =
+    client.dialect === "sqlite" ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
+  const teamMembersT =
+    client.dialect === "sqlite" ? sqliteSchema.teamMembers : pgSchema.teamMembers;
+  const teamsT = client.dialect === "sqlite" ? sqliteSchema.teams : pgSchema.teams;
+
+  /**
+   * "Is `userId` an effective editor of this canvas row?" as ONE SQL predicate on `t`
+   * (editor-roles plan, KTD2/KTD4/KTD9): a direct member row with role editor, OR
+   * membership of an editor-role team grant (personal team by membership alone; org
+   * team only when its org is in the caller's LIVE org set — the same clause as
+   * `teamsRepository.accessOrgClause`), AND the org predicate: under active tenancy
+   * the caller must hold a non-empty live org set that contains the canvas's home org
+   * when it has one. Shared by {@link listEditedCanvasIds} and the owned-or-edited list
+   * so the two can never drift.
+   */
+  const editedByPredicate = (userId: string, scope: EditorScope): SQL => {
+    const orgIds = [...scope.viewerOrgIds];
+    const directEditor = exists(
+      db
+        .select({ one: sql`1` })
+        .from(allowlistT)
+        .where(
+          and(
+            eq(allowlistT.canvasId, t.id),
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+            eq(allowlistT.role, "editor"),
+          ),
+        ),
+    );
+    const teamOrgClause =
+      orgIds.length === 0
+        ? isNull(teamsT.orgId)
+        : (or(isNull(teamsT.orgId), inArray(teamsT.orgId, orgIds)) as SQL);
+    const teamEditor = exists(
+      db
+        .select({ one: sql`1` })
+        .from(canvasTeamsT)
+        .innerJoin(teamMembersT, eq(teamMembersT.teamId, canvasTeamsT.teamId))
+        .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
+        .where(
+          and(
+            eq(canvasTeamsT.canvasId, t.id),
+            eq(canvasTeamsT.role, "editor"),
+            eq(teamMembersT.userId, userId),
+            teamOrgClause,
+          ),
+        ),
+    );
+    const grant = or(directEditor, teamEditor) as SQL;
+    if (!scope.tenancyActive) return grant;
+    // Active tenancy: a caller with NO live org (a guest) is never an editor; an
+    // org-homed canvas requires the caller to be in that org.
+    if (orgIds.length === 0) return sql`false`;
+    return and(grant, or(isNull(t.orgId), inArray(t.orgId, orgIds))) as SQL;
+  };
 
   /**
    * The §12 gallery-visibility predicate, shared by {@link listGallery} and the
@@ -918,7 +986,19 @@ export function canvasesRepository(client: DbClient) {
       principalKind: AllowlistPrincipalKind;
       userId?: string | null;
       email?: string | null;
+      /**
+       * Role to apply (editor-roles plan, KTD3). Omitted → the viewer default on
+       * INSERT and NO change to an existing row, so a role-less re-add can never
+       * demote an editor; supplied → applied on insert AND on conflict, so
+       * add-with-role is one atomic write.
+       */
+      role?: AccessRole;
     }): Promise<AllowlistEntry> {
+      if (input.principalKind === "guest" && input.role === "editor") {
+        // KD2 backstop: write power never crosses the org boundary. The service
+        // layer refuses this earlier with GUEST_VIEWER_ONLY; the repo never persists it.
+        throw new Error("a guest allowlist entry is always a viewer");
+      }
       const conflictTarget =
         input.principalKind === "member" ? allowlistT.userId : allowlistT.email;
       const rows = await db
@@ -929,12 +1009,14 @@ export function canvasesRepository(client: DbClient) {
           principalKind: input.principalKind,
           userId: input.userId ?? null,
           email: input.email ?? null,
+          role: input.role ?? "viewer",
           createdAt: Date.now(),
         })
         .onConflictDoUpdate({
           target: [allowlistT.canvasId, conflictTarget],
-          // No-op update so the existing row is returned rather than crashing.
-          set: { canvasId: input.canvasId },
+          // An explicit role updates the existing row; otherwise a no-op update so the
+          // existing row is returned (unchanged) rather than crashing.
+          set: input.role ? { role: input.role } : { canvasId: input.canvasId },
         })
         .returning();
       return rows[0] as AllowlistEntry;
@@ -945,6 +1027,93 @@ export function canvasesRepository(client: DbClient) {
       await db
         .delete(allowlistT)
         .where(and(eq(allowlistT.canvasId, canvasId), eq(allowlistT.id, entryId)));
+    },
+
+    /**
+     * Set one entry's role (editor-roles plan). Scoped to BOTH the canvas and the
+     * entry id like {@link removeAllowlistEntry}, so a role write can never reach
+     * another canvas's row. A guest row is never promoted (KD2): promoting to editor
+     * matches member rows only. Returns the updated entry, or null when no row matched.
+     */
+    async setAllowlistRole(
+      canvasId: string,
+      entryId: string,
+      role: AccessRole,
+    ): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .update(allowlistT)
+        .set({ role })
+        .where(
+          and(
+            eq(allowlistT.canvasId, canvasId),
+            eq(allowlistT.id, entryId),
+            role === "editor" ? eq(allowlistT.principalKind, "member") : undefined,
+          ),
+        )
+        .returning()) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /** One allowlist entry by id, scoped to the canvas (null when absent). */
+    async findAllowlistEntry(canvasId: string, entryId: string): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .select()
+        .from(allowlistT)
+        .where(and(eq(allowlistT.canvasId, canvasId), eq(allowlistT.id, entryId)))
+        .limit(1)) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /** The user's own member row on the canvas (any role), or null. */
+    async findMemberEntry(canvasId: string, userId: string): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .select()
+        .from(allowlistT)
+        .where(
+          and(
+            eq(allowlistT.canvasId, canvasId),
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+          ),
+        )
+        .limit(1)) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /**
+     * The user's DIRECT editor grant on the canvas (a member row with role editor),
+     * or null. One arm of the role resolver (KTD1); the team arm is
+     * `teamsRepository.editorTeamMatch`.
+     */
+    async findEditorGrant(canvasId: string, userId: string): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .select()
+        .from(allowlistT)
+        .where(
+          and(
+            eq(allowlistT.canvasId, canvasId),
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+            eq(allowlistT.role, "editor"),
+          ),
+        )
+        .limit(1)) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /**
+     * Ids of the non-deleted canvases the user is an effective editor of — a direct
+     * editor row or membership of an editor-role team — under the live org predicate
+     * (KTD2). Backs the owned-or-edited list (KTD9) and the Shared exclusion.
+     */
+    async listEditedCanvasIds(userId: string, scope: EditorScope): Promise<string[]> {
+      const rows = (await db
+        .select({ id: t.id })
+        .from(t)
+        .where(
+          and(ne(t.ownerId, userId), ne(t.status, "deleted"), editedByPredicate(userId, scope)),
+        )) as Array<{ id: string }>;
+      return rows.map((r) => r.id);
     },
 
     /**

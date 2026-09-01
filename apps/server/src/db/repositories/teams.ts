@@ -1,5 +1,11 @@
 import { orgSlug } from "@canvas-drop/shared";
-import { pgSchema, sqliteSchema, type Team, type TeamMember } from "@canvas-drop/shared/db";
+import {
+  type AccessRole,
+  pgSchema,
+  sqliteSchema,
+  type Team,
+  type TeamMember,
+} from "@canvas-drop/shared/db";
 import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
@@ -8,6 +14,13 @@ export interface UserTeamCanvasGrant {
   canvasId: string;
   teamId: string;
   teamName: string;
+}
+
+/** One canvas→team grant with its role (editor-roles plan). */
+export interface CanvasTeamGrant {
+  teamId: string;
+  role: AccessRole;
+  createdAt: number;
 }
 
 /**
@@ -219,6 +232,91 @@ export function teamsRepository(client: DbClient) {
         .from(canvasTeamsT)
         .where(eq(canvasTeamsT.canvasId, canvasId))) as Array<{ teamId: string }>;
       return rows.map((r) => r.teamId);
+    },
+
+    /** Every team grant on a canvas with its role, oldest first (the unified people list). */
+    async listCanvasTeamGrants(canvasId: string): Promise<CanvasTeamGrant[]> {
+      return (await db
+        .select({
+          teamId: canvasTeamsT.teamId,
+          role: canvasTeamsT.role,
+          createdAt: canvasTeamsT.createdAt,
+        })
+        .from(canvasTeamsT)
+        .where(eq(canvasTeamsT.canvasId, canvasId))
+        .orderBy(canvasTeamsT.createdAt, canvasTeamsT.teamId)) as CanvasTeamGrant[];
+    },
+
+    /** Ids of the teams holding an EDITOR grant on the canvas (KTD4). */
+    async listEditorTeamIds(canvasId: string): Promise<string[]> {
+      const rows = (await db
+        .select({ teamId: canvasTeamsT.teamId })
+        .from(canvasTeamsT)
+        .where(
+          and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.role, "editor")),
+        )) as Array<{ teamId: string }>;
+      return rows.map((r) => r.teamId);
+    },
+
+    /**
+     * Upsert one team grant with a role (editor-roles plan, KTD4). Scoped to the
+     * canvas; an existing grant's role is updated in place. Returns the grant.
+     */
+    async setCanvasTeamRole(
+      canvasId: string,
+      teamId: string,
+      role: AccessRole,
+    ): Promise<CanvasTeamGrant> {
+      const rows = (await db
+        .insert(canvasTeamsT)
+        .values({ canvasId, teamId, role, createdAt: Date.now() })
+        .onConflictDoUpdate({
+          target: [canvasTeamsT.canvasId, canvasTeamsT.teamId],
+          set: { role },
+        })
+        .returning({
+          teamId: canvasTeamsT.teamId,
+          role: canvasTeamsT.role,
+          createdAt: canvasTeamsT.createdAt,
+        })) as CanvasTeamGrant[];
+      return rows[0] as CanvasTeamGrant;
+    },
+
+    /** Remove one team grant from a canvas (any role). Returns whether a row was removed. */
+    async removeCanvasTeam(canvasId: string, teamId: string): Promise<boolean> {
+      const rows = (await db
+        .delete(canvasTeamsT)
+        .where(and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.teamId, teamId)))
+        .returning({ teamId: canvasTeamsT.teamId })) as Array<{ teamId: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Auth-critical (editor-roles plan, KTD1/KTD4): is `userId` a LIVE member of an
+     * EDITOR-role team granted on this canvas? Same membership-mandatory live-org
+     * clause as {@link teamMatch}, narrowed to `role = 'editor'` rows. The caller
+     * (the role resolver) applies the canvas-level org predicate (KTD2) itself.
+     */
+    async editorTeamMatch(
+      canvasId: string,
+      userId: string,
+      viewerOrgIds: Set<string>,
+    ): Promise<boolean> {
+      const rows = (await db
+        .select({ one: sql`1` })
+        .from(canvasTeamsT)
+        .innerJoin(membersT, eq(membersT.teamId, canvasTeamsT.teamId))
+        .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
+        .where(
+          and(
+            eq(canvasTeamsT.canvasId, canvasId),
+            eq(canvasTeamsT.role, "editor"),
+            eq(membersT.userId, userId),
+            accessOrgClause(viewerOrgIds),
+          ),
+        )
+        .limit(1)) as Array<unknown>;
+      return rows.length > 0;
     },
 
     /**
