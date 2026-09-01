@@ -250,8 +250,8 @@ export function useSaveDraftFile(id: string) {
   return useMutation({
     // Serialize draft writes for this canvas so overlapping autosaves settle in order.
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { path: string; content: string }) =>
-      api.putDraftFile(id, input.path, input.content),
+    mutationFn: (input: { path: string; content: string; expectedHash?: string }) =>
+      api.putDraftFile(id, input.path, input.content, { expectedHash: input.expectedHash }),
     onSuccess: (draft, input) => {
       qc.setQueryData(keys.draft(id), draft);
       // Write the saved content through to the per-file cache: a stale entry would
@@ -315,10 +315,11 @@ export function useDeleteDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (path: string) => api.deleteDraftFile(id, path),
-    onSuccess: (draft: DraftView, path) => {
+    mutationFn: (input: { path: string; expectedHash?: string }) =>
+      api.deleteDraftFile(id, input.path, input.expectedHash),
+    onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
-      qc.removeQueries({ queryKey: keys.draftFile(id, path) });
+      qc.removeQueries({ queryKey: keys.draftFile(id, input.path) });
     },
   });
 }
@@ -328,8 +329,8 @@ export function useRenameDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { from: string; to: string }) =>
-      api.renameDraftFile(id, input.from, input.to),
+    mutationFn: (input: { from: string; to: string; expectedHash?: string }) =>
+      api.renameDraftFile(id, input.from, input.to, input.expectedHash),
     onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
       // Carry the old path's cached content to the new path so re-opening the

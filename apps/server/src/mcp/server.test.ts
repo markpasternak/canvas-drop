@@ -118,6 +118,7 @@ async function connect(
         storage,
         audit,
         log: silent,
+        users: usersRepository(client),
       }),
       usage: usageEventsRepository(client),
       files: filesRepository(client),
@@ -2597,5 +2598,74 @@ describe.each(DIALECTS)("MCP — owned-or-edited list (editor-roles plan U9) [%s
       await mcp.callTool({ name: "list_shared_canvases", arguments: {} }),
     );
     expect((sharedOverMcp.canvases ?? []).map((c: Row) => c.id)).not.toContain(shared.id);
+  });
+});
+
+describe.each(DIALECTS)("MCP — draft preconditions (editor-roles plan U10) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("unconditioned write after your own write is fine; after another user's write it is DRAFT_CONFLICT with the fields; the correct expectedHash lands; get_draft / read_draft_file return hashes", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-draft", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const storage = memStorage();
+    const asOwner = await connect(client, { userId: owner }, false, config, storage);
+    const asEditor = await connect(client, { userId: editor }, false, config, storage);
+    const write = (c: typeof asOwner, content: string, expectedHash?: string) =>
+      c.callTool({
+        name: "write_draft_file",
+        arguments: {
+          id: cv.id,
+          path: "index.html",
+          content,
+          ...(expectedHash ? { expectedHash } : {}),
+        },
+      });
+    expect(isError(await write(asOwner, "v1"))).toBe(false);
+    expect(isError(await write(asOwner, "v2"))).toBe(false); // own follow-up, unconditioned
+    const conflict = await write(asEditor, "v3");
+    expect(isError(conflict)).toBe(true);
+    expect(text(conflict)).toMatch(/^DRAFT_CONFLICT: /);
+    expect(text(conflict)).toMatch(/path=index\.html currentHash=[0-9a-f]+ updatedBy=/);
+    expect(text(conflict)).toContain("updatedByName=owner@example.com");
+    const draft = payload(await asEditor.callTool({ name: "get_draft", arguments: { id: cv.id } }));
+    const entry = draft.files.find((f: { path: string }) => f.path === "index.html");
+    expect(entry).toMatchObject({ updatedBy: owner, updatedByName: "owner@example.com" });
+    expect(typeof entry.hash).toBe("string");
+    const read = payload(
+      await asEditor.callTool({
+        name: "read_draft_file",
+        arguments: { id: cv.id, path: "index.html" },
+      }),
+    );
+    expect(read).toMatchObject({ content: "v2", hash: entry.hash, updatedBy: owner });
+    expect(isError(await write(asEditor, "v3", entry.hash))).toBe(false);
+    // Delete with a stale hash is refused; with the current one it lands.
+    const stale = await asEditor.callTool({
+      name: "delete_draft_file",
+      arguments: { id: cv.id, path: "index.html", expectedHash: entry.hash },
+    });
+    expect(text(stale)).toMatch(/^DRAFT_CONFLICT: /);
+    const now = payload(await asEditor.callTool({ name: "get_draft", arguments: { id: cv.id } }))
+      .files[0].hash;
+    expect(
+      isError(
+        await asEditor.callTool({
+          name: "delete_draft_file",
+          arguments: { id: cv.id, path: "index.html", expectedHash: now },
+        }),
+      ),
+    ).toBe(false);
   });
 });

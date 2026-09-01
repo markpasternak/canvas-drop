@@ -352,6 +352,7 @@ export async function connectMcp(
         storage,
         audit,
         log: silent,
+        users: repos.users,
       }),
       usage: repos.usage,
       files: repos.files,

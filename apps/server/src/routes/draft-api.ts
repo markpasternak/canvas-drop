@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import { resolveAsset } from "../canvas/asset-resolver.js";
-import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
+import { liveManifest } from "../canvas/manifest.js";
 import { mimeFor } from "../canvas/mime.js";
 import {
   classifyMutability,
@@ -15,7 +15,7 @@ import {
 import { blobKey } from "../canvas/storage-keys.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
-import { DeployError } from "../deploy/errors.js";
+import { DeployError, DraftConflictError } from "../deploy/errors.js";
 import { injectOnPageEditor } from "../draft/onpage.js";
 import type { DraftService } from "../draft/service.js";
 import { requireSameOrigin } from "../http/same-origin.js";
@@ -32,27 +32,9 @@ export interface DraftApiDeps {
   storage: StorageDriver;
 }
 
-/** Serialize a draft for the editor: file list + state, never raw blob bytes. */
-function draftView(draft: Draft, liveManifest: Manifest | null) {
-  const manifest = draft.manifest as Manifest;
-  const files = Object.entries(manifest)
-    .map(([path, e]) => ({ path, size: e.size, mime: e.mime }))
-    .sort((a, b) => a.path.localeCompare(b.path));
-  return {
-    files,
-    stale: draft.stale,
-    baseVersionId: draft.baseVersionId,
-    updatedAt: draft.updatedAt,
-    // Unpublished changes = the draft differs from the live version (or there is none).
-    dirty: isDirty(manifest, liveManifest),
-  };
-}
-
-/** Whether the draft manifest diverges from the live version's (path set or any hash). */
-function isDirty(draft: Manifest, live: Manifest | null): boolean {
-  if (!live) return Object.keys(draft).length > 0;
-  return !manifestsEqual(draft, live);
-}
+/** The per-file precondition header (editor-roles plan, KTD8): the hash the client
+ *  loaded for the path, or the literal `none` for a path it believes absent. */
+const FILE_HASH_HEADER = "If-Draft-File-Hash";
 
 function previewNotFound(c: Context<AppEnv>): Response {
   return c.body(JSON.stringify({ error: "not_found" }), 404, {
@@ -62,6 +44,11 @@ function previewNotFound(c: Context<AppEnv>): Response {
 }
 
 function deployErr(c: Context<AppEnv>, err: unknown): Response | never {
+  // A stale save (KTD8/R17): 409 with the entry's current hash + writer so the client
+  // can reload and retry with one call. Checked before the generic 400 mapping.
+  if (err instanceof DraftConflictError) {
+    return c.json({ code: err.code, message: err.message, ...err.conflict }, 409);
+  }
   if (err instanceof DeployError) {
     return c.json({ code: err.code, message: err.message, path: err.path }, 400);
   }
@@ -108,8 +95,14 @@ export function draftApiRoutes(deps: DraftApiDeps) {
 
   async function viewOf(c: Context<AppEnv>, cv: Canvas, draft: Draft): Promise<Response> {
     const live = await liveManifest(deps.versions, cv.currentVersionId);
-    return c.json(draftView(draft, live?.manifest ?? null));
+    return c.json(await deps.drafts.describe(draft, live?.manifest ?? null));
   }
+
+  /** The per-mutation options from the request: the acting user + the precondition. */
+  const mutation = (c: Context<AppEnv>) => ({
+    actor: c.get("user").id,
+    expectedHash: c.req.header(FILE_HASH_HEADER),
+  });
 
   // Draft state + file list (creates the draft from the live version on first open, R10).
   app.get("/:id/draft", async (c) => {
@@ -143,31 +136,15 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     if (cv instanceof Response) return cv;
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
-    // Optimistic-concurrency (opt-in): a best-effort writer — the editor's unmount flush —
-    // pins the draft fork-point it edited against via `If-Draft-Base`. If a restore (or any
-    // wholesale replace) has since moved `baseVersionId`, reject so a stale single-file write
-    // can't clobber the new draft. `null` base is encoded as the `none` sentinel client-side.
-    // Header absent = no precondition (normal autosave/upload/create are unaffected).
-    const expectedBase = c.req.header("If-Draft-Base");
-    if (expectedBase !== undefined) {
-      const current = await deps.drafts.getOrCreate(cv);
-      if ((current.baseVersionId ?? "none") !== expectedBase) {
-        return c.json(
-          {
-            code: "DRAFT_CONFLICT",
-            message: "The draft changed since this edit; not overwriting.",
-          },
-          409,
-        );
-      }
-    }
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     // `?mode=create` = "Add a file": refuse to overwrite an existing path (R11) so a
     // create can never silently truncate the file already there. A plain PUT (autosave,
-    // replace, upload) stays an upsert.
+    // replace, upload) stays an upsert — guarded per FILE by `If-Draft-File-Hash` (KTD8):
+    // a stale hash is a 409 DRAFT_CONFLICT naming the last writer; an absent header still
+    // refuses when another user wrote the entry last.
     const mustNotExist = c.req.query("mode") === "create";
     try {
-      const draft = await deps.drafts.writeFile(cv, path, bytes, { mustNotExist });
+      const draft = await deps.drafts.writeFile(cv, path, bytes, { mustNotExist, ...mutation(c) });
       return viewOf(c, cv, draft);
     } catch (err) {
       return deployErr(c, err);
@@ -180,7 +157,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
     const path = c.req.query("path");
     if (!path) return c.json({ code: "INVALID_PATH", message: "path required" }, 400);
     try {
-      const draft = await deps.drafts.deleteFile(cv, path);
+      const draft = await deps.drafts.deleteFile(cv, path, mutation(c));
       return viewOf(c, cv, draft);
     } catch (err) {
       return deployErr(c, err);
@@ -195,7 +172,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     try {
-      const draft = await deps.drafts.renameFile(cv, body.data.from, body.data.to);
+      const draft = await deps.drafts.renameFile(cv, body.data.from, body.data.to, mutation(c));
       return viewOf(c, cv, draft);
     } catch (err) {
       return deployErr(c, err);
@@ -283,7 +260,7 @@ export function draftApiRoutes(deps: DraftApiDeps) {
       .safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ code: "INVALID_PATH", message: "version required" }, 400);
     try {
-      const draft = await deps.drafts.restore(cv, body.data.version);
+      const draft = await deps.drafts.restore(cv, body.data.version, c.get("user").id);
       return viewOf(c, cv, draft);
     } catch (err) {
       return deployErr(c, err);

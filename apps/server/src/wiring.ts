@@ -123,6 +123,8 @@ export function composeServices(deps: ServiceGraphDeps): ServiceGraph {
       storage: deps.storage,
       audit: deps.audit,
       log: deps.log,
+      // Writer names for stale-save conflicts and draft views (editor-roles plan, KTD8).
+      users: deps.users,
       // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
       // them. Effective-gated + best-effort — a no-op when capture is off — so it is
       // always wired and shared by EVERY publish path (editor draft-api AND MCP),

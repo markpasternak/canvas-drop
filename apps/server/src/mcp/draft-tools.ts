@@ -1,10 +1,11 @@
 import { Buffer } from "node:buffer";
-import type { Manifest } from "@canvas-drop/shared/db";
+import type { Draft } from "@canvas-drop/shared/db";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { liveManifest, manifestsEqual } from "../canvas/manifest.js";
+import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType, mimeFor } from "../canvas/mime.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { DraftConflictError } from "../deploy/errors.js";
 import type { DraftService } from "../draft/service.js";
 import type { McpCaller, RequireMutable, RequireRole } from "./server.js";
 import { fail, failDeploy, ok } from "./tool-kit.js";
@@ -31,27 +32,36 @@ export function registerDraftTools(
   requireRole: RequireRole,
   requireMutable: RequireMutable,
 ): void {
-  /** Serialize a draft like the editor's draftView (file list + dirty/stale state). */
-  async function draftViewFor(
-    cv: { currentVersionId: string | null },
-    draft: { manifest: unknown; stale: boolean; baseVersionId: string | null; updatedAt: number },
-  ) {
-    const manifest = draft.manifest as Manifest;
+  /** The draft as the editor sees it — the SAME projection the HTTP draft view returns
+   *  (per-file `hash` + last writer, so `expectedHash` on the next write is one call). */
+  async function draftViewFor(cv: { currentVersionId: string | null }, draft: Draft) {
     const live = await liveManifest(deps.versions, cv.currentVersionId);
-    const files = Object.entries(manifest)
-      .map(([path, e]) => ({ path, size: e.size, mime: e.mime }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-    const dirty = live
-      ? !manifestsEqual(manifest, live.manifest)
-      : Object.keys(manifest).length > 0;
-    return {
-      files,
-      stale: draft.stale,
-      baseVersionId: draft.baseVersionId,
-      updatedAt: draft.updatedAt,
-      dirty,
-    };
+    return deps.drafts.describe(draft, live?.manifest ?? null);
   }
+
+  /** The conflict message: the `DRAFT_CONFLICT:` prefix carrying the same fields as HTTP. */
+  function failConflictOrDeploy(e: unknown) {
+    if (e instanceof DraftConflictError) {
+      const c = e.conflict;
+      return fail(
+        `DRAFT_CONFLICT: ${e.message} (path=${c.path} currentHash=${c.currentHash} ` +
+          `updatedBy=${c.updatedBy ?? "-"} updatedByName=${c.updatedByName ?? "-"} ` +
+          `updatedAt=${c.updatedAt ?? "-"}). Re-read with get_draft / read_draft_file and ` +
+          "retry with expectedHash set to currentHash.",
+      );
+    }
+    return failDeploy(e);
+  }
+
+  const expectedHashParam = z
+    .string()
+    .optional()
+    .describe(
+      "Optimistic-concurrency guard: the file's `hash` from get_draft / read_draft_file (or " +
+        "the literal 'none' for a path you believe absent). A mismatch fails with " +
+        "DRAFT_CONFLICT naming the last writer. When omitted, the write still fails with " +
+        "DRAFT_CONFLICT if a DIFFERENT user wrote this file last — your own solo edits never conflict.",
+    );
 
   server.registerTool(
     "get_draft",
@@ -88,10 +98,18 @@ export function registerDraftTools(
       const bytes = await deps.drafts.readFile(cv, path);
       if (!bytes) return fail(`no draft file at "${path}"`);
       const text = isTextContentType(mimeFor(path).contentType);
+      // The entry's hash + last writer ride along so a following write can carry the
+      // precondition (editor-roles plan, KTD8).
+      const view = await draftViewFor(cv, await deps.drafts.getOrCreate(cv));
+      const entry = view.files.find((f) => f.path === path);
       return ok({
         path,
         encoding: text ? "utf8" : "base64",
         content: Buffer.from(bytes).toString(text ? "utf8" : "base64"),
+        hash: entry?.hash ?? null,
+        updatedBy: entry?.updatedBy ?? null,
+        updatedByName: entry?.updatedByName ?? null,
+        updatedAt: entry?.updatedAt ?? null,
       });
     },
   );
@@ -112,9 +130,10 @@ export function registerDraftTools(
           .boolean()
           .optional()
           .describe("If true, fail rather than overwrite an existing file."),
+        expectedHash: expectedHashParam,
       },
     },
-    async ({ id, path, content, encoding, create }) => {
+    async ({ id, path, content, encoding, create, expectedHash }) => {
       const gate = await requireMutable("write_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
@@ -122,10 +141,12 @@ export function registerDraftTools(
       try {
         const draft = await deps.drafts.writeFile(cv, path, bytes, {
           mustNotExist: create === true,
+          actor: caller.userId,
+          expectedHash,
         });
         return ok(await draftViewFor(cv, draft));
       } catch (e) {
-        return failDeploy(e);
+        return failConflictOrDeploy(e);
       }
     },
   );
@@ -138,16 +159,22 @@ export function registerDraftTools(
       inputSchema: {
         id: z.string().describe("The canvas id."),
         path: z.string().describe("File path within the draft."),
+        expectedHash: expectedHashParam,
       },
     },
-    async ({ id, path }) => {
+    async ({ id, path, expectedHash }) => {
       const gate = await requireMutable("delete_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
-        return ok(await draftViewFor(cv, await deps.drafts.deleteFile(cv, path)));
+        return ok(
+          await draftViewFor(
+            cv,
+            await deps.drafts.deleteFile(cv, path, { actor: caller.userId, expectedHash }),
+          ),
+        );
       } catch (e) {
-        return failDeploy(e);
+        return failConflictOrDeploy(e);
       }
     },
   );
@@ -161,16 +188,22 @@ export function registerDraftTools(
         id: z.string().describe("The canvas id."),
         from: z.string().describe("Current path."),
         to: z.string().describe("New path."),
+        expectedHash: expectedHashParam,
       },
     },
-    async ({ id, from, to }) => {
+    async ({ id, from, to, expectedHash }) => {
       const gate = await requireMutable("rename_draft_file", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
-        return ok(await draftViewFor(cv, await deps.drafts.renameFile(cv, from, to)));
+        return ok(
+          await draftViewFor(
+            cv,
+            await deps.drafts.renameFile(cv, from, to, { actor: caller.userId, expectedHash }),
+          ),
+        );
       } catch (e) {
-        return failDeploy(e);
+        return failConflictOrDeploy(e);
       }
     },
   );
@@ -220,7 +253,7 @@ export function registerDraftTools(
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
-        return ok(await draftViewFor(cv, await deps.drafts.restore(cv, version)));
+        return ok(await draftViewFor(cv, await deps.drafts.restore(cv, version, caller.userId)));
       } catch (e) {
         return failDeploy(e);
       }

@@ -104,8 +104,19 @@ export type NewCanvasAllowlistEntry = typeof canvasAllowlist.$inferInsert;
 /** Screenshot job status values (stored as text, CHECK-constrained in the schema). */
 export type ScreenshotJobStatus = "pending" | "running" | "done" | "failed";
 
-/** A deployed version's file manifest: path → content metadata. */
-export type ManifestEntry = { size: number; hash: string; mime: string };
+/**
+ * A deployed version's / draft's file manifest: path → content metadata. The draft adds
+ * per-entry WRITER metadata (editor-roles plan, KTD8): who last touched the entry and
+ * when, so two editors on one file get a conflict naming the other, not a silent
+ * overwrite. Published versions strip it (a version is content, not authorship).
+ */
+export type ManifestEntry = {
+  size: number;
+  hash: string;
+  mime: string;
+  updatedBy?: string;
+  updatedAt?: number;
+};
 export type Manifest = Record<string, ManifestEntry>;
 
 /** Canvas status values (stored as text, validated by zod at the boundary). */

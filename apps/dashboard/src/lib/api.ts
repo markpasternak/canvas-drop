@@ -247,6 +247,13 @@ export interface DraftFile {
   path: string;
   size: number;
   mime: string;
+  /** Content hash + last writer (editor-roles plan, KTD8): the editor sends the hash it
+   *  loaded as `If-Draft-File-Hash` on every save so two editors on one file can't
+   *  silently overwrite each other. Optional so older fixtures still type-check. */
+  hash?: string;
+  updatedBy?: string | null;
+  updatedByName?: string | null;
+  updatedAt?: number | null;
 }
 
 /** Editor draft state (M5): file list + publish/stale flags. */
@@ -561,6 +568,9 @@ export class ApiError extends Error {
     message: string,
     public readonly path?: string,
     public readonly status?: number,
+    /** The full JSON error body, for codes that carry more than `{ code, message, path }`
+     *  (e.g. DRAFT_CONFLICT's `currentHash` / `updatedByName` / `updatedAt`). */
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -606,20 +616,22 @@ function errorFromBody(status: number, statusText: string, text: string): ApiErr
   let code = `http_${status}`;
   let message = statusText || "Request failed";
   let path: string | undefined;
+  let details: Record<string, unknown> = {};
   try {
     const body = JSON.parse(text) as {
       code?: string;
       error?: string;
       message?: string;
       path?: string;
-    };
+    } & Record<string, unknown>;
     code = body.code ?? body.error ?? code;
     message = body.message ?? message;
     path = body.path;
+    details = body;
   } catch {
     /* non-JSON error body */
   }
-  return new ApiError(code, message, path, status);
+  return new ApiError(code, message, path, status, details);
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -1230,23 +1242,22 @@ export const api = {
   /** Write/replace a draft file (raw text body). Returns the refreshed draft view.
    * `opts.signal` lets best-effort callers (e.g. the editor's unmount flush) bound the
    * request so a hung server can't leave the PUT pending indefinitely.
-   * `opts.expectedBaseVersionId` pins the draft fork-point this edit was based on: the
-   * server rejects with 409 DRAFT_CONFLICT if a restore (or any wholesale replace) has
-   * since moved `baseVersionId`, so a stale flush can't clobber the new draft. A `null`
-   * base (draft forked from no live version) is sent as the `none` sentinel. */
+   * `opts.expectedHash` is the per-file precondition (editor-roles plan, KTD8): the hash
+   * the editor loaded for this path (`none` for a path it believes absent). The server
+   * rejects with 409 DRAFT_CONFLICT — naming the last writer and the current hash — if
+   * the file changed since, so two editors on one file never silently overwrite each
+   * other. Restores move every hash, so this also covers the old fork-point check. */
   putDraftFile: (
     id: string,
     path: string,
     content: string,
-    opts?: { signal?: AbortSignal; expectedBaseVersionId?: string | null },
+    opts?: { signal?: AbortSignal; expectedHash?: string },
   ) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "PUT",
       headers: {
         "content-type": "application/octet-stream",
-        ...(opts && "expectedBaseVersionId" in opts
-          ? { "If-Draft-Base": opts.expectedBaseVersionId ?? "none" }
-          : {}),
+        ...(opts?.expectedHash !== undefined ? { "If-Draft-File-Hash": opts.expectedHash } : {}),
       },
       body: content,
       signal: opts?.signal,
@@ -1270,13 +1281,20 @@ export const api = {
       body,
     }),
 
-  deleteDraftFile: (id: string, path: string) =>
+  deleteDraftFile: (id: string, path: string, expectedHash?: string) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "DELETE",
+      headers: expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {},
     }),
 
-  renameDraftFile: (id: string, from: string, to: string) =>
-    request<DraftView>(`/api/canvases/${id}/draft/rename`, jsonBody({ from, to })),
+  renameDraftFile: (id: string, from: string, to: string, expectedHash?: string) =>
+    request<DraftView>(`/api/canvases/${id}/draft/rename`, {
+      ...jsonBody({ from, to }),
+      headers: {
+        ...(jsonBody({ from, to }).headers as Record<string, string>),
+        ...(expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {}),
+      },
+    }),
 
   publishDraft: (id: string) =>
     request<PublishResult>(`/api/canvases/${id}/publish`, { method: "POST" }),

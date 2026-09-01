@@ -1,5 +1,5 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
-import type { Canvas } from "@canvas-drop/shared/db";
+import type { Canvas, Manifest } from "@canvas-drop/shared/db";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAuditLog } from "../audit/audit-log.js";
@@ -12,6 +12,7 @@ import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
+import { DraftConflictError } from "../deploy/errors.js";
 import type { DeployEntry } from "../deploy/ingest.js";
 import { memStorage } from "../storage/mem.js";
 import { draftService } from "./service.js";
@@ -377,5 +378,158 @@ describe.each(DIALECTS)("draftService.publish — screenshot enqueue (%s)", (dia
     });
     const result = await svc.publish(canvas, owner.id);
     expect(result.versionId).toBeTruthy();
+  });
+});
+
+// --- Per-file stale-save protection (editor-roles plan U10, KTD8/R17/AE10) ------------------
+
+describe.each(DIALECTS)("draftService — per-file preconditions (%s)", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function setup() {
+    client = await makeTestDb(dialect);
+    const storage = memStorage();
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const audit = createAuditLog(auditRepository(client), silent);
+    const svc = draftService({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      audit,
+      log: silent,
+      users,
+    });
+    const a = await users.upsert({
+      providerSub: "a",
+      email: "a@e.com",
+      name: "Ada",
+      isAdmin: false,
+    });
+    const b = await users.upsert({
+      providerSub: "b",
+      email: "b@e.com",
+      name: "Bob",
+      isAdmin: false,
+    });
+    const cv = await canvases.create({ ownerId: a.id, slug: "s", apiKeyHash: "k" });
+    const hashOf = async (path: string) => {
+      const d = await drafts.getByCanvas(cv.id);
+      return ((d ? d.manifest : {}) as Manifest)[path]?.hash ?? "none";
+    };
+    return { svc, drafts, versions, a, b, canvas: cv, hashOf };
+  }
+
+  it("characterization: a write without options still upserts; legacy unstamped entries never conflict", async () => {
+    const { svc, drafts, canvas } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("v1"));
+    await svc.writeFile(canvas, "index.html", enc("v2"));
+    const m = (await drafts.getByCanvas(canvas.id))?.manifest as Manifest;
+    expect(m["index.html"]?.updatedBy).toBeUndefined();
+  });
+
+  it("AE10: B's save with the old hash is refused naming A and the time; with the current hash it lands; a different file never conflicts", async () => {
+    const { svc, a, b, canvas, hashOf } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("<h1>base</h1>"), { actor: a.id });
+    await svc.writeFile(canvas, "style.css", enc("body{}"), { actor: a.id });
+    const h0 = await hashOf("index.html");
+    const c0 = await hashOf("style.css");
+    // A saves again (B still holds h0).
+    await svc.writeFile(canvas, "index.html", enc("<h1>A</h1>"), { actor: a.id, expectedHash: h0 });
+    const h1 = await hashOf("index.html");
+    const err = await svc
+      .writeFile(canvas, "index.html", enc("<h1>B</h1>"), { actor: b.id, expectedHash: h0 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DraftConflictError);
+    const conflict = (err as DraftConflictError).conflict;
+    expect(conflict).toMatchObject({
+      path: "index.html",
+      currentHash: h1,
+      updatedBy: a.id,
+      updatedByName: "Ada",
+    });
+    expect(typeof conflict.updatedAt).toBe("number");
+    expect((err as Error).message).toMatch(/changed by Ada at/);
+    expect(await hashOf("index.html")).toBe(h1); // A's content survived
+    // B reloads and retries with the current hash → lands, stamped as B.
+    await svc.writeFile(canvas, "index.html", enc("<h1>B</h1>"), { actor: b.id, expectedHash: h1 });
+    expect(await hashOf("index.html")).not.toBe(h1);
+    // B's save to a different file with its loaded hash is unaffected.
+    await svc.writeFile(canvas, "style.css", enc("body{color:red}"), {
+      actor: b.id,
+      expectedHash: c0,
+    });
+  });
+
+  it("new file: `none` succeeds when absent and conflicts when the path exists; delete and rename honour the precondition", async () => {
+    const { svc, a, b, canvas, hashOf } = await setup();
+    await svc.writeFile(canvas, "new.txt", enc("x"), { actor: a.id, expectedHash: "none" });
+    await expect(
+      svc.writeFile(canvas, "new.txt", enc("y"), { actor: b.id, expectedHash: "none" }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    const h = await hashOf("new.txt");
+    await expect(
+      svc.deleteFile(canvas, "new.txt", { actor: b.id, expectedHash: "stale" }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    await expect(
+      svc.renameFile(canvas, "new.txt", "moved.txt", { actor: b.id, expectedHash: "stale" }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    await svc.renameFile(canvas, "new.txt", "moved.txt", { actor: b.id, expectedHash: h });
+    expect(await hashOf("moved.txt")).toBe(h);
+    await svc.deleteFile(canvas, "moved.txt", { actor: b.id, expectedHash: h });
+    expect(await hashOf("moved.txt")).toBe("none");
+  });
+
+  it("unconditioned writes: OK after the same user's write; refused after a DIFFERENT user's write (the two-editor default); a solo sequence never conflicts", async () => {
+    const { svc, a, b, canvas } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("1"), { actor: a.id });
+    await svc.writeFile(canvas, "index.html", enc("2"), { actor: a.id }); // own → fine
+    await expect(
+      svc.writeFile(canvas, "index.html", enc("3"), { actor: b.id }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    for (let i = 0; i < 25; i++)
+      await svc.writeFile(canvas, "index.html", enc(`solo-${i}`), { actor: a.id });
+  });
+
+  it("restore by A stamps every entry, so B's save pinned to the pre-restore hash is refused (replaces If-Draft-Base); publish strips writer stamps", async () => {
+    const { svc, versions, a, b, canvas, hashOf } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("<h1>v1</h1>"), { actor: a.id });
+    await svc.publish(canvas, a.id);
+    await svc.writeFile(canvas, "index.html", enc("<h1>v2</h1>"), { actor: a.id });
+    await svc.publish(canvas, a.id);
+    const stale = await hashOf("index.html"); // B loaded v2's hash
+    await svc.restore(canvas, 1, a.id);
+    expect(await hashOf("index.html")).not.toBe(stale);
+    await expect(
+      svc.writeFile(canvas, "index.html", enc("<h1>stale</h1>"), {
+        actor: b.id,
+        expectedHash: stale,
+      }),
+    ).rejects.toBeInstanceOf(DraftConflictError);
+    const [latest] = await versions.listByCanvas(canvas.id);
+    const entry = ((latest ? latest.manifest : {}) as Manifest)["index.html"];
+    expect(entry).toBeDefined();
+    expect(entry && "updatedBy" in entry).toBe(false);
+  });
+
+  it("describe() returns each entry's hash + writer name — the one projection both transports use", async () => {
+    const { svc, drafts, a, canvas } = await setup();
+    await svc.writeFile(canvas, "index.html", enc("x"), { actor: a.id });
+    const draft = (await drafts.getByCanvas(canvas.id)) as NonNullable<
+      Awaited<ReturnType<typeof drafts.getByCanvas>>
+    >;
+    const view = await svc.describe(draft, null);
+    expect(view.files).toEqual([
+      expect.objectContaining({ path: "index.html", updatedBy: a.id, updatedByName: "Ada" }),
+    ]);
+    expect(typeof view.files[0]?.hash).toBe("string");
+    expect(view.dirty).toBe(true);
   });
 });
