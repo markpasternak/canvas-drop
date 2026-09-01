@@ -99,8 +99,9 @@ zip `bundle` part.
 
 ### `list` filter
 
-`list()` returns every share the viewer authored — **including** revoked and expired
-ones, so a management UI can show them. Pass a filter to narrow server-side:
+`list()` returns every active canvas record the viewer authored — **including**
+unpublished and expired ones, but excluding archived, deleted, and admin-disabled
+canvases — so a management UI can show recoverable records. Pass a filter to narrow server-side:
 
 ```js
 await canvasdrop.canvases.list({ sourceApp: "product-roadmap" });
@@ -115,10 +116,11 @@ await canvasdrop.canvases.list({ sourceKind: "roadmap-share", tags: ["q3"] });
 - **Update is in place.** `update` deploys a new immutable version to the **same**
   canvas — the public URL never changes, and version history + one-click rollback are
   preserved. Use it instead of `publish` when re-sharing the same artifact.
-- **Revoke keeps the record.** `revoke` makes the public URL unavailable (readers get
+- **Unpublish keeps the record.** `revoke` makes the public URL unavailable (readers get
   not-found) and stamps `revokedAt`, but the share **stays in `list()`** as
-  `status: "revoked"`. A revoked share is terminal — to share again, `publish` a fresh
-  one. Calling `update` on a revoked share rejects with `SHARE_REVOKED`.
+  `status: "revoked"`. Calling `update` with a bundle publishes it again at the same
+  URL and clears `revokedAt`. A settings-only update while unpublished rejects with
+  `SHARE_REVOKED`.
 - **Status is derived** from access + expiry + revoked state: `revoked` › `expired` ›
   `private` › `live`. Only a `live` share is reachable by a reader.
 - **Reader isolation.** A public/permitted reader receives only the shared static
@@ -151,8 +153,8 @@ or read `err.code` / `err.status`.
   `code: "QUOTA_EXCEEDED"`, with a `scope` of `user_daily` or `user_total`).
 - Invalid request (bundle or metadata too large, a disallowed access rung, a
   missing/over-max expiry) → `CanvasdropError` (`status: 400`/`413`, `code: "INVALID_BODY"`).
-- `update` on a share that's already revoked → `CanvasdropError` (`status: 409`,
-  `code: "SHARE_REVOKED"`) — publish a new share instead.
+- settings-only `update` on a share that's unpublished → `CanvasdropError`
+  (`status: 409`, `code: "SHARE_REVOKED"`) — include a bundle to publish it again.
 - The canvas was created but its deploy or share-config failed →
   `PublishFailedError` (`status: 502`, `code: "PUBLISH_FAILED"`). Its `.id` is the new
   canvas's id, so you can retry the publish or `canvasdrop.canvases.revoke(id)`.

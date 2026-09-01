@@ -473,13 +473,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     // An admin takedown makes the canvas read-only everywhere (§12.0 #5) — the role is
     // checked first (above), so this 409 never leaks a non-managed row's existence.
     if (cv.status === "disabled") return c.json(disabledError(cv), 409);
-    if (cv.revokedAt != null) {
-      return c.json(
-        { code: "SHARE_REVOKED", message: "This share is revoked; publish a new one instead." },
-        409,
-      );
-    }
-
     const form = await parseForm(c, false);
     if ("code" in form) return c.json(form, form.status);
     const parsed = updateMeta.safeParse(form.metaJson);
@@ -487,6 +480,15 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const meta = parsed.data;
     if (form.bundle && form.bundle.size === 0) {
       return c.json({ code: "INVALID_BODY", message: "empty bundle" }, 400);
+    }
+    if (cv.revokedAt != null && !form.bundle) {
+      return c.json(
+        {
+          code: "SHARE_REVOKED",
+          message: "This share is unpublished; include a bundle to publish it again.",
+        },
+        409,
+      );
     }
     if (metadataTooLarge(meta.metadata)) {
       return c.json({ code: "INVALID_BODY", message: "metadata too large" }, 400);
@@ -610,13 +612,17 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
     const ids = await deps.authoringUsage.authoredIdsByActor(viewer.id);
     const rows = await Promise.all(ids.map((id) => deps.canvases.findById(id)));
-    // Include revoked shares (they stay `active` + revoked_at); exclude deleted rows and
-    // any the viewer no longer manages (owner or editor — a share whose ownership moved
-    // away stays listed while the author remains an editor). The per-viewer set is
-    // bounded by the authoring total cap, so the per-row resolve is small.
+    // Include unpublished shares (they stay `active` + revoked_at), but keep the
+    // authoring view aligned with the dashboard's active-canvas view: archived,
+    // deleted, and admin-disabled canvases are not reusable shares. Exclude any the
+    // viewer no longer manages (owner or editor — a share whose ownership moved away
+    // stays listed while the author remains an editor). The per-viewer set is bounded
+    // by the authoring total cap, so the per-row resolve is small.
     const principal = memberPrincipal(viewer, c.get("orgIds") ?? new Set<string>());
     const grants = await Promise.all(
-      rows.map((cv) => resolveManagementGrant(cv ?? null, principal, roleDeps)),
+      rows.map((cv) =>
+        resolveManagementGrant(cv && cv.status === "active" ? cv : null, principal, roleDeps),
+      ),
     );
     let shares = grants
       .filter((g): g is RoleGrant => g !== null)
@@ -633,6 +639,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (fSourceKind) shares = shares.filter((s) => s.sourceKind === fSourceKind);
     if (fTags.length) shares = shares.filter((s) => fTags.every((t) => s.tags.includes(t)));
 
+    c.header("Cache-Control", "private, no-store");
     return c.json({ canvases: shares });
   });
 

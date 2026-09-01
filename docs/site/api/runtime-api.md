@@ -216,16 +216,18 @@ return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `hasPa
 `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `createdBy`, `version`,
 `bundleUpdatedAt`, `sourceApp`, `sourceKind`, `metadata`).
 
-`GET` returns the viewer's shares — **including** revoked and expired ones (each with a
-derived `status`: `revoked` › `expired` › `private` › `live`) — and accepts a
+`GET` returns the viewer's active canvas records — **including** unpublished and
+expired ones, but excluding archived, deleted, and admin-disabled canvases (each with
+a derived `status`: `revoked` › `expired` › `private` › `live`) — and accepts a
 `?sourceApp=&sourceKind=&tags=a,b` filter. `DELETE` **revokes**: the public URL is made
 unavailable, but the record stays in `list()` as `status: "revoked"` (it is not
-soft-deleted). Reader isolation: the public canvas-serve path never exposes `metadata`
-or any management field.
+soft-deleted). A later `PUT` with a bundle publishes that same record and URL again;
+a settings-only `PUT` remains blocked while it is unpublished. Reader isolation: the
+public canvas-serve path never exposes `metadata` or any management field.
 
 Errors: `CAPABILITY_DISABLED` (403), `NOT_AUTHENTICATED` (401), `QUOTA_EXCEEDED` (429,
-with `scope`), `INVALID_BODY` (400/413), `SHARE_REVOKED` (409, on `PUT` to a revoked
-share), and `PUBLISH_FAILED` (502, carrying the new canvas's `id` when the deploy or
+with `scope`), `INVALID_BODY` (400/413), `SHARE_REVOKED` (409, on a settings-only
+`PUT` to an unpublished share), and `PUBLISH_FAILED` (502, carrying the new canvas's `id` when the deploy or
 share-config failed after creation). Use the SDK's
 [`canvasdrop.canvases`](/docs/sdk/authoring) API rather than driving these by hand.
 

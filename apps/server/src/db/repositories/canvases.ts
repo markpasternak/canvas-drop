@@ -1512,7 +1512,10 @@ export function canvasesRepository(client: DbClient) {
     async setCurrentVersion(id: string, versionId: string): Promise<void> {
       await db
         .update(t)
-        .set({ currentVersionId: versionId, updatedAt: Date.now() })
+        // Publishing is the inverse of authoring revoke/unpublish. Clear the
+        // marker atomically with the live-version pointer so status cannot stay
+        // "revoked" after content is published again.
+        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: Date.now() })
         .where(eq(t.id, id));
     },
 
@@ -1528,7 +1531,7 @@ export function canvasesRepository(client: DbClient) {
     async setCurrentVersionIfReady(id: string, versionId: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ currentVersionId: versionId, updatedAt: Date.now() })
+        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: Date.now() })
         .where(
           and(
             eq(t.id, id),

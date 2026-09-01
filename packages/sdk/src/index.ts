@@ -62,7 +62,7 @@ export const ERROR_CODES = {
   SHARE_REVOKED: {
     status: 409,
     summary:
-      "canvasdrop.canvases.update was called on a revoked share; revoked shares are terminal — publish a new one instead.",
+      "canvasdrop.canvases.update was called on an unpublished share without a bundle; include a bundle to publish it again.",
   },
   REQUEST_FAILED: { status: 0, summary: "A request failed without a more specific code." },
 } as const;
@@ -252,9 +252,10 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  initOverrides?: RequestInit,
 ): Promise<T> {
   const url = `${opts.context.apiBase}/v1/c/${opts.context.slug}${path}`;
-  const init: RequestInit = { method, credentials: "include" };
+  const init: RequestInit = { ...initOverrides, method, credentials: "include" };
   if (body !== undefined) {
     init.headers = { "content-type": "application/json" };
     init.body = JSON.stringify(body);
@@ -361,6 +362,8 @@ export interface RealtimeNamespace {
 
 /** Access rung a share may request. `"password"` = a public link protected by a password. */
 export type ShareAccess = "private" | "specific_people" | "whole_org" | "public_link" | "password";
+/** Persisted audience returned by Canvas Drop. Team membership is managed in Canvas Drop. */
+export type ShareAudience = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 
 /** Derived lifecycle status of a managed share (mirrors the server's shared helper). */
 export type ShareStatus = "live" | "expired" | "revoked" | "private";
@@ -398,7 +401,7 @@ export interface AuthoredCanvas {
   url: string;
   title: string;
   tags: string[];
-  access: ShareAccess;
+  access: ShareAudience;
   /** Whether the share has a password gate in addition to its access rung. */
   hasPassword: boolean;
   status: ShareStatus;
@@ -430,7 +433,8 @@ export interface CanvasesNamespace {
     sourceKind?: string;
     tags?: string[];
   }): Promise<AuthoredCanvas[]>;
-  /** Revoke a share: the public URL becomes unavailable, but it stays in list() as "revoked". */
+  /** Unpublish a share: the URL becomes unavailable and stays listed as "revoked".
+   *  A later update with a bundle republishes it at the same URL. */
   revoke(id: string): Promise<void>;
 }
 
@@ -940,6 +944,8 @@ export function createClient(options: ClientOptions): CanvasdropClient {
           opts,
           "GET",
           `/authoring${qs ? `?${qs}` : ""}`,
+          undefined,
+          { cache: "no-store" },
         );
         return r.canvases;
       },
