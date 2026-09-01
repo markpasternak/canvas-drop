@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { DbClient } from "../db/factory.js";
 import { authoringUsageRepository } from "../db/repositories/authoring-usage.js";
-import { canvasesRepository } from "../db/repositories/canvases.js";
+import { type CanvasesRepository, canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -121,10 +121,10 @@ function buildApi(
   client: DbClient,
   setup: Setup,
   config = ON,
-  opts: { publicLinksEnabled?: boolean } = {},
+  opts: { publicLinksEnabled?: boolean; canvases?: CanvasesRepository } = {},
 ) {
   const { audit, events } = fakeAudit();
-  const canvases = canvasesRepository(client);
+  const canvases = opts.canvases ?? canvasesRepository(client);
   const versions = versionsRepository(client);
   const drafts = draftsRepository(client);
   const storage = memStorage();
@@ -287,7 +287,29 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     expect(authored).toMatchObject({
       actorId: owner.id,
       targetId: body.id,
-      meta: { sourceCanvasId: cv.id },
+      meta: { sourceCanvasId: cv.id, requestedAccess: "public_link" },
+    });
+  });
+
+  it("fails loudly when the requested access rung was not persisted", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const backing = canvasesRepository(client);
+    const faulty: CanvasesRepository = {
+      ...backing,
+      updateSettings: (id, patch) => backing.updateSettings(id, { ...patch, access: undefined }),
+    };
+    const { app } = buildApi(client, asMember(owner.id), ON, { canvases: faulty });
+
+    const res = await publish(
+      app,
+      publishBody({ title: "Snapshot", access: "public_link", expiresAt: Date.now() + 86_400_000 }),
+    );
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      code: "PUBLISH_FAILED",
+      message: "requested share settings were not persisted",
     });
   });
 
@@ -320,7 +342,10 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
       publishBody({ title: "B", access: "password", password: "hunter2" }),
     );
     expect(res.status).toBe(200);
-    const b = await canvases.findById(((await res.json()) as { id: string }).id);
+    const body = (await res.json()) as { id: string; access: string; hasPassword: boolean };
+    expect(body.access).toBe("public_link");
+    expect(body.hasPassword).toBe(true);
+    const b = await canvases.findById(body.id);
     expect(b?.access).toBe("public_link");
     expect(b?.passwordHash).toBeTruthy();
   });
@@ -452,6 +477,7 @@ type AuthoredCanvas = {
   version: string | null;
   tags: string[];
   access: string;
+  hasPassword: boolean;
   metadata: Record<string, unknown>;
   sourceApp: string | null;
   expiresAt: number | null;
@@ -466,7 +492,7 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
   it("update replaces the bundle IN PLACE — same URL, new version (AE1)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
-    const { app } = buildApi(client, asMember(owner.id));
+    const { app, events } = buildApi(client, asMember(owner.id));
     const pub = (await (
       await publish(app, publishBody({ title: "S", access: "private" }))
     ).json()) as AuthoredCanvas;
@@ -482,6 +508,10 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(updated.url).toBe(pub.url); // URL never changes
     expect(updated.version).toBeTruthy();
     expect(updated.version).not.toBe(pub.version); // a new immutable version was deployed
+    expect(events.find((e) => e.action === "canvas_authored_update")).toMatchObject({
+      targetId: pub.id,
+      meta: { requestedAccess: null, persistedAccess: "private" },
+    });
   });
 
   it("update does NOT consume the authoring quota (AE1 / KTD2)", async () => {
@@ -511,6 +541,32 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const res = await putUpdate(revokedApp, pub.id, formData({ access: "public_link" }));
     expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("update fails loudly when the requested access rung was not persisted", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const pub = (await (
+      await publish(
+        buildApi(client, asMember(owner.id)).app,
+        publishBody({ title: "S", access: "private" }),
+      )
+    ).json()) as AuthoredCanvas;
+    const backing = canvasesRepository(client);
+    const faulty: CanvasesRepository = {
+      ...backing,
+      updateSettings: (id, patch) => backing.updateSettings(id, { ...patch, access: undefined }),
+    };
+    const app = buildApi(client, asMember(owner.id), ON, { canvases: faulty }).app;
+
+    const res = await putUpdate(app, pub.id, formData({ access: "public_link" }));
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      code: "PUBLISH_FAILED",
+      id: pub.id,
+      message: "requested share settings were not persisted",
+    });
   });
 
   it("publish validates the DEFAULTED (omitted) access rung against allowedRungs", async () => {
@@ -564,6 +620,32 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const res = await putUpdate(revokedApp, pub.id, formData({ password: null }));
     expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("update keeps an existing password when no replacement is supplied", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "password", password: "hunter2" }))
+    ).json()) as AuthoredCanvas;
+    const originalHash = (await canvases.findById(published.id))?.passwordHash;
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({
+        title: "Updated",
+        access: "password",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as AuthoredCanvas).toMatchObject({
+      access: "public_link",
+      hasPassword: true,
+    });
+    expect((await canvases.findById(published.id))?.passwordHash).toBe(originalHash);
   });
 
   it("update on a revoked share is rejected (SHARE_REVOKED)", async () => {

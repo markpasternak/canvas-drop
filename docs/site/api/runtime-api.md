@@ -212,7 +212,7 @@ canvas under the viewer's account, deploys the bundle, and applies the share set
 in one metered call. `PUT` updates an existing share **in place** — a new immutable
 version at the same URL when a `bundle` is included (omit it to change only settings/
 metadata), owner-or-admin only, and it does **not** consume authoring quota. Both
-return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `status`,
+return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `hasPassword`, `status`,
 `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `createdBy`, `version`,
 `bundleUpdatedAt`, `sourceApp`, `sourceKind`, `metadata`).
 
