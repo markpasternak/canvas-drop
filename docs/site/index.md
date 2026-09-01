@@ -39,6 +39,10 @@ that communicates better as a working artifact than as a screenshot or a slide.
 - **Version and roll back.** Every publish is an immutable version (last 10
   kept); one-click **Make current** switches the served version in either
   direction.
+- **Collaborate** by making a person or a whole team an **editor** of a canvas: editors
+  edit, publish, roll back, and change sharing with you (never delete or transfer),
+  two editors never overwrite each other silently, and ownership moves to an editor
+  in one click. See [Roles](/docs/authoring/sharing#roles-viewers-and-editors).
 - **Share** the URL on a per-canvas access rung: `private` (owner only),
   `specific_people` (signed-in members plus auth-delegated pending emails),
   `team` (members of selected teams), `whole_org` (any signed-in member with the

@@ -40,6 +40,7 @@
     "tenancy:reconcile": "pnpm --filter @canvas-drop/server exec tsx scripts/tenancy-reconcile.ts",
     "seed:canvases": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-canvases.ts",
     "seed:demo-apps": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-demo-apps.ts",
+    "seed:collaborators": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-collaborators.ts",
     "seed:usage": "pnpm --filter @canvas-drop/server exec tsx scripts/seed-usage.ts",
     "docs:build": "node scripts/build-docs.mjs",
     "docs:watch": "node scripts/build-docs.mjs --watch",

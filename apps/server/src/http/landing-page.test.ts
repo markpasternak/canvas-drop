@@ -190,6 +190,7 @@ describe("landing page — rendered content", () => {
     // The Teams capability also appears in the "Built for teams" grid + the tour.
     expect(html).toContain("Teams &amp; invites");
     expect(html).toContain('src="/docs/assets/tour-teams.webp');
+    expect(html).toContain('src="/docs/assets/tour-people.webp');
   });
 });
 

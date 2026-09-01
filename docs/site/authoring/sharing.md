@@ -2,7 +2,9 @@
 
 Control who can open a canvas from its **Share** tab. Every canvas is
 **private by default** — only you, its owner, can open it. To let others in, pick
-one **access rung**, then optionally layer a password or an expiry on top.
+one **access rung**, then optionally layer a password or an expiry on top. To let
+someone *run* the canvas with you, make them an **editor** on the People list
+(see [Roles](#roles-viewers-and-editors) below).
 
 **Publish first.** A canvas must have a published version before you can raise it
 above Private. If you try to share an unpublished canvas the server refuses with
@@ -12,8 +14,9 @@ the rung.
 > Admins don't get a back door into your content. For a canvas they don't own, an
 > admin is treated like any other org member: a private canvas returns a 404, a
 > password prompts them too, and they can't open the editor or change its
-> settings. An admin's cross-owner power is moderation only — see it in the
-> all-canvases list and disable / re-enable / restore it.
+> settings. An admin's cross-owner power is moderation and offboarding only — see it
+> in the all-canvases list, disable / re-enable / restore it, or reassign its owner
+> when someone leaves.
 
 ## The access ladder
 
@@ -66,9 +69,66 @@ When listing is on:
 appear in those people's Shared view without a separate listing switch. **Public link**
 canvases do not appear in Shared; use the gallery for intentional public/org-wide discovery.
 
+## Roles: viewers and editors
+
+Every entry on a canvas's **People with access** list — a person, a pending
+invitee, or a whole team — is either a **viewer** or an **editor**.
+
+![The People with access list: the owner pinned first, then people and teams, each with a role control, and the Transfer ownership action](assets/tour-people.webp)
+
+- A **viewer** can open the canvas whatever the general-access rung says (a viewer row
+  is what the *Specific people* rung reads). Nothing else.
+- An **editor** can do everything the owner can *on that canvas*: edit the draft,
+  publish, roll back, restore, change settings and sharing, add and remove people
+  (including other editors), regenerate the deploy key, and use the deploy and
+  authoring APIs. Editors see the canvas in their own **Your canvases** list, marked
+  with the owner (**editor · <owner>** on the card, *owned by <owner> · editor* on
+  the row), and can narrow the list with the **Owned by me** / **Editing** filters.
+- **Owner-only acts** stay with the owner: **deleting** the canvas, **transferring**
+  ownership, and the retained guest-AI opt-in. An editor who tries one is told it is
+  owner-only (`OWNER_ONLY`, HTTP 403); nothing changes.
+- **Only org members and teams can be editors.** A guest (someone outside your org
+  domains) is always a viewer, and a pending invite can only carry the editor role
+  when its email belongs to an org domain. When an org boundary is configured, an
+  editor grant is effective only while the person is *currently* a member of the
+  org — checked on every request, so someone who leaves the org loses edit access
+  on their next request and their live editor session and realtime sockets are
+  dropped. Removing or demoting an editor takes effect the same way; if the general
+  access rung still admits them, the canvas moves to **Shared** as view-only.
+- **Entitlements follow the owner.** An editor can switch on the **Public link** only
+  when the *owner's* account may publish publicly; usage and spend stay attributed to
+  the canvas and its owner.
+
+Pick the role when you add someone (**Viewer** is the default) and change it any
+time from the row's role control. Promoting someone to editor sends them the
+courtesy email; when an editor makes someone else an editor, the owner is told too.
+After you remove or demote an editor, the dashboard offers to **regenerate the
+deploy key** — a key they copied keeps working until you do.
+
+### Two editors, one file
+
+There is no real-time co-editing. Every draft save carries the hash of the file the
+editor loaded; if someone else saved that file first, the save is refused
+(`DRAFT_CONFLICT`, HTTP 409) naming who saved and when, and the editor keeps their
+unsaved text next to the other person's version to compare and choose. Edits to
+*different* files never conflict. Publish records who created each version, so the
+**Versions** tab shows authorship.
+
+### Transfer ownership
+
+The owner can hand the canvas to any **editor who is an org member** (not to a team)
+from the People section. It applies at once and is audited: the recipient becomes the
+owner, you stay on as an editor, sharing and the public-link entitlement are
+re-evaluated against the new owner's account, and the deploy key keeps working (the
+new owner can rotate it). When an owner leaves the org, an admin can **reassign** any
+of their canvases to another member from **Admin → Canvases**, with a reason; the
+previous owner stays an editor when their account is still active, and the deploy
+key is rotated.
+
 ## Adding specific people
 
-Choose **Specific people**, then add by email. The result is deterministic:
+Choose **Specific people**, then add by email — as a **viewer** or an **editor**
+(editors keep access whatever rung you pick). The result is deterministic:
 
 - An **existing signed-in user** is granted immediately. They open the canvas with
   their normal sign-in and appear as active in the People list.
@@ -80,14 +140,17 @@ Choose **Specific people**, then add by email. The result is deterministic:
   the operator enables `invites.allowMemberNewEmails`, or when the email can already
   authenticate through an allowed domain or an existing sign-in permit.
 
-Pending people are visible in the People list and can be removed before they ever
-sign in. Removing an active or pending person takes effect on the next request.
+Pending people are visible in the People list, carry the role you gave them, and can
+be re-roled or removed before they ever sign in. Removing an active or pending
+person takes effect on the next request.
 
 The People list has one **Add person** action. It grants access immediately when it can,
 or records pending access for an email that must sign in first. When outbound email is
 enabled, the person gets a courtesy sign-in/access email. The action can return
-`granted`, `pending`, `already_added`, `already_pending`, or a policy/error state such as
-`NOT_PERMITTED` or `RATE_LIMITED`. There is no app-owned password or magic-link account;
+`granted`, `pending`, `already_added`, `already_pending`, `role_changed` (you passed a
+role for someone already listed; an omitted role never changes an existing entry), or a
+policy/error state such as `NOT_PERMITTED`, `GUEST_VIEWER_ONLY` (editor requested for a
+guest email), or `RATE_LIMITED`. There is no app-owned password or magic-link account;
 the person authenticates the same way everyone else does.
 
 > In `proxy` mode the upstream IAP owns admission. canvas-drop can record grants for
@@ -97,8 +160,11 @@ the person authenticates the same way everyone else does.
 
 ## Sharing with a team
 
-Choose **Team** to share with one or more [teams](/docs/authoring/teams)
-— named groups you create. A team can be **personal** (friends & family — anyone you add
+A team can be granted in two ways. On the **People** list, add a team as **viewers**
+(honoured on the Team rung) or as **editors** (every current member edits, at any
+rung — people who join the team later are editors too, and a member who leaves the
+team stops being one). Below, the general-access **Team** rung shares the canvas
+view-only with one or more [teams](/docs/authoring/teams) — named groups you create. A team can be **personal** (friends & family — anyone you add
 by email) or **org-attached** (a subset of your org). The share control lists only the teams
 **you belong to**; pick one or more, and every member can open and use the canvas (full
 backend, like a member). A team grant is independent of your own membership afterward — if

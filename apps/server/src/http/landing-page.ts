@@ -102,6 +102,10 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
     body: "An access ladder, per canvas: keep it private, share with a team, add a named few, open it to the whole org, or publish a static public link that admins can disable globally or revoke per account. Team and Whole-org shares can stay URL-only, or appear in Shared for people who already have access. Invite colleagues, contractors, or friends and family by email. They're in the moment they sign in, with no extra account or password for you to manage. Add a password or expiry, and revoke anytime.",
   },
   {
+    title: "Editors, not a bottleneck",
+    body: "Make a colleague, or a whole team, an editor of a canvas and they run it with you: edit, publish, roll back, change sharing, rotate the deploy key. You stay the owner; only deleting, transferring, and the guest-AI switch stay yours. Two editors never overwrite each other silently, edited canvases sit in the editor's own list marked with the owner, and when someone moves on you hand the canvas over in one click.",
+  },
+  {
     title: "Versions you can roll back",
     body: "Each publish snapshots an immutable version. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click.",
   },
@@ -165,6 +169,12 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
       "Copy the live URL, choose who can open it, and decide whether to keep Team and Whole-org shares link-only or list them in Shared.",
   },
   {
+    img: "tour-people",
+    label: "People & editors",
+    caption:
+      "One people list per canvas. Add a person or a team as a viewer or an editor; editors manage the canvas with you, and ownership moves to any editor in one click.",
+  },
+  {
     img: "tour-teams",
     label: "Teams & invites",
     caption:
@@ -192,6 +202,10 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Teams & invites",
     body: "Group people into a team and share a subset of canvases with just them. Invite colleagues, contractors, or friends and family by email; new people get access the instant they first sign in. No app-managed passwords, no magic-link accounts.",
+  },
+  {
+    title: "Editors & ownership",
+    body: "Give a person or a team the editor role on a canvas and they can do everything the owner can except delete or transfer it. Org members only, re-checked on every request. Owners hand a canvas to an editor in one click; admins reassign the canvases of anyone who leaves.",
   },
   {
     title: "Org sign-in (SSO)",
