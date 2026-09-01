@@ -1333,6 +1333,7 @@ describe("admin routes", () => {
     ).templates;
     expect(before.map((t) => t.key).sort()).toEqual([
       "account_invite",
+      "canvas_editor_granted_owner",
       "canvas_invite",
       "individual_canvas_invite",
       "team_invite",
