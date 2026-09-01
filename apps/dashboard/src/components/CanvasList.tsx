@@ -136,8 +136,18 @@ export function visibilityLabel(canvas: CanvasListItem): string {
  */
 export function ownerMarker(canvas: Pick<CanvasListItem, "role" | "owner">): string | null {
   if (canvas.role !== "editor") return null;
-  const who = canvas.owner?.name?.trim() || canvas.owner?.email || "someone else";
-  return `owned by ${who} · editor`;
+  return `owned by ${ownerName(canvas)} · editor`;
+}
+
+/** The compact card form of {@link ownerMarker} ("editor · Ada") — a grid card has no room
+ *  for the row's sentence, so the role leads and the owner's name follows. */
+export function ownerBadge(canvas: Pick<CanvasListItem, "role" | "owner">): string | null {
+  if (canvas.role !== "editor") return null;
+  return `editor · ${ownerName(canvas)}`;
+}
+
+function ownerName(canvas: Pick<CanvasListItem, "owner">): string {
+  return canvas.owner?.name?.trim() || canvas.owner?.email || "someone else";
 }
 
 function metaLine(canvas: CanvasListItem): string {
@@ -446,6 +456,9 @@ export function CanvasCard({
       badges={
         <>
           <PublicationBadge state={canvas.publicationState} />
+          {/* A canvas you edit but don't own is marked with its owner (editor-roles plan
+              F1/R15) — the grid card's counterpart to the list row's meta line. */}
+          {ownerBadge(canvas) && <ConceptBadge concept="shared">{ownerBadge(canvas)}</ConceptBadge>}
           <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
           {canvas.access !== "private" && <AccessBadge access={canvas.access} />}
           {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}

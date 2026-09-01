@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ownerMarker } from "../components/CanvasList.js";
+import { ownerBadge, ownerMarker } from "../components/CanvasList.js";
 
 /** The "owned by <name> · editor" marker on edited rows (editor-roles plan U9, R15). */
 describe("ownerMarker", () => {
@@ -19,5 +19,12 @@ describe("ownerMarker", () => {
       "owned by o@e.com · editor",
     );
     expect(ownerMarker({ role: "editor", owner: null })).toBe("owned by someone else · editor");
+  });
+
+  it("has a compact card form: the role first, then the owner's name", () => {
+    expect(ownerBadge({ role: "editor", owner: { id: "u", name: "Ada", email: "a@x" } })).toBe(
+      "editor · Ada",
+    );
+    expect(ownerBadge({ role: "owner", owner: null })).toBeNull();
   });
 });
