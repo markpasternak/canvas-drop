@@ -294,8 +294,8 @@ export function useUploadDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { path: string; file: Blob }) =>
-      api.uploadDraftFile(id, input.path, input.file),
+    mutationFn: (input: { path: string; file: Blob; expectedHash?: string }) =>
+      api.uploadDraftFile(id, input.path, input.file, input.expectedHash),
     onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
       qc.removeQueries({ queryKey: keys.draftFile(id, input.path) });
@@ -312,8 +312,8 @@ export function useUploadDraftFiles(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: async (files: Array<{ path: string; file: Blob }>) => {
-      for (const f of files) await api.uploadDraftFile(id, f.path, f.file);
+    mutationFn: async (files: Array<{ path: string; file: Blob; expectedHash?: string }>) => {
+      for (const f of files) await api.uploadDraftFile(id, f.path, f.file, f.expectedHash);
       return files.length;
     },
     onSuccess: (_count, files) => {

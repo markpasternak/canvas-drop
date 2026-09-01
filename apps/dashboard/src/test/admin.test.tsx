@@ -1265,3 +1265,124 @@ describe("admin dashboard", () => {
     });
   });
 });
+
+describe("admin canvases — reassign owner dialog (editor-roles plan U7; review #1)", () => {
+  const USERS = {
+    users: [
+      {
+        id: "u1",
+        email: "alice@example.com",
+        name: "Alice",
+        avatarUrl: null,
+        isAdmin: false,
+        isBlocked: false,
+        canPublishPublic: true,
+        createdAt: 0,
+        lastSeenAt: null,
+        canvasCount: 3,
+      },
+      {
+        id: "u2",
+        email: "bob@example.com",
+        name: "Bob",
+        avatarUrl: null,
+        isAdmin: false,
+        isBlocked: false,
+        canPublishPublic: true,
+        createdAt: 0,
+        lastSeenAt: null,
+        canvasCount: 1,
+      },
+      {
+        id: "u3",
+        email: "blocked@example.com",
+        name: "Blocked Bo",
+        avatarUrl: null,
+        isAdmin: false,
+        isBlocked: true,
+        canPublishPublic: true,
+        createdAt: 0,
+        lastSeenAt: null,
+        canvasCount: 0,
+      },
+    ],
+    total: 3,
+    limit: 8,
+    offset: 0,
+  };
+  const base = {
+    "GET /api/me": () =>
+      json({ id: "u9", email: "admin@x", name: "Admin", avatarUrl: null, isAdmin: true }),
+    "GET /api/admin/overview": () => json(OVERVIEW),
+    "GET /api/admin/ai-usage": () => json({ byCanvas: [] }),
+    "GET /api/admin/canvases": () => canvasPage([ROW]),
+    "GET /api/admin/users": () => json(USERS),
+  };
+
+  async function openDialog() {
+    renderAt("/admin/canvases");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for Happy Otter" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Reassign owner" }));
+    return user;
+  }
+
+  it("searches members, hides the current owner and blocked accounts, and POSTs { toUserId, reason }", async () => {
+    mockFetch({
+      ...base,
+      "POST /api/admin/canvases/c1/reassign-owner": () =>
+        json({ ok: true, canvas: ROW, previousOwnerEditor: true, publicLinkReverted: false }),
+    });
+    const user = await openDialog();
+    const dialog = await screen.findByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "Reassign owner" });
+    expect(submit).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("New owner"), "bo");
+    // Bob is offered; the current owner (Alice) and the blocked account are not.
+    expect(await within(dialog).findByText("bob@example.com")).toBeInTheDocument();
+    expect(within(dialog).queryByText("alice@example.com")).toBeNull();
+    expect(within(dialog).queryByText("blocked@example.com")).toBeNull();
+    await user.click(within(dialog).getByText("bob@example.com"));
+    expect(submit).toBeDisabled(); // a reason is required
+    await user.type(within(dialog).getByLabelText("Reason"), "Alice left the company");
+    await user.click(submit);
+    await waitFor(() => {
+      const call = calls.find((c) => c.path === "/api/admin/canvases/c1/reassign-owner");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call?.body ?? "{}")).toEqual({
+        toUserId: "u2",
+        reason: "Alice left the company",
+      });
+    });
+    expect(await screen.findByText(/Reassigned to bob@example.com/)).toBeInTheDocument();
+  });
+
+  it("names the public-link revert in the success toast, and surfaces a refusal as an error toast", async () => {
+    mockFetch({
+      ...base,
+      "POST /api/admin/canvases/c1/reassign-owner": () =>
+        json({ ok: true, canvas: ROW, previousOwnerEditor: true, publicLinkReverted: true }),
+    });
+    let user = await openDialog();
+    let dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("New owner"), "bob");
+    await user.click(await within(dialog).findByText("bob@example.com"));
+    await user.type(within(dialog).getByLabelText("Reason"), "offboarding");
+    await user.click(within(dialog).getByRole("button", { name: "Reassign owner" }));
+    expect(await screen.findByText(/public link was turned off/i)).toBeInTheDocument();
+
+    mockFetch({
+      ...base,
+      "POST /api/admin/canvases/c1/reassign-owner": () =>
+        json({ code: "NOT_ELIGIBLE", message: "That person can't own this canvas." }, 400),
+    });
+    user = await openDialog();
+    dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("New owner"), "bob");
+    await user.click(await within(dialog).findByText("bob@example.com"));
+    await user.type(within(dialog).getByLabelText("Reason"), "offboarding");
+    await user.click(within(dialog).getByRole("button", { name: "Reassign owner" }));
+    expect(await screen.findByText(/can't own this canvas/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument(); // stays open for a retry
+  });
+});

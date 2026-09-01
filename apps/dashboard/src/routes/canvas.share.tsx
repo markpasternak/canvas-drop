@@ -289,7 +289,8 @@ export default function Share() {
             details={{
               specific_people: (
                 <InlineNotice tone="neutral" className="py-2 text-xs">
-                  People and teams added above can open this canvas (editors always can).
+                  People added above can open this canvas (editors always can). A team added as
+                  viewers only applies on the Team rung; an editor team edits at any rung.
                 </InlineNotice>
               ),
               team:

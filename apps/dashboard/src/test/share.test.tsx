@@ -978,4 +978,109 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     expect(screen.queryByRole("button", { name: /transfer ownership/i })).toBeNull();
     expect(await screen.findByText(/only the owner can change the ai opt-in/i)).toBeInTheDocument();
   });
+
+  it("review #8: a failed transfer toasts, keeps the dialog open, and does not re-read the list", async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries }),
+      "POST /api/canvases/c1/transfer": () =>
+        json({ code: "NOT_ELIGIBLE", message: "Add them as an editor first." }, 400),
+    });
+    renderShare();
+    await user.click(await screen.findByRole("button", { name: /transfer ownership/i }));
+    const dialog = await screen.findByRole("dialog");
+    const readsBefore = calls.filter(
+      (c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist",
+    ).length;
+    await user.click(within(dialog).getByRole("button", { name: /transfer ownership/i }));
+    expect(await screen.findByText(/add them as an editor first/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      calls.filter((c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist").length,
+    ).toBe(readsBefore);
+  });
+
+  it("review #7: the transfer picker offers the server's candidates — a team-derived editor with no direct row", async () => {
+    const user = userEvent.setup();
+    const teamOnly = entries.filter((e) => e.kind !== "member" || e.role !== "editor");
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            ...teamOnly,
+            {
+              id: "team:t1",
+              kind: "team",
+              role: "editor",
+              email: null,
+              name: "Design",
+              userId: null,
+              teamId: "t1",
+              teamOrgId: null,
+              createdAt: 9,
+            },
+          ],
+          transferCandidates: [{ id: "u7", name: "Tia", email: "tia@example.com" }],
+        }),
+    });
+    renderShare();
+    const button = await screen.findByRole("button", { name: /transfer ownership/i });
+    expect(button).toBeEnabled();
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(/Tia/)).toBeInTheDocument();
+  });
+
+  it("KTD11 / AE19: removing an editor offers to regenerate the deploy key; declining removes only the grant, confirming mints and reveals a new key", async () => {
+    const user = userEvent.setup();
+    let removed = false;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({ entries: removed ? entries.filter((e) => e.id !== "member:e2") : entries }),
+      "DELETE /api/canvases/c1/allowlist/member:e2": () => {
+        removed = true;
+        return json({ ok: true });
+      },
+      "POST /api/canvases/c1/regenerate-key": () => json({ apiKey: "cdk_new_key_123" }),
+      "PATCH /api/canvases/c1/allowlist/member:e2": () => json({ ok: true }),
+    });
+    renderShare();
+    const list = await screen.findByRole("list", { name: /people with access/i });
+    const ednaRow = within(list).getByText("edna@example.com").closest("li") as HTMLElement;
+    await user.click(within(ednaRow).getByRole("button", { name: "Remove" }));
+    // The grant is gone and the prompt is up.
+    const prompt = await screen.findByRole("dialog", { name: /regenerate the deploy key/i });
+    expect(prompt).toHaveTextContent(/no longer edits this canvas/i);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    // Decline: nothing else happens.
+    await user.click(within(prompt).getByRole("button", { name: /cancel/i }));
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/regenerate-key"))).toBe(false);
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /regenerate the deploy key/i })).toBeNull(),
+    );
+  });
+
+  it("KTD11 / AE19: demoting an editor to viewer prompts too; confirming regenerates the key and reveals it once", async () => {
+    const user = userEvent.setup();
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries }),
+      "PATCH /api/canvases/c1/allowlist/member:e2": () => json({ ok: true }),
+      "POST /api/canvases/c1/regenerate-key": () => json({ apiKey: "cdk_new_key_123" }),
+    });
+    renderShare();
+    await screen.findByRole("list", { name: /people with access/i });
+    await user.selectOptions(screen.getByLabelText("Role for edna@example.com"), "viewer");
+    const prompt = await screen.findByRole("dialog", { name: /regenerate the deploy key/i });
+    await user.click(within(prompt).getByRole("button", { name: /regenerate key/i }));
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/regenerate-key"))).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("cdk_new_key_123")).toBeInTheDocument();
+  });
 });

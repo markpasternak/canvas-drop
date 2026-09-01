@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import { type AllowlistEntry, ApiError, api, type Team } from "../lib/api.js";
+import {
+  type AllowlistEntry,
+  ApiError,
+  api,
+  type Team,
+  type TransferCandidate,
+} from "../lib/api.js";
 import { inputControl } from "../lib/input-styles.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { usePeopleSearch } from "../lib/queries.js";
+import { ApiKeyReveal } from "./ApiKeyReveal.js";
 import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -69,9 +76,19 @@ export function PeopleAccessList({
   const [personRole, setPersonRole] = useState<AccessRole>("viewer");
   const [teamId, setTeamId] = useState("");
   const [teamRole, setTeamRole] = useState<AccessRole>("viewer");
-  const [busy, setBusy] = useState(false);
+  // One flag per action (review #21): adding a person never greys out Add team.
+  const [personBusy, setPersonBusy] = useState(false);
+  const [teamBusy, setTeamBusy] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState<string | null>(null);
+  // Owner-only, server-derived (review #7): every effective editor, including the people
+  // behind an editor team — the list's team ROW can't be a transfer target.
+  const [candidates, setCandidates] = useState<TransferCandidate[] | null>(null);
+  // KTD11 / AE19: after an editor leaves (removed or demoted), offer to rotate the deploy
+  // key they may have copied. Declining removes only the grant.
+  const [keyPrompt, setKeyPrompt] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const search = email.trim();
   const searchEnabled = search.length >= 2;
   const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
@@ -82,9 +99,10 @@ export function PeopleAccessList({
   const reload = () =>
     api
       .listAllowlist(canvasId)
-      .then((list) => {
-        setEntries(list);
-        onChanged?.(list);
+      .then((view) => {
+        setEntries(view.entries);
+        setCandidates(view.transferCandidates ?? null);
+        onChanged?.(view.entries);
       })
       .catch((err) => {
         // Surface the failure instead of silently showing an empty list — an
@@ -102,15 +120,19 @@ export function PeopleAccessList({
     (entries ?? []).filter((e) => e.kind === "team").map((e) => e.teamId),
   );
   const addableTeams = teams.filter((t) => !grantedTeamIds.has(t.id));
-  const editors = (entries ?? []).filter(
-    (e) => e.kind === "member" && e.role === "editor" && e.userId,
-  );
+  // Transfer recipients: the server's projection when present (owners), else the direct
+  // editor rows (legacy payloads) — never the team rows themselves.
+  const editors: TransferCandidate[] =
+    candidates ??
+    (entries ?? [])
+      .filter((e) => e.kind === "member" && e.role === "editor" && e.userId)
+      .map((e) => ({ id: e.userId as string, name: e.name ?? "", email: e.email ?? "" }));
   const nonOwner = (entries ?? []).filter((e) => e.kind !== "owner");
 
   async function addPerson() {
     const value = email.trim();
     if (!value) return;
-    setBusy(true);
+    setPersonBusy(true);
     try {
       const r = await api.addAllowlistMember(canvasId, value, personRole);
       setEmail("");
@@ -123,13 +145,13 @@ export function PeopleAccessList({
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
     } finally {
-      setBusy(false);
+      setPersonBusy(false);
     }
   }
 
   async function addTeam() {
     if (!teamId) return;
-    setBusy(true);
+    setTeamBusy(true);
     try {
       await api.addAllowlistTeam(canvasId, teamId, teamRole);
       setTeamId("");
@@ -138,7 +160,7 @@ export function PeopleAccessList({
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't add that team", "error");
     } finally {
-      setBusy(false);
+      setTeamBusy(false);
     }
   }
 
@@ -146,6 +168,7 @@ export function PeopleAccessList({
     try {
       await api.setAllowlistRole(canvasId, e.id, next);
       await reload();
+      if (e.role === "editor" && next === "viewer") setKeyPrompt(entryLabel(e));
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't change the role", "error");
     }
@@ -155,8 +178,22 @@ export function PeopleAccessList({
     try {
       await api.removeAllowlistEntry(canvasId, e.id);
       await reload();
+      if (e.role === "editor") setKeyPrompt(entryLabel(e));
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
+    }
+  }
+
+  async function regenerateKey() {
+    setRegenerating(true);
+    try {
+      const { apiKey } = await api.regenerateKey(canvasId);
+      setKeyPrompt(null);
+      setRevealedKey(apiKey);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't regenerate the key", "error");
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -205,7 +242,7 @@ export function PeopleAccessList({
         <Button
           size="sm"
           variant="secondary"
-          loading={busy}
+          loading={personBusy}
           disabled={!email.trim()}
           onClick={() => void addPerson()}
         >
@@ -244,7 +281,7 @@ export function PeopleAccessList({
           <Button
             size="sm"
             variant="secondary"
-            loading={busy}
+            loading={teamBusy}
             disabled={!teamId}
             onClick={() => void addTeam()}
           >
@@ -264,7 +301,9 @@ export function PeopleAccessList({
                 {e.kind === "owner" && <Badge tone="accent">Owner</Badge>}
                 {e.kind === "team" && (
                   <TeamScopeBadge
-                    team={{ orgId: teams.find((t) => t.id === e.teamId)?.orgId ?? null }}
+                    team={{
+                      orgId: e.teamOrgId ?? teams.find((t) => t.id === e.teamId)?.orgId ?? null,
+                    }}
                     orgs={orgs}
                   />
                 )}
@@ -318,13 +357,37 @@ export function PeopleAccessList({
                 : undefined
             }
             onClick={() => {
-              setTransferTo(editors[0]?.userId ?? null);
+              setTransferTo(editors[0]?.id ?? null);
               setTransferOpen(true);
             }}
           >
             Transfer ownership
           </Button>
         </div>
+      )}
+
+      <ConfirmDialog
+        open={keyPrompt !== null}
+        onClose={() => setKeyPrompt(null)}
+        onConfirm={() => void regenerateKey()}
+        title="Regenerate the deploy key?"
+        actionLabel="Regenerate key"
+        loading={regenerating}
+      >
+        {keyPrompt} no longer edits this canvas, but a deploy key they copied keeps working.
+        Regenerating invalidates the current key at once; the new key is shown once. Declining
+        leaves the key as it is.
+      </ConfirmDialog>
+      {revealedKey && (
+        <ApiKeyReveal
+          apiKey={revealedKey}
+          onClose={() => setRevealedKey(null)}
+          notice={{
+            title: "Update your deploy scripts",
+            description:
+              "Anything still using the old key stops deploying now — give the new key to the people and agents who deploy this canvas.",
+          }}
+        />
       )}
 
       <ConfirmDialog
@@ -338,10 +401,13 @@ export function PeopleAccessList({
           if (!transferTo || !onTransfer) return;
           // The owner row and the recipient's row both change hands: re-read the list
           // once the transfer has applied so it never shows the pre-transfer roles.
-          void onTransfer(transferTo).then(async () => {
-            setTransferOpen(false);
-            await reload();
-          });
+          void onTransfer(transferTo)
+            .then(async () => {
+              setTransferOpen(false);
+              await reload();
+            })
+            // The caller already toasts the failure; the dialog stays open for a retry.
+            .catch(() => {});
         }}
       >
         <div className="space-y-3">
@@ -359,8 +425,8 @@ export function PeopleAccessList({
                 <input
                   type="radio"
                   name="transfer-to"
-                  checked={transferTo === e.userId}
-                  onChange={() => setTransferTo(e.userId ?? null)}
+                  checked={transferTo === e.id}
+                  onChange={() => setTransferTo(e.id)}
                 />
                 <span className="text-sm text-fg">{e.name || e.email}</span>
                 {e.name && e.email && <span className="text-xs text-muted">{e.email}</span>}

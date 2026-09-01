@@ -699,3 +699,67 @@ describe("editor — access lost mid-session (editor-roles plan U12)", () => {
     expect(decodeURIComponent(download.href)).toContain("<h1>owner act</h1>");
   });
 });
+
+describe("editor — hash bookkeeping after the review (#6/#12/#13)", () => {
+  it("a rename right after an autosave carries the POST-save hash, not the one loaded before the save", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+      // The save's response reports the new content hash for index.html.
+      "PUT /api/canvases/c1/draft/file": () =>
+        json(
+          draftView({
+            dirty: true,
+            files: [{ path: "index.html", size: 12, mime: "text/html", hash: "h2" }],
+          }),
+        ),
+      "POST /api/canvases/c1/draft/rename": () =>
+        json(
+          draftView({
+            dirty: true,
+            files: [{ path: "home.html", size: 12, mime: "text/html", hash: "h2" }],
+          }),
+        ),
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("<h1>x</h1>"));
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    // Rename while the autosave is still in its debounce window: flush() runs first and
+    // the rename must then pin h2 (the hash the server just reported), not h1.
+    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    const field = await screen.findByDisplayValue("index.html");
+    fireEvent.change(field, { target: { value: "home.html" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await waitFor(() => {
+      const put = calls.find((c) => c.method === "PUT");
+      const rename = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/draft/rename",
+      );
+      expect(put?.headers?.["If-Draft-File-Hash"]).toBe("h1");
+      expect(rename?.headers?.["If-Draft-File-Hash"]).toBe("h2");
+    });
+  });
+
+  it("the exit flush is skipped while the session is locked out (no doomed PUT on unmount)", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "NOT_FOUND", message: "canvas not found" }, 404),
+    });
+    const { unmount } = renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>mine</h1>" } });
+    await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    const putsBefore = calls.filter((c) => c.method === "PUT").length;
+    // A further edit stays in the buffer; leaving must not fire another PUT.
+    fireEvent.change(editor, { target: { value: "<h1>more</h1>" } });
+    unmount();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(putsBefore);
+  });
+});

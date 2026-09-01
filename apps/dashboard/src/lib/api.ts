@@ -104,7 +104,8 @@ export interface Canvas {
    *  Always sent by the server; optional here so older fixtures still type-check. */
   ownerId?: string;
   owner?: { id: string; name: string; email: string } | null;
-  /** The CALLER's role on it — owner-only controls key off `role === "owner"`. */
+  /** The CALLER's role on it. Owner-only controls key off `role !== "editor"`: a legacy
+   *  payload without the field reads as owner-like and the server still enforces. */
   role?: "owner" | "editor" | null;
   /** True when the owner chose the slug (vs random). Drives the public+custom heads-up. */
   slugCustom: boolean;
@@ -315,7 +316,23 @@ export interface AllowlistEntry {
   name: string | null;
   userId?: string | null;
   teamId?: string | null;
+  /** The team's org on a team row (null = personal), so scope is labelled truthfully even
+   *  for a team the caller isn't on. Absent on legacy payloads. */
+  teamOrgId?: string | null;
   createdAt: number;
+}
+
+/** An effective editor the owner may transfer the canvas to (direct or through a team). */
+export interface TransferCandidate {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface AllowlistView {
+  entries: AllowlistEntry[];
+  /** Owner-only: present when the caller owns the canvas. */
+  transferCandidates?: TransferCandidate[];
 }
 
 /** A team the caller can see (plan 003) — one of their org's teams, flagged with
@@ -1151,8 +1168,7 @@ export const api = {
     request<Canvas>(`/api/canvases/${id}/preview`, { method: "DELETE" }),
 
   // Access list (D4 `specific_people`, U4).
-  listAllowlist: (id: string) =>
-    request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
+  listAllowlist: (id: string) => request<AllowlistView>(`/api/canvases/${id}/allowlist`),
   addAllowlistMember: (id: string, email: string, role?: AccessRole) =>
     request<AddMemberResult>(
       `/api/canvases/${id}/allowlist`,
@@ -1314,9 +1330,12 @@ export const api = {
     ),
 
   /** Replace/upload a draft file with raw bytes (binary-safe — images, fonts, etc.). */
-  uploadDraftFile: (id: string, path: string, body: Blob) =>
+  uploadDraftFile: (id: string, path: string, body: Blob, expectedHash?: string) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "PUT",
+      // The per-file precondition rides on uploads too (review #2): without it the server
+      // refuses a replace whenever another user wrote the entry last.
+      headers: expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {},
       body,
     }),
 

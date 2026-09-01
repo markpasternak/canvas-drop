@@ -160,6 +160,8 @@ export default function Editor() {
   const [lockedOut, setLockedOut] = useState<LockedOut | null>(null);
   const lockedOutRef = useRef<LockedOut | null>(null);
   lockedOutRef.current = lockedOut;
+  /** The save currently in flight, if any (review #6). */
+  const flushingRef = useRef<Promise<boolean> | null>(null);
   const copy = useClipboardCopy();
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
@@ -203,11 +205,12 @@ export default function Editor() {
   }, [draft, selected]);
 
   // Track every file's hash from the server's draft view (the conflicted path is left
-  // alone until the editor resolves it — see hashesRef).
-  useEffect(() => {
-    if (!draft) return;
+  // alone until the editor resolves it — see hashesRef). Called SYNCHRONOUSLY from every
+  // mutation response (review #13) — the effect below is only the backstop for reads —
+  // so a rename or delete right after a save already carries the post-save hash.
+  const trackHashes = (view: DraftView) => {
     const next = new Map<string, string>();
-    for (const f of draft.files) {
+    for (const f of view.files) {
       if (f.hash === undefined) continue;
       if (conflictRef.current?.path === f.path) {
         const kept = hashesRef.current.get(f.path);
@@ -217,6 +220,11 @@ export default function Editor() {
       next.set(f.path, f.hash);
     }
     hashesRef.current = next;
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: trackHashes reads refs only
+  useEffect(() => {
+    if (!draft) return;
+    trackHashes(draft);
   }, [draft]);
 
   // Fall back to code mode if on-page editing stops being available — the draft loses
@@ -235,7 +243,14 @@ export default function Editor() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (dirtyRef.current && bufferPathRef.current !== null) {
+      // Same guards as flush() (review #12): a conflicted path or a locked-out session
+      // never issues the doomed PUT on exit.
+      if (
+        dirtyRef.current &&
+        bufferPathRef.current !== null &&
+        conflictRef.current?.path !== bufferPathRef.current &&
+        !lockedOutRef.current
+      ) {
         const path = bufferPathRef.current;
         const body = bufferRef.current;
         const expectedHash = hashesRef.current.get(path) ?? "none";
@@ -288,7 +303,19 @@ export default function Editor() {
   /** Persist the autosave buffer. Returns false when the save failed — callers that
    *  would overwrite the buffer (file switch, surface switch, publish) must abort so
    *  the unsaved edit isn't silently lost. */
-  const flush = async (): Promise<boolean> => {
+  const flush = (): Promise<boolean> => {
+    // One save in flight at a time (review #6): a second trigger (autosave timer, Cmd+S,
+    // file switch, Publish) waits for the first and then re-reads the dirty flag and
+    // the post-save hash instead of racing with a hash captured before the first landed.
+    if (flushingRef.current) return flushingRef.current.then(() => flush());
+    const run = flushOnce().finally(() => {
+      flushingRef.current = null;
+    });
+    flushingRef.current = run;
+    return run;
+  };
+
+  const flushOnce = async (): Promise<boolean> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -301,11 +328,12 @@ export default function Editor() {
     // Once the server has refused this session's role, no further save is attempted.
     if (lockedOutRef.current) return false;
     try {
-      await save.mutateAsync({
+      const saved = await save.mutateAsync({
         path,
         content: body,
         expectedHash: hashesRef.current.get(path) ?? "none",
       });
+      trackHashes(saved);
       // The buffer may have moved on while the save was in flight — new keystrokes,
       // or a different file entirely. Only touch the dirty state for OUR file, and
       // only mark clean when the buffer still holds exactly what we saved (a stale
@@ -405,15 +433,47 @@ export default function Editor() {
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
     const paths = canvasRelativePaths(files);
-    const items = files.map((file, i) => ({ path: paths[i] as string, file }));
+    // Each upload carries the hash we last saw for its path (review #2): a new path has
+    // none; an existing one is replaced only against the version we loaded.
+    const items = files.map((file, i) => {
+      const path = paths[i] as string;
+      return { path, file, expectedHash: hashesRef.current.get(path) };
+    });
     try {
       await uploadMany.mutateAsync(items);
       setSelected(items[items.length - 1]?.path ?? selected);
       setRefreshKey((k) => k + 1);
       toast(`Uploaded ${files.length} ${files.length === 1 ? "file" : "files"}`);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't upload", "error");
+      if (!(await refuseIfLockedOut(err))) toast(uploadErrorHint(err), "error");
     }
+  }
+
+  /** A binary write has no text buffer to compare, so a stale-save refusal is explained
+   *  (who saved, when) and the draft is refreshed so the next attempt carries the current
+   *  hash — never retried blindly, never silently overwriting (KTD14). */
+  function uploadErrorHint(err: unknown): string {
+    if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
+      void qc.invalidateQueries({ queryKey: keys.draft(id) });
+      const who = typeof err.details.updatedByName === "string" ? err.details.updatedByName : null;
+      return `${who ?? "Someone else"} changed this file since you loaded it — the draft was refreshed; check it and upload again.`;
+    }
+    return err instanceof ApiError ? err.hint : "Couldn't upload";
+  }
+
+  /** A 404 / OWNER_ONLY on any write means this session lost its role: show the
+   *  blocking notice (keeping the buffer) instead of a one-off toast. */
+  async function refuseIfLockedOut(err: unknown): Promise<boolean> {
+    if (err instanceof ApiError && (err.status === 404 || err.code === "OWNER_ONLY")) {
+      setLockedOut({
+        path: bufferPathRef.current ?? selected ?? "",
+        code: err.code,
+        content: bufferRef.current,
+      });
+      setLocalDirty("failed");
+      return true;
+    }
+    return false;
   }
 
   const dropzone = useDropzone({ noClick: true, onDrop: (a) => void uploadFiles(a) });
@@ -421,7 +481,14 @@ export default function Editor() {
   async function onReplaceChosen(file: File) {
     if (!selected) return;
     try {
-      await upload.mutateAsync({ path: selected, file });
+      // Wait for any in-flight save of this path so the replace pins the post-save hash.
+      await flushingRef.current;
+      const view = await upload.mutateAsync({
+        path: selected,
+        file,
+        expectedHash: hashesRef.current.get(selected) ?? "none",
+      });
+      trackHashes(view);
       loadedRef.current = "";
       dirtyRef.current = false;
       setLocalDirty("clean"); // the replaced bytes ARE the saved state
@@ -429,7 +496,7 @@ export default function Editor() {
       setRefreshKey((k) => k + 1);
       toast("File replaced");
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't replace the file", "error");
+      if (!(await refuseIfLockedOut(err))) toast(uploadErrorHint(err), "error");
     }
   }
 
@@ -467,7 +534,12 @@ export default function Editor() {
    *  (covers a failed flush leaving `dirtyRef` set — the mirror of the delete guard). */
   async function guardedRename(from: string, to: string): Promise<void> {
     await flush();
-    await rename.mutateAsync({ from, to, expectedHash: hashesRef.current.get(from) });
+    const view = await rename.mutateAsync({
+      from,
+      to,
+      expectedHash: hashesRef.current.get(from),
+    });
+    trackHashes(view);
     if (bufferPathRef.current === from) bufferPathRef.current = to;
   }
 
@@ -512,10 +584,14 @@ export default function Editor() {
       setLocalDirty("clean");
     }
     try {
+      // A save of this very path may still be in flight; let it settle so the delete is
+      // pinned to the hash the server actually holds (review #13).
+      await flushingRef.current;
       const next = await del.mutateAsync({
         path: deleting,
         expectedHash: hashesRef.current.get(deleting),
       });
+      trackHashes(next);
       if (selected === deleting) setSelected(next.files[0]?.path ?? null);
       setDeleting(null);
       setRefreshKey((k) => k + 1);
@@ -539,11 +615,27 @@ export default function Editor() {
     try {
       // useSaveDraftFile writes the saved HTML through the per-file content cache,
       // so switching back to Code shows the on-page edits (not a stale buffer that
-      // would otherwise overwrite them on the next code edit).
-      await save.mutateAsync({ path: htmlFile.path, content: html });
+      // would otherwise overwrite them on the next code edit). The save is pinned to the
+      // hash we loaded (review #2) exactly like the code editor's autosave.
+      await flushingRef.current;
+      const saved = await save.mutateAsync({
+        path: htmlFile.path,
+        content: html,
+        expectedHash: hashesRef.current.get(htmlFile.path) ?? "none",
+      });
+      trackHashes(saved);
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
+        // Same resolution path as the code editor: their version beside the kept buffer.
+        bufferRef.current = html;
+        bufferPathRef.current = htmlFile.path;
+        await openConflict(htmlFile.path, err);
+        return;
+      }
+      if (!(await refuseIfLockedOut(err))) {
+        toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      }
     }
   }
 
