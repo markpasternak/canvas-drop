@@ -157,6 +157,10 @@ async function main() {
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
     // …and a team canvas needs the live team re-join (plan 003 U4).
     teamMatch: (canvasId, userId, viewerOrgIds) => teams.teamMatch(canvasId, userId, viewerOrgIds),
+    // …and editors stay connected at any rung (editor-roles plan): the same predicate
+    // the role resolver uses behind every HTTP/MCP gate.
+    isEffectiveEditor: (canvasId, userId, scope) =>
+      canvases.isEffectiveEditor(canvasId, userId, scope),
   });
 
   // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS

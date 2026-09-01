@@ -217,3 +217,67 @@ describe("MCP routes (config-gated mount)", () => {
     expect(denied.status).toBe(404);
   });
 });
+
+describe("mcp bearer export route — editor role (editor-roles plan U3)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("an editor downloads a version (200); a member with no role is 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const a = app(client, onConfig, storage);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const mk = (sub: string) =>
+      users.upsert({ providerSub: sub, email: `${sub}@example.com`, name: sub, isAdmin: false });
+    const owner = await mk("dl-owner");
+    const editor = await mk("dl-editor");
+    const nobody = await mk("dl-nobody");
+    const canvas = await canvases.create({ ownerId: owner.id, slug: "dl", apiKeyHash: "dl-key" });
+    await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const pending = await versions.createPending({
+      canvasId: canvas.id,
+      number: 1,
+      createdBy: owner.id,
+      source: "api",
+    });
+    const bytes = new TextEncoder().encode("<h1>dl</h1>");
+    await storage.put(blobKey(canvas.id, "dl-hash"), bytes);
+    await versions.markReady(pending.id, {
+      fileCount: 1,
+      totalBytes: bytes.byteLength,
+      manifest: { "index.html": { size: bytes.byteLength, hash: "dl-hash", mime: "text/html" } },
+    });
+    await canvases.setCurrentVersion(canvas.id, pending.id);
+    const tokenFor = async (userId: string, token: string) => {
+      await oauthRepository(client).tokens.create({
+        token,
+        kind: "access",
+        clientId: "test-client",
+        userId,
+        scopes: ["canvas-drop"],
+        expiresAt: Date.now() + 60_000,
+      });
+      return { headers: { authorization: `Bearer ${token}` } };
+    };
+    const asEditor = await a.request(
+      `/mcp/canvases/${canvas.id}/versions/1/download`,
+      await tokenFor(editor.id, "dl-editor-token"),
+    );
+    expect(asEditor.status).toBe(200);
+    expect(asEditor.headers.get("content-type")).toBe("application/zip");
+    const asNobody = await a.request(
+      `/mcp/canvases/${canvas.id}/versions/1/download`,
+      await tokenFor(nobody.id, "dl-nobody-token"),
+    );
+    expect(asNobody.status).toBe(404);
+  });
+});

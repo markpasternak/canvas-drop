@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { blobKey } from "../canvas/storage-keys.js";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { orgMembersRepository } from "../db/repositories/org-members.js";
+import { orgsRepository } from "../db/repositories/orgs.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
@@ -307,5 +310,136 @@ describe.each(DIALECTS)("uploadService (%s)", (dialect) => {
     // table never gained a second pending/ready version from a re-claim.
     const after = await canvases.findById(canvas.id);
     expect(after?.currentVersionId ?? null).toBeNull();
+  });
+});
+
+// --- Editor actor (editor-roles plan U3): sessions bind to the authorizing actor and
+//     finalize re-resolves the actor's role on the canvas, live. ----------------------
+
+describe.each(DIALECTS)("uploadService — editor actor [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function setup(tenancyActive = false) {
+    client = await makeTestDb(dialect);
+    const cfg: Config = tenancyActive
+      ? loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_ORG_NAME: "Acme" })
+      : config;
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const uploadSessions = uploadSessionsRepository(client);
+    const orgs = orgsRepository(client);
+    const orgMembers = orgMembersRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
+    await orgs.ensureOrg({ name: "Acme", slug: "acme", domains: ["acme.com"] });
+    const mk = (sub: string) =>
+      users.upsert({ providerSub: sub, email: `${sub}@acme.com`, name: sub, isAdmin: false });
+    const owner = await mk("owner");
+    const editor = await mk("editor");
+    const nobody = await mk("nobody");
+    const canvas = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "h" });
+    const grant = await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const svc = uploadService({
+      config: cfg,
+      canvases,
+      users,
+      uploadSessions,
+      storage,
+      engine,
+      log: silent,
+      orgMembership: makeOrgMembershipResolver(orgs, orgMembers),
+    });
+    const files = { "index.html": "<h1>by editor</h1>" };
+    const stage = async (uploadId: string, actorId: string) => {
+      for (const content of Object.values(files)) {
+        await svc.stageBlob(uploadId, actorId, canvas.id, sha(content), enc(content));
+      }
+    };
+    return { svc, users, canvases, versions, canvas, owner, editor, nobody, grant, files, stage };
+  }
+
+  it("an editor begins, stages, and finalizes; the version records the editor as creator", async () => {
+    const { svc, versions, canvas, editor, files, stage } = await setup();
+    const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
+    await stage(uploadId, editor.id);
+    const result = await svc.finalize(uploadId, editor.id, canvas.id);
+    expect(result.version).toBe(1);
+    const [v] = await versions.listByCanvas(canvas.id);
+    expect(v?.createdBy).toBe(editor.id);
+  });
+
+  it("a session is bound to the actor who began it: another member cannot stage or finalize it", async () => {
+    const { svc, canvas, editor, owner, nobody, files, stage } = await setup();
+    const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
+    // Even the OWNER cannot use the editor's session handle (actor binding, no leak).
+    await expect(svc.finalize(uploadId, owner.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_HANDLE_INVALID",
+    });
+    await expect(
+      svc.stageBlob(
+        uploadId,
+        nobody.id,
+        canvas.id,
+        sha(files["index.html"]),
+        enc(files["index.html"]),
+      ),
+    ).rejects.toMatchObject({ code: "UPLOAD_HANDLE_INVALID" });
+    await stage(uploadId, editor.id);
+    await expect(svc.finalize(uploadId, nobody.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_HANDLE_INVALID",
+    });
+  });
+
+  it("a forged session by a no-role member fails at finalize (the role is re-resolved on use)", async () => {
+    const { svc, canvas, nobody, files, stage } = await setup();
+    // The service-level begin has no gate (the front-ends gate it); finalize must still refuse.
+    const { uploadId } = await svc.begin(canvas, nobody.id, manifestFor(files));
+    await stage(uploadId, nobody.id);
+    await expect(svc.finalize(uploadId, nobody.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_HANDLE_INVALID",
+    });
+  });
+
+  it("block-after-issue for roles: an editor demoted after begin cannot finalize", async () => {
+    const { svc, canvases, canvas, editor, grant, files, stage } = await setup();
+    const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
+    await stage(uploadId, editor.id);
+    await canvases.setAllowlistRole(canvas.id, grant.id, "viewer");
+    await expect(svc.finalize(uploadId, editor.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_HANDLE_INVALID",
+    });
+  });
+
+  it("KTD2 live org predicate: under active tenancy an editor who left the org cannot finalize", async () => {
+    const { svc, users, canvas, editor, files, stage } = await setup(true);
+    const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
+    await stage(uploadId, editor.id);
+    // Re-home the editor's account outside the org's domains → live membership ∅.
+    await users.upsert({
+      providerSub: "editor",
+      email: "editor@gmail.com",
+      name: "editor",
+      isAdmin: false,
+    });
+    await expect(svc.finalize(uploadId, editor.id, canvas.id)).rejects.toMatchObject({
+      code: "UPLOAD_HANDLE_INVALID",
+    });
+  });
+
+  it("under active tenancy an in-org editor finalizes (membership resolved live from the email domain)", async () => {
+    const { svc, canvas, editor, files, stage } = await setup(true);
+    const { uploadId } = await svc.begin(canvas, editor.id, manifestFor(files));
+    await stage(uploadId, editor.id);
+    expect((await svc.finalize(uploadId, editor.id, canvas.id)).version).toBe(1);
   });
 });

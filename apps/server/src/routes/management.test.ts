@@ -3465,3 +3465,49 @@ describe("managementRoutes — role matrix (editor-roles plan)", () => {
     ).toBe(404);
   });
 });
+
+// --- Clone by an editor (editor-roles plan U3) -------------------------------------------
+
+describe("managementRoutes — clone by an editor", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("an editor clones a PRIVATE canvas → new canvas owned by the editor with an empty people list; a no-role member → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const nobody = await seedUser(client, "nobody");
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k1" });
+    await engine.deploy(src, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    await canvases.addAllowlistEntry({
+      canvasId: src.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+
+    const denied = await buildApp(client, { id: nobody.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(denied.status).toBe(404);
+
+    const res = await buildApp(client, { id: editor.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(res);
+    const clone = await canvases.findById(body.id);
+    expect(clone?.ownerId).toBe(editor.id);
+    expect(clone?.clonedFromCanvasId).toBe(src.id);
+    expect(await canvases.listAllowlist(body.id)).toEqual([]);
+  });
+});

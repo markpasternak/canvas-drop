@@ -2179,3 +2179,67 @@ describe.each(DIALECTS)("MCP — editor role gates [%s]", (dialect) => {
     );
   });
 });
+
+describe.each(DIALECTS)("MCP — editor staged deploy (editor-roles plan U3) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("begin_deploy → add_files → finalize_deploy succeeds as editor; a no-role member's finalize with that handle fails", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const nobody = await seedUser(client, "nobody@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "staged", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const storage = memStorage();
+    const asEditor = await connect(client, { userId: editor }, false, config, storage);
+    const files = { "index.html": "<h1>editor</h1>" };
+    const begun = payload(
+      await asEditor.callTool({
+        name: "begin_deploy",
+        arguments: {
+          id: cv.id,
+          manifest: Object.entries(files).map(([path, content]) => ({
+            path,
+            hash: sha(content),
+            size: new TextEncoder().encode(content).byteLength,
+          })),
+        },
+      }),
+    );
+    expect(begun.uploadId).toBeTruthy();
+    await asEditor.callTool({
+      name: "add_files",
+      arguments: {
+        id: cv.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "index.html", content: files["index.html"] }],
+      },
+    });
+    // A no-role member cannot finalize the editor's session (nor see the canvas).
+    const asNobody = await connect(client, { userId: nobody }, false, config, storage);
+    const forged = await asNobody.callTool({
+      name: "finalize_deploy",
+      arguments: { id: cv.id, uploadId: begun.uploadId },
+    });
+    expect(isError(forged)).toBe(true);
+    expect(text(forged)).toBe("canvas not found");
+    const result = payload(
+      await asEditor.callTool({
+        name: "finalize_deploy",
+        arguments: { id: cv.id, uploadId: begun.uploadId },
+      }),
+    );
+    expect(result.version).toBe(1);
+    const [v] = await versionsRepository(client).listByCanvas(cv.id);
+    expect(v?.createdBy).toBe(editor);
+  });
+});

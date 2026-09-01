@@ -676,3 +676,59 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(byId[exp.id]).toBe("expired"); // still listed (AE4)
   });
 });
+
+// --- Editor role on the authoring management routes (editor-roles plan U3, KTD12) ------
+
+describe("canvasAuthoringRoutes — editor role (admin allowance retained)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seedShare() {
+    client = await makeTestDb("sqlite");
+    const { owner, cv: source } = await makeSource(client);
+    // The authoring API is called from source canvas A's origin, so every actor must be
+    // able to REACH A (the canvas-api access gate runs first): open A to the org.
+    await canvasesRepository(client).setAccess(source.id, "whole_org");
+    const editor = await seedUser(client, "editor");
+    const nobody = await seedUser(client, "nobody");
+    const admin = await seedUser(client, "admin", true);
+    const { app: ownerApp } = buildApi(client, asMember(owner.id));
+    const pub = (await (
+      await publish(ownerApp, publishBody({ title: "S", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    await canvasesRepository(client).addAllowlistEntry({
+      canvasId: pub.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    return { owner, editor, nobody, admin, pub };
+  }
+
+  it("PUT /:id: an editor updates the share; an admin is still allowed (KTD12); a no-role member is 404", async () => {
+    const { editor, nobody, admin, pub } = await seedShare();
+    const asEditor = buildApi(client, asMember(editor.id)).app;
+    const upd = await putUpdate(asEditor, pub.id, formData({ title: "by editor" }));
+    expect(upd.status).toBe(200);
+    const asAdmin = buildApi(client, asMember(admin.id, { isAdmin: true })).app;
+    expect((await putUpdate(asAdmin, pub.id, formData({ title: "by admin" }))).status).toBe(200);
+    const asNobody = buildApi(client, asMember(nobody.id)).app;
+    expect((await putUpdate(asNobody, pub.id, formData({ title: "hax" }))).status).toBe(404);
+  });
+
+  it("DELETE /:id (revoke): editor 204; no-role member 404 with the share untouched", async () => {
+    const { editor, nobody, pub } = await seedShare();
+    const asNobody = buildApi(client, asMember(nobody.id)).app;
+    expect(
+      (await asNobody.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" })).status,
+    ).toBe(404);
+    expect((await canvasesRepository(client).findById(pub.id))?.revokedAt).toBeNull();
+    const asEditor = buildApi(client, asMember(editor.id)).app;
+    expect(
+      (await asEditor.request(`/v1/c/app/authoring/${pub.id}`, { method: "DELETE" })).status,
+    ).toBe(204);
+    expect((await canvasesRepository(client).findById(pub.id))?.revokedAt).not.toBeNull();
+  });
+});

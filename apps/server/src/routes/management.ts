@@ -461,8 +461,11 @@ export function managementRoutes(deps: ManagementDeps) {
     // may clone it — team canvases never reach the gallery, so this is their only clone path,
     // gated by the SAME live-org `teamMatch` re-join that the serve seam uses (KTD3).
     const orgIds = c.get("orgIds") ?? new Set<string>();
+    // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage —
+    // the shared resolver, not an owner comparison. The clone lands owned by the actor
+    // with an empty people list (existing behaviour).
     const eligible =
-      source.ownerId === user.id
+      (await resolveManagementGrant(source, memberPrincipal(user, orgIds), roleDeps)) !== null
         ? source.status === "active"
         : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
             tenancyActive: !!deps.config.org.name,

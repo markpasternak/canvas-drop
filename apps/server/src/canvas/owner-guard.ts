@@ -14,7 +14,7 @@ import {
 
 /** What the HTTP role gate needs: the role resolver's deps plus the by-id load. */
 export type CanvasGuardDeps = RoleDeps & {
-  canvases: Pick<CanvasesRepository, "findById" | "isEffectiveEditor" | "findMemberEntry">;
+  canvases: Pick<CanvasesRepository, "findById" | "isEffectiveEditor">;
 };
 
 /**

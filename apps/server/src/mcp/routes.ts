@@ -5,6 +5,8 @@ import { HTTPException } from "hono/http-exception";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { bearerToken } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
+import { loadManagementGrant } from "../canvas/role.js";
 import { VersionHistoryError } from "../canvas/version-history.js";
 import type { AllowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import type { OauthRepository } from "../db/repositories/oauth.js";
@@ -111,10 +113,19 @@ export function mcpRoutes(deps: McpRoutesDeps): Hono<AppEnv> {
   app.get("/mcp/canvases/:id/versions/:number/download", bearerGuard, async (c) => {
     const auth = c.get("mcpAuth");
     if (!auth) return c.json({ error: "unauthorized" }, 401);
-    const canvas = await deps.canvases.findById(c.req.param("id"));
-    if (!canvas || canvas.status === "deleted" || canvas.ownerId !== auth.userId) {
-      return c.json({ error: "not_found" }, 404);
-    }
+    // Owner OR editor (editor-roles plan, KTD1): the same role gate as the tools, with
+    // the caller's org membership resolved server-side exactly as the /mcp handler does.
+    const user = await deps.users.findById(auth.userId);
+    const orgIds = user
+      ? await makeOrgMembershipResolver(deps.orgs, deps.orgMembers)(user)
+      : new Set<string>();
+    const grant = await loadManagementGrant(
+      c.req.param("id"),
+      memberPrincipal({ id: auth.userId, isAdmin: user?.isAdmin ?? false }, orgIds),
+      { canvases: deps.canvases, tenancyActive: !!deps.config.org.name },
+    );
+    if (!grant) return c.json({ error: "not_found" }, 404);
+    const canvas = grant.canvas;
     const number = Number(c.req.param("number"));
     if (!Number.isInteger(number) || number < 1) {
       return c.json({ error: "invalid_version" }, 400);

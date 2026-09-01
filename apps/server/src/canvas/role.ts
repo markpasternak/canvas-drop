@@ -31,7 +31,9 @@ export function roleAtLeast(role: CanvasRole, min: CanvasRole): boolean {
 }
 
 export interface RoleDeps {
-  canvases: Pick<CanvasesRepository, "isEffectiveEditor" | "findMemberEntry">;
+  /** The effective-editor probe — the canvases repo, or any object exposing the same
+   *  method (the realtime hub passes a probe so its deps stay function-shaped). */
+  canvases: Pick<CanvasesRepository, "isEffectiveEditor">;
   /** Whether an org is configured (`!!config.org.name`) — the KTD2 predicate's switch. */
   tenancyActive: boolean;
 }
@@ -48,27 +50,38 @@ export function editorScopeFor(
  * THE role resolver (KTD1) — every owner gate calls this instead of comparing
  * `ownerId` to the caller. Check order: owner → effective editor (direct row or
  * editor-role team, with the live org predicate, as ONE SQL predicate on the
- * canvases repo) → viewer (a direct people-list row) → none.
+ * canvases repo) → none. This is the only place the owner comparison lives.
  *
  * Only a `member` principal can hold a role: a guest (KD2) or anonymous visitor is
  * `none` here — their view access is decided by the access ladder, never by a role.
  */
-export async function resolveCanvasRole(
+export async function resolveManagementRole(
   canvas: Pick<Canvas, "id" | "ownerId" | "orgId">,
   principal: Principal,
   deps: RoleDeps,
-): Promise<CanvasRole> {
+): Promise<ManagementRole | "none"> {
   if (principal.kind !== "member") return "none";
   if (canvas.ownerId === principal.id) return "owner";
-  if (
-    await deps.canvases.isEffectiveEditor(
-      canvas.id,
-      principal.id,
-      editorScopeFor(principal, deps.tenancyActive),
-    )
-  ) {
-    return "editor";
-  }
+  const editor = await deps.canvases.isEffectiveEditor(
+    canvas.id,
+    principal.id,
+    editorScopeFor(principal, deps.tenancyActive),
+  );
+  return editor ? "editor" : "none";
+}
+
+/**
+ * The full four-way role: {@link resolveManagementRole}, then `viewer` when the
+ * member holds a direct people-list row (informational — view reachability stays with
+ * `decideCanvasAccess`). Used where the distinction is shown, not for gating.
+ */
+export async function resolveCanvasRole(
+  canvas: Pick<Canvas, "id" | "ownerId" | "orgId">,
+  principal: Principal,
+  deps: RoleDeps & { canvases: Pick<CanvasesRepository, "findMemberEntry"> },
+): Promise<CanvasRole> {
+  const role = await resolveManagementRole(canvas, principal, deps);
+  if (role !== "none" || principal.kind !== "member") return role;
   const direct = await deps.canvases.findMemberEntry(canvas.id, principal.id);
   return direct ? "viewer" : "none";
 }
@@ -92,8 +105,8 @@ export async function resolveManagementGrant(
   deps: RoleDeps,
 ): Promise<RoleGrant | null> {
   if (!canvas || canvas.status === "deleted") return null;
-  const role = await resolveCanvasRole(canvas, principal, deps);
-  if (role !== "owner" && role !== "editor") return null;
+  const role = await resolveManagementRole(canvas, principal, deps);
+  if (role === "none") return null;
   return { canvas, role };
 }
 

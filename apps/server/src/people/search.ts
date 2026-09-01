@@ -1,4 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
+import { memberPrincipal } from "../canvas/authorization.js";
+import { resolveManagementGrant } from "../canvas/role.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { OrgMembersRepository } from "../db/repositories/org-members.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
@@ -6,7 +8,7 @@ import type { UserSearchResult, UsersRepository } from "../db/repositories/users
 
 export interface PeopleSearchDeps {
   config: Config;
-  canvases: Pick<CanvasesRepository, "findById" | "listAllowlist">;
+  canvases: Pick<CanvasesRepository, "findById" | "listAllowlist" | "isEffectiveEditor">;
   teams: Pick<TeamsRepository, "findById" | "isTeamMember" | "getMembers">;
   users: Pick<UsersRepository, "search">;
   orgMembers: Pick<OrgMembersRepository, "searchMembers">;
@@ -45,8 +47,15 @@ export async function searchPersonSuggestions(
   const excluded = new Set([actor.id]);
 
   if (input.context === "canvas") {
-    const canvas = await deps.canvases.findById(input.canvasId);
-    if (!canvas || canvas.ownerId !== actor.id) return { ok: false, error: "not_found" };
+    // Owner OR editor may add people (editor-roles plan, R8) — the shared resolver,
+    // resolved live; anyone else reads not-found (no existence leak).
+    const grant = await resolveManagementGrant(
+      await deps.canvases.findById(input.canvasId),
+      memberPrincipal(actor, actor.orgIds),
+      { canvases: deps.canvases, tenancyActive: !!deps.config.org.name },
+    );
+    if (!grant) return { ok: false, error: "not_found" };
+    const canvas = grant.canvas;
     for (const entry of await deps.canvases.listAllowlist(canvas.id)) {
       if (entry.userId) excluded.add(entry.userId);
     }

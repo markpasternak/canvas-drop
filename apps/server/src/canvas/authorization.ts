@@ -278,17 +278,13 @@ export async function resolveAccessContext(
   principal: Principal,
   opts: { publicLinksEnabled?: () => Promise<boolean>; tenancyActive?: boolean } = {},
 ): Promise<AccessContext> {
-  // Editor (editor-roles plan, KD6/KTD1): resolved FIRST for a non-owner member, at
-  // every rung, through the same repository predicate the owner gates use (direct
-  // editor row or editor-role team, live org predicate). An editor short-circuits the
-  // rung lookups — the decision table's editor branch precedes them. Guests and
-  // anonymous visitors are never editors (KD2), so nothing is resolved for them.
-  if (
-    canvas &&
-    canvas.status === "active" &&
-    principal.kind === "member" &&
-    canvas.ownerId !== principal.id
-  ) {
+  // Editor (editor-roles plan, KD6/KTD1): resolved FIRST for a member, at every rung,
+  // through the same repository predicate the owner gates use (direct editor row or
+  // editor-role team, live org predicate). An editor short-circuits the rung lookups —
+  // the decision table's editor branch precedes them (its owner bypass precedes both,
+  // so the owner's probe result is simply unused). Guests and anonymous visitors are
+  // never editors (KD2), so nothing is resolved for them.
+  if (canvas && canvas.status === "active" && principal.kind === "member") {
     const editorMatch = await canvases.isEffectiveEditor(canvas.id, principal.id, {
       tenancyActive: opts.tenancyActive ?? false,
       viewerOrgIds: principal.orgIds,

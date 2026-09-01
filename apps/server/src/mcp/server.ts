@@ -19,7 +19,11 @@ import {
   OWNER_ONLY_MESSAGE,
 } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
-import { loadManagementGrant, type ManagementRole } from "../canvas/role.js";
+import {
+  loadManagementGrant,
+  type ManagementRole,
+  resolveManagementGrant,
+} from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -1472,8 +1476,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // the dashboard (plan 002 U7): an org template is cloneable only by a member of its
       // org; a personal public_link template stays cloneable. Scoped to the caller's
       // server-resolved orgIds.
+      // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage
+      // — the shared resolver (parity with the dashboard clone route).
       const eligible =
-        source.ownerId === caller.userId
+        (await resolveManagementGrant(source, principal, roleDeps)) !== null
           ? source.status === "active"
           : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
               tenancyActive: caller.tenancyActive,

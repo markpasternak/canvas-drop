@@ -11,7 +11,8 @@ import type { DbClient } from "../factory.js";
 
 export interface CreateUploadSessionInput {
   canvasId: string;
-  ownerId: string;
+  /** The actor (owner or editor) opening the session; the only caller who may use it. */
+  actorId: string;
   handleHash: string;
   manifest: Manifest;
   stagedHashes: string[];
@@ -39,7 +40,7 @@ export function uploadSessionsRepository(client: DbClient) {
         .values({
           id: uuidv7(),
           canvasId: input.canvasId,
-          ownerId: input.ownerId,
+          actorId: input.actorId,
           handleHash: input.handleHash,
           // biome-ignore lint/suspicious/noExplicitAny: Manifest is a Json subtype; cast at the dual-dialect seam (KTD-1)
           manifest: input.manifest as any as Json,

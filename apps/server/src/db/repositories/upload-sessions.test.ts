@@ -20,7 +20,7 @@ describe.each(DIALECTS)("uploadSessionsRepository (%s)", (dialect) => {
 
   const base = () => ({
     canvasId,
-    ownerId,
+    actorId: ownerId,
     handleHash: "h".repeat(64),
     manifest: man({ "index.html": "a".repeat(64) }),
     stagedHashes: [] as string[],

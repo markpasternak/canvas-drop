@@ -656,15 +656,27 @@ describe("decideCanvasAccess — editor branch", () => {
   });
 
   it("an editor does NOT bypass deleted / archived / disabled (lifecycle first)", () => {
-    expect(decideCanvasAccess(canvas({ status: "deleted" }), other, NOW, EDITOR).status).toBe(404);
-    expect(decideCanvasAccess(canvas({ status: "archived" }), other, NOW, EDITOR).status).toBe(404);
+    expect(decideCanvasAccess(canvas({ status: "deleted" }), other, NOW, EDITOR)).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+    expect(decideCanvasAccess(canvas({ status: "archived" }), other, NOW, EDITOR)).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
     const disabled = decideCanvasAccess(canvas({ status: "disabled" }), other, NOW, EDITOR);
     expect(disabled).toEqual({ action: "deny", status: 403, reason: "disabled" });
   });
 
   it("without editorMatch nothing changes: a non-owner member on a private canvas is 404", () => {
-    expect(decideCanvasAccess(canvas(), other, NOW, { editorMatch: false }).status).toBe(404);
-    expect(decideCanvasAccess(canvas(), other, NOW, {}).status).toBe(404);
+    expect(decideCanvasAccess(canvas(), other, NOW, { editorMatch: false })).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+    expect(decideCanvasAccess(canvas(), other, NOW, {})).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
   });
 });
 
@@ -716,9 +728,8 @@ describe("resolveAccessContext — editorMatch resolution", () => {
     expect(ctx).toEqual({ isAllowed: false });
   });
 
-  it("never asks isEffectiveEditor for the owner, a guest, an anonymous visitor, or a non-active canvas", async () => {
+  it("never asks isEffectiveEditor for a guest, an anonymous visitor, or a non-active canvas", async () => {
     const { canvases, calls } = repo(["owner", "other"]);
-    await resolveAccessContext(canvases, noTeams, canvas(), owner);
     await resolveAccessContext(
       canvases,
       noTeams,

@@ -1,7 +1,13 @@
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
-import { decideCanvasAccess, principalLookupKey } from "../canvas/authorization.js";
+import {
+  decideCanvasAccess,
+  memberPrincipal,
+  principalLookupKey,
+} from "../canvas/authorization.js";
 import { assertCapability } from "../canvas/capability-guard.js";
+import { resolveManagementRole } from "../canvas/role.js";
+import type { EditorScope } from "../db/repositories/canvases.js";
 import type { Principal } from "../http/types.js";
 import type { Logger } from "../log/logger.js";
 
@@ -87,6 +93,11 @@ export interface HubDeps {
    *  granted team AND of that team's org (live re-join). Omitted ⇒ a team canvas
    *  re-authorizes as no-match (drops). */
   teamMatch?(canvasId: string, userId: string, viewerOrgIds: Set<string>): Promise<boolean>;
+  /** Effective-editor probe for live re-auth (editor-roles plan, KD6/R22) — the canvases
+   *  repo's `isEffectiveEditor`, fed to the shared role resolver so the hub keeps editors
+   *  connected (and exempt from the password gate) exactly where the HTTP gates admit
+   *  them. Omitted ⇒ nobody is an editor (fail-closed). */
+  isEffectiveEditor?(canvasId: string, userId: string, scope: EditorScope): Promise<boolean>;
 }
 
 type PresenceUser = { id: string; name: string };
@@ -109,6 +120,34 @@ function send(conn: Conn, obj: unknown): void {
 export function createHub(deps: HubDeps) {
   /** canvasId → live connections. */
   const byCanvas = new Map<string, Set<Conn>>();
+
+  /** The shared role resolver's deps, over the hub's function-shaped probe. */
+  const roleDeps = {
+    canvases: { isEffectiveEditor: deps.isEffectiveEditor ?? (async () => false) },
+    tenancyActive: !!deps.config.org.name,
+  };
+
+  /**
+   * The connection's management role (owner / editor / none) via the SAME resolver the
+   * HTTP and MCP gates use (KTD1). Fail-closed: a resolver error reads as `none`, so a
+   * transient DB error drops the socket rather than leaving a stale editor grant alive.
+   */
+  async function roleOf(canvas: Canvas, conn: Conn): Promise<"owner" | "editor" | "none"> {
+    if (conn.user.principal && conn.user.principal.kind !== "member") return "none";
+    try {
+      return await resolveManagementRole(
+        canvas,
+        memberPrincipal(conn.user, conn.user.orgIds),
+        roleDeps,
+      );
+    } catch (err) {
+      deps.log?.error(
+        { err, canvasId: canvas.id, userId: conn.user.id },
+        "realtime: role resolve error — failing closed",
+      );
+      return "none";
+    }
+  }
 
   function conns(canvasId: string): Set<Conn> {
     let s = byCanvas.get(canvasId);
@@ -383,9 +422,13 @@ export function createHub(deps: HubDeps) {
             teamMatch = false;
           }
         }
+        // Editors stay connected at any rung (editor-roles plan, KD6/R22) — resolved
+        // through the shared role resolver; a demoted editor is dropped by this sweep.
+        const editorMatch = (await roleOf(canvas, conn)) === "editor";
         const decision = decideCanvasAccess(canvas, principal, now, {
           isAllowed,
           teamMatch,
+          editorMatch,
           tenancyActive: !!deps.config.org.name,
         });
         if (decision.action === "deny") {
@@ -430,11 +473,12 @@ export function createHub(deps: HubDeps) {
     },
 
     /**
-     * Drop every non-owner socket of a canvas (D-RT-6). Called when a password is
-     * newly set: those viewers hold no re-verified gate grant, so they must
-     * re-handshake through the gate. Only the owner is exempt — a non-owner admin
-     * faces the gate like any member (it bypasses neither the rung nor the password),
-     * so its live socket is dropped too.
+     * Drop every socket of a canvas that faces the password gate (D-RT-6). Called when
+     * a password is newly set: those viewers hold no re-verified gate grant, so they
+     * must re-handshake through the gate. Only the owner and effective editors are
+     * exempt (they never face the gate — the owner / editor branches of
+     * `decideCanvasAccess`); a non-owner admin faces the gate like any member, so its
+     * live socket is dropped too.
      */
     async dropGatedNonOwners(canvasId: string): Promise<void> {
       const live = [...conns(canvasId)];
@@ -455,8 +499,8 @@ export function createHub(deps: HubDeps) {
       }
       for (const conn of live) {
         if (conn.closed) continue;
-        const isOwner = !!canvas && canvas.ownerId === conn.user.id;
-        if (!isOwner) {
+        const exempt = !!canvas && (await roleOf(canvas, conn)) !== "none";
+        if (!exempt) {
           dropConn(conn, CLOSE_UNAUTHORIZED, "password gate");
         }
       }

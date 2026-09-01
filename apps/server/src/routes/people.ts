@@ -10,7 +10,7 @@ import { searchPersonSuggestions } from "../people/search.js";
 
 export interface PeopleRoutesDeps {
   config: Config;
-  canvases: Pick<CanvasesRepository, "findById" | "listAllowlist">;
+  canvases: Pick<CanvasesRepository, "findById" | "listAllowlist" | "isEffectiveEditor">;
   teams: Pick<TeamsRepository, "findById" | "isTeamMember" | "getMembers">;
   users: Pick<UsersRepository, "search">;
   orgMembers: Pick<OrgMembersRepository, "searchMembers">;

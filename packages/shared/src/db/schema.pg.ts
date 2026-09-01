@@ -478,7 +478,10 @@ export const uploadSessions = pgTable(
       .text("canvas_id")
       .notNull()
       .references(() => canvases.id),
-    ownerId: c
+    // The ACTOR who began the session (owner or editor — editor-roles plan U3); the
+    // column keeps its historical `owner_id` name (no migration), the TS key says what
+    // it means: a session is usable only by the actor who opened it.
+    actorId: c
       .text("owner_id")
       .notNull()
       .references(() => users.id),
