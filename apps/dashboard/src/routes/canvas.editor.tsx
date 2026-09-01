@@ -7,7 +7,7 @@ import {
   UploadSimple,
 } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -58,6 +58,14 @@ const ROOT_HTML = "index.html";
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const rawUrl = (id: string, path: string) =>
   `/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`;
+
+/** A save refused because this session lost its role (editor-roles plan U12 / KTD14). */
+interface LockedOut {
+  path: string;
+  code: string;
+  /** The buffer at the moment of refusal — what copy/download hand back. */
+  content: string;
+}
 
 /** A stale-save refusal in flight (editor-roles plan, KTD8/KTD14). */
 interface DraftConflict {
@@ -145,6 +153,13 @@ export default function Editor() {
   const [conflict, setConflict] = useState<DraftConflict | null>(null);
   const conflictRef = useRef<DraftConflict | null>(null);
   conflictRef.current = conflict;
+  // Access lost mid-session (editor-roles plan U12 / KTD14): a 404 (removed, demoted,
+  // org departure, transferred away) or OWNER_ONLY answer to a save. The server no
+  // longer accepts this session's writes, so autosave stops and the buffer is kept on
+  // screen — with copy/download — until the editor chooses to leave.
+  const [lockedOut, setLockedOut] = useState<LockedOut | null>(null);
+  const lockedOutRef = useRef<LockedOut | null>(null);
+  lockedOutRef.current = lockedOut;
   const copy = useClipboardCopy();
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
@@ -283,6 +298,8 @@ export default function Editor() {
     const body = bufferRef.current;
     // A path with an unresolved conflict never auto-saves — the editor must choose first.
     if (conflictRef.current?.path === path) return false;
+    // Once the server has refused this session's role, no further save is attempted.
+    if (lockedOutRef.current) return false;
     try {
       await save.mutateAsync({
         path,
@@ -307,6 +324,13 @@ export default function Editor() {
         // Another editor saved this file first (R17): keep the buffer, show their
         // current content beside it, and let the editor compare before choosing.
         await openConflict(path, err);
+        return false;
+      }
+      if (err instanceof ApiError && (err.status === 404 || err.code === "OWNER_ONLY")) {
+        // The role behind this session is gone (or the act is the owner's): keep the
+        // buffer, stop saving, and say so once — no toast storm on every debounce.
+        setLockedOut({ path, code: err.code, content: body });
+        setLocalDirty("failed");
         return false;
       }
       setLocalDirty("failed");
@@ -847,6 +871,50 @@ export default function Editor() {
   return (
     <TabContentFrame className="space-y-3">
       {draftRepairNotice}
+      {lockedOut && (
+        <section
+          className="border border-danger/30 bg-danger-subtle/40 px-4 py-3"
+          data-testid="editor-locked-out"
+          role="alert"
+        >
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-fg">
+              {lockedOut.code === "OWNER_ONLY"
+                ? "Only the owner can do that"
+                : "You no longer have edit access to this canvas"}
+            </h2>
+            <p className="max-w-3xl text-xs leading-relaxed text-muted">
+              {lockedOut.code === "OWNER_ONLY"
+                ? "The server refused that change because it is reserved for the canvas owner."
+                : "Your access was changed while you were editing — the server no longer accepts saves from this session."}{" "}
+              Your unsaved edits to {lockedOut.path} are kept here until you leave: copy or download
+              them now.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => copy(lockedOut.content, "Copied your edits")}
+              >
+                Copy my edits
+              </Button>
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(lockedOut.content)}`}
+                download={baseName(lockedOut.path)}
+                className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-medium text-fg hover:bg-surface-raised"
+              >
+                Download my edits
+              </a>
+              <Link
+                to="/"
+                className="text-xs font-medium text-accent underline-offset-2 hover:underline"
+              >
+                Back to your canvases
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
       {conflict && (
         <section
           className="border border-danger/30 bg-danger-subtle/40 px-4 py-3"

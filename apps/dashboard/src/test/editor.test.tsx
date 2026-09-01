@@ -641,3 +641,61 @@ describe("editor — stale-save conflicts (editor-roles plan U10)", () => {
     expect(screen.queryByTestId("draft-conflict")).not.toBeInTheDocument();
   });
 });
+
+describe("editor — access lost mid-session (editor-roles plan U12)", () => {
+  it("a 404 on autosave (demoted editor) keeps the buffer, shows the blocking notice with copy/download, and offers the way back", async () => {
+    let puts = 0;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => {
+        puts += 1;
+        return json({ code: "NOT_FOUND", message: "canvas not found" }, 404);
+      },
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>mine</h1>" } });
+
+    const panel = await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    expect(panel).toHaveTextContent(/no longer have edit access/i);
+    // The refused save carried the buffer; the notice hands it back verbatim.
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.body).toContain("mine");
+    const download = screen.getByRole("link", { name: /download my edits/i }) as HTMLAnchorElement;
+    expect(decodeURIComponent(download.href)).toContain("<h1>mine</h1>");
+    expect(download.getAttribute("download")).toBe("index.html");
+    expect(screen.getByRole("button", { name: /copy my edits/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to your canvases/i })).toHaveAttribute(
+      "href",
+      "/",
+    );
+    // The status bar is truthful (never "published"), and autosave has stopped.
+    expect(screen.getByText(/save failed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/all changes published/i)).not.toBeInTheDocument();
+    const putsBefore = puts;
+    fireEvent.change(editor, { target: { value: "<h1>more</h1>" } });
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts).toBe(putsBefore);
+  });
+
+  it("an OWNER_ONLY refusal shows the owner-only variant and keeps the buffer", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "OWNER_ONLY", message: "Only the canvas owner can do that." }, 403),
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>owner act</h1>" } });
+    const panel = await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    expect(panel).toHaveTextContent(/only the owner can do that/i);
+    const download = screen.getByRole("link", { name: /download my edits/i }) as HTMLAnchorElement;
+    expect(decodeURIComponent(download.href)).toContain("<h1>owner act</h1>");
+  });
+});

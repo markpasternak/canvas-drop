@@ -182,6 +182,12 @@ export function makeHarness(
       return !!u && !u.isBlocked;
     },
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
+    // Mirror index.ts: the team re-join and the effective-editor probe, so realtime
+    // scenarios re-authorize exactly like prod (editors stay connected until demoted).
+    teamMatch: (canvasId, userId, viewerOrgIds) =>
+      teamsRepository(client).teamMatch(canvasId, userId, viewerOrgIds),
+    isEffectiveEditor: (canvasId, userId, scope) =>
+      canvases.isEffectiveEditor(canvasId, userId, scope),
   });
   const mailer = captureMailer();
 
