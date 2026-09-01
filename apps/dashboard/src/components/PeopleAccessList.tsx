@@ -336,7 +336,12 @@ export function PeopleAccessList({
         loading={transferring}
         onConfirm={() => {
           if (!transferTo || !onTransfer) return;
-          void onTransfer(transferTo).then(() => setTransferOpen(false));
+          // The owner row and the recipient's row both change hands: re-read the list
+          // once the transfer has applied so it never shows the pre-transfer roles.
+          void onTransfer(transferTo).then(async () => {
+            setTransferOpen(false);
+            await reload();
+          });
         }}
       >
         <div className="space-y-3">

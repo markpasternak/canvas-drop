@@ -891,18 +891,46 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     });
   });
 
-  it("owner's view: Transfer ownership lists the editors and POSTs the chosen user id (F4)", async () => {
+  it("owner's view: Transfer ownership lists the editors, POSTs the chosen user id, and re-reads the people list (F4)", async () => {
     const user = userEvent.setup();
+    // After the transfer the server lists Edna as the owner and the previous owner as an
+    // editor — the list must re-read rather than keep showing the pre-transfer roles.
+    let transferred = false;
+    const afterTransfer = [
+      {
+        id: "owner",
+        kind: "owner",
+        role: "owner",
+        email: "edna@example.com",
+        name: "Edna",
+        userId: "u3",
+        teamId: null,
+        createdAt: 0,
+      },
+      {
+        id: "member:e9",
+        kind: "member",
+        role: "editor",
+        email: "owner@example.com",
+        name: "Owner",
+        userId: "u1",
+        teamId: null,
+        createdAt: 4,
+      },
+    ];
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(published),
-      "GET /api/canvases/c1/allowlist": () => json({ entries }),
-      "POST /api/canvases/c1/transfer": () =>
-        json({
+      "GET /api/canvases/c1/allowlist": () =>
+        json({ entries: transferred ? afterTransfer : entries }),
+      "POST /api/canvases/c1/transfer": () => {
+        transferred = true;
+        return json({
           ok: true,
           canvas: { ...published, role: "editor", ownerId: "u3" },
           previousOwnerEditor: true,
           publicLinkReverted: false,
-        }),
+        });
+      },
     });
     renderShare();
     await user.click(await screen.findByRole("button", { name: /transfer ownership/i }));
@@ -917,6 +945,19 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
       expect(post?.body).toContain('"toUserId":"u3"');
     });
     expect(await screen.findByText(/you're now an editor/i)).toBeInTheDocument();
+    // The people list was re-read: Edna's row now carries the Owner badge and the previous
+    // owner's row a role control set to editor.
+    await vi.waitFor(() => {
+      const list = screen.getByRole("list", { name: /people with access/i });
+      const edna = within(list).getByText("edna@example.com").closest("li") as HTMLElement;
+      expect(within(edna).getByText("Owner")).toBeInTheDocument();
+      expect(
+        (within(list).getByLabelText("Role for owner@example.com") as HTMLSelectElement).value,
+      ).toBe("editor");
+    });
+    expect(
+      calls.filter((c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist").length,
+    ).toBeGreaterThan(1);
   });
 
   it("editor's view: no Transfer ownership control; the added-people AI opt-in is owner-only", async () => {
