@@ -7,7 +7,7 @@ import {
   UploadSimple,
 } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
@@ -30,6 +30,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { PaneHeader, WorkspacePane } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { ApiError, api, type DraftFile, type DraftView } from "../lib/api.js";
+import { useClipboardCopy } from "../lib/clipboard.js";
 import { cn } from "../lib/cn.js";
 import {
   draftUsesScripts,
@@ -39,6 +40,7 @@ import {
   normalizeDraftPath,
   singleHtmlFile,
 } from "../lib/file-kind.js";
+import { relativeTime } from "../lib/format.js";
 import {
   useCreateDraftFile,
   useDeleteDraftFile,
@@ -56,6 +58,24 @@ const ROOT_HTML = "index.html";
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const rawUrl = (id: string, path: string) =>
   `/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`;
+
+/** A save refused because this session lost its role (editor-roles plan U12 / KTD14). */
+interface LockedOut {
+  path: string;
+  code: string;
+  /** The buffer at the moment of refusal — what copy/download hand back. */
+  content: string;
+}
+
+/** A stale-save refusal in flight (editor-roles plan, KTD8/KTD14). */
+interface DraftConflict {
+  path: string;
+  currentHash: string;
+  updatedByName: string | null;
+  updatedAt: number | null;
+  /** The server's current content for the path (null when it could not be fetched). */
+  theirs: string | null;
+}
 
 function DraftRepairNotice({
   title,
@@ -123,9 +143,26 @@ export default function Editor() {
   // in the debounce window, "failed" after a flush error — so the bar never claims
   // "All changes published" while the buffer holds the only copy of an edit.
   const [localDirty, setLocalDirty] = useState<LocalDirtyState>("clean");
-  // The draft fork-point the current buffer is based on. Sent as the unmount-flush
-  // precondition (If-Draft-Base) so a stale flush landing after a restore is rejected.
-  const baseVersionRef = useRef<string | null>(null);
+  // Per-path content hashes the editor last saw (editor-roles plan, KTD8): every save —
+  // autosave, unmount flush, delete, rename — carries the path's hash as
+  // `If-Draft-File-Hash`, so two editors on one file get a conflict, never a silent
+  // overwrite. Refreshed from every draft view (each save response included), EXCEPT for
+  // a path with an open conflict: its stale buffer must not become eligible for a
+  // follow-up save just because the tracked hash caught up.
+  const hashesRef = useRef<Map<string, string>>(new Map());
+  const [conflict, setConflict] = useState<DraftConflict | null>(null);
+  const conflictRef = useRef<DraftConflict | null>(null);
+  conflictRef.current = conflict;
+  // Access lost mid-session (editor-roles plan U12 / KTD14): a 404 (removed, demoted,
+  // org departure, transferred away) or OWNER_ONLY answer to a save. The server no
+  // longer accepts this session's writes, so autosave stops and the buffer is kept on
+  // screen — with copy/download — until the editor chooses to leave.
+  const [lockedOut, setLockedOut] = useState<LockedOut | null>(null);
+  const lockedOutRef = useRef<LockedOut | null>(null);
+  lockedOutRef.current = lockedOut;
+  /** The save currently in flight, if any (review #6). */
+  const flushingRef = useRef<Promise<boolean> | null>(null);
+  const copy = useClipboardCopy();
 
   const selectedFile: DraftFile | undefined = draft?.files.find((f) => f.path === selected);
   const editable = selectedFile ? isEditableFile(selectedFile) : false;
@@ -167,10 +204,28 @@ export default function Editor() {
     }
   }, [draft, selected]);
 
-  // Keep the buffer's fork-point in sync with the draft so the unmount flush can pin it.
+  // Track every file's hash from the server's draft view (the conflicted path is left
+  // alone until the editor resolves it — see hashesRef). Called SYNCHRONOUSLY from every
+  // mutation response (review #13) — the effect below is only the backstop for reads —
+  // so a rename or delete right after a save already carries the post-save hash.
+  const trackHashes = (view: DraftView) => {
+    const next = new Map<string, string>();
+    for (const f of view.files) {
+      if (f.hash === undefined) continue;
+      if (conflictRef.current?.path === f.path) {
+        const kept = hashesRef.current.get(f.path);
+        if (kept !== undefined) next.set(f.path, kept);
+        continue;
+      }
+      next.set(f.path, f.hash);
+    }
+    hashesRef.current = next;
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: trackHashes reads refs only
   useEffect(() => {
-    baseVersionRef.current = draft?.baseVersionId ?? null;
-  }, [draft?.baseVersionId]);
+    if (!draft) return;
+    trackHashes(draft);
+  }, [draft]);
 
   // Fall back to code mode if on-page editing stops being available — the draft loses
   // its single HTML page, or it gains JavaScript (on-page can't render JS; see onPageAvailable).
@@ -188,23 +243,31 @@ export default function Editor() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (dirtyRef.current && bufferPathRef.current !== null) {
+      // Same guards as flush() (review #12): a conflicted path or a locked-out session
+      // never issues the doomed PUT on exit.
+      if (
+        dirtyRef.current &&
+        bufferPathRef.current !== null &&
+        conflictRef.current?.path !== bufferPathRef.current &&
+        !lockedOutRef.current
+      ) {
         const path = bufferPathRef.current;
         const body = bufferRef.current;
-        const expectedBaseVersionId = baseVersionRef.current;
+        const expectedHash = hashesRef.current.get(path) ?? "none";
         dirtyRef.current = false;
         // Surface the in-flight edit to other draft consumers (the Versions tab's restore
         // confirm-gate reads `draft.dirty`) so a restore can't bypass confirmation while
         // this flush is still settling. Reconciled to server-authoritative dirty on settle.
         qc.setQueryData<DraftView>(keys.draft(id), (d) => (d ? { ...d, dirty: true } : d));
-        // Bound the best-effort flush and pin its fork-point: a slow/unreachable server on
-        // navigation must not leave the PUT pending, and a flush that lands after a restore
-        // is rejected (409 DRAFT_CONFLICT) instead of clobbering the restored file. Warn
-        // instead of swallowing silently so a dropped exit-save is diagnosable.
+        // Bound the best-effort flush and pin the file's hash: a slow/unreachable server on
+        // navigation must not leave the PUT pending, and a flush that lands after another
+        // editor's save (or a restore) is rejected (409 DRAFT_CONFLICT) instead of
+        // clobbering their file. Warn instead of swallowing silently so a dropped
+        // exit-save is diagnosable.
         void api
           .putDraftFile(id, path, body, {
             signal: AbortSignal.timeout(5000),
-            expectedBaseVersionId,
+            expectedHash,
           })
           .then(() => {
             // Write through the per-file content cache so remounting the editor
@@ -240,7 +303,19 @@ export default function Editor() {
   /** Persist the autosave buffer. Returns false when the save failed — callers that
    *  would overwrite the buffer (file switch, surface switch, publish) must abort so
    *  the unsaved edit isn't silently lost. */
-  const flush = async (): Promise<boolean> => {
+  const flush = (): Promise<boolean> => {
+    // One save in flight at a time (review #6): a second trigger (autosave timer, Cmd+S,
+    // file switch, Publish) waits for the first and then re-reads the dirty flag and
+    // the post-save hash instead of racing with a hash captured before the first landed.
+    if (flushingRef.current) return flushingRef.current.then(() => flush());
+    const run = flushOnce().finally(() => {
+      flushingRef.current = null;
+    });
+    flushingRef.current = run;
+    return run;
+  };
+
+  const flushOnce = async (): Promise<boolean> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -248,8 +323,17 @@ export default function Editor() {
     if (!dirtyRef.current || bufferPathRef.current === null) return true;
     const path = bufferPathRef.current;
     const body = bufferRef.current;
+    // A path with an unresolved conflict never auto-saves — the editor must choose first.
+    if (conflictRef.current?.path === path) return false;
+    // Once the server has refused this session's role, no further save is attempted.
+    if (lockedOutRef.current) return false;
     try {
-      await save.mutateAsync({ path, content: body });
+      const saved = await save.mutateAsync({
+        path,
+        content: body,
+        expectedHash: hashesRef.current.get(path) ?? "none",
+      });
+      trackHashes(saved);
       // The buffer may have moved on while the save was in flight — new keystrokes,
       // or a different file entirely. Only touch the dirty state for OUR file, and
       // only mark clean when the buffer still holds exactly what we saved (a stale
@@ -264,11 +348,68 @@ export default function Editor() {
       setRefreshKey((k) => k + 1);
       return true;
     } catch (err) {
+      if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
+        // Another editor saved this file first (R17): keep the buffer, show their
+        // current content beside it, and let the editor compare before choosing.
+        await openConflict(path, err);
+        return false;
+      }
+      if (err instanceof ApiError && (err.status === 404 || err.code === "OWNER_ONLY")) {
+        // The role behind this session is gone (or the act is the owner's): keep the
+        // buffer, stop saving, and say so once — no toast storm on every debounce.
+        setLockedOut({ path, code: err.code, content: body });
+        setLocalDirty("failed");
+        return false;
+      }
       setLocalDirty("failed");
       toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
       return false;
     }
   };
+
+  /** Surface a stale-save refusal: fetch the server's current content for the path so the
+   *  editor can compare it with the kept buffer (KTD14 — the buffer is never dropped). */
+  async function openConflict(path: string, err: ApiError) {
+    const theirs = await api.getDraftFile(id, path).catch(() => null);
+    const d = err.details;
+    setConflict({
+      path,
+      currentHash: typeof d.currentHash === "string" ? d.currentHash : "none",
+      updatedByName: typeof d.updatedByName === "string" ? d.updatedByName : null,
+      updatedAt: typeof d.updatedAt === "number" ? d.updatedAt : null,
+      theirs,
+    });
+    setLocalDirty("conflict");
+  }
+
+  /** Resolve a conflict by adopting the other editor's version: the buffer becomes theirs. */
+  function useTheirVersion() {
+    if (!conflict) return;
+    const theirs = conflict.theirs ?? "";
+    hashesRef.current.set(conflict.path, conflict.currentHash);
+    qc.setQueryData(keys.draftFile(id, conflict.path), theirs);
+    if (bufferPathRef.current === conflict.path) {
+      bufferRef.current = theirs;
+      loadedRef.current = theirs;
+      dirtyRef.current = false;
+      setLocalDirty("clean");
+    }
+    setConflict(null);
+    setRefreshKey((k) => k + 1);
+  }
+
+  /** Resolve a conflict by re-saving the kept buffer over their version — an explicit
+   *  choice, pinned to the hash they wrote so a THIRD change is still caught. */
+  async function overwriteWithMine() {
+    if (!conflict) return;
+    hashesRef.current.set(conflict.path, conflict.currentHash);
+    setConflict(null);
+    if (bufferPathRef.current === conflict.path) {
+      dirtyRef.current = true;
+      setLocalDirty("unsaved");
+      await flush();
+    }
+  }
 
   const onEditorChange = (next: string) => {
     if (bufferPathRef.current !== selected) return;
@@ -292,15 +433,47 @@ export default function Editor() {
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
     const paths = canvasRelativePaths(files);
-    const items = files.map((file, i) => ({ path: paths[i] as string, file }));
+    // Each upload carries the hash we last saw for its path (review #2): a new path has
+    // none; an existing one is replaced only against the version we loaded.
+    const items = files.map((file, i) => {
+      const path = paths[i] as string;
+      return { path, file, expectedHash: hashesRef.current.get(path) };
+    });
     try {
       await uploadMany.mutateAsync(items);
       setSelected(items[items.length - 1]?.path ?? selected);
       setRefreshKey((k) => k + 1);
       toast(`Uploaded ${files.length} ${files.length === 1 ? "file" : "files"}`);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't upload", "error");
+      if (!(await refuseIfLockedOut(err))) toast(uploadErrorHint(err), "error");
     }
+  }
+
+  /** A binary write has no text buffer to compare, so a stale-save refusal is explained
+   *  (who saved, when) and the draft is refreshed so the next attempt carries the current
+   *  hash — never retried blindly, never silently overwriting (KTD14). */
+  function uploadErrorHint(err: unknown): string {
+    if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
+      void qc.invalidateQueries({ queryKey: keys.draft(id) });
+      const who = typeof err.details.updatedByName === "string" ? err.details.updatedByName : null;
+      return `${who ?? "Someone else"} changed this file since you loaded it — the draft was refreshed; check it and upload again.`;
+    }
+    return err instanceof ApiError ? err.hint : "Couldn't upload";
+  }
+
+  /** A 404 / OWNER_ONLY on any write means this session lost its role: show the
+   *  blocking notice (keeping the buffer) instead of a one-off toast. */
+  async function refuseIfLockedOut(err: unknown): Promise<boolean> {
+    if (err instanceof ApiError && (err.status === 404 || err.code === "OWNER_ONLY")) {
+      setLockedOut({
+        path: bufferPathRef.current ?? selected ?? "",
+        code: err.code,
+        content: bufferRef.current,
+      });
+      setLocalDirty("failed");
+      return true;
+    }
+    return false;
   }
 
   const dropzone = useDropzone({ noClick: true, onDrop: (a) => void uploadFiles(a) });
@@ -308,7 +481,14 @@ export default function Editor() {
   async function onReplaceChosen(file: File) {
     if (!selected) return;
     try {
-      await upload.mutateAsync({ path: selected, file });
+      // Wait for any in-flight save of this path so the replace pins the post-save hash.
+      await flushingRef.current;
+      const view = await upload.mutateAsync({
+        path: selected,
+        file,
+        expectedHash: hashesRef.current.get(selected) ?? "none",
+      });
+      trackHashes(view);
       loadedRef.current = "";
       dirtyRef.current = false;
       setLocalDirty("clean"); // the replaced bytes ARE the saved state
@@ -316,7 +496,7 @@ export default function Editor() {
       setRefreshKey((k) => k + 1);
       toast("File replaced");
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't replace the file", "error");
+      if (!(await refuseIfLockedOut(err))) toast(uploadErrorHint(err), "error");
     }
   }
 
@@ -354,7 +534,12 @@ export default function Editor() {
    *  (covers a failed flush leaving `dirtyRef` set — the mirror of the delete guard). */
   async function guardedRename(from: string, to: string): Promise<void> {
     await flush();
-    await rename.mutateAsync({ from, to });
+    const view = await rename.mutateAsync({
+      from,
+      to,
+      expectedHash: hashesRef.current.get(from),
+    });
+    trackHashes(view);
     if (bufferPathRef.current === from) bufferPathRef.current = to;
   }
 
@@ -399,7 +584,14 @@ export default function Editor() {
       setLocalDirty("clean");
     }
     try {
-      const next = await del.mutateAsync(deleting);
+      // A save of this very path may still be in flight; let it settle so the delete is
+      // pinned to the hash the server actually holds (review #13).
+      await flushingRef.current;
+      const next = await del.mutateAsync({
+        path: deleting,
+        expectedHash: hashesRef.current.get(deleting),
+      });
+      trackHashes(next);
       if (selected === deleting) setSelected(next.files[0]?.path ?? null);
       setDeleting(null);
       setRefreshKey((k) => k + 1);
@@ -423,11 +615,27 @@ export default function Editor() {
     try {
       // useSaveDraftFile writes the saved HTML through the per-file content cache,
       // so switching back to Code shows the on-page edits (not a stale buffer that
-      // would otherwise overwrite them on the next code edit).
-      await save.mutateAsync({ path: htmlFile.path, content: html });
+      // would otherwise overwrite them on the next code edit). The save is pinned to the
+      // hash we loaded (review #2) exactly like the code editor's autosave.
+      await flushingRef.current;
+      const saved = await save.mutateAsync({
+        path: htmlFile.path,
+        content: html,
+        expectedHash: hashesRef.current.get(htmlFile.path) ?? "none",
+      });
+      trackHashes(saved);
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      if (err instanceof ApiError && err.code === "DRAFT_CONFLICT") {
+        // Same resolution path as the code editor: their version beside the kept buffer.
+        bufferRef.current = html;
+        bufferPathRef.current = htmlFile.path;
+        await openConflict(htmlFile.path, err);
+        return;
+      }
+      if (!(await refuseIfLockedOut(err))) {
+        toast(err instanceof ApiError ? err.hint : "Couldn't save", "error");
+      }
     }
   }
 
@@ -755,6 +963,87 @@ export default function Editor() {
   return (
     <TabContentFrame className="space-y-3">
       {draftRepairNotice}
+      {lockedOut && (
+        <section
+          className="border border-danger/30 bg-danger-subtle/40 px-4 py-3"
+          data-testid="editor-locked-out"
+          role="alert"
+        >
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-fg">
+              {lockedOut.code === "OWNER_ONLY"
+                ? "Only the owner can do that"
+                : "You no longer have edit access to this canvas"}
+            </h2>
+            <p className="max-w-3xl text-xs leading-relaxed text-muted">
+              {lockedOut.code === "OWNER_ONLY"
+                ? "The server refused that change because it is reserved for the canvas owner."
+                : "Your access was changed while you were editing — the server no longer accepts saves from this session."}{" "}
+              Your unsaved edits to {lockedOut.path} are kept here until you leave: copy or download
+              them now.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => copy(lockedOut.content, "Copied your edits")}
+              >
+                Copy my edits
+              </Button>
+              <a
+                href={`data:text/plain;charset=utf-8,${encodeURIComponent(lockedOut.content)}`}
+                download={baseName(lockedOut.path)}
+                className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-xs font-medium text-fg hover:bg-surface-raised"
+              >
+                Download my edits
+              </a>
+              <Link
+                to="/"
+                className="text-xs font-medium text-accent underline-offset-2 hover:underline"
+              >
+                Back to your canvases
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
+      {conflict && (
+        <section
+          className="border border-danger/30 bg-danger-subtle/40 px-4 py-3"
+          data-testid="draft-conflict"
+        >
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-fg">
+              Someone else saved {conflict.path} first
+            </h2>
+            <p className="max-w-3xl text-xs leading-relaxed text-muted">
+              {conflict.updatedByName ?? "Another editor"} saved changes to this file{" "}
+              {conflict.updatedAt ? relativeTime(conflict.updatedAt) : "just now"}. Your unsaved
+              edits are kept in the editor — compare them with the saved version below, then choose.
+            </p>
+            {conflict.theirs !== null && (
+              <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-surface p-2 font-mono text-xs text-fg">
+                <code>{conflict.theirs}</code>
+              </pre>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={useTheirVersion}>
+                Use their version
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => void overwriteWithMine()}>
+                Overwrite with mine
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => copy(bufferRef.current, "Copied your version")}
+              >
+                Copy my version
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
       <PublishBar
         dirty={draft.dirty}
         stale={draft.stale}

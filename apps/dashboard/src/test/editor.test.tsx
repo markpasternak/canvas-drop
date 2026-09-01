@@ -100,7 +100,17 @@ function renderEditor() {
 }
 
 const draftView = (over: Partial<Record<string, unknown>> = {}) => ({
-  files: [{ path: "index.html", size: 10, mime: "text/html" }],
+  files: [
+    {
+      path: "index.html",
+      size: 10,
+      mime: "text/html",
+      hash: "h1",
+      updatedBy: null,
+      updatedByName: null,
+      updatedAt: null,
+    },
+  ],
   stale: false,
   baseVersionId: "v1",
   updatedAt: 0,
@@ -388,14 +398,14 @@ describe("Editor route", () => {
     fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
     unmount();
-    // The unmount flush must have dispatched the save with the edited content,
-    // pinned to the draft's fork-point so a flush landing after a restore is rejected.
+    // The unmount flush must have dispatched the save with the edited content, pinned
+    // to the file's hash so a flush landing after another editor's save is rejected.
     await waitFor(() => {
       const put = calls.find(
         (c) => c.method === "PUT" && c.url.startsWith("/api/canvases/c1/draft/file"),
       );
       expect(put?.body).toContain("edited");
-      expect(put?.headers?.["If-Draft-Base"]).toBe("v1");
+      expect(put?.headers?.["If-Draft-File-Hash"]).toBe("h1");
     });
   });
 
@@ -584,5 +594,172 @@ describe("WorkspacePane chrome (flat)", () => {
     expect(pane?.className).not.toMatch(/shadow-\[var\(--shadow-panel\)\]/);
     // Still a bordered pane (the hairline seams between panes).
     expect(pane?.className).toMatch(/\bborder\b/);
+  });
+});
+
+describe("editor — stale-save conflicts (editor-roles plan U10)", () => {
+  it("autosave sends the file's hash; a 409 keeps the buffer, shows the other editor's version, and 'Use their version' adopts it", async () => {
+    let puts = 0;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>theirs</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => {
+        puts += 1;
+        return json(
+          {
+            code: "DRAFT_CONFLICT",
+            message: "index.html was changed by Ada",
+            path: "index.html",
+            currentHash: "h2",
+            updatedBy: "u2",
+            updatedByName: "Ada",
+            updatedAt: Date.now() - 60_000,
+          },
+          409,
+        );
+      },
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("theirs"));
+    fireEvent.change(editor, { target: { value: "<h1>mine</h1>" } });
+
+    const panel = await screen.findByTestId("draft-conflict", undefined, { timeout: 4000 });
+    expect(panel).toHaveTextContent(/Ada saved changes/);
+    // The precondition rode along; the buffer is untouched; no silent retry.
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.headers?.["If-Draft-File-Hash"]).toBe("h1");
+    expect(put?.body).toContain("mine");
+    expect(screen.getByText(/save conflict/i)).toBeInTheDocument();
+    const putsBefore = puts;
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts).toBe(putsBefore);
+
+    fireEvent.click(screen.getByRole("button", { name: /use their version/i }));
+    await waitFor(() => expect(editor.value).toBe("<h1>theirs</h1>"));
+    expect(screen.queryByTestId("draft-conflict")).not.toBeInTheDocument();
+  });
+});
+
+describe("editor — access lost mid-session (editor-roles plan U12)", () => {
+  it("a 404 on autosave (demoted editor) keeps the buffer, shows the blocking notice with copy/download, and offers the way back", async () => {
+    let puts = 0;
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () => {
+        puts += 1;
+        return json({ code: "NOT_FOUND", message: "canvas not found" }, 404);
+      },
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>mine</h1>" } });
+
+    const panel = await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    expect(panel).toHaveTextContent(/no longer have edit access/i);
+    // The refused save carried the buffer; the notice hands it back verbatim.
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.body).toContain("mine");
+    const download = screen.getByRole("link", { name: /download my edits/i }) as HTMLAnchorElement;
+    expect(decodeURIComponent(download.href)).toContain("<h1>mine</h1>");
+    expect(download.getAttribute("download")).toBe("index.html");
+    expect(screen.getByRole("button", { name: /copy my edits/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to your canvases/i })).toHaveAttribute(
+      "href",
+      "/",
+    );
+    // The status bar is truthful (never "published"), and autosave has stopped.
+    expect(screen.getByText(/save failed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/all changes published/i)).not.toBeInTheDocument();
+    const putsBefore = puts;
+    fireEvent.change(editor, { target: { value: "<h1>more</h1>" } });
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts).toBe(putsBefore);
+  });
+
+  it("an OWNER_ONLY refusal shows the owner-only variant and keeps the buffer", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "OWNER_ONLY", message: "Only the canvas owner can do that." }, 403),
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>owner act</h1>" } });
+    const panel = await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    expect(panel).toHaveTextContent(/only the owner can do that/i);
+    const download = screen.getByRole("link", { name: /download my edits/i }) as HTMLAnchorElement;
+    expect(decodeURIComponent(download.href)).toContain("<h1>owner act</h1>");
+  });
+});
+
+describe("editor — hash bookkeeping after the review (#6/#12/#13)", () => {
+  it("a rename right after an autosave carries the POST-save hash, not the one loaded before the save", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>x</h1>", { status: 200 }),
+      // The save's response reports the new content hash for index.html.
+      "PUT /api/canvases/c1/draft/file": () =>
+        json(
+          draftView({
+            dirty: true,
+            files: [{ path: "index.html", size: 12, mime: "text/html", hash: "h2" }],
+          }),
+        ),
+      "POST /api/canvases/c1/draft/rename": () =>
+        json(
+          draftView({
+            dirty: true,
+            files: [{ path: "home.html", size: 12, mime: "text/html", hash: "h2" }],
+          }),
+        ),
+    });
+    renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("<h1>x</h1>"));
+    fireEvent.change(editor, { target: { value: "<h1>edited</h1>" } });
+    // Rename while the autosave is still in its debounce window: flush() runs first and
+    // the rename must then pin h2 (the hash the server just reported), not h1.
+    fireEvent.click(await screen.findByRole("button", { name: "Rename file" }));
+    const field = await screen.findByDisplayValue("index.html");
+    fireEvent.change(field, { target: { value: "home.html" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await waitFor(() => {
+      const put = calls.find((c) => c.method === "PUT");
+      const rename = calls.find(
+        (c) => c.method === "POST" && c.url === "/api/canvases/c1/draft/rename",
+      );
+      expect(put?.headers?.["If-Draft-File-Hash"]).toBe("h1");
+      expect(rename?.headers?.["If-Draft-File-Hash"]).toBe("h2");
+    });
+  });
+
+  it("the exit flush is skipped while the session is locked out (no doomed PUT on unmount)", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(CANVAS),
+      "GET /api/canvases/c1/draft": () => json(draftView()),
+      "GET /api/canvases/c1/draft/file": () => new Response("<h1>before</h1>", { status: 200 }),
+      "PUT /api/canvases/c1/draft/file": () =>
+        json({ code: "NOT_FOUND", message: "canvas not found" }, 404),
+    });
+    const { unmount } = renderEditor();
+    const editor = (await screen.findByTestId("code-editor")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain("before"));
+    fireEvent.change(editor, { target: { value: "<h1>mine</h1>" } });
+    await screen.findByTestId("editor-locked-out", undefined, { timeout: 4000 });
+    const putsBefore = calls.filter((c) => c.method === "PUT").length;
+    // A further edit stays in the buffer; leaving must not fire another PUT.
+    fireEvent.change(editor, { target: { value: "<h1>more</h1>" } });
+    unmount();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(putsBefore);
   });
 });

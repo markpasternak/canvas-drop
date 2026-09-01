@@ -1,6 +1,7 @@
 import type { Config } from "@canvas-drop/shared";
 import type { AdminSettingsService } from "./admin/settings-service.js";
 import type { AuditLog } from "./audit/audit-log.js";
+import { makeOrgMembershipResolver } from "./auth/org-membership.js";
 import { type CloneService, cloneService } from "./canvas/clone-service.js";
 import { type VersionHistoryService, versionHistoryService } from "./canvas/version-history.js";
 import type { DbClient } from "./db/factory.js";
@@ -9,6 +10,8 @@ import type { CanvasesRepository } from "./db/repositories/canvases.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { filesRepository } from "./db/repositories/files.js";
 import { oauthRepository } from "./db/repositories/oauth.js";
+import { orgMembersRepository } from "./db/repositories/org-members.js";
+import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { uploadSessionsRepository } from "./db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "./db/repositories/usage-events.js";
@@ -91,6 +94,11 @@ export function composeServices(deps: ServiceGraphDeps): ServiceGraph {
       uploadSessions: uploadSessionsRepository(deps.db),
       storage: deps.storage,
       engine: deps.engine,
+      // Finalize re-resolves the actor's LIVE org membership (editor-roles plan, KTD2).
+      orgMembership: makeOrgMembershipResolver(
+        orgsRepository(deps.db),
+        orgMembersRepository(deps.db),
+      ),
     }),
 
     clone: cloneService({
@@ -115,6 +123,8 @@ export function composeServices(deps: ServiceGraphDeps): ServiceGraph {
       storage: deps.storage,
       audit: deps.audit,
       log: deps.log,
+      // Writer names for stale-save conflicts and draft views (editor-roles plan, KTD8).
+      users: deps.users,
       // Schedule screenshot captures on publish (plan 004 / U6); the worker consumes
       // them. Effective-gated + best-effort — a no-op when capture is off — so it is
       // always wired and shared by EVERY publish path (editor draft-api AND MCP),

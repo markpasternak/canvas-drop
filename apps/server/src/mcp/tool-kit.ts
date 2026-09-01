@@ -37,6 +37,7 @@ export function canvasView(
   cv: {
     id: string;
     slug: string;
+    ownerId: string;
     title: string;
     description?: string | null;
     // `status`/`previewMode`/`access` are stored as plain text columns (no `$type` on
@@ -69,12 +70,20 @@ export function canvasView(
   // Passed (and resolved) only by get_canvas / update_canvas so a write is read-your-writes
   // confirmable; omitted elsewhere (the field is absent rather than a misleading []).
   teamIds?: string[],
+  // Whose canvas it is and what the CALLER may do with it (editor-roles plan, KTD9):
+  // `role` is 'owner' | 'editor'. Present on list_canvases / get_canvas / update_canvas.
+  identity?: {
+    owner: { id: string; name: string; email: string } | null;
+    role: "owner" | "editor";
+  },
 ) {
   const url = canvasUrl(config, cv.slug);
   return {
     id: cv.id,
     slug: cv.slug,
     url,
+    ownerId: cv.ownerId,
+    ...(identity ? { owner: identity.owner, role: identity.role } : {}),
     title: cv.title,
     description: cv.description ?? null,
     status: cv.status,

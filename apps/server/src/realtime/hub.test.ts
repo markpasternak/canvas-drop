@@ -513,3 +513,136 @@ describe("RealtimeHub", () => {
     expect(hub.activeCanvasIds()).not.toContain("c1");
   });
 });
+
+// --- Editors on the realtime surface (editor-roles plan U3/R22) --------------------------
+
+describe("RealtimeHub — editor role", () => {
+  /** A hub whose effective-editor probe reads from a mutable set (live re-auth). */
+  function editorHub(canvas: Canvas | null, editors: Set<string>, probe?: () => never) {
+    return createHub({
+      config,
+      resolveCanvas: async () => canvas,
+      isEffectiveEditor: async (_canvasId, userId) => {
+        if (probe) probe();
+        return editors.has(userId);
+      },
+    });
+  }
+
+  it("a newly-set password drops the viewer but keeps the owner AND the editor connected", async () => {
+    const hub = editorHub(fakeCanvas(), new Set(["editor"]));
+    const ownerSock = new FakeSocket();
+    const editorSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("editor"), editorSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.dropGatedNonOwners("c1");
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(editorSock.closed).toBeNull();
+    expect(ownerSock.closed).toBeNull();
+  });
+
+  it("revalidateCanvas keeps an editor's socket on a PRIVATE canvas and drops it once demoted (AE12)", async () => {
+    const editors = new Set(["editor"]);
+    const hub = editorHub(fakeCanvas({ access: "private" }), editors);
+    const editorSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("editor"), editorSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED); // private: no rung admits a viewer
+    expect(editorSock.closed).toBeNull();
+    // Demotion takes effect on the next sweep — no reconnect needed.
+    editors.delete("editor");
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("an editor's socket survives a password gate on revalidation (editors never face the gate)", async () => {
+    const hub = editorHub(
+      fakeCanvas({ access: "whole_org", passwordHash: "h" }),
+      new Set(["editor"]),
+    );
+    const editorSock = new FakeSocket();
+    mc(hub, "c1", user("editor"), editorSock);
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed).toBeNull();
+  });
+
+  it("fails closed when the editor probe throws: the would-be editor is dropped, the owner is kept", async () => {
+    const hub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isEffectiveEditor: async () => {
+        throw new Error("db down");
+      },
+    });
+    const ownerSock = new FakeSocket();
+    const editorSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("editor"), editorSock);
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(ownerSock.closed).toBeNull();
+    await hub.dropGatedNonOwners("c1");
+    expect(ownerSock.closed).toBeNull();
+  });
+
+  it("without an editor probe wired, nobody is an editor (fail-closed default)", async () => {
+    const hub = makeHub(fakeCanvas({ access: "private" }));
+    const editorSock = new FakeSocket();
+    mc(hub, "c1", user("editor"), editorSock);
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("review #5: the org set is LIVE per sweep — an editor whose org membership ends is dropped, like HTTP/MCP", async () => {
+    const tenancy: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "Acme",
+    });
+    let orgs = new Set(["acme"]);
+    const hub = createHub({
+      config: tenancy,
+      resolveCanvas: async () =>
+        fakeCanvas({ access: "private", orgId: "acme" } as Partial<Canvas>),
+      // The editor grant is effective only with a live org (the SQL predicate's contract).
+      isEffectiveEditor: async (_c, userId, scope) =>
+        userId === "editor" && scope.viewerOrgIds.has("acme"),
+      resolveOrgIds: async () => orgs,
+    });
+    const editorSock = new FakeSocket();
+    mc(
+      hub,
+      "c1",
+      { ...user("editor", false, new Set(["acme"])), email: "editor@acme.test" },
+      editorSock,
+    );
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed).toBeNull();
+    // The operator drops their org membership; the handshake-time set no longer matters.
+    orgs = new Set();
+    await hub.revalidateCanvas("c1");
+    expect(editorSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("review #5: a failing org resolver fails closed — the socket is dropped, never kept on a stale set", async () => {
+    const tenancy: Config = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_ORG_NAME: "Acme",
+    });
+    const hub = createHub({
+      config: tenancy,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isEffectiveEditor: async () => true,
+      resolveOrgIds: async () => {
+        throw new Error("db down");
+      },
+    });
+    const sock = new FakeSocket();
+    mc(hub, "c1", { ...user("editor", false, new Set(["acme"])), email: "editor@acme.test" }, sock);
+    await hub.revalidateCanvas("c1");
+    expect(sock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+});

@@ -5,13 +5,31 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
-import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
+import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
-import { DISABLED_CODE, disabledMessage } from "../canvas/owner-guard.js";
+import {
+  classifyMutability,
+  DISABLED_CODE,
+  disabledMessage,
+  OWNER_ONLY_CODE,
+  OWNER_ONLY_MESSAGE,
+} from "../canvas/owner-guard.js";
+import { ownershipService } from "../canvas/ownership.js";
 import { hashPassword } from "../canvas/password.js";
+import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
+import {
+  accessRoleSchema,
+  listedRole,
+  loadManagementGrant,
+  type ManagementRole,
+  OWNER_ONLY_ACTS,
+  resolveManagementGrant,
+} from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
@@ -19,6 +37,7 @@ import { blobKey, SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage
 import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { VersionHistoryService } from "../canvas/version-history.js";
+import { resolveVersionCreators } from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -56,6 +75,7 @@ import { resolveHomeOrg } from "../tenancy/home-org.js";
 import type { UploadService } from "../upload/service.js";
 import { registerDraftTools } from "./draft-tools.js";
 import { canvasView, fail, failDeploy, ok, type ToolResult } from "./tool-kit.js";
+import { type CanvasToolName, minRoleOf } from "./tool-roles.js";
 
 /** Preview hint (plan 004) — agent-native parity with the dashboard. Optional via
  *  PreviewHintDeps; omitted → `hasPreview` false / no `previewUrl`, like pipeline-off. */
@@ -76,7 +96,10 @@ export interface McpToolDeps extends PreviewHintDeps {
   /** The invite primitive — backs MCP Add person tools, wrapping the SAME service the HTTP route uses. */
   invites: InviteService;
   /** Pending invitations — canvas/team pending rows and cancellation (HTTP-route parity). */
-  invitations: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
+  invitations: Pick<
+    InvitationsRepository,
+    "listPendingForTarget" | "cancelPendingForTarget" | "findPendingForTarget" | "setPendingRole"
+  >;
   canvases: CanvasesRepository;
   /** Effective instance-wide public-link gate. Omitted in focused tests: defaults on. */
   publicLinksEnabled?: () => Promise<boolean>;
@@ -119,41 +142,90 @@ export interface McpCaller {
   tenancyActive: boolean;
 }
 
-/** The owner-and-mutable gate: resolves to the owned canvas, or a `ToolResult` the tool
- *  must return as-is (404-shape not-found, or the shared DISABLED refusal). Passed to
+/** A canvas-scoped tool's gate result: the canvas plus the caller's admitting role, or a
+ *  `ToolResult` the tool must return as-is. */
+export type ToolGate = { canvas: Canvas; role: ManagementRole } | { error: ToolResult };
+
+/** The role gate for a canvas-scoped READ tool (editor-roles plan, KTD1/KTD10): the
+ *  tool's minimum role comes from `TOOL_MIN_ROLE`. Fails with the bare "canvas not found"
+ *  for a no-role caller (no existence leak) or `OWNER_ONLY: …` for an editor on an
+ *  owner-only tool; a disabled canvas stays readable. */
+export type RequireRole = (tool: CanvasToolName, id: string) => Promise<ToolGate>;
+
+/** The role-and-mutable gate for a canvas-scoped MUTATION tool: as {@link RequireRole},
+ *  plus the shared DISABLED refusal for an admin-taken-down canvas. Passed to
  *  `registerDraftTools` so the draft EDIT tools share the management surface's gate. */
-export type RequireMutable = (id: string) => Promise<{ canvas: Canvas } | { error: ToolResult }>;
+export type RequireMutable = RequireRole;
 
 /**
  * The MCP tool surface (U5). A fresh server is built per request, bound to the
  * caller resolved from the verified OAuth token. Every tool wraps the SAME service
  * layer the HTTP API uses — no parallel logic — and every canvas-scoped tool runs
- * the owner check (`requireOwned`) so a caller can only act on canvases it owns;
+ * the shared role gate (`requireRole` / `requireMutable`, owner or editor) so a caller
+ * can only act on canvases it manages;
  * a non-owned id is indistinguishable from a missing one (no existence leak, §12.0).
  */
 export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer {
   const server = new McpServer({ name: "canvas-drop", version: "1" });
 
-  /** Load the canvas only if the caller owns it, else null. */
-  async function requireOwned(id: string) {
-    const cv = await deps.canvases.findById(id);
-    if (!cv || cv.status === "deleted" || cv.ownerId !== caller.userId) return null;
-    return cv;
+  /** The canvas projection with its owner + the caller's role (editor-roles plan, KTD9). */
+  async function viewWithIdentity(
+    cv: Canvas,
+    role: ManagementRole,
+    hasPreview = false,
+    teamIds?: string[],
+  ) {
+    const owner = await deps.users.findById(cv.ownerId);
+    return canvasView(deps.config, cv, hasPreview, teamIds, {
+      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+      role,
+    });
   }
 
-  /** Owner-and-mutable gate (parity with management.ts `mutableCanvas`): a disabled
-   *  (admin-taken-down) canvas is read-only to its owner, so every owner MUTATION tool
-   *  rejects with the shared `DISABLED` contract while the read tools keep using
-   *  `requireOwned`. Returns the canvas, or a `ToolResult` the tool returns as-is —
-   *  `fail("canvas not found")` when not owned/missing (no existence leak, §12.0), or
-   *  `fail("DISABLED: …")` (mirroring the HTTP 409 `{ code: "DISABLED", message }`). */
-  const requireMutable: RequireMutable = async (id) => {
-    const cv = await requireOwned(id);
-    if (!cv) return { error: fail("canvas not found") };
-    if (cv.status === "disabled") {
-      return { error: fail(`${DISABLED_CODE}: ${disabledMessage(cv)}`) };
+  /** The caller as a member principal — identity from the verified token, org
+   *  membership server-resolved by the MCP route (never client-asserted). */
+  const principal = memberPrincipal({ id: caller.userId, isAdmin: caller.isAdmin }, caller.orgIds);
+  const roleDeps = { canvases: deps.canvases, tenancyActive: caller.tenancyActive };
+
+  /** The shared role gate (editor-roles plan, KTD1/KTD10) — the SAME `loadManagementGrant`
+   *  + `classifyMutability` the HTTP management/draft routes use, with each tool's
+   *  minimum role read from `TOOL_MIN_ROLE`. Read tools: a no-role caller reads the bare
+   *  "canvas not found" (no existence leak, §12.0); an editor on an owner-only tool reads
+   *  `OWNER_ONLY: …`; a disabled canvas stays readable. */
+  const requireRole: RequireRole = async (tool, id) => {
+    const outcome = classifyMutability(
+      await loadManagementGrant(id, principal, roleDeps),
+      minRoleOf(tool),
+    );
+    switch (outcome.kind) {
+      case "not-found":
+        return { error: fail("canvas not found") };
+      case "owner-only":
+        return { error: fail(`${OWNER_ONLY_CODE}: ${OWNER_ONLY_MESSAGE}`) };
+      default:
+        return { canvas: outcome.canvas, role: outcome.role };
     }
-    return { canvas: cv };
+  };
+
+  /** Role-and-mutable gate (parity with management.ts `mutableCanvas`): as
+   *  {@link requireRole}, plus `fail("DISABLED: …")` for an admin-taken-down canvas
+   *  (mirroring the HTTP 409 `{ code: "DISABLED", message }`) — a disabled canvas is
+   *  read-only to its owner and editors. Check order: role → owner-only → disabled. */
+  const requireMutable: RequireMutable = async (tool, id) => {
+    const outcome = classifyMutability(
+      await loadManagementGrant(id, principal, roleDeps),
+      minRoleOf(tool),
+    );
+    switch (outcome.kind) {
+      case "not-found":
+        return { error: fail("canvas not found") };
+      case "owner-only":
+        return { error: fail(`${OWNER_ONLY_CODE}: ${OWNER_ONLY_MESSAGE}`) };
+      case "disabled":
+        return { error: fail(`${DISABLED_CODE}: ${disabledMessage(outcome.canvas)}`) };
+      case "ok":
+        return { canvas: outcome.canvas, role: outcome.role };
+    }
   };
 
   /** Captured-preview hint for the owned canvases in hand — see {@link resolvePreviewIds}
@@ -172,6 +244,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     }
     return cachedIdentity;
   };
+  /** The acting user with the role that admitted this call (people list, key rotation). */
+  const peopleActorNow = async (role: ManagementRole) => ({
+    id: caller.userId,
+    ...(await identityNow()),
+    isAdmin: caller.isAdmin,
+    role,
+  });
   const teamActorNow = async (): Promise<TeamActor> => {
     return { id: caller.userId, isAdmin: false, orgIds: caller.orgIds, ...(await identityNow()) };
   };
@@ -222,10 +301,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_canvases",
     {
       description:
-        "List the canvases you own. Default order is most-recently-updated; pass " +
-        'sort="popular" to rank by trending views over the last 30 days. Each item ' +
-        "carries `recentViews` (trending count) plus lifetime `viewCount` and `lastViewedAt`.",
+        "List the canvases you own OR edit — the same list as the dashboard's Your canvases. " +
+        "Non-owned rows appear with `role: 'editor'` and their `owner`; your own carry " +
+        "`role: 'owner'`. Pass role='owned' or 'edited' to narrow. Default order is " +
+        'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
+        "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
+        "and `lastViewedAt`.",
       inputSchema: {
+        role: z
+          .enum(["owned", "edited"])
+          .optional()
+          .describe("Narrow to canvases you own, or to canvases you edit but don't own."),
         query: z
           .string()
           .optional()
@@ -244,14 +330,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ query, tags, sort, limit }) => {
+    async ({ role, query, tags, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const {
         items,
         total,
         recentViews: rankedViews,
-      } = await deps.canvases.listByOwnerFiltered({
-        ownerId: caller.userId,
+      } = await deps.canvases.listForActorFiltered({
+        actorId: caller.userId,
+        scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
+        role,
         q: query,
         tag: tags,
         sort,
@@ -261,20 +349,28 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       });
       // The popular sort already aggregated the page's counts — reuse them rather than
       // hitting usage_events twice (plan 004); other sorts aggregate the page here.
-      const [previews, recentViews] = await Promise.all([
+      const [previews, recentViews, owners] = await Promise.all([
         previewIds(items.map((cv) => cv.id)),
         rankedViews ??
           deps.usage.recentViewCounts(
             items.map((cv) => cv.id),
             recentSinceMs,
           ),
+        deps.users.findByIds([...new Set(items.map((cv) => cv.ownerId))]),
       ]);
+      const ownerById = new Map(owners.map((u) => [u.id, u]));
       return ok({
         total,
-        canvases: items.map((cv) => ({
-          ...canvasView(deps.config, cv, previewVisible(cv, previews)),
-          recentViews: recentViews.get(cv.id) ?? 0,
-        })),
+        canvases: items.map((cv) => {
+          const owner = ownerById.get(cv.ownerId);
+          return {
+            ...canvasView(deps.config, cv, previewVisible(cv, previews), undefined, {
+              owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+              role: listedRole(cv, caller.userId),
+            }),
+            recentViews: recentViews.get(cv.id) ?? 0,
+          };
+        }),
       });
     },
   );
@@ -358,15 +454,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas",
     {
       description:
-        "Get the current state of a canvas you own. Also returns a `deploy` block with the exact " +
+        "Get the current state of a canvas you own or edit. Also returns a `deploy` block with the exact " +
         "curl endpoints for this canvas (apiBase, zipUpload, staged URLs, readback, and a " +
         "copy-paste `curl` with a $CANVAS_KEY placeholder — substitute the key from create_canvas). " +
         "Use this to get the runnable deploy command for an existing canvas without probing.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("get_canvas", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const hasPreview = previewVisible(cv, await previewIds([cv.id]));
       // Echo the team grants for a team-scoped canvas (parity with the dashboard share view).
       const teamIds =
@@ -374,7 +471,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
-        ...canvasView(deps.config, cv, hasPreview, teamIds),
+        ...(await viewWithIdentity(cv, gate.role, hasPreview, teamIds)),
+        // What only the owner may do (R7) — so an agent acting as an editor knows in
+        // advance which tools will refuse with OWNER_ONLY.
+        ownerOnlyActs: OWNER_ONLY_ACTS,
         deploy: deployEndpoints(deps.config, cv.id),
       });
     },
@@ -383,18 +483,24 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "list_versions",
     {
-      description: "List the published versions of a canvas you own.",
+      description: "List the published versions of a canvas you own or edit.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("list_versions", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const versions = await deps.versions.listByCanvas(cv.id);
+      // Who created each version (R18) — one batched identity lookup, shared with HTTP.
+      const creators = await resolveVersionCreators(deps.users, versions);
       return ok({
         versions: versions.map((v) => ({
           number: v.number,
           source: v.source,
           status: v.status,
+          createdBy: v.createdBy,
+          createdByName: creators.get(v.createdBy)?.name ?? null,
+          createdByEmail: creators.get(v.createdBy)?.email ?? null,
           createdAt: v.createdAt,
           fileCount: v.fileCount,
           totalBytes: v.totalBytes,
@@ -412,7 +518,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "delete_version",
     {
       description:
-        "Permanently delete one non-current published version you own. The current live version " +
+        "Permanently delete one non-current published version of a canvas you own or edit. The current live version " +
         "is protected; make another version current first. Shared draft/version blobs are retained.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -420,7 +526,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, version }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("delete_version", id);
       if ("error" in gate) return gate.error;
       const result = await deps.versionHistory.deleteHistorical(
         gate.canvas.id,
@@ -444,7 +550,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "deploy_canvas",
     {
       description:
-        "Deploy a canvas you own in ONE call. NOTE: if you can run shell commands, PREFER curl " +
+        "Deploy a canvas you own or edit in ONE call. NOTE: if you can run shell commands, PREFER curl " +
         "over the keyed HTTP Deploy API instead of this tool — request that permission if you " +
         "don't have it. The exact, ready-to-run curl command + endpoints are in the `deploy` " +
         "block that create_canvas (with the key filled in) and get_canvas return — use those " +
@@ -486,7 +592,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // canvas would silently pre-position content that goes live the moment it's
       // restored, defeating the admin freeze. A disabled canvas rejects with the shared
       // DISABLED contract; an archived one keeps the NOT_ACTIVE "unarchive first" message.
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("deploy_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (cv.status !== "active") {
@@ -532,7 +638,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "begin_deploy",
     {
       description:
-        "Open a staged deploy for a canvas you own. PREFER THIS over deploy_canvas whenever the " +
+        "Open a staged deploy for a canvas you own or edit. PREFER THIS over deploy_canvas whenever the " +
         "canvas already has content (any re-deploy) or has many/large/binary files. Give the " +
         "file manifest (path, sha256 hash, size); returns an uploadId and missingHashes — the " +
         "files NOT already stored — so you resend only what changed (a re-deploy of mostly-" +
@@ -552,7 +658,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, manifest }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("begin_deploy", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (cv.status !== "active") {
@@ -594,7 +700,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, uploadId, files }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("add_files", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       try {
@@ -621,7 +727,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, uploadId }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("finalize_deploy", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (cv.status !== "active") {
@@ -648,7 +754,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas_file",
     {
       description:
-        "Read back what is LIVE on a canvas you own — the way to verify a deploy. The live URL " +
+        "Read back what is LIVE on a canvas you own or edit — the way to verify a deploy. The live URL " +
         "is access-controlled (an unauthenticated GET returns a login page, not your files), so " +
         "confirm a deploy through here, never by fetching the URL. Omit `path` to list the live " +
         "version's files (path, size, mime, hash); pass `path` (e.g. 'index.html') to get that " +
@@ -663,8 +769,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, path }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("get_canvas_file", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       const live = await liveManifest(deps.versions, cv.currentVersionId);
       if (!live) return fail("this canvas has no live version yet");
       const { number: version, manifest } = live;
@@ -716,14 +823,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "rollback_canvas",
     {
-      description: "Point a canvas you own back at a previously published version number.",
+      description: "Point a canvas you own or edit back at a previously published version number.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         version: z.number().int().describe("The version number to make current."),
       },
     },
     async ({ id, version }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("rollback_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (cv.status !== "active") {
@@ -753,11 +860,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "unpublish_canvas",
     {
-      description: "Take a published canvas you own back to draft (clears the live version).",
+      description:
+        "Take a published canvas you own or edit back to draft (clears the live version).",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("unpublish_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (!(await deps.canvases.unpublish(cv.id)))
@@ -807,11 +915,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, ...patch }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("set_capabilities", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const fields = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-      if (Object.keys(fields).length === 0) return ok(canvasView(deps.config, cv));
+      if (Object.keys(fields).length === 0) return ok(await viewWithIdentity(cv, gate.role));
       const updated = await deps.canvases.updateCapabilities(cv.id, fields);
       deps.audit.recordAudit({
         action: "capabilities_update",
@@ -823,7 +931,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub
           .revalidateCanvas(cv.id)
           .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
-      return ok(canvasView(deps.config, updated));
+      return ok(await viewWithIdentity(updated, gate.role));
     },
   );
 
@@ -840,7 +948,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, slug }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("set_canvas_slug", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const resolved = await resolveCreateSlug(slug, (s) => deps.canvases.slugTaken(s));
@@ -867,18 +975,22 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "regenerate_deploy_key",
     {
       description:
-        "Mint a NEW deploy API key for a canvas you own and invalidate the old one (same as Settings → " +
+        "Mint a NEW deploy API key for a canvas you own or edit and invalidate the old one (same as Settings → " +
         "Regenerate key). Returns the new `cd_…` key ONCE, plus a refreshed `deploy` block with the " +
         "key embedded in the curl command. Use this if the key leaked or you lost it.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("regenerate_deploy_key", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      const apiKey = generateApiKey();
-      await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
-      deps.audit.recordAudit({ action: "key_regen", actorId: caller.userId, targetId: cv.id });
+      // Shared with the HTTP route (editor-roles plan U8/KTD11): audited with the acting
+      // role; a rotation by a non-owner emails the owner naming the actor.
+      const { apiKey } = await rotateDeployKey(
+        { canvases: deps.canvases, users: deps.users, audit: deps.audit, notify: deps.invites },
+        cv,
+        await peopleActorNow(gate.role),
+      );
       return ok({ apiKey, deploy: deployEndpoints(deps.config, cv.id, apiKey) });
     },
   );
@@ -887,15 +999,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "archive_canvas",
     {
       description:
-        "Archive a canvas you own (reversible) — takes its public URL offline and moves it to the " +
+        "Archive a canvas you own or edit (reversible) — takes its public URL offline and moves it to the " +
         "Archive view. Revokes guest grants. Use unarchive_canvas to restore it.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("archive_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      if (!(await deps.canvases.archive(cv.id))) return fail("canvas not found");
+      // The guarded transition only fails for a non-active row: the caller manages the
+      // canvas (the gate passed), so this is a state conflict, never a not-found.
+      if (!(await deps.canvases.archive(cv.id))) {
+        return fail("NOT_ACTIVE: only an active canvas can be archived");
+      }
       deps.audit.recordAudit({ action: "canvas_archive", actorId: caller.userId, targetId: cv.id });
       if (deps.hub)
         await deps.hub
@@ -920,11 +1036,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
   server.registerTool(
     "unarchive_canvas",
     {
-      description: "Restore an archived canvas you own back to active. Fails if it isn't archived.",
+      description:
+        "Restore an archived canvas you own or edit back to active. Fails if it isn't archived.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("unarchive_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (!(await deps.canvases.unarchive(cv.id)))
@@ -934,7 +1051,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         actorId: caller.userId,
         targetId: cv.id,
       });
-      return ok(canvasView(deps.config, { ...cv, status: "active" }));
+      return ok(await viewWithIdentity({ ...cv, status: "active" }, gate.role));
     },
   );
 
@@ -950,7 +1067,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     async ({ id }) => {
       // requireMutable enforces the "a DISABLED canvas can't be deleted" rule with the
       // shared DISABLED contract (deleting then admin-restoring would launder the takedown).
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("delete_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       await deps.canvases.setStatus(cv.id, "deleted");
@@ -975,7 +1092,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "update_canvas",
     {
       description:
-        "Update a canvas you own (mirrors the dashboard Settings + Share tabs). All fields optional; " +
+        "Update a canvas you own or edit (mirrors the dashboard Settings + Share tabs). All fields optional; " +
         "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
         "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
@@ -1046,13 +1163,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, ...input }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("update_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      const user = await deps.users.findById(caller.userId);
       const resolution = resolveSettingsUpdate(cv, input, {
         publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
-        canPublishPublic: user?.canPublishPublic ?? false,
+        // The public-link entitlement follows the OWNER's account, whoever acts (KD7/R10).
+        ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+        actorIsOwner: gate.role === "owner",
         publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
         now: Date.now(),
         tenancyActive: !!deps.config.org.name,
@@ -1134,7 +1252,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // Echo the resolved team grants when the canvas is team-scoped (read-your-writes).
       const teamIds =
         updated.access === "team" ? await deps.teams.listTeamIdsForCanvas(updated.id) : undefined;
-      const view = canvasView(deps.config, updated, false, teamIds);
+      // Identity rides on the mutation's echo too (review #10): the doc promises
+      // `role`/`owner` on update_canvas exactly like get_canvas.
+      const view = await viewWithIdentity(updated, gate.role, false, teamIds);
       return ok(warning ? { ...view, warning } : view);
     },
   );
@@ -1160,12 +1280,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       },
     },
     async ({ id, image }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("set_canvas_preview", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       if (image === undefined) {
         // Clear is custom-only — never delete a legitimately auto-captured screenshot.
-        if (cv.previewMode !== "custom") return ok(canvasView(deps.config, cv));
+        if (cv.previewMode !== "custom") return ok(await viewWithIdentity(cv, gate.role));
         await deletePreviewRenditions(deps.storage, cv.id);
         const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
         deps.audit.recordAudit({
@@ -1174,7 +1294,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           targetId: cv.id,
           meta: { previewMode: "auto" },
         });
-        return ok(canvasView(deps.config, updated));
+        return ok(await viewWithIdentity(updated, gate.role));
       }
       const bytes = new Uint8Array(Buffer.from(image, "base64"));
       if (bytes.byteLength === 0) return fail("INVALID_IMAGE: empty image");
@@ -1205,11 +1325,28 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         targetId: cv.id,
         meta: { previewMode: "custom" },
       });
-      return ok(canvasView(deps.config, updated));
+      return ok(await viewWithIdentity(updated, gate.role));
     },
   );
 
-  // ---- Sharing & access (U4) -------------------------------------------------
+  // ---- Sharing & access (U4 / editor-roles plan U4-U5) --------------------------
+  // Every people-list tool wraps the SAME people service the management routes wrap.
+
+  const people = peopleService({
+    canvases: deps.canvases,
+    users: deps.users,
+    invitations: deps.invitations,
+    teams: deps.teams,
+    invites: deps.invites,
+    guests: deps.guests,
+    audit: deps.audit,
+    hub: deps.hub,
+    log: deps.log,
+  });
+
+  const peopleFail = (err: PeopleError): ToolResult =>
+    err.code === "NOT_FOUND" ? fail("access entry not found") : fail(`${err.code}: ${err.message}`);
+  void PEOPLE_ERROR_STATUS;
 
   function addPersonFailure(status: string): ToolResult | null {
     if (status === "policy_blocked")
@@ -1223,32 +1360,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     return null;
   }
 
-  async function addCanvasPerson(cv: Canvas, email: string, mode: "add" | "invite") {
-    const actor = await identityNow();
-    const r = await deps.invites.resolveOrInvite(
-      {
-        kind: "canvas",
-        canvasId: cv.id,
-        canvasSlug: cv.slug,
-        canvasTitle: cv.title,
-        mode,
-      },
-      email,
-      { id: caller.userId, name: actor.name, email: actor.email, isAdmin: caller.isAdmin },
-    );
-    const failure = addPersonFailure(r.status);
+  async function addCanvasPerson(
+    gate: { canvas: Canvas; role: ManagementRole },
+    input: { email: string; role?: "viewer" | "editor"; mode: "add" | "invite" },
+  ) {
+    const r = await people.addPerson(gate.canvas, await peopleActorNow(gate.role), input);
+    if (!r.ok) return peopleFail(r);
+    const failure = addPersonFailure(r.result.status);
     if (failure) return failure;
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: caller.userId,
-      targetId: cv.id,
-      meta: { kind: "add_person", mode, status: r.status },
+    return ok({
+      ok: true,
+      status: r.result.status,
+      ...(r.result.emailDelivery ? { emailDelivery: r.result.emailDelivery } : {}),
+      role: r.role,
     });
-    return ok(
-      r.emailDelivery
-        ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }
-        : { ok: true, status: r.status },
-    );
   }
 
   server.registerTool(
@@ -1256,7 +1381,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Search eligible people for an Add person flow, mirroring the dashboard picker. " +
-        "Use context='canvas' with canvasId for a canvas you own, or context='team' with teamId " +
+        "Use context='canvas' with canvasId for a canvas you own or edit, or context='team' with teamId " +
         "for a team you can see. Returns scoped suggestions only; it does not expose admin People.",
       inputSchema: {
         context: z.enum(["canvas", "team"]).describe("Which picker context to search."),
@@ -1289,20 +1414,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_access",
     {
       description:
-        "List who can access a canvas you own beyond the rung default — active named people and " +
-        "pending sign-ins, same as the Share tab's people list. Each entry has an `id` (use it " +
-        "with revoke_access), `kind` ('member'|'pending'|'guest' for legacy rows), `email`, and `name`.",
+        "List a canvas's people list — the owner first, then named people, pending sign-ins, " +
+        "and team grants — each with a `role` ('owner'|'editor'|'viewer'), same as the Share " +
+        "dialog. Each entry has a stable `id` ('owner', 'member:<id>', 'guest:<id>', " +
+        "'pending:<id>', 'team:<teamId>') for set_access_role / revoke_access, a `kind`, " +
+        "`email`, `name`, `userId`, and `teamId`. Available to the owner and editors.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
-      const entries = await resolveAllowlistEntries(
-        await deps.canvases.listAllowlist(cv.id),
-        deps.users,
-        await deps.invitations.listPendingForTarget("canvas", cv.id),
-      );
-      return ok({ entries });
+      const gate = await requireRole("list_access", id);
+      if ("error" in gate) return gate.error;
+      const entries = await people.list(gate.canvas);
+      // Owner-only projection (review #7), the same one the dashboard's picker uses.
+      if (gate.role !== "owner") return ok({ entries });
+      return ok({ entries, transferCandidates: await ownership.transferCandidates(gate.canvas) });
     },
   );
 
@@ -1310,20 +1435,37 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "grant_access",
     {
       description:
-        "Grant a person access to a canvas you own by email (mirrors the Share tab's add-person). " +
-        "An existing user is granted now (`status: granted`); an admissible new email becomes a " +
-        "pending sign-in grant (`status: pending`) and materializes after verified sign-in. No " +
-        "app-owned credential is created. The grant only takes effect on the `specific_people` rung — " +
-        "set that with update_canvas.",
+        "Add a person (by email) or a team (by teamId) to a canvas's people list with a role " +
+        "(mirrors the Share dialog's add-person / add-team). `role` is 'viewer' (default) or " +
+        "'editor'; only org members and teams can be editors (GUEST_VIEWER_ONLY otherwise). An " +
+        "existing user is granted now (`status: granted`; an existing entry's role is updated " +
+        "when you pass one — `status: role_changed` — and never changed when you omit it); an " +
+        "admissible new email becomes a pending sign-in grant (`status: pending`) that " +
+        "materializes after verified sign-in, carrying the role. A viewer grant takes effect " +
+        "on the `specific_people` / `team` rungs (set with update_canvas); an editor always has " +
+        "access. Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
-        email: z.string().email().describe("The person's email."),
+        email: z.string().email().optional().describe("The person's email (or pass teamId)."),
+        teamId: z.string().optional().describe("A team to grant (or pass email)."),
+        role: accessRoleSchema.optional().describe("'viewer' (default) or 'editor'."),
       },
     },
-    async ({ id, email }) => {
-      const gate = await requireMutable(id);
+    async ({ id, email, teamId, role }) => {
+      if ((email ? 1 : 0) + (teamId ? 1 : 0) !== 1) {
+        return fail("INVALID_REQUEST: pass exactly one of email or teamId");
+      }
+      const gate = await requireMutable("grant_access", id);
       if ("error" in gate) return gate.error;
-      return addCanvasPerson(gate.canvas, email, "add");
+      if (teamId) {
+        const r = await people.addTeam(gate.canvas, await peopleActorNow(gate.role), {
+          teamId,
+          role,
+        });
+        if (!r.ok) return peopleFail(r);
+        return ok({ ok: true, status: r.status, role: r.role, from: r.from });
+      }
+      return addCanvasPerson(gate, { email: email as string, role, mode: "add" });
     },
   );
 
@@ -1331,7 +1473,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "invite_to_canvas",
     {
       description:
-        "Deliberately invite a person to a canvas you own, by email — distinct from grant_access " +
+        "Deliberately invite a person to a canvas you own or edit, by email — distinct from grant_access " +
         "(the silent add). Sends a courtesy email: an existing user is granted now " +
         "(`status: granted`); a brand-new email gets a sign-in invitation and reaches the canvas " +
         "on their first sign-in (`status: pending`). A brand-new EXTERNAL email is refused for a " +
@@ -1340,12 +1482,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().describe("The person's email."),
+        role: accessRoleSchema
+          .optional()
+          .describe("'viewer' (default) or 'editor' (org members only)."),
       },
     },
-    async ({ id, email }) => {
-      const gate = await requireMutable(id);
+    async ({ id, email, role }) => {
+      const gate = await requireMutable("invite_to_canvas", id);
       if ("error" in gate) return gate.error;
-      return addCanvasPerson(gate.canvas, email, "invite");
+      return addCanvasPerson(gate, { email, role, mode: "invite" });
     },
   );
 
@@ -1353,54 +1498,97 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "revoke_access",
     {
       description:
-        "Remove an access entry from a canvas you own (active member, pending sign-in, or legacy " +
-        "guest row). Pass the entry `id` from list_access. Revokes legacy guest sessions and drops " +
-        "any live sockets it no longer permits.",
+        "Remove a people-list entry from a canvas (a person — another editor included, or " +
+        "yourself — a pending sign-in, a legacy guest row, or a team grant). Pass the entry `id` " +
+        "from list_access (legacy bare row ids still work). The `owner` entry cannot be removed " +
+        "(OWNER_ONLY) — transfer ownership instead. Revokes legacy guest sessions and drops any " +
+        "live sockets it no longer permits. Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         entryId: z.string().describe("The access entry id (from list_access)."),
       },
     },
     async ({ id, entryId }) => {
-      const gate = await requireMutable(id);
+      const gate = await requireMutable("revoke_access", id);
       if ("error" in gate) return gate.error;
-      const cv = gate.canvas;
-      if (entryId.startsWith("pending:")) {
-        const cancelled = await deps.invitations.cancelPendingForTarget(
-          "canvas",
-          cv.id,
-          entryId.slice("pending:".length),
-        );
-        if (!cancelled) return fail("access entry not found");
-        deps.audit.recordAudit({
-          action: "allowlist_remove",
-          actorId: caller.userId,
-          targetId: cv.id,
-          meta: { entryId, kind: "pending", email: cancelled.email },
-        });
-        if (deps.hub)
-          await deps.hub
-            .revalidateCanvas(cv.id)
-            .catch((err) =>
-              deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"),
-            );
-        return ok({ ok: true });
-      }
-      const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
-      if (entry?.principalKind === "guest" && entry.email && deps.guests) {
-        await deps.guests.revokeInvite(cv.id, entry.email);
-      }
-      await deps.canvases.removeAllowlistEntry(cv.id, entryId);
-      deps.audit.recordAudit({
-        action: "allowlist_remove",
-        actorId: caller.userId,
-        targetId: cv.id,
-        meta: { entryId, kind: entry?.principalKind ?? null },
+      const r = await people.remove(gate.canvas, await peopleActorNow(gate.role), entryId);
+      if (!r.ok) return peopleFail(r);
+      return ok({ ok: true });
+    },
+  );
+
+  // ---- Ownership transfer (editor-roles plan U7) — owner-only -------------------------
+  const ownership = ownershipService({
+    canvases: deps.canvases,
+    users: deps.users,
+    teams: deps.teams,
+    orgMembership: makeOrgMembershipResolver(deps.orgs, deps.orgMembers),
+    tenancyActive: caller.tenancyActive,
+    audit: deps.audit,
+    hub: deps.hub,
+    notify: deps.invites,
+    log: deps.log,
+  });
+
+  server.registerTool(
+    "transfer_canvas",
+    {
+      description:
+        "Transfer ownership of a canvas you OWN to one of its existing editors (an org member). " +
+        "Instant — no pending state: the recipient becomes the owner and you stay on as an " +
+        "editor; the public-link entitlement now follows their account (a public link they are " +
+        "not entitled to is reverted — see `publicLinkReverted`). Pass the recipient's user id " +
+        "(from list_access / search_people), never an email; a team cannot receive a canvas. " +
+        "Editors get OWNER_ONLY; a recipient who is not an editor gets NOT_ELIGIBLE.",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        toUserId: z
+          .string()
+          .min(1)
+          .refine((v) => !v.includes("@"), "toUserId is a user id, not an email")
+          .describe("The recipient's user id (an existing editor) — never an email."),
+      },
+    },
+    async ({ id, toUserId }) => {
+      const gate = await requireMutable("transfer_canvas", id);
+      if ("error" in gate) return gate.error;
+      const identity = await identityNow();
+      const r = await ownership.transfer(
+        gate.canvas,
+        { id: caller.userId, name: identity.name },
+        toUserId,
+      );
+      if (!r.ok) return fail(`${r.code}: ${r.message}`);
+      return ok({
+        ok: true,
+        canvas: canvasView(deps.config, r.canvas),
+        previousOwnerEditor: r.previousOwnerEditor,
+        publicLinkReverted: r.publicLinkReverted,
       });
-      if (deps.hub)
-        await deps.hub
-          .revalidateCanvas(cv.id)
-          .catch((err) => deps.log.warn({ err, canvasId: cv.id }, "hub: revalidateCanvas failed"));
+    },
+  );
+
+  server.registerTool(
+    "set_access_role",
+    {
+      description:
+        "Change a people-list entry's role on a canvas (mirrors the Share dialog's role " +
+        "control). Pass the entry `id` from list_access and `role` 'viewer' or 'editor'. " +
+        "Works on people, pending sign-ins, and team grants; a guest row can only be a viewer " +
+        "(GUEST_VIEWER_ONLY); the `owner` entry is owner-only (OWNER_ONLY) — only " +
+        "transfer_canvas changes who the owner is. Demoting drops live editor sockets. " +
+        "Available to the owner and editors (you may demote yourself).",
+      inputSchema: {
+        id: z.string().describe("The canvas id."),
+        entryId: z.string().describe("The access entry id (from list_access)."),
+        role: accessRoleSchema.describe("'viewer' or 'editor'."),
+      },
+    },
+    async ({ id, entryId, role }) => {
+      const gate = await requireMutable("set_access_role", id);
+      if ("error" in gate) return gate.error;
+      const r = await people.setRole(gate.canvas, await peopleActorNow(gate.role), entryId, role);
+      if (!r.ok) return peopleFail(r);
       return ok({ ok: true });
     },
   );
@@ -1424,8 +1612,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // the dashboard (plan 002 U7): an org template is cloneable only by a member of its
       // org; a personal public_link template stays cloneable. Scoped to the caller's
       // server-resolved orgIds.
+      // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage
+      // — the shared resolver (parity with the dashboard clone route).
       const eligible =
-        source.ownerId === caller.userId
+        (await resolveManagementGrant(source, principal, roleDeps)) !== null
           ? source.status === "active"
           : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
               tenancyActive: caller.tenancyActive,
@@ -1452,14 +1642,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "get_canvas_usage",
     {
       description:
-        "Usage stats for a canvas you own (same as the dashboard usage panel): view stats + a " +
+        "Usage stats for a canvas you own or edit (same as the dashboard usage panel): view stats + a " +
         "30-day sparkline, and — for backend-on canvases — KV/file/AI/realtime op counts, file " +
         "storage, and AI tokens/cost.",
       inputSchema: { id: z.string().describe("The canvas id.") },
     },
     async ({ id }) => {
-      const cv = await requireOwned(id);
-      if (!cv) return fail("canvas not found");
+      const gate = await requireRole("get_canvas_usage", id);
+      if ("error" in gate) return gate.error;
+      const cv = gate.canvas;
       return ok(await fetchCanvasUsage(deps, cv.id));
     },
   );
@@ -1694,7 +1885,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
 
   // Draft / editor-loop tools (get/read/write/delete/rename/publish/restore) — split
   // into their own module to keep this registry under the file-size bar.
-  registerDraftTools(server, deps, caller, requireOwned, requireMutable);
+  registerDraftTools(server, deps, caller, requireRole, requireMutable);
 
   return server;
 }

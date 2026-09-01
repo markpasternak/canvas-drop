@@ -45,16 +45,24 @@ export type SettingsResolution =
  * diverge on the listability invariant (templatable ⊆ listed ⊆ shared/published/
  * unprotected), the share-requires-publish rule, or the effective public_link gate.
  *
- * `opts.publicLinksEnabled` and `opts.canPublishPublic` are the global + per-account
- * `public_link` gate. The caller applies the result: `updateSettings(patch)` + `setPassword(hash)`
- * when `password !== undefined`, then audits `share_change` when `targetAccess` is set.
+ * `opts.publicLinksEnabled` and `opts.ownerCanPublishPublic` are the global + per-account
+ * `public_link` gate — the per-account half is the OWNER's entitlement, whoever acts
+ * (editor-roles plan, KD7/R10): an editor without it may still switch a canvas whose
+ * owner has it on, and an editor with it may not when the owner lacks it
+ * (`PUBLIC_LINK_OWNER_GATED`). The guest-AI opt-in and its spend cap are owner-only
+ * (R7): a non-owner's write touching them refuses with `OWNER_ONLY`. The caller applies
+ * the result: `updateSettings(patch)` + `setPassword(hash)` when `password !== undefined`,
+ * then audits `share_change` when `targetAccess` is set.
  */
 export function resolveSettingsUpdate(
   cv: Canvas,
   input: CanvasSettingsInput,
   opts: {
     publicLinksEnabled: boolean;
-    canPublishPublic: boolean;
+    /** The canvas OWNER's per-account publish-public entitlement (never the actor's). */
+    ownerCanPublishPublic: boolean;
+    /** Whether the acting principal is the owner (the guest-AI fields are owner-only). */
+    actorIsOwner: boolean;
     publicEdgeCacheTtlSec: number;
     now: number;
     /** Whether tenancy is active (plan 002 — an org is configured). When true, a
@@ -63,6 +71,16 @@ export function resolveSettingsUpdate(
   },
 ): SettingsResolution {
   const { password, shared, access, discoverability, ...rest } = input;
+  // Owner-only settings (R7): the guest-AI opt-in admits non-org principals to a capability
+  // billed to the owner, so only the owner may touch it or its cap.
+  if (!opts.actorIsOwner && (rest.guestAiEnabled !== undefined || rest.guestAiCap !== undefined)) {
+    return {
+      ok: false,
+      code: "OWNER_ONLY",
+      message: "Only the canvas owner can change the guest AI opt-in or its spend cap.",
+      status: 403,
+    };
+  }
   // The target rung: the first-class `access` field wins; else the deprecated
   // `shared` boolean maps to whole_org/private; else unchanged (undefined).
   const targetAccess =
@@ -108,13 +126,24 @@ export function resolveSettingsUpdate(
         status: 403,
       };
     }
-    if (!opts.canPublishPublic) {
-      return {
-        ok: false,
-        code: "PUBLIC_NOT_ALLOWED",
-        message: "An administrator has revoked this account's permission to publish public links.",
-        status: 403,
-      };
+    if (!opts.ownerCanPublishPublic) {
+      // The entitlement follows the OWNER's account (KD7). The owner hears the existing
+      // refusal; an editor hears that the owner's account gates it (KTD6, AE6).
+      return opts.actorIsOwner
+        ? {
+            ok: false,
+            code: "PUBLIC_NOT_ALLOWED",
+            message:
+              "An administrator has revoked this account's permission to publish public links.",
+            status: 403,
+          }
+        : {
+            ok: false,
+            code: "PUBLIC_LINK_OWNER_GATED",
+            message:
+              "The owner's account can't publish public links, so this canvas can't be made public. An administrator can grant it to the owner.",
+            status: 403,
+          };
     }
   }
   // Under active tenancy, whole_org means "members of the canvas's home org" — a canvas

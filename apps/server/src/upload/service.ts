@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Config } from "@canvas-drop/shared";
 import type { Canvas, Manifest, UploadSession } from "@canvas-drop/shared/db";
+import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { looksLikeApiKey } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
 import { soleHtmlEntry } from "../canvas/manifest.js";
 import { decodeText, isTextContentType, mimeFor } from "../canvas/mime.js";
+import { resolveManagementGrant } from "../canvas/role.js";
 import { blobKey, canvasBlobPrefix, hashFromBlobKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
@@ -42,6 +45,11 @@ export interface UploadServiceDeps {
   storage: StorageDriver;
   engine: DeployEngine;
   log?: Logger;
+  /** Live org-membership resolver (editor-roles plan, KTD2): finalize re-resolves the
+   *  actor's membership on use so an editor's grant is checked against the LIVE org
+   *  set. Optional — omitted (focused tests) ⇒ an empty set, which under inert tenancy
+   *  changes nothing and under active tenancy admits only the owner. */
+  orgMembership?: OrgMembershipResolver;
   /** Injectable clock for tests; defaults to Date.now. */
   now?: () => number;
 }
@@ -58,21 +66,24 @@ export interface UploadServiceDeps {
  *           engine's shared commit tail.
  *
  * Identity (`callerId`) and the target `canvasId` are always supplied by the
- * gated front-ends (MCP `requireOwned` / Deploy-API `authCanvas`); the service
- * re-checks them on every staging op and again at finalize (block-after-issue).
+ * gated front-ends (the MCP role gate / Deploy-API `authCanvas`); the service binds
+ * each session to that ACTOR (the `owner_id` column of `upload_sessions` holds the
+ * actor who began it — owner or editor), re-checks the binding on every staging op,
+ * and re-resolves the actor's role on the canvas at finalize (block-after-issue).
  */
 export function uploadService(deps: UploadServiceDeps) {
   const now = deps.now ?? Date.now;
 
-  /** Resolve a session by plaintext uploadId, enforcing owner + canvas binding + liveness. */
+  /** Resolve a session by plaintext uploadId, enforcing actor + canvas binding + liveness.
+   *  A session is usable only by the actor who began it (editor-roles plan, U3). */
   async function requireStageable(
     handleHash: string,
     callerId: string,
     canvasId: string,
   ): Promise<UploadSession> {
     const s = await deps.uploadSessions.findByHandleHash(handleHash);
-    // One opaque code for unknown / wrong-owner / wrong-canvas — no existence leak.
-    if (!s || s.ownerId !== callerId || s.canvasId !== canvasId) {
+    // One opaque code for unknown / wrong-actor / wrong-canvas — no existence leak.
+    if (!s || s.actorId !== callerId || s.canvasId !== canvasId) {
       throw new DeployError("UPLOAD_HANDLE_INVALID", "no such upload session");
     }
     if (s.consumedAt) throw new DeployError("UPLOAD_ALREADY_FINALIZED", "already finalized");
@@ -143,7 +154,7 @@ export function uploadService(deps: UploadServiceDeps) {
      * covers a staged blob's hash. Returns the missing hashes the caller must
      * upload (content-addressed skip-unchanged).
      */
-    async begin(canvas: Canvas, ownerId: string, input: ManifestInput[]): Promise<BeginResult> {
+    async begin(canvas: Canvas, actorId: string, input: ManifestInput[]): Promise<BeginResult> {
       if (!Array.isArray(input) || input.length === 0) {
         throw new DeployError("INVALID_MANIFEST", "manifest is empty");
       }
@@ -210,7 +221,7 @@ export function uploadService(deps: UploadServiceDeps) {
       const uploadId = generateUploadId();
       await deps.uploadSessions.create({
         canvasId: canvas.id,
-        ownerId,
+        actorId,
         handleHash: hashUploadId(uploadId),
         manifest,
         stagedHashes: [],
@@ -269,16 +280,25 @@ export function uploadService(deps: UploadServiceDeps) {
 
       try {
         // Re-validate identity ON USE, not just at issue (block-after-issue, §12.0).
-        const user = await deps.users.findById(claimed.ownerId);
+        const user = await deps.users.findById(claimed.actorId);
         if (!user || user.isBlocked) {
-          throw new DeployError("UPLOAD_HANDLE_INVALID", "session owner is not active");
+          throw new DeployError("UPLOAD_HANDLE_INVALID", "session actor is not active");
         }
-        // Owner re-check through the owner-only seam: 404-equivalent, no existence
-        // leak; a non-owner admin is not a bypass.
-        const canvas = await deps.canvases.findById(canvasId);
-        if (!canvas || canvas.status === "deleted" || canvas.ownerId !== claimed.ownerId) {
-          throw new DeployError("UPLOAD_HANDLE_INVALID", "canvas not available to this owner");
+        // Role re-check through the shared resolver (editor-roles plan, KTD1): the
+        // session's actor must STILL be an owner or editor of the canvas at finalize
+        // time, with org membership re-resolved live (KTD2) — a demoted editor or a
+        // departed member cannot finish a deploy they began. 404-equivalent, no
+        // existence leak; a non-owner admin is not a bypass.
+        const orgIds = deps.orgMembership ? await deps.orgMembership(user) : new Set<string>();
+        const grant = await resolveManagementGrant(
+          await deps.canvases.findById(canvasId),
+          memberPrincipal(user, orgIds),
+          { canvases: deps.canvases, tenancyActive: !!deps.config.org.name },
+        );
+        if (!grant) {
+          throw new DeployError("UPLOAD_HANDLE_INVALID", "canvas not available to this actor");
         }
+        const canvas = grant.canvas;
 
         const manifest = (claimed.manifest as Manifest | null) ?? {};
         const paths = Object.keys(manifest);
@@ -316,7 +336,7 @@ export function uploadService(deps: UploadServiceDeps) {
 
         const version = await deps.engine.createVersionWithRetry(
           canvasId,
-          claimed.ownerId,
+          claimed.actorId,
           "upload",
         );
         // Mark the handle terminal BEFORE the commit so a transient failure in

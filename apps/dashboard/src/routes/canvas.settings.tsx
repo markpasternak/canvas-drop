@@ -346,15 +346,26 @@ export default function Settings() {
         </Section>
 
         <Section id="danger" title="Danger zone" tone="danger">
-          <Row
-            title="Delete canvas"
-            description="Takes it offline and removes it from your list. Recoverable for 30 days, then purged."
-          >
-            <Button variant="danger" size="sm" onClick={() => setConfirm("delete")}>
-              <Warning size={15} weight="bold" aria-hidden />
-              Delete canvas
-            </Button>
-          </Row>
+          {canvas.role === "editor" ? (
+            // Owner-only act (editor-roles plan, R7/KTD14): an editor sees why, never a
+            // button that bounces off OWNER_ONLY.
+            <Row
+              title="Delete canvas"
+              description={`Only the owner${canvas.owner?.name ? ` (${canvas.owner.name})` : ""} can delete this canvas. Ask them to delete it, or to transfer ownership to you first.`}
+            >
+              <span className="text-xs text-muted">Owner only</span>
+            </Row>
+          ) : (
+            <Row
+              title="Delete canvas"
+              description="Takes it offline and removes it from your list. Recoverable for 30 days, then purged."
+            >
+              <Button variant="danger" size="sm" onClick={() => setConfirm("delete")}>
+                <Warning size={15} weight="bold" aria-hidden />
+                Delete canvas
+              </Button>
+            </Row>
+          )}
         </Section>
       </div>
 

@@ -294,3 +294,28 @@ describe("settings route", () => {
     );
   });
 });
+
+describe("settings — owner-only danger zone (editor-roles plan U6)", () => {
+  it("an editor sees an owner-only notice instead of the Delete button", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          role: "editor",
+          ownerId: "u9",
+          owner: { id: "u9", name: "Olive", email: "o@example.com" },
+        }),
+    });
+    renderSettings();
+    expect(
+      await screen.findByText(/only the owner \(olive\) can delete this canvas/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete canvas/i })).toBeNull();
+  });
+
+  it("the owner keeps the Delete button", async () => {
+    mockFetch({ "GET /api/canvases/c1": () => json({ ...CANVAS, role: "owner", ownerId: "u1" }) });
+    renderSettings();
+    expect(await screen.findByRole("button", { name: /delete canvas/i })).toBeInTheDocument();
+  });
+});

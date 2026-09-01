@@ -5,6 +5,7 @@ import {
   Copy,
   Prohibit,
   Star,
+  UserSwitch,
 } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,16 +16,18 @@ import { daysSince, formatBytes, relativeTime } from "../lib/format.js";
 import {
   useAdminDisableCanvas,
   useAdminEnableCanvas,
+  useAdminReassignOwner,
   useAdminRestoreCanvas,
   useSetFeatured,
 } from "../lib/mutations.js";
+import { useAdminUsers } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
 import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { AccessBadge, Badge, ConceptBadge, StatusBadge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { DataTable } from "./DataTable.js";
 import { Dialog } from "./Dialog.js";
-import { TextareaField } from "./Field.js";
+import { Field, TextareaField } from "./Field.js";
 import { useToast } from "./Toast.js";
 
 const MENU_ICON = 15;
@@ -99,12 +102,117 @@ function TakedownDialog({
   );
 }
 
+/**
+ * Reassign-owner dialog (editor-roles plan U7, R14): pick another member (admin
+ * user directory search), give a reason, confirm. The server refuses the current
+ * owner, a blocked account, a non-member of the canvas's org, and the acting admin.
+ */
+function ReassignDialog({
+  canvas,
+  open,
+  onClose,
+}: {
+  canvas: AdminCanvasRow;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [target, setTarget] = useState<{ id: string; email: string; name: string } | null>(null);
+  const [reason, setReason] = useState("");
+  const reassign = useAdminReassignOwner();
+  const toast = useToast();
+  const users = useAdminUsers({ q: q.trim() || undefined, limit: 8 });
+  const candidates = (users.data?.users ?? []).filter(
+    (u) => !u.isBlocked && u.id !== canvas.owner?.id,
+  );
+  return (
+    <Dialog open={open} onClose={onClose} title={`Reassign “${canvas.title || canvas.slug}”`}>
+      <div className="space-y-4">
+        <p className="text-sm text-muted">
+          Moves ownership from {canvas.owner?.email ?? "the current owner"} to another member. The
+          previous owner stays on as an editor when their account is active; the deploy key is
+          rotated and the new owner issues a fresh one.
+        </p>
+        <Field
+          label="New owner"
+          placeholder="Search members by name or email"
+          value={target ? `${target.name} <${target.email}>` : q}
+          onChange={(e) => {
+            setTarget(null);
+            setQ(e.target.value);
+          }}
+        />
+        {!target && q.trim().length > 0 && (
+          <ul className="max-h-48 divide-y divide-border overflow-auto rounded-lg border border-border">
+            {candidates.length === 0 && (
+              <li className="px-3 py-2 text-sm text-muted">No matching members</li>
+            )}
+            {candidates.map((u) => (
+              <li key={u.id}>
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-surface-2"
+                  onClick={() => setTarget({ id: u.id, email: u.email, name: u.name })}
+                >
+                  <span className="font-medium">{u.name}</span>
+                  <span className="text-xs text-muted">{u.email}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <TextareaField
+          label="Reason"
+          placeholder="Why is ownership moving? (recorded in the audit log)"
+          value={reason}
+          onChange={(e) => setReason(e.target.value.slice(0, REASON_MAX))}
+          maxLength={REASON_MAX}
+          rows={3}
+          hint={`${reason.length}/${REASON_MAX}`}
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={reassign.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            loading={reassign.isPending}
+            disabled={!target || reason.trim().length === 0}
+            onClick={async () => {
+              if (!target) return;
+              try {
+                const r = await reassign.mutateAsync({
+                  id: canvas.id,
+                  toUserId: target.id,
+                  reason: reason.trim(),
+                });
+                toast(
+                  r.publicLinkReverted
+                    ? `Reassigned to ${target.email}; the public link was turned off (their account can't publish publicly)`
+                    : `Reassigned to ${target.email}`,
+                );
+                onClose();
+              } catch (err) {
+                toast(err instanceof ApiError ? err.hint : "Couldn't reassign", "error");
+              }
+            }}
+          >
+            Reassign owner
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 /** All row actions in one overflow menu — the dense-table best practice (every
  *  per-row action behind a kebab). The status action (Disable/Enable/Restore)
  *  joins the navigation/copy actions in the same menu; archived canvases are
  *  owner-controlled, so they get only the navigation actions. */
 function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
   const [takedownOpen, setTakedownOpen] = useState(false);
+  const [reassignOpen, setReassignOpen] = useState(false);
   const enable = useAdminEnableCanvas();
   const restore = useAdminRestoreCanvas();
   const setFeatured = useSetFeatured();
@@ -175,6 +283,16 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
         >
           {canvas.galleryFeatured ? "Unfeature" : "Feature in gallery"}
         </ActionMenuItem>
+        {/* Reassign owner (editor-roles plan U7): offboarding — move a canvas between
+            other members with a reason. Not offered for a soft-deleted row (restore first). */}
+        {canvas.status !== "deleted" && (
+          <ActionMenuItem
+            icon={<UserSwitch size={MENU_ICON} aria-hidden />}
+            onSelect={() => setReassignOpen(true)}
+          >
+            Reassign owner
+          </ActionMenuItem>
+        )}
         {canvas.status === "active" && (
           <ActionMenuItem
             danger
@@ -199,6 +317,7 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
         )}
       </ActionMenu>
       <TakedownDialog canvas={canvas} open={takedownOpen} onClose={() => setTakedownOpen(false)} />
+      <ReassignDialog canvas={canvas} open={reassignOpen} onClose={() => setReassignOpen(false)} />
     </>
   );
 }

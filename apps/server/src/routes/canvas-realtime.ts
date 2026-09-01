@@ -69,6 +69,7 @@ export function canvasRealtimeRoutes(deps: CanvasRealtimeDeps): Hono<AppEnv> {
             {
               id: user.id,
               name: user.name,
+              email: user.email,
               isAdmin: user.isAdmin,
               orgIds: c.get("orgIds") ?? new Set<string>(),
               principal: requestPrincipal(c),

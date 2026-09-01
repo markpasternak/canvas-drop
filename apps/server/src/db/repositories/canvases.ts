@@ -1,6 +1,7 @@
 import { computeSearchText, searchTextPatterns } from "@canvas-drop/shared";
 import { FEATURE_CAPABILITIES, FEATURE_COLUMN } from "@canvas-drop/shared/capabilities";
 import {
+  type AccessRole,
   type AccessRung,
   type AllowlistPrincipalKind,
   type Canvas,
@@ -31,6 +32,7 @@ import {
 } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
+import { teamOrgClause } from "./teams.js";
 
 /**
  * The share + gallery columns cleared whenever a canvas leaves the Published
@@ -252,8 +254,18 @@ export interface AllowlistEntry {
   principalKind: AllowlistPrincipalKind;
   userId: string | null;
   email: string | null;
+  /** viewer | editor (editor-roles plan). Guest rows are always `viewer`. */
+  role: AccessRole;
   createdAt: number;
 }
+
+/**
+ * Scope for the editor predicate (editor-roles plan, KTD2). Editor privilege is a LIVE
+ * predicate: when tenancy is active the caller needs a non-empty live org set that
+ * contains the canvas's home org (when it has one); when tenancy is inert any member
+ * qualifies. Same shape as {@link GalleryScope} so callers pass the one they already build.
+ */
+export type EditorScope = GalleryScope;
 
 export interface OwnerCanvasSummary {
   active: number;
@@ -264,6 +276,50 @@ export interface OwnerCanvasSummary {
   templates: number;
   neverDeployed: number;
 }
+
+/** The inventory summary over the actor's owned-or-edited set (editor-roles plan, KTD9). */
+export interface ActorCanvasSummary extends OwnerCanvasSummary {
+  /** Active canvases the actor owns. */
+  owned: number;
+  /** Active canvases the actor edits (not owned). */
+  edited: number;
+}
+
+/** `role` narrowing for the owned-or-edited list (R16). */
+export type ActorListRole = "owned" | "edited";
+
+/**
+ * Options for the actor's owned-OR-edited list (editor-roles plan, KTD9): the same
+ * search / tags / filters / sort / paging / archived pipeline as the owner list, over
+ * "owned by me, or a direct editor row for me, or a member of an editor-role team",
+ * under the live org predicate.
+ */
+export interface ActorListOptions extends Omit<OwnerListOptions, "ownerId"> {
+  actorId: string;
+  scope: EditorScope;
+  role?: ActorListRole;
+}
+
+/** Thrown inside the transfer transaction when the conditional owner swap matched no row. */
+class TransferConflict extends Error {}
+
+/** Input of the composite ownership write (editor-roles plan, KTD7). */
+export interface TransferOwnerInput {
+  canvasId: string;
+  /** The owner the caller observed — the swap is CONDITIONAL on it still holding. */
+  fromUserId: string;
+  toUserId: string;
+  /** Upsert a direct editor row for the previous owner (written FIRST). */
+  previousOwnerEditor: boolean;
+  /** Revert a `public_link` rung (the new owner lacks the entitlement). */
+  revertPublicLink: boolean;
+  /** Admin reassign: rotate the deploy key in the same write. */
+  newApiKeyHash?: string;
+}
+
+export type TransferOwnerResult =
+  | { swapped: true; canvas: Canvas; publicLinkReverted: boolean }
+  | { swapped: false };
 
 /**
  * Canvases repository (§10). Dual-dialect seam typed `any` (KTD-1); inputs and
@@ -277,6 +333,59 @@ export function canvasesRepository(client: DbClient) {
   const usersT = client.dialect === "sqlite" ? sqliteSchema.users : pgSchema.users;
   const allowlistT =
     client.dialect === "sqlite" ? sqliteSchema.canvasAllowlist : pgSchema.canvasAllowlist;
+  const canvasTeamsT =
+    client.dialect === "sqlite" ? sqliteSchema.canvasTeams : pgSchema.canvasTeams;
+  const teamMembersT =
+    client.dialect === "sqlite" ? sqliteSchema.teamMembers : pgSchema.teamMembers;
+  const teamsT = client.dialect === "sqlite" ? sqliteSchema.teams : pgSchema.teams;
+
+  /**
+   * "Is `userId` an effective editor of this canvas row?" as ONE SQL predicate on `t`
+   * (editor-roles plan, KTD2/KTD4/KTD9): a direct member row with role editor, OR
+   * membership of an editor-role team grant (personal team by membership alone; org
+   * team only when its org is in the caller's LIVE org set — the same clause as
+   * `teamsRepository.accessOrgClause`), AND the org predicate: under active tenancy
+   * the caller must hold a non-empty live org set that contains the canvas's home org
+   * when it has one. Shared by {@link listEditedCanvasIds} and the owned-or-edited list
+   * so the two can never drift.
+   */
+  const editedByPredicate = (userId: string, scope: EditorScope): SQL => {
+    const orgIds = [...scope.viewerOrgIds];
+    const directEditor = exists(
+      db
+        .select({ one: sql`1` })
+        .from(allowlistT)
+        .where(
+          and(
+            eq(allowlistT.canvasId, t.id),
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+            eq(allowlistT.role, "editor"),
+          ),
+        ),
+    );
+    const teamEditor = exists(
+      db
+        .select({ one: sql`1` })
+        .from(canvasTeamsT)
+        .innerJoin(teamMembersT, eq(teamMembersT.teamId, canvasTeamsT.teamId))
+        .innerJoin(teamsT, eq(teamsT.id, canvasTeamsT.teamId))
+        .where(
+          and(
+            eq(canvasTeamsT.canvasId, t.id),
+            eq(canvasTeamsT.role, "editor"),
+            eq(teamMembersT.userId, userId),
+            teamOrgClause(teamsT, orgIds),
+          ),
+        ),
+    );
+    const grant = or(directEditor, teamEditor) as SQL;
+    if (!scope.tenancyActive) return grant;
+    // Active tenancy: a caller with NO live org (a guest) is never an editor; an
+    // org-homed canvas requires the caller to be in that org.
+    if (orgIds.length === 0) return sql`false`;
+    return and(grant, or(isNull(t.orgId), inArray(t.orgId, orgIds))) as SQL;
+  };
 
   /**
    * The §12 gallery-visibility predicate, shared by {@link listGallery} and the
@@ -501,6 +610,117 @@ export function canvasesRepository(client: DbClient) {
     return { items, total };
   };
 
+  /**
+   * The shared list pipeline (search / tags / filters / sort / paging / archived) over a
+   * caller-supplied base scope — owner-only ({@link listByOwnerFiltered}) or
+   * owned-or-edited ({@link listForActorFiltered}). Every option ANDs onto `base` and
+   * can only ever shrink it (§12).
+   */
+  async function listFiltered(
+    base: SQL,
+    opts: Omit<OwnerListOptions, "ownerId">,
+  ): Promise<{ items: Canvas[]; total: number; recentViews?: Map<string, number> }> {
+    const filters: Array<SQL | undefined> = [
+      base,
+      // Default scope is the active set (excludes archived + deleted); the
+      // `archived` scope lists ONLY archived canvases (the Your-canvases toggle).
+      opts.archived ? eq(t.status, "archived") : notInArray(t.status, ["deleted", "archived"]),
+    ];
+
+    // Forgiving normalized-substring search over the shared `search_text` blob
+    // (plan 2026-06-19 KTD1) — the SAME predicate the gallery uses, so the owner
+    // list and gallery search title + summary + tags + slug identically.
+    filters.push(searchTextPredicate(opts.q));
+
+    // Multi-tag any-match (2026-06-19): one JSON-array-membership clause per tag,
+    // OR-ed — a canvas matches if it carries ANY selected tag. Same per-tag predicate
+    // the gallery uses (tagMembershipFilter), so the two surfaces can't drift.
+    if (opts.tag && opts.tag.length > 0) {
+      filters.push(or(...opts.tag.map(tagMembershipFilter)));
+    }
+
+    // Column-based state filters (plan 005 KTD3). `protected` keys off a set
+    // password hash; `neverDeployed` off the absence of a published version.
+    if (opts.access) filters.push(eq(t.access, opts.access));
+    if (opts.shared) filters.push(ne(t.access, "private"));
+    if (opts.protected) filters.push(isNotNull(t.passwordHash));
+    if (opts.listed) filters.push(eq(t.galleryListed, true));
+    if (opts.template) filters.push(eq(t.galleryTemplatable, true));
+    if (opts.neverDeployed) filters.push(isNull(t.currentVersionId));
+
+    const where = and(...filters);
+
+    // Trending sort (plan 004): rank the WHOLE filtered owner set by recent views,
+    // then paginate. Kept off the default path on purpose — only this opt-in sort
+    // pays the usage aggregate. Two bounded queries (filtered ids, then one grouped
+    // count over the recent window riding `usage_events(canvasId, createdAt)`), the
+    // ranking + slice in JS, then a hydrate of just the page. At single-org scale the
+    // owner's id set is small and the window is 90-day-pruned, so this stays cheap.
+    if (opts.sort === "popular") {
+      const sinceMs = opts.popularSinceMs ?? Date.now() - POPULAR_WINDOW_MS;
+      const idRows = (await db
+        .select({ id: t.id, updatedAt: t.updatedAt })
+        .from(t)
+        .where(where)) as Array<{ id: string; updatedAt: number }>;
+      const total = idRows.length;
+      if (total === 0) return { items: [], total: 0, recentViews: new Map() };
+
+      // Same (type=view, gte sinceMs, inArray ids, groupBy canvasId) aggregate the
+      // gallery's trending path uses — one shared implementation (hydrateRecentViews).
+      const views = await hydrateRecentViews(
+        idRows.map((r) => r.id),
+        sinceMs,
+      );
+
+      // (recent views desc, updatedAt desc, id desc) — same id tiebreak as the SQL
+      // sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
+      const pageIds = idRows
+        .map((r) => ({ id: r.id, updatedAt: Number(r.updatedAt), v: views.get(r.id) ?? 0 }))
+        .sort((a, b) => b.v - a.v || b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1))
+        .slice(opts.offset, opts.offset + opts.limit)
+        .map((r) => r.id);
+      if (pageIds.length === 0) return { items: [], total, recentViews: new Map() };
+
+      const byId = new Map(
+        ((await db.select().from(t).where(inArray(t.id, pageIds))) as Canvas[]).map((cv) => [
+          cv.id,
+          cv,
+        ]),
+      );
+      const items = pageIds
+        .map((id) => byId.get(id))
+        .filter((cv): cv is Canvas => cv !== undefined);
+      // Hand the page's trending counts back so the caller doesn't re-aggregate
+      // `usage_events` for the same rows (the ranking already has them).
+      const recentViews = new Map(pageIds.map((id) => [id, views.get(id) ?? 0]));
+      return { items, total, recentViews };
+    }
+
+    // Default is most-recently-updated; `created` and `title` are alternatives.
+    // Every axis keeps an `id` tiebreak (uuidv7 monotonic) so pages don't shuffle
+    // within an equal sort key — same convention as listGallery.
+    const orderBy =
+      opts.sort === "created"
+        ? [desc(t.createdAt), desc(t.id)]
+        : opts.sort === "title"
+          ? [sql`lower(${t.title}) asc`, desc(t.id)]
+          : [desc(t.updatedAt), desc(t.id)];
+
+    const rows = (await db
+      .select()
+      .from(t)
+      .where(where)
+      .orderBy(...orderBy)
+      .limit(opts.limit)
+      .offset(opts.offset)) as Canvas[];
+
+    const totalRows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
+      value: number;
+    }>;
+
+    return { items: rows, total: totalRows[0]?.value ?? 0 };
+  }
+
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
       const now = Date.now();
@@ -648,107 +868,27 @@ export function canvasesRepository(client: DbClient) {
     async listByOwnerFiltered(
       opts: OwnerListOptions,
     ): Promise<{ items: Canvas[]; total: number; recentViews?: Map<string, number> }> {
-      // Typed to allow `or(...)` (which is SQL | undefined) to be pushed, matching
-      // the gallery's filter-array shape that `and(...)` accepts.
-      const filters: Array<SQL | undefined> = [
-        eq(t.ownerId, opts.ownerId),
-        // Default scope is the active set (excludes archived + deleted); the
-        // `archived` scope lists ONLY archived canvases (the Your-canvases toggle).
-        opts.archived ? eq(t.status, "archived") : notInArray(t.status, ["deleted", "archived"]),
-      ];
+      return listFiltered(eq(t.ownerId, opts.ownerId), opts);
+    },
 
-      // Forgiving normalized-substring search over the shared `search_text` blob
-      // (plan 2026-06-19 KTD1) — the SAME predicate the gallery uses, so the owner
-      // list and gallery search title + summary + tags + slug identically.
-      filters.push(searchTextPredicate(opts.q));
-
-      // Multi-tag any-match (2026-06-19): one JSON-array-membership clause per tag,
-      // OR-ed — a canvas matches if it carries ANY selected tag. Same per-tag predicate
-      // the gallery uses (tagMembershipFilter), so the two surfaces can't drift.
-      if (opts.tag && opts.tag.length > 0) {
-        filters.push(or(...opts.tag.map(tagMembershipFilter)));
-      }
-
-      // Column-based state filters (plan 005 KTD3). `protected` keys off a set
-      // password hash; `neverDeployed` off the absence of a published version.
-      if (opts.access) filters.push(eq(t.access, opts.access));
-      if (opts.shared) filters.push(ne(t.access, "private"));
-      if (opts.protected) filters.push(isNotNull(t.passwordHash));
-      if (opts.listed) filters.push(eq(t.galleryListed, true));
-      if (opts.template) filters.push(eq(t.galleryTemplatable, true));
-      if (opts.neverDeployed) filters.push(isNull(t.currentVersionId));
-
-      const where = and(...filters);
-
-      // Trending sort (plan 004): rank the WHOLE filtered owner set by recent views,
-      // then paginate. Kept off the default path on purpose — only this opt-in sort
-      // pays the usage aggregate. Two bounded queries (filtered ids, then one grouped
-      // count over the recent window riding `usage_events(canvasId, createdAt)`), the
-      // ranking + slice in JS, then a hydrate of just the page. At single-org scale the
-      // owner's id set is small and the window is 90-day-pruned, so this stays cheap.
-      if (opts.sort === "popular") {
-        const sinceMs = opts.popularSinceMs ?? Date.now() - POPULAR_WINDOW_MS;
-        const idRows = (await db
-          .select({ id: t.id, updatedAt: t.updatedAt })
-          .from(t)
-          .where(where)) as Array<{ id: string; updatedAt: number }>;
-        const total = idRows.length;
-        if (total === 0) return { items: [], total: 0, recentViews: new Map() };
-
-        // Same (type=view, gte sinceMs, inArray ids, groupBy canvasId) aggregate the
-        // gallery's trending path uses — one shared implementation (hydrateRecentViews).
-        const views = await hydrateRecentViews(
-          idRows.map((r) => r.id),
-          sinceMs,
-        );
-
-        // (recent views desc, updatedAt desc, id desc) — same id tiebreak as the SQL
-        // sorts (uuidv7 monotonic) so equal-popularity pages stay stable.
-        const pageIds = idRows
-          .map((r) => ({ id: r.id, updatedAt: Number(r.updatedAt), v: views.get(r.id) ?? 0 }))
-          .sort((a, b) => b.v - a.v || b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1))
-          .slice(opts.offset, opts.offset + opts.limit)
-          .map((r) => r.id);
-        if (pageIds.length === 0) return { items: [], total, recentViews: new Map() };
-
-        const byId = new Map(
-          ((await db.select().from(t).where(inArray(t.id, pageIds))) as Canvas[]).map((cv) => [
-            cv.id,
-            cv,
-          ]),
-        );
-        const items = pageIds
-          .map((id) => byId.get(id))
-          .filter((cv): cv is Canvas => cv !== undefined);
-        // Hand the page's trending counts back so the caller doesn't re-aggregate
-        // `usage_events` for the same rows (the ranking already has them).
-        const recentViews = new Map(pageIds.map((id) => [id, views.get(id) ?? 0]));
-        return { items, total, recentViews };
-      }
-
-      // Default is most-recently-updated; `created` and `title` are alternatives.
-      // Every axis keeps an `id` tiebreak (uuidv7 monotonic) so pages don't shuffle
-      // within an equal sort key — same convention as listGallery.
-      const orderBy =
-        opts.sort === "created"
-          ? [desc(t.createdAt), desc(t.id)]
-          : opts.sort === "title"
-            ? [sql`lower(${t.title}) asc`, desc(t.id)]
-            : [desc(t.updatedAt), desc(t.id)];
-
-      const rows = (await db
-        .select()
-        .from(t)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(opts.limit)
-        .offset(opts.offset)) as Canvas[];
-
-      const totalRows = (await db.select({ value: count() }).from(t).where(where)) as Array<{
-        value: number;
-      }>;
-
-      return { items: rows, total: totalRows[0]?.value ?? 0 };
+    /**
+     * The actor's owned-OR-edited list (editor-roles plan, KTD9/R15/R16): owner rows,
+     * direct editor rows, and editor-team membership under the live org predicate —
+     * the SAME `editedByPredicate` the role resolver uses, so every row returned here
+     * resolves to owner or editor and vice versa. `role` narrows to owned / edited.
+     */
+    async listForActorFiltered(
+      opts: ActorListOptions,
+    ): Promise<{ items: Canvas[]; total: number; recentViews?: Map<string, number> }> {
+      const owned = eq(t.ownerId, opts.actorId);
+      const edited = and(ne(t.ownerId, opts.actorId), editedByPredicate(opts.actorId, opts.scope));
+      const base =
+        opts.role === "owned"
+          ? owned
+          : opts.role === "edited"
+            ? (edited as SQL)
+            : (or(owned, edited) as SQL);
+      return listFiltered(base, opts);
     },
 
     /**
@@ -756,6 +896,64 @@ export function canvasesRepository(client: DbClient) {
      * intentionally independent of the current search/filter so they explain the
      * whole personal inventory and can annotate filter chips honestly.
      */
+    /**
+     * Inventory counts over the actor's owned-OR-edited set (editor-roles plan, KTD9),
+     * plus the owned / edited split that annotates the role chips. Same buckets as
+     * {@link ownerSummary}, same filter-independence.
+     */
+    async actorSummary(actorId: string, scope: EditorScope): Promise<ActorCanvasSummary> {
+      const isActive = notInArray(t.status, ["deleted", "archived"]);
+      const owned = eq(t.ownerId, actorId);
+      const sumCase = (cond: SQL | undefined) =>
+        sql<number>`sum(case when ${cond} then 1 else 0 end)`;
+      const rows = (await db
+        .select({
+          active: sumCase(isActive),
+          archived: sumCase(eq(t.status, "archived")),
+          shared: sumCase(and(isActive, ne(t.access, "private"))),
+          protected: sumCase(and(isActive, isNotNull(t.passwordHash))),
+          listed: sumCase(and(isActive, eq(t.galleryListed, true))),
+          templates: sumCase(and(isActive, eq(t.galleryTemplatable, true))),
+          neverDeployed: sumCase(and(isActive, isNull(t.currentVersionId))),
+          owned: sumCase(and(isActive, owned)),
+          edited: sumCase(and(isActive, ne(t.ownerId, actorId))),
+        })
+        .from(t)
+        .where(or(owned, and(ne(t.ownerId, actorId), editedByPredicate(actorId, scope))))) as Array<
+        Record<keyof ActorCanvasSummary, number | null>
+      >;
+      const r = rows[0];
+      return {
+        active: Number(r?.active ?? 0),
+        archived: Number(r?.archived ?? 0),
+        shared: Number(r?.shared ?? 0),
+        protected: Number(r?.protected ?? 0),
+        listed: Number(r?.listed ?? 0),
+        templates: Number(r?.templates ?? 0),
+        neverDeployed: Number(r?.neverDeployed ?? 0),
+        owned: Number(r?.owned ?? 0),
+        edited: Number(r?.edited ?? 0),
+      };
+    },
+
+    /**
+     * Ids of every non-deleted canvas the actor MANAGES — owned or effectively edited
+     * (editor-roles plan, KTD9). The Shared list excludes these: an editor needs the
+     * management surface, not a view-only entry.
+     */
+    async listManagedCanvasIds(actorId: string, scope: EditorScope): Promise<string[]> {
+      const rows = (await db
+        .select({ id: t.id })
+        .from(t)
+        .where(
+          and(
+            ne(t.status, "deleted"),
+            or(eq(t.ownerId, actorId), editedByPredicate(actorId, scope)),
+          ),
+        )) as Array<{ id: string }>;
+      return rows.map((r) => r.id);
+    },
+
     async ownerSummary(ownerId: string): Promise<OwnerCanvasSummary> {
       // Single pass: conditional aggregation over the owner's rows instead of seven
       // serial COUNT round-trips. Each bucket is `sum(case when <cond> then 1 else 0
@@ -844,6 +1042,81 @@ export function canvasesRepository(client: DbClient) {
       return touchesSearchBlob ? inTransaction(apply) : apply(db);
     },
 
+    /**
+     * The composite ownership write (editor-roles plan, KTD7) — transfer and admin
+     * reassign share it. Runs in the transaction helper (a real transaction on Postgres;
+     * a passthrough on SQLite, where the WRITE ORDER is the safety net):
+     *  1. previous owner's direct editor row (upsert → editor) — first, so a failure
+     *     after the swap still leaves both parties with access;
+     *  2. `owner_id` swap in ONE conditional update (`owner_id = fromUserId` must still
+     *     hold → two concurrent transfers: exactly one succeeds; the loser reads
+     *     `swapped: false`);
+     *  3. delete the new owner's own people-list row (one row each, AE16);
+     *  4. revert a `public_link` rung when asked (the new owner lacks the entitlement).
+     * The audit event is the caller's, written after this returns.
+     */
+    async transferOwner(input: TransferOwnerInput): Promise<TransferOwnerResult> {
+      const now = Date.now();
+      try {
+        return await inTransaction(async (q) => {
+          if (input.previousOwnerEditor) {
+            await q
+              .insert(allowlistT)
+              .values({
+                id: uuidv7(),
+                canvasId: input.canvasId,
+                principalKind: "member",
+                userId: input.fromUserId,
+                email: null,
+                role: "editor",
+                createdAt: now,
+              })
+              .onConflictDoUpdate({
+                target: [allowlistT.canvasId, allowlistT.userId],
+                set: { role: "editor" },
+              });
+          }
+          const swapped = (await q
+            .update(t)
+            .set({
+              ownerId: input.toUserId,
+              updatedAt: now,
+              ...(input.newApiKeyHash ? { apiKeyHash: input.newApiKeyHash } : {}),
+            })
+            .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
+            .returning({ id: t.id })) as Array<{ id: string }>;
+          if (swapped.length === 0) throw new TransferConflict();
+          await q
+            .delete(allowlistT)
+            .where(
+              and(
+                eq(allowlistT.canvasId, input.canvasId),
+                eq(allowlistT.principalKind, "member"),
+                eq(allowlistT.userId, input.toUserId),
+              ),
+            );
+          let publicLinkReverted = false;
+          if (input.revertPublicLink) {
+            const reverted = (await q
+              .update(t)
+              .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: now })
+              .where(and(eq(t.id, input.canvasId), eq(t.access, "public_link")))
+              .returning({ id: t.id })) as Array<{ id: string }>;
+            publicLinkReverted = reverted.length > 0;
+          }
+          const rows = (await q
+            .select()
+            .from(t)
+            .where(eq(t.id, input.canvasId))
+            .limit(1)) as Canvas[];
+          return { swapped: true as const, canvas: rows[0] as Canvas, publicLinkReverted };
+        });
+      } catch (e) {
+        if (e instanceof TransferConflict) return { swapped: false as const };
+        throw e;
+      }
+    },
+
     /** Revoke-sweep: flip an owner's public_link canvases back to private when an admin
      *  removes their publish-public capability. Atomic single UPDATE. */
     async revertPublicForOwner(ownerId: string): Promise<void> {
@@ -918,7 +1191,19 @@ export function canvasesRepository(client: DbClient) {
       principalKind: AllowlistPrincipalKind;
       userId?: string | null;
       email?: string | null;
+      /**
+       * Role to apply (editor-roles plan, KTD3). Omitted → the viewer default on
+       * INSERT and NO change to an existing row, so a role-less re-add can never
+       * demote an editor; supplied → applied on insert AND on conflict, so
+       * add-with-role is one atomic write.
+       */
+      role?: AccessRole;
     }): Promise<AllowlistEntry> {
+      if (input.principalKind === "guest" && input.role === "editor") {
+        // KD2 backstop: write power never crosses the org boundary. The service
+        // layer refuses this earlier with GUEST_VIEWER_ONLY; the repo never persists it.
+        throw new Error("a guest allowlist entry is always a viewer");
+      }
       const conflictTarget =
         input.principalKind === "member" ? allowlistT.userId : allowlistT.email;
       const rows = await db
@@ -929,12 +1214,14 @@ export function canvasesRepository(client: DbClient) {
           principalKind: input.principalKind,
           userId: input.userId ?? null,
           email: input.email ?? null,
+          role: input.role ?? "viewer",
           createdAt: Date.now(),
         })
         .onConflictDoUpdate({
           target: [allowlistT.canvasId, conflictTarget],
-          // No-op update so the existing row is returned rather than crashing.
-          set: { canvasId: input.canvasId },
+          // An explicit role updates the existing row; otherwise a no-op update so the
+          // existing row is returned (unchanged) rather than crashing.
+          set: input.role ? { role: input.role } : { canvasId: input.canvasId },
         })
         .returning();
       return rows[0] as AllowlistEntry;
@@ -945,6 +1232,92 @@ export function canvasesRepository(client: DbClient) {
       await db
         .delete(allowlistT)
         .where(and(eq(allowlistT.canvasId, canvasId), eq(allowlistT.id, entryId)));
+    },
+
+    /**
+     * Set one entry's role (editor-roles plan). Scoped to BOTH the canvas and the
+     * entry id like {@link removeAllowlistEntry}, so a role write can never reach
+     * another canvas's row. A guest row is never promoted (KD2): promoting to editor
+     * matches member rows only. Returns the updated entry, or null when no row matched.
+     */
+    async setAllowlistRole(
+      canvasId: string,
+      entryId: string,
+      role: AccessRole,
+    ): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .update(allowlistT)
+        .set({ role })
+        .where(
+          and(
+            eq(allowlistT.canvasId, canvasId),
+            eq(allowlistT.id, entryId),
+            role === "editor" ? eq(allowlistT.principalKind, "member") : undefined,
+          ),
+        )
+        .returning()) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /** One allowlist entry by id, scoped to the canvas (null when absent). */
+    async findAllowlistEntry(canvasId: string, entryId: string): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .select()
+        .from(allowlistT)
+        .where(and(eq(allowlistT.canvasId, canvasId), eq(allowlistT.id, entryId)))
+        .limit(1)) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /** The user's own member row on the canvas (any role), or null. */
+    async findMemberEntry(canvasId: string, userId: string): Promise<AllowlistEntry | null> {
+      const rows = (await db
+        .select()
+        .from(allowlistT)
+        .where(
+          and(
+            eq(allowlistT.canvasId, canvasId),
+            eq(allowlistT.principalKind, "member"),
+            eq(allowlistT.userId, userId),
+          ),
+        )
+        .limit(1)) as AllowlistEntry[];
+      return rows[0] ?? null;
+    },
+
+    /**
+     * Auth-critical (editor-roles plan, KTD1/KTD2): is `userId` an effective editor
+     * of this canvas — a direct editor row or membership of an editor-role team, under
+     * the live org predicate? The SAME SQL predicate as {@link listEditedCanvasIds},
+     * evaluated for one row, so the role resolver and the owned-or-edited list can
+     * never disagree about who edits what.
+     */
+    async isEffectiveEditor(
+      canvasId: string,
+      userId: string,
+      scope: EditorScope,
+    ): Promise<boolean> {
+      const rows = (await db
+        .select({ id: t.id })
+        .from(t)
+        .where(and(eq(t.id, canvasId), editedByPredicate(userId, scope)))
+        .limit(1)) as Array<{ id: string }>;
+      return rows.length > 0;
+    },
+
+    /**
+     * Ids of the non-deleted canvases the user is an effective editor of — a direct
+     * editor row or membership of an editor-role team — under the live org predicate
+     * (KTD2). Backs the owned-or-edited list (KTD9) and the Shared exclusion.
+     */
+    async listEditedCanvasIds(userId: string, scope: EditorScope): Promise<string[]> {
+      const rows = (await db
+        .select({ id: t.id })
+        .from(t)
+        .where(
+          and(ne(t.ownerId, userId), ne(t.status, "deleted"), editedByPredicate(userId, scope)),
+        )) as Array<{ id: string }>;
+      return rows.map((r) => r.id);
     },
 
     /**
@@ -1383,6 +1756,20 @@ export function canvasesRepository(client: DbClient) {
      * (the JSON column is dialect-divergent to unnest in SQL), sorted, like the
      * gallery facets.
      */
+    /** The tag vocabulary across the actor's owned-or-edited canvases (KTD9). */
+    async listActorTagFacets(actorId: string, scope: EditorScope): Promise<string[]> {
+      const tagRows = (await db
+        .select({ tags: t.tags })
+        .from(t)
+        .where(
+          and(
+            ne(t.status, "deleted"),
+            or(eq(t.ownerId, actorId), editedByPredicate(actorId, scope)),
+          ),
+        )) as Array<{ tags: unknown }>;
+      return flattenTags(tagRows);
+    },
+
     async listOwnerTagFacets(ownerId: string): Promise<string[]> {
       const tagRows = (await db
         .select({ tags: t.tags })

@@ -1,4 +1,24 @@
+import type { Team } from "@canvas-drop/shared/db";
 import type { TeamsRepository } from "../db/repositories/teams.js";
+
+/**
+ * KTD4's per-team grant rule, shared by the settings flow ({@link resolveTeamGrant}) and
+ * the people-list add-team path (editor-roles plan U5): the actor must be a LIVE member
+ * of the team; an ORG team must match the canvas's org; a PERSONAL team (org_id null) is
+ * grantable to any canvas. Returns the team when grantable, else null.
+ */
+export async function canGrantTeam(
+  teams: Pick<TeamsRepository, "findById" | "isTeamMember">,
+  actorId: string,
+  canvasOrgId: string | null,
+  teamId: string,
+): Promise<Team | null> {
+  const team = await teams.findById(teamId);
+  if (!team) return null;
+  if (team.orgId !== null && team.orgId !== canvasOrgId) return null;
+  if (!(await teams.isTeamMember(teamId, actorId))) return null;
+  return team;
+}
 
 /**
  * Shared team-sharing logic (plan 003). The HTTP management routes AND the MCP tools
@@ -49,15 +69,11 @@ export async function resolveTeamGrant(
     const teamIds = [...new Set(input.teamIds ?? [])];
     if (teamIds.length === 0) return { kind: "error", code: "TEAM_REQUIRED" };
     for (const teamId of teamIds) {
-      const team = await teams.findById(teamId);
-      // Owner must belong to the team; an ORG team must match the canvas's org; a PERSONAL
-      // team (org_id null, plan 003) is grantable to any canvas the owner owns, incl. a
-      // personal canvas (org_id null) — so only org-attached teams carry the org-match rule.
-      if (
-        !team ||
-        (team.orgId !== null && team.orgId !== input.canvasOrgId) ||
-        !(await teams.isTeamMember(teamId, actorId))
-      )
+      // The actor must belong to the team; an ORG team must match the canvas's org; a
+      // PERSONAL team (org_id null, plan 003) is grantable to any canvas — the shared
+      // rule. Only the teams IN THE REQUEST are checked: grants the actor did not touch
+      // (another member's editor team, say) are never re-validated (KTD4).
+      if (!(await canGrantTeam(teams, actorId, input.canvasOrgId, teamId)))
         return { kind: "error", code: "TEAM_FORBIDDEN" };
     }
     return { kind: "write", teamIds };

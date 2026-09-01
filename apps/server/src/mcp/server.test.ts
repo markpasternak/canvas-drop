@@ -32,6 +32,7 @@ import { memStorage } from "../storage/mem.js";
 import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
 import { buildMcpServer } from "./server.js";
+import { type CanvasToolName, checkToolInventory, TOOL_MIN_ROLE } from "./tool-roles.js";
 
 const silent = pino({ level: "silent" });
 const config = loadConfig({});
@@ -118,6 +119,7 @@ async function connect(
         storage,
         audit,
         log: silent,
+        users: usersRepository(client),
       }),
       usage: usageEventsRepository(client),
       files: filesRepository(client),
@@ -252,6 +254,9 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     );
     // The owner-facing tags round-trip through update_canvas (agent-native parity).
     expect(updated.tags).toEqual(["Alpha", "beta"]);
+    // Review #10: the mutation's echo carries the same identity as get_canvas.
+    expect(updated.role).toBe("owner");
+    expect(updated.owner).toMatchObject({ id: userId, email: "owner@example.com" });
 
     // The tag write recomputes the forgiving-search blob (integration with U2): the
     // owner-list query finds the canvas by a tag substring it had no other source for.
@@ -841,18 +846,24 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(granted).toMatchObject({ ok: true, status: "granted" });
 
     const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(access.entries).toHaveLength(1);
-    expect(access.entries[0]).toMatchObject({ kind: "member", email: "teammate@example.com" });
+    // The owner row is pinned first (KTD5); the granted member follows with its role.
+    expect(access.entries).toHaveLength(2);
+    expect(access.entries[0]).toMatchObject({ id: "owner", kind: "owner", role: "owner" });
+    expect(access.entries[1]).toMatchObject({
+      kind: "member",
+      email: "teammate@example.com",
+      role: "viewer",
+    });
 
     const ok = payload(
       await mcp.callTool({
         name: "revoke_access",
-        arguments: { id: cv.id, entryId: access.entries[0].id },
+        arguments: { id: cv.id, entryId: access.entries[1].id },
       }),
     );
     expect(ok.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries).toHaveLength(1);
 
     // The legacy guest-invite path is retired; unknown self-serve external emails are denied
     // through the shared Add person policy, not by minting app-owned magic links.
@@ -879,8 +890,8 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(pending).toMatchObject({ ok: true, status: "pending" });
 
     const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(access.entries).toHaveLength(1);
-    expect(access.entries[0]).toMatchObject({
+    expect(access.entries).toHaveLength(2);
+    expect(access.entries[1]).toMatchObject({
       kind: "pending",
       email: "new-person@example.com",
     });
@@ -888,12 +899,12 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const revoked = payload(
       await mcp.callTool({
         name: "revoke_access",
-        arguments: { id: cv.id, entryId: access.entries[0].id },
+        arguments: { id: cv.id, entryId: access.entries[1].id },
       }),
     );
     expect(revoked.ok).toBe(true);
     const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries).toHaveLength(1);
   });
 
   it("admin owners can admit a never-seen external email through grant_access", async () => {
@@ -2087,3 +2098,818 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(me.teams.map((t: any) => t.id)).toContain(team.id);
   });
 });
+
+// --- Editor role gates (editor-roles plan U2, KTD1/KTD10) --------------------------------
+
+describe.each(DIALECTS)("MCP — editor role gates [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function seedRoles() {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const viewer = await seedUser(client, "viewer@example.com");
+    const nobody = await seedUser(client, "nobody@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-roles", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+    return { repo, cv, owner, editor, viewer, nobody };
+  }
+
+  it("get_canvas / update_canvas as editor succeed on a PRIVATE canvas; viewer and no-role read the bare not-found", async () => {
+    const { cv, editor, viewer, nobody } = await seedRoles();
+    const asEditor = await connect(client, { userId: editor });
+    const got = await asEditor.callTool({ name: "get_canvas", arguments: { id: cv.id } });
+    expect(isError(got)).toBe(false);
+    expect(payload(got).id).toBe(cv.id);
+    const upd = await asEditor.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "by editor" },
+    });
+    expect(isError(upd)).toBe(false);
+    expect(payload(upd).title).toBe("by editor");
+    for (const uid of [viewer, nobody]) {
+      const c = await connect(client, { userId: uid });
+      for (const name of ["get_canvas", "update_canvas", "delete_canvas", "get_draft"]) {
+        const res = await c.callTool({ name, arguments: { id: cv.id } });
+        expect(isError(res), `${name} as ${uid}`).toBe(true);
+        expect(text(res)).toBe("canvas not found");
+      }
+    }
+  });
+
+  it("delete_canvas as editor fails with the OWNER_ONLY: prefix — before the disabled state; the owner's delete on a disabled canvas is DISABLED", async () => {
+    const { repo, cv, owner, editor } = await seedRoles();
+    const asEditor = await connect(client, { userId: editor });
+    const refused = await asEditor.callTool({ name: "delete_canvas", arguments: { id: cv.id } });
+    expect(isError(refused)).toBe(true);
+    expect(text(refused)).toMatch(/^OWNER_ONLY: /);
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+
+    await repo.setDisabled(cv.id, "abuse");
+    const stillOwnerOnly = await asEditor.callTool({
+      name: "delete_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(text(stillOwnerOnly)).toMatch(/^OWNER_ONLY: /);
+    const editorMutation = await asEditor.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, title: "x" },
+    });
+    expect(text(editorMutation)).toMatch(/^DISABLED: /);
+    expect(isError(await asEditor.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+    const asOwner = await connect(client, { userId: owner });
+    const ownerDelete = await asOwner.callTool({ name: "delete_canvas", arguments: { id: cv.id } });
+    expect(text(ownerDelete)).toMatch(/^DISABLED: /);
+  });
+
+  it("KTD2 over MCP: an editor with an EMPTY live org set under active tenancy reads not-found; inert tenancy admits them", async () => {
+    const { cv, editor } = await seedRoles();
+    const active = await connect(client, {
+      userId: editor,
+      orgIds: new Set(),
+      tenancyActive: true,
+    });
+    const res = await active.callTool({ name: "get_canvas", arguments: { id: cv.id } });
+    expect(isError(res)).toBe(true);
+    expect(text(res)).toBe("canvas not found");
+    const inert = await connect(client, { userId: editor, tenancyActive: false });
+    expect(isError(await inert.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      false,
+    );
+  });
+});
+
+describe.each(DIALECTS)("MCP — editor staged deploy (editor-roles plan U3) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("begin_deploy → add_files → finalize_deploy succeeds as editor; a no-role member's finalize with that handle fails", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const nobody = await seedUser(client, "nobody@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "staged", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const storage = memStorage();
+    const asEditor = await connect(client, { userId: editor }, false, config, storage);
+    const files = { "index.html": "<h1>editor</h1>" };
+    const begun = payload(
+      await asEditor.callTool({
+        name: "begin_deploy",
+        arguments: {
+          id: cv.id,
+          manifest: Object.entries(files).map(([path, content]) => ({
+            path,
+            hash: sha(content),
+            size: new TextEncoder().encode(content).byteLength,
+          })),
+        },
+      }),
+    );
+    expect(begun.uploadId).toBeTruthy();
+    await asEditor.callTool({
+      name: "add_files",
+      arguments: {
+        id: cv.id,
+        uploadId: begun.uploadId,
+        files: [{ path: "index.html", content: files["index.html"] }],
+      },
+    });
+    // A no-role member cannot finalize the editor's session (nor see the canvas).
+    const asNobody = await connect(client, { userId: nobody }, false, config, storage);
+    const forged = await asNobody.callTool({
+      name: "finalize_deploy",
+      arguments: { id: cv.id, uploadId: begun.uploadId },
+    });
+    expect(isError(forged)).toBe(true);
+    expect(text(forged)).toBe("canvas not found");
+    const result = payload(
+      await asEditor.callTool({
+        name: "finalize_deploy",
+        arguments: { id: cv.id, uploadId: begun.uploadId },
+      }),
+    );
+    expect(result.version).toBe(1);
+    const [v] = await versionsRepository(client).listByCanvas(cv.id);
+    expect(v?.createdBy).toBe(editor);
+  });
+});
+
+describe.each(DIALECTS)("MCP — people-list roles (editor-roles plan U4/U5) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("grant_access with role, list_access roles + ids, set_access_role, owner/guest refusals, team grants", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const colleague = await seedUser(client, "colleague@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "roles", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "g@partner.com",
+    });
+    const mcp = await connect(client, { userId: owner });
+
+    const granted = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "colleague@example.com", role: "editor" },
+      }),
+    );
+    expect(granted).toMatchObject({ ok: true, status: "granted", role: "editor" });
+    expect((await repo.findMemberEntry(cv.id, colleague))?.role).toBe("editor");
+
+    const access = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(access.entries[0]).toMatchObject({ id: "owner", kind: "owner", role: "owner" });
+    const member = access.entries.find((e: { kind: string }) => e.kind === "member");
+    expect(member).toMatchObject({ role: "editor", email: "colleague@example.com" });
+    expect(member.id).toMatch(/^member:/);
+    const guest = access.entries.find((e: { kind: string }) => e.kind === "guest");
+    expect(guest).toMatchObject({ role: "viewer" });
+
+    // Demote via set_access_role; the colleague's tools then read not-found.
+    const demoted = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: member.id, role: "viewer" },
+    });
+    expect(isError(demoted)).toBe(false);
+    const asColleague = await connect(client, { userId: colleague });
+    expect(text(await asColleague.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+      "canvas not found",
+    );
+
+    // Guest → editor and the owner row are refused with the shared prefixes.
+    const guestUp = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: guest.id, role: "editor" },
+    });
+    expect(text(guestUp)).toMatch(/^GUEST_VIEWER_ONLY: /);
+    const ownerUp = await mcp.callTool({
+      name: "set_access_role",
+      arguments: { id: cv.id, entryId: "owner", role: "viewer" },
+    });
+    expect(text(ownerUp)).toMatch(/^OWNER_ONLY: /);
+    const ownerDel = await mcp.callTool({
+      name: "revoke_access",
+      arguments: { id: cv.id, entryId: "owner" },
+    });
+    expect(text(ownerDel)).toMatch(/^OWNER_ONLY: /);
+
+    // A team grant with a role through grant_access (teamId); its member becomes an editor.
+    const teams = teamsRepository(client);
+    const design = await teams.create({ orgId: null, name: "Design", createdBy: owner });
+    await teams.addMember(design.id, colleague);
+    const teamGrant = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, teamId: design.id, role: "editor" },
+      }),
+    );
+    expect(teamGrant).toMatchObject({ ok: true, role: "editor" });
+    expect(
+      isError(await asColleague.callTool({ name: "get_canvas", arguments: { id: cv.id } })),
+    ).toBe(false);
+    const after = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }));
+    expect(after.entries).toContainEqual(
+      expect.objectContaining({ id: `team:${design.id}`, kind: "team", role: "editor" }),
+    );
+    const both = await mcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, email: "x@example.com", teamId: design.id },
+    });
+    expect(text(both)).toMatch(/^INVALID_REQUEST: /);
+  });
+
+  it("an editor can manage the people list over MCP (add / promote / remove), never the owner row", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    await seedUser(client, "newbie@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "edit-people", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const mcp = await connect(client, { userId: editor });
+    const added = payload(
+      await mcp.callTool({
+        name: "grant_access",
+        arguments: { id: cv.id, email: "newbie@example.com" },
+      }),
+    );
+    expect(added).toMatchObject({ ok: true, status: "granted", role: null });
+    const entries = payload(await mcp.callTool({ name: "list_access", arguments: { id: cv.id } }))
+      .entries as Array<{ id: string; email: string | null; role: string }>;
+    const newbie = entries.find((e) => e.email === "newbie@example.com");
+    expect(newbie?.role).toBe("viewer");
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "set_access_role",
+          arguments: { id: cv.id, entryId: (newbie as { id: string }).id, role: "editor" },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isError(
+        await mcp.callTool({
+          name: "revoke_access",
+          arguments: { id: cv.id, entryId: (newbie as { id: string }).id },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      text(
+        await mcp.callTool({ name: "revoke_access", arguments: { id: cv.id, entryId: "owner" } }),
+      ),
+    ).toMatch(/^OWNER_ONLY: /);
+  });
+});
+
+describe.each(DIALECTS)("MCP — transfer_canvas (editor-roles plan U7) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("owner transfers to an editor; an editor gets OWNER_ONLY; an email is rejected by the schema; a non-editor recipient is NOT_ELIGIBLE", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const viewer = await seedUser(client, "viewer@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-xfer", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+
+    const asEditor = await connect(client, { userId: editor });
+    expect(
+      text(
+        await asEditor.callTool({
+          name: "transfer_canvas",
+          arguments: { id: cv.id, toUserId: viewer },
+        }),
+      ),
+    ).toMatch(/^OWNER_ONLY: /);
+    const asOwner = await connect(client, { userId: owner });
+    const byEmail = await asOwner.callTool({
+      name: "transfer_canvas",
+      arguments: { id: cv.id, toUserId: "editor@example.com" },
+    });
+    expect(isError(byEmail)).toBe(true);
+    expect(text(byEmail)).toMatch(/toUserId|email|Invalid/i);
+    expect(
+      text(
+        await asOwner.callTool({
+          name: "transfer_canvas",
+          arguments: { id: cv.id, toUserId: viewer },
+        }),
+      ),
+    ).toMatch(/^NOT_ELIGIBLE: /);
+    const ok = payload(
+      await asOwner.callTool({
+        name: "transfer_canvas",
+        arguments: { id: cv.id, toUserId: editor },
+      }),
+    );
+    expect(ok).toMatchObject({ ok: true, previousOwnerEditor: true, publicLinkReverted: false });
+    expect((await repo.findById(cv.id))?.ownerId).toBe(editor);
+    // The previous owner is an editor now: delete_canvas reads OWNER_ONLY for them.
+    expect(
+      text(await asOwner.callTool({ name: "delete_canvas", arguments: { id: cv.id } })),
+    ).toMatch(/^OWNER_ONLY: /);
+  });
+});
+
+describe.each(DIALECTS)(
+  "MCP — owner entitlements + version creators (editor-roles plan U8) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    it("AE6 over MCP: update_canvas access=public_link by an editor follows the OWNER's entitlement; guest-AI fields are OWNER_ONLY; list_versions names creators", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const users = usersRepository(client);
+      const repo = canvasesRepository(client);
+      const storage = memStorage();
+      const asOwner = await connect(client, { userId: owner }, false, config, storage);
+      const made = payload(await asOwner.callTool({ name: "create_canvas", arguments: {} }));
+      await asOwner.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, zipBase64: zip({ "index.html": "<h1>v1</h1>" }) },
+      });
+      await repo.addAllowlistEntry({
+        canvasId: made.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const asEditor = await connect(client, { userId: editor }, false, config, storage);
+
+      await users.setPublishPublic(owner, false);
+      await users.setPublishPublic(editor, true);
+      const gated = await asEditor.callTool({
+        name: "update_canvas",
+        arguments: { id: made.id, access: "public_link" },
+      });
+      expect(text(gated)).toMatch(/^PUBLIC_LINK_OWNER_GATED: /);
+      await users.setPublishPublic(owner, true);
+      await users.setPublishPublic(editor, false);
+      const ok = await asEditor.callTool({
+        name: "update_canvas",
+        arguments: { id: made.id, access: "public_link" },
+      });
+      expect(isError(ok)).toBe(false);
+      expect(payload(ok).access).toBe("public_link");
+
+      expect(
+        text(
+          await asEditor.callTool({
+            name: "update_canvas",
+            arguments: { id: made.id, guestAiEnabled: true },
+          }),
+        ),
+      ).toMatch(/^OWNER_ONLY: /);
+      expect(
+        isError(
+          await asOwner.callTool({
+            name: "update_canvas",
+            arguments: { id: made.id, guestAiEnabled: true },
+          }),
+        ),
+      ).toBe(false);
+
+      // The editor publishes v2 through the draft loop; list_versions names both creators.
+      await asEditor.callTool({
+        name: "write_draft_file",
+        arguments: { id: made.id, path: "index.html", content: "<h1>v2</h1>" },
+      });
+      const published = await asEditor.callTool({
+        name: "publish_draft",
+        arguments: { id: made.id },
+      });
+      expect(isError(published)).toBe(false);
+      const listed = payload(
+        await asOwner.callTool({ name: "list_versions", arguments: { id: made.id } }),
+      );
+      expect(
+        listed.versions.map(
+          (v: { number: number; createdBy: string; createdByName: string | null }) => [
+            v.number,
+            v.createdBy,
+            v.createdByName,
+          ],
+        ),
+      ).toEqual([
+        [2, editor, "editor@example.com"],
+        [1, owner, "owner@example.com"],
+      ]);
+    });
+  },
+);
+
+describe.each(DIALECTS)("MCP — owned-or-edited list (editor-roles plan U9) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("list_canvases returns edited canvases with role + owner, narrows by role, and agrees with the repository list; get_canvas echoes ownerOnlyActs", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const repo = canvasesRepository(client);
+    const own = await repo.create({ ownerId: editor, slug: "own", apiKeyHash: "k0" });
+    const shared = await repo.create({ ownerId: owner, slug: "shared", apiKeyHash: "k1" });
+    await repo.addAllowlistEntry({
+      canvasId: shared.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const mcp = await connect(client, { userId: editor });
+    type Row = { id: string; role: string; owner: { email: string } | null; ownerId: string };
+    const all = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
+    expect(all.total).toBe(2);
+    expect(all.canvases.find((c: Row) => c.id === shared.id)).toMatchObject({
+      role: "editor",
+      ownerId: owner,
+      owner: { email: "owner@example.com" },
+    });
+    expect(all.canvases.find((c: Row) => c.id === own.id)).toMatchObject({ role: "owner" });
+    const edited = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { role: "edited" } }),
+    );
+    expect(edited.canvases.map((c: Row) => c.id)).toEqual([shared.id]);
+    const owned = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { role: "owned" } }),
+    );
+    expect(owned.canvases.map((c: Row) => c.id)).toEqual([own.id]);
+    // Parity: the same ids the management list query returns for the same actor.
+    const viaRepo = await repo.listForActorFiltered({
+      actorId: editor,
+      scope: { tenancyActive: false, viewerOrgIds: new Set() },
+      limit: 50,
+      offset: 0,
+    });
+    expect(all.canvases.map((c: Row) => c.id).sort()).toEqual(
+      viaRepo.items.map((cv) => cv.id).sort(),
+    );
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: shared.id } }));
+    expect(got).toMatchObject({
+      role: "editor",
+      ownerId: owner,
+      ownerOnlyActs: ["delete", "transfer", "guest_ai"],
+    });
+    // Shared discovery over MCP excludes the edited canvas too.
+    const sharedOverMcp = payload(
+      await mcp.callTool({ name: "list_shared_canvases", arguments: {} }),
+    );
+    expect((sharedOverMcp.canvases ?? []).map((c: Row) => c.id)).not.toContain(shared.id);
+  });
+});
+
+describe.each(DIALECTS)("MCP — draft preconditions (editor-roles plan U10) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("unconditioned write after your own write is fine; after another user's write it is DRAFT_CONFLICT with the fields; the correct expectedHash lands; get_draft / read_draft_file return hashes", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner, slug: "mcp-draft", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const storage = memStorage();
+    const asOwner = await connect(client, { userId: owner }, false, config, storage);
+    const asEditor = await connect(client, { userId: editor }, false, config, storage);
+    const write = (c: typeof asOwner, content: string, expectedHash?: string) =>
+      c.callTool({
+        name: "write_draft_file",
+        arguments: {
+          id: cv.id,
+          path: "index.html",
+          content,
+          ...(expectedHash ? { expectedHash } : {}),
+        },
+      });
+    expect(isError(await write(asOwner, "v1"))).toBe(false);
+    expect(isError(await write(asOwner, "v2"))).toBe(false); // own follow-up, unconditioned
+    const conflict = await write(asEditor, "v3");
+    expect(isError(conflict)).toBe(true);
+    expect(text(conflict)).toMatch(/^DRAFT_CONFLICT: /);
+    expect(text(conflict)).toMatch(/path=index\.html currentHash=[0-9a-f]+ updatedBy=/);
+    expect(text(conflict)).toContain("updatedByName=owner@example.com");
+    const draft = payload(await asEditor.callTool({ name: "get_draft", arguments: { id: cv.id } }));
+    const entry = draft.files.find((f: { path: string }) => f.path === "index.html");
+    expect(entry).toMatchObject({ updatedBy: owner, updatedByName: "owner@example.com" });
+    expect(typeof entry.hash).toBe("string");
+    const read = payload(
+      await asEditor.callTool({
+        name: "read_draft_file",
+        arguments: { id: cv.id, path: "index.html" },
+      }),
+    );
+    expect(read).toMatchObject({ content: "v2", hash: entry.hash, updatedBy: owner });
+    expect(isError(await write(asEditor, "v3", entry.hash))).toBe(false);
+    // Delete with a stale hash is refused; with the current one it lands.
+    const stale = await asEditor.callTool({
+      name: "delete_draft_file",
+      arguments: { id: cv.id, path: "index.html", expectedHash: entry.hash },
+    });
+    expect(text(stale)).toMatch(/^DRAFT_CONFLICT: /);
+    const now = payload(await asEditor.callTool({ name: "get_draft", arguments: { id: cv.id } }))
+      .files[0].hash;
+    expect(
+      isError(
+        await asEditor.callTool({
+          name: "delete_draft_file",
+          arguments: { id: cv.id, path: "index.html", expectedHash: now },
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+// --- Table-driven parity (editor-roles plan U11, KTD10) -----------------------------------
+
+describe("MCP — tool inventory equals the role table (KTD10)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("every registered tool has a table entry and every table entry is registered", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId: owner });
+    const registered = (await mcp.listTools()).tools.map((t) => t.name);
+    expect(checkToolInventory(registered)).toEqual({ missingFromTable: [], missingFromServer: [] });
+    expect(registered.sort()).toEqual(Object.keys(TOOL_MIN_ROLE).sort());
+  });
+
+  it("a tool registered without a table entry (or an entry with no tool) fails the check", () => {
+    const keys = Object.keys(TOOL_MIN_ROLE);
+    expect(checkToolInventory([...keys, "rogue_tool"]).missingFromTable).toEqual(["rogue_tool"]);
+    expect(checkToolInventory(keys.filter((k) => k !== "delete_canvas")).missingFromServer).toEqual(
+      ["delete_canvas"],
+    );
+  });
+});
+
+describe.each(DIALECTS)(
+  "MCP — role matrix over every canvas-scoped tool (KTD10) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    type Ctx = { id: string; viewerId: string };
+    /** Minimal valid arguments per canvas-scoped tool. Domain refusals (a missing version, a
+     *  bad upload handle, an unknown entry id, NOT_ELIGIBLE…) count as ADMITTED: the matrix
+     *  only distinguishes "the gate let the role through" from the two role refusals. */
+    const ARGS: Record<CanvasToolName, (c: Ctx) => Record<string, unknown>> = {
+      get_canvas: ({ id }) => ({ id }),
+      update_canvas: ({ id }) => ({ id, title: "matrix" }),
+      set_capabilities: ({ id }) => ({ id, kv: true }),
+      set_canvas_slug: ({ id }) => ({ id }),
+      set_canvas_preview: ({ id }) => ({ id }),
+      regenerate_deploy_key: ({ id }) => ({ id }),
+      archive_canvas: ({ id }) => ({ id }),
+      unarchive_canvas: ({ id }) => ({ id }),
+      unpublish_canvas: ({ id }) => ({ id }),
+      get_canvas_usage: ({ id }) => ({ id }),
+      list_versions: ({ id }) => ({ id }),
+      delete_version: ({ id }) => ({ id, version: 99 }),
+      rollback_canvas: ({ id }) => ({ id, version: 99 }),
+      get_canvas_file: ({ id }) => ({ id }),
+      deploy_canvas: ({ id }) => ({ id, zipBase64: zip({ "index.html": "<h1>m</h1>" }) }),
+      begin_deploy: ({ id }) => ({
+        id,
+        manifest: [{ path: "index.html", hash: sha("m"), size: 1 }],
+      }),
+      add_files: ({ id }) => ({
+        id,
+        uploadId: "nope",
+        files: [{ path: "index.html", content: "m" }],
+      }),
+      finalize_deploy: ({ id }) => ({ id, uploadId: "nope" }),
+      search_people: ({ id }) => ({ context: "canvas", canvasId: id, q: "zz" }),
+      list_access: ({ id }) => ({ id }),
+      grant_access: ({ id }) => ({ id, email: "matrix-new@example.com" }),
+      invite_to_canvas: ({ id }) => ({ id, email: "matrix-new2@example.com" }),
+      revoke_access: ({ id }) => ({ id, entryId: "member:nope" }),
+      set_access_role: ({ id }) => ({ id, entryId: "member:nope", role: "viewer" }),
+      get_draft: ({ id }) => ({ id }),
+      read_draft_file: ({ id }) => ({ id, path: "index.html" }),
+      write_draft_file: ({ id }) => ({ id, path: "m.txt", content: "m" }),
+      delete_draft_file: ({ id }) => ({ id, path: "zz.txt" }),
+      rename_draft_file: ({ id }) => ({ id, from: "zz.txt", to: "yy.txt" }),
+      publish_draft: ({ id }) => ({ id }),
+      restore_draft: ({ id }) => ({ id, version: 99 }),
+      delete_canvas: ({ id }) => ({ id }),
+      transfer_canvas: ({ id, viewerId }) => ({ id, toUserId: viewerId }),
+    };
+    type Outcome = "not_found" | "owner_only" | "admitted";
+    // biome-ignore lint/suspicious/noExplicitAny: tool results are JSON text payloads
+    const classify = (r: any): Outcome => {
+      if (!isError(r)) return "admitted";
+      const t = text(r);
+      if (t === "canvas not found" || t === "not found") return "not_found";
+      if (/^OWNER_ONLY: /.test(t)) return "owner_only";
+      return "admitted";
+    };
+
+    it("owner / editor / viewer / no-role × every canvas-scoped tool → exactly the table's outcome", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const viewer = await seedUser(client, "viewer@example.com");
+      const nobody = await seedUser(client, "nobody@example.com");
+      const repo = canvasesRepository(client);
+      const storage = memStorage();
+      const clients = {
+        owner: await connect(client, { userId: owner }, false, config, storage),
+        editor: await connect(client, { userId: editor }, false, config, storage),
+        viewer: await connect(client, { userId: viewer }, false, config, storage),
+        nobody: await connect(client, { userId: nobody }, false, config, storage),
+      };
+      const tools = (Object.keys(ARGS) as CanvasToolName[]).sort();
+      const failures: string[] = [];
+      let n = 0;
+      for (const tool of tools) {
+        // A fresh canvas per tool so one tool's mutation never shapes another's outcome.
+        const cv = await repo.create({
+          ownerId: owner,
+          slug: `matrix-${n++}`,
+          apiKeyHash: `k${n}`,
+        });
+        await repo.addAllowlistEntry({
+          canvasId: cv.id,
+          principalKind: "member",
+          userId: editor,
+          role: "editor",
+        });
+        await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+        const ctx: Ctx = { id: cv.id, viewerId: viewer };
+        const min = TOOL_MIN_ROLE[tool];
+        const expected: Record<keyof typeof clients, Outcome> = {
+          viewer: "not_found",
+          nobody: "not_found",
+          editor: min === "owner" ? "owner_only" : "admitted",
+          owner: "admitted",
+        };
+        // Rejection paths first, then the editor, then the owner (whose mutation may be last).
+        for (const role of ["viewer", "nobody", "editor", "owner"] as const) {
+          const res = await clients[role].callTool({ name: tool, arguments: ARGS[tool](ctx) });
+          const got = classify(res);
+          if (got !== expected[role])
+            failures.push(
+              `${tool} as ${role}: expected ${expected[role]}, got ${got} (${text(res).slice(0, 80)})`,
+            );
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+  },
+);
+
+describe.each(DIALECTS)(
+  "MCP — the role is resolved per request (AE12) and AE11 end to end [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    it("AE12: a demoted editor's NEXT call on the same connection reads not found", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner, slug: "demote", apiKeyHash: "k" });
+      const row = await repo.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const mcp = await connect(client, { userId: editor });
+      expect(isError(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+        false,
+      );
+      await repo.setAllowlistRole(cv.id, row.id, "viewer");
+      expect(text(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+        "canvas not found",
+      );
+      await repo.removeAllowlistEntry(cv.id, row.id);
+      expect(
+        text(
+          await mcp.callTool({
+            name: "write_draft_file",
+            arguments: { id: cv.id, path: "a.txt", content: "x" },
+          }),
+        ),
+      ).toBe("canvas not found");
+    });
+
+    it("AE11: as an editor — list shows role editor → write → publish → versions name the editor → delete/transfer refuse OWNER_ONLY → Shared excludes it", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner, slug: "ae11", apiKeyHash: "k" });
+      await repo.updateSettings(cv.id, { title: "Roadmap" });
+      await repo.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const storage = memStorage();
+      const mcp = await connect(client, { userId: editor }, false, config, storage);
+
+      const listed = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
+      expect(listed.canvases.find((c: { id: string }) => c.id === cv.id)).toMatchObject({
+        role: "editor",
+        owner: { email: "owner@example.com" },
+      });
+      expect(
+        isError(
+          await mcp.callTool({
+            name: "write_draft_file",
+            arguments: { id: cv.id, path: "index.html", content: "<h1>by editor</h1>" },
+          }),
+        ),
+      ).toBe(false);
+      const published = payload(
+        await mcp.callTool({ name: "publish_draft", arguments: { id: cv.id } }),
+      );
+      expect(published.version).toBe(1);
+      const versions = payload(
+        await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }),
+      );
+      expect(versions.versions[0]).toMatchObject({
+        createdBy: editor,
+        createdByName: "editor@example.com",
+      });
+      expect(text(await mcp.callTool({ name: "delete_canvas", arguments: { id: cv.id } }))).toMatch(
+        /^OWNER_ONLY: /,
+      );
+      expect(
+        text(
+          await mcp.callTool({
+            name: "transfer_canvas",
+            arguments: { id: cv.id, toUserId: owner },
+          }),
+        ),
+      ).toMatch(/^OWNER_ONLY: /);
+      const shared = payload(await mcp.callTool({ name: "list_shared_canvases", arguments: {} }));
+      expect((shared.canvases ?? []).map((c: { id: string }) => c.id)).not.toContain(cv.id);
+    });
+  },
+);

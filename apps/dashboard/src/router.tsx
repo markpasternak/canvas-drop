@@ -65,6 +65,8 @@ export interface CanvasesSearch {
   /** Lifecycle scope: absent = active list; `archived` = the Active/Archived toggle's
    *  archived view (replaces the standalone /archived route). */
   scope?: "archived";
+  /** Owned-or-edited narrowing (editor-roles plan, R16): absent = both. */
+  role?: "owned" | "edited";
   /** Display mode override for the visit. Absent = fall back to the per-device
    *  stored choice, then the `grid` default. `grid`|`list` pins the layout for a
    *  shareable/deep-link visit and wins over the stored preference. */

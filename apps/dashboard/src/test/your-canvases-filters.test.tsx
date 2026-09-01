@@ -229,6 +229,38 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(within(metric as HTMLElement).getByText(value)).toBeInTheDocument();
   }
 
+  it("marks a canvas you edit but don't own with its owner, in the grid card and the list row (editor-roles plan F1)", async () => {
+    stub([
+      canvas({
+        id: "c-edit",
+        title: "Q3 launch plan",
+        role: "editor",
+        ownerId: "u-owner",
+        owner: { id: "u-owner", name: "Dev Owner", email: "owner@x" },
+      }),
+      canvas({ id: "c-own", title: "Mine", role: "owner" }),
+    ]);
+    renderAt("/");
+    // (The finish strip repeats the title, so wait on the card's own link.)
+    await screen.findByRole("link", { name: /View details for Q3 launch plan/ });
+    // Whatever the persisted view, the edited canvas names its owner and the owned one
+    // doesn't.
+    expect(screen.getAllByText(/Dev Owner/).length).toBeGreaterThan(0);
+    const mine = screen.getByRole("link", { name: /View details for Mine/ }).closest("li");
+    expect(mine).not.toBeNull();
+    expect(within(mine as HTMLElement).queryByText(/Dev Owner|owned by/)).toBeNull();
+    // Grid: the compact marker is its own badge on the card.
+    await userEvent.click(screen.getByRole("button", { name: /grid view/i }));
+    await waitFor(() =>
+      expect(screen.getAllByText("editor · Dev Owner").length).toBeGreaterThan(0),
+    );
+    // List: the marker leads the row's meta line.
+    await userEvent.click(screen.getByRole("button", { name: /list view/i }));
+    await waitFor(() =>
+      expect(within(rows()).getAllByText(/^owned by Dev Owner · editor/).length).toBeGreaterThan(0),
+    );
+  });
+
   it("filters to shared via the Shared chip", async () => {
     stub([
       canvas({ id: "a", title: "Shared one", shared: true }),

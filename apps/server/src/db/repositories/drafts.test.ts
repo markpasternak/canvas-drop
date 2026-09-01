@@ -63,9 +63,9 @@ describe.each(DIALECTS)("draftsRepository (%s)", (dialect) => {
     await drafts.markStale(canvasId);
     const next = man({ "page.html": "b".repeat(64) });
     const updated = await drafts.setManifest(canvasId, next);
-    expect(updated.manifest).toEqual(next);
-    expect(updated.stale).toBe(false);
-    expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
+    expect(updated?.manifest).toEqual(next);
+    expect(updated?.stale).toBe(false);
+    expect(updated?.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
   });
 
   it("resetToBase swaps manifest + base version and clears stale", async () => {
@@ -76,9 +76,9 @@ describe.each(DIALECTS)("draftsRepository (%s)", (dialect) => {
     });
     await drafts.markStale(canvasId);
     const restored = await drafts.resetToBase(canvasId, man({ "b.html": "2".repeat(64) }), "ver-2");
-    expect(restored.manifest).toEqual(man({ "b.html": "2".repeat(64) }));
-    expect(restored.baseVersionId).toBe("ver-2");
-    expect(restored.stale).toBe(false);
+    expect(restored?.manifest).toEqual(man({ "b.html": "2".repeat(64) }));
+    expect(restored?.baseVersionId).toBe("ver-2");
+    expect(restored?.stale).toBe(false);
   });
 
   it("markStale sets stale without touching the manifest", async () => {

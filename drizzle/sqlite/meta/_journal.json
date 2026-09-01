@@ -253,6 +253,13 @@
       "when": 1783405901193,
       "tag": "0035_anthropic_prompt_cache_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788289822593,
+      "tag": "0036_canvas_access_roles",
+      "breakpoints": true
     }
   ]
 }

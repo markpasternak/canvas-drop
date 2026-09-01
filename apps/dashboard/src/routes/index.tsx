@@ -66,6 +66,8 @@ const EMPTY_SUMMARY: CanvasOwnerSummary = {
   listed: 0,
   templates: 0,
   neverDeployed: 0,
+  owned: 0,
+  edited: 0,
 };
 
 const STATE_CHIPS: Array<{
@@ -507,11 +509,13 @@ export default function CanvasList() {
   const offset = (page - 1) * CANVASES_PAGE_SIZE;
   // Active NON-search filters (tags/access/state chips) — separate from `q` so the
   // empty-state selector can tell a search-empty from a filter-empty.
+  const role = search.role === "owned" || search.role === "edited" ? search.role : undefined;
   const hasNonSearchFilters = archivedView
     ? false
     : Boolean(
         access ||
           tags.length > 0 ||
+          role ||
           search.shared ||
           search.protected ||
           search.listed ||
@@ -533,6 +537,7 @@ export default function CanvasList() {
     template: archivedView ? undefined : search.template,
     undeployed: archivedView ? undefined : search.undeployed,
     scope: archivedView ? "archived" : "active",
+    role: archivedView ? undefined : role,
     sort,
     limit: CANVASES_PAGE_SIZE,
     offset,
@@ -590,6 +595,13 @@ export default function CanvasList() {
     navigate({
       to: "/",
       search: (prev) => ({ ...prev, [key]: nextOn ? true : undefined, page: 1 }),
+    });
+  }
+  /** The owned / edited chips are mutually exclusive: clicking the active one clears it. */
+  function setRole(next: "owned" | "edited") {
+    navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, role: role === next ? undefined : next, page: 1 }),
     });
   }
   function setSort(next: string) {
@@ -655,6 +667,7 @@ export default function CanvasList() {
               listed: undefined,
               template: undefined,
               undeployed: undefined,
+              role: undefined,
             }
           : {}),
         page: 1,
@@ -870,6 +883,25 @@ export default function CanvasList() {
                   <TagFilter availableTags={availableTags} selected={tags} onChange={setTags} />
                   {availableTags.length > 0 && (
                     <span className="mx-1 h-5 w-px shrink-0 self-center bg-border" aria-hidden />
+                  )}
+                  {/* Owned / edited narrowing (editor-roles plan, R16) — shown only once the
+                      actor edits something that isn't theirs, so a solo owner's chip row is
+                      unchanged. */}
+                  {summary.edited > 0 && (
+                    <>
+                      <FilterChip active={role === "owned"} onClick={() => setRole("owned")}>
+                        <span>Owned by me</span>
+                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                          {summary.owned}
+                        </span>
+                      </FilterChip>
+                      <FilterChip active={role === "edited"} onClick={() => setRole("edited")}>
+                        <span>Editing</span>
+                        <span className="text-xs tabular-nums text-subtle" aria-hidden>
+                          {summary.edited}
+                        </span>
+                      </FilterChip>
+                    </>
                   )}
                   {STATE_CHIPS.map((chip) => (
                     <FilterChip

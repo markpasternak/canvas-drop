@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
+import type { TemplateBody } from "../db/repositories/email-templates.js";
 import { emailTemplatesRepository } from "../db/repositories/email-templates.js";
 import { DIALECTS, makeTestDb } from "../db/testing.js";
 import {
@@ -130,7 +131,7 @@ describe.each(DIALECTS)("emailTemplates repo + seed (plan 003 phase 3) [%s]", (d
 
     await repo.seedDefaults(previous);
     expect((await effectiveTemplate(repo, "canvas_invite")).subject).toBe(
-      previous.canvas_invite.subject,
+      previous.canvas_invite?.subject,
     );
 
     await seedDefaultTemplates(repo);
@@ -146,7 +147,7 @@ describe.each(DIALECTS)("emailTemplates repo + seed (plan 003 phase 3) [%s]", (d
 
     await repo.seedDefaults(previous);
     expect((await effectiveTemplate(repo, "team_invite")).subject).toBe(
-      previous.team_invite.subject,
+      previous.team_invite?.subject,
     );
 
     await seedDefaultTemplates(repo);
@@ -158,7 +159,7 @@ describe.each(DIALECTS)("emailTemplates repo + seed (plan 003 phase 3) [%s]", (d
   it("preserves admin-customized rows even when the body matches a previous default", async () => {
     client = await makeTestDb(dialect);
     const repo = emailTemplatesRepository(client);
-    const previous = previousDefaults().canvas_invite;
+    const previous = previousDefaults().canvas_invite as TemplateBody;
 
     await repo.upsert("canvas_invite", previous, "admin-1");
     await seedDefaultTemplates(repo);

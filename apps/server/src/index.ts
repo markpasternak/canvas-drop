@@ -7,6 +7,7 @@ import { buildApp } from "./app.js";
 import { createAuditLog } from "./audit/audit-log.js";
 import { setupAuth } from "./auth/factory.js";
 import { makeOidc, makeOidcConfigLoader } from "./auth/oidc.js";
+import { makeOrgMembershipResolver } from "./auth/org-membership.js";
 import { canvasUrl } from "./canvas/url.js";
 import { backfillSearchText, countMissingSearchText } from "./db/backfill-search-text.js";
 import { makeDb } from "./db/factory.js";
@@ -18,6 +19,7 @@ import { draftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { guestRepository } from "./db/repositories/guest.js";
 import { invitationsRepository } from "./db/repositories/invitations.js";
+import { orgMembersRepository } from "./db/repositories/org-members.js";
 import { orgsRepository } from "./db/repositories/orgs.js";
 import { screenshotsRepository } from "./db/repositories/screenshots.js";
 import { settingsRepository } from "./db/repositories/settings.js";
@@ -157,6 +159,13 @@ async function main() {
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
     // …and a team canvas needs the live team re-join (plan 003 U4).
     teamMatch: (canvasId, userId, viewerOrgIds) => teams.teamMatch(canvasId, userId, viewerOrgIds),
+    // …and editors stay connected at any rung (editor-roles plan): the same predicate
+    // the role resolver uses behind every HTTP/MCP gate.
+    isEffectiveEditor: (canvasId, userId, scope) =>
+      canvases.isEffectiveEditor(canvasId, userId, scope),
+    // …and the org set is re-resolved per sweep (review #5), the same live predicate the
+    // gateway applies per request, so an org departure also ends live sockets.
+    resolveOrgIds: makeOrgMembershipResolver(orgs, orgMembersRepository(db)),
   });
 
   // 5. Compose and serve. createNodeWebSocket needs the app instance, and the WS

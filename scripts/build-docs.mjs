@@ -20,6 +20,8 @@ const OUT_FILE = join(root, "apps/server/src/docs/generated-content.ts");
 const LLMS_PAGES = [
   "",
   "quickstart",
+  // The agent-facing summary (deploy paths + the MCP surface incl. people-list roles).
+  "agents/llms",
   "authoring/capabilities",
   "sdk/overview",
   "api/deploy-api",

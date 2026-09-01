@@ -1,5 +1,11 @@
 import { orgSlug } from "@canvas-drop/shared";
-import { pgSchema, sqliteSchema, type Team, type TeamMember } from "@canvas-drop/shared/db";
+import {
+  type AccessRole,
+  pgSchema,
+  sqliteSchema,
+  type Team,
+  type TeamMember,
+} from "@canvas-drop/shared/db";
 import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
@@ -8,6 +14,13 @@ export interface UserTeamCanvasGrant {
   canvasId: string;
   teamId: string;
   teamName: string;
+}
+
+/** One canvas→team grant with its role (editor-roles plan). */
+export interface CanvasTeamGrant {
+  teamId: string;
+  role: AccessRole;
+  createdAt: number;
 }
 
 /**
@@ -21,6 +34,21 @@ export interface UserTeamCanvasGrant {
  * org clause only NARROWS — a personal team grants by membership alone, an org team additionally
  * re-joins the LIVE `viewerOrgIds` (so a removed-from-org user is denied even with a stale row).
  */
+/**
+ * The live-org clause every team-scoped predicate shares (plan 003 KTD3; editor-roles
+ * review #9): a PERSONAL team (no org) always joins; an org team only for a viewer who is
+ * currently in that org. Takes the dialect-resolved `teams` table so the canvases repo's
+ * editor predicate and the teams repo's own queries use ONE definition.
+ */
+export function teamOrgClause(
+  teamsTable: { orgId: Parameters<typeof isNull>[0] & Parameters<typeof inArray>[0] },
+  viewerOrgIds: readonly string[],
+): SQL {
+  return viewerOrgIds.length === 0
+    ? isNull(teamsTable.orgId)
+    : (or(isNull(teamsTable.orgId), inArray(teamsTable.orgId, [...viewerOrgIds])) as SQL);
+}
+
 export function teamsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
@@ -45,9 +73,7 @@ export function teamsRepository(client: DbClient) {
    *  alone (`org_id IS NULL`); an org team additionally requires its org in the viewer's
    *  LIVE orgIds. Empty `viewerOrgIds` ⇒ only the personal arm (we never emit `IN ()`). */
   const accessOrgClause = (viewerOrgIds: Set<string>): SQL =>
-    viewerOrgIds.size === 0
-      ? isNull(teamsT.orgId)
-      : (or(isNull(teamsT.orgId), inArray(teamsT.orgId, [...viewerOrgIds])) as SQL);
+    teamOrgClause(teamsT, [...viewerOrgIds]);
 
   /** A free slug within the team's namespace: org teams dedupe within the org; PERSONAL
    *  teams (no org) dedupe within the creator's own personal teams (the slug isn't a
@@ -100,6 +126,15 @@ export function teamsRepository(client: DbClient) {
     async findById(id: string): Promise<Team | null> {
       const rows = (await db.select().from(teamsT).where(eq(teamsT.id, id)).limit(1)) as Team[];
       return rows[0] ?? null;
+    },
+
+    /** Batched lookup (review #14) — the people list resolves every team grant in one query. */
+    async findByIds(ids: readonly string[]): Promise<Team[]> {
+      if (ids.length === 0) return [];
+      return (await db
+        .select()
+        .from(teamsT)
+        .where(inArray(teamsT.id, [...ids]))) as Team[];
     },
 
     /**
@@ -198,17 +233,22 @@ export function teamsRepository(client: DbClient) {
 
     // ---- canvas → team grants (the `team` rung; consumed by U4) ----
 
-    /** Replace a canvas's granted teams with exactly `teamIds` (idempotent set semantics).
-     *  Transactional: a failure between the delete and the insert would otherwise leave a
-     *  `team`-rung canvas granted to nobody — an accidental deny-to-everyone. */
+    /** Replace a canvas's VIEWER-role team grants with exactly `teamIds` (idempotent set
+     *  semantics — the `team` rung's grant set). Editor-role grants are owned solely by
+     *  the people-list path (editor-roles plan, KTD4): the replace-delete is scoped to
+     *  viewer rows and the insert never demotes an existing editor row, so no rung/teams
+     *  write can remove or downgrade an editor team. Transactional: a failure between the
+     *  delete and the insert would otherwise leave a `team`-rung canvas granted to nobody. */
     async setCanvasTeams(canvasId: string, teamIds: string[]): Promise<void> {
       await tx(async (q) => {
-        await q.delete(canvasTeamsT).where(eq(canvasTeamsT.canvasId, canvasId));
+        await q
+          .delete(canvasTeamsT)
+          .where(and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.role, "viewer")));
         if (teamIds.length === 0) return;
         const now = Date.now();
         await q
           .insert(canvasTeamsT)
-          .values(teamIds.map((teamId) => ({ canvasId, teamId, createdAt: now })))
+          .values(teamIds.map((teamId) => ({ canvasId, teamId, role: "viewer", createdAt: now })))
           .onConflictDoNothing();
       });
     },
@@ -219,6 +259,63 @@ export function teamsRepository(client: DbClient) {
         .from(canvasTeamsT)
         .where(eq(canvasTeamsT.canvasId, canvasId))) as Array<{ teamId: string }>;
       return rows.map((r) => r.teamId);
+    },
+
+    /** Every team grant on a canvas with its role, oldest first (the unified people list). */
+    async listCanvasTeamGrants(canvasId: string): Promise<CanvasTeamGrant[]> {
+      return (await db
+        .select({
+          teamId: canvasTeamsT.teamId,
+          role: canvasTeamsT.role,
+          createdAt: canvasTeamsT.createdAt,
+        })
+        .from(canvasTeamsT)
+        .where(eq(canvasTeamsT.canvasId, canvasId))
+        .orderBy(canvasTeamsT.createdAt, canvasTeamsT.teamId)) as CanvasTeamGrant[];
+    },
+
+    /** Ids of the teams holding an EDITOR grant on the canvas (KTD4). */
+    async listEditorTeamIds(canvasId: string): Promise<string[]> {
+      const rows = (await db
+        .select({ teamId: canvasTeamsT.teamId })
+        .from(canvasTeamsT)
+        .where(
+          and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.role, "editor")),
+        )) as Array<{ teamId: string }>;
+      return rows.map((r) => r.teamId);
+    },
+
+    /**
+     * Upsert one team grant with a role (editor-roles plan, KTD4). Scoped to the
+     * canvas; an existing grant's role is updated in place. Returns the grant.
+     */
+    async setCanvasTeamRole(
+      canvasId: string,
+      teamId: string,
+      role: AccessRole,
+    ): Promise<CanvasTeamGrant> {
+      const rows = (await db
+        .insert(canvasTeamsT)
+        .values({ canvasId, teamId, role, createdAt: Date.now() })
+        .onConflictDoUpdate({
+          target: [canvasTeamsT.canvasId, canvasTeamsT.teamId],
+          set: { role },
+        })
+        .returning({
+          teamId: canvasTeamsT.teamId,
+          role: canvasTeamsT.role,
+          createdAt: canvasTeamsT.createdAt,
+        })) as CanvasTeamGrant[];
+      return rows[0] as CanvasTeamGrant;
+    },
+
+    /** Remove one team grant from a canvas (any role). Returns whether a row was removed. */
+    async removeCanvasTeam(canvasId: string, teamId: string): Promise<boolean> {
+      const rows = (await db
+        .delete(canvasTeamsT)
+        .where(and(eq(canvasTeamsT.canvasId, canvasId), eq(canvasTeamsT.teamId, teamId)))
+        .returning({ teamId: canvasTeamsT.teamId })) as Array<{ teamId: string }>;
+      return rows.length > 0;
     },
 
     /**

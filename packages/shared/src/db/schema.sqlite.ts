@@ -332,6 +332,11 @@ export const canvasAllowlist = sqliteTable(
     principalKind: c.text("principal_kind").notNull(), // member | guest
     userId: c.text("user_id").references(() => users.id),
     email: c.text("email"),
+    // Per-entry role (editor-roles plan, KTD3): 'viewer' | 'editor', validated at the
+    // zod boundary (no CHECK — a CHECK forces the SQLite table-rebuild migration, like
+    // `team_members.role`). Pre-existing rows default to viewer; a guest row is always
+    // a viewer (enforced at the service layer, KD2).
+    role: c.text("role").notNull().default("viewer"),
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [
@@ -471,7 +476,10 @@ export const uploadSessions = sqliteTable(
       .text("canvas_id")
       .notNull()
       .references(() => canvases.id),
-    ownerId: c
+    // The ACTOR who began the session (owner or editor — editor-roles plan U3); the
+    // column keeps its historical `owner_id` name (no migration), the TS key says what
+    // it means: a session is usable only by the actor who opened it.
+    actorId: c
       .text("owner_id")
       .notNull()
       .references(() => users.id),
@@ -781,6 +789,10 @@ export const canvasTeams = sqliteTable(
       .text("team_id")
       .notNull()
       .references(() => teams.id),
+    // Team-grant role (editor-roles plan, KTD4): a 'viewer' row keeps the `team`-rung
+    // semantics; an 'editor' row makes every live member an editor at any rung and is
+    // never touched by rung changes. Unchecked text like `team_members.role`.
+    role: c.text("role").notNull().default("viewer"),
     createdAt: c.epochMs("created_at").notNull(),
   },
   (t) => [

@@ -15,6 +15,19 @@ import { keys } from "./queries.js";
  * field too, but the Settings UI awaits it (KTD-5) — optimism here is safe because
  * we never echo the password, only flip `hasPassword`.
  */
+/** Transfer ownership to an editor (editor-roles plan, U7). The response carries the
+ *  canvas as the caller now sees it (`role: "editor"`); lists refetch for both parties. */
+export function useTransferCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (toUserId: string) => api.transferCanvas(id, toUserId),
+    onSuccess: (r) => {
+      qc.setQueryData(keys.canvas(id), r.canvas);
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
 export function useUpdateSettings(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -250,8 +263,8 @@ export function useSaveDraftFile(id: string) {
   return useMutation({
     // Serialize draft writes for this canvas so overlapping autosaves settle in order.
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { path: string; content: string }) =>
-      api.putDraftFile(id, input.path, input.content),
+    mutationFn: (input: { path: string; content: string; expectedHash?: string }) =>
+      api.putDraftFile(id, input.path, input.content, { expectedHash: input.expectedHash }),
     onSuccess: (draft, input) => {
       qc.setQueryData(keys.draft(id), draft);
       // Write the saved content through to the per-file cache: a stale entry would
@@ -281,8 +294,8 @@ export function useUploadDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { path: string; file: Blob }) =>
-      api.uploadDraftFile(id, input.path, input.file),
+    mutationFn: (input: { path: string; file: Blob; expectedHash?: string }) =>
+      api.uploadDraftFile(id, input.path, input.file, input.expectedHash),
     onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
       qc.removeQueries({ queryKey: keys.draftFile(id, input.path) });
@@ -299,8 +312,8 @@ export function useUploadDraftFiles(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: async (files: Array<{ path: string; file: Blob }>) => {
-      for (const f of files) await api.uploadDraftFile(id, f.path, f.file);
+    mutationFn: async (files: Array<{ path: string; file: Blob; expectedHash?: string }>) => {
+      for (const f of files) await api.uploadDraftFile(id, f.path, f.file, f.expectedHash);
       return files.length;
     },
     onSuccess: (_count, files) => {
@@ -315,10 +328,11 @@ export function useDeleteDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (path: string) => api.deleteDraftFile(id, path),
-    onSuccess: (draft: DraftView, path) => {
+    mutationFn: (input: { path: string; expectedHash?: string }) =>
+      api.deleteDraftFile(id, input.path, input.expectedHash),
+    onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
-      qc.removeQueries({ queryKey: keys.draftFile(id, path) });
+      qc.removeQueries({ queryKey: keys.draftFile(id, input.path) });
     },
   });
 }
@@ -328,8 +342,8 @@ export function useRenameDraftFile(id: string) {
   const qc = useQueryClient();
   return useMutation({
     scope: { id: `draft-${id}` },
-    mutationFn: (input: { from: string; to: string }) =>
-      api.renameDraftFile(id, input.from, input.to),
+    mutationFn: (input: { from: string; to: string; expectedHash?: string }) =>
+      api.renameDraftFile(id, input.from, input.to, input.expectedHash),
     onSuccess: (draft: DraftView, input) => {
       qc.setQueryData(keys.draft(id), draft);
       // Carry the old path's cached content to the new path so re-opening the
@@ -505,6 +519,15 @@ export function useAdminDisableCanvas() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.admin.disableCanvas(id, reason),
+    onSuccess: () => invalidateAdmin(qc),
+  });
+}
+
+export function useAdminReassignOwner() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, toUserId, reason }: { id: string; toUserId: string; reason: string }) =>
+      api.admin.reassignOwner(id, { toUserId, reason }),
     onSuccess: () => invalidateAdmin(qc),
   });
 }

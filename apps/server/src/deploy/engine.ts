@@ -11,6 +11,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { DraftsRepository } from "../db/repositories/drafts.js";
 import type { UploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
+import { stampAll } from "../draft/service.js";
 import type { Logger } from "../log/logger.js";
 import type { StorageDriver } from "../storage/driver.js";
 import {
@@ -231,12 +232,23 @@ export function deployEngine(deps: DeployEngineDeps) {
       // Best-effort — never fail the deploy over draft bookkeeping.
       try {
         const draft = await deps.drafts.getByCanvas(canvas.id);
+        // The refreshed entries are stamped with the deploying actor (editor-roles plan,
+        // KTD8) so an editor's stale save against the pre-deploy hash is refused.
+        const stamped = stampAll(manifest, version.createdBy, Date.now());
         if (!draft) {
-          await deps.drafts.create({ canvasId: canvas.id, manifest, baseVersionId: version.id });
+          await deps.drafts.create({
+            canvasId: canvas.id,
+            manifest: stamped,
+            baseVersionId: version.id,
+          });
         } else if (await this.draftHasUnpublishedEdits(draft)) {
           await deps.drafts.markStale(canvas.id);
-        } else {
-          await deps.drafts.resetToBase(canvas.id, manifest, version.id);
+        } else if (
+          !(await deps.drafts.resetToBase(canvas.id, stamped, version.id, draft.updatedAt))
+        ) {
+          // The draft moved on while we deployed (review #4): those are held edits over
+          // the new version — flag stale rather than erase them.
+          await deps.drafts.markStale(canvas.id);
         }
       } catch (err) {
         deps.log.warn({ err, canvasId: canvas.id }, "post-deploy draft sync failed");

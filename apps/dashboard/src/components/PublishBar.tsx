@@ -18,7 +18,7 @@ export type EditorPane = "files" | "code" | "preview" | "onpage";
 /** The editor buffer's local (pre-autosave) state — the truthful counterpart to the
  *  server-side `dirty`: "unsaved" while an edit sits in the debounce window, "failed"
  *  after a flush error (the buffer holds the only copy until a retry lands). */
-export type LocalDirtyState = "clean" | "unsaved" | "failed";
+export type LocalDirtyState = "clean" | "unsaved" | "failed" | "conflict";
 
 export interface PublishBarProps {
   dirty: boolean;
@@ -69,15 +69,21 @@ export function PublishBar({
   // sits unsaved in the buffer (or a save just failed and needs a retry).
   const status = saving
     ? { label: "Saving...", tone: "text-subtle", icon: FloppyDisk }
-    : localDirty === "failed"
-      ? { label: "Save failed — changes not saved", tone: "text-danger", icon: WarningCircle }
-      : localDirty === "unsaved"
-        ? { label: "Unsaved changes", tone: "text-muted", icon: FloppyDisk }
-        : dirty
-          ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
-          : stale
-            ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
-            : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
+    : localDirty === "conflict"
+      ? {
+          label: "Save conflict — another editor changed this file",
+          tone: "text-danger",
+          icon: WarningCircle,
+        }
+      : localDirty === "failed"
+        ? { label: "Save failed — changes not saved", tone: "text-danger", icon: WarningCircle }
+        : localDirty === "unsaved"
+          ? { label: "Unsaved changes", tone: "text-muted", icon: FloppyDisk }
+          : dirty
+            ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
+            : stale
+              ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
+              : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
   const StatusIcon = status.icon;
 
   return (

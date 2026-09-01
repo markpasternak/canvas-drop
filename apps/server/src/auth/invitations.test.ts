@@ -166,4 +166,88 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(await invitations.countPendingByActor(inviter.id)).toBe(1);
     expect(await invitations.listForEmail("dup@x.com")).toHaveLength(1);
   });
+  it("review #3: a demotion that lands between apply and consume wins — the invitee ends up a viewer and the invite is consumed", async () => {
+    const { users, canvases, invitations, deps, inviter } = await harness();
+    const canvas = await canvases.create({ ownerId: inviter.id, slug: "race", apiKeyHash: "k" });
+    await invitations.record({
+      email: "late@x.com",
+      target: { type: "canvas", id: canvas.id },
+      role: "editor",
+      invitedBy: inviter.id,
+    });
+    const inv = (await invitations.listForEmail("late@x.com"))[0] as { id: string };
+    const invitee = await users.upsert({
+      providerSub: "dev:late",
+      email: "late@x.com",
+      name: "Late",
+      isAdmin: false,
+    });
+    // Interpose on the first consume: the owner demotes the pending entry just before it.
+    const original = invitations.consumeIfRole.bind(invitations);
+    let demoted = false;
+    const racing: InvitationApplyDeps = {
+      ...deps,
+      invitations: {
+        ...invitations,
+        listForEmail: invitations.listForEmail.bind(invitations),
+        consume: invitations.consume.bind(invitations),
+        findPendingById: invitations.findPendingById.bind(invitations),
+        consumeIfRole: async (id, role) => {
+          if (!demoted) {
+            demoted = true;
+            await invitations.setPendingRole("canvas", canvas.id, inv.id, "viewer");
+          }
+          return original(id, role);
+        },
+      },
+    };
+    await materializePendingInvitations(racing, { id: invitee.id, email: "late@x.com" });
+    const row = await canvases.findMemberEntry(canvas.id, invitee.id);
+    expect(row?.role).toBe("viewer");
+    expect(await invitations.findPendingById(inv.id)).toBeNull(); // consumed after re-apply
+  });
+});
+
+describe.each(DIALECTS)("materialize — pending role (editor-roles plan U4) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("a pending EDITOR invite materializes an editor row; a legacy null-role invite a viewer row", async () => {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const teams = teamsRepository(client);
+    const canvases = canvasesRepository(client);
+    const invitations = invitationsRepository(client);
+    const inviter = await users.upsert({
+      providerSub: "inviter",
+      email: "inviter@e.com",
+      name: "I",
+      isAdmin: false,
+    });
+    const a = await canvases.create({ ownerId: inviter.id, slug: "a", apiKeyHash: "k" });
+    const b = await canvases.create({ ownerId: inviter.id, slug: "b", apiKeyHash: "k2" });
+    await invitations.record({
+      email: "new@e.com",
+      target: { type: "canvas", id: a.id },
+      role: "editor",
+      invitedBy: inviter.id,
+    });
+    await invitations.record({
+      email: "new@e.com",
+      target: { type: "canvas", id: b.id },
+      invitedBy: inviter.id,
+    });
+    const person = await users.upsert({
+      providerSub: "new",
+      email: "new@e.com",
+      name: "N",
+      isAdmin: false,
+    });
+    await materializePendingInvitations({ invitations, teams, canvases }, person);
+    expect((await canvases.findMemberEntry(a.id, person.id))?.role).toBe("editor");
+    expect((await canvases.findMemberEntry(b.id, person.id))?.role).toBe("viewer");
+    expect(await invitations.listForEmail("new@e.com")).toEqual([]);
+  });
 });

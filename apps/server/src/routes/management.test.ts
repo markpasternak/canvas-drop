@@ -2745,6 +2745,8 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const id = await publishedCanvas(owner.id);
+    // The gate reads the OWNER's account entitlement (editor-roles plan, KD7).
+    await usersRepository(client).setPublishPublic(owner.id, false);
     const res = await buildApp(client, {
       id: owner.id,
       isAdmin: false,
@@ -2792,21 +2794,24 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     const listed = await jsonOf<{ entries: Array<{ id: string; kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(listed.entries).toHaveLength(1);
-    const entry = listed.entries[0];
+    // The owner row is pinned first (KTD5); the granted member follows.
+    expect(listed.entries).toHaveLength(2);
+    expect(listed.entries[0]).toMatchObject({ id: "owner", kind: "owner" });
+    const entry = listed.entries[1];
     if (!entry) throw new Error("expected one allowlist entry");
     expect(entry.kind).toBe("member");
     expect(entry.email).toBe("member@example.com");
+    expect(entry.id).toMatch(/^member:/);
 
     const del = await app.request(`/api/canvases/${id}/allowlist/${entry.id}`, {
       method: "DELETE",
       headers: mut,
     });
     expect(del.status).toBe(200);
-    const after = await jsonOf<{ entries: unknown[] }>(
+    const after = await jsonOf<{ entries: Array<{ kind: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries.map((e) => e.kind)).toEqual(["owner"]);
     void member;
   });
 
@@ -3182,7 +3187,9 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     const listed = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(listed.entries).toEqual([expect.objectContaining({ kind: "pending", email })]);
+    expect(listed.entries.filter((e) => e.kind !== "owner")).toEqual([
+      expect.objectContaining({ kind: "pending", email, role: "viewer" }),
+    ]);
     expect(await guestRepository(client).listInvitesByCanvas(id)).toHaveLength(0);
 
     const materialized = await usersRepository(client).upsert({
@@ -3199,7 +3206,9 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     const afterMaterialize = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(afterMaterialize.entries).toEqual([expect.objectContaining({ kind: "member", email })]);
+    expect(afterMaterialize.entries.filter((e) => e.kind !== "owner")).toEqual([
+      expect.objectContaining({ kind: "member", email }),
+    ]);
   });
 
   it("removes pending Add person rows without touching other canvas invitations", async () => {
@@ -3309,10 +3318,10 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       headers: mut,
     });
     expect(del.status).toBe(200);
-    const after = await jsonOf<{ entries: unknown[] }>(
+    const after = await jsonOf<{ entries: Array<{ kind: string }> }>(
       await app.request(`/api/canvases/${id}/allowlist`),
     );
-    expect(after.entries).toHaveLength(0);
+    expect(after.entries.map((e) => e.kind)).toEqual(["owner"]);
     expect(await guests.findLiveSessionByTokenHash(hashToken("legacy-session-token"))).toBeNull();
   });
 
@@ -3326,5 +3335,745 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       { method: "POST", headers: mut, body: JSON.stringify({ email: "x@example.com" }) },
     );
     expect(res.status).toBe(404);
+  });
+});
+
+// --- Role matrix (editor-roles plan U2, KTD1): owner / editor / viewer / no role ×
+//     read / mutate / owner-only. Rejection paths first. -----------------------------
+
+describe("managementRoutes — role matrix (editor-roles plan)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedRoles() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const nobody = await seedUser(client, "nobody");
+    const admin = await seedUser(client, "admin", true);
+    const repo = canvasesRepository(client);
+    // General access stays PRIVATE: an editor must reach the surface regardless (AE2).
+    const cv = await repo.create({ ownerId: owner.id, slug: "matrix", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    const as = (u: { id: string }, isAdmin = false) => buildApp(client, { id: u.id, isAdmin });
+    return { repo, cv, owner, editor, viewer, nobody, admin, as };
+  }
+
+  it("READ (GET /:id, /versions, /usage): owner + editor 200; viewer, no-role, admin 404", async () => {
+    const { cv, owner, editor, viewer, nobody, admin, as } = await seedRoles();
+    for (const path of [
+      `/api/canvases/${cv.id}`,
+      `/api/canvases/${cv.id}/versions`,
+      `/api/canvases/${cv.id}/usage`,
+    ]) {
+      expect((await as(viewer).request(path)).status, `viewer ${path}`).toBe(404);
+      expect((await as(nobody).request(path)).status, `nobody ${path}`).toBe(404);
+      expect((await as(admin, true).request(path)).status, `admin ${path}`).toBe(404);
+      expect((await as(owner).request(path)).status, `owner ${path}`).toBe(200);
+      expect((await as(editor).request(path)).status, `editor ${path}`).toBe(200);
+    }
+  });
+
+  it("MUTATE (PATCH /:id/settings, /capabilities): owner + editor 200; viewer, no-role, admin 404", async () => {
+    const { cv, owner, editor, viewer, nobody, admin, as } = await seedRoles();
+    const patch = (
+      u: { id: string },
+      isAdmin = false,
+      path = "settings",
+      body: unknown = { title: "t" },
+    ) =>
+      as(u, isAdmin).request(`/api/canvases/${cv.id}/${path}`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    expect((await patch(viewer)).status).toBe(404);
+    expect((await patch(nobody)).status).toBe(404);
+    expect((await patch(admin, true)).status).toBe(404);
+    expect((await patch(owner)).status).toBe(200);
+    const res = await patch(editor, false, "settings", { title: "by editor" });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ title: string }>(res)).title).toBe("by editor");
+    expect((await patch(editor, false, "capabilities", { kv: false })).status).toBe(200);
+  });
+
+  it("OWNER-ONLY (DELETE /:id): editor → 403 OWNER_ONLY; viewer / no-role → 404; owner → 200 (AE4)", async () => {
+    const { repo, cv, owner, editor, viewer, nobody, as } = await seedRoles();
+    const del = (u: { id: string }) =>
+      as(u).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so });
+    expect((await del(viewer)).status).toBe(404);
+    expect((await del(nobody)).status).toBe(404);
+    const asEditor = await del(editor);
+    expect(asEditor.status).toBe(403);
+    expect(await jsonOf<{ code: string }>(asEditor)).toEqual({
+      code: "OWNER_ONLY",
+      message: expect.stringMatching(/owner/i),
+    });
+    expect((await repo.findById(cv.id))?.status).toBe("active");
+    expect((await del(owner)).status).toBe(200);
+    expect((await repo.findById(cv.id))?.status).toBe("deleted");
+  });
+
+  it("check order is role → owner-only → disabled: on a DISABLED canvas an editor's delete is 403 OWNER_ONLY (not 409), no-role is 404, owner is 409", async () => {
+    const { repo, cv, owner, editor, nobody, as } = await seedRoles();
+    await repo.setDisabled(cv.id, "abuse");
+    const del = (u: { id: string }) =>
+      as(u).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so });
+    expect((await del(nobody)).status).toBe(404);
+    const asEditor = await del(editor);
+    expect(asEditor.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asEditor)).code).toBe("OWNER_ONLY");
+    const asOwner = await del(owner);
+    expect(asOwner.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(asOwner)).code).toBe("DISABLED");
+    // An editor's ordinary mutation on the disabled canvas is the shared 409; reads stay 200.
+    const patch = await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(patch.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(patch)).code).toBe("DISABLED");
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+  });
+
+  it("GET /by-slug/:slug resolves for the owner AND an editor; viewer / no-role 404", async () => {
+    const { cv, owner, editor, viewer, nobody, as } = await seedRoles();
+    const get = (u: { id: string }) => as(u).request(`/api/canvases/by-slug/${cv.slug}`);
+    expect((await get(viewer)).status).toBe(404);
+    expect((await get(nobody)).status).toBe(404);
+    expect(await jsonOf<{ id: string }>(await get(owner))).toEqual({ id: cv.id });
+    expect(await jsonOf<{ id: string }>(await get(editor))).toEqual({ id: cv.id });
+  });
+
+  it("removal takes effect on the next request: a demoted editor is 404 on read and mutate", async () => {
+    const { repo, cv, editor, as } = await seedRoles();
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    const entry = await repo.findMemberEntry(cv.id, editor.id);
+    await repo.setAllowlistRole(cv.id, (entry as { id: string }).id, "viewer");
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+    await repo.removeAllowlistEntry(cv.id, (entry as { id: string }).id);
+    expect(
+      (
+        await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+          method: "PATCH",
+          headers: so,
+          body: JSON.stringify({ title: "x" }),
+        })
+      ).status,
+    ).toBe(404);
+  });
+});
+
+// --- Clone by an editor (editor-roles plan U3) -------------------------------------------
+
+describe("managementRoutes — clone by an editor", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("an editor clones a PRIVATE canvas → new canvas owned by the editor with an empty people list; a no-role member → 404", async () => {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const nobody = await seedUser(client, "nobody");
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const engine = deployEngine({ config, canvases, versions, drafts, storage, log: silent });
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k1" });
+    await engine.deploy(src, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    await canvases.addAllowlistEntry({
+      canvasId: src.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+
+    const denied = await buildApp(client, { id: nobody.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(denied.status).toBe(404);
+
+    const res = await buildApp(client, { id: editor.id, isAdmin: false }, storage).request(
+      `/api/canvases/${src.id}/clone`,
+      sameOriginPost,
+    );
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(res);
+    const clone = await canvases.findById(body.id);
+    expect(clone?.ownerId).toBe(editor.id);
+    expect(clone?.clonedFromCanvasId).toBe(src.id);
+    expect(await canvases.listAllowlist(body.id)).toEqual([]);
+  });
+});
+
+// --- People-list roles over HTTP (editor-roles plan U4/U5) --------------------------------
+
+describe("managementRoutes — people-list roles", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+  type Entry = {
+    id: string;
+    kind: string;
+    role: string;
+    email: string | null;
+    name: string | null;
+  };
+
+  async function seedPeople() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const nobody = await seedUser(client, "nobody");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner.id, slug: "people", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "g@partner.com",
+    });
+    const hub = {
+      calls: [] as Array<{ method: string; canvasId: string }>,
+      async revalidateCanvas(canvasId: string) {
+        this.calls.push({ method: "revalidateCanvas", canvasId });
+      },
+      async dropGatedNonOwners(canvasId: string) {
+        this.calls.push({ method: "dropGatedNonOwners", canvasId });
+      },
+    };
+    const as = (u: { id: string }) =>
+      buildApp(client, { id: u.id, isAdmin: false }, undefined, hub);
+    const list = async (u: { id: string }) =>
+      (await jsonOf<{ entries: Entry[] }>(await as(u).request(`/api/canvases/${cv.id}/allowlist`)))
+        .entries;
+    return { repo, cv, owner, editor, viewer, nobody, hub, as, list };
+  }
+
+  it("GET lists the owner first, then people with roles, ids prefixed; an editor sees the same list", async () => {
+    const { owner, editor, list } = await seedPeople();
+    const entries = await list(owner);
+    expect(entries[0]).toMatchObject({ id: "owner", kind: "owner", role: "owner" });
+    expect(entries.map((e) => `${e.kind}:${e.role}`)).toEqual([
+      "owner:owner",
+      "member:editor",
+      "member:viewer",
+      "guest:viewer",
+    ]);
+    expect(entries.slice(1).every((e) => e.id.includes(":"))).toBe(true);
+    expect(await list(editor)).toEqual(entries);
+  });
+
+  it("AE1: PATCH role=editor on a guest entry → 400 GUEST_VIEWER_ONLY", async () => {
+    const { cv, owner, as, list } = await seedPeople();
+    const guest = (await list(owner)).find((e) => e.kind === "guest") as Entry;
+    const res = await as(owner).request(`/api/canvases/${cv.id}/allowlist/${guest.id}`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ role: "editor" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await jsonOf<{ code: string }>(res)).code).toBe("GUEST_VIEWER_ONLY");
+  });
+
+  it("the owner entry: PATCH role and DELETE → 403 OWNER_ONLY, for the owner and an editor alike", async () => {
+    const { cv, owner, editor, as } = await seedPeople();
+    for (const u of [owner, editor]) {
+      const patch = await as(u).request(`/api/canvases/${cv.id}/allowlist/owner`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify({ role: "viewer" }),
+      });
+      expect(patch.status).toBe(403);
+      expect((await jsonOf<{ code: string }>(patch)).code).toBe("OWNER_ONLY");
+      const del = await as(u).request(`/api/canvases/${cv.id}/allowlist/owner`, {
+        method: "DELETE",
+        headers: so,
+      });
+      expect(del.status).toBe(403);
+    }
+  });
+
+  it("promote a viewer to editor by entry id (they can then manage); demote drops live sockets via revalidate", async () => {
+    const { cv, owner, viewer, hub, as, list } = await seedPeople();
+    const row = (await list(owner)).find((e) => e.email === "viewer@example.com") as Entry;
+    expect((await as(viewer).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+    const up = await as(owner).request(`/api/canvases/${cv.id}/allowlist/${row.id}`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ role: "editor" }),
+    });
+    expect(up.status).toBe(200);
+    expect((await as(viewer).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    hub.calls.length = 0;
+    const down = await as(owner).request(`/api/canvases/${cv.id}/allowlist/${row.id}`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(down.status).toBe(200);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    expect((await as(viewer).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+  });
+
+  it("an entry id belonging to canvas B is 404 on canvas A and changes nothing", async () => {
+    const { repo, cv, owner, editor, as, list } = await seedPeople();
+    const other = await repo.create({ ownerId: owner.id, slug: "other", apiKeyHash: "k2" });
+    const row = (await list(owner)).find((e) => e.email === "editor@example.com") as Entry;
+    const res = await as(owner).request(`/api/canvases/${other.id}/allowlist/${row.id}`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(res.status).toBe(404);
+    expect((await repo.findMemberEntry(cv.id, editor.id))?.role).toBe("editor");
+  });
+
+  it("AE5: editor E1 removes editor E2 → E2 is 404 next; E1 can demote themselves to viewer", async () => {
+    const { repo, cv, editor, as, list } = await seedPeople();
+    const e2 = await seedUser(client, "e2");
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: e2.id,
+      role: "editor",
+    });
+    expect((await as(e2).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    const e2Row = (await list(editor)).find((e) => e.email === "e2@example.com") as Entry;
+    const del = await as(editor).request(`/api/canvases/${cv.id}/allowlist/${e2Row.id}`, {
+      method: "DELETE",
+      headers: so,
+    });
+    expect(del.status).toBe(200);
+    expect((await as(e2).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+    const self = (await list(editor)).find((e) => e.email === "editor@example.com") as Entry;
+    const demote = await as(editor).request(`/api/canvases/${cv.id}/allowlist/${self.id}`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(demote.status).toBe(200);
+    expect((await as(editor).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+  });
+
+  it("POST with role=editor grants an existing member as editor; re-adding without a role keeps editor; legacy bare ids still delete", async () => {
+    const { repo, cv, owner, as, list } = await seedPeople();
+    const fresh = await seedUser(client, "fresh");
+    const add = await as(owner).request(`/api/canvases/${cv.id}/allowlist`, {
+      method: "POST",
+      headers: so,
+      body: JSON.stringify({ email: "fresh@example.com", role: "editor" }),
+    });
+    expect(add.status).toBe(200);
+    expect(await jsonOf<{ status: string; role: string }>(add)).toMatchObject({
+      status: "granted",
+      role: "editor",
+    });
+    const row = await repo.findMemberEntry(cv.id, fresh.id);
+    expect(row?.role).toBe("editor");
+    const readd = await as(owner).request(`/api/canvases/${cv.id}/allowlist`, {
+      method: "POST",
+      headers: so,
+      body: JSON.stringify({ email: "fresh@example.com" }),
+    });
+    expect((await jsonOf<{ status: string }>(readd)).status).toBe("already_added");
+    expect((await repo.findMemberEntry(cv.id, fresh.id))?.role).toBe("editor");
+    // Legacy bare row id (pre-prefix clients) still works on DELETE.
+    const del = await as(owner).request(
+      `/api/canvases/${cv.id}/allowlist/${(row as { id: string }).id}`,
+      {
+        method: "DELETE",
+        headers: so,
+      },
+    );
+    expect(del.status).toBe(200);
+    expect((await list(owner)).find((e) => e.email === "fresh@example.com")).toBeUndefined();
+  });
+
+  it("U5: add a team with role editor via the people list; a non-member actor gets 403 TEAM_FORBIDDEN", async () => {
+    const { cv, owner, editor, nobody, as, list } = await seedPeople();
+    const teams = teamsRepository(client);
+    const design = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
+    await teams.addMember(design.id, nobody.id);
+    // The editor is not in Design → cannot grant it.
+    const forbidden = await as(editor).request(`/api/canvases/${cv.id}/allowlist`, {
+      method: "POST",
+      headers: so,
+      body: JSON.stringify({ teamId: design.id, role: "editor" }),
+    });
+    expect(forbidden.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(forbidden)).code).toBe("TEAM_FORBIDDEN");
+    const ok = await as(owner).request(`/api/canvases/${cv.id}/allowlist`, {
+      method: "POST",
+      headers: so,
+      body: JSON.stringify({ teamId: design.id, role: "editor" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(await list(owner)).toContainEqual(
+      expect.objectContaining({
+        id: `team:${design.id}`,
+        kind: "team",
+        role: "editor",
+        name: "Design",
+      }),
+    );
+    // Its member (previously no role) now manages the canvas (AE3).
+    expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    await teams.removeMember(design.id, nobody.id);
+    expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+  });
+
+  it("AE13: leaving the team rung clears the VIEWER team grant but keeps the EDITOR team grant (its members still edit)", async () => {
+    const { repo, cv, owner, nobody, as, list } = await seedPeople();
+    // Sharing rungs need a published canvas (the share guard): deploy one version first.
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage: memStorage(),
+      log: silent,
+    });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    const teams = teamsRepository(client);
+    const viewers = await teams.create({ orgId: null, name: "Viewers", createdBy: owner.id });
+    const editors = await teams.create({ orgId: null, name: "Editors", createdBy: owner.id });
+    await teams.addMember(editors.id, nobody.id);
+    // Team rung with the viewer team (the settings flow), plus an editor team via the people list.
+    const rung = await as(owner).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ access: "team", teamIds: [viewers.id] }),
+    });
+    expect(rung.status).toBe(200);
+    await as(owner).request(`/api/canvases/${cv.id}/allowlist`, {
+      method: "POST",
+      headers: so,
+      body: JSON.stringify({ teamId: editors.id, role: "editor" }),
+    });
+    expect(
+      (await list(owner))
+        .filter((e) => e.kind === "team")
+        .map((e) => e.role)
+        .sort(),
+    ).toEqual(["editor", "viewer"]);
+    // A settings save replacing the viewer set (rung unchanged) leaves the editor grant intact.
+    const another = await teams.create({ orgId: null, name: "Other viewers", createdBy: owner.id });
+    expect(
+      (
+        await as(owner).request(`/api/canvases/${cv.id}/settings`, {
+          method: "PATCH",
+          headers: so,
+          body: JSON.stringify({ teamIds: [another.id] }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await list(owner))
+        .filter((e) => e.kind === "team")
+        .map((e) => `${e.name}:${e.role}`)
+        .sort(),
+    ).toEqual(["Editors:editor", "Other viewers:viewer"]);
+    // Switch the rung to whole org: viewer team rows cleared, the editor team row intact.
+    const off = await as(owner).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ access: "whole_org" }),
+    });
+    expect(off.status).toBe(200);
+    expect((await list(owner)).filter((e) => e.kind === "team")).toEqual([
+      expect.objectContaining({ id: `team:${editors.id}`, role: "editor" }),
+    ]);
+    expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+  });
+});
+
+// --- Ownership transfer over HTTP (editor-roles plan U7) -----------------------------------
+
+describe("managementRoutes — POST /:id/transfer", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedTransfer() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const viewer = await seedUser(client, "viewer");
+    const nobody = await seedUser(client, "nobody");
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId: owner.id, slug: "xfer", apiKeyHash: "k" });
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer.id });
+    const hub = {
+      calls: [] as Array<{ method: string; canvasId: string }>,
+      async revalidateCanvas(canvasId: string) {
+        this.calls.push({ method: "revalidateCanvas", canvasId });
+      },
+      async dropGatedNonOwners(canvasId: string) {
+        this.calls.push({ method: "dropGatedNonOwners", canvasId });
+      },
+    };
+    const as = (u: { id: string }) =>
+      buildApp(client, { id: u.id, isAdmin: false }, undefined, hub);
+    const transfer = (u: { id: string }, toUserId: string, headers: Record<string, string> = so) =>
+      as(u).request(`/api/canvases/${cv.id}/transfer`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ toUserId }),
+      });
+    return { repo, cv, owner, editor, viewer, nobody, hub, as, transfer };
+  }
+
+  it("owner-only: an editor gets 403 OWNER_ONLY, viewer/no-role 404; a cross-origin request is refused before the gate (403, no OWNER_ONLY/404 signal)", async () => {
+    const { editor, viewer, nobody, transfer } = await seedTransfer();
+    const asEditor = await transfer(editor, viewer.id);
+    expect(asEditor.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(asEditor)).code).toBe("OWNER_ONLY");
+    expect((await transfer(viewer, editor.id)).status).toBe(404);
+    expect((await transfer(nobody, editor.id)).status).toBe(404);
+    const crossSite = await transfer(nobody, editor.id, {
+      "Sec-Fetch-Site": "cross-site",
+      "content-type": "application/json",
+    });
+    expect(crossSite.status).toBe(403);
+    expect(JSON.stringify(await crossSite.json())).not.toContain("OWNER_ONLY");
+  });
+
+  it("AE7: owner → editor succeeds (previous owner becomes editor, sockets revalidated); to a non-editor → 409 NOT_ELIGIBLE; an email → 400", async () => {
+    const { repo, cv, owner, editor, viewer, hub, as, transfer } = await seedTransfer();
+    const bad = await transfer(owner, viewer.id);
+    expect(bad.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(bad)).code).toBe("NOT_ELIGIBLE");
+    expect((await transfer(owner, "editor@example.com")).status).toBe(400);
+    const ok = await transfer(owner, editor.id);
+    expect(ok.status).toBe(200);
+    const body = await jsonOf<{
+      ok: boolean;
+      previousOwnerEditor: boolean;
+      canvas: { id: string };
+    }>(ok);
+    expect(body).toMatchObject({ ok: true, previousOwnerEditor: true });
+    expect((await repo.findById(cv.id))?.ownerId).toBe(editor.id);
+    expect(hub.calls).toContainEqual({ method: "revalidateCanvas", canvasId: cv.id });
+    // The previous owner is now an editor: manages, but delete is owner-only.
+    expect((await as(owner).request(`/api/canvases/${cv.id}`)).status).toBe(200);
+    const del = await as(owner).request(`/api/canvases/${cv.id}`, {
+      method: "DELETE",
+      headers: so,
+    });
+    expect(del.status).toBe(403);
+    // The new owner may delete.
+    expect(
+      (await as(editor).request(`/api/canvases/${cv.id}`, { method: "DELETE", headers: so }))
+        .status,
+    ).toBe(200);
+  });
+});
+
+// --- Owner entitlement gates, key rotation visibility, version creators (editor-roles plan U8) ---
+
+describe("managementRoutes — owner entitlements, key rotation, version creators", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+  const so = { "Sec-Fetch-Site": "same-origin", "content-type": "application/json" } as const;
+
+  async function seedU8() {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const repo = canvasesRepository(client);
+    const users = usersRepository(client);
+    const storage = memStorage();
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage,
+      log: silent,
+    });
+    const cv = await repo.create({ ownerId: owner.id, slug: "ent", apiKeyHash: "k" });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>v1</h1>" }), owner.id);
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const as = (u: { id: string }, canPublishPublic = true) =>
+      buildApp(client, { id: u.id, isAdmin: false, canPublishPublic }, storage);
+    const patch = (u: { id: string }, body: unknown, canPublishPublic = true) =>
+      as(u, canPublishPublic).request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    return { repo, users, engine, cv, owner, editor, as, patch };
+  }
+
+  it("AE6: editor WITH the entitlement, owner WITHOUT → PUBLIC_LINK_OWNER_GATED; owner WITH, editor WITHOUT → editor succeeds", async () => {
+    const { users, owner, editor, patch } = await seedU8();
+    await users.setPublishPublic(owner.id, false);
+    await users.setPublishPublic(editor.id, true);
+    const gated = await patch(editor, { access: "public_link" }, true);
+    expect(gated.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(gated)).code).toBe("PUBLIC_LINK_OWNER_GATED");
+    await users.setPublishPublic(owner.id, true);
+    await users.setPublishPublic(editor.id, false);
+    const ok = await patch(editor, { access: "public_link" }, false);
+    expect(ok.status).toBe(200);
+    expect((await jsonOf<{ access: string }>(ok)).access).toBe("public_link");
+  });
+
+  it("an editor's settings save touching the guest-AI fields → 403 OWNER_ONLY; their other settings writes succeed; the owner may set them", async () => {
+    const { owner, editor, patch } = await seedU8();
+    const refused = await patch(editor, { guestAiEnabled: true });
+    expect(refused.status).toBe(403);
+    expect((await jsonOf<{ code: string }>(refused)).code).toBe("OWNER_ONLY");
+    expect((await patch(editor, { guestAiCap: 2 })).status).toBe(403);
+    expect((await patch(editor, { title: "by editor" })).status).toBe(200);
+    expect((await patch(owner, { guestAiEnabled: true, guestAiCap: 2 })).status).toBe(200);
+  });
+
+  it("AE19: an editor regenerates the deploy key (response as today); audit meta byRole editor; the owner's rotation is byRole owner", async () => {
+    const { cv, owner, editor, as } = await seedU8();
+    const res = await as(editor).request(`/api/canvases/${cv.id}/regenerate-key`, {
+      method: "POST",
+      headers: so,
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf<{ apiKey: string }>(res)).apiKey).toMatch(/^cd_/);
+    await as(owner).request(`/api/canvases/${cv.id}/regenerate-key`, {
+      method: "POST",
+      headers: so,
+    });
+    const events = (await auditRepository(client).recent(20)).filter(
+      (e) => e.action === "key_regen",
+    );
+    expect(events.map((e) => [e.actorId, (e.meta as { byRole: string }).byRole])).toEqual(
+      expect.arrayContaining([
+        [editor.id, "editor"],
+        [owner.id, "owner"],
+      ]),
+    );
+  });
+
+  it("R18: versions list who created each version — an editor's publish names the editor; the owner's names the owner", async () => {
+    const { repo, engine, cv, owner, editor, as } = await seedU8();
+    const row = (await repo.findById(cv.id)) as NonNullable<
+      Awaited<ReturnType<typeof repo.findById>>
+    >;
+    await engine.deploy(row, "folder", folder({ "index.html": "<h1>v2</h1>" }), editor.id);
+    const res = await as(editor).request(`/api/canvases/${cv.id}/versions`);
+    expect(res.status).toBe(200);
+    const { versions } = await jsonOf<{
+      versions: Array<{ number: number; createdBy: string; createdByName: string | null }>;
+    }>(res);
+    expect(versions.map((v) => [v.number, v.createdBy, v.createdByName])).toEqual([
+      [2, editor.id, "editor"],
+      [1, owner.id, "owner"],
+    ]);
+  });
+
+  it("R11: per-canvas usage and attribution are unchanged by an editor's actions", async () => {
+    const { cv, owner, editor, as } = await seedU8();
+    const ownerView = await jsonOf<Record<string, unknown>>(
+      await as(owner).request(`/api/canvases/${cv.id}/usage`),
+    );
+    const editorView = await jsonOf<Record<string, unknown>>(
+      await as(editor).request(`/api/canvases/${cv.id}/usage`),
+    );
+    expect(editorView).toEqual(ownerView);
+    // The canvas is still attributed to its owner after the editor's settings write.
+    await as(editor).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ title: "edited" }),
+    });
+    expect((await canvasesRepository(client).findById(cv.id))?.ownerId).toBe(owner.id);
+  });
+});
+
+// --- Owned-or-edited main list (editor-roles plan U9) --------------------------------------
+
+describe("managementRoutes — owned-or-edited list", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("AE9: an editor's main list shows the edited canvas marked with owner + role; role filters; Shared excludes it; tags span both", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const repo = canvasesRepository(client);
+    const own = await repo.create({ ownerId: editor.id, slug: "own", apiKeyHash: "k0" });
+    const shared = await repo.create({ ownerId: owner.id, slug: "shared", apiKeyHash: "k1" });
+    await repo.updateSettings(shared.id, { title: "Roadmap", tags: ["planning"] });
+    await repo.addAllowlistEntry({
+      canvasId: shared.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const app = buildApp(client, { id: editor.id, isAdmin: false });
+    type Row = { id: string; role: string | null; owner: { name: string } | null; ownerId: string };
+    const list = async (qs = "") =>
+      jsonOf<{ canvases: Row[]; total: number; summary: { owned: number; edited: number } }>(
+        await app.request(`/api/canvases${qs}`),
+      );
+    const all = await list();
+    expect(all.total).toBe(2);
+    expect(all.summary).toMatchObject({ owned: 1, edited: 1 });
+    const row = all.canvases.find((c) => c.id === shared.id) as Row;
+    expect(row).toMatchObject({ role: "editor", ownerId: owner.id, owner: { name: "owner" } });
+    expect(all.canvases.find((c) => c.id === own.id)).toMatchObject({ role: "owner" });
+    expect((await list("?role=owned")).canvases.map((c) => c.id)).toEqual([own.id]);
+    expect((await list("?role=edited")).canvases.map((c) => c.id)).toEqual([shared.id]);
+    expect((await list("?q=roadmap")).canvases.map((c) => c.id)).toEqual([shared.id]);
+    expect(
+      (await jsonOf<{ tags: string[] }>(await app.request("/api/canvases/tags"))).tags,
+    ).toEqual(["planning"]);
+    const sharedList = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app.request("/api/canvases/shared"),
+    );
+    expect(sharedList.canvases.map((c) => c.id)).not.toContain(shared.id);
+    // The single-canvas view carries the same identity.
+    const one = await jsonOf<Row>(await app.request(`/api/canvases/${shared.id}`));
+    expect(one).toMatchObject({ role: "editor", ownerId: owner.id });
   });
 });

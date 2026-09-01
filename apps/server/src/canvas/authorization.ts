@@ -40,6 +40,15 @@ export interface AccessContext {
    * KTD3). Resolved by {@link resolveAccessContext}; absent ⇒ treated as not-a-match.
    */
   teamMatch?: boolean;
+  /**
+   * Whether the principal is an EFFECTIVE EDITOR of this canvas (editor-roles plan,
+   * KD6/KTD1): an org member with a direct editor row or membership of an editor-role
+   * team, under the live org predicate — resolved by {@link resolveAccessContext}
+   * through the same repository predicate the owner gates use. An editor is owner-
+   * equivalent for view: allowed at ANY rung, no password gate, full content. Absent
+   * ⇒ not an editor.
+   */
+  editorMatch?: boolean;
 }
 
 /**
@@ -153,6 +162,14 @@ export function decideCanvasAccess(
   if (principal.kind === "member" && canvas.ownerId === principal.id) {
     return { action: "allow", needsPasswordGate: false, staticOnly: false };
   }
+  // Editor (editor-roles plan, KD6): an effective editor — an org member resolved by
+  // the caller through the same live predicate as every owner gate — is owner-
+  // equivalent for view: allowed whatever the general-access setting, no password
+  // gate, full content. Only a MEMBER can be an editor (KD2): a guest's editorMatch
+  // is never computed, and the flag is ignored for any other principal kind.
+  if (principal.kind === "member" && ctx.editorMatch) {
+    return { action: "allow", needsPasswordGate: false, staticOnly: false };
+  }
   // Internal capture (plan 004 / U3): the screenshot worker rendering THIS canvas at
   // a pinned version. Set only by the internal capture middleware from a verified
   // server-minted token (§12.0 #1) — never a client header on a public surface. It
@@ -252,12 +269,28 @@ export interface CanvasAccessDeps {
  * (`isPrincipalAllowed`). All other rungs short-circuit to empty context.
  */
 export async function resolveAccessContext(
-  canvases: Pick<CanvasesRepository, "isPrincipalAllowed" | "isOwnerPublishEnabled">,
+  canvases: Pick<
+    CanvasesRepository,
+    "isPrincipalAllowed" | "isOwnerPublishEnabled" | "isEffectiveEditor"
+  >,
   teams: Pick<TeamsRepository, "teamMatch">,
   canvas: Canvas | null,
   principal: Principal,
-  opts: { publicLinksEnabled?: () => Promise<boolean> } = {},
+  opts: { publicLinksEnabled?: () => Promise<boolean>; tenancyActive?: boolean } = {},
 ): Promise<AccessContext> {
+  // Editor (editor-roles plan, KD6/KTD1): resolved FIRST for a member, at every rung,
+  // through the same repository predicate the owner gates use (direct editor row or
+  // editor-role team, live org predicate). An editor short-circuits the rung lookups —
+  // the decision table's editor branch precedes them (its owner bypass precedes both,
+  // so the owner's probe result is simply unused). Guests and anonymous visitors are
+  // never editors (KD2), so nothing is resolved for them.
+  if (canvas && canvas.status === "active" && principal.kind === "member") {
+    const editorMatch = await canvases.isEffectiveEditor(canvas.id, principal.id, {
+      tenancyActive: opts.tenancyActive ?? false,
+      viewerOrgIds: principal.orgIds,
+    });
+    if (editorMatch) return { editorMatch: true };
+  }
   // public_link: resolve the owner's publish capability so the decision table can
   // deny a canvas whose owner lost the grant, independent of the write-time sweep
   // (defense-in-depth; the two layers together honor §12.0 #3/#5).
@@ -326,7 +359,7 @@ export function canvasAccess(deps: CanvasAccessDeps) {
       deps.teams ?? NO_TEAM_MATCH,
       canvas,
       principal,
-      { publicLinksEnabled: deps.publicLinksEnabled },
+      { publicLinksEnabled: deps.publicLinksEnabled, tenancyActive: deps.tenancyActive },
     );
     const decision = decideCanvasAccess(canvas, principal, Date.now(), {
       ...ctx,

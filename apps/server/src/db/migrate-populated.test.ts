@@ -134,3 +134,52 @@ describe("migrating a populated database (FK-on table-recreation regression)", (
     await client.close();
   });
 });
+
+describe("0036 canvas_access_roles on a populated database", () => {
+  it("existing allowlist rows and team grants read back as viewer after migration", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "cd-mig-roles-"));
+    const dbFile = join(workdir, "canvasdrop.db");
+
+    // Phase 1: the pre-0036 schema with a real people-list row and a real team grant.
+    const pre = subsetMigrationsBefore("0036");
+    const seed = new Database(dbFile);
+    migrateSqlite(drizzleSqlite(seed), { migrationsFolder: pre });
+    seed.exec(`
+      INSERT INTO users (id, provider_sub, email, name, created_at)
+        VALUES ('u1','sub-1','u@example.com','U',0), ('u2','sub-2','v@example.com','V',0);
+      INSERT INTO canvases (id, slug, owner_id, api_key_hash, created_at, updated_at)
+        VALUES ('c1','slug-1','u1','h1',0,0);
+      INSERT INTO canvas_allowlist (id, canvas_id, principal_kind, user_id, email, created_at)
+        VALUES ('a1','c1','member','u2',NULL,0), ('a2','c1','guest',NULL,'g@partner.com',0);
+      INSERT INTO teams (id, org_id, name, slug, created_by, created_at)
+        VALUES ('t1',NULL,'Friends','friends','u1',0);
+      INSERT INTO canvas_teams (canvas_id, team_id, created_at) VALUES ('c1','t1',0);
+    `);
+    seed.close();
+
+    // Phase 2: the real factory migrate() applies 0036 onward.
+    const config = loadConfig({ CANVAS_DROP_DB: "sqlite", CANVAS_DROP_SQLITE_PATH: dbFile });
+    const client = makeDb(config);
+    if (client.dialect !== "sqlite") throw new Error("expected a sqlite client");
+    await expect(runMigrations(client)).resolves.toBeUndefined();
+
+    const allowlist = client.db.all<{ id: string; role: string }>(
+      sql`SELECT id, role FROM canvas_allowlist ORDER BY id`,
+    );
+    expect(allowlist).toEqual([
+      { id: "a1", role: "viewer" },
+      { id: "a2", role: "viewer" },
+    ]);
+    const grants = client.db.all<{ team_id: string; role: string }>(
+      sql`SELECT team_id, role FROM canvas_teams`,
+    );
+    expect(grants).toEqual([{ team_id: "t1", role: "viewer" }]);
+    // The columns are unchecked text (KTD3): 'editor' is writable without a table rebuild.
+    expect(() =>
+      client.db.run(sql`UPDATE canvas_allowlist SET role = 'editor' WHERE id = 'a1'`),
+    ).not.toThrow();
+    const violations = client.db.all(sql`PRAGMA foreign_key_check`);
+    expect(violations).toHaveLength(0);
+    await client.close();
+  });
+});

@@ -100,6 +100,13 @@ export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 export interface Canvas {
   id: string;
   slug: string;
+  /** Whose canvas it is (editor-roles plan): the owner's account and display identity.
+   *  Always sent by the server; optional here so older fixtures still type-check. */
+  ownerId?: string;
+  owner?: { id: string; name: string; email: string } | null;
+  /** The CALLER's role on it. Owner-only controls key off `role !== "editor"`: a legacy
+   *  payload without the field reads as owner-like and the server still enforces. */
+  role?: "owner" | "editor" | null;
   /** True when the owner chose the slug (vs random). Drives the public+custom heads-up. */
   slugCustom: boolean;
   url: string;
@@ -177,6 +184,9 @@ export interface CanvasOwnerSummary {
   listed: number;
   templates: number;
   neverDeployed: number;
+  /** Active canvases you own / you edit but don't own (editor-roles plan, R16). */
+  owned: number;
+  edited: number;
 }
 
 /** What a version serves at the canvas root (computed server-side). Discriminated
@@ -192,6 +202,9 @@ export interface VersionInfo {
   source: string;
   status: string;
   createdBy: string;
+  /** The creator's display identity (editor-roles plan, R18); null when the account is gone. */
+  createdByName?: string | null;
+  createdByEmail?: string | null;
   createdAt: number;
   fileCount: number;
   totalBytes: number;
@@ -235,6 +248,13 @@ export interface DraftFile {
   path: string;
   size: number;
   mime: string;
+  /** Content hash + last writer (editor-roles plan, KTD8): the editor sends the hash it
+   *  loaded as `If-Draft-File-Hash` on every save so two editors on one file can't
+   *  silently overwrite each other. Optional so older fixtures still type-check. */
+  hash?: string;
+  updatedBy?: string | null;
+  updatedByName?: string | null;
+  updatedAt?: number | null;
 }
 
 /** Editor draft state (M5): file list + publish/stale flags. */
@@ -280,14 +300,39 @@ export interface CanvasSettings {
   tags?: string[];
 }
 
-/** One canvas access-list entry. Members carry identity; pending rows are auth-delegated
- *  grants that materialize on first verified sign-in. */
+/**
+ * One row of a canvas's people list (editor-roles plan, KTD5): the owner (pinned first),
+ * members, legacy guest rows, pending auth-delegated invitees, and team grants — each
+ * with a role and a stable id (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`,
+ * `team:<teamId>`) the role / remove calls address.
+ */
+export type AccessRole = "viewer" | "editor";
 export interface AllowlistEntry {
   id: string;
-  kind: "member" | "guest" | "pending";
+  kind: "owner" | "member" | "guest" | "pending" | "team";
+  /** `owner` on the owner row; guests are always `viewer`. Absent on legacy payloads. */
+  role?: "owner" | AccessRole;
   email: string | null;
   name: string | null;
+  userId?: string | null;
+  teamId?: string | null;
+  /** The team's org on a team row (null = personal), so scope is labelled truthfully even
+   *  for a team the caller isn't on. Absent on legacy payloads. */
+  teamOrgId?: string | null;
   createdAt: number;
+}
+
+/** An effective editor the owner may transfer the canvas to (direct or through a team). */
+export interface TransferCandidate {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface AllowlistView {
+  entries: AllowlistEntry[];
+  /** Owner-only: present when the caller owns the canvas. */
+  transferCandidates?: TransferCandidate[];
 }
 
 /** A team the caller can see (plan 003) — one of their org's teams, flagged with
@@ -340,7 +385,13 @@ export type PersonSearchParams =
   | { context: "team"; teamId: string; q: string };
 
 /** Outcome of Add person across canvas/team surfaces. */
-export type AddMemberStatus = "granted" | "already_added" | "pending" | "already_pending";
+export type AddMemberStatus =
+  | "granted"
+  | "already_added"
+  | "pending"
+  | "already_pending"
+  /** An existing member's role was changed in place by an add-with-role. */
+  | "role_changed";
 
 export type EmailDelivery =
   | { status: "sent" }
@@ -458,6 +509,8 @@ export interface CanvasesQuery {
   undeployed?: boolean;
   /** Lifecycle scope: omit/`active` for the live set, `archived` for the archive. */
   scope?: "active" | "archived";
+  /** Owned-or-edited narrowing (editor-roles plan, R16); omit for both. */
+  role?: "owned" | "edited";
   sort?: CanvasesSort;
   limit?: number;
   offset?: number;
@@ -547,6 +600,9 @@ export class ApiError extends Error {
     message: string,
     public readonly path?: string,
     public readonly status?: number,
+    /** The full JSON error body, for codes that carry more than `{ code, message, path }`
+     *  (e.g. DRAFT_CONFLICT's `currentHash` / `updatedByName` / `updatedAt`). */
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -592,20 +648,22 @@ function errorFromBody(status: number, statusText: string, text: string): ApiErr
   let code = `http_${status}`;
   let message = statusText || "Request failed";
   let path: string | undefined;
+  let details: Record<string, unknown> = {};
   try {
     const body = JSON.parse(text) as {
       code?: string;
       error?: string;
       message?: string;
       path?: string;
-    };
+    } & Record<string, unknown>;
     code = body.code ?? body.error ?? code;
     message = body.message ?? message;
     path = body.path;
+    details = body;
   } catch {
     /* non-JSON error body */
   }
-  return new ApiError(code, message, path, status);
+  return new ApiError(code, message, path, status, details);
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -1016,6 +1074,7 @@ export const api = {
     for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.undeployed) sp.set("undeployed", "1");
     if (query.scope === "archived") sp.set("scope", "archived");
+    if (query.role) sp.set("role", query.role);
     if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));
@@ -1109,10 +1168,33 @@ export const api = {
     request<Canvas>(`/api/canvases/${id}/preview`, { method: "DELETE" }),
 
   // Access list (D4 `specific_people`, U4).
-  listAllowlist: (id: string) =>
-    request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
-  addAllowlistMember: (id: string, email: string) =>
-    request<AddMemberResult>(`/api/canvases/${id}/allowlist`, jsonBody({ email })),
+  listAllowlist: (id: string) => request<AllowlistView>(`/api/canvases/${id}/allowlist`),
+  addAllowlistMember: (id: string, email: string, role?: AccessRole) =>
+    request<AddMemberResult>(
+      `/api/canvases/${id}/allowlist`,
+      jsonBody(role ? { email, role } : { email }),
+    ),
+  /** Grant a team with a role (editor-roles plan): a viewer team keeps the Team rung's
+   *  semantics; an editor team makes every live member an editor at any rung. */
+  addAllowlistTeam: (id: string, teamId: string, role: AccessRole) =>
+    request<{ ok: true; status: string; role: AccessRole }>(
+      `/api/canvases/${id}/allowlist`,
+      jsonBody({ teamId, role }),
+    ),
+  /** Change an entry's role (people, pending invitees, teams). The owner row refuses. */
+  setAllowlistRole: (id: string, entryId: string, role: AccessRole) =>
+    request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, {
+      ...jsonBody({ role }),
+      method: "PATCH",
+    }),
+  /** Owner-only: transfer ownership to an existing editor (instant; you become an editor). */
+  transferCanvas: (id: string, toUserId: string) =>
+    request<{
+      ok: true;
+      canvas: Canvas;
+      previousOwnerEditor: boolean;
+      publicLinkReverted: boolean;
+    }>(`/api/canvases/${id}/transfer`, jsonBody({ toUserId })),
   /** Individual one-canvas access email (plan 003 U8). `granted` = an existing user got
    *  access now; `pending` = a brand-new person gets access on their first sign-in. */
   inviteToCanvas: (id: string, email: string) =>
@@ -1215,23 +1297,22 @@ export const api = {
   /** Write/replace a draft file (raw text body). Returns the refreshed draft view.
    * `opts.signal` lets best-effort callers (e.g. the editor's unmount flush) bound the
    * request so a hung server can't leave the PUT pending indefinitely.
-   * `opts.expectedBaseVersionId` pins the draft fork-point this edit was based on: the
-   * server rejects with 409 DRAFT_CONFLICT if a restore (or any wholesale replace) has
-   * since moved `baseVersionId`, so a stale flush can't clobber the new draft. A `null`
-   * base (draft forked from no live version) is sent as the `none` sentinel. */
+   * `opts.expectedHash` is the per-file precondition (editor-roles plan, KTD8): the hash
+   * the editor loaded for this path (`none` for a path it believes absent). The server
+   * rejects with 409 DRAFT_CONFLICT — naming the last writer and the current hash — if
+   * the file changed since, so two editors on one file never silently overwrite each
+   * other. Restores move every hash, so this also covers the old fork-point check. */
   putDraftFile: (
     id: string,
     path: string,
     content: string,
-    opts?: { signal?: AbortSignal; expectedBaseVersionId?: string | null },
+    opts?: { signal?: AbortSignal; expectedHash?: string },
   ) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "PUT",
       headers: {
         "content-type": "application/octet-stream",
-        ...(opts && "expectedBaseVersionId" in opts
-          ? { "If-Draft-Base": opts.expectedBaseVersionId ?? "none" }
-          : {}),
+        ...(opts?.expectedHash !== undefined ? { "If-Draft-File-Hash": opts.expectedHash } : {}),
       },
       body: content,
       signal: opts?.signal,
@@ -1249,19 +1330,29 @@ export const api = {
     ),
 
   /** Replace/upload a draft file with raw bytes (binary-safe — images, fonts, etc.). */
-  uploadDraftFile: (id: string, path: string, body: Blob) =>
+  uploadDraftFile: (id: string, path: string, body: Blob, expectedHash?: string) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "PUT",
+      // The per-file precondition rides on uploads too (review #2): without it the server
+      // refuses a replace whenever another user wrote the entry last.
+      headers: expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {},
       body,
     }),
 
-  deleteDraftFile: (id: string, path: string) =>
+  deleteDraftFile: (id: string, path: string, expectedHash?: string) =>
     request<DraftView>(`/api/canvases/${id}/draft/file?path=${encodeURIComponent(path)}`, {
       method: "DELETE",
+      headers: expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {},
     }),
 
-  renameDraftFile: (id: string, from: string, to: string) =>
-    request<DraftView>(`/api/canvases/${id}/draft/rename`, jsonBody({ from, to })),
+  renameDraftFile: (id: string, from: string, to: string, expectedHash?: string) =>
+    request<DraftView>(`/api/canvases/${id}/draft/rename`, {
+      ...jsonBody({ from, to }),
+      headers: {
+        ...(jsonBody({ from, to }).headers as Record<string, string>),
+        ...(expectedHash !== undefined ? { "If-Draft-File-Hash": expectedHash } : {}),
+      },
+    }),
 
   publishDraft: (id: string) =>
     request<PublishResult>(`/api/canvases/${id}/publish`, { method: "POST" }),
@@ -1377,6 +1468,16 @@ export const api = {
 
     disableCanvas: (id: string, reason: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/disable`, jsonBody({ reason })),
+
+    /** Reassign a canvas's owner to another member with a reason (editor-roles plan U7).
+     *  The deploy key is rotated server-side; the previous owner stays on as an editor. */
+    reassignOwner: (id: string, input: { toUserId: string; reason: string }) =>
+      request<{
+        ok: true;
+        previousOwnerEditor: boolean;
+        publicLinkReverted: boolean;
+        deployKeyRotated: boolean;
+      }>(`/api/admin/canvases/${id}/reassign-owner`, jsonBody(input)),
 
     enableCanvas: (id: string) =>
       request<{ ok: true }>(`/api/admin/canvases/${id}/enable`, { method: "POST" }),

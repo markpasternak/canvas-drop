@@ -185,6 +185,10 @@ export function teamsService(deps: {
         return { ok: false, error: "AUTH_ADMISSION_REQUIRED" };
       if (r.status === "blocked") return { ok: false, error: "TARGET_BLOCKED" };
       if (r.status === "rate_limited") return { ok: false, error: "RATE_LIMITED" };
+      if (r.status === "guest_viewer_only" || r.status === "role_changed") {
+        // Canvas-only outcomes (people-list roles); a team target never carries a role.
+        throw new Error(`unreachable invite outcome for a team target: ${r.status}`);
+      }
       deps.audit.recordAudit({ action: "team_member_add", actorId: actor.id, targetId: teamId });
       return r.emailDelivery
         ? { ok: true, status: r.status, emailDelivery: r.emailDelivery }

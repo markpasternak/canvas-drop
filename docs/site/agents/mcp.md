@@ -30,19 +30,36 @@ a live token on the next request.
 
 ## Tools
 
-Owner-management tools are scoped to your account. A canvas you don't own reads as
-*not found* — there is no cross-owner owner-surface access and no existence leak.
-Identity-scoped discovery tools are explicit exceptions: `list_shared_canvases`
-returns only non-owned canvases you can already open and whose owner made them
-discoverable in Shared.
+Management tools are scoped to the canvases you **own or edit**. A canvas you hold no
+role on reads as *not found* — there is no cross-account management access and no
+existence leak. Identity-scoped discovery tools are explicit exceptions:
+`list_shared_canvases` returns only canvases you can already open (but don't manage)
+whose owner made them discoverable in Shared.
+
+**Roles.** Every entry on a canvas's people list — a person, a pending invitee, or a
+team — is a `viewer` or an `editor`. An editor (org members and teams only; a guest is
+always a viewer) can do everything the owner can *except* the owner-only acts:
+`delete_canvas`, `transfer_canvas`, and the guest-AI opt-in fields of `update_canvas`.
+Those refuse with `OWNER_ONLY: …` for an editor. The role is resolved on every call, so
+a demotion or removal takes effect on your next request. `list_canvases` returns the
+canvases you own **and** the ones you edit (each with `role` and `owner`); `get_canvas`
+echoes `ownerOnlyActs`. People-list entries carry stable ids — `owner`, `member:<id>`,
+`guest:<id>`, `pending:<id>`, `team:<teamId>` (legacy bare row ids still work) — which
+`set_access_role` and `revoke_access` address.
+
+**Refusal codes** you may see beyond `DISABLED`: `OWNER_ONLY` (an owner-only act as an
+editor), `GUEST_VIEWER_ONLY` (editor requested for a guest / non-org email),
+`PUBLIC_LINK_OWNER_GATED` (the *owner's* account can't publish public links — the
+entitlement follows the owner, whoever acts), and `DRAFT_CONFLICT` (a stale draft save —
+see the draft tools below).
 
 | Tool | What it does |
 |---|---|
 | `whoami` | The connected account (`id`, `email`, `name`). When an org boundary is configured, also `orgs` (`[{id, name}]` you're a member of), `teams` (the teams you belong to), and `isGuest` (true = signed in but in no org) — use an org `id` as `create_canvas`'s `orgId`. |
-| `list_canvases` | The canvases you own. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
+| `list_canvases` | The canvases you own **or edit** — each with `role` (`owner`/`editor`), `ownerId`, and `owner` `{id, name, email}`; pass `role: "owned"` or `"edited"` to narrow. Optional `query` filter — a forgiving text search over title, description, tags, and slug (case/accent/whitespace-insensitive; multiple words are AND-ed) — an optional `tags` filter (any-match — canvases carrying any of the given tags), plus `sort` (`updated` default, or `created`/`title`/`popular`), and `limit` (1–100, default 50). `sort=popular` ranks by trending views (last 30 days); every item carries `recentViews` (that 30-day count) plus lifetime `viewCount` and `lastViewedAt`. |
 | `create_canvas` | Create a canvas; returns its id, URL, a one-time deploy key, and a `deploy` block of ready-to-run curl endpoints (so you never probe for the API host). Optional `orgId` homes it in an org you belong to (from `whoami.orgs`) so it can be shared org-wide; omit or `null` for a personal canvas. Only meaningful when an org boundary is configured. |
-| `get_canvas` | Current state of a canvas you own (includes lifetime `viewCount` + `lastViewedAt`; full stats via `get_canvas_usage`). |
-| `list_versions` | Version history of a canvas you own (`number`, `source`, `status`, `createdAt`, `fileCount`, `totalBytes`, `current`, `downloadUrl`). |
+| `get_canvas` | Current state of a canvas you own or edit — includes your `role`, the `owner`, `ownerOnlyActs`, lifetime `viewCount` + `lastViewedAt` (full stats via `get_canvas_usage`). |
+| `list_versions` | Version history of a canvas you own or edit (`number`, `source`, `status`, `createdBy` + `createdByName`/`createdByEmail` — who published it — `createdAt`, `fileCount`, `totalBytes`, `current`, `downloadUrl`). |
 | `delete_version` | Permanently delete one non-current ready version. The current version and disabled canvases are protected; shared draft/version blobs are retained. |
 | `deploy_canvas` | Publish static files directly to live in one call — pass either a base64-encoded ZIP (`zipBase64`) **or** a `files` array (text as UTF-8, binary as base64). |
 | `begin_deploy` | Open a staged upload from a file manifest (path, sha256, size); returns an `uploadId` and the subset of hashes you still need to send. |
@@ -53,17 +70,19 @@ discoverable in Shared.
 | `unpublish_canvas` | Take a published canvas back to draft. |
 | `set_capabilities` | Toggle a canvas's backend capabilities — `backendEnabled` is the master switch; `kv`/`files`/`ai`/`realtime` are individual features (effective only when backend is on). Omitted fields are unchanged. |
 | `set_canvas_slug` | Change a canvas's URL slug (pass a custom one, or omit for a fresh random slug). The old URL stops working immediately. |
-| `regenerate_deploy_key` | Mint a new `cd_…` deploy key and invalidate the old one; the new key is returned **once**. |
+| `regenerate_deploy_key` | Mint a new `cd_…` deploy key and invalidate the old one; the new key is returned **once**. Editors may rotate it; a rotation by a non-owner emails the owner naming the actor (their saved key stops working). |
 | `archive_canvas` | Archive a canvas (reversible) — takes its URL offline and revokes any retained legacy guest sessions for that canvas. |
 | `unarchive_canvas` | Restore an archived canvas back to active. |
-| `delete_canvas` | Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas. Not reversible from MCP. |
-| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `discoverability` (`link_only` or `listed` for Team / Whole-org shares; affects listing only, never URL access), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), and retained legacy guest-session AI settings where present. Setting `galleryListed: true` on a Whole-org canvas also sets `discoverability: "listed"`, making it discoverable in Shared and in that organization’s gallery in one call. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to — see `list_teams`; personal teams can be granted to any canvas you own, while org teams must match the canvas org); add `discoverability: "listed"` when team members should find it in Shared. Switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs the instance switch on and the owner account not revoked; a password un-lists). |
+| `delete_canvas` | **Owner-only.** Soft-delete a canvas — it loses its URL and is purged after the retention window. Blocked if an admin has disabled the canvas; an editor gets `OWNER_ONLY`. Not reversible from MCP. |
+| `transfer_canvas` | **Owner-only.** Transfer ownership to one of the canvas's existing editors (pass their user `id`, never an email; a team can't receive a canvas). Instant: they become the owner, you stay on as an editor; the public-link entitlement now follows their account (`publicLinkReverted` tells you if a public link had to be turned off). A non-editor recipient is `NOT_ELIGIBLE`. |
+| `update_canvas` | Update settings/sharing (Settings + Share tabs): `title`, `description`, access rung (`private`/`specific_people`/`team`/`whole_org`/`public_link`), `discoverability` (`link_only` or `listed` for Team / Whole-org shares; affects listing only, never URL access), `password` (or null to clear), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto`/`off` — the cover toggle; upload a custom image with `set_canvas_preview`), gallery listing/metadata, `tags` (the canvas's unified tag set — owner-list filtering *and* public gallery display; max 20, 50 chars each), and retained legacy guest-session AI settings where present. Setting `galleryListed: true` on a Whole-org canvas also sets `discoverability: "listed"`, making it discoverable in Shared and in that organization’s gallery in one call. To share with teams, set `access: "team"` **and** `teamIds` (≥1 team you belong to — see `list_teams`; personal teams can be granted to any canvas you own, while org teams must match the canvas org); add `discoverability: "listed"` when team members should find it in Shared. Switching off `team` clears the grants. Server enforces the preconditions (sharing/listing need a published canvas; `public_link` needs the instance switch on and the owner account not revoked; a password un-lists). The response is the same identity-bearing view as `get_canvas` (`role`, `owner`), as are the other mutation tools' echoes. |
 | `set_canvas_preview` | Set or clear a canvas's custom cover image (the dashboard's preview upload). Pass `image` (base64 png/jpeg/webp) to pin it as the cover (`previewMode` becomes `custom`, so a publish never overwrites it); omit `image` to clear it back to `auto`. |
-| `list_access` | List active named people plus pending sign-in grants for a canvas you own (each with an `id` for `revoke_access`; legacy guest rows can still appear during migration). |
+| `list_access` | The canvas's people list — the owner first, then named people, pending sign-in grants, and team grants — each with a `role` (`owner`/`editor`/`viewer`), a stable `id` (see Roles above) for `set_access_role` / `revoke_access`, `kind`, `email`, `name`, `userId`, `teamId`, and `teamOrgId` (a team row's org; null for a personal team). When the caller is the **owner**, the response also carries `transferCandidates` — every effective editor, including the people behind an editor team — the same list the dashboard's Transfer picker offers and the set `transfer_canvas` accepts. |
+| `set_access_role` | Change an entry's role to `viewer` or `editor` (people, pending invitees, teams). A guest can only be a viewer (`GUEST_VIEWER_ONLY`); the `owner` entry refuses (`OWNER_ONLY`) — only `transfer_canvas` changes who owns it. Demoting drops the person's live editor sockets. |
 | `search_people` | Search eligible people for the Add person picker, scoped to a canvas you own or a team you can see. This mirrors the dashboard autocomplete and does not expose the admin People directory. |
-| `grant_access` | Add a person by email. Existing users are granted now (`status: granted`); admissible new emails become pending auth-delegated grants (`status: pending`). No app-owned credential is created. Takes effect on the `specific_people` rung. |
-| `invite_to_canvas` | Compatibility alias for adding a person and sending the access email when email is enabled. Prefer `grant_access` for new agent flows; both use the same Add person service and statuses. A brand-new external email is refused for a non-admin (`NOT_PERMITTED`) unless the instance allows it; `RATE_LIMITED` past the cap. |
-| `revoke_access` | Remove an active person, pending sign-in grant, or legacy guest row. Legacy guest sessions are revoked when present. |
+| `grant_access` | Add a person (`email`) **or a team (`teamId`)** with an optional `role` (`viewer` default, or `editor` — org members and teams only). Existing users are granted now (`status: granted`; passing a role for someone already listed updates it — `status: role_changed` — omitting it never changes an existing entry); admissible new emails become pending auth-delegated grants (`status: pending`) that carry the role. A team grant answers the same way: `granted`, `role_changed` (with `from`), or `already_added` when the team already holds that role — re-adding an editor team without a role keeps it an editor. No app-owned credential is created. A viewer grant takes effect on the `specific_people` / `team` rungs; an editor always has access. |
+| `invite_to_canvas` | Compatibility alias for adding a person (optional `role`) and sending the access email when email is enabled. Prefer `grant_access` for new agent flows; both use the same Add person service and statuses. A brand-new external email is refused for a non-admin (`NOT_PERMITTED`) unless the instance allows it; `RATE_LIMITED` past the cap. |
+| `revoke_access` | Remove a people-list entry: an active person (another editor, or yourself), a pending sign-in grant, a legacy guest row, or a team grant. The `owner` entry refuses (`OWNER_ONLY`). Legacy guest sessions are revoked when present; live sockets the entry no longer permits are dropped. |
 | `clone_canvas` | Clone a canvas into a new one you own — any active canvas you own, or a gallery template someone shared. Starts as an unpublished draft with a fresh slug + key. |
 | `get_canvas_usage` | Usage stats: views + 30-day sparkline, and (backend-on) KV/file/AI/realtime op counts, storage, AI tokens/cost. |
 | `list_teams` | The teams you belong to, each with `mine` (you're a member) and `canManage` (you created it — so you can rename/delete it). |
@@ -73,11 +92,11 @@ discoverable in Shared.
 | `list_team_members` | The roster of a team you belong to: active `members` (`userId`, `email`, `name`) plus `pending` invite rows (`id`, `email`, `invitedAt`) for people who haven't signed in yet. |
 | `cancel_team_invite` | Cancel a pending invite on a team you belong to — the self-serve mirror of `add_team_member` (take back a typo'd email without an admin). Pass the pending row's `id` from `list_team_members`. |
 | `list_shared_canvases` | Non-owned canvases discoverable to you in **Shared**: direct Specific-people grants, listed Team shares, and listed Whole-org shares. Takes optional `query`, `sort` (`updated`/`title`/`owner`), `limit`, and `offset`. Display-only; open via the returned `url`. |
-| `get_draft` | The editor **draft** of a canvas you own — file list + state (`dirty` = differs from live). Creates it from the live version on first open. |
-| `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64). |
-| `write_draft_file` | Write/replace a draft file (`create: true` refuses to overwrite). |
-| `delete_draft_file` | Delete a draft file. |
-| `rename_draft_file` | Rename/move a draft file. |
+| `get_draft` | The editor **draft** of a canvas you own or edit — file list + state (`dirty` = differs from live). Each file carries its content `hash` and last writer (`updatedBy`, `updatedByName`, `updatedAt`) for the precondition below. Creates it from the live version on first open. |
+| `read_draft_file` | Read one draft file's content (text UTF-8 / binary base64) plus its current `hash` and last writer. |
+| `write_draft_file` | Write/replace a draft file (`create: true` refuses to overwrite). **Stale-save protection:** pass `expectedHash` (the file's `hash` you loaded, or `none` for a path you believe absent) — a mismatch fails with `DRAFT_CONFLICT: … (path=… currentHash=… updatedBy=… updatedByName=… updatedAt=…)`; re-read and retry with the current hash. Omitting `expectedHash` is fine for your own solo edits, but the write still fails with `DRAFT_CONFLICT` if a *different* user wrote that file last. Two editors in different files never conflict. |
+| `delete_draft_file` | Delete a draft file (same optional `expectedHash` precondition). |
+| `rename_draft_file` | Rename/move a draft file (optional `expectedHash` on the source path). |
 | `publish_draft` | Publish the draft as a new live version (the editor's Publish). |
 | `restore_draft` | Reset the draft to a published `version`'s files (the editor's Restore). |
 

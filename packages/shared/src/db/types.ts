@@ -104,8 +104,19 @@ export type NewCanvasAllowlistEntry = typeof canvasAllowlist.$inferInsert;
 /** Screenshot job status values (stored as text, CHECK-constrained in the schema). */
 export type ScreenshotJobStatus = "pending" | "running" | "done" | "failed";
 
-/** A deployed version's file manifest: path → content metadata. */
-export type ManifestEntry = { size: number; hash: string; mime: string };
+/**
+ * A deployed version's / draft's file manifest: path → content metadata. The draft adds
+ * per-entry WRITER metadata (editor-roles plan, KTD8): who last touched the entry and
+ * when, so two editors on one file get a conflict naming the other, not a silent
+ * overwrite. Published versions strip it (a version is content, not authorship).
+ */
+export type ManifestEntry = {
+  size: number;
+  hash: string;
+  mime: string;
+  updatedBy?: string;
+  updatedAt?: number;
+};
 export type Manifest = Record<string, ManifestEntry>;
 
 /** Canvas status values (stored as text, validated by zod at the boundary). */
@@ -149,6 +160,15 @@ export type PreviewMode = "auto" | "off" | "custom";
 
 /** A canvas-allowlist principal kind (members reference a user row; guests an email). */
 export type AllowlistPrincipalKind = "member" | "guest";
+/**
+ * Role carried by a people-list entry or a team grant (editor-roles plan, KD1/KD3):
+ *  - `viewer` — read access per the access ladder (the default; every pre-existing row)
+ *  - `editor` — owner-equivalent except the owner-only acts; org members and teams only
+ * Stored as unchecked text (`canvas_allowlist.role`, `canvas_teams.role`) and
+ * validated at the zod boundary.
+ */
+export type AccessRole = "viewer" | "editor";
+export const ACCESS_ROLES: readonly AccessRole[] = ["viewer", "editor"];
 /**
  * Version source values (`editor` = published from the in-browser draft, M5;
  * `upload` = published via the two-channel staging→finalize flow, plan 003).

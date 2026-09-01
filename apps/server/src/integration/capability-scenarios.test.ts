@@ -667,7 +667,7 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     const pending = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await h.GET(OWNER, `/api/canvases/${cv.id}/allowlist`),
     );
-    expect(pending.entries).toEqual([
+    expect(pending.entries.filter((e) => e.kind !== "owner")).toEqual([
       expect.objectContaining({ kind: "pending", email: GUEST_EMAIL }),
     ]);
     expect(await h.repos.guests.listInvitesByCanvas(cv.id)).toHaveLength(0);
@@ -682,7 +682,7 @@ describe.each(DIALECTS)("capability scenarios [%s]", (dialect) => {
     const materialized = await jsonOf<{ entries: Array<{ kind: string; email: string }> }>(
       await h.GET(OWNER, `/api/canvases/${cv.id}/allowlist`),
     );
-    expect(materialized.entries).toEqual([
+    expect(materialized.entries.filter((e) => e.kind !== "owner")).toEqual([
       expect.objectContaining({ kind: "member", email: GUEST_EMAIL }),
     ]);
 

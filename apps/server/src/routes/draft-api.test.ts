@@ -35,7 +35,16 @@ describe("draftApiRoutes", () => {
     const versions = versionsRepository(client);
     const drafts = draftsRepository(client);
     const audit = createAuditLog(auditRepository(client), silent);
-    const svc = draftService({ config, canvases, versions, drafts, storage, audit, log: silent });
+    const svc = draftService({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      audit,
+      log: silent,
+      users,
+    });
     const owner = await users.upsert({
       providerSub: "o",
       email: "o@e.com",
@@ -484,39 +493,64 @@ describe("draftApiRoutes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(png);
   });
 
-  it("If-Draft-Base precondition: matching base writes, no header upserts unconditionally", async () => {
-    const { appAs, owner, canvas } = await setup();
-    const app = appAs(owner.id);
-
-    // Fresh canvas has no live version → baseVersionId is null, sent as the `none` sentinel.
-    const matched = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
-      method: "PUT",
-      headers: { ...SO, "If-Draft-Base": "none" },
-      body: enc("<h1>hello</h1>"),
+  it("AE10 over HTTP: If-Draft-File-Hash — a stale hash is 409 DRAFT_CONFLICT with path/currentHash/writer; the current hash lands; another file never conflicts", async () => {
+    const { appAs, owner, other, canvas, canvases } = await setup();
+    await canvases.addAllowlistEntry({
+      canvasId: canvas.id,
+      principalKind: "member",
+      userId: other.id,
+      role: "editor",
     });
-    expect(matched.status).toBe(200);
-
-    // No precondition header at all → upsert applies as before (autosave/upload back-compat).
-    const noHeader = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
-      method: "PUT",
-      headers: SO,
-      body: enc("<h1>again</h1>"),
+    const a = appAs(owner.id);
+    const b = appAs(other.id);
+    const hashOf = async (path: string) =>
+      (
+        await jsonOf<{ files: Array<{ path: string; hash: string }> }>(
+          await a.request(`/api/canvases/${canvas.id}/draft`),
+        )
+      ).files.find((f) => f.path === path)?.hash ?? "none";
+    const put = (app: typeof a, path: string, body: string, hash?: string) =>
+      app.request(`/api/canvases/${canvas.id}/draft/file?path=${path}`, {
+        method: "PUT",
+        headers: hash === undefined ? SO : { ...SO, "If-Draft-File-Hash": hash },
+        body: enc(body),
+      });
+    expect((await put(a, "index.html", "<h1>base</h1>", "none")).status).toBe(200);
+    expect((await put(a, "style.css", "body{}", "none")).status).toBe(200);
+    const h0 = await hashOf("index.html");
+    const c0 = await hashOf("style.css");
+    expect((await put(a, "index.html", "<h1>A</h1>", h0)).status).toBe(200);
+    const h1 = await hashOf("index.html");
+    const stale = await put(b, "index.html", "<h1>B</h1>", h0);
+    expect(stale.status).toBe(409);
+    const body = await jsonOf<Record<string, unknown>>(stale);
+    expect(body).toMatchObject({
+      code: "DRAFT_CONFLICT",
+      path: "index.html",
+      currentHash: h1,
+      updatedBy: owner.id,
+      updatedByName: "O",
     });
-    expect(noHeader.status).toBe(200);
-    expect((await jsonOf<{ dirty: boolean }>(noHeader)).dirty).toBe(true);
+    expect(typeof body.updatedAt).toBe("number");
+    expect(
+      await (await a.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`)).text(),
+    ).toBe("<h1>A</h1>");
+    expect((await put(b, "index.html", "<h1>B</h1>", h1)).status).toBe(200);
+    expect((await put(b, "style.css", "body{color:red}", c0)).status).toBe(200);
+    // Unconditioned: A's own follow-up is fine; B's over A's fresh write is refused.
+    expect((await put(a, "style.css", "body{color:blue}")).status).toBe(409);
+    expect((await put(b, "style.css", "body{color:green}")).status).toBe(200);
   });
 
-  it("a stale If-Draft-Base after a restore is rejected (409) and the restored file survives", async () => {
+  it("restore stamps every entry: a save pinned to the pre-restore hash is 409 and the restored file survives; a fresh hash lands", async () => {
     const { appAs, owner, canvas } = await setup();
     const app = appAs(owner.id);
-    const draftBase = async () =>
+    const hashOf = async () =>
       (
-        await jsonOf<{ baseVersionId: string | null }>(
+        await jsonOf<{ files: Array<{ path: string; hash: string }> }>(
           await app.request(`/api/canvases/${canvas.id}/draft`),
         )
-      ).baseVersionId;
-
-    // Publish v1 then v2 (each rebases the draft's baseVersionId to the new version).
+      ).files[0]?.hash ?? "none";
     for (const body of ["<h1>v1</h1>", "<h1>v2</h1>"]) {
       await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
         method: "PUT",
@@ -525,35 +559,81 @@ describe("draftApiRoutes", () => {
       });
       await app.request(`/api/canvases/${canvas.id}/publish`, { method: "POST", headers: SO });
     }
-    const staleBase = await draftBase(); // the editor's fork-point before restore (v2)
-
-    // Restore v1 — wholesale replace; baseVersionId moves to v1.
+    const stale = await hashOf();
     await app.request(`/api/canvases/${canvas.id}/restore`, {
       method: "POST",
       headers: { ...SO, "content-type": "application/json" },
       body: JSON.stringify({ version: 1 }),
     });
-
-    // A stale unmount-flush pinned to the pre-restore base is refused — no clobber.
-    const stale = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+    const refused = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
       method: "PUT",
-      headers: { ...SO, "If-Draft-Base": staleBase ?? "none" },
+      headers: { ...SO, "If-Draft-File-Hash": stale },
       body: enc("<h1>stale</h1>"),
     });
-    expect(stale.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(stale)).code).toBe("DRAFT_CONFLICT");
-    const intact = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
-    expect(await intact.text()).toBe("<h1>v1</h1>"); // restored content untouched
-
-    // A write pinned to the CURRENT (post-restore) base still applies — sequential saves work.
+    expect(refused.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(refused)).code).toBe("DRAFT_CONFLICT");
+    expect(
+      await (await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`)).text(),
+    ).toBe("<h1>v1</h1>");
     const after = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
       method: "PUT",
-      headers: { ...SO, "If-Draft-Base": (await draftBase()) ?? "none" },
+      headers: { ...SO, "If-Draft-File-Hash": await hashOf() },
       body: enc("<h1>edited-after-restore</h1>"),
     });
     expect(after.status).toBe(200);
-    const final = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`);
-    expect(await final.text()).toBe("<h1>edited-after-restore</h1>");
+    // The old draft-level header is gone: it is ignored, never a precondition.
+    const legacy = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: { ...SO, "If-Draft-Base": "bogus" },
+      body: enc("<h1>legacy-header-ignored</h1>"),
+    });
+    expect(legacy.status).toBe(200);
+  });
+
+  it("delete and rename honour If-Draft-File-Hash; the draft view carries per-file hash + writer", async () => {
+    const { appAs, owner, canvas } = await setup();
+    const app = appAs(owner.id);
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=a.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("a"),
+    });
+    const view = await jsonOf<{
+      files: Array<{
+        path: string;
+        hash: string;
+        updatedBy: string | null;
+        updatedByName: string | null;
+      }>;
+    }>(await app.request(`/api/canvases/${canvas.id}/draft`));
+    expect(view.files[0]).toMatchObject({
+      path: "a.html",
+      updatedBy: owner.id,
+      updatedByName: "O",
+    });
+    const h = view.files[0]?.hash as string;
+    const badRename = await app.request(`/api/canvases/${canvas.id}/draft/rename`, {
+      method: "POST",
+      headers: { ...SO, "content-type": "application/json", "If-Draft-File-Hash": "stale" },
+      body: JSON.stringify({ from: "a.html", to: "b.html" }),
+    });
+    expect(badRename.status).toBe(409);
+    const okRename = await app.request(`/api/canvases/${canvas.id}/draft/rename`, {
+      method: "POST",
+      headers: { ...SO, "content-type": "application/json", "If-Draft-File-Hash": h },
+      body: JSON.stringify({ from: "a.html", to: "b.html" }),
+    });
+    expect(okRename.status).toBe(200);
+    const badDelete = await app.request(`/api/canvases/${canvas.id}/draft/file?path=b.html`, {
+      method: "DELETE",
+      headers: { ...SO, "If-Draft-File-Hash": "stale" },
+    });
+    expect(badDelete.status).toBe(409);
+    const okDelete = await app.request(`/api/canvases/${canvas.id}/draft/file?path=b.html`, {
+      method: "DELETE",
+      headers: { ...SO, "If-Draft-File-Hash": h },
+    });
+    expect(okDelete.status).toBe(200);
   });
 
   it("a path-traversal write is rejected with a stable code (400)", async () => {
@@ -564,5 +644,122 @@ describe("draftApiRoutes", () => {
     );
     expect(res.status).toBe(400);
     expect((await jsonOf<{ code: string }>(res)).code).toBe("ZIP_SLIP_REJECTED");
+  });
+});
+
+// --- Editor role on the draft surface (editor-roles plan U2, AE2) ----------------------
+
+describe("draftApiRoutes — editor role", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function setup() {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const versions = versionsRepository(client);
+    const drafts = draftsRepository(client);
+    const audit = createAuditLog(auditRepository(client), silent);
+    const svc = draftService({
+      config,
+      canvases,
+      versions,
+      drafts,
+      storage,
+      audit,
+      log: silent,
+      users,
+    });
+    const mk = (sub: string) =>
+      users.upsert({ providerSub: sub, email: `${sub}@e.com`, name: sub, isAdmin: false });
+    const owner = await mk("o");
+    const editor = await mk("e");
+    const viewer = await mk("v");
+    const nobody = await mk("n");
+    // General access stays PRIVATE (the default) — an editor reaches the draft regardless.
+    const cv = await canvases.create({ ownerId: owner.id, slug: "s", apiKeyHash: "k" });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "member",
+      userId: viewer.id,
+    });
+
+    function appAs(userId: string, isAdmin = false) {
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("user", { id: userId, isAdmin } as never);
+        c.set("orgIds", new Set<string>());
+        c.set("clientIp", "127.0.0.1");
+        await next();
+      });
+      app.route(
+        "/api/canvases",
+        draftApiRoutes({ config, canvases, versions, storage, drafts: svc }),
+      );
+      return app;
+    }
+    return { canvases, versions, owner, editor, viewer, nobody, canvas: cv, appAs };
+  }
+
+  it("a viewer-role member and a no-role member get 404 on read AND write draft routes", async () => {
+    const { appAs, viewer, nobody, canvas } = await setup();
+    for (const u of [viewer, nobody]) {
+      const app = appAs(u.id);
+      expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(404);
+      const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=a.html`, {
+        method: "PUT",
+        headers: SO,
+        body: enc("x"),
+      });
+      expect(put.status).toBe(404);
+      expect(
+        (await app.request(`/api/canvases/${canvas.id}/publish`, { method: "POST", headers: SO }))
+          .status,
+      ).toBe(404);
+    }
+  });
+
+  it("an editor can open the draft, save a file, and publish on a PRIVATE canvas; the version records the editor (AE2, R18)", async () => {
+    const { appAs, editor, canvas, versions, canvases } = await setup();
+    const app = appAs(editor.id);
+    expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(200);
+    const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>by editor</h1>"),
+    });
+    expect(put.status).toBe(200);
+    const pub = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(pub.status).toBe(200);
+    const live = await canvases.findById(canvas.id);
+    expect(live?.currentVersionId).not.toBeNull();
+    const [v] = await versions.listByCanvas(canvas.id);
+    expect(v?.createdBy).toBe(editor.id);
+  });
+
+  it("an editor's draft EDIT on a DISABLED canvas is the shared 409 DISABLED; the draft READ stays 200", async () => {
+    const { appAs, editor, canvas, canvases } = await setup();
+    await canvases.setDisabled(canvas.id, "policy");
+    const app = appAs(editor.id);
+    expect((await app.request(`/api/canvases/${canvas.id}/draft`)).status).toBe(200);
+    const put = await app.request(`/api/canvases/${canvas.id}/draft/file?path=a.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("x"),
+    });
+    expect(put.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(put)).code).toBe("DISABLED");
   });
 });

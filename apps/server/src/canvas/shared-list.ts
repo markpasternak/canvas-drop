@@ -37,7 +37,7 @@ interface Candidate {
 type SharedListDeps = {
   canvases: Pick<
     CanvasesRepository,
-    "findByIds" | "listDirectSharedWithUser" | "listWholeOrgSharedWithUser"
+    "findByIds" | "listDirectSharedWithUser" | "listWholeOrgSharedWithUser" | "listManagedCanvasIds"
   >;
   teams: Pick<TeamsRepository, "listCanvasGrantsForUserTeams">;
   users: Pick<UsersRepository, "findByIds">;
@@ -49,9 +49,8 @@ function canvasTags(cv: Canvas): string[] | null {
     : null;
 }
 
-function liveTeamCanvas(cv: Canvas, viewerId: string, now: number): boolean {
+function liveTeamCanvas(cv: Canvas, now: number): boolean {
   return (
-    cv.ownerId !== viewerId &&
     cv.access === "team" &&
     cv.discoverability === "listed" &&
     cv.status === "active" &&
@@ -115,7 +114,7 @@ export async function listSharedCanvases(
 ): Promise<{ items: SharedCanvasItem[]; total: number }> {
   const candidates = new Map<string, Candidate>();
 
-  const [direct, teamGrants, wholeOrg] = await Promise.all([
+  const [direct, teamGrants, wholeOrg, managedIds] = await Promise.all([
     deps.canvases.listDirectSharedWithUser(opts.viewerId, opts.now),
     deps.teams.listCanvasGrantsForUserTeams(opts.viewerId, opts.viewerOrgIds),
     deps.canvases.listWholeOrgSharedWithUser(
@@ -126,9 +125,17 @@ export async function listSharedCanvases(
       },
       opts.now,
     ),
+    // Canvases the viewer MANAGES (owns or effectively edits) never appear in Shared
+    // (editor-roles plan, KD9/R15): they live in the main list with the management surface.
+    deps.canvases.listManagedCanvasIds(opts.viewerId, {
+      tenancyActive: opts.tenancyActive,
+      viewerOrgIds: opts.viewerOrgIds,
+    }),
   ]);
+  const managed = new Set(managedIds);
 
   for (const cv of direct) {
+    if (managed.has(cv.id)) continue;
     addCandidate(candidates, {
       canvas: cv,
       access: { kind: "direct", label: "Direct" },
@@ -144,7 +151,7 @@ export async function listSharedCanvases(
   }
   const teamRows = await deps.canvases.findByIds([...teamsByCanvas.keys()]);
   for (const cv of teamRows) {
-    if (!liveTeamCanvas(cv, opts.viewerId, opts.now)) continue;
+    if (managed.has(cv.id) || !liveTeamCanvas(cv, opts.now)) continue;
     const grants = teamsByCanvas.get(cv.id) ?? [];
     const unique = [...new Map(grants.map((g) => [g.teamId, g])).values()].sort((a, b) =>
       a.teamName.localeCompare(b.teamName),
@@ -163,6 +170,7 @@ export async function listSharedCanvases(
   }
 
   for (const cv of wholeOrg) {
+    if (managed.has(cv.id)) continue;
     addCandidate(candidates, {
       canvas: cv,
       access: { kind: "whole_org", label: "Whole org" },

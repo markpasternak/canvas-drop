@@ -15,19 +15,39 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
-import { resolveAllowlistEntries } from "../canvas/allowlist-view.js";
+import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
 import type { CloneService } from "../canvas/clone-service.js";
+import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { rootEntry } from "../canvas/manifest.js";
-import { classifyMutability, disabledError, requireOwnedCanvas } from "../canvas/owner-guard.js";
+import {
+  classifyMutability,
+  disabledError,
+  ownerOnlyError,
+  requireCanvasRole,
+} from "../canvas/owner-guard.js";
+import { OWNERSHIP_ERROR_STATUS, ownershipService } from "../canvas/ownership.js";
 import { hashPassword } from "../canvas/password.js";
+import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
+import {
+  accessRoleSchema,
+  listedRole,
+  type ManagementRole,
+  type MinRole,
+  resolveManagementGrant,
+} from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { canvasUrl } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
-import { VersionHistoryError, type VersionHistoryService } from "../canvas/version-history.js";
+import {
+  resolveVersionCreators,
+  VersionHistoryError,
+  type VersionHistoryService,
+} from "../canvas/version-history.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -67,11 +87,17 @@ export interface ManagementDeps extends PreviewHintDeps {
   teams?: Pick<
     TeamsRepository,
     | "findById"
+    | "findByIds"
+    | "getMembers"
+    | "listEditorTeamIds"
     | "isTeamMember"
     | "setCanvasTeams"
     | "listTeamIdsForCanvas"
     | "listCanvasGrantsForUserTeams"
     | "teamMatch"
+    | "listCanvasTeamGrants"
+    | "setCanvasTeamRole"
+    | "removeCanvasTeam"
   >;
   config: Config;
   canvases: CanvasesRepository;
@@ -93,6 +119,9 @@ export interface ManagementDeps extends PreviewHintDeps {
    * live sockets that lost access; a newly-set password drops gated non-owners.
    */
   hub?: RealtimeHub;
+  /** Live org-membership resolver (editor-roles plan, KTD2/KTD7): transfer eligibility
+   *  re-resolves the recipient's org set. Optional — absent ⇒ ∅ (fine under inert tenancy). */
+  orgMembership?: OrgMembershipResolver;
   /** Legacy guest service. Kept only so revoking old access rows can revoke any
    *  retained guest sessions; new sharing never creates app-owned credentials. */
   guests?: GuestService;
@@ -111,7 +140,10 @@ export interface ManagementDeps extends PreviewHintDeps {
   /** The invite primitive (plan 003 U8) — the individual one-off canvas invite routes through
    *  it. Optional: suites that don't exercise the invite path may omit it. */
   invites?: InviteService;
-  invitations?: Pick<InvitationsRepository, "listPendingForTarget" | "cancelPendingForTarget">;
+  invitations?: Pick<
+    InvitationsRepository,
+    "listPendingForTarget" | "cancelPendingForTarget" | "findPendingForTarget" | "setPendingRole"
+  >;
   // Screenshot preview hint (plan 004): `screenshotsEnabled` + `screenshots.doneCanvasIds`
   // come from PreviewHintDeps. Both optional — omitted in unit tests → `hasPreview` false.
 }
@@ -167,7 +199,7 @@ const settingsSchema = z.object({
 
 /**
  * OWNER canvas view (never leaks `api_key_hash` / `password_hash`). Every
- * caller of this projection is gated by `ownedCanvas` (owner-only) or
+ * caller of this projection is gated by `managedCanvas` (owner-only) or
  * `requireAdmin`, so it carries the owner-facing `disabledReason` (§6.10.2 — "owner
  * sees why"). It is NOT a public/shared projection: any future non-owner-facing
  * view (gallery, shared link) must be a SEPARATE function that omits `disabledReason`
@@ -182,10 +214,18 @@ function ownerCanvasView(
    *  resolved) when `access === 'team'`. Empty on the list path (no per-row join);
    *  populated on the single-canvas view so the share picker can pre-check them. */
   teamIds: string[] = [],
+  /** The owner's display identity + the CALLER's role on the canvas (editor-roles plan,
+   *  KTD9/KTD14): the dashboard conditions owner-only controls on `role === "owner"` and
+   *  marks edited rows "owned by <name> · editor". */
+  identity?: { owner: { id: string; name: string; email: string } | null; role: ManagementRole },
 ) {
   return {
     id: cv.id,
     slug: cv.slug,
+    // Whose canvas it is, and what the caller may do with it (editor-roles plan).
+    ownerId: cv.ownerId,
+    owner: identity?.owner ?? null,
+    role: identity?.role ?? null,
     // A captured screenshot preview exists for this canvas (plan 004). Drives the
     // dashboard cover (real shot vs GenerativeCover) without a probe request. False
     // whenever the pipeline is off, so the dashboard behaves exactly like today.
@@ -279,6 +319,8 @@ const ownerListQuerySchema = z.object({
   // Lifecycle scope: the active set (default) or the archived set (Your-canvases
   // Active/Archived toggle). A junk value falls back to active.
   scope: z.enum(["active", "archived"]).catch("active"),
+  // Owned-or-edited narrowing (editor-roles plan, R16): omit for both.
+  role: z.enum(["owned", "edited"]).optional().catch(undefined),
   sort: z.enum(["updated", "created", "title", "popular"]).catch("updated"),
   limit: z.coerce.number().int().catch(CANVASES_PAGE_SIZE),
   offset: z.coerce.number().int().catch(0),
@@ -322,33 +364,62 @@ export function managementRoutes(deps: ManagementDeps) {
    *  ({@link resolvePreviewIds}); optional deps (omitted in unit tests) → no previews. */
   const previewIds = (canvasIds: string[]) => resolvePreviewIds(deps, canvasIds);
 
-  /** Serialize one canvas with the per-request effective globals. */
-  async function canvasView(cv: Canvas) {
+  /** The caller's org membership from the gateway (∅ for a member in no org). */
+  const actorOrgIds = (c: Context<AppEnv>): Set<string> => c.get("orgIds") ?? new Set<string>();
+
+  /** The caller's role on the `:id` canvas as the gate resolved it; the create / paste
+   *  paths run no gate and the caller IS the owner. */
+  const roleOf = (c: Context<AppEnv>): ManagementRole => c.get("canvasRole") ?? "owner";
+
+  /** Serialize one canvas with the per-request effective globals, its owner, and the
+   *  caller's role. */
+  async function canvasView(cv: Canvas, role: ManagementRole) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
     // Resolve the canvas's team grants only here (the single-canvas view) — the share
     // picker pre-checks them. The list path skips this join (teamIds stays []).
-    const teamIds =
-      deps.teams && cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : [];
-    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds);
+    const [teamIds, owner] = await Promise.all([
+      deps.teams && cv.access === "team" ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
+      deps.users.findById(cv.ownerId),
+    ]);
+    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds, {
+      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+      role,
+    });
   }
 
-  /** Load a canvas the caller OWNS, else 404. Owner-only gate for the owner management
-   *  surface, shared with draft-api.ts so the two can't drift. A non-owner admin is
-   *  treated like any other member here (404); cross-owner admin power is the admin
-   *  routes only (list + disable/enable/restore). */
-  const ownedCanvas = (c: Context<AppEnv>) => requireOwnedCanvas(c, deps.canvases);
+  /** The role resolver's deps (editor-roles plan, KTD1/KTD2): the live org predicate
+   *  switches on whether an org is configured. */
+  const roleDeps = { canvases: deps.canvases, tenancyActive: !!deps.config.org.name };
 
-  /** Load a canvas the caller OWNS *and* may still mutate, else send the refusal.
+  /** Resolve the caller's management grant on `:id` (owner / editor), else null. */
+  const grantFor = (c: Context<AppEnv>) => requireCanvasRole(c, roleDeps);
+
+  /** Load a canvas the caller may MANAGE (owner or editor), else null → 404. The role
+   *  gate for the management surface, shared with draft-api.ts so the two can't drift.
+   *  A no-role caller — including a non-owner admin — is treated like any other member
+   *  (404); cross-owner admin power is the admin routes only (list + disable/enable/
+   *  restore/reassign). */
+  const managedCanvas = async (c: Context<AppEnv>): Promise<Canvas | null> =>
+    (await grantFor(c))?.canvas ?? null;
+
+  /** Load a canvas the caller may MANAGE *and* may still mutate, else send the refusal.
    *  Returns the canvas, or a Response the handler must return as-is:
-   *   - 404 (`{ error: "not_found" }`) when not owned / missing / deleted (no existence leak)
+   *   - 404 (`{ error: "not_found" }`) when no role / missing / deleted (no existence leak)
+   *   - 403 (`{ code: "OWNER_ONLY", … }`) when `min` is owner and the caller is an editor
    *   - 409 (`{ code: "DISABLED", … }`) when an admin has taken the canvas down (§12.0 #5).
-   *  A disabled canvas is read-only to its owner: every owner MUTATION goes through this,
-   *  while reads keep using `ownedCanvas` so the owner can still see the canvas + reason. */
-  const mutableCanvas = async (c: Context<AppEnv>): Promise<Canvas | Response> => {
-    const outcome = classifyMutability(await ownedCanvas(c));
+   *  Check order is role → owner-only → disabled (KTD1). A disabled canvas is read-only:
+   *  every MUTATION goes through this, while reads keep using `managedCanvas` so the
+   *  canvas + takedown reason stay visible. */
+  const mutableCanvas = async (
+    c: Context<AppEnv>,
+    min: MinRole = "editor",
+  ): Promise<Canvas | Response> => {
+    const outcome = classifyMutability(await grantFor(c), min);
     switch (outcome.kind) {
       case "not-found":
         return c.json({ error: "not_found" }, 404);
+      case "owner-only":
+        return c.json(ownerOnlyError(), 403);
       case "disabled":
         return c.json(disabledError(outcome.canvas), 409);
       case "ok":
@@ -414,7 +485,7 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     deps.audit.recordAudit({ action: "canvas_create", actorId: user.id, targetId: cv.id });
     // apiKey is returned ONCE and never again.
-    return c.json({ ...(await canvasView(cv)), apiKey }, 201);
+    return c.json({ ...(await canvasView(cv, roleOf(c))), apiKey }, 201);
   });
 
   // Clone → a new canvas owned by the caller, seeded from an existing one (plan 002).
@@ -438,8 +509,11 @@ export function managementRoutes(deps: ManagementDeps) {
     // may clone it — team canvases never reach the gallery, so this is their only clone path,
     // gated by the SAME live-org `teamMatch` re-join that the serve seam uses (KTD3).
     const orgIds = c.get("orgIds") ?? new Set<string>();
+    // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage —
+    // the shared resolver, not an owner comparison. The clone lands owned by the actor
+    // with an empty people list (existing behaviour).
     const eligible =
-      source.ownerId === user.id
+      (await resolveManagementGrant(source, memberPrincipal(user, orgIds), roleDeps)) !== null
         ? source.status === "active"
         : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
             tenancyActive: !!deps.config.org.name,
@@ -458,7 +532,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: canvas.id,
       meta: { from: source.id },
     });
-    return c.json(await canvasView(canvas), 201);
+    return c.json(await canvasView(canvas, roleOf(c)), 201);
   });
 
   /** Enrich a canvas list with each canvas's last-deploy summary in one batched
@@ -470,6 +544,7 @@ export function managementRoutes(deps: ManagementDeps) {
    *  ranked by, so that sort never aggregates `usage_events` twice (plan 004). */
   async function withLastDeploy(
     list: Canvas[],
+    actorId: string,
     recentSinceMs: number,
     precomputedViews?: Map<string, number>,
   ) {
@@ -479,20 +554,27 @@ export function managementRoutes(deps: ManagementDeps) {
     const byId = new Map((await deps.versions.findByIds(currentIds)).map((v) => [v.id, v]));
     // Globals are request-global (not per-canvas) — resolve once, reuse for the row.
     const globals = await resolveGlobals();
-    // Batched lookups for the whole page (no N+1): preview hints + recent view counts.
+    // Batched lookups for the whole page (no N+1): preview hints + recent view counts +
+    // the owners' display identity (edited rows show "owned by …", KTD9).
     // The popular sort already computed the page's counts, so reuse them there.
-    const [previews, recentViews] = await Promise.all([
+    const [previews, recentViews, owners] = await Promise.all([
       previewIds(list.map((cv) => cv.id)),
       precomputedViews ??
         deps.usage.recentViewCounts(
           list.map((cv) => cv.id),
           recentSinceMs,
         ),
+      deps.users.findByIds([...new Set(list.map((cv) => cv.ownerId))]),
     ]);
+    const ownerById = new Map(owners.map((u) => [u.id, u]));
     return list.map((cv) => {
       const v = cv.currentVersionId ? byId.get(cv.currentVersionId) : undefined;
+      const owner = ownerById.get(cv.ownerId);
       return {
-        ...ownerCanvasView(deps.config, cv, globals, previewVisible(cv, previews)),
+        ...ownerCanvasView(deps.config, cv, globals, previewVisible(cv, previews), [], {
+          owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+          role: listedRole(cv, actorId),
+        }),
         // Trending views over the recent window (0 when the canvas has none).
         recentViews: recentViews.get(cv.id) ?? 0,
         lastDeploy: v
@@ -534,6 +616,7 @@ export function managementRoutes(deps: ManagementDeps) {
           template: false,
           undeployed: false,
           scope: "active" as const,
+          role: undefined,
           sort: "updated" as const,
           limit: CANVASES_PAGE_SIZE,
           offset: 0,
@@ -542,14 +625,18 @@ export function managementRoutes(deps: ManagementDeps) {
     const offset = Math.max(data.offset, 0);
 
     const userId = c.get("user").id;
+    // The live org predicate for the edited arm (editor-roles plan, KTD2/KTD9).
+    const scope = { tenancyActive: !!deps.config.org.name, viewerOrgIds: actorOrgIds(c) };
     // One trending-window floor reused for BOTH the `popular` ranking and the per-row
     // `recentViews` number, so the order and the displayed counts can't disagree.
     const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
     // The filtered page and the (filter-independent) inventory summary have no data
     // dependency — run them concurrently rather than serially.
     const [{ items, total, recentViews }, summary] = await Promise.all([
-      deps.canvases.listByOwnerFiltered({
-        ownerId: userId,
+      deps.canvases.listForActorFiltered({
+        actorId: userId,
+        scope,
+        role: data.role,
         q: data.q,
         tag: data.tag,
         access: data.access,
@@ -564,9 +651,9 @@ export function managementRoutes(deps: ManagementDeps) {
         limit,
         offset,
       }),
-      deps.canvases.ownerSummary(userId),
+      deps.canvases.actorSummary(userId, scope),
     ]);
-    const canvases = await withLastDeploy(items, recentSinceMs, recentViews);
+    const canvases = await withLastDeploy(items, userId, recentSinceMs, recentViews);
     return c.json({ canvases, total, limit, offset, summary });
   });
 
@@ -591,7 +678,11 @@ export function managementRoutes(deps: ManagementDeps) {
   // sameOrigin (that guards mutations); authenticated via the gateway. Owner-scoped in
   // the repo — only the caller's own tags, never another owner's (§12).
   app.get("/tags", async (c) => {
-    const tags = await deps.canvases.listOwnerTagFacets(c.get("user").id);
+    // Owned-or-edited vocabulary (editor-roles plan, KTD9).
+    const tags = await deps.canvases.listActorTagFacets(c.get("user").id, {
+      tenancyActive: !!deps.config.org.name,
+      viewerOrgIds: actorOrgIds(c),
+    });
     return c.json({ tags });
   });
 
@@ -604,11 +695,14 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/by-slug/:slug", async (c) => {
     const slug = c.req.param("slug");
     if (!slug) return c.json({ error: "not_found" }, 404);
-    const cv = await deps.canvases.findBySlug(slug);
-    if (!cv || cv.status === "deleted" || cv.ownerId !== c.get("user").id) {
-      return c.json({ error: "not_found" }, 404);
-    }
-    return c.json({ id: cv.id });
+    // Owner OR editor (editor-roles plan, KTD9): edited canvases resolve like owned ones.
+    const grant = await resolveManagementGrant(
+      await deps.canvases.findBySlug(slug),
+      memberPrincipal(c.get("user"), c.get("orgIds") ?? new Set<string>()),
+      roleDeps,
+    );
+    if (!grant) return c.json({ error: "not_found" }, 404);
+    return c.json({ id: grant.canvas.id });
   });
 
   async function sharedCanvasesResponse(c: Context<AppEnv>) {
@@ -668,18 +762,18 @@ export function managementRoutes(deps: ManagementDeps) {
   app.get("/shared", sharedCanvasesResponse);
 
   app.get("/:id", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    return c.json(await canvasView(cv));
+    return c.json(await canvasView(cv, roleOf(c)));
   });
 
   // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
   // realtime connect count (M9), derived from usage_events + files + ai_usage.
-  // Owner-only (ownedCanvas), dashboard-session gated — NOT the runtime router.
+  // Owner-only (managedCanvas), dashboard-session gated — NOT the runtime router.
   // Realtime is ephemeral, so "peak concurrent connections" isn't derivable; we
   // surface the connect count (rt_connect events) instead.
   app.get("/:id/usage", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     return c.json(await fetchCanvasUsage(deps, cv.id));
   });
@@ -693,7 +787,9 @@ export function managementRoutes(deps: ManagementDeps) {
     // resolver (also used by the MCP update_canvas tool), so the two can't diverge.
     const resolution = resolveSettingsUpdate(cv, body.data, {
       publicLinksEnabled: await (deps.publicLinksEnabled?.() ?? Promise.resolve(true)),
-      canPublishPublic: c.get("user").canPublishPublic,
+      // The public-link entitlement follows the OWNER's account, whoever acts (KD7/R10).
+      ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+      actorIsOwner: c.get("canvasRole") === "owner",
       publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
       now: Date.now(),
       tenancyActive: !!deps.config.org.name,
@@ -789,34 +885,74 @@ export function managementRoutes(deps: ManagementDeps) {
             c.get("log")?.warn({ err, canvasId: cv.id }, "hub: dropGatedNonOwners failed"),
           );
     }
-    const view = await canvasView(updated);
+    const view = await canvasView(updated, roleOf(c));
     return c.json(warning ? { ...view, warning } : view);
   });
 
-  // --- Access allowlist (D4 `specific_people` rung, U4) -------------------------
-  // One Add person model: existing users are granted now; new admissible emails are pending.
+  // --- People list: people, pending invitees, and teams, each with a role ----------
+  // (editor-roles plan U4/U5, KTD5). One Add person model: existing users are granted
+  // now; new admissible emails are pending. Every mutation wraps the shared people
+  // service the MCP tools also wrap.
 
-  /** List a canvas's allowlist entries with member display identity resolved. */
+  const people = peopleService({
+    canvases: deps.canvases,
+    users: deps.users,
+    invitations: deps.invitations,
+    teams: deps.teams,
+    invites: deps.invites,
+    guests: deps.guests,
+    audit: deps.audit,
+    hub: deps.hub,
+  });
+
+  /** The acting user for a people-list change — identity from the gateway, role from the
+   *  gate that admitted this request (`canvasRole`). */
+  const peopleActor = (c: Context<AppEnv>) => {
+    const u = c.get("user");
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      isAdmin: u.isAdmin,
+      role: c.get("canvasRole") ?? ("editor" as const),
+    };
+  };
+
+  const peopleFailure = (c: Context<AppEnv>, err: PeopleError) =>
+    err.code === "NOT_FOUND"
+      ? c.json({ error: "not_found" }, 404)
+      : c.json({ code: err.code, message: err.message }, PEOPLE_ERROR_STATUS[err.code]);
+
+  /** The unified people list (owner, people, pending invitees, teams — with roles). */
   app.get("/:id/allowlist", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
-    const entries = await resolveAllowlistEntries(
-      await deps.canvases.listAllowlist(cv.id),
-      deps.users,
-      deps.invitations ? await deps.invitations.listPendingForTarget("canvas", cv.id) : [],
-    );
-    return c.json({ entries });
+    // The owner also gets the transfer-candidate projection (review #7): effective editors
+    // including the people behind editor teams. Owner-only information — editors don't
+    // see it (they can't transfer).
+    const entries = await people.list(cv);
+    if (roleOf(c) !== "owner") return c.json({ entries });
+    return c.json({ entries, transferCandidates: await ownership.transferCandidates(cv) });
   });
 
   // Normalize at the boundary (trim + lowercase) so allowlist/invite dedup on the
   // unique (canvas_id, email) index is case-insensitive and member matching is
   // consistent — "Alice@x.com" and "alice@x.com" are one principal.
-  const allowlistAddSchema = z.object({
-    email: z
-      .string()
-      .email()
-      .transform((e) => e.trim().toLowerCase()),
-  });
+  const emailField = z
+    .string()
+    .email()
+    .transform((e) => e.trim().toLowerCase());
+  const allowlistAddSchema = z
+    .object({
+      email: emailField.optional(),
+      teamId: z.string().min(1).optional(),
+      role: accessRoleSchema.optional(),
+    })
+    .refine((v) => (v.email ? 1 : 0) + (v.teamId ? 1 : 0) === 1, {
+      message: "exactly one of email or teamId",
+    });
+  const inviteSchema = z.object({ email: emailField, role: accessRoleSchema.optional() });
+  const roleSchema = z.object({ role: accessRoleSchema });
 
   function addPersonFailure(c: Context<AppEnv>, status: string) {
     if (status === "policy_blocked") {
@@ -843,39 +979,43 @@ export function managementRoutes(deps: ManagementDeps) {
     return null;
   }
 
-  async function addPerson(c: Context<AppEnv>, cv: Canvas, email: string, mode: "add" | "invite") {
-    if (!deps.invites)
-      return c.json({ code: "EMAIL_NOT_CONFIGURED", message: "Invites are unavailable." }, 503);
-    const actor = c.get("user");
-    const r = await deps.invites.resolveOrInvite(
-      {
-        kind: "canvas",
-        canvasId: cv.id,
-        canvasSlug: cv.slug,
-        canvasTitle: cv.title,
-        mode,
-      },
-      email,
-      { id: actor.id, name: actor.name, email: actor.email, isAdmin: actor.isAdmin },
-    );
-    const failure = addPersonFailure(c, r.status);
+  async function addPerson(
+    c: Context<AppEnv>,
+    cv: Canvas,
+    input: { email: string; role?: "viewer" | "editor"; mode: "add" | "invite" },
+  ) {
+    const r = await people.addPerson(cv, peopleActor(c), input);
+    if (!r.ok) return peopleFailure(c, r);
+    const failure = addPersonFailure(c, r.result.status);
     if (failure) return failure;
-    deps.audit.recordAudit({
-      action: "allowlist_add",
-      actorId: actor.id,
-      targetId: cv.id,
-      meta: { kind: "add_person", mode, status: r.status },
+    return c.json({
+      ok: true,
+      status: r.result.status,
+      emailDelivery: r.result.emailDelivery,
+      role: r.role,
     });
-    return c.json({ ok: true, status: r.status, emailDelivery: r.emailDelivery });
   }
 
-  /** Add person: existing user -> granted now; admissible new email -> pending. */
+  /** Add a person (existing user → granted now; admissible new email → pending) or a
+   *  team, each with an optional role (default viewer). */
   app.post("/:id/allowlist", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
     const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    return addPerson(c, cv, body.data.email, "add");
+    if (body.data.teamId) {
+      const r = await people.addTeam(cv, peopleActor(c), {
+        teamId: body.data.teamId,
+        role: body.data.role,
+      });
+      if (!r.ok) return peopleFailure(c, r);
+      return c.json({ ok: true, status: r.status, role: r.role, from: r.from });
+    }
+    return addPerson(c, cv, {
+      email: body.data.email as string,
+      role: body.data.role,
+      mode: "add",
+    });
   });
 
   /** Individual one-canvas access email (plan 003 U8): routes through the
@@ -887,47 +1027,68 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/invite", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const body = allowlistAddSchema.safeParse(await c.req.json().catch(() => ({})));
+    const body = inviteSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
-    return addPerson(c, cv, body.data.email, "invite");
+    return addPerson(c, cv, { email: body.data.email, role: body.data.role, mode: "invite" });
   });
 
-  /** Remove an allowlist entry; revoke a guest's invite + sessions, and drop any
-   *  live sockets it no longer permits. */
+  /** Change an entry's role (editor-roles plan, R8). The `owner` entry is owner-only
+   *  (403 OWNER_ONLY) for everyone; a guest is never an editor (400 GUEST_VIEWER_ONLY). */
+  app.patch("/:id/allowlist/:entryId", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c);
+    if (cv instanceof Response) return cv;
+    const body = roleSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const r = await people.setRole(cv, peopleActor(c), c.req.param("entryId"), body.data.role);
+    if (!r.ok) return peopleFailure(c, r);
+    return c.json({ ok: true });
+  });
+
+  /** Remove an entry (person, pending invitee, legacy guest, or team grant); revoke a
+   *  guest's invite + sessions, and drop any live sockets it no longer permits. */
   app.delete("/:id/allowlist/:entryId", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const entryId = c.req.param("entryId");
-    if (entryId.startsWith("pending:")) {
-      const cancelled =
-        (await deps.invitations?.cancelPendingForTarget(
-          "canvas",
-          cv.id,
-          entryId.slice("pending:".length),
-        )) ?? null;
-      if (!cancelled) return c.json({ error: "not_found" }, 404);
-      deps.audit.recordAudit({
-        action: "allowlist_remove",
-        actorId: c.get("user").id,
-        targetId: cv.id,
-        meta: { entryId, kind: "pending", email: cancelled.email },
-      });
-      await revalidate(c, cv.id);
-      return c.json({ ok: true });
-    }
-    const entry = (await deps.canvases.listAllowlist(cv.id)).find((e) => e.id === entryId);
-    if (entry?.principalKind === "guest" && entry.email && deps.guests) {
-      await deps.guests.revokeInvite(cv.id, entry.email);
-    }
-    await deps.canvases.removeAllowlistEntry(cv.id, entryId);
-    deps.audit.recordAudit({
-      action: "allowlist_remove",
-      actorId: c.get("user").id,
-      targetId: cv.id,
-      meta: { entryId, kind: entry?.principalKind ?? null },
-    });
-    await revalidate(c, cv.id);
+    const r = await people.remove(cv, peopleActor(c), c.req.param("entryId"));
+    if (!r.ok) return peopleFailure(c, r);
     return c.json({ ok: true });
+  });
+
+  // --- Ownership transfer (editor-roles plan U7, R12/R13) — owner-only ---------------
+  const ownership = ownershipService({
+    canvases: deps.canvases,
+    users: deps.users,
+    teams: deps.teams,
+    orgMembership: deps.orgMembership,
+    tenancyActive: !!deps.config.org.name,
+    audit: deps.audit,
+    hub: deps.hub,
+    notify: deps.invites,
+  });
+  const transferSchema = z.object({
+    // A user id, never an email (KTD7): the recipient must already be an editor.
+    toUserId: z
+      .string()
+      .min(1)
+      .refine((v) => !v.includes("@"), "toUserId is a user id, not an email"),
+  });
+
+  /** Transfer ownership to an existing editor (instant; the caller becomes an editor).
+   *  Owner-only (an editor reads 403 OWNER_ONLY); takes a user id, never an email. */
+  app.post("/:id/transfer", sameOrigin, async (c) => {
+    const cv = await mutableCanvas(c, "owner");
+    if (cv instanceof Response) return cv;
+    const body = transferSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    const user = c.get("user");
+    const r = await ownership.transfer(cv, { id: user.id, name: user.name }, body.data.toUserId);
+    if (!r.ok) return c.json({ code: r.code, message: r.message }, OWNERSHIP_ERROR_STATUS[r.code]);
+    return c.json({
+      ok: true,
+      canvas: await canvasView(r.canvas, "editor"),
+      previousOwnerEditor: r.previousOwnerEditor,
+      publicLinkReverted: r.publicLinkReverted,
+    });
   });
 
   app.patch("/:id/capabilities", sameOrigin, async (c) => {
@@ -936,7 +1097,7 @@ export function managementRoutes(deps: ManagementDeps) {
     const body = capabilitiesSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "invalid_body" }, 400);
     const patch = body.data;
-    if (Object.keys(patch).length === 0) return c.json(await canvasView(cv));
+    if (Object.keys(patch).length === 0) return c.json(await canvasView(cv, roleOf(c)));
     const updated = await deps.canvases.updateCapabilities(cv.id, patch);
     deps.audit.recordAudit({
       action: "capabilities_update",
@@ -947,7 +1108,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Turning realtime (or the backend group) off must drop live sockets — the
     // heartbeat would too, but this makes it instant (D-RT-6).
     await revalidate(c, cv.id);
-    return c.json(await canvasView(updated));
+    return c.json(await canvasView(updated, roleOf(c)));
   });
 
   app.post("/:id/regenerate-slug", sameOrigin, async (c) => {
@@ -973,15 +1134,19 @@ export function managementRoutes(deps: ManagementDeps) {
     // Old slug URLs are invalidated — drop all live sockets so clients reconnect
     // under the new slug (D-RT-6 / §12.0 #5).
     deps.hub?.dropCanvas(cv.id);
-    return c.json(await canvasView(updated));
+    return c.json(await canvasView(updated, roleOf(c)));
   });
 
   app.post("/:id/regenerate-key", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    const apiKey = generateApiKey();
-    await deps.canvases.regenerateApiKey(cv.id, hashApiKey(apiKey));
-    deps.audit.recordAudit({ action: "key_regen", actorId: c.get("user").id, targetId: cv.id });
+    // Shared with the MCP tool (editor-roles plan U8/KTD11): audited with the acting
+    // role; a rotation by a non-owner emails the owner naming the actor.
+    const { apiKey } = await rotateDeployKey(
+      { canvases: deps.canvases, users: deps.users, audit: deps.audit, notify: deps.invites },
+      cv,
+      peopleActor(c),
+    );
     return c.json({ apiKey }); // shown once
   });
 
@@ -1014,7 +1179,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { previewMode: "custom" },
     });
-    return c.json(await canvasView(updated));
+    return c.json(await canvasView(updated, roleOf(c)));
   });
 
   // Remove the custom preview → revert to `auto` (next publish re-captures) and delete
@@ -1024,7 +1189,7 @@ export function managementRoutes(deps: ManagementDeps) {
   app.delete("/:id/preview", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    if (cv.previewMode !== "custom") return c.json(await canvasView(cv));
+    if (cv.previewMode !== "custom") return c.json(await canvasView(cv, roleOf(c)));
     await deletePreviewRenditions(deps.storage, cv.id);
     const updated = await deps.canvases.updateSettings(cv.id, { previewMode: "auto" });
     deps.audit.recordAudit({
@@ -1033,7 +1198,7 @@ export function managementRoutes(deps: ManagementDeps) {
       targetId: cv.id,
       meta: { previewMode: "auto" },
     });
-    return c.json(await canvasView(updated));
+    return c.json(await canvasView(updated, roleOf(c)));
   });
 
   app.delete("/:id", sameOrigin, async (c) => {
@@ -1041,8 +1206,10 @@ export function managementRoutes(deps: ManagementDeps) {
     // having an admin restore it would launder the takedown into an active canvas. It
     // must be `enable`d (admin route) first. This holds for every owner — there is no
     // admin shortcut, and an admin has no owner access to someone else's canvas anyway.
-    // `mutableCanvas` enforces this with the shared `DISABLED` contract.
-    const cv = await mutableCanvas(c);
+    // `mutableCanvas` enforces this with the shared `DISABLED` contract. Delete is an
+    // OWNER-ONLY act (R7): an editor is refused with the explicit OWNER_ONLY 403, checked
+    // before the disabled state (KTD1).
+    const cv = await mutableCanvas(c, "owner");
     if (cv instanceof Response) return cv;
     await deps.canvases.setStatus(cv.id, "deleted");
     deps.audit.recordAudit({ action: "canvas_delete", actorId: c.get("user").id, targetId: cv.id });
@@ -1054,11 +1221,15 @@ export function managementRoutes(deps: ManagementDeps) {
 
   // Archive (owner-initiated, reversible) — takes the canvas offline (its public
   // URL 404s) and moves it to the Archive view. The guarded repo transition
-  // returns false only for an already-deleted row, which ownedCanvas already 404s.
+  // returns false only for an already-deleted row, which managedCanvas already 404s.
   app.post("/:id/archive", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    if (!(await deps.canvases.archive(cv.id))) return c.json({ error: "not_found" }, 404);
+    // The guarded transition only fails for a non-active row: the caller manages the
+    // canvas (the gate passed), so this is a state conflict, never a not-found.
+    if (!(await deps.canvases.archive(cv.id))) {
+      return c.json({ code: "NOT_ACTIVE", message: "Only an active canvas can be archived." }, 409);
+    }
     deps.audit.recordAudit({
       action: "canvas_archive",
       actorId: c.get("user").id,
@@ -1068,7 +1239,9 @@ export function managementRoutes(deps: ManagementDeps) {
     // grants so re-publishing later doesn't silently resurrect them.
     await revalidate(c, cv.id);
     await revokeGuests(c, cv.id);
-    return c.json(await canvasView({ ...cv, status: "archived", ...CLEARED_PUBLICATION_FIELDS }));
+    return c.json(
+      await canvasView({ ...cv, status: "archived", ...CLEARED_PUBLICATION_FIELDS }, roleOf(c)),
+    );
   });
 
   // Unarchive — restore an archived canvas to active. A 409 on an invalid
@@ -1084,7 +1257,7 @@ export function managementRoutes(deps: ManagementDeps) {
       actorId: c.get("user").id,
       targetId: cv.id,
     });
-    return c.json(await canvasView({ ...cv, status: "active" }));
+    return c.json(await canvasView({ ...cv, status: "active" }, roleOf(c)));
   });
 
   // Unpublish — take a published canvas back to Draft (its public URL 404s) while
@@ -1109,22 +1282,26 @@ export function managementRoutes(deps: ManagementDeps) {
     await revalidate(c, cv.id);
     await revokeGuests(c, cv.id);
     return c.json(
-      await canvasView({ ...cv, currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS }),
+      await canvasView({ ...cv, currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS }, roleOf(c)),
     );
   });
 
   // Deploy history (§6.1.13). Session-authed sibling of the Bearer `/v1` versions
   // endpoint — owner-only, no existence leak. GET, so no same-origin guard.
   app.get("/:id/versions", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const versions = await deps.versions.listByCanvas(cv.id);
+    // Who created each version (R18) — one batched identity lookup, shared with MCP.
+    const creators = await resolveVersionCreators(deps.users, versions);
     return c.json({
       versions: versions.map((v) => ({
         number: v.number,
         source: v.source,
         status: v.status,
         createdBy: v.createdBy,
+        createdByName: creators.get(v.createdBy)?.name ?? null,
+        createdByEmail: creators.get(v.createdBy)?.email ?? null,
         createdAt: v.createdAt,
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
@@ -1138,7 +1315,7 @@ export function managementRoutes(deps: ManagementDeps) {
   // Download all files in a specific version as a ZIP archive. GET, owner-only,
   // no same-origin guard (browser navigation with cookies triggers the download).
   app.get("/:id/versions/:number/download", async (c) => {
-    const cv = await ownedCanvas(c);
+    const cv = await managedCanvas(c);
     if (!cv) return c.json({ error: "not_found" }, 404);
     const num = Number(c.req.param("number"));
     if (!Number.isInteger(num) || num < 1) return c.json({ error: "invalid_version" }, 400);
@@ -1236,7 +1413,7 @@ export function managementRoutes(deps: ManagementDeps) {
     // Reflect the swap from known-good data (target.id) rather than re-reading —
     // avoids returning a stale snapshot if a refetch transiently fails.
     return c.json({
-      ...(await canvasView({ ...cv, currentVersionId: target.id })),
+      ...(await canvasView({ ...cv, currentVersionId: target.id }, roleOf(c))),
       version,
     });
   });
@@ -1295,7 +1472,7 @@ export function managementRoutes(deps: ManagementDeps) {
         targetId: cv.id,
         meta: { source: "paste", version: deploy.version },
       });
-      return c.json({ ...(await canvasView(cv)), apiKey, deploy }, 201);
+      return c.json({ ...(await canvasView(cv, roleOf(c))), apiKey, deploy }, 201);
     } catch (err) {
       await deps.canvases.setStatus(cv.id, "deleted").catch(() => {});
       if (err instanceof DeployError) {

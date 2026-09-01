@@ -8,9 +8,11 @@ import { dayStartUtc } from "../ai/quota.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { checkAuthoringQuota } from "../authoring/quota.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
+import { memberPrincipal } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { disabledError } from "../canvas/owner-guard.js";
 import { hashPassword } from "../canvas/password.js";
+import { type RoleGrant, resolveManagementGrant } from "../canvas/role.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AuthoringUsageRepository } from "../db/repositories/authoring-usage.js";
@@ -129,6 +131,32 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     return { id: user.id, isAdmin: !!user.isAdmin, canPublishPublic: !!user.canPublishPublic };
   }
 
+  /** The role resolver's deps (editor-roles plan, KTD1). */
+  const roleDeps = { canvases: deps.canvases, tenancyActive: !!deps.config.org.name };
+
+  /**
+   * The management gate for an authored share: OWNER OR EDITOR through the shared
+   * resolver (editor-roles plan, KTD1), with the pre-existing ADMIN allowance retained
+   * unchanged (KTD12 — the §12.0 #3 conflict is recorded, not resolved, this round).
+   * A non-managed / missing / deleted id reads as null → not-found (no existence leak).
+   */
+  async function managedShare(
+    c: import("hono").Context<AppEnv>,
+    id: string,
+    viewer: { id: string; isAdmin: boolean },
+  ): Promise<{ canvas: Canvas; role: "owner" | "editor" | "admin" } | null> {
+    const cv = await deps.canvases.findById(id);
+    if (!cv || cv.status === "deleted") return null;
+    const grant = await resolveManagementGrant(
+      cv,
+      memberPrincipal(viewer, c.get("orgIds") ?? new Set<string>()),
+      roleDeps,
+    );
+    if (grant) return { canvas: grant.canvas, role: grant.role };
+    // The pre-existing admin allowance (KTD12), retained unchanged this round.
+    return viewer.isAdmin ? { canvas: cv, role: "admin" } : null;
+  }
+
   /** The management projection (authoring v2). Assembled ONLY here (the authenticated
    *  management API) — the public canvas-serve path never reads `metadata`, so a reader
    *  structurally cannot receive author/management data (reader isolation). */
@@ -173,7 +201,9 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
    */
   async function validateGates(
     pol: Awaited<ReturnType<typeof policy>>,
-    viewer: { canPublishPublic: boolean },
+    // The public-link entitlement follows the canvas OWNER's account, whoever acts
+    // (editor-roles plan, KD7/R10); `actorIsOwner` picks the refusal wording (KTD6).
+    entitlement: { ownerCanPublishPublic: boolean; actorIsOwner: boolean },
     s: {
       /** True when this request explicitly sets the access rung (publish: always). */
       accessExplicit: boolean;
@@ -217,13 +247,20 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
           status: 403,
         };
       }
-      if (!viewer.canPublishPublic) {
-        return {
-          code: "PUBLIC_NOT_ALLOWED",
-          message:
-            "An administrator has revoked this account's permission to publish public links.",
-          status: 403,
-        };
+      if (!entitlement.ownerCanPublishPublic) {
+        return entitlement.actorIsOwner
+          ? {
+              code: "PUBLIC_NOT_ALLOWED",
+              message:
+                "An administrator has revoked this account's permission to publish public links.",
+              status: 403,
+            }
+          : {
+              code: "PUBLIC_LINK_OWNER_GATED",
+              message:
+                "The owner's account can't publish public links, so this share can't be made public. An administrator can grant it to the owner.",
+              status: 403,
+            };
       }
     }
     if (pol.requireExpiry && s.effectiveRung !== "private" && s.effectiveExpiry === null) {
@@ -314,17 +351,22 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
         409,
       );
     }
-    const gateErr = await validateGates(pol, viewer, {
-      accessExplicit: true,
-      requestedRung: rung,
-      wantsPasswordAccess: requestedAccess === "password",
-      effectiveRung: rung,
-      willHavePassword: requestedAccess === "password" && !!meta.password,
-      runPublicLinkGate: rung === "public_link",
-      effectiveExpiry: meta.expiresAt ?? null,
-      newExpiry: meta.expiresAt,
-      now,
-    });
+    // A fresh share is the viewer's own canvas: the viewer IS the owner.
+    const gateErr = await validateGates(
+      pol,
+      { ownerCanPublishPublic: viewer.canPublishPublic, actorIsOwner: true },
+      {
+        accessExplicit: true,
+        requestedRung: rung,
+        wantsPasswordAccess: requestedAccess === "password",
+        effectiveRung: rung,
+        willHavePassword: requestedAccess === "password" && !!meta.password,
+        runPublicLinkGate: rung === "public_link",
+        effectiveExpiry: meta.expiresAt ?? null,
+        newExpiry: meta.expiresAt,
+        now,
+      },
+    );
     if (gateErr) return c.json(gateErr, gateErr.status);
 
     // Quota: per-viewer daily + all-time total (checked before any row is created).
@@ -423,13 +465,13 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
     const id = c.req.param("id");
-    const cv = await deps.canvases.findById(id);
-    // Owner or admin only; a non-owned / missing id reads as not-found (no existence leak).
-    if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
-      return c.json({ code: "NOT_FOUND" }, 404);
-    }
-    // An admin takedown makes the canvas read-only to its owner everywhere (§12.0 #5) —
-    // ownership is checked first (above), so this 409 never leaks a non-owned row's existence.
+    // Owner or editor (admin allowance kept, KTD12); a non-managed / missing id reads as
+    // not-found (no existence leak).
+    const managed = await managedShare(c, id, viewer);
+    if (!managed) return c.json({ code: "NOT_FOUND" }, 404);
+    const cv = managed.canvas;
+    // An admin takedown makes the canvas read-only everywhere (§12.0 #5) — the role is
+    // checked first (above), so this 409 never leaks a non-managed row's existence.
     if (cv.status === "disabled") return c.json(disabledError(cv), 409);
     const form = await parseForm(c, false);
     if ("code" in form) return c.json(form, form.status);
@@ -441,7 +483,10 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     }
     if (cv.revokedAt != null && !form.bundle) {
       return c.json(
-        { code: "SHARE_REVOKED", message: "This share is unpublished; include a bundle to publish it again." },
+        {
+          code: "SHARE_REVOKED",
+          message: "This share is unpublished; include a bundle to publish it again.",
+        },
         409,
       );
     }
@@ -481,21 +526,28 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     // Expiry after this op: undefined keeps the row's, null clears it, a number sets it.
     const effectiveExpiry =
       meta.expiresAt === undefined ? (cv.sharedExpiresAt ?? null) : meta.expiresAt;
-    const gateErr = await validateGates(pol, viewer, {
-      accessExplicit: requestedAccess !== undefined,
-      requestedRung: rung,
-      wantsPasswordAccess: requestedAccess === "password",
-      effectiveRung,
-      willHavePassword,
-      // Re-run the public-link admin gate whenever the op creates or WIDENS a public link
-      // (access set to public_link/password, or a password cleared on an existing one) —
-      // never on a benign edit of an already-open share.
-      runPublicLinkGate:
-        effectiveRung === "public_link" && (requestedAccess !== undefined || passwordCleared),
-      effectiveExpiry,
-      newExpiry: typeof meta.expiresAt === "number" ? meta.expiresAt : undefined,
-      now,
-    });
+    const gateErr = await validateGates(
+      pol,
+      {
+        ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+        actorIsOwner: managed.role === "owner",
+      },
+      {
+        accessExplicit: requestedAccess !== undefined,
+        requestedRung: rung,
+        wantsPasswordAccess: requestedAccess === "password",
+        effectiveRung,
+        willHavePassword,
+        // Re-run the public-link admin gate whenever the op creates or WIDENS a public link
+        // (access set to public_link/password, or a password cleared on an existing one) —
+        // never on a benign edit of an already-open share.
+        runPublicLinkGate:
+          effectiveRung === "public_link" && (requestedAccess !== undefined || passwordCleared),
+        effectiveExpiry,
+        newExpiry: typeof meta.expiresAt === "number" ? meta.expiresAt : undefined,
+        now,
+      },
+    );
     if (gateErr) return c.json(gateErr, gateErr.status);
 
     // Deploy a new immutable version (stable URL) when a bundle is supplied.
@@ -562,10 +614,19 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const rows = await Promise.all(ids.map((id) => deps.canvases.findById(id)));
     // Include unpublished shares (they stay `active` + revoked_at), but keep the
     // authoring view aligned with the dashboard's active-canvas view: archived,
-    // deleted, and admin-disabled canvases are not reusable shares.
-    let shares = rows
-      .filter((cv): cv is Canvas => !!cv && cv.status === "active" && cv.ownerId === viewer.id)
-      .map(toAuthoredCanvas);
+    // deleted, and admin-disabled canvases are not reusable shares. Exclude any the
+    // viewer no longer manages (owner or editor — a share whose ownership moved away
+    // stays listed while the author remains an editor). The per-viewer set is bounded
+    // by the authoring total cap, so the per-row resolve is small.
+    const principal = memberPrincipal(viewer, c.get("orgIds") ?? new Set<string>());
+    const grants = await Promise.all(
+      rows.map((cv) =>
+        resolveManagementGrant(cv && cv.status === "active" ? cv : null, principal, roleDeps),
+      ),
+    );
+    let shares = grants
+      .filter((g): g is RoleGrant => g !== null)
+      .map((g) => toAuthoredCanvas(g.canvas));
 
     // In-memory filter (the per-viewer set is bounded by the authoring total cap).
     const fSourceApp = c.req.query("sourceApp");
@@ -587,11 +648,11 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
     const id = c.req.param("id");
-    const cv = await deps.canvases.findById(id);
-    // Owner or admin only; a non-owned / missing id reads as not-found (no existence leak).
-    if (!cv || cv.status === "deleted" || (cv.ownerId !== viewer.id && !viewer.isAdmin)) {
-      return c.json({ code: "NOT_FOUND" }, 404);
-    }
+    // Owner or editor (admin allowance kept, KTD12); a non-managed / missing id reads as
+    // not-found (no existence leak).
+    const managed = await managedShare(c, id, viewer);
+    if (!managed) return c.json({ code: "NOT_FOUND" }, 404);
+    const cv = managed.canvas;
     // A disabled (admin-taken-down) canvas is read-only to its owner (§12.0 #5) — parity
     // with every management mutation, which refuses through mutableCanvas.
     if (cv.status === "disabled") return c.json(disabledError(cv), 409);

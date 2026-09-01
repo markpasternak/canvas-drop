@@ -11,6 +11,7 @@ import { fakeProvider } from "../ai/testing.js";
 import { buildApp } from "../app.js";
 import { type AuditLog, createAuditLog } from "../audit/audit-log.js";
 import { guestService } from "../auth/guest.js";
+import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { sessionService } from "../auth/session.js";
 import type { AuthStrategy } from "../auth/strategy.js";
 import { cloneService } from "../canvas/clone-service.js";
@@ -182,6 +183,13 @@ export function makeHarness(
       return !!u && !u.isBlocked;
     },
     isPrincipalAllowed: (canvasId, principal) => canvases.isPrincipalAllowed(canvasId, principal),
+    // Mirror index.ts: the team re-join and the effective-editor probe, so realtime
+    // scenarios re-authorize exactly like prod (editors stay connected until demoted).
+    teamMatch: (canvasId, userId, viewerOrgIds) =>
+      teamsRepository(client).teamMatch(canvasId, userId, viewerOrgIds),
+    isEffectiveEditor: (canvasId, userId, scope) =>
+      canvases.isEffectiveEditor(canvasId, userId, scope),
+    resolveOrgIds: makeOrgMembershipResolver(orgsRepository(client), orgMembersRepository(client)),
   });
   const mailer = captureMailer();
 
@@ -352,6 +360,7 @@ export async function connectMcp(
         storage,
         audit,
         log: silent,
+        users: repos.users,
       }),
       usage: repos.usage,
       files: repos.files,

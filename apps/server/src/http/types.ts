@@ -69,6 +69,10 @@ export interface AppVariables {
   canvasSlug?: string;
   /** The authorized canvas — set by canvasAccess (U15) on allow. */
   canvas?: Canvas;
+  /** The caller's role on the `:id` canvas (editor-roles plan) — set by the role gate
+   *  (`requireCanvasRole`) on the management / draft surfaces so a handler can branch
+   *  on owner vs editor without a second resolve. Server-resolved, never client input. */
+  canvasRole?: "owner" | "editor";
   /** Whether the password gate must run before serving — set by canvasAccess (U15). */
   needsPasswordGate?: boolean;
   /** The verified MCP OAuth caller — set by the `/mcp` bearer-auth middleware from a

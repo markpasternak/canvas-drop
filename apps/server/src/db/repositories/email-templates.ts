@@ -63,7 +63,7 @@ export function emailTemplatesRepository(client: DbClient) {
     /** Idempotently seed defaults and migrate old untouched defaults to the latest body. */
     async seedDefaults(
       defaults: Record<string, TemplateBody>,
-      previousDefaults: readonly Record<string, TemplateBody>[] = [],
+      previousDefaults: readonly Partial<Record<string, TemplateBody>>[] = [],
     ): Promise<void> {
       const now = Date.now();
       const existingRows = (await db.select().from(T)) as EmailTemplate[];

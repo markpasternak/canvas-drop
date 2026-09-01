@@ -131,7 +131,7 @@ describe.each(DIALECTS)("collectGarbage (blob mark-sweep) [%s]", (dialect) => {
     await storage.put(blobKey(canvasId, "staged"), enc("staged"));
     await uploadSessions.create({
       canvasId,
-      ownerId: owner.id,
+      actorId: owner.id,
       handleHash: "h".repeat(64),
       manifest: m(["staged"]),
       stagedHashes: ["staged"],

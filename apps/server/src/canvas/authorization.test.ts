@@ -9,6 +9,7 @@ import {
   isAnonymouslyPublic,
   isAnonymouslyReachable,
   principalLookupKey,
+  resolveAccessContext,
 } from "./authorization.js";
 
 const NOW = 1_000_000;
@@ -408,6 +409,9 @@ describe("canvasAccess — disabled-canvas rendering", () => {
       async isOwnerPublishEnabled() {
         return true;
       },
+      async isEffectiveEditor() {
+        return false;
+      },
     } as unknown as CanvasesRepository;
     const app = new Hono<AppEnv>();
     app.use("*", async (c, next) => {
@@ -610,5 +614,131 @@ describe("isAnonymouslyReachable — the pre-gateway carve-out predicate", () =>
     expect(isAnonymouslyReachable("public_link", NOW, NOW)).toBe(false);
     expect(isAnonymouslyReachable("public_link", NOW - 1, NOW)).toBe(false);
     expect(isAnonymouslyReachable("public_link", NOW + 1, NOW)).toBe(true);
+  });
+});
+
+// --- Editor branch (editor-roles plan U2, KD6/KTD1) ---------------------------------
+
+describe("decideCanvasAccess — editor branch", () => {
+  const EDITOR = { editorMatch: true } as const;
+
+  it("an editor is allowed on a PRIVATE canvas — no password gate, full content (AE2)", () => {
+    const d = decideCanvasAccess(
+      canvas({ access: "private", passwordHash: "h" }),
+      other,
+      NOW,
+      EDITOR,
+    );
+    expect(d).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+  });
+
+  it("an editor bypasses the rung, the password gate, and the share expiry at every rung", () => {
+    for (const access of ["specific_people", "team", "whole_org", "public_link"] as const) {
+      const d = decideCanvasAccess(
+        canvas({ access, passwordHash: "h", sharedExpiresAt: NOW - 1, orgId: ORG_B }),
+        other,
+        NOW,
+        { ...ACTIVE, ...EDITOR },
+      );
+      expect(d, access).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+    }
+  });
+
+  it("editorMatch is IGNORED for a guest or anonymous principal (KD2: editors are members only)", () => {
+    expect(decideCanvasAccess(canvas(), guest("cv1"), NOW, EDITOR).action).toBe("deny");
+    expect(decideCanvasAccess(canvas(), anon, NOW, EDITOR).action).toBe("deny");
+    // …and an admin without editorMatch is still an ordinary member (404 on private).
+    expect(decideCanvasAccess(canvas(), admin, NOW, {})).toEqual({
+      action: "deny",
+      status: 404,
+      reason: "owner_only",
+    });
+  });
+
+  it("an editor does NOT bypass deleted / archived / disabled (lifecycle first)", () => {
+    expect(decideCanvasAccess(canvas({ status: "deleted" }), other, NOW, EDITOR)).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+    expect(decideCanvasAccess(canvas({ status: "archived" }), other, NOW, EDITOR)).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+    const disabled = decideCanvasAccess(canvas({ status: "disabled" }), other, NOW, EDITOR);
+    expect(disabled).toEqual({ action: "deny", status: 403, reason: "disabled" });
+  });
+
+  it("without editorMatch nothing changes: a non-owner member on a private canvas is 404", () => {
+    expect(decideCanvasAccess(canvas(), other, NOW, { editorMatch: false })).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+    expect(decideCanvasAccess(canvas(), other, NOW, {})).toMatchObject({
+      action: "deny",
+      status: 404,
+    });
+  });
+});
+
+describe("resolveAccessContext — editorMatch resolution", () => {
+  function repo(editorIds: string[]) {
+    const calls: Array<[string, string, { tenancyActive: boolean; viewerOrgIds: Set<string> }]> =
+      [];
+    const canvases = {
+      isPrincipalAllowed: async () => false,
+      isOwnerPublishEnabled: async () => true,
+      isEffectiveEditor: async (
+        canvasId: string,
+        userId: string,
+        scope: { tenancyActive: boolean; viewerOrgIds: Set<string> },
+      ) => {
+        calls.push([canvasId, userId, scope]);
+        return editorIds.includes(userId);
+      },
+    };
+    return { canvases, calls };
+  }
+  const noTeams = { teamMatch: async () => false };
+
+  it("resolves editorMatch for a non-owner MEMBER through isEffectiveEditor with the live org scope, and short-circuits the rung lookups", async () => {
+    const { canvases, calls } = repo(["other"]);
+    const ctx = await resolveAccessContext(
+      canvases,
+      noTeams,
+      canvas({ access: "specific_people" }),
+      other,
+      {
+        tenancyActive: true,
+      },
+    );
+    expect(ctx).toEqual({ editorMatch: true });
+    expect(calls).toEqual([
+      ["cv1", "other", { tenancyActive: true, viewerOrgIds: new Set([ORG_A]) }],
+    ]);
+  });
+
+  it("a non-editor member falls through to the rung lookup (specific_people → isAllowed)", async () => {
+    const { canvases } = repo([]);
+    const ctx = await resolveAccessContext(
+      canvases,
+      noTeams,
+      canvas({ access: "specific_people" }),
+      other,
+    );
+    expect(ctx).toEqual({ isAllowed: false });
+  });
+
+  it("never asks isEffectiveEditor for a guest, an anonymous visitor, or a non-active canvas", async () => {
+    const { canvases, calls } = repo(["owner", "other"]);
+    await resolveAccessContext(
+      canvases,
+      noTeams,
+      canvas({ access: "specific_people" }),
+      guest("cv1"),
+    );
+    await resolveAccessContext(canvases, noTeams, canvas({ access: "public_link" }), anon);
+    await resolveAccessContext(canvases, noTeams, canvas({ status: "disabled" }), other);
+    await resolveAccessContext(canvases, noTeams, null, other);
+    expect(calls).toEqual([]);
   });
 });
