@@ -9,23 +9,23 @@ import { CopyButton } from "../components/CopyButton.js";
 import { Field } from "../components/Field.js";
 import { IconLink } from "../components/IconButton.js";
 import { PasswordField } from "../components/PasswordField.js";
-import { PeopleEmailCombobox } from "../components/PeopleEmailCombobox.js";
+import { PeopleAccessList } from "../components/PeopleAccessList.js";
 import { SettingsNav } from "../components/SettingsNav.js";
 import { Row, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { type AccessRung, type AllowlistEntry, ApiError, api, type Team } from "../lib/api.js";
+import { type AccessRung, type AllowlistEntry, ApiError } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
-import { addPersonFeedback } from "../lib/invite-feedback.js";
-import { usePublishDraft, useUpdateSettings } from "../lib/mutations.js";
+import { usePublishDraft, useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
-import { useCanvas, useMe, usePeopleSearch, useTeams } from "../lib/queries.js";
+import { useCanvas, useMe, useTeams } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const BASE_SECTIONS = [
   { id: "share-link", label: "Share link" },
+  { id: "people", label: "People" },
   { id: "access", label: "Access" },
   { id: "locks", label: "Locks" },
   { id: "gallery", label: "Gallery" },
@@ -33,6 +33,7 @@ const BASE_SECTIONS = [
 
 const PEOPLE_SECTIONS = [
   { id: "share-link", label: "Share link" },
+  { id: "people", label: "People" },
   { id: "access", label: "Access" },
   { id: "locks", label: "Locks" },
   { id: "added-people-ai", label: "Added people" },
@@ -48,6 +49,9 @@ export default function Share() {
   // (`mine`). Only meaningful under active tenancy; for a Personal-only caller this is [].
   const { data: teams } = useTeams();
   const update = useUpdateSettings(id);
+  const transfer = useTransferCanvas(id);
+  // The people list (editor-roles plan): the Team rung reads its viewer-role team grants.
+  const [people, setPeople] = useState<AllowlistEntry[]>([]);
 
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
@@ -69,6 +73,27 @@ export default function Share() {
     if (!canvas) return;
     setDescription(canvas.description ?? "");
   }, [canvas?.id]);
+
+  // A pending Team pick completes itself once a viewer team is granted in the people list
+  // (the old picker's "share once ≥1 team is selected", KTD5) — the radio is already
+  // selected, so there is nothing further to click.
+  const pendingViewerTeamIds = people
+    .filter((e) => e.kind === "team" && e.role !== "editor" && e.teamId)
+    .map((e) => e.teamId as string);
+  const pendingTeamKey = pendingViewerTeamIds.join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire on the grant set only
+  useEffect(() => {
+    if (!pendingTeam || pendingViewerTeamIds.length === 0) return;
+    setPendingTeam(false);
+    void update
+      .mutateAsync({ access: "team", teamIds: pendingViewerTeamIds })
+      .then(({ warning }) => {
+        if (warning) toast(warning);
+      })
+      .catch((err) =>
+        toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error"),
+      );
+  }, [pendingTeam, pendingTeamKey]);
 
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;
@@ -152,6 +177,13 @@ export default function Share() {
   // the server re-checks via resolveTeamGrant, so an incompatible pick surfaces as a toast
   // rather than being silently hidden here.
   const shareableTeams = (teams ?? []).filter((t) => t.mine);
+  // Viewer-role team grants back the `team` rung (KTD4); editor teams are effective at
+  // every rung and never touched by rung changes.
+  const viewerTeamIds = people
+    .filter((e) => e.kind === "team" && e.role !== "editor" && e.teamId)
+    .map((e) => e.teamId as string);
+  // Owner unless the server says editor (legacy payloads carry no role; the server enforces).
+  const isOwner = canvas.role !== "editor";
 
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
@@ -179,6 +211,41 @@ export default function Share() {
         </Section>
 
         <Section
+          id="people"
+          title="People with access"
+          description="Named people and teams, each as a viewer or an editor. Editors manage the canvas with you."
+        >
+          <PeopleAccessList
+            canvasId={canvas.id}
+            role={canvas.role}
+            teams={shareableTeams}
+            orgs={me?.orgs ?? []}
+            onChanged={setPeople}
+            onTransfer={
+              isOwner
+                ? async (toUserId) => {
+                    try {
+                      const r = await transfer.mutateAsync(toUserId);
+                      toast(
+                        r.publicLinkReverted
+                          ? "Ownership transferred. The public link was turned off because the new owner's account can't publish publicly."
+                          : "Ownership transferred — you're now an editor of this canvas.",
+                      );
+                    } catch (err) {
+                      toast(
+                        err instanceof ApiError ? err.hint : "Couldn't transfer ownership",
+                        "error",
+                      );
+                      throw err;
+                    }
+                  }
+                : undefined
+            }
+            transferring={transfer.isPending}
+          />
+        </Section>
+
+        <Section
           id="access"
           title="Access"
           description="Pick the audience that can open this canvas."
@@ -203,32 +270,50 @@ export default function Share() {
             allowTeam={shareableTeams.length > 0 || (me?.orgs?.length ?? 0) > 0}
             onChange={(access) => {
               if (access === "team") {
-                // Don't write yet — reveal the picker; the save fires from there once a
-                // team is chosen (an empty team grant is a server 409).
-                setPendingTeam(true);
+                // The Team rung admits the VIEWER teams on the people list (the old picker
+                // folded into the list's add-team control, KTD5). With none granted yet
+                // there is nothing to save (an empty team grant is a server 409): reveal
+                // the hint instead.
+                if (viewerTeamIds.length === 0) {
+                  setPendingTeam(true);
+                  return;
+                }
+                setPendingTeam(false);
+                save({ access: "team", teamIds: viewerTeamIds });
                 return;
               }
               setPendingTeam(false);
               save({ access });
             }}
-            // The "who" for the two list-based rungs renders INLINE — nested directly under
-            // the selected rung — so the choice sits with the option, not in a far-off
-            // section. The picker/allowlist only mount when their rung is the active one.
+            // The "who" for the two list-based rungs is the People list above; the inline
+            // detail just says which rows the rung admits.
             details={{
-              specific_people: <Allowlist canvasId={canvas.id} />,
-              team: (
-                <TeamPicker
-                  teams={shareableTeams}
-                  orgs={me?.orgs ?? []}
-                  selected={canvas.access === "team" ? canvas.teamIds : []}
-                  saving={update.isPending}
-                  onShare={(teamIds) => {
-                    setPendingTeam(false);
-                    save({ access: "team", teamIds });
-                  }}
-                  onCancel={pendingTeam ? () => setPendingTeam(false) : undefined}
-                />
+              specific_people: (
+                <InlineNotice tone="neutral" className="py-2 text-xs">
+                  People and teams added above can open this canvas (editors always can).
+                </InlineNotice>
               ),
+              team:
+                viewerTeamIds.length === 0 ? (
+                  shareableTeams.length === 0 ? (
+                    <InlineNotice tone="neutral" className="py-2 text-xs">
+                      You're not in any team yet. Create or join one in{" "}
+                      <Link to="/teams" className="text-accent hover:underline">
+                        Teams
+                      </Link>{" "}
+                      to share a canvas with it.
+                    </InlineNotice>
+                  ) : (
+                    <InlineNotice tone="neutral" className="py-2 text-xs">
+                      Add a team as a viewer under People with access first — the Team rung admits
+                      the viewer teams listed there.
+                    </InlineNotice>
+                  )
+                ) : (
+                  <InlineNotice tone="neutral" className="py-2 text-xs">
+                    Members of the viewer teams listed above can open this canvas.
+                  </InlineNotice>
+                ),
             }}
           />
           {(canvas.access === "team" || canvas.access === "whole_org") && (
@@ -347,13 +432,20 @@ export default function Share() {
             title="AI for added people"
             description="Controls metered AI for people added to this canvas. This does not change your own AI budget."
           >
+            {!isOwner && (
+              <InlineNotice tone="neutral" className="py-2 text-xs">
+                Only the owner can change the AI opt-in for added people — it is billed to their
+                account.
+              </InlineNotice>
+            )}
             <Toggle
               label="Allow added people to use AI"
               description="Off by default. Added people can use KV, files, and realtime when those capabilities are enabled; AI is metered, so it is opt-in per canvas."
               checked={canvas.guestAiEnabled}
+              disabled={!isOwner}
               onChange={(guestAiEnabled) => save({ guestAiEnabled })}
             />
-            {canvas.guestAiEnabled && (
+            {isOwner && canvas.guestAiEnabled && (
               <Field
                 label="Added people AI spend cap (USD)"
                 type="number"
@@ -623,208 +715,5 @@ function AccessLadder({
         </InlineNotice>
       )}
     </fieldset>
-  );
-}
-
-/**
- * Team grant picker (plan 003) — the multi-select shown when the "Team" rung is
- * chosen. Offers only the teams the owner BELONGS to (`mine`); the server re-checks
- * membership at grant time (KTD4). The rung can't be saved with zero teams, so the
- * Share button is disabled until ≥1 is selected. `selected` seeds the checkboxes from
- * the canvas's current grants; `onCancel` (present only while the pick is pending)
- * backs out without writing.
- */
-/** The scope label for a team in the picker: a PERSONAL team (no org) vs a workspace/org
- *  team (named by its org). Makes the share target's reach legible — a personal team can hold
- *  people added by email; an org team is your colleagues. */
-function TeamScopeBadge({ team, orgs }: { team: Team; orgs: Array<{ id: string; name: string }> }) {
-  if (team.orgId === null) return <Badge tone="neutral">Personal</Badge>;
-  const orgName = orgs.find((o) => o.id === team.orgId)?.name;
-  return <Badge tone="accent">{orgName ?? "Workspace"}</Badge>;
-}
-
-function TeamPicker({
-  teams,
-  orgs,
-  selected,
-  saving,
-  onShare,
-  onCancel,
-}: {
-  teams: Team[];
-  orgs: Array<{ id: string; name: string }>;
-  selected: string[];
-  saving: boolean;
-  onShare: (teamIds: string[]) => void;
-  onCancel?: () => void;
-}) {
-  const [sel, setSel] = useState<Set<string>>(() => new Set(selected));
-  // Re-seed when the persisted grant set changes (e.g. after a save settles). Keyed on
-  // the membership string so a re-render doesn't clobber an in-progress edit.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed on the grant set only
-  useEffect(() => {
-    setSel(new Set(selected));
-  }, [selected.join(",")]);
-
-  if (teams.length === 0) {
-    return (
-      <InlineNotice tone="neutral" className="py-2 text-xs">
-        You're not in any team yet. Create or join one in{" "}
-        <Link to="/teams" className="text-accent hover:underline">
-          Teams
-        </Link>{" "}
-        to share a canvas with it.
-      </InlineNotice>
-    );
-  }
-
-  const toggle = (id: string) =>
-    setSel((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  // "Already applied" when the selection exactly equals the persisted grant set.
-  const same = sel.size === selected.length && selected.every((id) => sel.has(id));
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted">
-        Pick the teams that can open this canvas. Only teams you belong to are listed.
-      </p>
-      <ul className="space-y-1">
-        {teams.map((t) => (
-          <li key={t.id}>
-            <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-sm hover:bg-surface-hover">
-              <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} />
-              <span className="text-fg">{t.name}</span>
-              <TeamScopeBadge team={t} orgs={orgs} />
-            </label>
-          </li>
-        ))}
-      </ul>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={saving}
-          disabled={sel.size === 0 || same}
-          onClick={() => onShare([...sel])}
-        >
-          {selected.length > 0 ? "Update teams" : "Share with teams"}
-        </Button>
-        {onCancel && (
-          <Button size="sm" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Allowlist({ canvasId }: { canvasId: string }) {
-  const toast = useToast();
-  const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
-  const [email, setEmail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const search = email.trim();
-  const searchEnabled = search.length >= 2;
-  const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
-    { context: "canvas", canvasId, q: search },
-    searchEnabled,
-  );
-
-  const reload = () => {
-    api
-      .listAllowlist(canvasId)
-      .then(setEntries)
-      .catch((err) => {
-        // Surface the failure instead of silently showing an empty list — an
-        // inaccessible allowlist must be distinguishable from a real-empty one.
-        toast(err instanceof ApiError ? err.hint : "Couldn't load the access list", "error");
-        setEntries([]);
-      });
-  };
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvasId change only
-  useEffect(() => {
-    reload();
-  }, [canvasId]);
-
-  async function add() {
-    const value = email.trim();
-    if (!value) return;
-    setBusy(true);
-    try {
-      const r = await api.addAllowlistMember(canvasId, value);
-      setEmail("");
-      reload();
-      const feedback = addPersonFeedback("canvas", r.status, r.emailDelivery);
-      toast(feedback.message, feedback.tone);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't add that person", "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(entryId: string) {
-    try {
-      await api.removeAllowlistEntry(canvasId, entryId);
-      reload();
-    } catch (err) {
-      toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted">
-        Give someone access to just this canvas. Existing users are added now; new emails stay
-        pending until they sign in through this instance.
-      </p>
-      <div className="flex items-end gap-2">
-        <PeopleEmailCombobox
-          label="Person's email"
-          placeholder="colleague@example.com"
-          value={email}
-          onChange={setEmail}
-          onSubmit={() => void add()}
-          suggestions={suggestions}
-          searchEnabled={searchEnabled}
-          searching={searchingPeople}
-        />
-        <Button size="sm" variant="secondary" loading={busy} disabled={!email.trim()} onClick={add}>
-          Add person
-        </Button>
-      </div>
-      {entries === null ? (
-        <Skeleton className="h-8" />
-      ) : entries.length === 0 ? (
-        <p className="text-xs text-muted">No one added yet. Only you can open this.</p>
-      ) : (
-        <ul className="divide-y divide-border">
-          {entries.map((e) => (
-            <li key={e.id} className="flex items-center justify-between py-2 text-sm">
-              <span>
-                <span className="text-fg">{e.email ?? "(unknown)"}</span>
-                {e.kind === "pending" && (
-                  <span className="ml-2 text-xs text-muted">pending sign-in</span>
-                )}
-                {e.kind === "guest" && <span className="ml-2 text-xs text-muted">legacy</span>}
-              </span>
-              <span className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => remove(e.id)}>
-                  Remove
-                </Button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }

@@ -15,6 +15,19 @@ import { keys } from "./queries.js";
  * field too, but the Settings UI awaits it (KTD-5) — optimism here is safe because
  * we never echo the password, only flip `hasPassword`.
  */
+/** Transfer ownership to an editor (editor-roles plan, U7). The response carries the
+ *  canvas as the caller now sees it (`role: "editor"`); lists refetch for both parties. */
+export function useTransferCanvas(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (toUserId: string) => api.transferCanvas(id, toUserId),
+    onSuccess: (r) => {
+      qc.setQueryData(keys.canvas(id), r.canvas);
+      qc.invalidateQueries({ queryKey: keys.canvases });
+    },
+  });
+}
+
 export function useUpdateSettings(id: string) {
   const qc = useQueryClient();
   return useMutation({

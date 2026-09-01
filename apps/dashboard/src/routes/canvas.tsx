@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { AccessBadge, GalleryBadge, PublicationBadge, ScopeBadge } from "../components/Badge.js";
+import {
+  AccessBadge,
+  Badge,
+  GalleryBadge,
+  PublicationBadge,
+  ScopeBadge,
+} from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { CanvasDetailChrome } from "../components/CanvasDetail.js";
 import { DeployButton } from "../components/DeployButton.js";
@@ -162,6 +168,12 @@ export default function CanvasLayout() {
           canvas ? (
             <span className="flex flex-wrap items-center gap-1.5">
               <PublicationBadge state={canvas.publicationState} />
+              {/* Editing someone else's canvas (editor-roles plan, R15): say whose it is. */}
+              {canvas.role === "editor" && (
+                <Badge tone="accent">
+                  Editor · owned by {canvas.owner?.name || canvas.owner?.email || "someone else"}
+                </Badge>
+              )}
               <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
               <AccessBadge access={canvas.access} />
               <GalleryBadge canvas={canvas} />

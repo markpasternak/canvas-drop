@@ -299,13 +299,22 @@ export interface CanvasSettings {
   tags?: string[];
 }
 
-/** One canvas access-list entry. Members carry identity; pending rows are auth-delegated
- *  grants that materialize on first verified sign-in. */
+/**
+ * One row of a canvas's people list (editor-roles plan, KTD5): the owner (pinned first),
+ * members, legacy guest rows, pending auth-delegated invitees, and team grants — each
+ * with a role and a stable id (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`,
+ * `team:<teamId>`) the role / remove calls address.
+ */
+export type AccessRole = "viewer" | "editor";
 export interface AllowlistEntry {
   id: string;
-  kind: "member" | "guest" | "pending";
+  kind: "owner" | "member" | "guest" | "pending" | "team";
+  /** `owner` on the owner row; guests are always `viewer`. Absent on legacy payloads. */
+  role?: "owner" | AccessRole;
   email: string | null;
   name: string | null;
+  userId?: string | null;
+  teamId?: string | null;
   createdAt: number;
 }
 
@@ -359,7 +368,13 @@ export type PersonSearchParams =
   | { context: "team"; teamId: string; q: string };
 
 /** Outcome of Add person across canvas/team surfaces. */
-export type AddMemberStatus = "granted" | "already_added" | "pending" | "already_pending";
+export type AddMemberStatus =
+  | "granted"
+  | "already_added"
+  | "pending"
+  | "already_pending"
+  /** An existing member's role was changed in place by an add-with-role. */
+  | "role_changed";
 
 export type EmailDelivery =
   | { status: "sent" }
@@ -1138,8 +1153,32 @@ export const api = {
   // Access list (D4 `specific_people`, U4).
   listAllowlist: (id: string) =>
     request<{ entries: AllowlistEntry[] }>(`/api/canvases/${id}/allowlist`).then((r) => r.entries),
-  addAllowlistMember: (id: string, email: string) =>
-    request<AddMemberResult>(`/api/canvases/${id}/allowlist`, jsonBody({ email })),
+  addAllowlistMember: (id: string, email: string, role?: AccessRole) =>
+    request<AddMemberResult>(
+      `/api/canvases/${id}/allowlist`,
+      jsonBody(role ? { email, role } : { email }),
+    ),
+  /** Grant a team with a role (editor-roles plan): a viewer team keeps the Team rung's
+   *  semantics; an editor team makes every live member an editor at any rung. */
+  addAllowlistTeam: (id: string, teamId: string, role: AccessRole) =>
+    request<{ ok: true; status: string; role: AccessRole }>(
+      `/api/canvases/${id}/allowlist`,
+      jsonBody({ teamId, role }),
+    ),
+  /** Change an entry's role (people, pending invitees, teams). The owner row refuses. */
+  setAllowlistRole: (id: string, entryId: string, role: AccessRole) =>
+    request<{ ok: true }>(`/api/canvases/${id}/allowlist/${entryId}`, {
+      ...jsonBody({ role }),
+      method: "PATCH",
+    }),
+  /** Owner-only: transfer ownership to an existing editor (instant; you become an editor). */
+  transferCanvas: (id: string, toUserId: string) =>
+    request<{
+      ok: true;
+      canvas: Canvas;
+      previousOwnerEditor: boolean;
+      publicLinkReverted: boolean;
+    }>(`/api/canvases/${id}/transfer`, jsonBody({ toUserId })),
   /** Individual one-canvas access email (plan 003 U8). `granted` = an existing user got
    *  access now; `pending` = a brand-new person gets access on their first sign-in. */
   inviteToCanvas: (id: string, email: string) =>
