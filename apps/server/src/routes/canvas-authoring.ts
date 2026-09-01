@@ -170,6 +170,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       title: cv.title,
       tags: (cv.tags as string[] | null) ?? [],
       access: cv.access,
+      hasPassword: cv.passwordHash !== null,
       status: shareStatus(cv.access, cv.sharedExpiresAt ?? null, cv.revokedAt ?? null, now),
       createdAt: cv.createdAt,
       updatedAt: cv.updatedAt,
@@ -412,7 +413,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       action: "canvas_authored",
       actorId: viewer.id,
       targetId: canvasB.id,
-      meta: { sourceCanvasId: source.id },
+      meta: { sourceCanvasId: source.id, requestedAccess },
     });
 
     try {
@@ -425,11 +426,12 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     // Configure. Password FIRST (while still private) then flip access LAST, so a mid-op
     // failure can never leave the canvas public without its intended password.
+    let finalCv: Canvas;
     try {
       if (requestedAccess === "password" && meta.password) {
         await deps.canvases.setPassword(canvasB.id, await hashPassword(meta.password));
       }
-      await deps.canvases.updateSettings(canvasB.id, {
+      finalCv = await deps.canvases.updateSettings(canvasB.id, {
         access: rung,
         tags: meta.tags,
         sharedExpiresAt: meta.expiresAt,
@@ -440,7 +442,21 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "configure failed" }, 502);
     }
 
-    const finalCv = (await deps.canvases.findById(canvasB.id)) ?? canvasB;
+    if (finalCv.access !== rung) {
+      c.get("log")?.error(
+        { id: canvasB.id, requestedAccess: rung, persistedAccess: finalCv.access },
+        "authoring: requested access was not persisted",
+      );
+      return c.json(
+        {
+          code: "PUBLISH_FAILED",
+          id: canvasB.id,
+          message: "requested share settings were not persisted",
+        },
+        502,
+      );
+    }
+
     return c.json(toAuthoredCanvas(finalCv));
   });
 
@@ -544,6 +560,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     }
 
     // Apply settings. Password FIRST (mirrors publish's ordering safety).
+    let finalCv: Canvas;
     try {
       if (meta.password !== undefined) {
         await deps.canvases.setPassword(
@@ -551,7 +568,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
           meta.password === null ? null : await hashPassword(meta.password),
         );
       }
-      await deps.canvases.updateSettings(cv.id, {
+      finalCv = await deps.canvases.updateSettings(cv.id, {
         title: meta.title,
         access: rung,
         tags: meta.tags,
@@ -563,12 +580,27 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "configure failed" }, 502);
     }
 
+    if (rung !== undefined && finalCv.access !== rung) {
+      c.get("log")?.error(
+        { id: cv.id, requestedAccess: rung, persistedAccess: finalCv.access },
+        "authoring: requested access was not persisted",
+      );
+      return c.json(
+        {
+          code: "PUBLISH_FAILED",
+          id: cv.id,
+          message: "requested share settings were not persisted",
+        },
+        502,
+      );
+    }
+
     deps.audit.recordAudit({
       action: "canvas_authored_update",
       actorId: viewer.id,
       targetId: cv.id,
+      meta: { requestedAccess: requestedAccess ?? null, persistedAccess: finalCv.access },
     });
-    const finalCv = (await deps.canvases.findById(cv.id)) ?? cv;
     return c.json(toAuthoredCanvas(finalCv));
   });
 

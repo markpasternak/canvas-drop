@@ -398,7 +398,9 @@ export interface AuthoredCanvas {
   url: string;
   title: string;
   tags: string[];
-  access: string;
+  access: ShareAccess;
+  /** Whether the share has a password gate in addition to its access rung. */
+  hasPassword: boolean;
   status: ShareStatus;
   createdAt: number;
   updatedAt: number;
