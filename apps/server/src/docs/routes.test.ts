@@ -110,6 +110,12 @@ describe("docs routes", () => {
     const body = await res.text();
     expect(body).toContain("canvasdrop");
     expect(body).toContain("/v1/canvases/");
+    // The MCP surface is part of the agent-facing text (editor-roles plan, KTD13): the
+    // people-list role tools and the role vocabulary are discoverable from llms.txt.
+    expect(body).toContain("set_access_role");
+    expect(body).toContain("transfer_canvas");
+    expect(body).toMatch(/viewer or an editor/);
+    expect(body).toContain("OWNER_ONLY");
   });
 
   it("serves the self-hosted mermaid bundle as long-cached javascript", async () => {

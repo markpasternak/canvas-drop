@@ -1006,7 +1006,11 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const gate = await requireMutable("archive_canvas", id);
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
-      if (!(await deps.canvases.archive(cv.id))) return fail("canvas not found");
+      // The guarded transition only fails for a non-active row: the caller manages the
+      // canvas (the gate passed), so this is a state conflict, never a not-found.
+      if (!(await deps.canvases.archive(cv.id))) {
+        return fail("NOT_ACTIVE: only an active canvas can be archived");
+      }
       deps.audit.recordAudit({ action: "canvas_archive", actorId: caller.userId, targetId: cv.id });
       if (deps.hub)
         await deps.hub

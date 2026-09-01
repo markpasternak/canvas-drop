@@ -41,18 +41,22 @@ client registration) and then get identity-scoped tools across every canvas you 
 (`update_canvas` settings/sharing/`previewMode`, `set_canvas_preview` custom cover,
 `set_capabilities`, `set_canvas_slug`,
 `regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
-`clone_canvas`, `get_canvas_usage`, the access tools `list_access`/`grant_access`/
-`invite_to_canvas`/`revoke_access`, the team tools `list_teams`/
+`clone_canvas`, `get_canvas_usage`, the people-list tools `list_access`/`grant_access`/
+`invite_to_canvas`/`set_access_role`/`revoke_access` (every entry is a `viewer` or an
+`editor`; editors manage the canvas like the owner except delete, transfer, and the
+guest-AI opt-in, which refuse `OWNER_ONLY`), `transfer_canvas` (owner → an existing
+editor), the team tools `list_teams`/
 `create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
 `add_team_member`/`remove_team_member`/`cancel_team_invite`/`list_team_members`/
 `list_shared_canvases` (plus `update_canvas` with `access: "team"` + `teamIds` to share
 a canvas with a team), and the editor draft loop `get_draft`/
 `read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
 `publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
-anything an owner can do in the UI, an agent can do here. The full table is in the
-[MCP server](/docs/agents/mcp) reference. Owner-scoped management tools only touch
-canvases you own; `list_shared_canvases` returns non-owned canvases already accessible
-to you. Typical
+anything an owner *or editor* can do in the UI, an agent can do here. The full table is
+in the [MCP server](/docs/agents/mcp) reference. Management tools touch the canvases
+you own or edit (`list_canvases` returns both, each with `role`); `list_shared_canvases`
+returns canvases you can open but don't manage. Draft writes take an `expectedHash`
+per file so two editors never silently overwrite each other (`DRAFT_CONFLICT`). Typical
 flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `query`
 (matches title + description + tags + slug, case/accent/whitespace-insensitive, multi-word
 AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)

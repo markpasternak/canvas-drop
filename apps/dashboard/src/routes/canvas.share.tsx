@@ -1,7 +1,6 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useEffect, useState } from "react";
-import { Badge } from "../components/Badge.js";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";

@@ -75,3 +75,20 @@ export type CanvasToolName = {
 export function minRoleOf(tool: CanvasToolName): MinRole {
   return TOOL_MIN_ROLE[tool];
 }
+
+/**
+ * The inventory check (KTD10): every registered tool must have a table entry and every
+ * table entry must be registered. Returned as two diffs so a failing test says which
+ * side drifted. Pure, so a negative case can be asserted without a server.
+ */
+export function checkToolInventory(registered: readonly string[]): {
+  missingFromTable: string[];
+  missingFromServer: string[];
+} {
+  const table = new Set<string>(Object.keys(TOOL_MIN_ROLE));
+  const seen = new Set(registered);
+  return {
+    missingFromTable: [...seen].filter((n) => !table.has(n)).sort(),
+    missingFromServer: [...table].filter((n) => !seen.has(n)).sort(),
+  };
+}

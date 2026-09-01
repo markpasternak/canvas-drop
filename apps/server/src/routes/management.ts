@@ -1216,7 +1216,11 @@ export function managementRoutes(deps: ManagementDeps) {
   app.post("/:id/archive", sameOrigin, async (c) => {
     const cv = await mutableCanvas(c);
     if (cv instanceof Response) return cv;
-    if (!(await deps.canvases.archive(cv.id))) return c.json({ error: "not_found" }, 404);
+    // The guarded transition only fails for a non-active row: the caller manages the
+    // canvas (the gate passed), so this is a state conflict, never a not-found.
+    if (!(await deps.canvases.archive(cv.id))) {
+      return c.json({ code: "NOT_ACTIVE", message: "Only an active canvas can be archived." }, 409);
+    }
     deps.audit.recordAudit({
       action: "canvas_archive",
       actorId: c.get("user").id,

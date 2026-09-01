@@ -32,6 +32,7 @@ import { memStorage } from "../storage/mem.js";
 import { teamsService } from "../teams/service.js";
 import { uploadService } from "../upload/service.js";
 import { buildMcpServer } from "./server.js";
+import { type CanvasToolName, checkToolInventory, TOOL_MIN_ROLE } from "./tool-roles.js";
 
 const silent = pino({ level: "silent" });
 const config = loadConfig({});
@@ -2669,3 +2670,243 @@ describe.each(DIALECTS)("MCP — draft preconditions (editor-roles plan U10) [%s
     ).toBe(false);
   });
 });
+
+// --- Table-driven parity (editor-roles plan U11, KTD10) -----------------------------------
+
+describe("MCP — tool inventory equals the role table (KTD10)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("every registered tool has a table entry and every table entry is registered", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId: owner });
+    const registered = (await mcp.listTools()).tools.map((t) => t.name);
+    expect(checkToolInventory(registered)).toEqual({ missingFromTable: [], missingFromServer: [] });
+    expect(registered.sort()).toEqual(Object.keys(TOOL_MIN_ROLE).sort());
+  });
+
+  it("a tool registered without a table entry (or an entry with no tool) fails the check", () => {
+    const keys = Object.keys(TOOL_MIN_ROLE);
+    expect(checkToolInventory([...keys, "rogue_tool"]).missingFromTable).toEqual(["rogue_tool"]);
+    expect(checkToolInventory(keys.filter((k) => k !== "delete_canvas")).missingFromServer).toEqual(
+      ["delete_canvas"],
+    );
+  });
+});
+
+describe.each(DIALECTS)(
+  "MCP — role matrix over every canvas-scoped tool (KTD10) [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    type Ctx = { id: string; viewerId: string };
+    /** Minimal valid arguments per canvas-scoped tool. Domain refusals (a missing version, a
+     *  bad upload handle, an unknown entry id, NOT_ELIGIBLE…) count as ADMITTED: the matrix
+     *  only distinguishes "the gate let the role through" from the two role refusals. */
+    const ARGS: Record<CanvasToolName, (c: Ctx) => Record<string, unknown>> = {
+      get_canvas: ({ id }) => ({ id }),
+      update_canvas: ({ id }) => ({ id, title: "matrix" }),
+      set_capabilities: ({ id }) => ({ id, kv: true }),
+      set_canvas_slug: ({ id }) => ({ id }),
+      set_canvas_preview: ({ id }) => ({ id }),
+      regenerate_deploy_key: ({ id }) => ({ id }),
+      archive_canvas: ({ id }) => ({ id }),
+      unarchive_canvas: ({ id }) => ({ id }),
+      unpublish_canvas: ({ id }) => ({ id }),
+      get_canvas_usage: ({ id }) => ({ id }),
+      list_versions: ({ id }) => ({ id }),
+      delete_version: ({ id }) => ({ id, version: 99 }),
+      rollback_canvas: ({ id }) => ({ id, version: 99 }),
+      get_canvas_file: ({ id }) => ({ id }),
+      deploy_canvas: ({ id }) => ({ id, zipBase64: zip({ "index.html": "<h1>m</h1>" }) }),
+      begin_deploy: ({ id }) => ({
+        id,
+        manifest: [{ path: "index.html", hash: sha("m"), size: 1 }],
+      }),
+      add_files: ({ id }) => ({
+        id,
+        uploadId: "nope",
+        files: [{ path: "index.html", content: "m" }],
+      }),
+      finalize_deploy: ({ id }) => ({ id, uploadId: "nope" }),
+      search_people: ({ id }) => ({ context: "canvas", canvasId: id, q: "zz" }),
+      list_access: ({ id }) => ({ id }),
+      grant_access: ({ id }) => ({ id, email: "matrix-new@example.com" }),
+      invite_to_canvas: ({ id }) => ({ id, email: "matrix-new2@example.com" }),
+      revoke_access: ({ id }) => ({ id, entryId: "member:nope" }),
+      set_access_role: ({ id }) => ({ id, entryId: "member:nope", role: "viewer" }),
+      get_draft: ({ id }) => ({ id }),
+      read_draft_file: ({ id }) => ({ id, path: "index.html" }),
+      write_draft_file: ({ id }) => ({ id, path: "m.txt", content: "m" }),
+      delete_draft_file: ({ id }) => ({ id, path: "zz.txt" }),
+      rename_draft_file: ({ id }) => ({ id, from: "zz.txt", to: "yy.txt" }),
+      publish_draft: ({ id }) => ({ id }),
+      restore_draft: ({ id }) => ({ id, version: 99 }),
+      delete_canvas: ({ id }) => ({ id }),
+      transfer_canvas: ({ id, viewerId }) => ({ id, toUserId: viewerId }),
+    };
+    type Outcome = "not_found" | "owner_only" | "admitted";
+    // biome-ignore lint/suspicious/noExplicitAny: tool results are JSON text payloads
+    const classify = (r: any): Outcome => {
+      if (!isError(r)) return "admitted";
+      const t = text(r);
+      if (t === "canvas not found" || t === "not found") return "not_found";
+      if (/^OWNER_ONLY: /.test(t)) return "owner_only";
+      return "admitted";
+    };
+
+    it("owner / editor / viewer / no-role × every canvas-scoped tool → exactly the table's outcome", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const viewer = await seedUser(client, "viewer@example.com");
+      const nobody = await seedUser(client, "nobody@example.com");
+      const repo = canvasesRepository(client);
+      const storage = memStorage();
+      const clients = {
+        owner: await connect(client, { userId: owner }, false, config, storage),
+        editor: await connect(client, { userId: editor }, false, config, storage),
+        viewer: await connect(client, { userId: viewer }, false, config, storage),
+        nobody: await connect(client, { userId: nobody }, false, config, storage),
+      };
+      const tools = (Object.keys(ARGS) as CanvasToolName[]).sort();
+      const failures: string[] = [];
+      let n = 0;
+      for (const tool of tools) {
+        // A fresh canvas per tool so one tool's mutation never shapes another's outcome.
+        const cv = await repo.create({
+          ownerId: owner,
+          slug: `matrix-${n++}`,
+          apiKeyHash: `k${n}`,
+        });
+        await repo.addAllowlistEntry({
+          canvasId: cv.id,
+          principalKind: "member",
+          userId: editor,
+          role: "editor",
+        });
+        await repo.addAllowlistEntry({ canvasId: cv.id, principalKind: "member", userId: viewer });
+        const ctx: Ctx = { id: cv.id, viewerId: viewer };
+        const min = TOOL_MIN_ROLE[tool];
+        const expected: Record<keyof typeof clients, Outcome> = {
+          viewer: "not_found",
+          nobody: "not_found",
+          editor: min === "owner" ? "owner_only" : "admitted",
+          owner: "admitted",
+        };
+        // Rejection paths first, then the editor, then the owner (whose mutation may be last).
+        for (const role of ["viewer", "nobody", "editor", "owner"] as const) {
+          const res = await clients[role].callTool({ name: tool, arguments: ARGS[tool](ctx) });
+          const got = classify(res);
+          if (got !== expected[role])
+            failures.push(
+              `${tool} as ${role}: expected ${expected[role]}, got ${got} (${text(res).slice(0, 80)})`,
+            );
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+  },
+);
+
+describe.each(DIALECTS)(
+  "MCP — the role is resolved per request (AE12) and AE11 end to end [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    it("AE12: a demoted editor's NEXT call on the same connection reads not found", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner, slug: "demote", apiKeyHash: "k" });
+      const row = await repo.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const mcp = await connect(client, { userId: editor });
+      expect(isError(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+        false,
+      );
+      await repo.setAllowlistRole(cv.id, row.id, "viewer");
+      expect(text(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }))).toBe(
+        "canvas not found",
+      );
+      await repo.removeAllowlistEntry(cv.id, row.id);
+      expect(
+        text(
+          await mcp.callTool({
+            name: "write_draft_file",
+            arguments: { id: cv.id, path: "a.txt", content: "x" },
+          }),
+        ),
+      ).toBe("canvas not found");
+    });
+
+    it("AE11: as an editor — list shows role editor → write → publish → versions name the editor → delete/transfer refuse OWNER_ONLY → Shared excludes it", async () => {
+      client = await makeTestDb(dialect);
+      const owner = await seedUser(client, "owner@example.com");
+      const editor = await seedUser(client, "editor@example.com");
+      const repo = canvasesRepository(client);
+      const cv = await repo.create({ ownerId: owner, slug: "ae11", apiKeyHash: "k" });
+      await repo.updateSettings(cv.id, { title: "Roadmap" });
+      await repo.addAllowlistEntry({
+        canvasId: cv.id,
+        principalKind: "member",
+        userId: editor,
+        role: "editor",
+      });
+      const storage = memStorage();
+      const mcp = await connect(client, { userId: editor }, false, config, storage);
+
+      const listed = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
+      expect(listed.canvases.find((c: { id: string }) => c.id === cv.id)).toMatchObject({
+        role: "editor",
+        owner: { email: "owner@example.com" },
+      });
+      expect(
+        isError(
+          await mcp.callTool({
+            name: "write_draft_file",
+            arguments: { id: cv.id, path: "index.html", content: "<h1>by editor</h1>" },
+          }),
+        ),
+      ).toBe(false);
+      const published = payload(
+        await mcp.callTool({ name: "publish_draft", arguments: { id: cv.id } }),
+      );
+      expect(published.version).toBe(1);
+      const versions = payload(
+        await mcp.callTool({ name: "list_versions", arguments: { id: cv.id } }),
+      );
+      expect(versions.versions[0]).toMatchObject({
+        createdBy: editor,
+        createdByName: "editor@example.com",
+      });
+      expect(text(await mcp.callTool({ name: "delete_canvas", arguments: { id: cv.id } }))).toMatch(
+        /^OWNER_ONLY: /,
+      );
+      expect(
+        text(
+          await mcp.callTool({
+            name: "transfer_canvas",
+            arguments: { id: cv.id, toUserId: owner },
+          }),
+        ),
+      ).toMatch(/^OWNER_ONLY: /);
+      const shared = payload(await mcp.callTool({ name: "list_shared_canvases", arguments: {} }));
+      expect((shared.canvases ?? []).map((c: { id: string }) => c.id)).not.toContain(cv.id);
+    });
+  },
+);
