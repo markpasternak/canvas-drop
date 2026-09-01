@@ -287,7 +287,7 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     expect(authored).toMatchObject({
       actorId: owner.id,
       targetId: body.id,
-      meta: { sourceCanvasId: cv.id },
+      meta: { sourceCanvasId: cv.id, requestedAccess: "public_link" },
     });
   });
 
@@ -342,7 +342,10 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
       publishBody({ title: "B", access: "password", password: "hunter2" }),
     );
     expect(res.status).toBe(200);
-    const b = await canvases.findById(((await res.json()) as { id: string }).id);
+    const body = (await res.json()) as { id: string; access: string; hasPassword: boolean };
+    expect(body.access).toBe("public_link");
+    expect(body.hasPassword).toBe(true);
+    const b = await canvases.findById(body.id);
     expect(b?.access).toBe("public_link");
     expect(b?.passwordHash).toBeTruthy();
   });
@@ -474,6 +477,7 @@ type AuthoredCanvas = {
   version: string | null;
   tags: string[];
   access: string;
+  hasPassword: boolean;
   metadata: Record<string, unknown>;
   sourceApp: string | null;
   expiresAt: number | null;
@@ -488,7 +492,7 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
   it("update replaces the bundle IN PLACE — same URL, new version (AE1)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
-    const { app } = buildApi(client, asMember(owner.id));
+    const { app, events } = buildApi(client, asMember(owner.id));
     const pub = (await (
       await publish(app, publishBody({ title: "S", access: "private" }))
     ).json()) as AuthoredCanvas;
@@ -504,6 +508,10 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(updated.url).toBe(pub.url); // URL never changes
     expect(updated.version).toBeTruthy();
     expect(updated.version).not.toBe(pub.version); // a new immutable version was deployed
+    expect(events.find((e) => e.action === "canvas_authored_update")).toMatchObject({
+      targetId: pub.id,
+      meta: { requestedAccess: null, persistedAccess: "private" },
+    });
   });
 
   it("update does NOT consume the authoring quota (AE1 / KTD2)", async () => {
@@ -612,6 +620,32 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const res = await putUpdate(revokedApp, pub.id, formData({ password: null }));
     expect(res.status).toBe(403);
     expect(((await res.json()) as { code: string }).code).toBe("PUBLIC_NOT_ALLOWED");
+  });
+
+  it("update keeps an existing password when no replacement is supplied", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "password", password: "hunter2" }))
+    ).json()) as AuthoredCanvas;
+    const originalHash = (await canvases.findById(published.id))?.passwordHash;
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({
+        title: "Updated",
+        access: "password",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as AuthoredCanvas).toMatchObject({
+      access: "public_link",
+      hasPassword: true,
+    });
+    expect((await canvases.findById(published.id))?.passwordHash).toBe(originalHash);
   });
 
   it("update on a revoked share is rejected (SHARE_REVOKED)", async () => {

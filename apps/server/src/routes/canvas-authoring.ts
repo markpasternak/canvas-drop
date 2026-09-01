@@ -142,6 +142,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       title: cv.title,
       tags: (cv.tags as string[] | null) ?? [],
       access: cv.access,
+      hasPassword: cv.passwordHash !== null,
       status: shareStatus(cv.access, cv.sharedExpiresAt ?? null, cv.revokedAt ?? null, now),
       createdAt: cv.createdAt,
       updatedAt: cv.updatedAt,
@@ -370,7 +371,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       action: "canvas_authored",
       actorId: viewer.id,
       targetId: canvasB.id,
-      meta: { sourceCanvasId: source.id },
+      meta: { sourceCanvasId: source.id, requestedAccess },
     });
 
     try {
@@ -549,6 +550,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       action: "canvas_authored_update",
       actorId: viewer.id,
       targetId: cv.id,
+      meta: { requestedAccess: requestedAccess ?? null, persistedAccess: finalCv.access },
     });
     return c.json(toAuthoredCanvas(finalCv));
   });
