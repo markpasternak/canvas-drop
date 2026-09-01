@@ -60,14 +60,16 @@ async function main() {
   const sofia = await person(PEOPLE.sofia);
   const noah = await person(PEOPLE.noah);
 
-  const byTitle = async (title: string) => {
-    const rows = (await drizzle.select().from(t).where(eq(t.title, title)).limit(1)) as Array<{
+  // Look the demo apps up by their `<kebab-title>-demo` slug (seed-demo-apps): the volume
+  // seed reuses some of the same titles, so a title lookup could hit a zero-file canvas.
+  const bySlug = async (slug: string) => {
+    const rows = (await drizzle.select().from(t).where(eq(t.slug, slug)).limit(1)) as Array<{
       id: string;
       ownerId: string;
     }>;
     const row = rows[0];
     if (!row) {
-      process.stderr.write(`! no canvas titled "${title}" — run pnpm seed:demo-apps first\n`);
+      process.stderr.write(`! no canvas with slug "${slug}" — run pnpm seed:demo-apps first\n`);
       return null;
     }
     return row;
@@ -87,7 +89,7 @@ async function main() {
   };
 
   // ── Pricing Calculator: the full people-list story ──
-  const pricing = await byTitle("Pricing Calculator");
+  const pricing = await bySlug("pricing-calculator-demo");
   if (pricing) {
     await grant(pricing.id, priya.id, "editor");
     await grant(pricing.id, liam.id, "viewer");
@@ -113,7 +115,7 @@ async function main() {
   }
 
   // ── Sprint Board: owned by Dana, the dev admin stays on as an editor ──
-  const sprint = await byTitle("Sprint Board");
+  const sprint = await bySlug("sprint-board-demo");
   if (sprint) {
     if (sprint.ownerId === admin.id) {
       const r = await canvases.transferOwner({
@@ -135,7 +137,7 @@ async function main() {
   }
 
   // ── Roadmap Timeline: one more editor ──
-  const roadmap = await byTitle("Roadmap Timeline");
+  const roadmap = await bySlug("roadmap-timeline-demo");
   if (roadmap) {
     await grant(roadmap.id, noah.id, "editor");
     process.stdout.write("  ✓ Roadmap Timeline: Noah (editor)\n");
