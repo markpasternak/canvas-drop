@@ -129,8 +129,25 @@ export function visibilityLabel(canvas: CanvasListItem): string {
 
 /** Quiet, dot-separated identity line — who can see it and when it last changed.
  *  Shared by the list row and the grid card so the two views never drift. */
+/**
+ * The owner marker for a canvas the viewer EDITS but does not own (editor-roles plan,
+ * R15): "owned by <name> · editor", falling back to the owner's email, then a neutral
+ * label. Null for the viewer's own canvases so their rows read exactly as before.
+ */
+export function ownerMarker(canvas: Pick<CanvasListItem, "role" | "owner">): string | null {
+  if (canvas.role !== "editor") return null;
+  const who = canvas.owner?.name?.trim() || canvas.owner?.email || "someone else";
+  return `owned by ${who} · editor`;
+}
+
 function metaLine(canvas: CanvasListItem): string {
-  return [visibility(canvas).primary, `Edited ${relativeTime(lastActivity(canvas))}`].join(" · ");
+  return [
+    ownerMarker(canvas),
+    visibility(canvas).primary,
+    `Edited ${relativeTime(lastActivity(canvas))}`,
+  ]
+    .filter((part): part is string => !!part)
+    .join(" · ");
 }
 
 /** The deployed footprint, e.g. "12 kB · 4 files", or null when never deployed. */

@@ -2538,3 +2538,64 @@ describe.each(DIALECTS)(
     });
   },
 );
+
+describe.each(DIALECTS)("MCP — owned-or-edited list (editor-roles plan U9) [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("list_canvases returns edited canvases with role + owner, narrows by role, and agrees with the repository list; get_canvas echoes ownerOnlyActs", async () => {
+    client = await makeTestDb(dialect);
+    const owner = await seedUser(client, "owner@example.com");
+    const editor = await seedUser(client, "editor@example.com");
+    const repo = canvasesRepository(client);
+    const own = await repo.create({ ownerId: editor, slug: "own", apiKeyHash: "k0" });
+    const shared = await repo.create({ ownerId: owner, slug: "shared", apiKeyHash: "k1" });
+    await repo.addAllowlistEntry({
+      canvasId: shared.id,
+      principalKind: "member",
+      userId: editor,
+      role: "editor",
+    });
+    const mcp = await connect(client, { userId: editor });
+    type Row = { id: string; role: string; owner: { email: string } | null; ownerId: string };
+    const all = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
+    expect(all.total).toBe(2);
+    expect(all.canvases.find((c: Row) => c.id === shared.id)).toMatchObject({
+      role: "editor",
+      ownerId: owner,
+      owner: { email: "owner@example.com" },
+    });
+    expect(all.canvases.find((c: Row) => c.id === own.id)).toMatchObject({ role: "owner" });
+    const edited = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { role: "edited" } }),
+    );
+    expect(edited.canvases.map((c: Row) => c.id)).toEqual([shared.id]);
+    const owned = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { role: "owned" } }),
+    );
+    expect(owned.canvases.map((c: Row) => c.id)).toEqual([own.id]);
+    // Parity: the same ids the management list query returns for the same actor.
+    const viaRepo = await repo.listForActorFiltered({
+      actorId: editor,
+      scope: { tenancyActive: false, viewerOrgIds: new Set() },
+      limit: 50,
+      offset: 0,
+    });
+    expect(all.canvases.map((c: Row) => c.id).sort()).toEqual(
+      viaRepo.items.map((cv) => cv.id).sort(),
+    );
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: shared.id } }));
+    expect(got).toMatchObject({
+      role: "editor",
+      ownerId: owner,
+      ownerOnlyActs: ["delete", "transfer", "guest_ai"],
+    });
+    // Shared discovery over MCP excludes the edited canvas too.
+    const sharedOverMcp = payload(
+      await mcp.callTool({ name: "list_shared_canvases", arguments: {} }),
+    );
+    expect((sharedOverMcp.canvases ?? []).map((c: Row) => c.id)).not.toContain(shared.id);
+  });
+});

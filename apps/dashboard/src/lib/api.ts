@@ -100,6 +100,12 @@ export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 export interface Canvas {
   id: string;
   slug: string;
+  /** Whose canvas it is (editor-roles plan): the owner's account and display identity.
+   *  Always sent by the server; optional here so older fixtures still type-check. */
+  ownerId?: string;
+  owner?: { id: string; name: string; email: string } | null;
+  /** The CALLER's role on it — owner-only controls key off `role === "owner"`. */
+  role?: "owner" | "editor" | null;
   /** True when the owner chose the slug (vs random). Drives the public+custom heads-up. */
   slugCustom: boolean;
   url: string;
@@ -177,6 +183,9 @@ export interface CanvasOwnerSummary {
   listed: number;
   templates: number;
   neverDeployed: number;
+  /** Active canvases you own / you edit but don't own (editor-roles plan, R16). */
+  owned: number;
+  edited: number;
 }
 
 /** What a version serves at the canvas root (computed server-side). Discriminated
@@ -461,6 +470,8 @@ export interface CanvasesQuery {
   undeployed?: boolean;
   /** Lifecycle scope: omit/`active` for the live set, `archived` for the archive. */
   scope?: "active" | "archived";
+  /** Owned-or-edited narrowing (editor-roles plan, R16); omit for both. */
+  role?: "owned" | "edited";
   sort?: CanvasesSort;
   limit?: number;
   offset?: number;
@@ -1019,6 +1030,7 @@ export const api = {
     for (const tag of query.tag ?? []) sp.append("tag", tag);
     if (query.undeployed) sp.set("undeployed", "1");
     if (query.scope === "archived") sp.set("scope", "archived");
+    if (query.role) sp.set("role", query.role);
     if (query.sort && query.sort !== "updated") sp.set("sort", query.sort);
     if (query.limit !== undefined) sp.set("limit", String(query.limit));
     if (query.offset !== undefined) sp.set("offset", String(query.offset));

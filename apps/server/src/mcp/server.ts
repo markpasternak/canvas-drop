@@ -24,8 +24,10 @@ import { hashPassword } from "../canvas/password.js";
 import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import {
   accessRoleSchema,
+  listedRole,
   loadManagementGrant,
   type ManagementRole,
+  OWNER_ONLY_ACTS,
   resolveManagementGrant,
 } from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
@@ -166,6 +168,20 @@ export type RequireMutable = RequireRole;
 export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer {
   const server = new McpServer({ name: "canvas-drop", version: "1" });
 
+  /** The canvas projection with its owner + the caller's role (editor-roles plan, KTD9). */
+  async function viewWithIdentity(
+    cv: Canvas,
+    role: ManagementRole,
+    hasPreview = false,
+    teamIds?: string[],
+  ) {
+    const owner = await deps.users.findById(cv.ownerId);
+    return canvasView(deps.config, cv, hasPreview, teamIds, {
+      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+      role,
+    });
+  }
+
   /** The caller as a member principal — identity from the verified token, org
    *  membership server-resolved by the MCP route (never client-asserted). */
   const principal = memberPrincipal({ id: caller.userId, isAdmin: caller.isAdmin }, caller.orgIds);
@@ -285,10 +301,17 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_canvases",
     {
       description:
-        "List the canvases you own. Default order is most-recently-updated; pass " +
-        'sort="popular" to rank by trending views over the last 30 days. Each item ' +
-        "carries `recentViews` (trending count) plus lifetime `viewCount` and `lastViewedAt`.",
+        "List the canvases you own OR edit — the same list as the dashboard's Your canvases. " +
+        "Non-owned rows appear with `role: 'editor'` and their `owner`; your own carry " +
+        "`role: 'owner'`. Pass role='owned' or 'edited' to narrow. Default order is " +
+        'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
+        "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
+        "and `lastViewedAt`.",
       inputSchema: {
+        role: z
+          .enum(["owned", "edited"])
+          .optional()
+          .describe("Narrow to canvases you own, or to canvases you edit but don't own."),
         query: z
           .string()
           .optional()
@@ -307,14 +330,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ query, tags, sort, limit }) => {
+    async ({ role, query, tags, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const {
         items,
         total,
         recentViews: rankedViews,
-      } = await deps.canvases.listByOwnerFiltered({
-        ownerId: caller.userId,
+      } = await deps.canvases.listForActorFiltered({
+        actorId: caller.userId,
+        scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
+        role,
         q: query,
         tag: tags,
         sort,
@@ -324,20 +349,28 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       });
       // The popular sort already aggregated the page's counts — reuse them rather than
       // hitting usage_events twice (plan 004); other sorts aggregate the page here.
-      const [previews, recentViews] = await Promise.all([
+      const [previews, recentViews, owners] = await Promise.all([
         previewIds(items.map((cv) => cv.id)),
         rankedViews ??
           deps.usage.recentViewCounts(
             items.map((cv) => cv.id),
             recentSinceMs,
           ),
+        deps.users.findByIds([...new Set(items.map((cv) => cv.ownerId))]),
       ]);
+      const ownerById = new Map(owners.map((u) => [u.id, u]));
       return ok({
         total,
-        canvases: items.map((cv) => ({
-          ...canvasView(deps.config, cv, previewVisible(cv, previews)),
-          recentViews: recentViews.get(cv.id) ?? 0,
-        })),
+        canvases: items.map((cv) => {
+          const owner = ownerById.get(cv.ownerId);
+          return {
+            ...canvasView(deps.config, cv, previewVisible(cv, previews), undefined, {
+              owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+              role: listedRole(cv, caller.userId),
+            }),
+            recentViews: recentViews.get(cv.id) ?? 0,
+          };
+        }),
       });
     },
   );
@@ -438,7 +471,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
-        ...canvasView(deps.config, cv, hasPreview, teamIds),
+        ...(await viewWithIdentity(cv, gate.role, hasPreview, teamIds)),
+        // What only the owner may do (R7) — so an agent acting as an editor knows in
+        // advance which tools will refuse with OWNER_ONLY.
+        ownerOnlyActs: OWNER_ONLY_ACTS,
         deploy: deployEndpoints(deps.config, cv.id),
       });
     },

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { memberPrincipal } from "../../canvas/authorization.js";
+import { resolveManagementRole } from "../../canvas/role.js";
 import type { DbClient } from "../factory.js";
 import { DIALECTS, makeTestDb } from "../testing.js";
 import { canvasesRepository } from "./canvases.js";
@@ -280,5 +282,228 @@ describe.each(DIALECTS)("canvas access roles — repository writes [%s]", (diale
         viewerOrgIds: new Set(),
       }),
     ).toEqual(expect.arrayContaining([personal.id]));
+  });
+});
+
+// --- Owned-or-edited list (editor-roles plan U9, KTD9) -----------------------------------
+
+describe.each(DIALECTS)("owned-or-edited list [%s]", (dialect) => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  async function fixtures(tenancyActive: boolean) {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const orgs = orgsRepository(client);
+    const orgMembers = orgMembersRepository(client);
+    const org = await orgs.ensureOrg({ name: "Acme", slug: "acme", domains: ["acme.com"] });
+    const other = await orgs.ensureOrg({ name: "Other", slug: "other", domains: ["other.com"] });
+    const mk = (sub: string, domain = "acme.com") =>
+      users.upsert({ providerSub: sub, email: `${sub}@${domain}`, name: sub, isAdmin: false });
+    const owner = await mk("owner");
+    const me = await mk("me");
+    const outsider = await mk("outsider", "gmail.com");
+    await orgMembers.upsertDomainMember(org.id, owner.id);
+    await orgMembers.upsertDomainMember(org.id, me.id);
+    const c = async (slug: string, extra: { orgId?: string; tags?: string[] } = {}) => {
+      const cv = await canvases.create({
+        ownerId: owner.id,
+        slug,
+        apiKeyHash: slug,
+        orgId: extra.orgId ?? null,
+      });
+      if (extra.tags) await canvases.updateSettings(cv.id, { tags: extra.tags });
+      return cv;
+    };
+    const mine = await c("mine");
+    await canvases.updateSettings(mine.id, { tags: ["ops"] });
+    const direct = await c("direct", { tags: ["design"] });
+    const viaTeam = await c("via-team");
+    const viewed = await c("viewed");
+    const viewerTeam = await c("viewer-team");
+    const crossOrg = await c("cross-org", { orgId: other.id });
+    const personalTeam = await c("personal-team");
+    const archived = await c("archived");
+    // Ownership: `mine` is mine; everything else is the owner's.
+    await canvases.transferOwner({
+      canvasId: mine.id,
+      fromUserId: owner.id,
+      toUserId: me.id,
+      previousOwnerEditor: false,
+      revertPublicLink: false,
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: direct.id,
+      principalKind: "member",
+      userId: me.id,
+      role: "editor",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: viewed.id,
+      principalKind: "member",
+      userId: me.id,
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: crossOrg.id,
+      principalKind: "member",
+      userId: me.id,
+      role: "editor",
+    });
+    await canvases.addAllowlistEntry({
+      canvasId: archived.id,
+      principalKind: "member",
+      userId: me.id,
+      role: "editor",
+    });
+    await canvases.archive(archived.id);
+    const eng = await teams.create({ orgId: org.id, name: "Eng", createdBy: owner.id });
+    await teams.addMember(eng.id, me.id);
+    await teams.setCanvasTeamRole(viaTeam.id, eng.id, "editor");
+    await teams.setCanvasTeamRole(viewerTeam.id, eng.id, "viewer");
+    const friends = await teams.create({ orgId: null, name: "Friends", createdBy: owner.id });
+    await teams.addMember(friends.id, me.id);
+    await teams.addMember(friends.id, outsider.id);
+    await teams.setCanvasTeamRole(personalTeam.id, friends.id, "editor");
+    const scope = { tenancyActive, viewerOrgIds: new Set([org.id]) };
+    return {
+      canvases,
+      users,
+      org,
+      owner,
+      me,
+      outsider,
+      scope,
+      ids: { mine, direct, viaTeam, viewed, viewerTeam, crossOrg, personalTeam, archived },
+    };
+  }
+
+  it("AE9: lists owned + edited (direct / editor team / personal team), never viewer rows or viewer teams; role filter narrows", async () => {
+    const { canvases, me, scope, ids } = await fixtures(false);
+    const slugs = async (role?: "owned" | "edited", archived = false) =>
+      (
+        await canvases.listForActorFiltered({
+          actorId: me.id,
+          scope,
+          role,
+          archived,
+          limit: 50,
+          offset: 0,
+        })
+      ).items
+        .map((cv) => cv.slug)
+        .sort();
+    // Inert tenancy: the cross-org canvas counts too (any member qualifies).
+    expect(await slugs()).toEqual(["cross-org", "direct", "mine", "personal-team", "via-team"]);
+    expect(await slugs("owned")).toEqual(["mine"]);
+    expect(await slugs("edited")).toEqual(["cross-org", "direct", "personal-team", "via-team"]);
+    // The owner's archived canvas appears under my archived toggle.
+    expect(await slugs(undefined, true)).toEqual(["archived"]);
+    void ids;
+  });
+
+  it("KTD2 in the list: under active tenancy the cross-org canvas drops out; an empty live org set lists only owned", async () => {
+    const { canvases, me, org, scope } = await fixtures(true);
+    const slugs = async (s = scope) =>
+      (
+        await canvases.listForActorFiltered({ actorId: me.id, scope: s, limit: 50, offset: 0 })
+      ).items
+        .map((cv) => cv.slug)
+        .sort();
+    expect(await slugs()).toEqual(["direct", "mine", "personal-team", "via-team"]);
+    expect(await slugs({ tenancyActive: true, viewerOrgIds: new Set() })).toEqual(["mine"]);
+    void org;
+  });
+
+  it("search, tag filter, and popular sort include edited canvases; total matches on both dialects", async () => {
+    const { canvases, me, scope } = await fixtures(false);
+    const byTag = await canvases.listForActorFiltered({
+      actorId: me.id,
+      scope,
+      tag: ["design"],
+      limit: 50,
+      offset: 0,
+    });
+    expect(byTag.items.map((cv) => cv.slug)).toEqual(["direct"]);
+    expect(byTag.total).toBe(1);
+    const byQ = await canvases.listForActorFiltered({
+      actorId: me.id,
+      scope,
+      q: "via",
+      limit: 50,
+      offset: 0,
+    });
+    expect(byQ.items.map((cv) => cv.slug)).toEqual(["via-team"]);
+    const popular = await canvases.listForActorFiltered({
+      actorId: me.id,
+      scope,
+      sort: "popular",
+      limit: 2,
+      offset: 0,
+    });
+    expect(popular.total).toBe(5);
+    expect(popular.items).toHaveLength(2);
+    const page2 = await canvases.listForActorFiltered({
+      actorId: me.id,
+      scope,
+      limit: 2,
+      offset: 4,
+    });
+    expect(page2.total).toBe(5);
+    expect(page2.items).toHaveLength(1);
+  });
+
+  it("actorSummary counts the owned-or-edited set with the owned / edited split; tag facets span both", async () => {
+    const { canvases, me, scope } = await fixtures(false);
+    const summary = await canvases.actorSummary(me.id, scope);
+    expect(summary).toMatchObject({ active: 5, archived: 1, owned: 1, edited: 4 });
+    expect((await canvases.listActorTagFacets(me.id, scope)).sort()).toEqual(["design", "ops"]);
+  });
+
+  it("resolver agreement: every listed id resolves to owner/editor, and every effective editor is listed", async () => {
+    const { canvases, users, me, outsider, org, scope } = await fixtures(true);
+    const listed = (
+      await canvases.listForActorFiltered({ actorId: me.id, scope, limit: 50, offset: 0 })
+    ).items;
+    const deps = { canvases, tenancyActive: true };
+    for (const cv of listed) {
+      const role = await resolveManagementRole(cv, memberPrincipal(me, new Set([org.id])), deps);
+      expect(role, cv.slug).not.toBe("none");
+    }
+    // The outsider in the personal editor team (no org) under active tenancy: NOT an editor,
+    // and not listed (AE14).
+    const outsiderList = await canvases.listForActorFiltered({
+      actorId: outsider.id,
+      scope: { tenancyActive: true, viewerOrgIds: new Set() },
+      limit: 50,
+      offset: 0,
+    });
+    expect(outsiderList.items).toEqual([]);
+    const personal = listed.find((cv) => cv.slug === "personal-team") as NonNullable<
+      (typeof listed)[number]
+    >;
+    expect(await resolveManagementRole(personal, memberPrincipal(outsider, new Set()), deps)).toBe(
+      "none",
+    );
+    // Managed ids = owned ∪ edited, the Shared exclusion set.
+    const managed = await canvases.listManagedCanvasIds(me.id, scope);
+    expect(managed.sort()).toEqual(
+      [
+        ...listed.map((cv) => cv.id),
+        ...(
+          await canvases.listForActorFiltered({
+            actorId: me.id,
+            scope,
+            archived: true,
+            limit: 50,
+            offset: 0,
+          })
+        ).items.map((cv) => cv.id),
+      ].sort(),
+    );
+    void users;
   });
 });

@@ -3,6 +3,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { TeamsRepository } from "../db/repositories/teams.js";
 import type { UsersRepository } from "../db/repositories/users.js";
+import { isOwnerOf } from "./role.js";
 
 /**
  * One row of a canvas's unified people list (editor-roles plan, KTD5): the owner pinned
@@ -67,7 +68,7 @@ export async function resolvePeopleList(
 
   const active: PeopleEntry[] = entries
     // A stale member row for the owner (pre-transfer history) never shows twice (AE16).
-    .filter((e) => !(e.principalKind === "member" && e.userId === canvas.ownerId))
+    .filter((e) => !(e.principalKind === "member" && e.userId && isOwnerOf(canvas, e.userId)))
     .map((e) => {
       const u = e.userId ? byId.get(e.userId) : undefined;
       const kind = e.principalKind;

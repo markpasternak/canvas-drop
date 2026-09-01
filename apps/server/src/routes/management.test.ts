@@ -4027,3 +4027,53 @@ describe("managementRoutes — owner entitlements, key rotation, version creator
     expect((await canvasesRepository(client).findById(cv.id))?.ownerId).toBe(owner.id);
   });
 });
+
+// --- Owned-or-edited main list (editor-roles plan U9) --------------------------------------
+
+describe("managementRoutes — owned-or-edited list", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  it("AE9: an editor's main list shows the edited canvas marked with owner + role; role filters; Shared excludes it; tags span both", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const editor = await seedUser(client, "editor");
+    const repo = canvasesRepository(client);
+    const own = await repo.create({ ownerId: editor.id, slug: "own", apiKeyHash: "k0" });
+    const shared = await repo.create({ ownerId: owner.id, slug: "shared", apiKeyHash: "k1" });
+    await repo.updateSettings(shared.id, { title: "Roadmap", tags: ["planning"] });
+    await repo.addAllowlistEntry({
+      canvasId: shared.id,
+      principalKind: "member",
+      userId: editor.id,
+      role: "editor",
+    });
+    const app = buildApp(client, { id: editor.id, isAdmin: false });
+    type Row = { id: string; role: string | null; owner: { name: string } | null; ownerId: string };
+    const list = async (qs = "") =>
+      jsonOf<{ canvases: Row[]; total: number; summary: { owned: number; edited: number } }>(
+        await app.request(`/api/canvases${qs}`),
+      );
+    const all = await list();
+    expect(all.total).toBe(2);
+    expect(all.summary).toMatchObject({ owned: 1, edited: 1 });
+    const row = all.canvases.find((c) => c.id === shared.id) as Row;
+    expect(row).toMatchObject({ role: "editor", ownerId: owner.id, owner: { name: "owner" } });
+    expect(all.canvases.find((c) => c.id === own.id)).toMatchObject({ role: "owner" });
+    expect((await list("?role=owned")).canvases.map((c) => c.id)).toEqual([own.id]);
+    expect((await list("?role=edited")).canvases.map((c) => c.id)).toEqual([shared.id]);
+    expect((await list("?q=roadmap")).canvases.map((c) => c.id)).toEqual([shared.id]);
+    expect(
+      (await jsonOf<{ tags: string[] }>(await app.request("/api/canvases/tags"))).tags,
+    ).toEqual(["planning"]);
+    const sharedList = await jsonOf<{ canvases: Array<{ id: string }> }>(
+      await app.request("/api/canvases/shared"),
+    );
+    expect(sharedList.canvases.map((c) => c.id)).not.toContain(shared.id);
+    // The single-canvas view carries the same identity.
+    const one = await jsonOf<Row>(await app.request(`/api/canvases/${shared.id}`));
+    expect(one).toMatchObject({ role: "editor", ownerId: owner.id });
+  });
+});

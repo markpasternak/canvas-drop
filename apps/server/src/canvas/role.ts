@@ -30,6 +30,25 @@ export type MinRole = ManagementRole;
 
 const RANK: Record<CanvasRole, number> = { none: 0, viewer: 1, editor: 2, owner: 3 };
 
+/** THE owner comparison — the resolver's owner branch. Nothing else compares `ownerId`;
+ *  the few non-gate uses (a list label, an "already the owner" refusal, hiding the owner's
+ *  stale people-list row) call this so the comparison lives in exactly one place. */
+export function isOwnerOf(canvas: Pick<Canvas, "ownerId">, userId: string): boolean {
+  return canvas.ownerId === userId;
+}
+
+/**
+ * The role label for a row the owned-or-edited LIST query returned (KTD9): the query's
+ * predicate already admitted the row as owned or effectively edited, so the label is
+ * the owner branch, else editor. Display-only — never an authorization input.
+ */
+export function listedRole(canvas: Pick<Canvas, "ownerId">, actorId: string): ManagementRole {
+  return isOwnerOf(canvas, actorId) ? "owner" : "editor";
+}
+
+/** The acts only the owner may perform (R7), echoed by `get_canvas` for agents. */
+export const OWNER_ONLY_ACTS = ["delete", "transfer", "guest_ai"] as const;
+
 export function roleAtLeast(role: CanvasRole, min: CanvasRole): boolean {
   return RANK[role] >= RANK[min];
 }
@@ -80,7 +99,7 @@ export async function resolveManagementRole(
   deps: RoleDeps,
 ): Promise<ManagementRole | "none"> {
   if (principal.kind !== "member") return "none";
-  if (canvas.ownerId === principal.id) return "owner";
+  if (isOwnerOf(canvas, principal.id)) return "owner";
   const editor = await deps.canvases.isEffectiveEditor(
     canvas.id,
     principal.id,

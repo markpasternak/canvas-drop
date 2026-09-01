@@ -5,7 +5,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { Logger } from "../log/logger.js";
 import { generateApiKey, hashApiKey } from "./api-key.js";
-import { editorOrgPredicate } from "./role.js";
+import { editorOrgPredicate, isOwnerOf } from "./role.js";
 
 /**
  * Ownership moves (editor-roles plan U7, KTD7): the owner-initiated TRANSFER to an
@@ -149,7 +149,7 @@ export function ownershipService(deps: OwnershipDeps) {
       actor: { id: string; name: string },
       toUserId: string,
     ): Promise<OwnershipResult | OwnershipError> {
-      if (toUserId === canvas.ownerId)
+      if (isOwnerOf(canvas, toUserId))
         return err("ALREADY_OWNER", "That person already owns this canvas.");
       const target = await loadTarget(toUserId);
       if ("ok" in target) return target;
@@ -219,7 +219,7 @@ export function ownershipService(deps: OwnershipDeps) {
       reason: string,
     ): Promise<OwnershipResult | OwnershipError> {
       if (toUserId === admin.id) return err("SELF", "Reassign to another member, not yourself.");
-      if (toUserId === canvas.ownerId)
+      if (isOwnerOf(canvas, toUserId))
         return err("ALREADY_OWNER", "That person already owns this canvas.");
       const target = await loadTarget(toUserId);
       if ("ok" in target) return target;
