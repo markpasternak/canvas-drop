@@ -1,5 +1,6 @@
-import { type Config, shareStatus } from "@canvas-drop/shared";
+import { accessModeOf, type Config, publicationStatusOf, shareStatus } from "@canvas-drop/shared";
 import type { AccessRung, Canvas, Json } from "@canvas-drop/shared/db";
+import { isRestrictedRung } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -170,25 +171,42 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     const now = Date.now();
     const metadata = (cv.metadata ?? {}) as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === "string" ? v : null);
-    let audienceSummary: { count: number | null; names: string[] } = { count: null, names: [] };
-    if (cv.access === "specific_people") {
-      const viewers = (await deps.canvases.listAllowlist(cv.id)).filter(
-        (entry) => entry.role === "viewer",
-      );
-      audienceSummary = { count: viewers.length, names: [] };
-    } else if (cv.access === "team" && deps.teams) {
+    // The people-and-teams list applies at EVERY rung (restricted access model), so the
+    // audience summary is rung-agnostic: the viewer-role people and teams on the list
+    // (editors manage the share rather than merely view it, so they are not the audience).
+    const viewers = (await deps.canvases.listAllowlist(cv.id)).filter(
+      (entry) => entry.role === "viewer",
+    );
+    let teamCount = 0;
+    let teamNames: string[] = [];
+    if (deps.teams) {
       const grants = (await deps.teams.listCanvasTeamGrants(cv.id)).filter(
         (grant) => grant.role === "viewer",
       );
-      const teams = await deps.teams.findByIds(grants.map((g) => g.teamId));
-      audienceSummary = { count: grants.length, names: teams.map((team) => team.name) };
+      teamCount = grants.length;
+      teamNames = (await deps.teams.findByIds(grants.map((g) => g.teamId))).map((t) => t.name);
     }
+    const audienceSummary: { count: number | null; names: string[] } = {
+      count: viewers.length + teamCount,
+      names: teamNames,
+    };
     return {
       id: cv.id,
       url: canvasUrl(deps.config, cv.slug),
       title: cv.title,
       tags: (cv.tags as string[] | null) ?? [],
       access: cv.access,
+      // The two independent concepts consumers should branch on (restricted access model):
+      // WHO ELSE can open it, and WHETHER it is published. `status` below is the legacy
+      // conflation of both, frozen for existing clients.
+      accessMode: accessModeOf(cv.access),
+      publicationStatus: publicationStatusOf({
+        status: cv.status,
+        hasCurrentVersion: cv.currentVersionId !== null,
+        revokedAt: cv.revokedAt ?? null,
+        sharedExpiresAt: cv.sharedExpiresAt ?? null,
+        now,
+      }),
       hasPassword: cv.passwordHash !== null,
       status: shareStatus(cv.access, cv.sharedExpiresAt ?? null, cv.revokedAt ?? null, now),
       createdAt: cv.createdAt,
@@ -290,7 +308,9 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
             };
       }
     }
-    if (pol.requireExpiry && s.effectiveRung !== "private" && s.effectiveExpiry === null) {
+    // Only the two open audiences need an expiry: the restricted family (`private` and its
+    // legacy aliases) opens nothing beyond the people-and-teams list.
+    if (pol.requireExpiry && !isRestrictedRung(s.effectiveRung) && s.effectiveExpiry === null) {
       return { code: "INVALID_BODY", message: "an expiry is required", status: 400 };
     }
     if (typeof s.newExpiry === "number") {
@@ -627,7 +647,8 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     if (meta.metadata !== undefined) settings.patch.metadata = meta.metadata as Json;
 
     const passwordHash = await hashPasswordMutation(settings.password);
-    const viewerTeamIds = cv.access === "team" && (rung ?? cv.access) !== "team" ? [] : undefined;
+    // Team grants live on the people-and-teams list and apply at every rung (restricted
+    // access model): a rung change never touches them, so no viewer-team write rides along.
     const conflictResponse = async () => {
       const current = await deps.canvases.findById(cv.id);
       return c.json(
@@ -651,7 +672,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
               passwordHash,
               expectedUpdatedAt: meta.expectedUpdatedAt,
               currentVersionId: versionId,
-              viewerTeamIds,
             });
             if (!finalCv) {
               activationConflict = true;
@@ -672,7 +692,6 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
         finalCv = await deps.canvases.updateSettingsAtomic(cv.id, settings.patch, {
           passwordHash,
           expectedUpdatedAt: meta.expectedUpdatedAt,
-          viewerTeamIds,
         });
       } catch (err) {
         c.get("log")?.error({ err, id: cv.id }, "authoring: update configure failed");

@@ -334,8 +334,8 @@ function RowActions({ canvas }: { canvas: AdminCanvasRow }) {
  *    - The admin's OWN active canvas is always openable (they hold the grant).
  *    - For another owner's canvas, Open shows only when any org member could reach
  *      it: whole_org / public_link, AND it isn't password-gated, AND its share window
- *      hasn't expired. private / specific_people aren't knowable-reachable
- *      client-side (a specific_people grant to the admin isn't visible here), a
+ *      hasn't expired. Restricted canvases (private and its legacy aliases) aren't
+ *      knowable-reachable client-side (a grant to the admin isn't visible here), a
  *      password would just hit the unlock gate, and an expired share serves the
  *      expired page — so we hide Open in all of those and keep only the kebab. */
 function adminCanView(canvas: AdminCanvasRow, viewerId: string | undefined): boolean {

@@ -1,7 +1,7 @@
 import { ArrowSquareOut, LockSimple } from "@phosphor-icons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { CanvasListItem } from "../lib/api.js";
+import { type CanvasListItem, isRestrictedRung } from "../lib/api.js";
 import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
 import { useMe } from "../lib/queries.js";
 import { rowPrimaryActionClass } from "../lib/row-styles.js";
@@ -45,9 +45,9 @@ function RowBadges({ canvas }: { canvas: CanvasListItem }) {
       )}
       {/* Home tenant (plan 002): Personal vs the org workspace. Only shows for org members. */}
       <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-      {/* Who can reach it — shown for every shared rung (Specific people / Team / Whole
-          org / Public). Private is the default, so it gets no badge. */}
-      {canvas.access !== "private" && <AccessBadge access={canvas.access} />}
+      {/* Who can reach it — shown for the two open rungs (Whole org / Public). Restricted
+          is the default, so it gets no badge. */}
+      {!isRestrictedRung(canvas.access) && <AccessBadge access={canvas.access} />}
       {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
       {/* Listed-but-not-template: gallery state used to be its own column. */}
       {canvas.galleryListed && !canvas.galleryTemplatable && (
@@ -97,18 +97,13 @@ function visibility(canvas: CanvasListItem): { primary: string; secondary: strin
         primary: gated ? "Whole org + protected" : "Whole org",
         secondary: gated ? "Password required" : "Org members",
       };
-    case "specific_people":
-      return {
-        primary: gated ? "Specific people + protected" : "Specific people",
-        secondary: gated ? "Password required" : "Added people only",
-      };
-    case "team":
-      return {
-        primary: gated ? "Team + protected" : "Team",
-        secondary: gated ? "Password required" : "Team members",
-      };
     default:
-      return { primary: "Private", secondary: "Owner only" };
+      // The Restricted family (`private` + its legacy aliases): the people and teams on
+      // the list, nobody else (restricted access model).
+      return {
+        primary: gated ? "Restricted + protected" : "Restricted",
+        secondary: gated ? "Password required" : "People and teams you add",
+      };
   }
 }
 
@@ -460,7 +455,7 @@ export function CanvasCard({
               F1/R15) — the grid card's counterpart to the list row's meta line. */}
           {ownerBadge(canvas) && <ConceptBadge concept="shared">{ownerBadge(canvas)}</ConceptBadge>}
           <ScopeBadge canvas={canvas} orgs={me?.orgs ?? []} />
-          {canvas.access !== "private" && <AccessBadge access={canvas.access} />}
+          {!isRestrictedRung(canvas.access) && <AccessBadge access={canvas.access} />}
           {canvas.galleryTemplatable && <ConceptBadge concept="templates">Template</ConceptBadge>}
           {canvas.hasPassword && (
             <ConceptBadge concept="protected">

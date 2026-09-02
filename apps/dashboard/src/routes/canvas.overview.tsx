@@ -12,7 +12,13 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice } from "../components/Surface.js";
 import { TagsEditor } from "../components/TagsEditor.js";
 import { useToast } from "../components/Toast.js";
-import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/api.js";
+import {
+  ApiError,
+  type Canvas,
+  isRestrictedRung,
+  type RootEntry,
+  type VersionInfo,
+} from "../lib/api.js";
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
@@ -33,10 +39,7 @@ function galleryLabel(canvas: Canvas): string {
 
 function accessLabel(canvas: Canvas): string {
   const base = accessRungLabel(canvas.access);
-  const head =
-    canvas.access !== "private" && canvas.sharedExpiresAt
-      ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})`
-      : base;
+  const head = canvas.sharedExpiresAt ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})` : base;
   const parts = [head];
   if (canvas.hasPassword) parts.push("password");
   return parts.join(", ");
@@ -344,7 +347,7 @@ export default function Overview() {
               className={cn(
                 canvas.access === "public_link"
                   ? "font-medium text-warning"
-                  : canvas.access !== "private"
+                  : !isRestrictedRung(canvas.access)
                     ? "text-fg"
                     : "text-muted",
               )}

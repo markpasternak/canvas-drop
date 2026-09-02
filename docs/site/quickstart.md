@@ -157,20 +157,21 @@ save shows a conflict banner instead. The **Versions** tab lists every kept
 version: **Make current** re-points the live URL at it (in either direction),
 **Restore** copies one back into the draft, **Download ZIP** exports it.
 
-The **Share** tab sets who can open the canvas. Sharing needs a published
-version. The ladder, from narrowest to widest:
+The **Share** tab sets who can open the canvas, in two parts. **Share with people and
+teams** names people (by email) and teams, each as a **viewer** or an **editor**; that
+list always applies, and a brand-new email becomes live only after that person's first
+verified sign-in. **General access** says who *else* can open the URL (opening it to the
+org or the public needs a published version):
 
-| Rung | Who can open the URL |
+| General access | Who else can open the URL |
 |------|----------------------|
-| **Private** (default) | You, and any editors on the people and teams list. A non-owner admin is treated like any member and gets a 404. |
-| **Specific people** | People and teams on the people and teams list, each as viewer or editor. A brand-new email becomes live only after that person's first verified sign-in. |
-| **Team** | Members of the teams on the list. |
+| **Restricted** (default) | Nobody beyond you, your editors, and the people and teams on the list. A non-owner admin is treated like any member and gets a 404. |
 | **Whole org** | Any signed-in member with the link. |
 | **Public link** | Anyone with the link, static files only: the primitives are refused for anonymous visitors. Needs the instance's public-links switch (on by default) and the owner account's public-link permission (granted by default, revocable by an admin). |
 
-On top of any rung you can add a password gate or a share expiry. Team and
-Whole-org shares are link-only by default; turn on **List for people with
-access** to make them appear in the viewer's **Shared** view. The gallery is
+On top of any choice you can add a password gate or a share expiry. People and teams
+on the list see the canvas in **Shared** at once; a Whole-org share is link-only until
+you turn on **List for your org**. The gallery is
 narrower: it lists only Public-link canvases and Whole-org canvases whose
 owners turn on **List in the gallery**. Revoking access takes effect on the next
 request. Details in [Sharing & access](/docs/authoring/sharing).

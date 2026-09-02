@@ -644,6 +644,11 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await repo.setPassword(prot.id, "argon2hash");
     await repo.updateSettings(listed.id, { galleryListed: true });
     await repo.updateSettings(tmpl.id, { galleryTemplatable: true });
+    // Two legacy aliases of `private` (restricted access model): NOT shared, but restricted.
+    const people = await repo.create({ ownerId: me, slug: "people", apiKeyHash: "k-people" });
+    const teamy = await repo.create({ ownerId: me, slug: "teamy", apiKeyHash: "k-teamy" });
+    await repo.setAccess(people.id, "specific_people");
+    await repo.setAccess(teamy.id, "team");
     // `plain` and one other are deployed; the rest are never-deployed.
     await deploy(client, plain.id, me);
 
@@ -652,13 +657,19 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
         .map((c) => c.id)
         .sort();
 
+    // `shared` = open beyond the people-and-teams list: the aliases are not shared…
     expect(await ids({ shared: true })).toEqual([shared.id].sort());
+    // …and `restricted` is the whole family: private + both aliases.
+    expect(await ids({ access: "restricted" })).toEqual(
+      [plain.id, prot.id, listed.id, tmpl.id, people.id, teamy.id].sort(),
+    );
+    expect(await ids({ access: "specific_people" })).toEqual([people.id]);
     expect(await ids({ protected: true })).toEqual([prot.id].sort());
     expect(await ids({ listed: true })).toEqual([listed.id].sort());
     expect(await ids({ template: true })).toEqual([tmpl.id].sort());
     // never-deployed = everything except the one deployed canvas.
     expect(await ids({ neverDeployed: true })).toEqual(
-      [shared.id, prot.id, listed.id, tmpl.id].sort(),
+      [shared.id, prot.id, listed.id, tmpl.id, people.id, teamy.id].sort(),
     );
   });
 
@@ -701,6 +712,9 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const template = await repo.create({ ownerId: me, slug: "template", apiKeyHash: "k5" });
     const archived = await repo.create({ ownerId: me, slug: "archived", apiKeyHash: "k6" });
     const deleted = await repo.create({ ownerId: me, slug: "deleted", apiKeyHash: "k7" });
+    // The two legacy aliases of `private` (restricted access model): active, NOT shared.
+    const people = await repo.create({ ownerId: me, slug: "people", apiKeyHash: "k8" });
+    const teamy = await repo.create({ ownerId: me, slug: "teamy", apiKeyHash: "k9" });
     await repo.create({ ownerId: other, slug: "other", apiKeyHash: "ko" });
 
     await deploy(client, deployed.id, me);
@@ -710,16 +724,23 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await repo.updateSettings(template.id, { galleryListed: true, galleryTemplatable: true });
     await repo.archive(archived.id);
     await repo.setStatus(deleted.id, "deleted");
+    await repo.setAccess(people.id, "specific_people");
+    await repo.setAccess(teamy.id, "team");
 
+    // `shared` = open beyond the people-and-teams list: the aliases count like `private`.
     await expect(repo.ownerSummary(me)).resolves.toEqual({
-      active: 5,
+      active: 7,
       archived: 1,
       shared: 1,
       protected: 1,
       listed: 2,
       templates: 1,
-      neverDeployed: 4,
+      neverDeployed: 6,
     });
+    // The actor-scoped twin the management list uses agrees on the `shared` bucket.
+    await expect(
+      repo.actorSummary(me, { tenancyActive: false, viewerOrgIds: new Set<string>() }),
+    ).resolves.toMatchObject({ active: 7, shared: 1 });
   });
 
   it("listByOwnerFiltered intersects composed filters", async () => {

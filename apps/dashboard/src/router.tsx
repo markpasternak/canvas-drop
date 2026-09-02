@@ -3,7 +3,7 @@ import { lazy } from "react";
 import { AppLayout } from "./app-layout.js";
 import { DashboardNotFoundState, DashboardRouteErrorState } from "./components/ErrorState.js";
 import type {
-  AccessRung,
+  AccessFilter,
   AdminCanvasContextFilter,
   AdminCanvasExpiryFilter,
   AdminCanvasSort,
@@ -52,7 +52,7 @@ export interface CanvasesSearch {
   q?: string;
   sort?: CanvasesSortParam;
   /** Access-rung filter (D4); `shared` stays as the legacy coarse boolean chip. */
-  access?: AccessRung;
+  access?: AccessFilter;
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -191,7 +191,7 @@ const onboardingRoute = createRoute({
 export interface AdminCanvasesSearch {
   status?: AdminCanvasStatus;
   /** Access-rung governance filter (e.g. find every `public_link`). */
-  access?: AccessRung;
+  access?: AccessFilter;
   public?: boolean;
   password?: boolean;
   expiry?: AdminCanvasExpiryFilter;

@@ -217,6 +217,9 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     // The canvas is now published; get_canvas reflects it.
     const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: created.id } }));
     expect(got.publicationState).toBe("published");
+    // Audience rides alongside lifecycle (restricted access model): a fresh canvas is Restricted.
+    expect(got.access).toBe("private");
+    expect(got.accessMode).toBe("restricted");
   });
 
   it("update_canvas restricting a public_link canvas returns a CDN edge-cache warning (parity)", async () => {
@@ -1048,6 +1051,17 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const list = payload(await mcp.callTool({ name: "list_canvases", arguments: {} }));
     expect(list.total).toBe(2);
     expect(list.canvases).toHaveLength(2);
+    // The audience filter the dashboard lists send (parity): fresh canvases are Restricted.
+    const restricted = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { access: "restricted" } }),
+    );
+    expect(restricted.total).toBe(2);
+    // biome-ignore lint/suspicious/noExplicitAny: JSON payload
+    expect(restricted.canvases.every((c: any) => c.accessMode === "restricted")).toBe(true);
+    const org = payload(
+      await mcp.callTool({ name: "list_canvases", arguments: { access: "whole_org" } }),
+    );
+    expect(org.total).toBe(0);
   });
 
   it("list_canvases query inherits the forgiving search (matches a tag, case/accent-insensitive)", async () => {
@@ -1790,7 +1804,7 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(text(res)).toContain("TEAM_FORBIDDEN");
   });
 
-  it("list_shared_canvases surfaces only listed team canvases to a teammate, not the owner", async () => {
+  it("list_shared_canvases surfaces a team-granted canvas to a teammate at once (no discoverability opt-in), never to the owner", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
@@ -1822,18 +1836,12 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       arguments: { id: cv.id, password: "secret" },
     });
     const mateMcp = await connectMember(mateId, org.id);
-    expect(
-      payload(await mateMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
-    ).toHaveLength(0);
-    await ownerMcp.callTool({
-      name: "update_canvas",
-      arguments: { id: cv.id, discoverability: "listed" },
-    });
     // The owner does NOT see their own canvas in Shared.
     expect(
       payload(await ownerMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
     ).toHaveLength(0);
-    // The teammate does after the owner opts the grant into discovery.
+    // The teammate does, immediately: a team on the list is an open door (restricted access
+    // model) — no `discoverability` opt-in, which now only governs whole_org listing.
     const { canvases } = payload(
       await mateMcp.callTool({ name: "list_shared_canvases", arguments: { query: "design" } }),
     );
@@ -1991,6 +1999,155 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     });
     expect(isError(denied)).toBe(true);
     expect(text(denied)).toContain("not found");
+  });
+
+  it("clone_canvas: a viewer-team member may clone a canvas that stays PRIVATE (the list applies at every rung); a non-member cannot", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const strangerId = await member("stranger@a.example", org.id);
+    const store = memStorage();
+    const conn = (userId: string) =>
+      connect(
+        client,
+        { userId, orgIds: new Set([org.id]), tenancyActive: true },
+        false,
+        tenantConfig,
+        store,
+      );
+    const ownerMcp = await conn(ownerId);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    await ownerMcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "mate@a.example" },
+    });
+    const cv = payload(
+      await ownerMcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }),
+    );
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    // The team goes on the people-and-teams list; General access stays Restricted (`private`).
+    await ownerMcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, teamId: team.id, role: "viewer" },
+    });
+    expect(
+      payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
+    ).toBe("private");
+    const cloned = payload(
+      await (await conn(mateId)).callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+    );
+    expect(cloned.id).toBeTruthy();
+    expect(cloned.id).not.toBe(cv.id);
+    const denied = await (await conn(strangerId)).callTool({
+      name: "clone_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(isError(denied)).toBe(true);
+    expect(text(denied)).toContain("not found");
+  });
+
+  it("clone_canvas fences for a team viewer (review #1): never-published, password-protected, or expired sources read not found; the same source clones once published, unprotected, unexpired", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mateId = await member("mate@a.example", org.id);
+    const store = memStorage();
+    const conn = (userId: string) =>
+      connect(
+        client,
+        { userId, orgIds: new Set([org.id]), tenancyActive: true },
+        false,
+        tenantConfig,
+        store,
+      );
+    const ownerMcp = await conn(ownerId);
+    const mateMcp = await conn(mateId);
+    const team = payload(
+      await ownerMcp.callTool({
+        name: "create_team",
+        arguments: { orgId: org.id, name: "Design" },
+      }),
+    );
+    await ownerMcp.callTool({
+      name: "add_team_member",
+      arguments: { id: team.id, email: "mate@a.example" },
+    });
+    const cv = payload(
+      await ownerMcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }),
+    );
+    await ownerMcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, teamId: team.id, role: "viewer" },
+    });
+    const cloneAsMate = () => mateMcp.callTool({ name: "clone_canvas", arguments: { id: cv.id } });
+    const expectNotFound = async () => {
+      const r = await cloneAsMate();
+      expect(isError(r)).toBe(true);
+      expect(text(r)).toContain("not found");
+    };
+    // Never published: the clone would be seeded from the owner's private draft.
+    await expectNotFound();
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    // Password-protected: the cloner would own the copy and bypass the gate.
+    const repo = canvasesRepository(client);
+    await repo.setPassword(cv.id, "argon2hash");
+    await expectNotFound();
+    await repo.setPassword(cv.id, null);
+    // Expired share: the serve seam denies the same member.
+    await repo.updateSettings(cv.id, { sharedExpiresAt: Date.now() - 60_000 });
+    await expectNotFound();
+    await repo.updateSettings(cv.id, { sharedExpiresAt: null });
+    // Published, unprotected, unexpired: the granted team clones it (still `private`).
+    expect(
+      payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
+    ).toBe("private");
+    const cloned = payload(await cloneAsMate());
+    expect(cloned.id).toBeTruthy();
+    expect(cloned.id).not.toBe(cv.id);
+  });
+
+  it("update_canvas legacy `teamIds: []` carve-out (review #8/#9): a no-op when leaving the `team` value, TEAM_REQUIRED with any other access value; the grants survive", async () => {
+    client = await makeTestDb(dialect);
+    const org = await seedOrg();
+    const ownerId = await member("owner@a.example", org.id);
+    const mcp = await connectMember(ownerId, org.id);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { orgId: org.id, name: "Design" } }),
+    );
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: { orgId: org.id } }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    const granted = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+      }),
+    );
+    expect(granted.teamIds).toEqual([team.id]);
+    // Leaving the team value with the legacy empty array: accepted, grants untouched.
+    const off = payload(
+      await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, access: "whole_org", teamIds: [] },
+      }),
+    );
+    expect(off).toMatchObject({ access: "whole_org", teamIds: [team.id] });
+    // Off the team value, an empty array is refused whatever `access` says.
+    for (const access of ["whole_org", "private", "team"]) {
+      const refused = await mcp.callTool({
+        name: "update_canvas",
+        arguments: { id: cv.id, access, teamIds: [] },
+      });
+      expect(isError(refused), access).toBe(true);
+      expect(text(refused)).toContain("TEAM_REQUIRED");
+    }
+    const got = payload(await mcp.callTool({ name: "get_canvas", arguments: { id: cv.id } }));
+    expect(got).toMatchObject({ access: "whole_org", teamIds: [team.id] });
   });
 
   it("rename_team is creator-only over MCP (no admin bypass)", async () => {

@@ -1,6 +1,7 @@
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { describe, expect, it } from "vitest";
+import { decideCanvasAccess } from "../canvas/authorization.js";
 import {
   CLOSE_CAPABILITY_DISABLED,
   CLOSE_UNAUTHORIZED,
@@ -645,4 +646,213 @@ describe("RealtimeHub — editor role", () => {
     await hub.revalidateCanvas("c1");
     expect(sock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
   });
+});
+
+describe("RealtimeHub — the list applies at every rung (restricted access model)", () => {
+  it("revalidateCanvas keeps a directly listed viewer on a PRIVATE canvas and drops an unlisted one", async () => {
+    const hub = makeHub(
+      fakeCanvas({ access: "private" }),
+      undefined,
+      async (_canvasId, p) => p.userId === "listed",
+    );
+    const listedSock = new FakeSocket();
+    const otherSock = new FakeSocket();
+    mc(hub, "c1", user("listed"), listedSock);
+    mc(hub, "c1", user("other"), otherSock);
+    await hub.revalidateCanvas("c1");
+    expect(listedSock.closed).toBeNull();
+    expect(otherSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("revalidateCanvas keeps a granted-team member at every restricted rung (teamMatch is no longer team-rung-only)", async () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      const hub = createHub({
+        config,
+        resolveCanvas: async () => fakeCanvas({ access }),
+        teamMatch: async (_canvasId, userId) => userId === "tm",
+      });
+      const tmSock = new FakeSocket();
+      const otherSock = new FakeSocket();
+      mc(hub, "c1", user("tm"), tmSock);
+      mc(hub, "c1", user("other"), otherSock);
+      await hub.revalidateCanvas("c1");
+      expect(tmSock.closed, access).toBeNull();
+      expect(otherSock.closed?.code, access).toBe(CLOSE_UNAUTHORIZED);
+    }
+  });
+
+  it("revalidateCanvas keeps a listed member's socket on a public_link canvas (full access, not the static-only public view)", async () => {
+    const hub = makeHub(
+      fakeCanvas({ access: "public_link" }),
+      undefined,
+      async (_canvasId, p) => p.userId === "listed",
+    );
+    const listedSock = new FakeSocket();
+    const viewerSock = new FakeSocket();
+    mc(hub, "c1", user("listed"), listedSock);
+    mc(hub, "c1", user("viewer"), viewerSock);
+    await hub.revalidateCanvas("c1");
+    expect(listedSock.closed).toBeNull();
+    expect(viewerSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+  });
+
+  it("revalidateCanvas keeps a listed guest at whole_org (the list beats the members-only rung)", async () => {
+    const hub = makeHub(
+      fakeCanvas({ access: "whole_org" }),
+      async (id) => id === "owner",
+      async (_canvasId, p) => p.email === "g@x.com",
+    );
+    const guestSock = new FakeSocket();
+    mc(
+      hub,
+      "c1",
+      {
+        ...user("guest:inv1"),
+        principal: {
+          kind: "guest",
+          id: "guest:inv1",
+          inviteId: "inv1",
+          canvasId: "c1",
+          email: "g@x.com",
+        },
+      },
+      guestSock,
+    );
+    await hub.revalidateCanvas("c1");
+    expect(guestSock.closed).toBeNull();
+  });
+
+  it("revalidateCanvas fails closed when teamMatch throws on a PRIVATE canvas (drops the member, keeps the owner)", async () => {
+    const hub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      teamMatch: async () => {
+        throw new Error("db down");
+      },
+    });
+    const ownerSock = new FakeSocket();
+    const memberSock = new FakeSocket();
+    mc(hub, "c1", user("owner"), ownerSock);
+    mc(hub, "c1", user("member"), memberSock);
+    await hub.revalidateCanvas("c1");
+    expect(memberSock.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(ownerSock.closed).toBeNull();
+  });
+});
+
+describe("RealtimeHub — a failed list lookup reads as no match; the rung alone decides (review #1, rejected as a widening)", () => {
+  it("a failed lookup never masks the OTHER lookup's match: a listed member stays when only teamMatch throws, a team member stays when only isPrincipalAllowed throws", async () => {
+    const throwing = async () => {
+      throw new Error("db down");
+    };
+    const listedHub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isPrincipalAllowed: async () => true,
+      teamMatch: throwing,
+    });
+    const listedSock = new FakeSocket();
+    mc(listedHub, "c1", user("listed"), listedSock);
+    await listedHub.revalidateCanvas("c1");
+    expect(listedSock.closed).toBeNull();
+
+    const teamHub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isPrincipalAllowed: throwing,
+      teamMatch: async () => true,
+    });
+    const teamSock = new FakeSocket();
+    mc(teamHub, "c1", user("tm"), teamSock);
+    await teamHub.revalidateCanvas("c1");
+    expect(teamSock.closed).toBeNull();
+  });
+
+  it("drops a member on a RESTRICTED canvas when both lookups throw (nothing else admits them)", async () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      const hub = createHub({
+        config,
+        resolveCanvas: async () => fakeCanvas({ access }),
+        isPrincipalAllowed: async () => {
+          throw new Error("db down");
+        },
+        teamMatch: async () => {
+          throw new Error("db down");
+        },
+      });
+      const memberSock = new FakeSocket();
+      mc(hub, "c1", user("member"), memberSock);
+      await hub.revalidateCanvas("c1");
+      expect(memberSock.closed?.code, access).toBe(CLOSE_UNAUTHORIZED);
+    }
+  });
+
+  it("keeps a member on a whole_org canvas when a lookup throws — the wide rung admits them regardless of the list, as it did before this round", async () => {
+    const hub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "whole_org" }),
+      isPrincipalAllowed: async () => {
+        throw new Error("db down");
+      },
+      teamMatch: async () => {
+        throw new Error("db down");
+      },
+    });
+    const memberSock = new FakeSocket();
+    mc(hub, "c1", user("member"), memberSock);
+    await hub.revalidateCanvas("c1");
+    expect(memberSock.closed).toBeNull();
+  });
+
+  it("a lookup error on one socket never aborts the sweep for the others", async () => {
+    let calls = 0;
+    const hub = makeHub(fakeCanvas({ access: "private" }), undefined, async (_c, key) => {
+      calls += 1;
+      if (key.userId === "a") throw new Error("db down");
+      return key.userId === "b";
+    });
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    mc(hub, "c1", user("a"), first);
+    mc(hub, "c1", user("b"), second);
+    await hub.revalidateCanvas("c1");
+    expect(first.closed?.code).toBe(CLOSE_UNAUTHORIZED);
+    expect(second.closed).toBeNull();
+    expect(calls).toBe(2);
+  });
+});
+
+describe("RealtimeHub — verdict parity with decideCanvasAccess over one fixture matrix (plan R-a)", () => {
+  const RUNGS = ["private", "specific_people", "team", "whole_org", "public_link"] as const;
+  const PRINCIPALS = [
+    { name: "a directly listed member", id: "listed", isAllowed: true, teamMatch: false },
+    { name: "a granted-team member", id: "tm", isAllowed: false, teamMatch: true },
+    { name: "an unlisted member", id: "other", isAllowed: false, teamMatch: false },
+  ] as const;
+  for (const access of RUNGS) {
+    for (const p of PRINCIPALS) {
+      it(`${p.name} on ${access}: the socket survives exactly when the HTTP decision allows full access`, async () => {
+        const canvas = fakeCanvas({ access });
+        const hub = createHub({
+          config,
+          resolveCanvas: async () => canvas,
+          isPrincipalAllowed: async (_canvasId, key) => key.userId === "listed",
+          teamMatch: async (_canvasId, userId) => userId === "tm",
+        });
+        const sock = new FakeSocket();
+        mc(hub, "c1", user(p.id), sock);
+        await hub.revalidateCanvas("c1");
+        const decision = decideCanvasAccess(
+          canvas,
+          { kind: "member", id: p.id, isAdmin: false, orgIds: new Set<string>() },
+          Date.now(),
+          { isAllowed: p.isAllowed, teamMatch: p.teamMatch, tenancyActive: false },
+        );
+        // Neither side resolves `publicEnabled` here, so an unlisted member on public_link is
+        // denied by the HTTP decision (no realtime) and dropped by the hub — the same verdict.
+        const httpKeepsSocket = decision.action === "allow" && !decision.staticOnly;
+        expect(sock.closed === null, `${p.name} on ${access}`).toBe(httpKeepsSocket);
+      });
+    }
+  }
 });

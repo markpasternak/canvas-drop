@@ -397,8 +397,31 @@ export type ShareAccess = "private" | "specific_people" | "whole_org" | "public_
 /** Persisted audience returned by Canvas Drop. Team membership is managed in Canvas Drop. */
 export type ShareAudience = "private" | "specific_people" | "team" | "whole_org" | "public_link";
 
-/** Derived lifecycle status of a managed share (mirrors the server's shared helper). */
+/**
+ * LEGACY derived status of a managed share (mirrors the server's shared helper). It conflates
+ * two concepts: `private` means the persisted `access` value is literally `"private"` (General
+ * access Restricted) — the people and teams on the canvas's list can still open it — and the
+ * legacy aliases `specific_people` / `team` read `live`. Frozen for compatibility.
+ * @deprecated Read `accessMode` (who else can open it) and `publicationStatus` (whether it is
+ * published) instead.
+ */
 export type ShareStatus = "live" | "expired" | "revoked" | "private";
+
+/** Who else can open a share beyond the owner, the editors, and its people-and-teams list
+ *  (which applies at every value): `restricted` = `private` and its legacy aliases. */
+export type AccessMode = "restricted" | "whole_org" | "public_link";
+
+/** Whether a share is published, independent of its audience. Precedence: deleted › disabled
+ *  › archived › unpublished (revoked) › draft (no version) › expired › published. Owner-facing
+ *  lists omit deleted rows. */
+export type PublicationStatus =
+  | "draft"
+  | "published"
+  | "expired"
+  | "unpublished"
+  | "archived"
+  | "disabled"
+  | "deleted";
 
 export interface PublishOptions {
   title: string;
@@ -436,8 +459,14 @@ export interface AuthoredCanvas {
   title: string;
   tags: string[];
   access: ShareAudience;
+  /** Who else can open it, beyond the people-and-teams list — the field to branch on. */
+  accessMode: AccessMode;
+  /** Whether it is published — the field to branch on for "can this be opened at all".
+   *  Never `deleted`: deleted canvases are omitted from every authoring response. */
+  publicationStatus: Exclude<PublicationStatus, "deleted">;
   /** Whether the share has a password gate in addition to its access rung. */
   hasPassword: boolean;
+  /** @deprecated Legacy conflation of audience and lifecycle; see `accessMode` + `publicationStatus`. */
   status: ShareStatus;
   createdAt: number;
   updatedAt: number;

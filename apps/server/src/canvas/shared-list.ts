@@ -49,10 +49,11 @@ function canvasTags(cv: Canvas): string[] | null {
     : null;
 }
 
+/** A canvas a team grant can list: published, unexpired — at ANY rung (restricted access
+ *  model: a team on the list is an open door like a direct grant, so it enumerates the same
+ *  way; `discoverability` only gates the whole_org surfaces). */
 function liveTeamCanvas(cv: Canvas, now: number): boolean {
   return (
-    cv.access === "team" &&
-    cv.discoverability === "listed" &&
     cv.status === "active" &&
     cv.currentVersionId !== null &&
     (cv.sharedExpiresAt === null || cv.sharedExpiresAt > now)

@@ -167,7 +167,7 @@ well. The operator also sets the policy a publish is checked against:
 | Whether a share expiry is required | `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` |
 
 An admin can change the two quotas at runtime in Admin → Settings; the rung and
-expiry policy is env-only. The `team` rung is not in the default set. See the
+expiry policy is env-only (`specific_people` is a legacy alias of `private`). See the
 [authoring SDK reference](/docs/sdk/authoring).
 
 ## Clones start static

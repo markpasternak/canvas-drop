@@ -40,7 +40,7 @@ import { PageHeader } from "../components/Surface.js";
 import { TagFilter } from "../components/TagFilter.js";
 import { useToast } from "../components/Toast.js";
 import {
-  type AccessRung,
+  type AccessFilter,
   ApiError,
   CANVASES_PAGE_SIZE,
   type CanvasListItem,
@@ -630,7 +630,7 @@ export default function CanvasList() {
       to: "/",
       search: (prev) => ({
         ...prev,
-        access: next === "all" ? undefined : (next as AccessRung),
+        access: next === "all" ? undefined : (next as AccessFilter),
         page: 1,
       }),
     });

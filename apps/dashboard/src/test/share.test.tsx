@@ -239,9 +239,15 @@ describe("share route", () => {
     expect(screen.queryByText(/sharing unlocks after you publish/i)).toBeNull();
   });
 
-  it("team rung: a team added as a viewer in People with access backs the rung; picking Team PATCHes access:team + teamIds", async () => {
-    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
-    let granted = false;
+  it("General access offers Restricted / Whole org / Public link; a legacy team rung reads as Restricted", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "team",
+      shared: true,
+      teamIds: ["t1"],
+      currentVersionId: "v1",
+    };
     const calls = mockFetch({
       "GET /api/canvases/c1": () => json(published),
       "GET /api/teams": () =>
@@ -260,98 +266,87 @@ describe("share route", () => {
               email: "owner@example.com",
               name: "Owner",
               userId: "u1",
-              teamId: null,
-              createdAt: 0,
             },
-            ...(granted
-              ? [
-                  {
-                    id: "team:t1",
-                    kind: "team",
-                    role: "viewer",
-                    email: null,
-                    name: "Design",
-                    userId: null,
-                    teamId: "t1",
-                    createdAt: 1,
-                  },
-                ]
-              : []),
+            {
+              id: "team:t1",
+              kind: "team",
+              role: "viewer",
+              teamId: "t1",
+              name: "Design",
+              teamOrgId: "o1",
+            },
           ],
         }),
-      "POST /api/canvases/c1/allowlist": () => {
-        granted = true;
-        return json({ ok: true, status: "granted", role: "viewer" });
-      },
       "PATCH /api/canvases/c1/settings": () =>
-        json({ ...published, access: "team", shared: true, teamIds: ["t1"] }),
+        json({ ...published, access: "whole_org", teamIds: ["t1"] }),
     });
     const user = userEvent.setup();
     renderShare();
 
-    // With no viewer team granted yet, picking Team only reveals the hint (no write).
-    await user.click(await screen.findByRole("radio", { name: /^team/i }));
-    expect(await screen.findByText(/add a team as a viewer/i)).toBeInTheDocument();
-    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
-
-    // Grant the team through the unified people list (the folded-in picker, KTD5).
-    await user.selectOptions(screen.getByLabelText("Team to add"), "t1");
-    await user.click(screen.getByRole("button", { name: "Add team" }));
-    await vi.waitFor(() => {
-      const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/allowlist");
-      expect(post?.body).toContain("t1");
-    });
-    // The team row shows its org scope badge and a role control.
+    // The legacy `team` value displays as Restricted; the old rungs are gone from the picker.
+    expect(await screen.findByRole("radio", { name: /restricted/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /whole org/i })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /^team/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /specific people/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /private/i })).toBeNull();
+    // The team stays on the people list, unaffected by whatever the picker does.
     expect(await screen.findByText("Acme")).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("group", { name: "Role for Design" })).getByRole("button", {
-        name: "Viewer",
-      }),
-    ).toHaveAttribute("aria-pressed", "true");
 
-    await user.click(screen.getByRole("radio", { name: /^team/i }));
+    await user.click(screen.getByRole("radio", { name: /whole org/i }));
     await vi.waitFor(() => {
       const patch = calls.find(
         (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
       );
-      expect(patch?.body).toContain('"access":"team"');
-      expect(patch?.body).toContain("t1");
+      expect(patch?.body).toContain('"access":"whole_org"');
+      // No `teamIds` rides along: team grants live on the list (restricted access model).
+      expect(patch?.body).not.toContain("teamIds");
     });
   });
 
-  it("team rung: shows a 'create a team' notice when the caller has no teams", async () => {
-    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
-    mockFetch({
+  it("picking Restricted on a Whole-org canvas PATCHes access:private (Restricted writes the base rung)", async () => {
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "whole_org",
+      shared: true,
+      currentVersionId: "v1",
+    };
+    const calls = mockFetch({
       "GET /api/canvases/c1": () => json(published),
-      "GET /api/teams": () => json({ teams: [] }),
+      "PATCH /api/canvases/c1/settings": () =>
+        json({ ...published, access: "private", shared: false }),
     });
     const user = userEvent.setup();
     renderShare();
 
-    await user.click(await screen.findByRole("radio", { name: /^team/i }));
-    expect(await screen.findByText(/not in any team yet/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole("radio", { name: /restricted/i }));
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"access":"private"');
+    });
   });
 
-  it("team rung is hidden for a guest (no org)", async () => {
+  it("a guest (no org) sees Restricted but no Whole-org choice", async () => {
     mockFetch({
       "GET /api/me": () => json({ ...ME, isGuest: true, orgs: [] }),
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
     });
     renderShare();
-    await screen.findByRole("radio", { name: /private/i });
-    expect(screen.queryByRole("radio", { name: /^team/i })).toBeNull();
+    expect(await screen.findByRole("radio", { name: /restricted/i })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: /whole org/i })).toBeNull();
   });
 
-  it("whole-org rung is disabled on a Personal canvas, but the Team rung stays enabled (plan 003 U6)", async () => {
+  it("whole-org rung is disabled on a Personal canvas; Restricted stays enabled", async () => {
     mockFetch({
       "GET /api/me": () => json({ ...ME, orgs: [{ id: "o1", name: "Acme" }] }),
       "GET /api/canvases/c1": () =>
         json({ ...CANVAS, orgId: null, publicationState: "published", currentVersionId: "v1" }),
     });
     renderShare();
-    // A personal canvas CAN be shared with a personal team — the Team rung is enabled…
-    expect(await screen.findByRole("radio", { name: /^team/i })).toBeEnabled();
+    expect(await screen.findByRole("radio", { name: /restricted/i })).toBeEnabled();
     // …but it still can't be shared org-wide.
     expect(screen.getByRole("radio", { name: /whole org/i })).toBeDisabled();
   });
@@ -363,9 +358,8 @@ describe("share route", () => {
     });
     renderShare();
 
-    expect(await screen.findByRole("radio", { name: /private/i })).toBeEnabled();
+    expect(await screen.findByRole("radio", { name: /restricted/i })).toBeEnabled();
     expect(screen.getByRole("radio", { name: /whole org/i })).toBeEnabled();
-    expect(screen.getByRole("radio", { name: /specific people/i })).toBeEnabled();
   });
 
   it("shows the human-guessable heads-up for a custom slug on a link-reachable rung", async () => {
@@ -414,7 +408,7 @@ describe("share route", () => {
         }),
     });
     renderShare();
-    await screen.findByRole("radio", { name: /private/i });
+    await screen.findByRole("radio", { name: /restricted/i });
     expect(screen.queryByText(/custom, human-readable URL/i)).not.toBeInTheDocument();
   });
 
@@ -502,7 +496,7 @@ describe("share route", () => {
     });
   });
 
-  it("updates added-people AI settings for specific people access", async () => {
+  it("updates added-people AI settings when a legacy guest is on the list", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () =>
         json({
@@ -512,7 +506,20 @@ describe("share route", () => {
           shared: true,
           currentVersionId: "v1",
         }),
-      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "guest:g9",
+              kind: "guest",
+              role: "viewer",
+              email: "g@partner.com",
+              name: null,
+              userId: null,
+              createdAt: 1,
+            },
+          ],
+        }),
       "PATCH /api/canvases/c1/settings": () =>
         json({
           ...CANVAS,
@@ -535,6 +542,263 @@ describe("share route", () => {
       expect(patch?.body).toContain("guestAiEnabled");
       expect(patch?.body).toContain("true");
     });
+  });
+
+  it("Restricted hint says 'only you' while the list holds just the owner, and counts the list otherwise", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      // The Public link choice (and its hint) only renders for an account that may publish publicly.
+      "GET /api/me": () => json({ ...ME, canPublishPublic: true }),
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(await screen.findByText(/only you currently have access/i)).toBeInTheDocument();
+    // Changing General access is explained as additive to the list.
+    expect(screen.getByText(/never removes the people and teams above/i)).toBeInTheDocument();
+    // Public link explains that listed people keep full access.
+    expect(screen.getByText(/people and teams above keep their full access/i)).toBeInTheDocument();
+  });
+
+  it("Restricted hint names how many people and teams the list holds — never 'only you' with grants", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+            {
+              id: "member:m1",
+              kind: "member",
+              role: "viewer",
+              email: "liam@example.com",
+              name: "Liam",
+              userId: "u2",
+              createdAt: 2,
+            },
+            {
+              id: "team:t1",
+              kind: "team",
+              role: "viewer",
+              email: null,
+              name: "Design",
+              userId: null,
+              teamId: "t1",
+              teamOrgId: "o1",
+              createdAt: 3,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/only you and the 2 people and teams above can open it/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/only you currently have access/i)).toBeNull();
+  });
+
+  it("the guest-AI section follows a legacy guest on the list, not General access", async () => {
+    const guest = {
+      id: "guest:g1",
+      kind: "guest",
+      role: "viewer",
+      email: "g@partner.com",
+      name: null,
+      userId: null,
+      createdAt: 1,
+    };
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "whole_org",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [guest] }),
+    });
+    renderShare();
+    // Whole org + a legacy guest: the AI opt-in is offered.
+    expect(
+      await screen.findByRole("switch", { name: /allow added people to use ai/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("the guest-AI section stays hidden on a Restricted canvas with no legacy guest", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    expect(screen.queryByRole("switch", { name: /allow added people to use ai/i })).toBeNull();
+  });
+
+  it("a pending invite is not counted as someone who can open the canvas (review #4)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+            {
+              id: "pending:p1",
+              kind: "pending",
+              role: "viewer",
+              email: "new@example.com",
+              name: null,
+              userId: null,
+              createdAt: 2,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(await screen.findByText(/only you currently have access/i)).toBeInTheDocument();
+  });
+
+  it("a failed people-list load never reads as an empty list (review #3)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ error: "boom" }, 500),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    // The neutral sentence, not "only you"; the password notice stays general too.
+    expect(
+      screen.getByText(/^only the people and teams above can open it\.$/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/only you currently have access/i)).toBeNull();
+    expect(screen.queryByText(/gates no one/i)).toBeNull();
+    expect(screen.getByText(/asked for this password too/i)).toBeInTheDocument();
+  });
+
+  it("the password notice names editors AND legacy guests as exempt, and says 'gates no one' only for a loaded empty list (review #2)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "guest:g1",
+              kind: "guest",
+              role: "viewer",
+              email: "g@partner.com",
+              name: null,
+              userId: null,
+              createdAt: 1,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/asked for this password too; editors and legacy guests never are/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/gates no one/i)).toBeNull();
+  });
+
+  it("with a loaded empty list the password notice says it gates no one and the expiry field stays hidden (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    expect(await screen.findByText(/gates no one/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/share expiry/i)).toBeNull();
+  });
+
+  it("one listed person shows the singular hint and the expiry field (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "member:m1",
+              kind: "member",
+              role: "viewer",
+              email: "liam@example.com",
+              name: "Liam",
+              userId: "u2",
+              createdAt: 2,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/only you and the one person or team above can open it/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/share expiry/i)).toBeInTheDocument();
+  });
+
+  it("a Restricted canvas with an expiry shows the expiry field even with an empty list (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          sharedExpiresAt: Date.now() + 86_400_000,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    expect(await screen.findByLabelText(/share expiry/i)).toBeInTheDocument();
   });
 
   it("warns when a shared canvas's expiry is already in the past", async () => {
@@ -666,7 +930,7 @@ describe("share route", () => {
     const user = userEvent.setup();
     renderShare();
 
-    await user.click(await screen.findByRole("switch", { name: /list for people with access/i }));
+    await user.click(await screen.findByRole("switch", { name: /list for your org/i }));
     await vi.waitFor(() => {
       const patch = calls.find(
         (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",

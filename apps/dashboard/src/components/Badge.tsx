@@ -85,13 +85,15 @@ export function PublicationBadge({ state }: { state: PublicationState }) {
   );
 }
 
-/** Access axis (D4 ladder): who can reach the canvas. `public_link` is the only
- *  rung open beyond the org, so it reads as a distinct, attention-toned "Public"
+/** Access axis (D4 ladder): who can reach the canvas. The Restricted family (`private`
+ *  and its legacy aliases `specific_people` / `team`) reads as one label — the people and
+ *  teams on the list always can, nobody else (restricted access model). `public_link` is
+ *  the only rung open beyond the org, so it reads as a distinct, attention-toned "Public"
  *  pill (with a dot) everywhere access is shown — owners and admins alike. */
 const ACCESS_BADGE: Record<AccessRung, { tone: Tone; label: string; dot: boolean }> = {
-  private: { tone: "neutral", label: "Private", dot: false },
-  specific_people: { tone: "accent", label: "Specific people", dot: false },
-  team: { tone: "accent", label: "Team", dot: false },
+  private: { tone: "neutral", label: "Restricted", dot: false },
+  specific_people: { tone: "neutral", label: "Restricted", dot: false },
+  team: { tone: "neutral", label: "Restricted", dot: false },
   whole_org: { tone: "accent", label: "Whole org", dot: false },
   public_link: { tone: "warning", label: "Public", dot: true },
 };
@@ -102,14 +104,14 @@ export function accessRungLabel(access: AccessRung): string {
   return (ACCESS_BADGE[access] ?? ACCESS_BADGE.private).label;
 }
 
-/** Options for an access-rung filter dropdown (owner + admin canvas lists), derived
- *  from ACCESS_BADGE so the rung labels never drift from the pills. `all` clears it. */
+/** Options for the access filter dropdown (owner + admin canvas lists): the three choices
+ *  the Share tab offers, with `restricted` covering the whole family server-side. Labels
+ *  come from ACCESS_BADGE so they never drift from the pills. `all` clears it. */
 export const ACCESS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "all", label: "All access" },
-  ...(Object.keys(ACCESS_BADGE) as AccessRung[]).map((a) => ({
-    value: a,
-    label: ACCESS_BADGE[a].label,
-  })),
+  { value: "restricted", label: ACCESS_BADGE.private.label },
+  { value: "whole_org", label: ACCESS_BADGE.whole_org.label },
+  { value: "public_link", label: ACCESS_BADGE.public_link.label },
 ];
 
 export function AccessBadge({ access }: { access: AccessRung }) {

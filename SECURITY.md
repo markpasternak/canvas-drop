@@ -40,10 +40,10 @@ The security-critical surface is the five hard invariants (see the
    the editor role on the canvas's people list, directly or through an
    editor-role team, resolved live on every request and admitted on any rung,
    and is owner-equivalent except for delete, transfer, and the guest-AI
-   opt-in, which answer `OWNER_ONLY`; any allowed org member at
-   `whole_org`; a member of a granted team at `team`; a listed principal — an
-   existing user, or a pending email once that email has verified through the
-   configured auth — at `specific_people`; anyone at `public_link`, static-only
+   opt-in, which answer `OWNER_ONLY`; every principal on the people-and-teams
+   list — an existing user, a pending email once that email has verified through
+   the configured auth, or a member of a granted team — at every `access` value;
+   any allowed org member at `whole_org`; anyone at `public_link`, static-only
    and only while the instance public-link switch is on and the owner account
    is not revoked). Pending grants confer nothing; revoke/expiry/password are
    honored, including **live** on open realtime sockets. An admin gets **no**

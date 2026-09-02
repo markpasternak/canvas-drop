@@ -1,4 +1,5 @@
 import type { Config } from "@canvas-drop/shared";
+import { accessModeOf } from "@canvas-drop/shared";
 import { type CanvasStatus, publicationState } from "@canvas-drop/shared/db";
 import { canvasUrl } from "../canvas/url.js";
 import { DeployError } from "../deploy/errors.js";
@@ -66,7 +67,7 @@ export function canvasView(
   // the access-gated cover (`card` rendition) so an agent can surface it the way the
   // dashboard does. Defaults false → no preview (pipeline off / not yet captured).
   hasPreview = false,
-  // The teams this canvas is granted to (plan 003) — only meaningful for `access: "team"`.
+  // The teams this canvas is granted to (plan 003), at any rung (restricted access model).
   // Passed (and resolved) only by get_canvas / update_canvas so a write is read-your-writes
   // confirmable; omitted elsewhere (the field is absent rather than a misleading []).
   teamIds?: string[],
@@ -92,6 +93,8 @@ export function canvasView(
     // Sharing / settings fields (parity with the Settings + Share dashboard tabs) so an
     // agent can confirm an `update_canvas` write from this response, not a second call.
     access: cv.access,
+    // Who else can open it beyond the people-and-teams list (restricted access model).
+    accessMode: accessModeOf(cv.access ?? "private"),
     discoverability: cv.discoverability,
     ...(teamIds !== undefined ? { teamIds } : {}),
     hasPassword: cv.passwordHash != null,

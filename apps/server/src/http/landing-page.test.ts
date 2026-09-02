@@ -177,16 +177,23 @@ describe("landing page — rendered content", () => {
     const html = renderLandingPage();
     // The ladder heading + each rung in product order.
     expect(html).toContain("An access ladder that fits how people actually share.");
-    for (const rung of ["Private", "Specific people", "Team", "Whole org", "Public link"]) {
+    for (const rung of ["People &amp; teams", "Restricted", "Whole org", "Public link"]) {
       expect(html).toContain(`class="r-name">${rung}`);
     }
-    // The Team rung is the accented (feature) one.
+    // The old rungs are gone from the marketing copy (restricted access model).
+    for (const gone of [
+      'class="r-name">Private',
+      'class="r-name">Specific people',
+      'class="r-name">Team<',
+    ]) {
+      expect(html).not.toContain(gone);
+    }
+    // The people-and-teams entry is the accented (feature) one.
     expect(html).toContain('class="rung feature"');
     // The headline differentiator: auth-delegated invites (no app-owned credentials).
     expect(html).toContain("no app-managed passwords, no magic-link accounts");
-    // Discovery is separate from access: Team/Whole-org can stay URL-only.
-    expect(html).toContain("Team and Whole-org shares can stay link-only");
-    expect(html).toContain("list them in Shared");
+    // The list always applies; General access only widens.
+    expect(html).toContain("the people and teams you name always get in");
     // The Teams capability also appears in the "Built for teams" grid + the tour.
     expect(html).toContain("Teams &amp; invites");
     expect(html).toContain('src="/docs/assets/tour-teams.webp');

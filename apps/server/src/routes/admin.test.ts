@@ -868,19 +868,24 @@ describe("admin routes", () => {
       apiKeyHash: "u7-org",
       orgId: org.id,
     });
+    // "team" context = a team grant on the list (restricted access model), whatever the rung:
+    // one canvas stays on the legacy `team` alias, the other is plain private.
+    const ctxTeams = teamsRepository(client);
+    const ctxTeam = await ctxTeams.create({ orgId: null, name: "Ctx", createdBy: publicOwner.id });
     const teamCanvas = await canvases.create({
       ownerId: publicOwner.id,
       slug: "team-context",
       apiKeyHash: "u7-team",
     });
     await canvases.setAccess(teamCanvas.id, "team");
+    await ctxTeams.setCanvasTeams(teamCanvas.id, [ctxTeam.id]);
     const orgTeamCanvas = await canvases.create({
       ownerId: publicOwner.id,
       slug: "org-team-context",
       apiKeyHash: "u7-org-team",
       orgId: org.id,
     });
-    await canvases.setAccess(orgTeamCanvas.id, "team");
+    await ctxTeams.setCanvasTeamRole(orgTeamCanvas.id, ctxTeam.id, "editor");
 
     const publicBody = (await (await app.request("/api/admin/canvases?public=true")).json()) as {
       canvases: Array<{
@@ -930,6 +935,20 @@ describe("admin routes", () => {
       new Set([teamCanvas.id, orgTeamCanvas.id]),
     );
     expect(teamBody.canvases.every((c) => c.context === "team")).toBe(true);
+
+    // `access=restricted` = the whole family (private + the legacy aliases), never the open rungs.
+    const restrictedBody = (await (
+      await app.request("/api/admin/canvases?access=restricted")
+    ).json()) as { canvases: Array<{ id: string; access: string }> };
+    const restrictedIds = new Set(restrictedBody.canvases.map((c) => c.id));
+    expect(restrictedIds.has(teamCanvas.id)).toBe(true);
+    expect(restrictedIds.has(orgTeamCanvas.id)).toBe(true);
+    expect(restrictedIds.has(orgCanvas.id)).toBe(true);
+    expect(
+      restrictedBody.canvases.every((c) =>
+        ["private", "specific_people", "team"].includes(c.access),
+      ),
+    ).toBe(true);
   });
 
   it("blocks then unblocks a user (audited); the stored bit flips", async () => {

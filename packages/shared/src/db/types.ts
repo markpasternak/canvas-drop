@@ -124,9 +124,10 @@ export type CanvasStatus = "active" | "disabled" | "archived" | "deleted";
 
 /**
  * Canvas access rung (D4 ladder). One rung per canvas, stored as text:
- *  - `private`         — owner only (default; a non-owner admin is treated as any member)
- *  - `specific_people` — a named allowlist (org members and/or invited guests)
- *  - `team`            — members of a granted team (plan 003 P2; needs a home org)
+ *  - `private`         — Restricted: the owner, the editors and the people-and-teams
+ *                        list (default; a non-owner admin is treated as any member)
+ *  - `specific_people` — legacy alias of `private` (kept for API compatibility)
+ *  - `team`            — legacy alias of `private` (kept for API compatibility)
  *  - `whole_org`       — any authenticated org member with the link (the former "shared")
  *  - `public_link`     — anyone with the link; revocable per account; static-only
  */
@@ -140,12 +141,26 @@ export const ACCESS_RUNGS: readonly AccessRung[] = [
 ];
 
 /**
+ * The RESTRICTED family (restricted access model, plan 2026-09-02): the rungs at which
+ * nobody beyond the owner, the editors, and the people-and-teams list can open the canvas.
+ * `specific_people` and `team` are legacy aliases of `private` — still stored and accepted
+ * on every API surface for compatibility, folded into one "Restricted" choice in the
+ * dashboard, and treated identically by every access decision. The list itself ALWAYS
+ * applies, at every rung; General access only ever widens beyond it.
+ */
+export const RESTRICTED_RUNGS: readonly AccessRung[] = ["private", "specific_people", "team"];
+export function isRestrictedRung(access: string): boolean {
+  return (RESTRICTED_RUNGS as readonly string[]).includes(access);
+}
+
+/**
  * Non-owner enumeration policy for access-controlled canvases.
  *  - `link_only` — access is by URL only; people who can open it do not see it in Shared.
  *  - `listed`    — people who already have access may discover it in Shared.
  *
- * This never widens URL access. It only controls listing surfaces for `team` and
- * `whole_org` canvases; direct `specific_people` grants are listed for the grantee.
+ * This never widens URL access. It only controls the `whole_org` listing surfaces (Shared
+ * for org members, and gallery eligibility); people and teams on a canvas's list always
+ * see it in Shared (restricted access model).
  */
 export type CanvasDiscoverability = "link_only" | "listed";
 export const CANVAS_DISCOVERABILITIES: readonly CanvasDiscoverability[] = ["link_only", "listed"];

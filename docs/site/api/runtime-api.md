@@ -74,8 +74,8 @@ bypass here: they face the rung and the gate like any other member.
 | `ARCHIVED` | 404 | The canvas is archived. |
 | `DISABLED` | 403 | An admin disabled the canvas. The owner is not exempt. |
 | `NOT_INVITED` | 404 | A guest principal scoped to a different canvas. |
-| `OWNER_ONLY` | 404 | The viewer does not meet the rung: Private; Team without a team match; Whole org as a non-member (or, under tenancy, a member of another org); Specific people without a grant or as an anonymous visitor; Public link while public links are off for the instance or for the owner. |
-| `SHARE_EXPIRED` | 404 | The share's expiry has passed (Team, Whole org, Specific people, Public link). |
+| `OWNER_ONLY` | 404 | The viewer has no route in: not on the people-and-teams list (directly or through a team) and not admitted by General access — Restricted, Whole org as a non-member (or, under tenancy, a member of another org), or Public link while public links are off for the instance or for the owner. |
+| `SHARE_EXPIRED` | 404 | The share's expiry has passed (for anyone but the owner and editors). |
 | `PASSWORD_REQUIRED` | 403 | A shared canvas with a password set and no valid `__canvasdrop_gate` cookie. The gate that sets the cookie lives on the canvas page, not under `/v1/c/`; this API only checks it. Guests skip the gate. |
 | `STATIC_ONLY` | 403 | Public link canvas and the viewer is not the owner or an editor. Applies to signed-in members as well as anonymous visitors: the whole runtime API is closed. Body: `{"code":"STATIC_ONLY","message":"This canvas is public and static-only."}`. |
 
@@ -320,7 +320,7 @@ compatibility shorthand for a Public link plus a password.
 | `title` | required, 1-200 chars | optional | |
 | `slug` | optional | not accepted | Custom slug. Invalid: `400 INVALID_BODY` with `reason: "invalid_slug"`; in use: `409 SLUG_TAKEN`. |
 | `tags` | optional | optional | Up to 20, each 1-64 chars. |
-| `access` | optional, default `private` | optional | `private`, `specific_people`, `whole_org`, `public_link`, or `password` (a Public link with a password). Must be in `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` (default `private,specific_people,whole_org,public_link`; `public_link` covers `password`), else `400 INVALID_BODY`. |
+| `access` | optional, default `private` | optional | `private` (Restricted: the people-and-teams list only), `whole_org`, `public_link`, or `password` (a Public link with a password); `specific_people` is accepted as a legacy alias of `private`. Must be in `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` (default `private,specific_people,whole_org,public_link`; `public_link` covers `password`), else `400 INVALID_BODY`. |
 | `password` | optional, 1-200 chars | optional; `null` clears | Required when `access` is `password`. |
 | `expiresAt` | optional, epoch ms | optional; `null` clears | Must be in the future and within `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` (default `0`, no cap); required when `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` is on (default off). |
 | `metadata` | optional object | optional | Free-form, ≤ 16 KiB. |
@@ -353,13 +353,19 @@ settings-only `PUT` on a revoked share is `409 SHARE_REVOKED`.
 `AuthoredCanvas`:
 
 ```
-{ id, url, title, tags, access, hasPassword, status, createdAt, updatedAt, expiresAt,
-  galleryListed, galleryTemplatable, discoverability, revokedAt, createdBy, viewerRole,
-  audienceSummary, version, bundleUpdatedAt, sourceApp, sourceKind, metadata }
+{ id, url, title, tags, access, accessMode, publicationStatus, hasPassword, status,
+  createdAt, updatedAt, expiresAt, galleryListed, galleryTemplatable, discoverability,
+  revokedAt, createdBy, viewerRole, audienceSummary, version, bundleUpdatedAt, sourceApp,
+  sourceKind, metadata }
 ```
 
-`status` is derived, first match wins: `revoked` (`revokedAt` set), `expired` (`expiresAt`
-passed), `private` (`access` is `private`), else `live`. `version` is the id of the
+`accessMode` is the audience: `restricted` (`access` is `private` or a legacy alias —
+only the people and teams on the list, who are admitted at every value), `whole_org`, or
+`public_link`. `publicationStatus` is the lifecycle, independent of the audience, first
+match wins: `disabled`, `archived`, `unpublished` (`revokedAt` set), `draft` (no version),
+`expired` (`expiresAt` passed), else `published`; deleted canvases never appear. The older
+`status` (`revoked` › `expired` › `private` › `live`) is deprecated and frozen: its `private`
+means the persisted value is literally `private`, not that nobody can open the share. `version` is the id of the
 current published version (`null` when none) and advances on every deploy;
 `bundleUpdatedAt` is the row's last write (deploy or settings), the same value as
 `updatedAt`, so watch `version` to detect a bundle change. `sourceApp` and `sourceKind`

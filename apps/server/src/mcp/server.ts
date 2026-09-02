@@ -8,7 +8,7 @@ import type { GuestService } from "../auth/guest.js";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
-import type { CloneService } from "../canvas/clone-service.js";
+import { type CloneService, isCloneableByGrantedTeam } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
@@ -306,12 +306,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "`role: 'owner'`. Pass role='owned' or 'edited' to narrow. Default order is " +
         'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
         "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
-        "and `lastViewedAt`.",
+        "and `lastViewedAt`. Pass `access` to narrow by audience — the same filter the " +
+        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases.",
       inputSchema: {
         role: z
           .enum(["owned", "edited"])
           .optional()
           .describe("Narrow to canvases you own, or to canvases you edit but don't own."),
+        access: z
+          .enum(["restricted", "whole_org", "public_link", "private", "specific_people", "team"])
+          .optional()
+          .describe(
+            "Narrow by audience: restricted (private + its legacy aliases specific_people / team), " +
+              "whole_org, or public_link. A single legacy value is accepted too.",
+          ),
         query: z
           .string()
           .optional()
@@ -330,7 +338,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ role, query, tags, sort, limit }) => {
+    async ({ role, access, query, tags, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const {
         items,
@@ -340,6 +348,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         actorId: caller.userId,
         scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
         role,
+        access,
         q: query,
         tag: tags,
         sort,
@@ -465,9 +474,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-      // Echo the team grants for a team-scoped canvas (parity with the dashboard share view).
-      const teamIds =
-        cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : undefined;
+      // Echo the team grants at any rung (parity with the dashboard share view — team grants
+      // live on the people-and-teams list, restricted access model).
+      const teamIds = await deps.teams.listTeamIdsForCanvas(cv.id);
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
@@ -1093,15 +1102,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Update a canvas you own or edit (mirrors the dashboard Settings + Share tabs). All fields optional; " +
-        "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
+        "omitted = unchanged. Set General access, a password (or null to clear), a share expiry, " +
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
-        "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
-        "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
-        "grant_access / revoke_access. `discoverability` controls only whether Team/Whole-org " +
-        "canvases are findable in Shared (it never widens URL access). To share with one or more teams, set access='team' AND pass " +
-        "`teamIds` (the teams you belong to — see whoami.teams / list_teams); personal teams can be " +
-        "granted to any canvas you own, while org teams must match the canvas org. Switching off the team rung clears the grants. When " +
-        "restricting a previously-public canvas, the response may include a `warning` string (a " +
+        "preconditions (opening to the org or the public, and gallery listing, need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
+        "password un-lists from the gallery). The people-and-teams list (grant_access / set_access_role / revoke_access) ALWAYS applies, " +
+        "at every `access` value; `access` only says who else may open the canvas: private = Restricted (nobody else), whole_org, public_link. " +
+        "`specific_people` and `team` are accepted as legacy aliases of private. `discoverability` controls only whether a Whole-org " +
+        "canvas is findable in Shared by the whole org (people and teams on the list always see it; it never widens URL access). " +
+        "To share with a team, grant_access it with teamId; the legacy `teamIds` field replaces the viewer-team grants on the list " +
+        "(teams you belong to — see whoami.teams / list_teams; personal teams fit any canvas you own, org teams must match the canvas org). " +
+        "Changing `access` never touches team grants. When restricting a previously-public canvas, the response may include a `warning` string (a " +
         "plain-language CDN edge-cache staleness notice) — surface it to the user.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -1117,21 +1127,29 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           ),
         access: z
           .enum(["private", "specific_people", "team", "whole_org", "public_link"])
-          .optional(),
+          .optional()
+          .describe(
+            "General access — who can open the canvas BEYOND the people-and-teams list (which always applies): " +
+              "private = Restricted (nobody else), whole_org, public_link. specific_people and team are legacy " +
+              "aliases of private, accepted for compatibility.",
+          ),
         discoverability: z
           .enum(["link_only", "listed"])
           .optional()
           .describe(
-            "Listing policy for Team/Whole-org canvases: link_only = URL access only; listed = " +
-              "people who already have access can find it in Shared. Does not change who can open it.",
+            "Listing policy for a Whole-org canvas: link_only = URL access only; listed = every org member " +
+              "can find it in Shared (and it becomes gallery-eligible). People and teams on the list always " +
+              "see it in Shared. Does not change who can open it.",
           ),
         teamIds: z
           .array(z.string().min(1))
           .max(50)
           .optional()
           .describe(
-            "Teams to grant when access='team'. Personal teams can be granted to any canvas you own; " +
-              "org teams must match the canvas org. Required (≥1) when setting access='team'; ignored for other rungs.",
+            "Legacy: replaces the VIEWER-role team grants on the people-and-teams list (prefer grant_access with teamId). " +
+              "Personal teams can be granted to any canvas you own; org teams must match the canvas org. An empty array on its " +
+              "own is refused (TEAM_REQUIRED); the legacy `teamIds: []` sent together with an `access` change away from the " +
+              "`team` value is a no-op — the grants stay on the list.",
           ),
         password: z
           .string()
@@ -1178,7 +1196,12 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
 
-      // Resolve viewer-team grants before mutating, then commit them with the canvas row.
+      // Legacy `teamIds` (plan 003 U6) — the SAME shared resolver the management PATCH route
+      // uses (agent-native parity): when sent, it replaces the VIEWER-role team grants after
+      // validating owner-team membership (KTD4); an empty set is refused. Team grants live on
+      // the people-and-teams list and apply at every rung (restricted access model), so a
+      // rung change never clears them. Resolved before mutating, then committed with the
+      // canvas row.
       let teamGranted = false;
       let viewerTeamIds: string[] | undefined;
       {
@@ -1198,8 +1221,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         if (grant.kind === "write") {
           viewerTeamIds = grant.teamIds;
           teamGranted = true;
-        } else if (grant.kind === "clear") {
-          viewerTeamIds = [];
         }
       }
 
@@ -1248,9 +1269,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub.revalidateCanvas(cv.id).catch(() => {});
         if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
       }
-      // Echo the resolved team grants when the canvas is team-scoped (read-your-writes).
-      const teamIds =
-        updated.access === "team" ? await deps.teams.listTeamIdsForCanvas(updated.id) : undefined;
+      // Echo the resolved team grants at any rung (read-your-writes).
+      const teamIds = await deps.teams.listTeamIdsForCanvas(updated.id);
       // Identity rides on the mutation's echo too (review #10): the doc promises
       // `role`/`owner` on update_canvas exactly like get_canvas.
       const view = await viewWithIdentity(updated, gate.role, false, teamIds);
@@ -1440,9 +1460,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "existing user is granted now (`status: granted`; an existing entry's role is updated " +
         "when you pass one — `status: role_changed` — and never changed when you omit it); an " +
         "admissible new email becomes a pending sign-in grant (`status: pending`) that " +
-        "materializes after verified sign-in, carrying the role. A viewer grant takes effect " +
-        "on the `specific_people` / `team` rungs (set with update_canvas); an editor always has " +
-        "access. Available to the owner and editors.",
+        "materializes after verified sign-in, carrying the role. Every grant opens the canvas at once, " +
+        "whatever General access (update_canvas `access`) says; an editor also manages it. " +
+        "Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().optional().describe("The person's email (or pass teamId)."),
@@ -1477,7 +1497,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "(`status: granted`); a brand-new email gets a sign-in invitation and reaches the canvas " +
         "on their first sign-in (`status: pending`). A brand-new EXTERNAL email is refused for a " +
         "non-admin unless the instance allows it (NOT_PERMITTED); RATE_LIMITED if you invite too " +
-        "many. The grant lands on the `specific_people` rung — set that with update_canvas.",
+        "many. The grant opens the canvas at once, whatever General access says.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().describe("The person's email."),
@@ -1599,9 +1619,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Clone a canvas into a NEW canvas you own, seeded from the source (mirrors gallery/Settings " +
-        "Clone). You may clone any ACTIVE canvas you own, or a gallery-listed + templatable canvas " +
-        "someone else shared. The clone starts as an unpublished draft with a fresh slug + key, " +
-        "backend off. Returns the new canvas. A non-eligible/unknown source reads as not found.",
+        "Clone). You may clone any ACTIVE canvas you own or edit, a gallery-listed + templatable canvas " +
+        "someone else shared, or a published, unexpired, password-free canvas granted to a team you " +
+        "belong to (at any General-access value). The clone starts as an unpublished draft with a " +
+        "fresh slug + key, backend off. Returns the new canvas. A non-eligible/unknown source reads as not found.",
       inputSchema: { id: z.string().describe("The source canvas id.") },
     },
     async ({ id }) => {
@@ -1613,17 +1634,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       // server-resolved orgIds.
       // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage
       // — the shared resolver (parity with the dashboard clone route).
+      const now = Date.now();
       const eligible =
         (await resolveManagementGrant(source, principal, roleDeps)) !== null
           ? source.status === "active"
-          : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+          : (await deps.canvases.findCloneableTemplate(id, now, {
               tenancyActive: caller.tenancyActive,
               viewerOrgIds: caller.orgIds,
             })) !== null ||
-            // Team branch (plan 003): a member of one of a `team` canvas's granted teams may
-            // clone it — same live-org `teamMatch` re-join the serve seam uses (KTD3).
-            (source.access === "team" &&
-              source.status === "active" &&
+            // Team branch (plan 003): a member of one of the canvas's granted teams may clone
+            // it at ANY rung (restricted access model) — same live-org `teamMatch` re-join the
+            // serve seam uses (KTD3), fenced to what the serve seam would show them:
+            // published, unexpired, no password (`isCloneableByGrantedTeam`; review #1).
+            (isCloneableByGrantedTeam(source, now) &&
               (await deps.teams.teamMatch(id, caller.userId, caller.orgIds)));
       if (!eligible) return fail("canvas not found");
       const { canvas } = await deps.clone.clone(source, caller.userId);
@@ -1826,9 +1849,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_shared_canvases",
     {
       description:
-        "List non-owned canvases discoverable to you in Shared: direct Specific-people grants, " +
-        "Team canvases whose owner opted into discoverability, and Whole-org canvases whose owner " +
-        "opted into discoverability. Excludes your own canvases, public links, expired shares, " +
+        "List non-owned canvases discoverable to you in Shared: canvases you are on the people-and-teams " +
+        "list of (directly, or through a team — at any General-access value), plus Whole-org canvases " +
+        "whose owner opted into discoverability. Excludes canvases you own or edit, expired shares, " +
         "and anything not live. Display-only; open via the returned url.",
       inputSchema: {
         query: z

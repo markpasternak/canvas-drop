@@ -1,4 +1,5 @@
 import type { Canvas, CanvasDiscoverability } from "@canvas-drop/shared/db";
+import { isRestrictedRung } from "@canvas-drop/shared/db";
 import type { CanvasSettingsPatch } from "../db/repositories/canvases.js";
 import { cdnAccessDowngradeWarning } from "../http/cdn-cache.js";
 import { isAnonymouslyPublic } from "./authorization.js";
@@ -93,7 +94,10 @@ export function resolveSettingsUpdate(
   const effectiveAccess = targetAccess ?? cv.access;
   const effectiveExpiresAt =
     rest.sharedExpiresAt !== undefined ? rest.sharedExpiresAt : cv.sharedExpiresAt;
-  const discoverableAccess = effectiveAccess === "team" || effectiveAccess === "whole_org";
+  // Only the whole_org rung has an enumeration policy to set: people and teams on the list
+  // always see the canvas in Shared (restricted access model), and the restricted family
+  // and public_link have no org-wide listing surface. Any other rung pins `link_only`.
+  const discoverableAccess = effectiveAccess === "whole_org";
   // Gallery listing is itself an explicit discovery opt-in. For Whole-org canvases,
   // make that single owner action supply the narrower `discoverability='listed'` fact
   // used by both Shared and the org-scoped gallery predicate. Keeping this resolution
@@ -107,12 +111,16 @@ export function resolveSettingsUpdate(
   const galleryEligible =
     effectiveAccess === "public_link" ||
     (effectiveAccess === "whole_org" && effectiveDiscoverability === "listed");
-  const willBeShared = effectiveAccess !== "private";
+  // "Shared" here means open beyond the people-and-teams list: the two wide rungs. The
+  // restricted family (`private` and its legacy aliases) opens nothing on its own.
+  const willBeShared = !isRestrictedRung(effectiveAccess);
   // "Published" means the full lifecycle state (active + a current version), not just
   // "has a version" — an archived canvas keeps its currentVersionId.
   const isPublished = cv.status === "active" && cv.currentVersionId !== null;
 
-  if (targetAccess !== undefined && targetAccess !== "private" && !isPublished) {
+  // Opening a canvas to the org or the public before it has anything to show is refused;
+  // moving within the restricted family opens nothing, so it needs no publish.
+  if (targetAccess !== undefined && !isRestrictedRung(targetAccess) && !isPublished) {
     return {
       ok: false,
       code: "SHARE_REQUIRES_PUBLISH",
@@ -168,11 +176,10 @@ export function resolveSettingsUpdate(
       status: 409,
     };
   }
-  // The `team` rung (plan 003 phase 3) no longer requires a home org or active tenancy: a
-  // PERSONAL team can be granted to a personal (org-less) canvas. The actual grant — which
-  // teams, owner membership, org-match for org teams — is validated + written by the caller's
-  // grant resolver (`resolveTeamGrant`), which returns TEAM_REQUIRED (no teams) / TEAM_FORBIDDEN
-  // (invalid), so there's no pure guard to duplicate here.
+  // The restricted family (`private` and its legacy aliases `specific_people` / `team`) needs
+  // no guard of its own: nothing opens beyond the list, which is managed on the people-list
+  // routes. Legacy `teamIds` writes are validated by the caller's grant resolver
+  // (`resolveTeamGrant` → TEAM_REQUIRED / TEAM_FORBIDDEN), not here.
   if (rest.galleryListed === true) {
     if (!willBeShared) {
       return {

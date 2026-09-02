@@ -1,5 +1,25 @@
-import { type AccessRung, type Canvas, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, or, type SQL, sql } from "drizzle-orm";
+import {
+  type AccessRung,
+  type Canvas,
+  pgSchema,
+  RESTRICTED_RUNGS,
+  sqliteSchema,
+} from "@canvas-drop/shared/db";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notExists,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { DbClient } from "../factory.js";
 
 /** Window for the "new in the last N days" growth stats (§6.10.6). */
@@ -34,8 +54,9 @@ export interface ListAllCanvasesQuery {
   owner?: string;
   /** Drill-down: restrict to canvases owned by, directly shared with, or pending for this email. */
   person?: string;
-  /** Governance filter: narrow to one access rung (e.g. find every `public_link`). */
-  access?: AccessRung;
+  /** Governance filter: narrow to one access rung (e.g. find every `public_link`), or to
+   *  the whole Restricted family with `restricted` (`private` + its legacy aliases). */
+  access?: AccessRung | "restricted";
   /** Effective public-link filter (access rung + owner/global capability). */
   publicLink?: boolean;
   publicLinksEnabled?: boolean;
@@ -43,7 +64,9 @@ export interface ListAllCanvasesQuery {
   password?: boolean;
   /** Share-window filter over sharedExpiresAt. */
   expiry?: AdminCanvasExpiryFilter;
-  /** Home/access context filter: personal, org, or team-rung. */
+  /** Context filter: `team` = the canvas has at least one team grant (viewer or editor);
+   *  `personal` / `org` = by home org, for canvases with no team grant. The legacy `team`
+   *  RUNG signals nothing (restricted access model). */
   context?: AdminCanvasContextFilter;
   /** Exposure filter: canvases involving external people. */
   external?: boolean;
@@ -332,11 +355,18 @@ export function adminRepository(client: DbClient) {
         filters.push(sql`${canvasesT.sharedExpiresAt} is not null`);
         filters.push(sql`${canvasesT.sharedExpiresAt} <= ${Date.now()}`);
       }
+      // Context (restricted access model): a team grant on the list is what makes a canvas
+      // "team" — the legacy `team` rung is just a Restricted alias. Personal / org cover the
+      // rest by home org, so the three stay mutually exclusive.
+      const teamGrant = db
+        .select({ one: sql`1` })
+        .from(canvasTeamsT)
+        .where(eq(canvasTeamsT.canvasId, canvasesT.id));
       if (q.context === "personal") {
-        filters.push(and(isNull(canvasesT.orgId), ne(canvasesT.access, "team")));
+        filters.push(and(isNull(canvasesT.orgId), notExists(teamGrant)));
       } else if (q.context === "org") {
-        filters.push(and(isNotNull(canvasesT.orgId), ne(canvasesT.access, "team")));
-      } else if (q.context === "team") filters.push(eq(canvasesT.access, "team"));
+        filters.push(and(isNotNull(canvasesT.orgId), notExists(teamGrant)));
+      } else if (q.context === "team") filters.push(exists(teamGrant));
       if (q.external || q.pending) {
         const { rows, exposure } = await allCanvasIdsByExposure();
         const matchingIds = new Set(
@@ -426,7 +456,9 @@ export function adminRepository(client: DbClient) {
         }
         filters.push(personFilters.length > 0 ? (or(...personFilters) as SQL) : sql`1 = 0`);
       }
-      if (q.access) filters.push(eq(canvasesT.access, q.access));
+      if (q.access === "restricted") {
+        filters.push(inArray(canvasesT.access, [...RESTRICTED_RUNGS]));
+      } else if (q.access) filters.push(eq(canvasesT.access, q.access));
       // Gallery facets — each maps to one boolean canvas column. `templatable`
       // implies listed at the data level, but they filter independently here so an
       // admin can isolate either set.

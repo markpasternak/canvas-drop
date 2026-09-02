@@ -29,58 +29,55 @@ export async function canGrantTeam(
 /** The canvas→team grant action resolved from a settings update. */
 export type TeamGrantAction =
   | { kind: "write"; teamIds: string[] }
-  | { kind: "clear" }
   | { kind: "none" }
   | { kind: "error"; code: "TEAM_REQUIRED" | "TEAM_FORBIDDEN" };
 
 /**
- * Resolve what to do with a canvas's team grants for a settings change, validating that
- * the owner may grant each team (KTD4: a live member of that team, in the canvas's org).
- * Covers three shapes a caller can request:
- *  - **set the team rung** (`targetAccess === 'team'`): require ≥1 valid team.
- *  - **change the grant set with the rung unchanged** (`teamIds` sent, canvas already
- *    `team`): require ≥1 valid team — so an agent can re-pick teams without re-sending
- *    `access` (the dashboard always sends both; the MCP exposes `teamIds` independently).
- *  - **leave the team rung** (`targetAccess` set to anything else): clear the grants.
- * Returns `none` when nothing about the grants changes.
+ * Resolve what to do with a canvas's VIEWER-role team grants for a settings change.
+ * Team grants live on the people-and-teams list and apply at EVERY rung (restricted access
+ * model), so a rung change — to or from the legacy `team` alias, to whole_org, anywhere —
+ * never touches them. The legacy `teamIds` field keeps its replace semantics for existing
+ * agents: when sent, it becomes the exact set of viewer-role team grants (editor teams are
+ * the list's alone, KTD4), each validated by the shared per-team rule ({@link canGrantTeam}:
+ * a live member of that team; an org team in the canvas's org). An explicit empty set is
+ * refused (`TEAM_REQUIRED`) rather than silently wiping grants — removals go through the
+ * people-list revoke path — with one compatibility carve-out: the legacy "leave the Team
+ * rung" shape (`teamIds: []` sent by a client that sees the canvas on the legacy `team`
+ * value, together with an `access` change to anything but `team`) used to clear the grants
+ * and is now a no-op, because the grants belong to the list. The carve-out is keyed on that
+ * exact transition — current value `team`, new value not `team` — so an empty array with an
+ * echoed or unrelated `access` value stays refused (review #9). Returns `none` when
+ * `teamIds` wasn't sent.
  */
 export async function resolveTeamGrant(
   teams: Pick<TeamsRepository, "findById" | "isTeamMember">,
   actorId: string,
   input: {
     canvasOrgId: string | null;
-    /** The canvas's current access rung. */
+    /** The canvas's CURRENT persisted `access` value. */
     currentAccess: string;
-    /** The resolved NEW rung, or undefined when the rung isn't changing. */
+    /** The resolved NEW rung when the same call changes `access`, else undefined. */
     targetAccess?: string;
     /** The provided team set, or undefined when `teamIds` wasn't sent. */
     teamIds?: string[];
   },
 ): Promise<TeamGrantAction> {
-  const settingTeam = input.targetAccess === "team";
-  // A grant-set change with the rung unchanged: only when the canvas is ALREADY team-
-  // scoped and the caller actually sent teamIds (else leave the grants untouched).
-  const updatingGrants =
-    input.targetAccess === undefined &&
-    input.teamIds !== undefined &&
-    input.currentAccess === "team";
-
-  if (settingTeam || updatingGrants) {
-    const teamIds = [...new Set(input.teamIds ?? [])];
-    if (teamIds.length === 0) return { kind: "error", code: "TEAM_REQUIRED" };
-    for (const teamId of teamIds) {
-      // The actor must belong to the team; an ORG team must match the canvas's org; a
-      // PERSONAL team (org_id null, plan 003) is grantable to any canvas — the shared
-      // rule. Only the teams IN THE REQUEST are checked: grants the actor did not touch
-      // (another member's editor team, say) are never re-validated (KTD4).
-      if (!(await canGrantTeam(teams, actorId, input.canvasOrgId, teamId)))
-        return { kind: "error", code: "TEAM_FORBIDDEN" };
-    }
-    return { kind: "write", teamIds };
+  if (input.teamIds === undefined) return { kind: "none" };
+  const teamIds = [...new Set(input.teamIds)];
+  if (teamIds.length === 0) {
+    const leavingTeamRung =
+      input.currentAccess === "team" &&
+      input.targetAccess !== undefined &&
+      input.targetAccess !== "team";
+    return leavingTeamRung ? { kind: "none" } : { kind: "error", code: "TEAM_REQUIRED" };
   }
-  // Rung changing away from team → the grants are meaningless; clear them.
-  if (input.targetAccess !== undefined && input.targetAccess !== "team") return { kind: "clear" };
-  return { kind: "none" };
+  for (const teamId of teamIds) {
+    // Only the teams IN THE REQUEST are checked: grants the actor did not touch (another
+    // member's editor team, say) are never re-validated (KTD4).
+    if (!(await canGrantTeam(teams, actorId, input.canvasOrgId, teamId)))
+      return { kind: "error", code: "TEAM_FORBIDDEN" };
+  }
+  return { kind: "write", teamIds };
 }
 
 /** One team visible to the viewer with their membership + management flags. `orgId` is null

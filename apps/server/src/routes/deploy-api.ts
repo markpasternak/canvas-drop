@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { Config } from "@canvas-drop/shared";
+import { accessModeOf, type Config } from "@canvas-drop/shared";
 import type { Canvas, CanvasStatus } from "@canvas-drop/shared/db";
 import { publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
@@ -185,6 +185,9 @@ export function deployApiRoutes(deps: DeployApiDeps) {
         auth.status as CanvasStatus,
         auth.currentVersionId !== null,
       ),
+      // Who else can open it beyond the people-and-teams list (restricted access model) —
+      // the same derived audience the management and MCP views carry.
+      accessMode: accessModeOf(auth.access),
       currentVersionId: auth.currentVersionId,
     });
   });

@@ -210,11 +210,24 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "DISCOVERY_CONFLICT", status: 409 });
   });
 
-  it("NOT_GALLERY_ELIGIBLE: team canvases cannot be listed in the gallery", () => {
-    const r = resolve(canvas({ access: "team", discoverability: "listed" }), {
-      galleryListed: true,
-    });
-    expect(r).toMatchObject({ ok: false, code: "NOT_GALLERY_ELIGIBLE", status: 409 });
+  it("NOT_SHARED: a Restricted canvas (the legacy team / specific_people aliases included) cannot be listed in the gallery", () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      const r = resolve(canvas({ access, discoverability: "listed" }), { galleryListed: true });
+      expect(r).toMatchObject({ ok: false, code: "NOT_SHARED", status: 409 });
+    }
+  });
+
+  it("SHARE_REQUIRES_PUBLISH fires only for the two open rungs — moving within the restricted family needs no publish", () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      expect(resolve(canvas({ access: "private", currentVersionId: null }), { access }).ok).toBe(
+        true,
+      );
+    }
+    for (const access of ["whole_org", "public_link"] as const) {
+      expect(
+        resolve(canvas({ access: "private", currentVersionId: null }), { access }),
+      ).toMatchObject({ ok: false, code: "SHARE_REQUIRES_PUBLISH", status: 409 });
+    }
   });
 
   it("NOT_LISTED: enabling templatable without the canvas being listed is rejected (409)", () => {
@@ -264,13 +277,15 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     }
   });
 
-  it("persists listed discoverability for a team canvas without gallery listing", () => {
+  it("pins a team-rung canvas's discoverability to link_only — only whole_org carries a listing policy (restricted access model)", () => {
+    // A team on the list always sees the canvas in Shared, so there is nothing to opt into;
+    // the legacy `team` rung is a Restricted alias and takes the family's pinned value.
     const r = resolve(canvas({ access: "team", discoverability: "link_only" }), {
       discoverability: "listed",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.patch.discoverability).toBe("listed");
+      expect(r.patch.discoverability).toBe("link_only");
       expect(r.patch.galleryListed).toBe(false);
     }
   });

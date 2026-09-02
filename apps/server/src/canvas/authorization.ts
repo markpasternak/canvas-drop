@@ -18,8 +18,9 @@ export type AccessDecision =
 
 /**
  * Context the pure decision table can't compute itself (caller-resolved so the
- * table stays I/O-free, KTD4): whether the principal is on this canvas's allowlist
- * (`specific_people`), and whether public-link access is effectively enabled
+ * table stays I/O-free, KTD4): whether the principal is on this canvas's people-and-
+ * teams list (`isAllowed` / `teamMatch` — consulted at EVERY rung under the restricted
+ * access model), and whether public-link access is effectively enabled
  * (`public_link`, resolved by {@link resolveAccessContext} from the global switch
  * and owner's per-user capability; an absent value is treated as not-enabled by the table).
  */
@@ -35,7 +36,7 @@ export interface AccessContext {
    */
   tenancyActive?: boolean;
   /**
-   * Whether the principal may reach this canvas's `team` rung (plan 003 U4): a member of
+   * Whether the principal is a member of a team on this canvas's list (plan 003 U4): a member of
    * a team the canvas is granted to AND of that team's org (the live-orgIds re-join,
    * KTD3). Resolved by {@link resolveAccessContext}; absent ⇒ treated as not-a-match.
    */
@@ -195,21 +196,30 @@ export function decideCanvasAccess(
   // where set (R4/R21); only the owner (handled above) is never prompted.
   const gate = principal.kind === "guest" ? false : canvas.passwordHash !== null;
 
+  // The people-and-teams list ALWAYS applies (restricted access model, plan 2026-09-02):
+  // a direct grant (member by id, guest by email — `isAllowed`) or membership of a granted
+  // team (`teamMatch`; members only — a PERSONAL team grants by membership alone, an ORG
+  // team is re-joined against the LIVE orgIds) opens the canvas at EVERY rung. General
+  // access only ever widens beyond the list. Outsiders stay fenced: an anonymous visitor
+  // has no lookup key and can never be listed, and only a member can team-match, so a
+  // stray flag for any other kind is ignored. The share expiry and the password gate apply
+  // exactly as they do to the wider rungs.
+  const listed =
+    (principal.kind !== "anonymous" && ctx.isAllowed === true) ||
+    (principal.kind === "member" && ctx.teamMatch === true);
+  if (listed) {
+    if (expired) return { action: "deny", status: 404, reason: "share_expired" };
+    return { action: "allow", needsPasswordGate: gate, staticOnly: false };
+  }
+
   switch (canvas.access) {
     case "private":
-      return { action: "deny", status: 404, reason: "owner_only" };
+    case "specific_people":
     case "team":
-      // Members-only team scope. Outsiders (canvas-scoped guest / anonymous) never match.
-      // `teamMatch` is the single, widened predicate (plan 003 phase 3): a member of a granted
-      // team AND (the team is PERSONAL — org_id null — OR an ORG team whose org is in the
-      // viewer's LIVE orgIds). It alone decides access — a personal team works without any
-      // org/tenancy (so a personal canvas shared with a personal team is reachable by its
-      // no-org members), while an org team's live re-join still drops a removed-from-org user.
-      // Membership is mandatory inside `teamMatch`, so a non-member gets the opaque 404 (§12.0 #3).
-      if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
-      if (!ctx.teamMatch) return { action: "deny", status: 404, reason: "owner_only" };
-      if (expired) return { action: "deny", status: 404, reason: "share_expired" };
-      return { action: "allow", needsPasswordGate: gate, staticOnly: false };
+      // Restricted: nobody beyond the owner, the editors and the list — all handled above.
+      // `specific_people` and `team` are legacy aliases of `private`: stored and accepted
+      // for API compatibility, identical here (§12.0 #3 — the opaque 404 for everyone else).
+      return { action: "deny", status: 404, reason: "owner_only" };
     case "whole_org":
       // Org members only — guests/anonymous are outsiders, at any tenancy state.
       if (principal.kind !== "member") return { action: "deny", status: 404, reason: "owner_only" };
@@ -222,12 +232,6 @@ export function decideCanvasAccess(
       if (ctx.tenancyActive && (canvas.orgId === null || !principal.orgIds.has(canvas.orgId))) {
         return { action: "deny", status: 404, reason: "owner_only" };
       }
-      if (expired) return { action: "deny", status: 404, reason: "share_expired" };
-      return { action: "allow", needsPasswordGate: gate, staticOnly: false };
-    case "specific_people":
-      if (principal.kind === "anonymous")
-        return { action: "deny", status: 404, reason: "owner_only" };
-      if (!ctx.isAllowed) return { action: "deny", status: 404, reason: "owner_only" };
       if (expired) return { action: "deny", status: 404, reason: "share_expired" };
       return { action: "allow", needsPasswordGate: gate, staticOnly: false };
     case "public_link":
@@ -249,8 +253,8 @@ const NO_TEAM_MATCH: Pick<TeamsRepository, "teamMatch"> = { teamMatch: async () 
 
 export interface CanvasAccessDeps {
   canvases: CanvasesRepository;
-  /** Teams store (plan 003 U4) — resolves the `team` rung's `teamMatch`. Optional: when
-   *  omitted (suites that don't exercise teams) a team canvas matches no one (fail-closed). */
+  /** Teams store (plan 003 U4) — resolves `teamMatch` (membership of a team on the list).
+   *  Optional: when omitted (suites that don't exercise teams) no team matches (fail-closed). */
   teams?: Pick<TeamsRepository, "teamMatch">;
   /** Whether tenancy is active (plan 002 U4 — an org is configured). Threaded into the
    *  decision so `whole_org` is org-scoped only once an operator names an org. */
@@ -263,10 +267,10 @@ export interface CanvasAccessDeps {
  * Resolve the parts of {@link AccessContext} that need a DB lookup, for a given
  * principal + canvas. The single canonical allowlist check (KTD4) every caller
  * routes through — keeps the membership predicate from drifting across the content
- * chain, the runtime API, and the realtime handshake. Two rungs need a DB lookup:
- * the `public_link` rung checks whether the owner's publish capability is still
- * enabled (`isOwnerPublishEnabled`); the `specific_people` rung checks the allowlist
- * (`isPrincipalAllowed`). All other rungs short-circuit to empty context.
+ * chain, the runtime API, and the realtime handshake. The `public_link` rung checks
+ * whether the owner's publish capability is still enabled (`isOwnerPublishEnabled`);
+ * the people-and-teams list (`isPrincipalAllowed` + `teamMatch`) is resolved at EVERY
+ * rung for any principal that can be on it (restricted access model).
  */
 export async function resolveAccessContext(
   canvases: Pick<
@@ -291,26 +295,34 @@ export async function resolveAccessContext(
     });
     if (editorMatch) return { editorMatch: true };
   }
+  const ctx: AccessContext = {};
   // public_link: resolve the owner's publish capability so the decision table can
   // deny a canvas whose owner lost the grant, independent of the write-time sweep
   // (defense-in-depth; the two layers together honor §12.0 #3/#5).
   if (canvas?.access === "public_link") {
     const globalEnabled = opts.publicLinksEnabled ? await opts.publicLinksEnabled() : true;
-    return {
-      publicEnabled: globalEnabled && (await canvases.isOwnerPublishEnabled(canvas.ownerId)),
-    };
+    ctx.publicEnabled = globalEnabled && (await canvases.isOwnerPublishEnabled(canvas.ownerId));
   }
-  // team: only a member can match; resolve the single widened predicate (plan 003 phase 3) —
-  // membership is mandatory, a PERSONAL team grants by that alone, an ORG team additionally
-  // re-joins the live orgIds (so a removed-from-org or non-team-member is denied even with a
-  // stale team_members row). Computed for any team canvas, personal or org-homed.
-  if (canvas?.access === "team") {
-    if (principal.kind !== "member") return { teamMatch: false };
-    return { teamMatch: await teams.teamMatch(canvas.id, principal.id, principal.orgIds) };
+  // The people-and-teams list (restricted access model): resolved at EVERY rung, for any
+  // principal that can be on it — a member (by id) or the canvas's OWN guest (by email).
+  // An anonymous visitor has no key and a guest scoped to another canvas is denied before
+  // the list is consulted, so neither pays the lookups; nor does a non-active canvas
+  // (lifecycle denies first). `teamMatch` is the single widened team predicate (plan 003
+  // phase 3): membership is mandatory, a PERSONAL team grants by that alone, an ORG team
+  // re-joins the live orgIds (a removed-from-org user is denied even with a stale
+  // team_members row). Only a member can be on a team.
+  const canBeListed =
+    canvas !== null &&
+    canvas.status === "active" &&
+    (principal.kind === "member" ||
+      (principal.kind === "guest" && principal.canvasId === canvas.id));
+  if (canvas && canBeListed) {
+    ctx.isAllowed = await canvases.isPrincipalAllowed(canvas.id, principalLookupKey(principal));
+    if (principal.kind === "member") {
+      ctx.teamMatch = await teams.teamMatch(canvas.id, principal.id, principal.orgIds);
+    }
   }
-  if (canvas?.access !== "specific_people") return {};
-  if (principal.kind === "anonymous") return { isAllowed: false };
-  return { isAllowed: await canvases.isPrincipalAllowed(canvas.id, principalLookupKey(principal)) };
+  return ctx;
 }
 
 /** The acting principal for a canvas-facing request: the resolver-set guest/

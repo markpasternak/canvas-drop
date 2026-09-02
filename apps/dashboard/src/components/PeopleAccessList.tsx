@@ -41,7 +41,7 @@ export interface PeopleAccessListProps {
   /** Teams the caller may grant (the ones they belong to). */
   teams: Team[];
   orgs: Array<{ id: string; name: string }>;
-  /** Fires with the fresh list after every load/change (the Team rung reads the viewer teams). */
+  /** Fires with the fresh list after every load/change (the share view mirrors it). */
   onChanged?: (entries: AllowlistEntry[]) => void;
   /** Owner-only: transfer ownership to the chosen editor. */
   onTransfer?: (toUserId: string) => Promise<void>;

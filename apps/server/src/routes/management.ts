@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import {
+  accessModeOf,
   CANVAS_MAX_TAG_LENGTH,
   CANVAS_MAX_TAGS,
   type CapabilityGlobals,
@@ -9,7 +10,7 @@ import {
   validateSlug,
 } from "@canvas-drop/shared";
 import type { Canvas, CanvasStatus, Manifest } from "@canvas-drop/shared/db";
-import { publicationState } from "@canvas-drop/shared/db";
+import { isRestrictedRung, publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -18,7 +19,7 @@ import type { GuestService } from "../auth/guest.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
-import type { CloneService } from "../canvas/clone-service.js";
+import { type CloneService, isCloneableByGrantedTeam } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { rootEntry } from "../canvas/manifest.js";
 import {
@@ -236,15 +237,18 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // The effective audience — who else can open it beyond the people-and-teams list
+    // (restricted access model): `private` and its legacy aliases read `restricted`.
+    accessMode: accessModeOf(cv.access),
     discoverability: cv.discoverability,
-    // The teams this canvas is shared with (plan 003 U5). Empty unless access==='team'
-    // (and only resolved on the single-canvas view; the list path leaves it []).
+    // The teams this canvas is shared with (plan 003 U5), at any rung — only resolved on
+    // the single-canvas view; the list path leaves it [].
     teamIds,
     // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
     // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
     orgId: cv.orgId,
-    // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
-    shared: cv.access !== "private",
+    // Back-compat boolean: open beyond the people-and-teams list (whole_org / public_link).
+    shared: !isRestrictedRung(cv.access),
     guestAiEnabled: cv.guestAiEnabled,
     guestAiCap: cv.guestAiCap,
     sharedExpiresAt: cv.sharedExpiresAt,
@@ -308,7 +312,7 @@ const ownerListQuerySchema = z.object({
   // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
   // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
   access: z
-    .enum(["private", "specific_people", "team", "whole_org", "public_link"])
+    .enum(["private", "specific_people", "team", "whole_org", "public_link", "restricted"])
     .optional()
     .catch(undefined),
   shared: boolFlag,
@@ -375,10 +379,11 @@ export function managementRoutes(deps: ManagementDeps) {
    *  caller's role. */
   async function canvasView(cv: Canvas, role: ManagementRole) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-    // Resolve the canvas's team grants only here (the single-canvas view) — the share
-    // picker pre-checks them. The list path skips this join (teamIds stays []).
+    // Resolve the canvas's team grants only here (the single-canvas view), at EVERY rung —
+    // team grants live on the people-and-teams list and apply regardless of the rung
+    // (restricted access model). The list path skips this join (teamIds stays []).
     const [teamIds, owner] = await Promise.all([
-      deps.teams && cv.access === "team" ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
+      deps.teams ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
       deps.users.findById(cv.ownerId),
     ]);
     return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds, {
@@ -512,15 +517,19 @@ export function managementRoutes(deps: ManagementDeps) {
     // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage —
     // the shared resolver, not an owner comparison. The clone lands owned by the actor
     // with an empty people list (existing behaviour).
+    const now = Date.now();
     const eligible =
       (await resolveManagementGrant(source, memberPrincipal(user, orgIds), roleDeps)) !== null
         ? source.status === "active"
-        : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+        : (await deps.canvases.findCloneableTemplate(id, now, {
             tenancyActive: !!deps.config.org.name,
             viewerOrgIds: orgIds,
           })) !== null ||
-          (source.access === "team" &&
-            source.status === "active" &&
+          // A member of a granted team (restricted access model: team grants apply at every
+          // rung, so the clone path does too — the same live-org `teamMatch` the serve seam
+          // uses), fenced to what the serve seam would show them: published, unexpired, no
+          // password (`isCloneableByGrantedTeam`; review #1).
+          (isCloneableByGrantedTeam(source, now) &&
             !!deps.teams &&
             (await deps.teams.teamMatch(id, user.id, orgIds)));
     if (!eligible) return c.json({ error: "not_found" }, 404);
@@ -799,8 +808,12 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const { patch, password, targetAccess, warning } = resolution;
 
-    // Resolve viewer-team grants before mutating, then commit them with the canvas row.
-    // `teamGranted` drives the audit for a grant-only change (no rung change).
+    // Legacy `teamIds` (plan 003 U4/U5): when sent, replace the VIEWER-role team grants
+    // through the shared resolver (also used by MCP update_canvas), which validates
+    // owner-team membership (KTD4) and refuses an empty set. Team grants live on the
+    // people-and-teams list and apply at every rung (restricted access model), so a rung
+    // change never clears them. Resolved before mutating, then committed with the canvas
+    // row; `teamGranted` drives the audit for a grant-only change (no rung change).
     let teamGranted = false;
     let viewerTeamIds: string[] | undefined;
     if (deps.teams) {
@@ -821,8 +834,6 @@ export function managementRoutes(deps: ManagementDeps) {
       if (grant.kind === "write") {
         viewerTeamIds = grant.teamIds;
         teamGranted = true;
-      } else if (grant.kind === "clear") {
-        viewerTeamIds = [];
       }
     }
 

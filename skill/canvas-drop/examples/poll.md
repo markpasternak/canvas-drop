@@ -34,8 +34,9 @@ over realtime.
    key (shown once), and a `deploy` block with this exact command filled in; `deploy_canvas`
    covers the case where you cannot run shell commands (see `SKILL.md`).
 
-3. **Share it at a signed-in rung**: Specific people, Team, or Whole org. At the Public
-   link rung the runtime API is closed to everyone but the owner and editors: each KV call
+3. **Share it with signed-in people**: add them (or a team) under Share with people and
+   teams, or set General access to Whole org. On a Public link the runtime API is closed
+   to everyone but the owner, the editors, and the people on the list: each KV call
    fails with `403 STATIC_ONLY`, so a public-link poll cannot record votes.
 
 ## `index.html`

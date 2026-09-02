@@ -81,9 +81,20 @@ export type PublicationState = "draft" | "published" | "archived" | "disabled" |
 
 /** Per-canvas access rung (D4 ladder). `public_link` is static-only for non-owners and
  *  effective only while the instance switch is on and the owner account is not revoked.
- *  `team` (plan 003) shares with members of the granted teams — strictly team-scoped
- *  (never the org-wide gallery), slotted between `specific_people` and `whole_org`. */
+ *  `specific_people` and `team` are legacy aliases of `private` (restricted access model):
+ *  still stored and returned by the API, shown as **Restricted** everywhere here. */
 export type AccessRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
+/** The Restricted family: nobody beyond the owner, the editors, and the people-and-teams list
+ *  can open the canvas. The list itself applies at EVERY rung; General access only widens. */
+export const RESTRICTED_RUNGS: readonly AccessRung[] = ["private", "specific_people", "team"];
+export function isRestrictedRung(access: string): boolean {
+  return (RESTRICTED_RUNGS as readonly string[]).includes(access);
+}
+/** A list-filter value: one rung, or `restricted` for the whole family. */
+export type AccessFilter = AccessRung | "restricted";
+/** Server-derived audience: who else can open the canvas beyond the people-and-teams list.
+ *  Mirrors `accessModeOf` in the shared package (`private` + aliases = `restricted`). */
+export type AccessMode = "restricted" | "whole_org" | "public_link";
 
 /** Listing policy for Team/Whole-org canvases. It never changes URL access. */
 export type CanvasDiscoverability = "link_only" | "listed";
@@ -149,6 +160,8 @@ export interface Canvas {
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
   status: CanvasStatus;
+  /** Server-derived audience (restricted access model). Absent on legacy payloads. */
+  accessMode?: AccessMode;
   /** Single derived lifecycle the UI renders as the Publication chip (server-computed). */
   publicationState: PublicationState;
   /** Admin takedown reason (§6.10.2) — owner-only surface; null unless disabled. */
@@ -496,8 +509,8 @@ export type CanvasesSort = "updated" | "created" | "title" | "popular";
 /** Your-canvases browse query (plan 005). State flags map 1:1 to the row pills. */
 export interface CanvasesQuery {
   q?: string;
-  /** Access-rung filter (D4); `shared` stays as the legacy coarse boolean. */
-  access?: AccessRung;
+  /** Access filter (D4): a rung or `restricted`; `shared` stays as the legacy coarse boolean. */
+  access?: AccessFilter;
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -836,7 +849,7 @@ export type AdminCanvasSort = "recent" | "created" | "title";
  *  `owner` is the drill-down filter from the user table ("see what they have"). */
 export interface AdminCanvasesQuery {
   status?: AdminCanvasStatus;
-  access?: AccessRung;
+  access?: AccessFilter;
   /** Effective public-link filter. */
   public?: boolean;
   password?: boolean;
@@ -1174,8 +1187,8 @@ export const api = {
       `/api/canvases/${id}/allowlist`,
       jsonBody(role ? { email, role } : { email }),
     ),
-  /** Grant a team with a role (editor-roles plan): a viewer team keeps the Team rung's
-   *  semantics; an editor team makes every live member an editor at any rung. */
+  /** Grant a team with a role (editor-roles plan): a viewer team opens the canvas for every
+   *  live member at any General-access choice; an editor team makes each of them an editor. */
   addAllowlistTeam: (id: string, teamId: string, role: AccessRole) =>
     request<{ ok: true; status: string; role: AccessRole }>(
       `/api/canvases/${id}/allowlist`,

@@ -149,8 +149,11 @@ describe("list row badges", () => {
     expect(screen.queryByText("Owner only")).toBeNull();
     expect(screen.queryByText("Anyone with the link")).toBeNull();
     expect(screen.queryByText("Password required")).toBeNull();
-    // A team canvas surfaces "Team" as the visible access badge.
-    expect(screen.getByText("Team")).toBeInTheDocument();
+    // The Restricted family (private / specific people / team) is the default: it gets no
+    // access badge, the old rung names never appear, and the meta line reads "Restricted".
+    expect(screen.queryByText("Team")).toBeNull();
+    expect(screen.queryByText("Specific people")).toBeNull();
+    expect(screen.getAllByText(/^Restricted/).length).toBeGreaterThanOrEqual(3);
   });
 
   it("surfaces draft-only deployment state, but not zeros for deployed canvases", async () => {

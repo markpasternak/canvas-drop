@@ -202,12 +202,14 @@ GET {base}/v1/canvases/{id}
 Authorization: Bearer cd_...
 ```
 
-Returns `{ id, slug, url, title, status, publicationState, currentVersionId }`. A key
-resolves only an active canvas (an archived, disabled, or deleted canvas's key fails
+Returns `{ id, slug, url, title, status, publicationState, accessMode, currentVersionId }`.
+A key resolves only an active canvas (an archived, disabled, or deleted canvas's key fails
 auth with `401`), so `status` is always `"active"` here and `publicationState` is
 `"published"` when a live version exists, otherwise `"draft"`. To confirm a canvas is
 live, check `publicationState === "published"`; you do not need to interpret
-`currentVersionId` yourself.
+`currentVersionId` yourself. `accessMode` is the audience — `restricted` (only the
+people-and-teams list), `whole_org`, or `public_link` — the same derived value the
+management API and MCP return.
 
 ## List versions
 

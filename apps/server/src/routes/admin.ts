@@ -67,6 +67,9 @@ export interface AdminRoutesDeps {
 
 const STATUSES = ["active", "disabled", "archived", "deleted"] as const;
 const ACCESS_RUNGS = ["private", "specific_people", "team", "whole_org", "public_link"] as const;
+// `restricted` = the whole Restricted family (private + its legacy aliases specific_people /
+// team) — the value the dashboard's access filter sends (restricted access model).
+const ACCESS_FILTERS = [...ACCESS_RUNGS, "restricted"] as const;
 const CANVAS_SORTS = ["recent", "created", "title"] as const;
 const EXPIRY_FILTERS = ["none", "active", "expired"] as const;
 const CONTEXT_FILTERS = ["personal", "org", "team"] as const;
@@ -78,7 +81,7 @@ const boolFlag = z
   .transform((v) => v === "true");
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
-  access: z.enum(ACCESS_RUNGS).optional(),
+  access: z.enum(ACCESS_FILTERS).optional(),
   publicLink: boolFlag,
   password: boolFlag,
   external: boolFlag,
@@ -266,7 +269,14 @@ export function adminRoutes(deps: AdminRoutesDeps) {
             : cv.sharedExpiresAt <= Date.now()
               ? "expired"
               : "active",
-        context: cv.access === "team" ? "team" : cv.orgId === null ? "personal" : "org",
+        // "team" = at least one team grant on the list (restricted access model — the legacy
+        // `team` rung signals nothing); otherwise the home-org context.
+        context:
+          (exposure.get(cv.id)?.teamCount ?? 0) > 0
+            ? "team"
+            : cv.orgId === null
+              ? "personal"
+              : "org",
         exposure: exposure.get(cv.id) ?? {
           specificPeopleCount: 0,
           teamCount: 0,

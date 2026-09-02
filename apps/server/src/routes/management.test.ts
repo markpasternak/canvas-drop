@@ -1041,11 +1041,13 @@ describe("managementRoutes", () => {
     expect(res.status).toBe(200);
     const view = await jsonOf<{
       publicationState: string;
+      accessMode: string;
       currentVersionId: string | null;
       shared: boolean;
       galleryListed: boolean;
     }>(res);
     expect(view.publicationState).toBe("draft");
+    expect(view.accessMode).toBe("restricted"); // audience rides alongside lifecycle
     expect(view.currentVersionId).toBeNull();
     expect(view.shared).toBe(false); // leaving Published reverts share
     expect(view.galleryListed).toBe(false);
@@ -2655,6 +2657,11 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     await repo.create({ ownerId: owner.id, slug: "priv", apiKeyHash: "k1", title: "Keep me" });
     const pub = await repo.create({ ownerId: owner.id, slug: "pub", apiKeyHash: "k2" });
     await repo.setAccess(pub.id, "whole_org");
+    // Legacy aliases of `private` (restricted access model).
+    const people = await repo.create({ ownerId: owner.id, slug: "people", apiKeyHash: "k3" });
+    await repo.setAccess(people.id, "specific_people");
+    const teamy = await repo.create({ ownerId: owner.id, slug: "teamy", apiKeyHash: "k4" });
+    await repo.setAccess(teamy.id, "team");
 
     // access= narrows to the matching rung.
     const filtered = await jsonOf<{ canvases: Array<{ slug: string }> }>(
@@ -2663,6 +2670,25 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       ),
     );
     expect(filtered.canvases.map((c) => c.slug)).toEqual(["pub"]);
+    // `restricted` = the whole family (the value the dashboard's filter sends).
+    const restricted = await jsonOf<{ canvases: Array<{ slug: string }> }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        "/api/canvases?access=restricted",
+      ),
+    );
+    expect(restricted.canvases.map((c) => c.slug).sort()).toEqual(["people", "priv", "teamy"]);
+    // An alias reads as NOT shared (open beyond the list) on the single-canvas view, with the
+    // family's access mode.
+    const view = await jsonOf<{ shared: boolean; accessMode: string; access: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        `/api/canvases/${people.id}`,
+      ),
+    );
+    expect(view).toMatchObject({
+      access: "specific_people",
+      shared: false,
+      accessMode: "restricted",
+    });
 
     // A junk ?access= (.catch) drops only itself — the q= filter still applies.
     const junk = await jsonOf<{ canvases: Array<{ slug: string }> }>(
@@ -2715,21 +2741,29 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     return pasteCanvas(buildApp(client, { id: ownerId, isAdmin: false }));
   }
 
-  it("sets the access rung to specific_people (published required)", async () => {
+  it("sets the access rung to specific_people (a Restricted alias — no publish needed; opening to the org does)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const app = buildApp(client, { id: owner.id, isAdmin: false });
 
-    // Unpublished canvas can't move off private.
+    // An unpublished canvas may move within the restricted family (nothing opens)…
     const draft = await jsonOf<{ id: string }>(
       await app.request("/api/canvases", { method: "POST", headers: mut, body: "{}" }),
     );
-    const blocked = await app.request(`/api/canvases/${draft.id}/settings`, {
+    const alias = await app.request(`/api/canvases/${draft.id}/settings`, {
       method: "PATCH",
       headers: mut,
       body: JSON.stringify({ access: "specific_people" }),
     });
+    expect(alias.status).toBe(200);
+    // …but not to a wide rung until it has something to show.
+    const blocked = await app.request(`/api/canvases/${draft.id}/settings`, {
+      method: "PATCH",
+      headers: mut,
+      body: JSON.stringify({ access: "whole_org" }),
+    });
     expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ code: "SHARE_REQUIRES_PUBLISH" });
 
     const id = await publishedCanvas(owner.id);
     const ok = await app.request(`/api/canvases/${id}/settings`, {
@@ -2815,7 +2849,7 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
     void member;
   });
 
-  it("GET /shared lists direct grants, but only listed team grants", async () => {
+  it("GET /shared lists direct grants and team grants at every rung (no discoverability opt-in)", async () => {
     client = await makeTestDb("sqlite");
     const owner = await seedUser(client, "owner");
     const directMember = await seedUser(client, "direct-member");
@@ -2862,10 +2896,13 @@ describe("managementRoutes — access ladder + allowlist (U4)", () => {
       ).status,
     ).toBe(200);
 
-    const teamLinkOnly = await jsonOf<{ canvases: unknown[]; total: number }>(
+    // A team on the list is an open door (restricted access model): the teammate sees the
+    // canvas in Shared at once — `discoverability` now governs whole_org listing only.
+    const teamAtOnce = await jsonOf<{ canvases: Array<{ id: string }>; total: number }>(
       await buildApp(client, { id: teammate.id, isAdmin: false }).request("/api/canvases/shared"),
     );
-    expect(teamLinkOnly).toMatchObject({ canvases: [], total: 0 });
+    expect(teamAtOnce.total).toBe(1);
+    expect(teamAtOnce.canvases.map((c) => c.id)).toEqual([teamCanvas]);
 
     expect(
       (
@@ -3521,6 +3558,77 @@ describe("managementRoutes — clone by an editor", () => {
   });
 });
 
+describe("managementRoutes — clone by a granted-team viewer (restricted access model, review #1/#7)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** A PRIVATE canvas with a viewer-team grant on its people-and-teams list. */
+  async function seedTeamCanvas(opts: { publish: boolean }) {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const mate = await seedUser(client, "mate");
+    const stranger = await seedUser(client, "stranger");
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage,
+      log: silent,
+    });
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k1" });
+    if (opts.publish) {
+      await engine.deploy(src, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    }
+    const team = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
+    await teams.addMember(team.id, mate.id);
+    await teams.setCanvasTeams(src.id, [team.id]);
+    const cloneAs = (u: { id: string }) =>
+      buildApp(client, { id: u.id, isAdmin: false }, storage).request(
+        `/api/canvases/${src.id}/clone`,
+        sameOriginPost,
+      );
+    return { canvases, src, owner, mate, stranger, cloneAs };
+  }
+
+  it("a viewer-team member clones a published PRIVATE canvas (the list applies at every rung); a non-member gets 404", async () => {
+    const { canvases, src, mate, stranger, cloneAs } = await seedTeamCanvas({ publish: true });
+    expect((await canvases.findById(src.id))?.access).toBe("private");
+    expect((await cloneAs(stranger)).status).toBe(404);
+    const res = await cloneAs(mate);
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(res);
+    const clone = await canvases.findById(body.id);
+    expect(clone?.ownerId).toBe(mate.id);
+    expect(clone?.clonedFromCanvasId).toBe(src.id);
+  });
+
+  it("the fences: a never-published source reads 404 for the team viewer (never a copy of the owner's draft); the owner still clones it", async () => {
+    const { owner, mate, cloneAs } = await seedTeamCanvas({ publish: false });
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+
+  it("the fences: an expired share reads 404 for the team viewer; the owner still clones it", async () => {
+    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.updateSettings(src.id, { sharedExpiresAt: Date.now() - 60_000 });
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+
+  it("the fences: a password-protected source reads 404 for the team viewer (the cloner would own the copy and bypass the gate); the owner still clones it", async () => {
+    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.setPassword(src.id, "argon2hash");
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+});
+
 // --- People-list roles over HTTP (editor-roles plan U4/U5) --------------------------------
 
 describe("managementRoutes — people-list roles", () => {
@@ -3747,7 +3855,50 @@ describe("managementRoutes — people-list roles", () => {
     expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(404);
   });
 
-  it("AE13: leaving the team rung clears the VIEWER team grant but keeps the EDITOR team grant (its members still edit)", async () => {
+  it("legacy `teamIds: []` carve-out (review #8/#9): with an access change OFF `team` it is a no-op and the grants survive; with any other access value it is TEAM_REQUIRED", async () => {
+    const { repo, cv, owner, as, list } = await seedPeople();
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage: memStorage(),
+      log: silent,
+    });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    const teams = teamsRepository(client);
+    const viewers = await teams.create({ orgId: null, name: "Viewers", createdBy: owner.id });
+    const patch = (body: Record<string, unknown>) =>
+      as(owner).request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ access: "team", teamIds: [viewers.id] })).status).toBe(200);
+    const teamGrants = async () => (await list(owner)).filter((e) => e.kind === "team").length;
+    expect(await teamGrants()).toBe(1);
+
+    // The old dashboard's "leave the Team rung" shape: a no-op for the grants.
+    const off = await patch({ access: "whole_org", teamIds: [] });
+    expect(off.status).toBe(200);
+    expect(await teamGrants()).toBe(1);
+    expect(
+      (await jsonOf<{ teamIds: string[] }>(await as(owner).request(`/api/canvases/${cv.id}`)))
+        .teamIds,
+    ).toEqual([viewers.id]);
+
+    // Off the `team` value, an empty set is refused whatever `access` says.
+    const echoed = await patch({ access: "whole_org", teamIds: [] });
+    expect(echoed.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(echoed)).code).toBe("TEAM_REQUIRED");
+    const toPrivate = await patch({ access: "private", teamIds: [] });
+    expect(toPrivate.status).toBe(409);
+    const toTeam = await patch({ access: "team", teamIds: [] });
+    expect(toTeam.status).toBe(409);
+    expect(await teamGrants()).toBe(1);
+  });
+
+  it("AE13: legacy teamIds replaces only the VIEWER team grants; a rung change keeps every team grant (its members still edit)", async () => {
     const { repo, cv, owner, nobody, as, list } = await seedPeople();
     // Sharing rungs need a published canvas (the share guard): deploy one version first.
     const engine = deployEngine({
@@ -3798,16 +3949,26 @@ describe("managementRoutes — people-list roles", () => {
         .map((e) => `${e.name}:${e.role}`)
         .sort(),
     ).toEqual(["Editors:editor", "Other viewers:viewer"]);
-    // Switch the rung to whole org: viewer team rows cleared, the editor team row intact.
+    // Switch the rung to whole org, then back to private: team grants live on the people list
+    // and apply at every rung (restricted access model), so a rung change touches NEITHER row.
     const off = await as(owner).request(`/api/canvases/${cv.id}/settings`, {
       method: "PATCH",
       headers: so,
       body: JSON.stringify({ access: "whole_org" }),
     });
     expect(off.status).toBe(200);
-    expect((await list(owner)).filter((e) => e.kind === "team")).toEqual([
-      expect.objectContaining({ id: `team:${editors.id}`, role: "editor" }),
-    ]);
+    const back = await as(owner).request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: so,
+      body: JSON.stringify({ access: "private" }),
+    });
+    expect(back.status).toBe(200);
+    expect(
+      (await list(owner))
+        .filter((e) => e.kind === "team")
+        .map((e) => `${e.name}:${e.role}`)
+        .sort(),
+    ).toEqual(["Editors:editor", "Other viewers:viewer"]);
     expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(200);
   });
 });

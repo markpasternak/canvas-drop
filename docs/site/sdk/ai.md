@@ -162,7 +162,7 @@ the owner opted the canvas in (`GUEST_AI_DISABLED`, 403). The owner can also set
 a per-canvas monthly USD ceiling for guest calls; once the canvas's total spend
 this month reaches it, guest calls are refused with `GUEST_AI_CAP` (429). Both
 controls live in the canvas's **Share** tab under **AI for added people** (shown
-on a **Specific people** canvas). Only the owner can change them; an editor sees
+when a legacy guest is on the people-and-teams list). Only the owner can change them; an editor sees
 them read-only. People added through **Add person** sign in as members and are
 not affected by either gate.
 

@@ -118,8 +118,21 @@ describe("deployApiRoutes (Bearer key)", () => {
       headers: { Authorization: `Bearer ${a.key}` },
     });
     expect(draftRes.status).toBe(200);
-    expect(((await draftRes.json()) as { publicationState: string }).publicationState).toBe(
-      "draft",
+    const draftBody = (await draftRes.json()) as Record<string, unknown>;
+    expect(draftBody.publicationState).toBe("draft");
+    // The documented shape (docs/site/api/deploy-api.md, agents/llms.md): audience rides along.
+    expect(draftBody.accessMode).toBe("restricted");
+    expect(Object.keys(draftBody).sort()).toEqual(
+      [
+        "accessMode",
+        "currentVersionId",
+        "id",
+        "publicationState",
+        "slug",
+        "status",
+        "title",
+        "url",
+      ].sort(),
     );
 
     await app.request(`/v1/canvases/${a.id}/deploy`, {

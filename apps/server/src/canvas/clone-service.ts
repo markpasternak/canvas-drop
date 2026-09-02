@@ -32,6 +32,25 @@ export interface CloneResult {
 }
 
 /**
+ * The fences a NON-MANAGER clone path must check on top of its grant (restricted access
+ * model review, #1). A member of a granted team may view the canvas at any rung, but only
+ * what the serve seam would show them: the clone must seed from a PUBLISHED version (with
+ * no version the clone service falls back to the owner's private draft), the share must
+ * not have expired, and a password-protected canvas is not cloneable by someone who has
+ * not passed the gate (the cloner would own the copy and bypass it). Mirrors the gallery
+ * template predicate (`findCloneableTemplate`). Owners and editors clone through the
+ * manager branch, which is not subject to these fences.
+ */
+export function isCloneableByGrantedTeam(source: Canvas, now: number): boolean {
+  return (
+    source.status === "active" &&
+    source.currentVersionId !== null &&
+    (source.sharedExpiresAt === null || source.sharedExpiresAt > now) &&
+    source.passwordHash === null
+  );
+}
+
+/**
  * Clone a canvas into a brand-new canvas owned by the caller (plan 002).
  *
  * The clone is seeded from the source's **published** version manifest, falling

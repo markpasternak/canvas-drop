@@ -4,6 +4,8 @@ import { DIALECTS, makeTestDb } from "../testing.js";
 import { adminRepository } from "./admin.js";
 import { canvasesRepository } from "./canvases.js";
 import { filesRepository } from "./files.js";
+import { orgsRepository } from "./orgs.js";
+import { teamsRepository } from "./teams.js";
 import { usageEventsRepository } from "./usage-events.js";
 import { usersRepository } from "./users.js";
 import { versionsRepository } from "./versions.js";
@@ -156,6 +158,58 @@ describe.each(DIALECTS)("adminRepository [%s]", (dialect) => {
       sort: "created",
     });
     expect(byCreated.items.map((c) => c.id)).toEqual([apple.id, zebra.id]);
+  });
+
+  it("filters by context (team = a team grant on the list, any rung) and by access=restricted on both dialects", async () => {
+    client = await makeTestDb(dialect);
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const a = await seedUser(client, "alice");
+    const org = await orgsRepository(client).ensureOrg({
+      name: "Acme",
+      slug: "acme",
+      domains: ["acme.example"],
+    });
+    const team = await teams.create({ orgId: null, name: "Ctx", createdBy: a.id });
+    // A private personal canvas with a VIEWER team grant → context "team".
+    const privTeam = await canvases.create({
+      ownerId: a.id,
+      slug: "pt-1111-2222",
+      apiKeyHash: "h1",
+    });
+    await teams.setCanvasTeams(privTeam.id, [team.id]);
+    // A whole_org canvas homed in the org with an EDITOR team grant → context "team" too.
+    const orgTeam = await canvases.create({
+      ownerId: a.id,
+      slug: "ot-1111-2222",
+      apiKeyHash: "h2",
+      orgId: org.id,
+    });
+    await canvases.setAccess(orgTeam.id, "whole_org");
+    await teams.setCanvasTeamRole(orgTeam.id, team.id, "editor");
+    // A bare org canvas → "org"; a bare personal canvas on the legacy alias → "personal".
+    const bareOrg = await canvases.create({
+      ownerId: a.id,
+      slug: "bo-1111-2222",
+      apiKeyHash: "h3",
+      orgId: org.id,
+    });
+    const legacy = await canvases.create({ ownerId: a.id, slug: "lg-1111-2222", apiKeyHash: "h4" });
+    await canvases.setAccess(legacy.id, "specific_people");
+
+    const admin = adminRepository(client);
+    const ids = async (q: Partial<Parameters<typeof admin.listAllCanvasesFiltered>[0]>) =>
+      (await admin.listAllCanvasesFiltered({ ...q, limit: 50, offset: 0 })).items
+        .map((c) => c.id)
+        .sort();
+    expect(await ids({ context: "team" })).toEqual([privTeam.id, orgTeam.id].sort());
+    expect(await ids({ context: "org" })).toEqual([bareOrg.id]);
+    expect(await ids({ context: "personal" })).toEqual([legacy.id]);
+    // The family filter: private + its aliases, never the open rungs.
+    expect(await ids({ access: "restricted" })).toEqual(
+      [privTeam.id, bareOrg.id, legacy.id].sort(),
+    );
+    expect(await ids({ access: "specific_people" })).toEqual([legacy.id]);
   });
 
   it("filters by gallery facets: templatable and listed", async () => {

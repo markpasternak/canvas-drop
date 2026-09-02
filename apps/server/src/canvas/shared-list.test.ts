@@ -112,4 +112,72 @@ describe.each(DIALECTS)("listSharedCanvases — editor exclusion [%s]", (dialect
       "viewed",
     ]);
   });
+
+  it("lists direct and team grants at EVERY rung — private included, no discoverability opt-in needed (restricted access model)", async () => {
+    client = await makeTestDb(dialect);
+    const users = usersRepository(client);
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const owner = await users.upsert({
+      providerSub: "o2",
+      email: "o2@e.com",
+      name: "O",
+      isAdmin: false,
+    });
+    const me = await users.upsert({
+      providerSub: "m2",
+      email: "m2@e.com",
+      name: "M",
+      isAdmin: false,
+    });
+    const mk = async (slug: string, access: "private" | "team" | "whole_org" | "public_link") => {
+      const cv = await canvases.create({ ownerId: owner.id, slug, apiKeyHash: slug });
+      await publish(cv.id, owner.id);
+      await canvases.setAccess(cv.id, access);
+      return cv;
+    };
+    // A direct viewer grant on a PRIVATE canvas (the rung was never flipped).
+    const direct = await mk("direct-private", "private");
+    await canvases.addAllowlistEntry({
+      canvasId: direct.id,
+      principalKind: "member",
+      userId: me.id,
+    });
+    // A viewer-team grant on a private canvas, discoverability left at its default.
+    const team = await teams.create({ orgId: null, name: "Eng", createdBy: owner.id });
+    await teams.addMember(team.id, me.id);
+    const viaTeam = await mk("team-private", "private");
+    await teams.setCanvasTeamRole(viaTeam.id, team.id, "viewer");
+    // A team-rung canvas that stayed link_only (legacy) now lists for its team too.
+    const legacyLinkOnly = await mk("team-link-only", "team");
+    await teams.setCanvasTeamRole(legacyLinkOnly.id, team.id, "viewer");
+    // A public canvas with a direct grant is still "shared with me".
+    const pub = await mk("public-direct", "public_link");
+    await canvases.addAllowlistEntry({ canvasId: pub.id, principalKind: "member", userId: me.id });
+    // Control: a private canvas with no grant never appears.
+    await mk("private-none", "private");
+    // Control: a whole_org canvas still needs the listing opt-in to enumerate for non-grantees.
+    await mk("org-link-only", "whole_org");
+
+    const { items } = await listSharedCanvases(
+      { canvases, teams, users },
+      {
+        viewerId: me.id,
+        viewerOrgIds: new Set(),
+        tenancyActive: false,
+        now: Date.now(),
+        limit: 50,
+        offset: 0,
+      },
+    );
+    expect(items.map((i) => i.canvas.slug).sort()).toEqual([
+      "direct-private",
+      "public-direct",
+      "team-link-only",
+      "team-private",
+    ]);
+    const byslug = new Map(items.map((i) => [i.canvas.slug, i.access.kind]));
+    expect(byslug.get("direct-private")).toBe("direct");
+    expect(byslug.get("team-private")).toBe("team");
+  });
 });

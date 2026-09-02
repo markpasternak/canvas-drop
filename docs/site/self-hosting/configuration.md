@@ -356,7 +356,7 @@ The share policy (the last three rows) is env-only.
 | `CANVAS_DROP_AUTHORING` | `off` | `on` \| `off`. Instance master switch. **Runtime-editable.** |
 | `CANVAS_DROP_AUTHORING_USER_DAILY_MAX` | `20` | Max canvases a viewer may author per UTC day. **Runtime-editable.** |
 | `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` | All-time cap per viewer. **Runtime-editable.** |
-| `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` | CSV of access rungs a publish may request. `public_link` also covers the SDK's `access: "password"`. |
+| `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` | CSV of `access` values a publish may request (`specific_people` is a legacy alias of `private`). `public_link` also covers the SDK's `access: "password"`. |
 | `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` | Max share expiry in days; `0` = no cap. |
 | `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` | boolean. Require an expiry on shared rungs. |
 
@@ -398,7 +398,7 @@ personal-team adds, canvas Add person, and admin sign-in permits.
 |---------|---------|-------|
 | `email.invitesEnabled` | `false` | Master switch. When off, grants still happen but no sign-in or access email is sent. Also needs a driver that can send (see above). |
 | `email.notifyOnAddUser` | `true` | Email a person when an admin permits their email to sign in. |
-| `email.notifyOnCanvasAdd` | `true` | Email an existing user when added to a canvas's Specific people list. |
+| `email.notifyOnCanvasAdd` | `true` | Email an existing user when added to a canvas's people-and-teams list. |
 | `email.notifyOnCanvasInvite` | `true` | Email an existing user on an individual one-canvas access action. |
 | `invites.allowMemberNewEmails` | `false` | Let a non-admin member add a brand-new external email. Off = only admins can permit new emails; members can add people who can already sign in. |
 | `invites.maxPerActorPerHour` | `20` | Add-person actions per actor per hour (admins get a higher allowance). |
