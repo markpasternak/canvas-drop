@@ -487,6 +487,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         usage,
         files,
         aiUsage,
+        connections,
         audit: deps.audit,
         publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
@@ -695,6 +696,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       usage,
       files,
       aiUsage,
+      connections,
       hub: deps.hub,
       guests: deps.guests,
       invites,

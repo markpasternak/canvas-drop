@@ -88,6 +88,7 @@ function upstreamResponse(c: Context<AppEnv>, result: ConnectionFetchResult) {
     if (value) headers.set(name, value);
   }
   headers.set(CONNECTION_RESPONSE_MARKER, "upstream");
+  headers.set("access-control-expose-headers", CONNECTION_RESPONSE_MARKER);
   headers.set("cache-control", "private, no-store");
   headers.set("x-content-type-options", "nosniff");
   headers.set("content-security-policy", "sandbox");

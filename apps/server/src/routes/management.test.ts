@@ -9,11 +9,14 @@ import { cloneService } from "../canvas/clone-service.js";
 import { verifyPassword } from "../canvas/password.js";
 import { SCREENSHOT_RENDITIONS, screenshotKey } from "../canvas/storage-keys.js";
 import { versionHistoryService } from "../canvas/version-history.js";
+import { createSecretCipher } from "../connections/secret-cipher.js";
+import { connectionService } from "../connections/service.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { connectionsRepository } from "../db/repositories/connections.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { guestRepository } from "../db/repositories/guest.js";
@@ -77,6 +80,12 @@ function buildApp(
   const engine = deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent });
   const clone = cloneService({ canvases, versions, drafts, storage });
   const versionHistory = versionHistoryService({ versions, storage, engine, audit });
+  const connections = connectionService({
+    repository: connectionsRepository(client),
+    canvases,
+    cipher: createSecretCipher(cfg.connections.encryptionKey),
+    audit,
+  });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     // stand in for the foundation gateway: inject the authenticated user
@@ -118,6 +127,7 @@ function buildApp(
       usage: usageEventsRepository(client),
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
+      connections,
       hub,
       guests: withGuests ? guestService(config, guestRepository(client)) : undefined,
       invites: makeInviteService(client, cfg),
@@ -149,6 +159,57 @@ describe("managementRoutes", () => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  it("lists only sanitized connection authority for a canvas manager", async () => {
+    client = await makeTestDb("sqlite");
+    const owner = await seedUser(client, "owner");
+    const canvases = canvasesRepository(client);
+    const canvas = await canvases.create({
+      ownerId: owner.id,
+      slug: "stocks",
+      apiKeyHash: "hash",
+    });
+    const repository = connectionsRepository(client);
+    await repository.create({
+      id: "profile-1",
+      key: "market",
+      label: "Market data",
+      origin: "https://stocks.example.com",
+      allowedMethods: ["GET"],
+      protectedHeaderNames: ["user-agent"],
+      protectedHeadersEnvelope: "opaque-ciphertext",
+      enabled: true,
+      createdBy: owner.id,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await repository.attach({
+      canvasId: canvas.id,
+      connectionId: "profile-1",
+      createdBy: owner.id,
+      createdAt: 1,
+    });
+
+    const response = await buildApp(client, { id: owner.id, isAdmin: false }).request(
+      `/api/canvases/${canvas.id}/connections`,
+    );
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({
+      connections: [
+        {
+          key: "market",
+          label: "Market data",
+          origin: "https://stocks.example.com",
+          allowedMethods: ["GET"],
+          available: false,
+          unavailableReason: "encryption_key_unavailable",
+        },
+      ],
+    });
+    expect(text).not.toContain("user-agent");
+    expect(text).not.toContain("opaque-ciphertext");
   });
 
   it("create returns a unique slug + cd_ key once, storing only the hash", async () => {

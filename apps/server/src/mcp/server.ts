@@ -38,6 +38,7 @@ import { canvasUrl, deployEndpoints } from "../canvas/url.js";
 import { fetchCanvasUsage } from "../canvas/usage-stats.js";
 import type { VersionHistoryService } from "../canvas/version-history.js";
 import { resolveVersionCreators } from "../canvas/version-history.js";
+import type { ConnectionService } from "../connections/service.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -126,6 +127,8 @@ export interface McpToolDeps extends PreviewHintDeps {
   usage: UsageEventsRepository;
   files: FilesRepository;
   aiUsage: AiUsageRepository;
+  /** Shared sanitized manager view used by HTTP and MCP. */
+  connections?: Pick<ConnectionService, "listForCanvas">;
 }
 
 /** Largest blob `get_canvas_file` will inline into the model context (256 KiB).
@@ -294,6 +297,23 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         teams: teamRows.map((t) => ({ id: t.id, name: t.name, slug: t.slug, orgId: t.orgId })),
         isGuest: caller.tenancyActive && caller.orgIds.size === 0,
       });
+    },
+  );
+
+  server.registerTool(
+    "list_canvas_connections",
+    {
+      description:
+        "List the admin-granted outbound connections available to a canvas you own or edit. " +
+        "Returns only key, label, exact origin, allowed methods, and sanitized availability; " +
+        "protected header names and values are never exposed.",
+      inputSchema: { id: z.string().describe("Canvas id.") },
+    },
+    async ({ id }) => {
+      const gate = await requireRole("list_canvas_connections", id);
+      if ("error" in gate) return gate.error;
+      if (!deps.connections) return fail("CONNECTIONS_UNAVAILABLE: connection service unavailable");
+      return ok({ connections: await deps.connections.listForCanvas(gate.canvas.id) });
     },
   );
 

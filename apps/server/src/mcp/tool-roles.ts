@@ -29,6 +29,7 @@ export const TOOL_MIN_ROLE = {
   list_team_members: "any",
 
   get_canvas: "editor",
+  list_canvas_connections: "editor",
   update_canvas: "editor",
   set_capabilities: "editor",
   set_canvas_slug: "editor",
