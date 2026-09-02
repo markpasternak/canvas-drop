@@ -139,7 +139,7 @@ Runs on every push to `main` and every pull request, on Node 24 with `pnpm@11.0.
 | `build` (Build) | `pnpm build` (`pnpm -r build`: shared, sdk, dashboard, server) |
 | `dependency-audit` (Dependency audit (advisory)) | `pnpm audit --audit-level high \|\| true`; logs findings, never fails the run |
 
-A change that passes on SQLite but breaks Postgres fails `test-postgres`. A separate `Security` workflow (`.github/workflows/security.yml`) runs a blocking gitleaks scan of the working tree on the same triggers, then plants a fake token outside the allowlist and asserts the scan still catches it.
+A change that passes on SQLite but breaks Postgres fails `test-postgres`. CI is the explicit, authoritative gate, and server-side branch protection on `main` is enabled: the CI matrix is a required status check, so every change lands through a green PR, never a direct push. A separate `Security` workflow (`.github/workflows/security.yml`) runs a blocking gitleaks scan of the working tree on the same triggers, then plants a fake token outside the allowlist and asserts the scan still catches it.
 
 ## Read next
 

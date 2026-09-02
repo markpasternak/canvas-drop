@@ -270,7 +270,8 @@ open, the server closes it with one of these codes:
 | `4401` | Access was lost on revalidation: canvas gone, access removed, the canvas became a Public link (static-only), a password gate was set, or the user was deactivated. |
 | `1001` | Server shutdown. |
 
-The SDK treats `4401`, `4403`, and `4429` as terminal and does not reconnect.
+Limits: 30 connections per canvas, 100 publishes per minute per connection, 16 KiB per
+frame. The SDK treats `4401`, `4403`, and `4429` as terminal and does not reconnect.
 
 Frames are JSON text, ≤ 16 KiB each, all scoped to the canvas from the handshake. Client
 to server:

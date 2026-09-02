@@ -105,8 +105,9 @@ const me = await canvasdrop.me(); // { id, email, name, avatarUrl, kind }
 
 `me(): Promise<Me>` returns `{ id: string; email: string; name: string;
 avatarUrl: string | null; kind: "member" | "guest" }`. `kind` is `"member"` for
-a signed-in org member; `"guest"` is retained for legacy guest sessions. There
-is no `isAdmin` on the object. Needs only **Enable backend**.
+a signed-in org member; `"guest"` is retained only for legacy guest sessions
+(new Add person grants materialize as signed-in users after verified sign-in).
+There is no `isAdmin` on the object. Needs only **Enable backend**.
 
 ## KV: `kv` and `kv.user`
 
@@ -159,10 +160,10 @@ await canvasdrop.files.delete(f.id);
 
 Limits: 25 MiB per file (`FILE_TOO_LARGE`, 413) and 1 GiB per canvas
 (`QUOTA_EXCEEDED`, 409). Content is served with `X-Content-Type-Options:
-nosniff`; only PNG, JPEG, GIF, WebP, and AVIF render inline. Everything else,
-including SVG and HTML, is served as an attachment so an upload can never run
-as another viewer on the canvas origin. Reading a file's content goes through
-the same access check as every other call.
+nosniff` and a sanitized filename; only PNG, JPEG, GIF, WebP, and AVIF render
+inline. Everything else, including SVG and HTML, is served as an attachment so
+an upload can never run as another viewer on the canvas origin. Reading a file's
+content goes through the same access check as every other call.
 
 ## AI: `ai.chat()` and `ai.stream()`
 
@@ -202,10 +203,11 @@ price for. `maxTokens` defaults to 1024 and is capped at 8192. The request body
 is capped at 256 KiB (`BODY_TOO_LARGE`, 413). There are no options for
 temperature, tools, images, stop sequences, or an `AbortSignal`.
 
-`stream()` yields only text; usage and cost come from `chat()` alone. You can
-`break` out of the loop early; the SDK releases the stream reader. The provider
-key lives on the server; the canvas never sees it, and AI is only on when the
-operator has configured one.
+`stream()` yields only text; usage and cost come from `chat()` alone (the two
+cache fields report prompt-cache writes and reads, `0` when the provider returns
+no cache metrics). You can `break` out of the loop early; the SDK releases the
+stream reader. The provider key lives on the server; the canvas never sees it,
+and AI is only on when the operator has configured one.
 
 Spend is metered per viewer per day and per canvas per month
 (`CANVAS_DROP_AI_USER_DAILY_USD`, default 5; `CANVAS_DROP_AI_CANVAS_MONTHLY_USD`,
@@ -360,6 +362,14 @@ throws `PublishFailedError` with the new canvas's `.id` so you can `update` or
 `update` and `revoke` on a share an administrator has disabled throw
 `.code === "DISABLED"` with status 409 (not the runtime's 403).
 
+## Authoring (optional)
+
+`canvasdrop.canvases` — `publish` / `update` / `list` / `revoke` — lets a signed-in
+member create and manage new canvases **as themselves** from the page (the
+**authoring** capability: off by default per canvas and also gated by the operator's
+`CANVAS_DROP_AUTHORING` switch). Full reference:
+[`docs/site/sdk/authoring.md`](site/sdk/authoring.md).
+
 ## Errors
 
 Every failure throws an error extending `CanvasdropError`, which carries a
@@ -424,8 +434,8 @@ The served script is the same client that the workspace package
 `@canvas-drop/sdk` exports, with the context detected for you. The package
 exports `createClient`, `detectContext`, `SDK_VERSION` (the string `"1"`),
 `ERROR_CODES` (the 23 wire codes with status and summary), `errorFromResponse`,
-the six error classes for `instanceof` checks, and every interface above
-(`CanvasdropClient`, `Me`, `KvNamespace`, `KvList`, `FileMeta`, `AiMessage`,
+the base error class and its five subclasses for `instanceof` checks, and every
+interface above (`CanvasdropClient`, `Me`, `KvNamespace`, `KvList`, `FileMeta`, `AiMessage`,
 `AiChatOptions`, `AiUsage`, `AiResult`, `Channel`, `RealtimeMessage`,
 `RealtimeUser`, `ShareAccess`, `ShareAudience`, `ShareStatus`,
 `PublishOptions`, `UpdateOptions`, `AuthoredCanvas`, `CanvasesNamespace`).

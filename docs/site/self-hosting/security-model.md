@@ -122,10 +122,13 @@ after this one names the mechanism behind one of them.
 2. **No credential or canvas theft.** No user can read another user's session, canvas
    API key, or canvas content. Session tokens and API keys are stored only as SHA-256
    hashes; an API key is shown once; a session token rides only in an HttpOnly cookie.
-3. **No unauthorized access.** A canvas is reachable by its owner and its editors, and
-   otherwise only through the access rung the owner chose. Admins get no special access
-   to canvases they do not own. Anyone without a route in gets an opaque `404`; an editor
-   attempting an owner-only act gets an explicit `403 OWNER_ONLY`.
+3. **No unauthorized access.** A canvas is reachable by its owner and its editors (people
+   or teams holding the editor role on its people list, resolved live on every request and
+   admitted on any rung), and otherwise only through the access rung the owner chose:
+   Specific people, Team, Whole org, or Public link. Admins get no special access to
+   canvases they do not own; cross-owner admin power is limited to the dedicated admin
+   routes (list, disable/enable/restore, reassign owner). Anyone without a route in gets an
+   opaque `404`; an editor attempting an owner-only act gets an explicit `403 OWNER_ONLY`.
 4. **No cross-canvas reach in subdomain mode.** One canvas, its code, its SDK calls, or
    its socket cannot read, write, or act on another canvas's data, files, AI quota, or
    realtime channels. Path mode has reduced browser isolation and must be opted into.

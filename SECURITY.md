@@ -38,8 +38,9 @@ The security-critical surface is the five hard invariants (see the
 3. **No unauthorized access** — a canvas is reachable only by principals its
    access rung allows (owner or editor, where an editor is an org member holding
    the editor role on the canvas's people list, directly or through an
-   editor-role team, and is owner-equivalent except for delete, transfer, and
-   the guest-AI opt-in, which answer `OWNER_ONLY`; any allowed org member at
+   editor-role team, resolved live on every request and admitted on any rung,
+   and is owner-equivalent except for delete, transfer, and the guest-AI
+   opt-in, which answer `OWNER_ONLY`; any allowed org member at
    `whole_org`; a member of a granted team at `team`; a listed principal — an
    existing user, or a pending email once that email has verified through the
    configured auth — at `specific_people`; anyone at `public_link`, static-only

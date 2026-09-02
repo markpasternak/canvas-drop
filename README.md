@@ -203,9 +203,9 @@ Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usag
 
 | Shipped | Still deferred |
 |---------|----------------|
-| Docker image and compose stack | An executed backup/restore drill |
-| Vendor-neutral deploy docs | The single-VPS load test |
-| Backup/restore tooling with a scheduled-maintenance runbook ([`docs/ops.md`](docs/ops.md)) | A 10 to 15 person colleague pilot behind an IAP |
+| Docker image and compose stack | The single-VPS load test |
+| Vendor-neutral deploy docs | A 10 to 15 person colleague pilot behind an IAP |
+| Backup/restore tooling with a scheduled-maintenance runbook ([`docs/ops.md`](docs/ops.md)) and an automated round-trip test on both dialects | |
 | Security review of the five invariants ([`docs/security/`](docs/security/)) | |
 | Secret scan in CI | |
 | This README, the quickstart, and three starter examples | |

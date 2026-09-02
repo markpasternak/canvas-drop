@@ -217,7 +217,8 @@ The canvas must have Backend switched on (see Capabilities below); `/sdk/v1.js`
 sits behind the same sign-in as the canvas.
 
 - `me()` returns `{ id, email, name, avatarUrl, kind }`. `kind` is `"member"`;
-  `"guest"` appears only for retained legacy guest sessions.
+  `"guest"` appears only for retained legacy guest sessions, since new Add person
+  grants materialize as signed-in users.
 - `kv` (shared) and `kv.user` (per viewer, keyed server-side) have the same five
   methods: `get(key)` returns the value or `null`; `set(key, value)` stores any
   JSON except `null`; `delete(key)` is idempotent; `list({ prefix?, cursor?, limit? })`

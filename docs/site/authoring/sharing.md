@@ -97,6 +97,30 @@ The owner can hand the canvas to any current **editor who is an org member**, in
 
 When an owner leaves, an admin can **reassign** any of their canvases to another member from **Admin → Canvases** with a recorded reason. The previous owner stays an editor when their account is still active, both parties are emailed, and the deploy key is rotated in the same step (the new owner issues a fresh one).
 
+## Roles: viewers and editors
+
+Every entry on the People list — a person, a pending invitee, or a team — carries a
+role: **Viewer** (the default) or **Editor**. A viewer can open the canvas when the
+access rung admits them (Specific people or Team). An editor can *always* open the
+canvas, on any rung, and manages it as fully as you do: the editor draft and Publish,
+deploys and the deploy key, versions and rollback, settings, sharing, and the People
+list itself. Three acts stay with the owner and refuse `OWNER_ONLY` for an editor:
+deleting the canvas, transferring ownership, and the legacy guest-AI opt-in. Only org
+members and teams can be editors; a legacy guest is always a viewer.
+
+Roles are resolved on every request, so demoting or removing an editor takes effect
+immediately (and drops their live editor sockets). Two editors saving the same draft
+file get a named stale-save conflict instead of a silent overwrite; edits to different
+files never conflict.
+
+**Transfer ownership** (owner only, from the People list) hands the canvas to one of
+its existing editors in one step: they become the owner and you stay on as an editor.
+The public-link entitlement follows the new owner's account, so a Public link is
+turned off if their account may not publish one. An admin can also reassign a departed
+owner's canvases from the admin routes. Agents do the same over
+[MCP](/docs/agents/mcp): `grant_access` with `role`, `set_access_role`, and the
+owner-only `transfer_canvas`.
+
 ## Adding specific people
 
 Under **People with access**, add by email as a **viewer** or an **editor**. The outcome is deterministic:

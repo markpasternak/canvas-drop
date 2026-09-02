@@ -99,9 +99,9 @@ usage stats, optional screenshots and preview covers, design skins, and the
 authoring capability.
 
 Ops and packaging (M10) is the only open milestone. The Docker image and compose
-stack, vendor-neutral deploy docs, backup/restore tooling, the security review,
-a secret scan in CI, and the starter examples have shipped. Still deferred: an
-executed backup/restore drill against real data, a single-VPS load test, and a
+stack, vendor-neutral deploy docs, backup/restore tooling (with an automated
+round-trip test on both dialects), the security review, a secret scan in CI, and
+the starter examples have shipped. Still deferred: a single-VPS load test and a
 colleague pilot behind an identity-aware proxy. canvas-drop has not yet run under
 a real org's load; treat it as ready to self-host and evaluate, not as
 battle-tested.
