@@ -1,11 +1,9 @@
 # Browser SDK
 
-You wrote a static canvas and now you want it to remember things, store files,
-greet the signed-in viewer, call a model, or sync between tabs. The browser SDK
-gives your canvas those five backend capabilities — KV (key-value storage),
-files, AI, identity (`me()`), and realtime — with **no build step and no secrets
-in the canvas**. Identity comes from the signed-in session; the canvas is
-identified by its own URL.
+Give a static canvas memory, file storage, the signed-in viewer's identity, a
+model, and live sync through one global, `canvasdrop`. There is no build step
+and nothing to configure in the page: identity comes from the viewer's session,
+the canvas is identified from its own URL, and no key ever reaches the browser.
 
 ## Add it to a canvas
 
@@ -20,59 +18,101 @@ Drop in one script tag, then call the global:
 </script>
 ```
 
-(`type="module"` lets you use top-level `await`; the SDK script tag itself is a
-plain `<script>` and runs first.)
+`type="module"` lets you use top-level `await`; the SDK tag itself is a plain
+`<script>` and runs first. The bundle is served at `{base}/sdk/v1.js` behind the
+same sign-in as everything else, and a relative `src` resolves in both URL modes.
 
-The script tag defines the single global `window.canvasdrop` (that is the only
-global name — there is no `cd` alias). The SDK auto-detects the canvas slug and
-the API base from the page's location:
+The snippet runs as soon as the canvas has **Backend** switched on (see
+[Turn the backend on first](#turn-the-backend-on-first)). A fresh local
+instance (`pnpm dev`, `dev` auth) is already signed in.
 
-- **Path mode** — a path like `/c/{slug}/…` is matched; the slug is the segment
-  after `/c/`, and the API base is the page's own origin.
-- **Subdomain mode** — otherwise, the slug is the first label of the hostname
-  (`{slug}.{base}`), and the API base is the page's protocol plus the remaining
-  host labels (and port, if any).
+## One global: `canvasdrop`
 
-Every request goes to `{apiBase}/v1/c/{slug}/…` with `credentials: "include"`, so
-identity rides the existing session cookie. You never pass the slug or any key
-yourself.
+The script defines exactly one global, `window.canvasdrop`. There is no `cd`
+alias, no second name, and no version property on the object.
 
-## Enable the capability first
+If you import the `@canvas-drop/sdk` package as a module instead, it exports
+`createClient`, `detectContext`, `SDK_VERSION`, `ERROR_CODES`, and the error
+classes. The served script is that same client with the context detected for
+you.
 
-The canvas owner must turn on **Backend** (and the specific feature) in the
-canvas's **Backend** tab. A method whose capability is off throws a
-`CapabilityDisabledError`. See [Capabilities](/docs/authoring/capabilities).
+## How the SDK finds your canvas
+
+`detectContext(window.location)` reads the slug and the API base from the page
+URL. You never pass either yourself.
+
+| URL mode | Page URL | Slug | API base |
+| --- | --- | --- | --- |
+| Path | `https://canvases.example.com/c/quiet-otter-x7k2/` | the segment after `/c/` | the page's own origin |
+| Subdomain | `https://quiet-otter-x7k2.canvases.example.com/` | the first hostname label | the protocol plus the remaining labels (port kept, if any) |
+
+Path mode is checked first (`/c/{slug}`); any other URL is treated as a
+subdomain. Every request goes to `{apiBase}/v1/c/{slug}/…` with
+`credentials: "include"`, so the viewer's session cookie rides along. On a
+local path-mode instance that is `http://localhost:3000/v1/c/quiet-otter-x7k2/…`.
+
+## Turn the backend on first
+
+A canvas is static until its owner or an editor turns on **Backend** in the
+canvas's **Backend** tab. That master switch is off by default and gates every
+primitive, including `me()`. With it on:
+
+- **Identity** has no toggle of its own; `me()` works whenever the backend is on.
+- **KV**, **files**, **AI**, and **realtime** each have their own toggle. AI and
+  realtime also depend on the operator having configured them for the instance.
+- **Authoring** stays off until the owner enables it and the operator has opted
+  the instance in.
+
+A call to anything that is off throws `CapabilityDisabledError` (code
+`CAPABILITY_DISABLED`, status 403); its `.hint` names the gate that failed and
+how to fix it. The [Capabilities](/docs/authoring/capabilities) page covers the
+tab.
 
 ## The surface
 
-- [`canvasdrop.me()`](/docs/sdk/identity) — the signed-in viewer (`{ id, email, name, avatarUrl, kind }`, where `kind` is `"member"` or `"guest"`).
-- [`canvasdrop.kv`](/docs/sdk/kv) — `get`/`set`/`delete`/`list`/`increment`, shared plus per-viewer (`canvasdrop.kv.user`).
-- [`canvasdrop.files`](/docs/sdk/files) — `upload`/`list`/`delete`/`url`.
-- [`canvasdrop.ai`](/docs/sdk/ai) — server-side model calls: `chat` and streaming `stream`.
-- [`canvasdrop.realtime`](/docs/sdk/realtime) — `channel(name)` for pub/sub + presence.
-- [`canvasdrop.canvases`](/docs/sdk/authoring) — `publish`/`update`/`list`/`revoke`: a signed-in viewer creates and manages canvases as **managed shares** from the page, as themselves (the **authoring** capability, off by default).
+| Namespace | What it does | Reference |
+| --- | --- | --- |
+| `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind }`, where `kind` is `"member"` or `"guest"`. | [Identity](/docs/sdk/identity) |
+| `canvasdrop.kv` | `get`, `set`, `delete`, `list`, `increment`. The same five on `canvasdrop.kv.user` store per viewer. `get` resolves `null` for a missing key. | [KV](/docs/sdk/kv) |
+| `canvasdrop.files` | `upload(file)`, `list()`, `delete(id)`, and the synchronous `url(id)`. | [Files](/docs/sdk/files) |
+| `canvasdrop.ai` | `chat(messages, { model })` resolves the full text with usage and cost; `stream(messages, { model })` yields text chunks. | [AI](/docs/sdk/ai) |
+| `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `close`. | [Realtime](/docs/sdk/realtime) |
+| `canvasdrop.canvases` | `publish`, `update`, `list`, `revoke`: a signed-in viewer creates and manages canvases from the page, as themselves (the authoring capability). | [Authoring](/docs/sdk/authoring) |
 
 ## Errors
 
-Every failure throws an error extending `CanvasdropError`, which carries a string
-`.code` and a numeric `.status`. Four typed subclasses are thrown directly —
-`NotAuthenticatedError` (401), `NotFoundError` (404), `CapabilityDisabledError`
-(403), and `QuotaExceededError` (429/409/413, the spend/rate and size-limit
-failures — the `*_TOO_LARGE` codes surface here too) — and everything else surfaces as the
-base `CanvasdropError`. Switch on `.code` to handle the rest. See the
-[error code reference](/docs/api/errors).
+Every failure throws an error extending `CanvasdropError`: a string `.code`, a
+numeric `.status`, and, when the server sent one, a `.hint` with the fix. Five
+subclasses cover the cases you most often branch on:
+
+| Class | `.code` | `.status` |
+| --- | --- | --- |
+| `NotAuthenticatedError` | `NOT_AUTHENTICATED` | 401 |
+| `NotFoundError` | `NOT_FOUND` | 404 |
+| `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 |
+| `QuotaExceededError` | `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, `CONNECTION_LIMIT`, or a size code (`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`) | 429, 409, or 413 |
+| `PublishFailedError` | `PUBLISH_FAILED`, with the new canvas's `.id` | 502 |
+
+Everything else (`PASSWORD_REQUIRED`, `STATIC_ONLY`, `DISABLED`,
+`MODEL_NOT_ALLOWED`, `NOT_NUMERIC`, `INVALID_BODY`, and the rest) arrives as the
+base `CanvasdropError`; branch on `.code`. The full list is on the
+[error codes](/docs/api/errors) page.
 
 ```js
 try {
   await canvasdrop.kv.increment("votes");
 } catch (err) {
   if (err.code === "CAPABILITY_DISABLED") {
-    // ask the owner to enable KV in the Backend tab
+    // ask the owner to enable KV in the Backend tab; err.hint says what is off
   } else {
     throw err;
   }
 }
 ```
 
-If you import the SDK package as a module instead of using the global script, the
-error classes (and `createClient`) are exported for `instanceof` checks.
+Two cases do not throw the way the rest do: `kv.get` on a missing key resolves
+`null` rather than throwing `NotFoundError`, and realtime reports sign-in,
+capability, and connection-limit failures by closing the socket, after which the
+next `publish` or `presence()` call throws that error. With the module import,
+the error classes are exported for `instanceof` checks; with the global script,
+branch on `.code` or `.name`.
