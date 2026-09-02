@@ -775,7 +775,7 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     });
   });
 
-  it("clears stale viewer-team grants when authoring changes away from team access", async () => {
+  it("keeps viewer-team grants when authoring leaves the legacy team rung (the list applies at every rung)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
     const teams = teamsRepository(client);
@@ -790,10 +790,12 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const response = await putUpdate(app, published.id, formData({ access: "private" }));
 
     expect(response.status).toBe(200);
-    expect(await teams.listTeamIdsForCanvas(published.id)).toEqual([]);
+    // The team stays on the list — it opens the canvas at `private` just the same.
+    expect(await teams.listTeamIdsForCanvas(published.id)).toEqual([team.id]);
     expect(await response.json()).toMatchObject({
       access: "private",
       discoverability: "link_only",
+      audienceSummary: { count: 1, names: ["Old audience"] },
     });
   });
 
