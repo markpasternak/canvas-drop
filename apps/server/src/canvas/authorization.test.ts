@@ -717,15 +717,12 @@ describe("resolveAccessContext — editorMatch resolution", () => {
     ]);
   });
 
-  it("a non-editor member falls through to the rung lookup (specific_people → isAllowed)", async () => {
+  it("a non-editor member falls through to the list lookups (isAllowed + teamMatch) at any rung", async () => {
     const { canvases } = repo([]);
-    const ctx = await resolveAccessContext(
-      canvases,
-      noTeams,
-      canvas({ access: "specific_people" }),
-      other,
-    );
-    expect(ctx).toEqual({ isAllowed: false });
+    for (const access of ["private", "specific_people", "team", "whole_org"] as const) {
+      const ctx = await resolveAccessContext(canvases, noTeams, canvas({ access }), other);
+      expect(ctx).toEqual({ isAllowed: false, teamMatch: false });
+    }
   });
 
   it("never asks isEffectiveEditor for a guest, an anonymous visitor, or a non-active canvas", async () => {
@@ -740,5 +737,179 @@ describe("resolveAccessContext — editorMatch resolution", () => {
     await resolveAccessContext(canvases, noTeams, canvas({ status: "disabled" }), other);
     await resolveAccessContext(canvases, noTeams, null, other);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("decideCanvasAccess — the list always applies (restricted access model)", () => {
+  const RESTRICTED = ["private", "specific_people", "team"] as const;
+
+  it("a directly listed member opens the canvas at every restricted rung (gate reflects the password)", () => {
+    for (const access of RESTRICTED) {
+      expect(decideCanvasAccess(canvas({ access }), other, NOW, { isAllowed: true })).toEqual({
+        action: "allow",
+        needsPasswordGate: false,
+        staticOnly: false,
+      });
+      expect(
+        decideCanvasAccess(canvas({ access, passwordHash: "h" }), other, NOW, { isAllowed: true }),
+      ).toMatchObject({ action: "allow", needsPasswordGate: true });
+    }
+  });
+
+  it("a member of a granted team opens the canvas at every restricted rung", () => {
+    for (const access of RESTRICTED) {
+      expect(decideCanvasAccess(canvas({ access }), other, NOW, { teamMatch: true })).toEqual({
+        action: "allow",
+        needsPasswordGate: false,
+        staticOnly: false,
+      });
+    }
+  });
+
+  it("an unlisted member is 404 at every restricted rung — the three are one family", () => {
+    for (const access of RESTRICTED) {
+      expect(decideCanvasAccess(canvas({ access }), other, NOW, {})).toEqual({
+        action: "deny",
+        status: 404,
+        reason: "owner_only",
+      });
+      expect(
+        decideCanvasAccess(canvas({ access }), other, NOW, { isAllowed: false, teamMatch: false }),
+      ).toMatchObject({ action: "deny", status: 404 });
+    }
+  });
+
+  it("a listed guest opens the canvas at whole_org too (no gate — the magic link was the gate)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", passwordHash: "h" }), guest("cv1"), NOW, {
+        isAllowed: true,
+      }),
+    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+    // …and an unlisted guest is still an outsider there.
+    expect(decideCanvasAccess(canvas({ access: "whole_org" }), guest("cv1"), NOW, {})).toMatchObject(
+      { action: "deny", status: 404 },
+    );
+  });
+
+  it("active tenancy: a listed member of a DIFFERENT org opens a whole_org canvas (the list beats the org scope)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org", orgId: ORG_A }), memberB, NOW, {
+        ...ACTIVE,
+        isAllowed: true,
+      }),
+    ).toMatchObject({ action: "allow" });
+  });
+
+  it("a listed member gets FULL access on a public_link canvas (not the static-only public view)", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link" }), other, NOW, {
+        publicEnabled: true,
+        isAllowed: true,
+      }),
+    ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
+    expect(
+      decideCanvasAccess(canvas({ access: "public_link" }), other, NOW, {
+        publicEnabled: false,
+        teamMatch: true,
+      }),
+    ).toMatchObject({ action: "allow", staticOnly: false });
+  });
+
+  it("anonymous can never be listed, and only a member can team-match — stray flags are ignored", () => {
+    for (const access of RESTRICTED) {
+      expect(
+        decideCanvasAccess(canvas({ access }), anon, NOW, { isAllowed: true, teamMatch: true }),
+      ).toMatchObject({ action: "deny", status: 404 });
+      expect(
+        decideCanvasAccess(canvas({ access }), guest("cv1"), NOW, { teamMatch: true }),
+      ).toMatchObject({ action: "deny", status: 404 });
+    }
+  });
+
+  it("a listed principal past the share expiry is 404 (share_expired), like every non-owner", () => {
+    expect(
+      decideCanvasAccess(canvas({ access: "private", sharedExpiresAt: NOW - 1 }), other, NOW, {
+        isAllowed: true,
+      }),
+    ).toEqual({ action: "deny", status: 404, reason: "share_expired" });
+  });
+
+  it("lifecycle still wins: a listed member is 404 on an archived canvas and 403 on a disabled one", () => {
+    expect(
+      decideCanvasAccess(canvas({ status: "archived" }), other, NOW, { isAllowed: true }),
+    ).toMatchObject({ action: "deny", status: 404 });
+    expect(
+      decideCanvasAccess(canvas({ status: "disabled" }), other, NOW, { isAllowed: true }),
+    ).toMatchObject({ action: "deny", status: 403 });
+  });
+});
+
+describe("resolveAccessContext — list lookups at every rung", () => {
+  function deps(opts: { allowed?: boolean; team?: boolean } = {}) {
+    const allowCalls: Array<[string, { userId?: string | null; email?: string | null }]> = [];
+    const teamCalls: Array<[string, string, Set<string>]> = [];
+    const canvases = {
+      isPrincipalAllowed: async (
+        id: string,
+        key: { userId?: string | null; email?: string | null },
+      ) => {
+        allowCalls.push([id, key]);
+        return opts.allowed ?? false;
+      },
+      isOwnerPublishEnabled: async () => true,
+      isEffectiveEditor: async () => false,
+    };
+    const teams = {
+      teamMatch: async (id: string, userId: string, orgIds: Set<string>) => {
+        teamCalls.push([id, userId, orgIds]);
+        return opts.team ?? false;
+      },
+    };
+    return { canvases, teams, allowCalls, teamCalls };
+  }
+
+  it("a member: both lookups run at every rung, public_link included (alongside publicEnabled)", async () => {
+    for (const access of ["private", "specific_people", "team", "whole_org"] as const) {
+      const d = deps({ team: true });
+      const ctx = await resolveAccessContext(d.canvases, d.teams, canvas({ access }), other);
+      expect(ctx).toEqual({ isAllowed: false, teamMatch: true });
+      expect(d.allowCalls).toEqual([["cv1", { userId: "other" }]]);
+      expect(d.teamCalls).toEqual([["cv1", "other", new Set([ORG_A])]]);
+    }
+    const d = deps({ allowed: true });
+    const ctx = await resolveAccessContext(
+      d.canvases,
+      d.teams,
+      canvas({ access: "public_link" }),
+      other,
+    );
+    expect(ctx).toEqual({ publicEnabled: true, isAllowed: true, teamMatch: false });
+  });
+
+  it("the canvas's own guest: the allowlist lookup by email only (guests are never on a team)", async () => {
+    const d = deps({ allowed: true });
+    const ctx = await resolveAccessContext(
+      d.canvases,
+      d.teams,
+      canvas({ access: "private" }),
+      guest("cv1", " G@X.com "),
+    );
+    expect(ctx).toEqual({ isAllowed: true });
+    expect(d.allowCalls).toEqual([["cv1", { email: "g@x.com" }]]);
+    expect(d.teamCalls).toEqual([]);
+  });
+
+  it("no lookups for an anonymous visitor, a guest scoped to another canvas, a non-active canvas, or a null canvas", async () => {
+    const d = deps({ allowed: true, team: true });
+    expect(await resolveAccessContext(d.canvases, d.teams, canvas(), anon)).toEqual({});
+    expect(await resolveAccessContext(d.canvases, d.teams, canvas(), guest("cv-other"))).toEqual(
+      {},
+    );
+    expect(
+      await resolveAccessContext(d.canvases, d.teams, canvas({ status: "archived" }), other),
+    ).toEqual({});
+    expect(await resolveAccessContext(d.canvases, d.teams, null, other)).toEqual({});
+    expect(d.allowCalls).toEqual([]);
+    expect(d.teamCalls).toEqual([]);
   });
 });
