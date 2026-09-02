@@ -3514,14 +3514,14 @@ describe("managementRoutes — role matrix (editor-roles plan)", () => {
 
 // --- Clone by an editor (editor-roles plan U3) -------------------------------------------
 
-describe("managementRoutes — clone by an editor", () => {
+describe.each(DIALECTS)("managementRoutes — clone by an editor (%s)", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
   it("an editor clones a PRIVATE canvas → new canvas owned by the editor with an empty people list; a no-role member → 404", async () => {
-    client = await makeTestDb("sqlite");
+    client = await makeTestDb(dialect);
     const storage = memStorage();
     const owner = await seedUser(client, "owner");
     const editor = await seedUser(client, "editor");
@@ -3558,18 +3558,19 @@ describe("managementRoutes — clone by an editor", () => {
   });
 });
 
-describe("managementRoutes — clone by a granted-team viewer (restricted access model, review #1/#7)", () => {
+describe.each(DIALECTS)("managementRoutes — clone by direct and team viewers (%s)", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
   });
 
-  /** A PRIVATE canvas with a viewer-team grant on its people-and-teams list. */
-  async function seedTeamCanvas(opts: { publish: boolean }) {
-    client = await makeTestDb("sqlite");
+  /** A Restricted canvas with direct and team viewer grants on its access list. */
+  async function seedViewerCanvas(opts: { publish: boolean }) {
+    client = await makeTestDb(dialect);
     const storage = memStorage();
     const owner = await seedUser(client, "owner");
     const mate = await seedUser(client, "mate");
+    const direct = await seedUser(client, "direct");
     const stranger = await seedUser(client, "stranger");
     const canvases = canvasesRepository(client);
     const teams = teamsRepository(client);
@@ -3588,56 +3589,93 @@ describe("managementRoutes — clone by a granted-team viewer (restricted access
     const team = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
     await teams.addMember(team.id, mate.id);
     await teams.setCanvasTeams(src.id, [team.id]);
+    await canvases.addAllowlistEntry({
+      canvasId: src.id,
+      principalKind: "member",
+      userId: direct.id,
+      role: "viewer",
+    });
     const cloneAs = (u: { id: string }) =>
       buildApp(client, { id: u.id, isAdmin: false }, storage).request(
         `/api/canvases/${src.id}/clone`,
         sameOriginPost,
       );
-    return { canvases, src, owner, mate, stranger, cloneAs };
+    return { canvases, src, owner, mate, direct, stranger, cloneAs };
   }
 
-  it("a viewer-team member clones a published PRIVATE canvas (the list applies at every rung); a non-member gets 404", async () => {
-    const { canvases, src, mate, stranger, cloneAs } = await seedTeamCanvas({ publish: true });
+  it("direct and team viewers clone the same published Restricted canvas; a no-grant member gets 404", async () => {
+    const { canvases, src, mate, direct, stranger, cloneAs } = await seedViewerCanvas({
+      publish: true,
+    });
     expect((await canvases.findById(src.id))?.access).toBe("private");
     expect((await cloneAs(stranger)).status).toBe(404);
-    const res = await cloneAs(mate);
-    expect(res.status).toBe(201);
-    const body = await jsonOf<{ id: string }>(res);
+    expect((await cloneAs(mate)).status).toBe(201);
+
+    const directResponse = await cloneAs(direct);
+    expect(directResponse.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(directResponse);
     const clone = await canvases.findById(body.id);
-    expect(clone?.ownerId).toBe(mate.id);
-    expect(clone?.clonedFromCanvasId).toBe(src.id);
+    expect(clone).toMatchObject({
+      ownerId: direct.id,
+      clonedFromCanvasId: src.id,
+      access: "private",
+      currentVersionId: null,
+      sharedExpiresAt: null,
+      galleryListed: false,
+      galleryTemplatable: false,
+    });
+    expect(clone?.apiKeyHash).not.toBe(src.apiKeyHash);
+    expect(await canvases.listAllowlist(body.id)).toEqual([]);
   });
 
-  it("the fences: a never-published source reads 404 for the team viewer (never a copy of the owner's draft); the owner still clones it", async () => {
-    const { owner, mate, cloneAs } = await seedTeamCanvas({ publish: false });
+  it("the fences: a never-published source reads 404 for both viewer grants; the owner still clones it", async () => {
+    const { owner, mate, direct, cloneAs } = await seedViewerCanvas({ publish: false });
     expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(direct)).status).toBe(404);
     expect((await cloneAs(owner)).status).toBe(201);
   });
 
-  it("the fences: an expired share reads 404 for the team viewer; the owner still clones it", async () => {
-    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+  it("the fences: an expired share reads 404 for both viewer grants; the owner still clones it", async () => {
+    const { canvases, src, owner, mate, direct, cloneAs } = await seedViewerCanvas({
+      publish: true,
+    });
     await canvases.updateSettings(src.id, { sharedExpiresAt: Date.now() - 60_000 });
     expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(direct)).status).toBe(404);
     expect((await cloneAs(owner)).status).toBe(201);
   });
 
-  it("the fences: a password-protected source reads 404 for the team viewer (the cloner would own the copy and bypass the gate); the owner still clones it", async () => {
-    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+  it("the fences: a password-protected source reads 404 for both viewer grants; the owner still clones it", async () => {
+    const { canvases, src, owner, mate, direct, cloneAs } = await seedViewerCanvas({
+      publish: true,
+    });
     await canvases.setPassword(src.id, "argon2hash");
     expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(direct)).status).toBe(404);
     expect((await cloneAs(owner)).status).toBe(201);
   });
 
-  it("the fences: an archived source reads opaque 404 for the team viewer", async () => {
-    const { canvases, src, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+  it("the fences: archived, disabled, and deleted sources read opaque 404 for both viewer grants", async () => {
+    const { canvases, src, mate, direct, cloneAs } = await seedViewerCanvas({ publish: true });
     await canvases.archive(src.id);
     expect((await cloneAs(mate)).status).toBe(404);
-  });
-
-  it("the fences: an admin-disabled source reads opaque 404 for the team viewer", async () => {
-    const { canvases, src, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    expect((await cloneAs(direct)).status).toBe(404);
+    await canvases.unarchive(src.id);
     await canvases.setDisabled(src.id, "policy");
     expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(direct)).status).toBe(404);
+    await canvases.enable(src.id);
+    await canvases.setStatus(src.id, "deleted");
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(direct)).status).toBe(404);
+  });
+
+  it("General access alone never grants clone eligibility", async () => {
+    const { canvases, src, stranger, cloneAs } = await seedViewerCanvas({ publish: true });
+    for (const access of ["whole_org", "public_link"] as const) {
+      await canvases.updateSettings(src.id, { access });
+      expect((await cloneAs(stranger)).status, access).toBe(404);
+    }
   });
 });
 
