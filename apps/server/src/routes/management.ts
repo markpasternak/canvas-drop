@@ -495,10 +495,11 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   // Clone → a new canvas owned by the caller, seeded from an existing one (plan 002).
-  // An owner may clone any ACTIVE canvas they own; a non-owner only a gallery-listed
-  // + templatable one. Eligibility is re-derived server-side from the row (never the
-  // client); a non-eligible source 404s opaquely so its existence isn't revealed
-  // (§12.2). The clone gets its OWN fresh deploy key (the source's is never copied),
+  // An owner/editor may clone any ACTIVE canvas they manage. Other signed-in members
+  // may clone a gallery template or a published, active, unprotected canvas reached
+  // through a durable direct/team viewer grant. Eligibility is re-derived server-side
+  // from the row (never the client); a non-eligible source 404s opaquely so its
+  // existence isn't revealed (§12.2). The clone gets its OWN fresh deploy key,
   // but unlike create we do NOT return the plaintext here — a clone's key is revealed
   // on demand via Settings → Regenerate key, so an unused secret never transits the
   // wire (plan 002 decision).

@@ -27,6 +27,8 @@ Copy must describe the layer it belongs to. “No one else has direct access yet
 
 Moving ownership transfer out of each access row and into owner-only Advanced presentation also moves its data dependencies. The list reports eligible transfer candidates to its parent, and the parent increments an explicit refresh key after a successful transfer so the owner row and candidate set are reloaded together. The existing generation guard and null-on-load behavior remain important: a late response from the previous canvas must not repopulate stale list-derived copy or actions.
 
+The same identity guard must cover mutations, not only reads. Capture the canvas id when transfer starts and suppress both success and failure effects if that route is no longer active. Otherwise a late response can close the next canvas's dialog, refresh its people list, or announce a transfer that happened somewhere else.
+
 ## Grant shape should not change the viewer capability
 
 Direct and team viewer grants both authorize the same published bytes. Clone eligibility now uses one resolver for all paths:
@@ -38,6 +40,12 @@ Direct and team viewer grants both authorize the same published bytes. Clone eli
 General access alone does not grant cloning. Pending invitations have no user principal yet, retained legacy guests are not members, and no-role members stay opaque not-found. Archived, disabled, deleted, expired, password-protected, and unpublished sources fail the same way for direct and team viewers. Keeping this in one service avoids HTTP/MCP drift and removes a capability difference caused only by how the same viewer was added.
 
 The result is intentionally durable. A clone is a new, unpublished Restricted canvas owned by the viewer, with an empty direct-access list, backend off, and a fresh slug and deploy key. Revoking the source grant later does not revoke the copy; that is the existing clone-as-template contract, now made explicit in user and agent documentation.
+
+## Materialization must claim before it grants
+
+Durable viewer cloning raises the consequence of a pre-existing invitation race. The old login hook inserted the allowlist row and then marked the pending invitation consumed. If an owner cancelled between the stale invitation read and that insert, cancellation could win while the durable member grant survived—and that member could then clone.
+
+The repository now conditionally claims the still-pending invitation and inserts the canvas grant or team membership in the same transaction. Cancellation or a pending-role change that wins first makes the claim return false; an insert failure rolls the claim back for the next verified login. The rule is broader than cloning: whenever a revocable pending record materializes into a durable authorization row, claim-and-apply must be atomic in both dialects.
 
 ## Treat documentation screenshots as behavior artifacts
 

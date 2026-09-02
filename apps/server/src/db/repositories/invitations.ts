@@ -14,6 +14,21 @@ export interface RecordInvitation {
   invitedBy: string;
 }
 
+export interface MaterializeCanvasInvitation {
+  invitationId: string;
+  canvasId: string;
+  userId: string;
+  expectedRole: string | null;
+  role: "viewer" | "editor";
+  updateExistingRole: boolean;
+}
+
+export interface MaterializeTeamInvitation {
+  invitationId: string;
+  teamId: string;
+  userId: string;
+}
+
 /**
  * Pending-access store (plan 003 phase 4 / U4). Pending access is a grant recorded
  * BEFORE the person has a `users` row. When the email first authenticates (verified by the
@@ -24,7 +39,27 @@ export interface RecordInvitation {
 export function invitationsRepository(client: DbClient) {
   // biome-ignore lint/suspicious/noExplicitAny: dual-dialect db seam
   const db = client.db as any;
-  const T = (client.dialect === "sqlite" ? sqliteSchema : pgSchema).invitations;
+  const S = client.dialect === "sqlite" ? sqliteSchema : pgSchema;
+  const T = S.invitations;
+  const allowlistT = S.canvasAllowlist;
+  const teamMembersT = S.teamMembers;
+
+  const canvasClaim = (input: MaterializeCanvasInvitation) =>
+    and(
+      eq(T.id, input.invitationId),
+      eq(T.targetType, "canvas"),
+      eq(T.targetId, input.canvasId),
+      isNull(T.consumedAt),
+      input.expectedRole === null ? isNull(T.role) : eq(T.role, input.expectedRole),
+    );
+
+  const teamClaim = (input: MaterializeTeamInvitation) =>
+    and(
+      eq(T.id, input.invitationId),
+      eq(T.targetType, "team"),
+      eq(T.targetId, input.teamId),
+      isNull(T.consumedAt),
+    );
 
   return {
     /** Record a pending grant (idempotent on the email+target unique index). */
@@ -129,32 +164,104 @@ export function invitationsRepository(client: DbClient) {
         .where(and(eq(T.email, email), isNull(T.consumedAt)))) as Invitation[];
     },
 
+    /**
+     * Atomically claim a pending canvas invitation and materialize its member grant.
+     * Cancellation and role changes race against the conditional claim, so neither can
+     * leave behind a durable grant for an invitation they won. A failed insert rolls the
+     * claim back, preserving the materializer's retry-on-next-login contract.
+     */
+    async materializeCanvasGrant(input: MaterializeCanvasInvitation): Promise<boolean> {
+      const values = {
+        id: uuidv7(),
+        canvasId: input.canvasId,
+        principalKind: "member",
+        userId: input.userId,
+        email: null,
+        role: input.role,
+        createdAt: Date.now(),
+      } as const;
+      const set = input.updateExistingRole ? { role: input.role } : { canvasId: input.canvasId };
+
+      if (client.dialect === "sqlite") {
+        return db.transaction((q: typeof db) => {
+          const claimed = q
+            .update(T)
+            .set({ consumedAt: Date.now() })
+            .where(canvasClaim(input))
+            .returning({ id: T.id })
+            .all() as Array<{ id: string }>;
+          if (claimed.length === 0) return false;
+          q.insert(allowlistT)
+            .values(values)
+            .onConflictDoUpdate({
+              target: [allowlistT.canvasId, allowlistT.userId],
+              set,
+            })
+            .run();
+          return true;
+        });
+      }
+
+      return db.transaction(async (q: typeof db) => {
+        const claimed = (await q
+          .update(T)
+          .set({ consumedAt: Date.now() })
+          .where(canvasClaim(input))
+          .returning({ id: T.id })) as Array<{ id: string }>;
+        if (claimed.length === 0) return false;
+        await q
+          .insert(allowlistT)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [allowlistT.canvasId, allowlistT.userId],
+            set,
+          });
+        return true;
+      });
+    },
+
+    /** Atomically claim a pending team invitation and materialize its membership. */
+    async materializeTeamGrant(input: MaterializeTeamInvitation): Promise<boolean> {
+      const values = {
+        id: uuidv7(),
+        teamId: input.teamId,
+        userId: input.userId,
+        role: "member",
+        createdAt: Date.now(),
+      } as const;
+
+      if (client.dialect === "sqlite") {
+        return db.transaction((q: typeof db) => {
+          const claimed = q
+            .update(T)
+            .set({ consumedAt: Date.now() })
+            .where(teamClaim(input))
+            .returning({ id: T.id })
+            .all() as Array<{ id: string }>;
+          if (claimed.length === 0) return false;
+          q.insert(teamMembersT).values(values).onConflictDoNothing().run();
+          return true;
+        });
+      }
+
+      return db.transaction(async (q: typeof db) => {
+        const claimed = (await q
+          .update(T)
+          .set({ consumedAt: Date.now() })
+          .where(teamClaim(input))
+          .returning({ id: T.id })) as Array<{ id: string }>;
+        if (claimed.length === 0) return false;
+        await q.insert(teamMembersT).values(values).onConflictDoNothing();
+        return true;
+      });
+    },
+
     /** Stamp an invitation consumed (idempotent — a no-op if already consumed). */
     async consume(id: string): Promise<void> {
       await db
         .update(T)
         .set({ consumedAt: Date.now() })
         .where(and(eq(T.id, id), isNull(T.consumedAt)));
-    },
-
-    /**
-     * Consume only if the invitation still carries `role` (review #3): the materializer
-     * applied that role, so a concurrent set-role that changed it in between must win —
-     * false tells the caller to re-read and re-apply.
-     */
-    async consumeIfRole(id: string, role: string | null): Promise<boolean> {
-      const rows = (await db
-        .update(T)
-        .set({ consumedAt: Date.now() })
-        .where(
-          and(
-            eq(T.id, id),
-            isNull(T.consumedAt),
-            role === null ? isNull(T.role) : eq(T.role, role),
-          ),
-        )
-        .returning({ id: T.id })) as Array<{ id: string }>;
-      return rows.length > 0;
     },
 
     /** One un-consumed invitation by id (the materializer's re-read after a lost race). */

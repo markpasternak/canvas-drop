@@ -451,6 +451,17 @@ describe("share route", () => {
     await user.keyboard("{ArrowLeft}");
     expect(peopleTab).toHaveAttribute("aria-selected", "true");
     expect(peopleTab).toHaveFocus();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(teamsTab).toHaveAttribute("aria-selected", "true");
+    expect(teamsTab).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(peopleTab).toHaveAttribute("aria-selected", "true");
+    expect(peopleTab).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(teamsTab).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(peopleTab).toHaveFocus();
   });
 
   it("shows the human-guessable heads-up for a custom slug on a link-reachable rung", async () => {
@@ -1501,6 +1512,58 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     expect(
       calls.filter((c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist").length,
     ).toBeGreaterThan(1);
+  });
+
+  it("ignores a transfer completion after navigation to another canvas", async () => {
+    const user = userEvent.setup();
+    let resolveTransfer: ((response: Response) => void) | undefined;
+    const pendingTransfer = new Promise<Response>((resolve) => {
+      resolveTransfer = resolve;
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries }),
+      "POST /api/canvases/c1/transfer": () => pendingTransfer,
+      "GET /api/canvases/c2": () =>
+        json({
+          ...published,
+          id: "c2",
+          slug: "second-canvas",
+          url: "http://x/c/second-canvas",
+        }),
+      "GET /api/canvases/c2/allowlist": () => json({ entries }),
+    });
+    const router = renderShare();
+    const transferButton = await screen.findByRole("button", { name: /transfer ownership/i });
+    await vi.waitFor(() => expect(transferButton).toBeEnabled());
+    await user.click(transferButton);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: /transfer ownership/i,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        calls.some((call) => call.method === "POST" && call.url === "/api/canvases/c1/transfer"),
+      ).toBe(true),
+    );
+
+    await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    expect(await screen.findByRole("link", { name: "http://x/c/second-canvas" })).toBeVisible();
+    resolveTransfer?.(
+      json({
+        ok: true,
+        canvas: { ...published, role: "editor", ownerId: "u3" },
+        previousOwnerEditor: true,
+        publicLinkReverted: false,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByText(/ownership transferred/i)).toBeNull();
+    expect(
+      calls.filter((call) => call.method === "GET" && call.url === "/api/canvases/c2/allowlist"),
+    ).toHaveLength(1);
   });
 
   it("editor's view: no Transfer ownership control; the added-people AI opt-in is owner-only", async () => {

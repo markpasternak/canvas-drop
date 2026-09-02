@@ -2210,6 +2210,21 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       name: "grant_access",
       arguments: { id: cv.id, email: "stranger@a.example", role: "viewer" },
     });
+    const repo = canvasesRepository(client);
+    // Neither an email-only legacy guest row nor a pending invitation is a durable
+    // member grant, even when the signed-in account has the same email.
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "no-grant@a.example",
+      role: "viewer",
+    });
+    await invitationsRepository(client).record({
+      email: "no-grant@a.example",
+      target: { type: "canvas", id: cv.id },
+      role: "viewer",
+      invitedBy: ownerId,
+    });
     expect(
       payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
     ).toBe("private");
@@ -2225,9 +2240,21 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(directClone.id).not.toBe(cv.id);
 
     const noGrantMcp = await conn(noGrantId);
-    const repo = canvasesRepository(client);
+    const restrictedDenied = await noGrantMcp.callTool({
+      name: "clone_canvas",
+      arguments: { id: cv.id },
+    });
+    expect(isError(restrictedDenied)).toBe(true);
+    expect(text(restrictedDenied)).toContain("not found");
     for (const access of ["whole_org", "public_link"] as const) {
       await repo.updateSettings(cv.id, { access });
+      for (const grantedId of [mateId, strangerId]) {
+        const granted = await (await conn(grantedId)).callTool({
+          name: "clone_canvas",
+          arguments: { id: cv.id },
+        });
+        expect(isError(granted), `${grantedId} ${access}`).toBe(false);
+      }
       const denied = await noGrantMcp.callTool({
         name: "clone_canvas",
         arguments: { id: cv.id },

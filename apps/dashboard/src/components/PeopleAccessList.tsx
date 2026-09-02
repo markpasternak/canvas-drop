@@ -233,8 +233,17 @@ export function PeopleAccessList({
   function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const next = event.key === "ArrowLeft" || event.key === "Home" ? "people" : "teams";
-    if (next === "teams" && teams.length === 0) return;
+    const tabs: Array<"people" | "teams"> = teams.length > 0 ? ["people", "teams"] : ["people"];
+    const current = tabs.indexOf(addMode);
+    const next =
+      event.key === "Home"
+        ? tabs[0]
+        : event.key === "End"
+          ? tabs[tabs.length - 1]
+          : event.key === "ArrowRight"
+            ? tabs[(current + 1) % tabs.length]
+            : tabs[(current - 1 + tabs.length) % tabs.length];
+    if (!next) return;
     setAddMode(next);
     (next === "people" ? peopleTab : teamsTab).current?.focus();
   }

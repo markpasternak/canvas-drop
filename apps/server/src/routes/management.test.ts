@@ -3595,6 +3595,20 @@ describe.each(DIALECTS)("managementRoutes — clone by direct and team viewers (
       userId: direct.id,
       role: "viewer",
     });
+    // Email-only invitation shapes are not durable member grants. Even when the email
+    // matches a signed-in account, cloning waits for verified-login materialization.
+    await canvases.addAllowlistEntry({
+      canvasId: src.id,
+      principalKind: "guest",
+      email: stranger.email,
+      role: "viewer",
+    });
+    await invitationsRepository(client).record({
+      email: stranger.email,
+      target: { type: "canvas", id: src.id },
+      role: "viewer",
+      invitedBy: owner.id,
+    });
     const cloneAs = (u: { id: string }) =>
       buildApp(client, { id: u.id, isAdmin: false }, storage).request(
         `/api/canvases/${src.id}/clone`,
@@ -3603,7 +3617,7 @@ describe.each(DIALECTS)("managementRoutes — clone by direct and team viewers (
     return { canvases, src, owner, mate, direct, stranger, cloneAs };
   }
 
-  it("direct and team viewers clone the same published Restricted canvas; a no-grant member gets 404", async () => {
+  it("direct and team viewers clone at every General-access rung; pending/guest-only shapes get 404", async () => {
     const { canvases, src, mate, direct, stranger, cloneAs } = await seedViewerCanvas({
       publish: true,
     });
@@ -3626,6 +3640,13 @@ describe.each(DIALECTS)("managementRoutes — clone by direct and team viewers (
     });
     expect(clone?.apiKeyHash).not.toBe(src.apiKeyHash);
     expect(await canvases.listAllowlist(body.id)).toEqual([]);
+
+    for (const access of ["whole_org", "public_link"] as const) {
+      await canvases.updateSettings(src.id, { access });
+      expect((await cloneAs(mate)).status, `team ${access}`).toBe(201);
+      expect((await cloneAs(direct)).status, `direct ${access}`).toBe(201);
+      expect((await cloneAs(stranger)).status, `email-only ${access}`).toBe(404);
+    }
   });
 
   it("the fences: a never-published source reads 404 for both viewer grants; the owner still clones it", async () => {

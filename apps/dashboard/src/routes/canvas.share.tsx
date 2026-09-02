@@ -1,6 +1,6 @@
 import { Buildings, Globe, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -61,17 +61,21 @@ export default function Share() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState<string | null>(null);
   const [peopleRefreshKey, setPeopleRefreshKey] = useState(0);
+  const activeCanvasId = useRef<string | null>(id);
   // The people-and-teams list as the list component last loaded it: drives the Restricted
   // hint ("only you" vs "you and the N above") and the legacy-guest AI section. `null` until
   // the list for THIS canvas has loaded (and after a failed load), so the copy below never
   // describes an empty list it has not actually seen (review #3).
   const [people, setPeople] = useState<AllowlistEntry[] | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the mirror on canvas change only
   useEffect(() => {
+    activeCanvasId.current = id;
     setPeople(null);
     setTransferCandidates(null);
     setTransferOpen(false);
     setTransferTo(null);
+    return () => {
+      if (activeCanvasId.current === id) activeCanvasId.current = null;
+    };
   }, [id]);
   const listLoaded = people !== null;
   // Who can open the canvas TODAY through the list: a pending invite has no user yet, so it
@@ -125,8 +129,10 @@ export default function Share() {
 
   async function transferOwnership() {
     if (!transferTo) return;
+    const transferCanvasId = id;
     try {
       const result = await transfer.mutateAsync(transferTo);
+      if (activeCanvasId.current !== transferCanvasId) return;
       setTransferOpen(false);
       setPeopleRefreshKey((current) => current + 1);
       toast(
@@ -135,6 +141,7 @@ export default function Share() {
           : "Ownership transferred. You're now an editor of this canvas.",
       );
     } catch (err) {
+      if (activeCanvasId.current !== transferCanvasId) return;
       toast(err instanceof ApiError ? err.hint : "Couldn't transfer ownership", "error");
     }
   }

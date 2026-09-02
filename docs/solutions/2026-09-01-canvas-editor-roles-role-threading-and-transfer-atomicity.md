@@ -63,7 +63,7 @@ See also [[auth-invariant-checklist]] and [[teams-parity-shared-helpers-and-list
    conditional `UPDATE ... WHERE consumed_at IS NULL` that returned nothing when login
    materialization had already consumed the invite; the service reported and audited success
    anyway, and the materializer's snapshot of the old role won the race. **Fix:** honour the
-   null result (not found), and consume role-aware (`consumeIfRole`) with a re-read-and-re-apply
+   null result (not found), and atomically claim-and-apply the pending role with a re-read-and-re-apply
    when the role changed underneath. *Lesson:* a conditional write is only as safe as the check
    of its row count.
 5. **An omitted argument that defaulted to a downgrade.** Both team-grant callers defaulted an

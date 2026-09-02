@@ -28,6 +28,51 @@ function dependencies() {
 }
 
 describe("isCloneEligibleForMember", () => {
+  it("keeps owner/editor management cloning ahead of viewer fences, but only for active rows", async () => {
+    const owner: Principal = {
+      kind: "member",
+      id: source.ownerId,
+      isAdmin: false,
+      orgIds: new Set(),
+    };
+    const ownerDeps = dependencies();
+    await expect(isCloneEligibleForMember(source, owner, ownerDeps, Date.now())).resolves.toBe(
+      true,
+    );
+    await expect(
+      isCloneEligibleForMember({ ...source, status: "archived" }, owner, ownerDeps, Date.now()),
+    ).resolves.toBe(false);
+    expect(ownerDeps.canvases.findCloneableTemplate).not.toHaveBeenCalled();
+
+    const editor: Principal = {
+      kind: "member",
+      id: "editor",
+      isAdmin: false,
+      orgIds: new Set(),
+    };
+    const editorDeps = dependencies();
+    editorDeps.canvases.isEffectiveEditor.mockResolvedValue(true);
+    await expect(isCloneEligibleForMember(source, editor, editorDeps, Date.now())).resolves.toBe(
+      true,
+    );
+    expect(editorDeps.canvases.findCloneableTemplate).not.toHaveBeenCalled();
+  });
+
+  it("keeps gallery-template eligibility ahead of direct and team grant checks", async () => {
+    const deps = dependencies();
+    deps.canvases.findCloneableTemplate.mockResolvedValue(source);
+    const principal: Principal = {
+      kind: "member",
+      id: "gallery-viewer",
+      isAdmin: false,
+      orgIds: new Set(["org-1"]),
+    };
+
+    await expect(isCloneEligibleForMember(source, principal, deps, Date.now())).resolves.toBe(true);
+    expect(deps.canvases.isPrincipalAllowed).not.toHaveBeenCalled();
+    expect(deps.teams.teamMatch).not.toHaveBeenCalled();
+  });
+
   it.each<Principal>([
     {
       kind: "guest",
