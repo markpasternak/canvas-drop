@@ -9,7 +9,7 @@ import { filesService } from "../canvas/files-service.js";
 import { type ConnectionLimits, connectionLimits } from "../connections/limits.js";
 import { createSecretCipher } from "../connections/secret-cipher.js";
 import { connectionService } from "../connections/service.js";
-import type { connectionTransport } from "../connections/transport.js";
+import type { ConnectionFetchInput, connectionTransport } from "../connections/transport.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
@@ -77,7 +77,7 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
       protectedHeaders: [{ name: "User-Agent", value: "controlled-stock-agent" }],
     });
     if (options.grant ?? true) await service.attach(owner.id, profile.id, canvas.id);
-    const fetch = vi.fn(async () => ({
+    const fetch = vi.fn(async (_input: ConnectionFetchInput) => ({
       status: 200,
       headers: new Headers({ "content-type": "application/json", "set-cookie": "blocked=1" }),
       body: new TextEncoder().encode('{"price":42}'),
@@ -152,6 +152,23 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     const serializedUsage = JSON.stringify(await usage.countByType(canvas.id, null));
     expect(serializedUsage).not.toContain("symbol");
     expect(serializedUsage).not.toContain("controlled-stock-agent");
+  });
+
+  it("ignores the browser's ambient User-Agent when the profile controls the upstream agent", async () => {
+    const { app, fetch } = await fixture();
+    const response = await app.request("/v1/c/stocks/connections/market/quote", {
+      headers: {
+        accept: "application/json",
+        "user-agent": "ambient-browser-agent",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+    const input = fetch.mock.calls[0]?.[0];
+    expect(input?.callerHeaders).toContainEqual(["accept", "application/json"]);
+    expect(input?.callerHeaders).not.toContainEqual(["user-agent", "ambient-browser-agent"]);
+    expect(input?.protectedHeaders).toEqual([["user-agent", "controlled-stock-agent"]]);
   });
 
   it("preserves repeated connection-looking segments in the upstream path", async () => {
