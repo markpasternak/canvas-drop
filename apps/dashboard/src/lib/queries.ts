@@ -33,6 +33,7 @@ export const keys = {
   draftFiles: (id: string) => ["draft-file", id] as const,
   draftFile: (id: string, path: string) => ["draft-file", id, path] as const,
   usage: (id: string) => ["usage", id] as const,
+  canvasConnections: (id: string) => ["canvas", id, "connections"] as const,
   adminCanvases: (query: AdminCanvasesQuery) => ["admin", "canvases", query] as const,
   adminPeople: (query: AdminPeopleQuery) => ["admin", "people", query] as const,
   adminUsers: (query: AdminUsersQuery) => ["admin", "users", query] as const,
@@ -41,6 +42,11 @@ export const keys = {
   adminConfig: ["admin", "config"] as const,
   adminAllowedEmails: ["admin", "allowed-emails"] as const,
   adminEmailTemplates: ["admin", "email-templates"] as const,
+  adminConnections: ["admin", "connections"] as const,
+  adminConnectionCanvases: (id: string) => ["admin", "connections", id, "canvases"] as const,
+  adminConnectionEvents: (id: string, offset: number) =>
+    ["admin", "connections", id, "events", offset] as const,
+  adminCanvasConnections: (id: string) => ["admin", "canvases", id, "connections"] as const,
   gallery: (query: GalleryQuery) => ["gallery", query] as const,
   galleryFacets: ["gallery", "facets"] as const,
   // Teams (plan 003). The `teams` prefix covers the list + every roster key so a team
@@ -97,6 +103,14 @@ export function useUsage(id: string, enabled = true) {
   return useQuery({ queryKey: keys.usage(id), queryFn: () => api.getUsage(id), enabled });
 }
 
+export function useCanvasConnections(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.canvasConnections(id),
+    queryFn: () => api.listCanvasConnections(id),
+    enabled,
+  });
+}
+
 // --- Admin (§6.10, M7) ---
 
 /**
@@ -150,6 +164,34 @@ export function useAdminEmailTemplates() {
   return useQuery({
     queryKey: keys.adminEmailTemplates,
     queryFn: api.admin.listEmailTemplates,
+  });
+}
+
+export function useAdminConnections() {
+  return useQuery({ queryKey: keys.adminConnections, queryFn: api.admin.listConnections });
+}
+
+export function useAdminConnectionCanvases(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.adminConnectionCanvases(id),
+    queryFn: () => api.admin.listConnectionCanvases(id),
+    enabled,
+  });
+}
+
+export function useAdminConnectionEvents(id: string, offset: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.adminConnectionEvents(id, offset),
+    queryFn: () => api.admin.listConnectionEvents(id, offset),
+    enabled,
+  });
+}
+
+export function useAdminCanvasConnections(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.adminCanvasConnections(id),
+    queryFn: () => api.admin.listCanvasConnections(id),
+    enabled,
   });
 }
 

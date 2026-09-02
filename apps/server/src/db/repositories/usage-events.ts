@@ -1,5 +1,5 @@
 import { type Json, pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -11,6 +11,19 @@ export interface UsageEventInput {
   userId: string;
   type: UsageType;
   meta?: Json;
+}
+
+export interface ConnectionUsageEvent {
+  id: string;
+  canvasId: string;
+  userId: string;
+  key: string | null;
+  method: string | null;
+  outcome: string | null;
+  upstreamStatus: number | null;
+  durationMs: number | null;
+  responseBytes: number | null;
+  createdAt: number;
 }
 
 /**
@@ -55,6 +68,69 @@ export function usageEventsRepository(client: DbClient) {
       const out: Record<string, number> = {};
       for (const r of rows) out[r.type] = Number(r.count);
       return out;
+    },
+
+    /** Admin-only data source for one connection profile's bounded operational history.
+     * The SQL predicate keeps the read profile-scoped and paginated. The projection
+     * deliberately copies only the non-sensitive runtime fields; paths, queries,
+     * headers, and bodies can never pass through even if a malformed row contains them. */
+    async recentConnectionEvents(input: {
+      profileId: string;
+      sinceMs: number;
+      limit: number;
+      offset: number;
+    }): Promise<ConnectionUsageEvent[]> {
+      const profileIdExpr =
+        client.dialect === "sqlite"
+          ? sql<string>`json_extract(${t.meta}, '$.profileId')`
+          : sql<string>`${t.meta}->>'profileId'`;
+      const rows = (await db
+        .select({
+          id: t.id,
+          canvasId: t.canvasId,
+          userId: t.userId,
+          meta: t.meta,
+          createdAt: t.createdAt,
+        })
+        .from(t)
+        .where(
+          and(
+            eq(t.type, "connection_op"),
+            gte(t.createdAt, input.sinceMs),
+            sql`${profileIdExpr} = ${input.profileId}`,
+          ),
+        )
+        .orderBy(desc(t.createdAt))
+        .limit(input.limit)
+        .offset(input.offset)) as Array<{
+        id: string;
+        canvasId: string;
+        userId: string;
+        meta: Json | null;
+        createdAt: number;
+      }>;
+      const text = (meta: Record<string, Json>, key: string) =>
+        typeof meta[key] === "string" ? (meta[key] as string) : null;
+      const number = (meta: Record<string, Json>, key: string) =>
+        typeof meta[key] === "number" ? (meta[key] as number) : null;
+      return rows.map((row) => {
+        const meta =
+          row.meta && typeof row.meta === "object" && !Array.isArray(row.meta)
+            ? (row.meta as Record<string, Json>)
+            : {};
+        return {
+          id: row.id,
+          canvasId: row.canvasId,
+          userId: row.userId,
+          key: text(meta, "key"),
+          method: text(meta, "method"),
+          outcome: text(meta, "outcome"),
+          upstreamStatus: number(meta, "upstreamStatus"),
+          durationMs: number(meta, "durationMs"),
+          responseBytes: number(meta, "responseBytes"),
+          createdAt: row.createdAt,
+        };
+      });
     },
 
     /**

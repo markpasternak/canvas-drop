@@ -6,6 +6,7 @@ const ADMIN_TABS: ReadonlyArray<TabNavItem> = [
   { to: "/admin", label: "Overview", end: true },
   { to: "/admin/canvases", label: "Canvases" },
   { to: "/admin/users", label: "People" },
+  { to: "/admin/connections", label: "Connections" },
   { to: "/admin/settings", label: "Configuration" },
 ];
 

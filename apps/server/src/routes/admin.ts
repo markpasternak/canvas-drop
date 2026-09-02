@@ -32,6 +32,7 @@ import type { CanvasesRepository } from "../db/repositories/canvases.js";
 import type { EmailTemplatesRepository } from "../db/repositories/email-templates.js";
 import type { FilesRepository } from "../db/repositories/files.js";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
+import type { UsageEventsRepository } from "../db/repositories/usage-events.js";
 import type { UsersRepository } from "../db/repositories/users.js";
 import type { VersionsRepository } from "../db/repositories/versions.js";
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS } from "../email/templates.js";
@@ -59,6 +60,7 @@ export interface AdminRoutesDeps {
   invites: InviteService;
   audit: AuditLog;
   connections: ConnectionService;
+  usage: Pick<UsageEventsRepository, "recentConnectionEvents">;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
   revokeMcpTokensForUser?: (userId: string) => Promise<void>;
@@ -83,6 +85,10 @@ const boolFlag = z
   .union([z.literal("true"), z.literal("false")])
   .optional()
   .transform((v) => v === "true");
+const connectionEventsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
 const listQuery = z.object({
   status: z.enum(STATUSES).optional(),
   access: z.enum(ACCESS_FILTERS).optional(),
@@ -412,6 +418,24 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   app.get("/connections/:id/canvases", async (c) => {
     try {
       return c.json({ canvases: await deps.connections.listCanvases(c.req.param("id")) });
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.get("/connections/:id/events", async (c) => {
+    const query = connectionEventsQuery.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "invalid_query" }, 400);
+    try {
+      await deps.connections.getAdmin(c.req.param("id"));
+      const sinceMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const events = await deps.usage.recentConnectionEvents({
+        profileId: c.req.param("id"),
+        sinceMs,
+        limit: query.data.limit,
+        offset: query.data.offset,
+      });
+      return c.json({ events, limit: query.data.limit, offset: query.data.offset });
     } catch (error) {
       return connectionAdminError(c, error);
     }

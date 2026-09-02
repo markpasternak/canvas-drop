@@ -160,4 +160,28 @@ describe("capabilities tab", () => {
     await screen.findByRole("switch", { name: "Enable backend" });
     expect(screen.queryByText(/won't run for public visitors/i)).not.toBeInTheDocument();
   });
+
+  it("shows sanitized admin-granted connection authority without mutation controls", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () => json(ON),
+      "GET /api/canvases/c1/connections": () =>
+        json({
+          connections: [
+            {
+              key: "stocks",
+              label: "Stock data",
+              origin: "https://stocks.example.com",
+              allowedMethods: ["GET"],
+              available: true,
+              unavailableReason: null,
+            },
+          ],
+        }),
+    });
+    renderCapabilities();
+    expect(await screen.findByText("Stock data")).toBeInTheDocument();
+    expect(screen.getByText("https://stocks.example.com")).toBeInTheDocument();
+    expect(screen.getByText("Methods: GET")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /grant|revoke|edit/i })).not.toBeInTheDocument();
+  });
 });

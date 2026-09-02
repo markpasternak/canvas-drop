@@ -56,7 +56,7 @@ export interface CanvasConnectionView {
   origin: string;
   allowedMethods: ConnectionMethod[];
   available: boolean;
-  unavailableReason: "disabled" | "encryption_key_unavailable" | null;
+  unavailableReason: "backend_off" | "disabled" | "encryption_key_unavailable" | null;
 }
 
 export interface CreateConnectionInput {
@@ -102,19 +102,21 @@ export function connectionService(deps: {
     };
   };
 
-  const managerView = (profile: ConnectionProfile): CanvasConnectionView => {
+  const managerView = (profile: ConnectionProfile, backendEnabled = true): CanvasConnectionView => {
     const keyUnavailable = !!profile.protectedHeadersEnvelope && !deps.cipher.available;
     return {
       key: profile.key,
       label: profile.label,
       origin: profile.origin,
       allowedMethods: profile.allowedMethods,
-      available: profile.enabled && !keyUnavailable,
-      unavailableReason: !profile.enabled
-        ? "disabled"
-        : keyUnavailable
-          ? "encryption_key_unavailable"
-          : null,
+      available: backendEnabled && profile.enabled && !keyUnavailable,
+      unavailableReason: keyUnavailable
+        ? "encryption_key_unavailable"
+        : !profile.enabled
+          ? "disabled"
+          : !backendEnabled
+            ? "backend_off"
+            : null,
     };
   };
 
@@ -276,8 +278,9 @@ export function connectionService(deps: {
     },
 
     async listForCanvas(canvasId: string): Promise<CanvasConnectionView[]> {
+      const canvas = await deps.canvases.findById(canvasId);
       return (await deps.repository.listForCanvas(canvasId)).map(({ profile }) =>
-        managerView(profile),
+        managerView(profile, canvas?.backendEnabled ?? false),
       );
     },
 

@@ -1,4 +1,5 @@
 import { useParams } from "@tanstack/react-router";
+import { Badge } from "../components/Badge.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { Row, RowDivider, Section } from "../components/SettingsSection.js";
 import { Skeleton } from "../components/Skeleton.js";
@@ -7,7 +8,7 @@ import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError, type FeatureCapability } from "../lib/api.js";
 import { useUpdateCapabilities } from "../lib/mutations.js";
-import { useCanvas } from "../lib/queries.js";
+import { useCanvas, useCanvasConnections } from "../lib/queries.js";
 
 /**
  * Backend-group features (plan 006). Mirrors the shared capability taxonomy — the
@@ -53,6 +54,7 @@ export default function Capabilities() {
   const { id } = useParams({ strict: false }) as { id: string };
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
+  const connections = useCanvasConnections(id);
   const update = useUpdateCapabilities(id);
 
   if (isLoading || !canvas) {
@@ -126,6 +128,49 @@ export default function Capabilities() {
         >
           <span className="text-xs font-medium text-muted">{backendOn ? "Always on" : "Off"}</span>
         </Row>
+      </Section>
+      <Section
+        id="connections"
+        title="Connections"
+        description="Third-party origins an administrator has granted to this canvas."
+      >
+        {connections.isLoading ? <p className="text-sm text-muted">Loading connections…</p> : null}
+        {connections.isError ? (
+          <InlineNotice tone="danger">Connection grants could not be loaded.</InlineNotice>
+        ) : null}
+        {connections.data?.length === 0 ? (
+          <p className="text-sm text-muted">
+            No outbound connections are granted. Ask an administrator to attach a connection profile
+            if this canvas needs third-party data.
+          </p>
+        ) : null}
+        {connections.data?.map((connection) => (
+          <div
+            key={connection.key}
+            className="rounded-lg border border-border bg-surface-raised px-3 py-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-fg">{connection.label}</p>
+                <p className="font-mono text-xs text-muted">{connection.key}</p>
+              </div>
+              <Badge tone={connection.available ? "success" : "warning"}>
+                {connection.available ? "Available" : "Unavailable"}
+              </Badge>
+            </div>
+            <p className="mt-2 break-all font-mono text-xs text-muted">{connection.origin}</p>
+            <p className="mt-1 text-xs text-muted">
+              Methods: {connection.allowedMethods.join(", ")}
+            </p>
+            {!connection.available ? (
+              <p className="mt-2 text-xs text-warning">
+                {connection.unavailableReason === "backend_off"
+                  ? "Turn on Backend to use this grant."
+                  : "An administrator must restore this connection profile."}
+              </p>
+            ) : null}
+          </div>
+        ))}
       </Section>
     </TabContentFrame>
   );

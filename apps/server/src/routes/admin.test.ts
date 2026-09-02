@@ -70,6 +70,7 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       invites: makeInviteService(client, config),
       audit,
       connections,
+      usage: usageEventsRepository(client),
     }),
   );
   return { app, audit, canvases, invitations };
@@ -1098,6 +1099,30 @@ describe("admin routes", () => {
     expect(authorityText).toContain('"key":"stocks"');
     expect(authorityText).not.toContain("user-agent");
     expect(authorityText).not.toContain("controlled-secret-agent");
+
+    await usageEventsRepository(client).record({
+      canvasId: canvas.id,
+      userId: admin.id,
+      type: "connection_op",
+      meta: {
+        profileId: id,
+        key: "stocks",
+        method: "GET",
+        outcome: "success",
+        upstreamStatus: 200,
+        durationMs: 12,
+        responseBytes: 42,
+        path: "/private-symbol?token=canary-query",
+        headers: "canary-secret-header",
+      },
+    });
+    const recent = await app.request(`/api/admin/connections/${id}/events?limit=25&offset=0`);
+    expect(recent.status).toBe(200);
+    const recentText = await recent.text();
+    expect(recentText).toContain('"outcome":"success"');
+    expect(recentText).not.toContain("private-symbol");
+    expect(recentText).not.toContain("canary-query");
+    expect(recentText).not.toContain("canary-secret-header");
   });
 
   it("rejects cross-site connection mutations before creating a profile", async () => {

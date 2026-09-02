@@ -1013,6 +1013,55 @@ export interface AdminAiUsage {
   }>;
 }
 
+export type ConnectionMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/** Sanitized authority visible to a canvas owner/editor. Protected header names and
+ * values are intentionally absent from this wire type. */
+export interface CanvasConnection {
+  key: string;
+  label: string;
+  origin: string;
+  allowedMethods: ConnectionMethod[];
+  available: boolean;
+  unavailableReason: "backend_off" | "disabled" | "encryption_key_unavailable" | null;
+}
+
+export interface AdminConnection {
+  id: string;
+  key: string;
+  label: string;
+  origin: string;
+  allowedMethods: ConnectionMethod[];
+  protectedHeaders: Array<{ name: string; set: true }>;
+  encryptionKeyAvailable: boolean;
+  enabled: boolean;
+  affectedCanvasCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConnectionProfileInput {
+  key: string;
+  label: string;
+  origin: string;
+  allowedMethods: ConnectionMethod[];
+  protectedHeaders?: Array<{ name: string; value: string }>;
+  enabled?: boolean;
+}
+
+export interface AdminConnectionEvent {
+  id: string;
+  canvasId: string;
+  userId: string;
+  key: string | null;
+  method: string | null;
+  outcome: string | null;
+  upstreamStatus: number | null;
+  durationMs: number | null;
+  responseBytes: number | null;
+  createdAt: number;
+}
+
 /** Fields shared by every admin Configuration row, secret or not. */
 interface AdminConfigFieldBase {
   key: string;
@@ -1115,6 +1164,11 @@ export const api = {
     request<{ id: string }>(`/api/canvases/by-slug/${encodeURIComponent(slug)}`),
 
   getUsage: (id: string) => request<CanvasUsage>(`/api/canvases/${id}/usage`),
+
+  listCanvasConnections: (id: string) =>
+    request<{ connections: CanvasConnection[] }>(`/api/canvases/${id}/connections`).then(
+      (r) => r.connections,
+    ),
 
   createCanvas: (body: {
     title?: string;
@@ -1402,6 +1456,46 @@ export const api = {
     overview: () => request<AdminOverview>("/api/admin/overview"),
 
     aiUsage: () => request<AdminAiUsage>("/api/admin/ai-usage"),
+
+    listConnections: () =>
+      request<{ connections: AdminConnection[] }>("/api/admin/connections").then(
+        (r) => r.connections,
+      ),
+    createConnection: (input: ConnectionProfileInput) =>
+      request<{ connection: AdminConnection }>("/api/admin/connections", jsonBody(input)).then(
+        (r) => r.connection,
+      ),
+    updateConnection: (id: string, input: Omit<Partial<ConnectionProfileInput>, "key">) =>
+      request<{ connection: AdminConnection }>(`/api/admin/connections/${id}`, {
+        ...jsonBody(input),
+        method: "PUT",
+      }).then((r) => r.connection),
+    deleteConnection: (id: string, expectedAffectedCanvasCount: number) =>
+      request<{ deleted: boolean; revokedGrants: number }>(`/api/admin/connections/${id}`, {
+        ...jsonBody({ expectedAffectedCanvasCount }),
+        method: "DELETE",
+      }),
+    listConnectionCanvases: (id: string) =>
+      request<{ canvases: Array<{ id: string; slug: string; title: string }> }>(
+        `/api/admin/connections/${id}/canvases`,
+      ).then((r) => r.canvases),
+    listConnectionEvents: (id: string, offset = 0) =>
+      request<{ events: AdminConnectionEvent[]; limit: number; offset: number }>(
+        `/api/admin/connections/${id}/events?limit=25&offset=${offset}`,
+      ),
+    attachConnection: (id: string, canvasId: string) =>
+      request<{ attached: boolean; connection: CanvasConnection }>(
+        `/api/admin/connections/${id}/canvases/${canvasId}`,
+        { method: "PUT" },
+      ),
+    detachConnection: (id: string, canvasId: string) =>
+      request<{ detached: boolean }>(`/api/admin/connections/${id}/canvases/${canvasId}`, {
+        method: "DELETE",
+      }),
+    listCanvasConnections: (canvasId: string) =>
+      request<{ connections: CanvasConnection[] }>(
+        `/api/admin/canvases/${canvasId}/connections`,
+      ).then((r) => r.connections),
 
     /** Email-keyed People directory with governance filters (plan 2026-06-23 U6). */
     listPeople: (query: AdminPeopleQuery = {}) => {

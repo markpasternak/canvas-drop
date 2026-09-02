@@ -747,6 +747,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       invites,
       audit: deps.audit,
       connections,
+      usage,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
       orgMembership,
       hub: deps.hub,
