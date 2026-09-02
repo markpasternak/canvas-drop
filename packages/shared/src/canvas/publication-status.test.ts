@@ -48,9 +48,12 @@ describe("publicationStatusOf — the state matrix", () => {
     expect(publicationStatusOf({ ...base, status: "disabled", revokedAt: NOW })).toBe("disabled");
   });
 
-  it("is independent of the audience: the same lifecycle whatever General access says", () => {
-    // The helper takes no `access` input at all — audience is `accessModeOf`'s concern.
-    const keys = Object.keys(base).sort();
-    expect(keys).toEqual(["hasCurrentVersion", "now", "revokedAt", "sharedExpiresAt", "status"]);
+  it("is independent of the audience: the helper accepts no `access` input (compile-time pin)", () => {
+    // Audience is `accessModeOf`'s concern. Adding `access` to the input type would make the
+    // line below compile — and this test's typecheck fail — which is the whole point.
+    expect(
+      // @ts-expect-error audience is not an input to the lifecycle helper
+      publicationStatusOf({ ...base, access: "public_link" }),
+    ).toBe("published");
   });
 });

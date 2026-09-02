@@ -54,12 +54,23 @@ export default function Share() {
   const [description, setDescription] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
   // The people-and-teams list as the list component last loaded it: drives the Restricted
-  // hint ("only you" vs "you and the N above") and the legacy-guest AI section.
-  const [people, setPeople] = useState<AllowlistEntry[]>([]);
-  const listedCount = people.filter((e) => e.kind !== "owner").length;
+  // hint ("only you" vs "you and the N above") and the legacy-guest AI section. `null` until
+  // the list for THIS canvas has loaded (and after a failed load), so the copy below never
+  // describes an empty list it has not actually seen (review #3).
+  const [people, setPeople] = useState<AllowlistEntry[] | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the mirror on canvas change only
+  useEffect(() => {
+    setPeople(null);
+  }, [id]);
+  const listLoaded = people !== null;
+  // Who can open the canvas TODAY through the list: a pending invite has no user yet, so it
+  // is not counted (review #4).
+  const listedCount = (people ?? []).filter(
+    (e) => e.kind !== "owner" && e.kind !== "pending",
+  ).length;
   // The "AI for added people" controls gate LEGACY guest sessions (canvas-ai.ts keys on the
   // guest principal, at every rung), so they show exactly when such a guest is on the list.
-  const hasLegacyGuest = people.some((e) => e.kind === "guest");
+  const hasLegacyGuest = (people ?? []).some((e) => e.kind === "guest");
   const sections = hasLegacyGuest ? PEOPLE_SECTIONS : BASE_SECTIONS;
   const sectionIds = sections.map((s) => s.id);
   const { active: activeSection, select: selectSection } = useSectionNav(sectionIds, !!canvas);
@@ -234,13 +245,16 @@ export default function Share() {
             // bounce off that with no feedback (plan 002).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
             // The Restricted hint tells the truth about the list: "only you" only when the
-            // list really is empty, otherwise how many people and teams it names.
+            // loaded list really is empty, otherwise how many people and teams it names; the
+            // neutral sentence until the list has loaded.
             restrictedHint={
-              listedCount === 0
-                ? "Only you currently have access. Add people or teams above to let them in."
-                : listedCount === 1
-                  ? "Only you and the one person or team above can open it."
-                  : `Only you and the ${listedCount} people and teams above can open it.`
+              !listLoaded
+                ? "Only the people and teams above can open it."
+                : listedCount === 0
+                  ? "Only you currently have access. Add people or teams above to let them in."
+                  : listedCount === 1
+                    ? "Only you and the one person or team above can open it."
+                    : `Only you and the ${listedCount} people and teams above can open it.`
             }
             // Restricted writes `private`; the legacy `specific_people` / `team` values
             // display as Restricted and are never written by the dashboard.
@@ -311,9 +325,11 @@ export default function Share() {
             />
             {canvas.hasPassword && !canvas.shared && (
               <InlineNotice tone="neutral" className="py-2 text-xs">
-                {listedCount === 0
+                {listLoaded && listedCount === 0
                   ? "Nobody but you can open this canvas yet, so the password gates no one until you add people or teams above, or widen General access."
-                  : "The people and teams above are asked for this password too; editors never are."}
+                  : // Legacy guest sessions are never asked (the serve seam exempts the guest
+                    // principal from the gate), nor are editors (review #2).
+                    "The people and teams above are asked for this password too; editors and legacy guests never are."}
               </InlineNotice>
             )}
             <div className="flex gap-2">
@@ -338,7 +354,7 @@ export default function Share() {
             </div>
           </div>
 
-          {(canvas.shared || listedCount > 0 || canvas.sharedExpiresAt !== null) && (
+          {(canvas.shared || canvas.sharedExpiresAt !== null || listedCount > 0) && (
             <div className="border-t border-border pt-4">
               <div className="space-y-2">
                 <Field

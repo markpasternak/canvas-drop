@@ -42,15 +42,20 @@ export type TeamGrantAction =
  * a live member of that team; an org team in the canvas's org). An explicit empty set is
  * refused (`TEAM_REQUIRED`) rather than silently wiping grants — removals go through the
  * people-list revoke path — with one compatibility carve-out: the legacy "leave the Team
- * rung" shape (`teamIds: []` sent together with an `access` change to anything but `team`)
- * used to clear the grants and is now a no-op, because the grants belong to the list.
- * Returns `none` when `teamIds` wasn't sent.
+ * rung" shape (`teamIds: []` sent by a client that sees the canvas on the legacy `team`
+ * value, together with an `access` change to anything but `team`) used to clear the grants
+ * and is now a no-op, because the grants belong to the list. The carve-out is keyed on that
+ * exact transition — current value `team`, new value not `team` — so an empty array with an
+ * echoed or unrelated `access` value stays refused (review #9). Returns `none` when
+ * `teamIds` wasn't sent.
  */
 export async function resolveTeamGrant(
   teams: Pick<TeamsRepository, "findById" | "isTeamMember">,
   actorId: string,
   input: {
     canvasOrgId: string | null;
+    /** The canvas's CURRENT persisted `access` value. */
+    currentAccess: string;
     /** The resolved NEW rung when the same call changes `access`, else undefined. */
     targetAccess?: string;
     /** The provided team set, or undefined when `teamIds` wasn't sent. */
@@ -60,7 +65,10 @@ export async function resolveTeamGrant(
   if (input.teamIds === undefined) return { kind: "none" };
   const teamIds = [...new Set(input.teamIds)];
   if (teamIds.length === 0) {
-    const leavingTeamRung = input.targetAccess !== undefined && input.targetAccess !== "team";
+    const leavingTeamRung =
+      input.currentAccess === "team" &&
+      input.targetAccess !== undefined &&
+      input.targetAccess !== "team";
     return leavingTeamRung ? { kind: "none" } : { kind: "error", code: "TEAM_REQUIRED" };
   }
   for (const teamId of teamIds) {

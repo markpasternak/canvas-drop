@@ -712,6 +712,9 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     const template = await repo.create({ ownerId: me, slug: "template", apiKeyHash: "k5" });
     const archived = await repo.create({ ownerId: me, slug: "archived", apiKeyHash: "k6" });
     const deleted = await repo.create({ ownerId: me, slug: "deleted", apiKeyHash: "k7" });
+    // The two legacy aliases of `private` (restricted access model): active, NOT shared.
+    const people = await repo.create({ ownerId: me, slug: "people", apiKeyHash: "k8" });
+    const teamy = await repo.create({ ownerId: me, slug: "teamy", apiKeyHash: "k9" });
     await repo.create({ ownerId: other, slug: "other", apiKeyHash: "ko" });
 
     await deploy(client, deployed.id, me);
@@ -721,16 +724,23 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     await repo.updateSettings(template.id, { galleryListed: true, galleryTemplatable: true });
     await repo.archive(archived.id);
     await repo.setStatus(deleted.id, "deleted");
+    await repo.setAccess(people.id, "specific_people");
+    await repo.setAccess(teamy.id, "team");
 
+    // `shared` = open beyond the people-and-teams list: the aliases count like `private`.
     await expect(repo.ownerSummary(me)).resolves.toEqual({
-      active: 5,
+      active: 7,
       archived: 1,
       shared: 1,
       protected: 1,
       listed: 2,
       templates: 1,
-      neverDeployed: 4,
+      neverDeployed: 6,
     });
+    // The actor-scoped twin the management list uses agrees on the `shared` bucket.
+    await expect(
+      repo.actorSummary(me, { tenancyActive: false, viewerOrgIds: new Set<string>() }),
+    ).resolves.toMatchObject({ active: 7, shared: 1 });
   });
 
   it("listByOwnerFiltered intersects composed filters", async () => {

@@ -3558,6 +3558,77 @@ describe("managementRoutes — clone by an editor", () => {
   });
 });
 
+describe("managementRoutes — clone by a granted-team viewer (restricted access model, review #1/#7)", () => {
+  let client: DbClient;
+  afterEach(async () => {
+    await client?.close();
+  });
+
+  /** A PRIVATE canvas with a viewer-team grant on its people-and-teams list. */
+  async function seedTeamCanvas(opts: { publish: boolean }) {
+    client = await makeTestDb("sqlite");
+    const storage = memStorage();
+    const owner = await seedUser(client, "owner");
+    const mate = await seedUser(client, "mate");
+    const stranger = await seedUser(client, "stranger");
+    const canvases = canvasesRepository(client);
+    const teams = teamsRepository(client);
+    const engine = deployEngine({
+      config,
+      canvases,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage,
+      log: silent,
+    });
+    const src = await canvases.create({ ownerId: owner.id, slug: "src", apiKeyHash: "k1" });
+    if (opts.publish) {
+      await engine.deploy(src, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    }
+    const team = await teams.create({ orgId: null, name: "Design", createdBy: owner.id });
+    await teams.addMember(team.id, mate.id);
+    await teams.setCanvasTeams(src.id, [team.id]);
+    const cloneAs = (u: { id: string }) =>
+      buildApp(client, { id: u.id, isAdmin: false }, storage).request(
+        `/api/canvases/${src.id}/clone`,
+        sameOriginPost,
+      );
+    return { canvases, src, owner, mate, stranger, cloneAs };
+  }
+
+  it("a viewer-team member clones a published PRIVATE canvas (the list applies at every rung); a non-member gets 404", async () => {
+    const { canvases, src, mate, stranger, cloneAs } = await seedTeamCanvas({ publish: true });
+    expect((await canvases.findById(src.id))?.access).toBe("private");
+    expect((await cloneAs(stranger)).status).toBe(404);
+    const res = await cloneAs(mate);
+    expect(res.status).toBe(201);
+    const body = await jsonOf<{ id: string }>(res);
+    const clone = await canvases.findById(body.id);
+    expect(clone?.ownerId).toBe(mate.id);
+    expect(clone?.clonedFromCanvasId).toBe(src.id);
+  });
+
+  it("the fences: a never-published source reads 404 for the team viewer (never a copy of the owner's draft); the owner still clones it", async () => {
+    const { owner, mate, cloneAs } = await seedTeamCanvas({ publish: false });
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+
+  it("the fences: an expired share reads 404 for the team viewer; the owner still clones it", async () => {
+    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.updateSettings(src.id, { sharedExpiresAt: Date.now() - 60_000 });
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+
+  it("the fences: a password-protected source reads 404 for the team viewer (the cloner would own the copy and bypass the gate); the owner still clones it", async () => {
+    const { canvases, src, owner, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.setPassword(src.id, "argon2hash");
+    expect((await cloneAs(mate)).status).toBe(404);
+    expect((await cloneAs(owner)).status).toBe(201);
+  });
+});
+
 // --- People-list roles over HTTP (editor-roles plan U4/U5) --------------------------------
 
 describe("managementRoutes — people-list roles", () => {
@@ -3782,6 +3853,49 @@ describe("managementRoutes — people-list roles", () => {
     expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(200);
     await teams.removeMember(design.id, nobody.id);
     expect((await as(nobody).request(`/api/canvases/${cv.id}`)).status).toBe(404);
+  });
+
+  it("legacy `teamIds: []` carve-out (review #8/#9): with an access change OFF `team` it is a no-op and the grants survive; with any other access value it is TEAM_REQUIRED", async () => {
+    const { repo, cv, owner, as, list } = await seedPeople();
+    const engine = deployEngine({
+      config,
+      canvases: repo,
+      versions: versionsRepository(client),
+      drafts: draftsRepository(client),
+      storage: memStorage(),
+      log: silent,
+    });
+    await engine.deploy(cv, "folder", folder({ "index.html": "<h1>hi</h1>" }), owner.id);
+    const teams = teamsRepository(client);
+    const viewers = await teams.create({ orgId: null, name: "Viewers", createdBy: owner.id });
+    const patch = (body: Record<string, unknown>) =>
+      as(owner).request(`/api/canvases/${cv.id}/settings`, {
+        method: "PATCH",
+        headers: so,
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ access: "team", teamIds: [viewers.id] })).status).toBe(200);
+    const teamGrants = async () => (await list(owner)).filter((e) => e.kind === "team").length;
+    expect(await teamGrants()).toBe(1);
+
+    // The old dashboard's "leave the Team rung" shape: a no-op for the grants.
+    const off = await patch({ access: "whole_org", teamIds: [] });
+    expect(off.status).toBe(200);
+    expect(await teamGrants()).toBe(1);
+    expect(
+      (await jsonOf<{ teamIds: string[] }>(await as(owner).request(`/api/canvases/${cv.id}`)))
+        .teamIds,
+    ).toEqual([viewers.id]);
+
+    // Off the `team` value, an empty set is refused whatever `access` says.
+    const echoed = await patch({ access: "whole_org", teamIds: [] });
+    expect(echoed.status).toBe(409);
+    expect((await jsonOf<{ code: string }>(echoed)).code).toBe("TEAM_REQUIRED");
+    const toPrivate = await patch({ access: "private", teamIds: [] });
+    expect(toPrivate.status).toBe(409);
+    const toTeam = await patch({ access: "team", teamIds: [] });
+    expect(toTeam.status).toBe(409);
+    expect(await teamGrants()).toBe(1);
   });
 
   it("AE13: legacy teamIds replaces only the VIEWER team grants; a rung change keeps every team grant (its members still edit)", async () => {

@@ -461,8 +461,9 @@ export interface AuthoredCanvas {
   access: ShareAudience;
   /** Who else can open it, beyond the people-and-teams list — the field to branch on. */
   accessMode: AccessMode;
-  /** Whether it is published — the field to branch on for "can this be opened at all". */
-  publicationStatus: PublicationStatus;
+  /** Whether it is published — the field to branch on for "can this be opened at all".
+   *  Never `deleted`: deleted canvases are omitted from every authoring response. */
+  publicationStatus: Exclude<PublicationStatus, "deleted">;
   /** Whether the share has a password gate in addition to its access rung. */
   hasPassword: boolean;
   /** @deprecated Legacy conflation of audience and lifecycle; see `accessMode` + `publicationStatus`. */

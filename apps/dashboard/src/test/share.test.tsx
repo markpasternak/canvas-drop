@@ -658,6 +658,149 @@ describe("share route", () => {
     expect(screen.queryByRole("switch", { name: /allow added people to use ai/i })).toBeNull();
   });
 
+  it("a pending invite is not counted as someone who can open the canvas (review #4)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+            {
+              id: "pending:p1",
+              kind: "pending",
+              role: "viewer",
+              email: "new@example.com",
+              name: null,
+              userId: null,
+              createdAt: 2,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(await screen.findByText(/only you currently have access/i)).toBeInTheDocument();
+  });
+
+  it("a failed people-list load never reads as an empty list (review #3)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ error: "boom" }, 500),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    // The neutral sentence, not "only you"; the password notice stays general too.
+    expect(
+      screen.getByText(/^only the people and teams above can open it\.$/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/only you currently have access/i)).toBeNull();
+    expect(screen.queryByText(/gates no one/i)).toBeNull();
+    expect(screen.getByText(/asked for this password too/i)).toBeInTheDocument();
+  });
+
+  it("the password notice names editors AND legacy guests as exempt, and says 'gates no one' only for a loaded empty list (review #2)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "guest:g1",
+              kind: "guest",
+              role: "viewer",
+              email: "g@partner.com",
+              name: null,
+              userId: null,
+              createdAt: 1,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/asked for this password too; editors and legacy guests never are/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/gates no one/i)).toBeNull();
+  });
+
+  it("with a loaded empty list the password notice says it gates no one and the expiry field stays hidden (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          hasPassword: true,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    expect(await screen.findByText(/gates no one/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/share expiry/i)).toBeNull();
+  });
+
+  it("one listed person shows the singular hint and the expiry field (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "member:m1",
+              kind: "member",
+              role: "viewer",
+              email: "liam@example.com",
+              name: "Liam",
+              userId: "u2",
+              createdAt: 2,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/only you and the one person or team above can open it/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/share expiry/i)).toBeInTheDocument();
+  });
+
+  it("a Restricted canvas with an expiry shows the expiry field even with an empty list (review #13)", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          currentVersionId: "v1",
+          sharedExpiresAt: Date.now() + 86_400_000,
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    expect(await screen.findByLabelText(/share expiry/i)).toBeInTheDocument();
+  });
+
   it("warns when a shared canvas's expiry is already in the past", async () => {
     const past = Date.now() - 60 * 60 * 1000;
     mockFetch({

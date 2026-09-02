@@ -118,7 +118,7 @@ Available to any signed-in account.
 | `list_canvases` | `role?` (`owned` \| `edited`), `access?` (`restricted` \| `whole_org` \| `public_link`, or a legacy value), `query?`, `tags?` (string[]), `sort?` (`updated` default, `created`, `title`, `popular`), `limit?` (1-100, default 50) | `{total, canvases: [View + {owner: {id, name, email}, role: "owner" \| "editor", recentViews}]}`. `query` is a forgiving text filter over title, description, tags, and slug (case-, accent-, and whitespace-insensitive; words are AND-ed). `tags` matches canvases carrying any of the given tags. `popular` ranks by views in the last 30 days (`recentViews`). |
 | `list_shared_canvases` | `query?`, `sort?` (`updated` default, `title`, `owner`), `limit?` (1-100, default 50), `offset?` (default 0) | `{total, limit, offset, canvases: [{id, slug, url, title, description, tags, access: {kind: "direct" \| "team" \| "whole_org", label, teamIds?, teamNames?}, hasPassword, hasPreview, owner: {id, name, avatarUrl} \| null, createdAt, updatedAt}]}`. Canvases you can open but do not manage: anything you are on the people-and-teams list of (directly or through a team, at any `access` value), plus the Whole-org shares their owner listed. Display-only; open the `url`. |
 | `create_canvas` | `title?`, `description?`, `backendEnabled?`, `slug?` (≤63), `orgId?` (string or null) | View + `apiKey` (the deploy key, returned once) + `deploy` (ready-to-run endpoints with the real key embedded, see Return shapes). `orgId` from `whoami.orgs` homes the canvas in that org so it can be shared org-wide; omit it for a personal canvas. `ORG_FORBIDDEN`, `INVALID_SLUG`, `SLUG_TAKEN`. |
-| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas (org-scoped), or an active canvas granted to a team you belong to (at any General-access value). Anything else reads `canvas not found`. |
+| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas (org-scoped), or a published, unexpired, password-free canvas granted to a team you belong to (at any General-access value — a team viewer clones only what they can open). Anything else reads `canvas not found`. |
 
 ### Read a canvas
 
@@ -193,8 +193,10 @@ Notes on `update_canvas`:
   whole org; people and teams on the list always see it there. It never widens URL access.
   Off `whole_org` it is pinned to `link_only` on every write (a legacy `team` row that stored
   `listed` reads `listed` until its next settings write).
-- Legacy shape: `teamIds: []` sent together with an `access` change away from `team` is a
-  no-op (the grants stay on the list); `teamIds: []` on its own is refused (`TEAM_REQUIRED`). Setting `galleryListed: true` on a Whole-org canvas also
+- Legacy shape: `teamIds: []` sent by a client that sees the canvas on the legacy `team`
+  value, together with an `access` change to another value, is a no-op (the grants stay on
+  the list); `teamIds: []` on its own, or with any other `access` value, is refused
+  (`TEAM_REQUIRED`). Setting `galleryListed: true` on a Whole-org canvas also
   sets `discoverability: "listed"`; passing `link_only` in the same call is refused
   (`DISCOVERY_CONFLICT`).
 - Gallery listing needs a shared, published, password-free canvas on `public_link` or a

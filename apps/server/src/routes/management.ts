@@ -19,7 +19,7 @@ import type { GuestService } from "../auth/guest.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
-import type { CloneService } from "../canvas/clone-service.js";
+import { type CloneService, isCloneableByGrantedTeam } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { rootEntry } from "../canvas/manifest.js";
 import {
@@ -517,16 +517,19 @@ export function managementRoutes(deps: ManagementDeps) {
     // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage —
     // the shared resolver, not an owner comparison. The clone lands owned by the actor
     // with an empty people list (existing behaviour).
+    const now = Date.now();
     const eligible =
       (await resolveManagementGrant(source, memberPrincipal(user, orgIds), roleDeps)) !== null
         ? source.status === "active"
-        : (await deps.canvases.findCloneableTemplate(id, Date.now(), {
+        : (await deps.canvases.findCloneableTemplate(id, now, {
             tenancyActive: !!deps.config.org.name,
             viewerOrgIds: orgIds,
           })) !== null ||
           // A member of a granted team (restricted access model: team grants apply at every
-          // rung, so the clone path does too — the same live-org `teamMatch` the serve seam uses).
-          (source.status === "active" &&
+          // rung, so the clone path does too — the same live-org `teamMatch` the serve seam
+          // uses), fenced to what the serve seam would show them: published, unexpired, no
+          // password (`isCloneableByGrantedTeam`; review #1).
+          (isCloneableByGrantedTeam(source, now) &&
             !!deps.teams &&
             (await deps.teams.teamMatch(id, user.id, orgIds)));
     if (!eligible) return c.json({ error: "not_found" }, 404);
@@ -816,6 +819,7 @@ export function managementRoutes(deps: ManagementDeps) {
     if (deps.teams) {
       const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
         canvasOrgId: cv.orgId,
+        currentAccess: cv.access,
         targetAccess,
         teamIds: body.data.teamIds,
       });

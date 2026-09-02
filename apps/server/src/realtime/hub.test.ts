@@ -741,7 +741,34 @@ describe("RealtimeHub — the list applies at every rung (restricted access mode
 });
 
 describe("RealtimeHub — a failed list lookup reads as no match; the rung alone decides (review #1, rejected as a widening)", () => {
-  it("drops a member on a RESTRICTED canvas when either lookup throws (nothing else admits them)", async () => {
+  it("a failed lookup never masks the OTHER lookup's match: a listed member stays when only teamMatch throws, a team member stays when only isPrincipalAllowed throws", async () => {
+    const throwing = async () => {
+      throw new Error("db down");
+    };
+    const listedHub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isPrincipalAllowed: async () => true,
+      teamMatch: throwing,
+    });
+    const listedSock = new FakeSocket();
+    mc(listedHub, "c1", user("listed"), listedSock);
+    await listedHub.revalidateCanvas("c1");
+    expect(listedSock.closed).toBeNull();
+
+    const teamHub = createHub({
+      config,
+      resolveCanvas: async () => fakeCanvas({ access: "private" }),
+      isPrincipalAllowed: throwing,
+      teamMatch: async () => true,
+    });
+    const teamSock = new FakeSocket();
+    mc(teamHub, "c1", user("tm"), teamSock);
+    await teamHub.revalidateCanvas("c1");
+    expect(teamSock.closed).toBeNull();
+  });
+
+  it("drops a member on a RESTRICTED canvas when both lookups throw (nothing else admits them)", async () => {
     for (const access of ["private", "specific_people", "team"] as const) {
       const hub = createHub({
         config,
@@ -821,8 +848,8 @@ describe("RealtimeHub — verdict parity with decideCanvasAccess over one fixtur
           Date.now(),
           { isAllowed: p.isAllowed, teamMatch: p.teamMatch, tenancyActive: false },
         );
-        // The hub never resolves `publicEnabled`, so an unlisted member on public_link is
-        // static-only for HTTP and dropped by the hub — both read as "no realtime".
+        // Neither side resolves `publicEnabled` here, so an unlisted member on public_link is
+        // denied by the HTTP decision (no realtime) and dropped by the hub — the same verdict.
         const httpKeepsSocket = decision.action === "allow" && !decision.staticOnly;
         expect(sock.closed === null, `${p.name} on ${access}`).toBe(httpKeepsSocket);
       });
