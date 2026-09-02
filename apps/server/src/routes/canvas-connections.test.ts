@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeProvider } from "../ai/testing.js";
 import type { AuditLog } from "../audit/audit-log.js";
 import { filesService } from "../canvas/files-service.js";
-import { connectionLimits } from "../connections/limits.js";
+import { type ConnectionLimits, connectionLimits } from "../connections/limits.js";
 import { createSecretCipher } from "../connections/secret-cipher.js";
 import { connectionService } from "../connections/service.js";
 import type { connectionTransport } from "../connections/transport.js";
@@ -30,7 +30,12 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
   afterEach(async () => client?.close());
 
   async function fixture(
-    options: { grant?: boolean; backendEnabled?: boolean; asViewer?: boolean } = {},
+    options: {
+      grant?: boolean;
+      backendEnabled?: boolean;
+      asViewer?: boolean;
+      limits?: ConnectionLimits;
+    } = {},
   ) {
     client = await makeTestDb(dialect);
     const encryptionKey = randomBytes(32).toString("base64");
@@ -100,7 +105,7 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
         connections: {
           service,
           transport,
-          limits: connectionLimits(config.connections),
+          limits: options.limits ?? connectionLimits(config.connections),
         },
       }),
     );
@@ -108,7 +113,7 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
   }
 
   it("forwards a granted relative stock path with the protected agent and hardened response", async () => {
-    const { app, canvas, fetch, usage } = await fixture();
+    const { app, canvas, fetch, profile, usage } = await fixture();
     const sdk = createClient({
       context: { slug: "stocks", apiBase: "http://canvas-drop.test" },
       fetch: async (input, init) => app.request(input, init),
@@ -137,9 +142,27 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     await vi.waitFor(async () => {
       expect((await usage.countByType(canvas.id, null)).connection_op).toBe(1);
     });
+    const [event] = await usage.recentConnectionEvents({
+      profileId: profile.id,
+      sinceMs: 0,
+      limit: 1,
+      offset: 0,
+    });
+    expect(event?.origin).toBe("https://stocks.example.com");
     const serializedUsage = JSON.stringify(await usage.countByType(canvas.id, null));
     expect(serializedUsage).not.toContain("symbol");
     expect(serializedUsage).not.toContain("controlled-stock-agent");
+  });
+
+  it("preserves repeated connection-looking segments in the upstream path", async () => {
+    const { app, fetch } = await fixture();
+    const response = await app.request(
+      "/v1/c/stocks/connections/market/archive/connections/market/quote",
+    );
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/archive/connections/market/quote" }),
+    );
   });
 
   it("performs no outbound work without a grant or with Backend off", async () => {
@@ -189,6 +212,37 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     expect(response.status).toBe(413);
     expect(await response.json()).toMatchObject({ code: "REQUEST_TOO_LARGE" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("acquires bounded admission before consuming a request body", async () => {
+    const limits = {
+      acquire: vi.fn(() => {
+        return { release: vi.fn() };
+      }),
+    } as unknown as ConnectionLimits;
+    const { app, profile, service } = await fixture({ limits });
+    await service.update("admin", profile.id, { allowedMethods: ["POST"] });
+    let releaseBody = () => {};
+    const bodyAllowed = new Promise<void>((resolve) => {
+      releaseBody = resolve;
+    });
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        await bodyAllowed;
+        controller.enqueue(new TextEncoder().encode("ok"));
+        controller.close();
+      },
+    });
+    const pendingResponse = app.request("/v1/c/stocks/connections/market/quote", {
+      method: "POST",
+      body,
+      // Node's fetch Request requires this for a streaming request body.
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    await vi.waitFor(() => expect(limits.acquire).toHaveBeenCalledOnce());
+    releaseBody();
+    const response = await pendingResponse;
+    expect(response.status).toBe(200);
   });
 
   it("keeps public-link viewers static-only even when the profile is granted", async () => {

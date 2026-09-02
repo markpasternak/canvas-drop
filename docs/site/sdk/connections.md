@@ -55,8 +55,8 @@ Only a method the administrator selected for that profile is accepted. Request
 bodies work for `POST`, `PUT`, `PATCH`, and `DELETE`; `GET` and `HEAD` do not send
 one. `headers` accepts the normal browser `HeadersInit` shapes. Canvas cookies,
 authorization, forwarding, hop-by-hop, compression, and host headers are never
-passed through. A protected profile header wins over a caller header with the
-same name.
+passed through. Supplying a caller header with the same name as a protected
+profile header is rejected; the protected value is never replaced or exposed.
 
 ## Responses and errors
 
@@ -129,4 +129,3 @@ also restrict the Canvas Drop server's network egress as defense in depth.
 
 Public-link visitors can never use Connections. If an audience needs this
 backend, use Restricted or Whole org access and grant people or teams as needed.
-

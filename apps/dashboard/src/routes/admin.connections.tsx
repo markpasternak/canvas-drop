@@ -86,7 +86,7 @@ function ProfileFields({
           mono
           placeholder="stock-data"
           onChange={(event) => onChange({ ...draft, key: event.target.value })}
-          description="Immutable name used by canvas code. Lowercase letters, numbers, and hyphens."
+          description="Immutable URL-safe name used by canvas code. Lowercase letters, numbers, hyphens, and underscores."
         />
         <Field
           label="Display name"
@@ -335,6 +335,7 @@ function RecentEvents({ profileId }: { profileId: string }) {
               <tr>
                 <th className="py-2 pr-3">When</th>
                 <th className="py-2 pr-3">Canvas</th>
+                <th className="py-2 pr-3">Origin</th>
                 <th className="py-2 pr-3">Method</th>
                 <th className="py-2 pr-3">Outcome</th>
                 <th className="py-2 pr-3">Bytes</th>
@@ -348,6 +349,7 @@ function RecentEvents({ profileId }: { profileId: string }) {
                     {new Date(event.createdAt).toLocaleString()}
                   </td>
                   <td className="py-2 pr-3 font-mono">{event.canvasId}</td>
+                  <td className="py-2 pr-3 font-mono">{event.origin ?? "—"}</td>
                   <td className="py-2 pr-3">{event.method ?? "—"}</td>
                   <td className="py-2 pr-3">{event.outcome ?? "—"}</td>
                   <td className="py-2 pr-3 whitespace-nowrap">

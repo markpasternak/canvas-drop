@@ -143,6 +143,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
     const user = c.get("user");
     const key = c.req.param("key") ?? "";
     let profileId: string | undefined;
+    let origin: string | undefined;
     const method = c.req.method.toUpperCase();
     let admission: ReturnType<ConnectionLimits["acquire"]> | undefined;
     let outcome = "platform_rejection";
@@ -171,12 +172,18 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
       }
       const profile = await deps.service.resolveRuntime(canvas.id, key);
       profileId = profile.id;
+      origin = profile.origin;
       if (!profile.allowedMethods.includes(method as ConnectionMethod)) {
         throw new ConnectionTransportError(
           "METHOD_NOT_ALLOWED",
           "connection method is not allowed",
         );
       }
+      admission = deps.limits.acquire({
+        actorId: user.id,
+        canvasId: canvas.id,
+        profileId: profile.id,
+      });
       const contentLength = c.req.header("content-length");
       const declaredLength = contentLength === undefined ? undefined : Number(contentLength);
       if (
@@ -195,15 +202,10 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
           ? undefined
           : await readRequestBody(c.req.raw, deps.config.connections.maxBodyBytes);
       requestBytes = rawBody?.byteLength ?? 0;
-      admission = deps.limits.acquire({
-        actorId: user.id,
-        canvasId: canvas.id,
-        profileId: profile.id,
-      });
-      const routePrefix = `/connections/${key}`;
-      const prefixAt = c.req.path.lastIndexOf(routePrefix);
-      const relativePath =
-        prefixAt < 0 ? "/" : c.req.path.slice(prefixAt + routePrefix.length) || "/";
+      const routePrefix = `/v1/c/${c.req.param("slug")}/connections/${key}`;
+      const relativePath = c.req.path.startsWith(routePrefix)
+        ? c.req.path.slice(routePrefix.length) || "/"
+        : "/";
       const search = new URL(c.req.url).search;
       const result = await deps.transport.fetch({
         origin: profile.origin,
@@ -241,6 +243,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         responseBytes,
       };
       if (profileId) meta.profileId = profileId;
+      if (origin) meta.origin = origin;
       if (upstreamStatus !== undefined) meta.upstreamStatus = upstreamStatus;
       void deps.usage
         .record({ canvasId: canvas.id, userId: user.id, type: "connection_op", meta })

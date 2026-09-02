@@ -68,6 +68,7 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
       meta: {
         profileId: "profile-a",
         key: "stocks",
+        origin: "https://stocks.example.com",
         method: "GET",
         outcome: "success",
         upstreamStatus: 200,
@@ -95,6 +96,7 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
       canvasId,
       userId,
       key: "stocks",
+      origin: "https://stocks.example.com",
       method: "GET",
       outcome: "success",
       upstreamStatus: 200,

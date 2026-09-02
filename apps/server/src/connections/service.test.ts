@@ -115,6 +115,41 @@ describe.each(DIALECTS)("connectionService [%s]", (dialect) => {
     await expect(repository.findGranted(canvas.id, "stocks")).resolves.toBeNull();
   });
 
+  it("serializes attach against a confirmed profile deletion", async () => {
+    const { admin, canvas, repository, service } = await fixture();
+    const profile = await service.create(admin.id, {
+      key: "stocks",
+      label: "Stocks",
+      origin: "https://stocks.example.com",
+      allowedMethods: ["GET"],
+    });
+    await service.attach(admin.id, profile.id, canvas.id);
+
+    const originalCountGrants = repository.countGrants;
+    let releaseCount = () => {};
+    const countBlocked = new Promise<void>((resolve) => {
+      releaseCount = resolve;
+    });
+    let countStarted = () => {};
+    const countEntered = new Promise<void>((resolve) => {
+      countStarted = resolve;
+    });
+    repository.countGrants = async (id) => {
+      const count = await originalCountGrants(id);
+      countStarted();
+      await countBlocked;
+      return count;
+    };
+
+    const removal = service.remove(admin.id, profile.id, 1);
+    await countEntered;
+    const concurrentAttach = service.attach(admin.id, profile.id, canvas.id);
+    releaseCount();
+
+    await expect(removal).resolves.toEqual({ deleted: true, revokedGrants: 1 });
+    await expect(concurrentAttach).rejects.toMatchObject({ code: "CONNECTION_NOT_FOUND" });
+  });
+
   it("shows missing-key availability without decrypting or revealing header names to managers", async () => {
     const seeded = await fixture(true);
     const profile = await seeded.service.create(seeded.admin.id, {

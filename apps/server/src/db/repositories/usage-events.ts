@@ -18,6 +18,7 @@ export interface ConnectionUsageEvent {
   canvasId: string;
   userId: string;
   key: string | null;
+  origin: string | null;
   method: string | null;
   outcome: string | null;
   upstreamStatus: number | null;
@@ -124,6 +125,7 @@ export function usageEventsRepository(client: DbClient) {
           canvasId: row.canvasId,
           userId: row.userId,
           key: text(meta, "key"),
+          origin: text(meta, "origin"),
           method: text(meta, "method"),
           outcome: text(meta, "outcome"),
           upstreamStatus: number(meta, "upstreamStatus"),

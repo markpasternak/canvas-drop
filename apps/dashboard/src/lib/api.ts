@@ -1054,6 +1054,7 @@ export interface AdminConnectionEvent {
   canvasId: string;
   userId: string;
   key: string | null;
+  origin: string | null;
   method: string | null;
   outcome: string | null;
   upstreamStatus: number | null;

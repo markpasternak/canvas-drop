@@ -82,6 +82,28 @@ export function connectionService(deps: {
   cipher: SecretCipher;
   audit: AuditLog;
 }) {
+  // The first release is deliberately single-process. Serialize grant mutations per
+  // profile so the affected-canvas count an admin confirms cannot change between the
+  // count and the cascading DELETE. The database still makes the delete + revocation
+  // itself atomic; this closes the application-level attach/delete interleaving window.
+  const profileMutationTails = new Map<string, Promise<void>>();
+  const withProfileMutation = async <T>(profileId: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = profileMutationTails.get(profileId) ?? Promise.resolve();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch(() => {}).then(() => gate);
+    profileMutationTails.set(profileId, tail);
+    await previous.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (profileMutationTails.get(profileId) === tail) profileMutationTails.delete(profileId);
+    }
+  };
+
   const adminView = async (profile: ConnectionProfile): Promise<AdminConnectionView> => {
     const protectedHeaders = profile.protectedHeaderNames
       .slice()
@@ -212,62 +234,68 @@ export function connectionService(deps: {
     },
 
     async remove(actorId: string, id: string, expectedAffectedCanvasCount: number) {
-      const profile = await find(id);
-      const actual = await deps.repository.countGrants(id);
-      if (actual !== expectedAffectedCanvasCount) {
-        throw new ConnectionServiceError(
-          "CONNECTION_CONFIRMATION_REQUIRED",
-          `confirm deletion for ${actual} affected canvases`,
-        );
-      }
-      const result = await deps.repository.delete(id);
-      if (!result.deleted) {
-        throw new ConnectionServiceError("CONNECTION_NOT_FOUND", "connection not found");
-      }
-      deps.audit.recordAudit({
-        actorId,
-        action: "connection_profile_delete",
-        targetType: "connection_profile",
-        targetId: id,
-        meta: { key: profile.key, revokedCanvasCount: result.revokedGrants },
+      return withProfileMutation(id, async () => {
+        const profile = await find(id);
+        const actual = await deps.repository.countGrants(id);
+        if (actual !== expectedAffectedCanvasCount) {
+          throw new ConnectionServiceError(
+            "CONNECTION_CONFIRMATION_REQUIRED",
+            `confirm deletion for ${actual} affected canvases`,
+          );
+        }
+        const result = await deps.repository.delete(id);
+        if (!result.deleted) {
+          throw new ConnectionServiceError("CONNECTION_NOT_FOUND", "connection not found");
+        }
+        deps.audit.recordAudit({
+          actorId,
+          action: "connection_profile_delete",
+          targetType: "connection_profile",
+          targetId: id,
+          meta: { key: profile.key, revokedCanvasCount: result.revokedGrants },
+        });
+        return result;
       });
-      return result;
     },
 
     async attach(actorId: string, id: string, canvasId: string) {
-      const [profile, canvas] = await Promise.all([find(id), deps.canvases.findById(canvasId)]);
-      if (!canvas) throw new ConnectionServiceError("CANVAS_NOT_FOUND", "canvas not found");
-      const attached = await deps.repository.attach({
-        canvasId,
-        connectionId: id,
-        createdBy: actorId,
-        createdAt: Date.now(),
-      });
-      if (attached) {
-        deps.audit.recordAudit({
-          actorId,
-          action: "connection_grant_attach",
-          targetType: "canvas",
-          targetId: canvasId,
-          meta: { connectionId: id, key: profile.key },
+      return withProfileMutation(id, async () => {
+        const [profile, canvas] = await Promise.all([find(id), deps.canvases.findById(canvasId)]);
+        if (!canvas) throw new ConnectionServiceError("CANVAS_NOT_FOUND", "canvas not found");
+        const attached = await deps.repository.attach({
+          canvasId,
+          connectionId: id,
+          createdBy: actorId,
+          createdAt: Date.now(),
         });
-      }
-      return { attached, connection: managerView(profile) };
+        if (attached) {
+          deps.audit.recordAudit({
+            actorId,
+            action: "connection_grant_attach",
+            targetType: "canvas",
+            targetId: canvasId,
+            meta: { connectionId: id, key: profile.key },
+          });
+        }
+        return { attached, connection: managerView(profile) };
+      });
     },
 
     async detach(actorId: string, id: string, canvasId: string) {
-      const profile = await find(id);
-      const detached = await deps.repository.detach(id, canvasId);
-      if (detached) {
-        deps.audit.recordAudit({
-          actorId,
-          action: "connection_grant_detach",
-          targetType: "canvas",
-          targetId: canvasId,
-          meta: { connectionId: id, key: profile.key },
-        });
-      }
-      return { detached };
+      return withProfileMutation(id, async () => {
+        const profile = await find(id);
+        const detached = await deps.repository.detach(id, canvasId);
+        if (detached) {
+          deps.audit.recordAudit({
+            actorId,
+            action: "connection_grant_detach",
+            targetType: "canvas",
+            targetId: canvasId,
+            meta: { connectionId: id, key: profile.key },
+          });
+        }
+        return { detached };
+      });
     },
 
     async listCanvases(id: string) {
