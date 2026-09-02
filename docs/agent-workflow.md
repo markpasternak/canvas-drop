@@ -12,22 +12,28 @@ hardening, gallery, and the AI proxy + realtime. Several post-v1 features are me
 usage stats, server-side list filters, the documentation system, clone-as-template, the
 primitives showcase, owner-chosen custom slugs, the MCP server, the staged/optimized
 upload path, the per-canvas preview control, the org boundary + teams, version ZIP
-export/deletion, and editor roles + ownership transfer). `BUILD_BRIEF.md` §16 and the
-README Status section are the authoritative status; defer to them.
+export/deletion, and editor roles + ownership transfer). The README Status section is the
+authoritative status ledger; defer to it. `BUILD_BRIEF.md` §16 is the spec's roadmap, not a
+ledger: it still marks M10 `[next]` with no sub-item markers and lists already-shipped work
+(agent skill, clone, search, scoped Shared discovery) under "Post-v1".
 
 The only open milestone is **M10 — ops/packaging** (Docker image + compose, backup/restore
 drill, single-VPS load test, IAP pilot), which is **partial**: the `Dockerfile`, `docker-compose.yml`,
-`scripts/compose-smoke.sh`, `.env.production.example`, the backup/restore tooling
+`scripts/compose-smoke.sh`, `.env.production.example`, the self-hosting docs
+(`docs/site/self-hosting/`, served at `/docs`), the backup/restore tooling
 (`apps/server/src/ops/backup.ts` + `ops/cli.ts`, run as `pnpm backup` / `pnpm restore` / `pnpm purge`,
-runbook in `docs/ops.md`), the three starter examples, and the secret-scan CI job are shipped, but
+runbook in `docs/ops.md`), the security review (`docs/security/2026-06-16-security-audit.md`), the
+three starter examples (`examples/hello-static`, `kv-counter`, `showcase`), and the secret-scan CI
+job (`.github/workflows/security.yml`) are shipped, but
 the backup/restore round-trip drill (an executed run against real data), the single-VPS load test,
 and the IAP colleague pilot are still deferred. The
 full sharing access ladder (private / specific-people / team / whole-org / public-link,
 auth-delegated Add person grants, admin-gated public links, and link-only/listed
 discoverability) is also shipped and merged.
 
-Note: several plans in `docs/plans/` still carry `status: active` in their frontmatter even
-though their scope is merged — the header pointers are stale. The MCP ↔ user parity plan
+Note: many plans in `docs/plans/` still carry stale frontmatter (`status: active`, `ready`,
+`planned`, or no `status` field at all) even though their scope is merged — the header pointers
+are stale; the code, not the plan header, says what shipped. The MCP ↔ user parity plan
 (`docs/plans/2026-06-17-001-feat-mcp-user-parity-plan.md`) is `status: completed` and merged: the
 MCP server now ships a **46-tool surface** (every tool declared once in
 `apps/server/src/mcp/tool-roles.ts`) with full dashboard owner/editor/viewer parity, including
@@ -35,7 +41,7 @@ MCP server now ships a **46-tool surface** (every tool declared once in
 the access tools (`grant_access`/`invite_to_canvas`/`revoke_access`/`list_access`/`set_access_role`/`transfer_canvas`),
 the team tools, and the draft-editor loop (`get_draft`, `read_draft_file`,
 `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft`).
-For overall status defer to `BUILD_BRIEF.md` §16 and the README Status section.
+For overall status defer to the README Status section (see the note on `BUILD_BRIEF.md` §16 above).
 
 Before starting work: `git pull`, read the relevant `docs/solutions/` learnings (see AGENTS.md
 "Read first"), and pick up a unit from a plan in `docs/plans/`.

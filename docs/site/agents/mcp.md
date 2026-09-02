@@ -1,10 +1,10 @@
 # MCP server
 
-Connect an MCP-capable agent host to a canvas-drop instance once, then create, deploy,
-share, and edit canvases as the signed-in account. There is no per-canvas key to paste.
-MCP is the identity-scoped companion to the keyed [Deploy API](/docs/api/deploy-api):
-the Deploy API acts on one canvas with its secret key; MCP acts across every canvas you
-own or edit, as you.
+If you are an agent host that speaks MCP, this page gets you connected to a canvas-drop
+instance once and then creating, deploying, sharing, and editing canvases as the
+signed-in account, with no per-canvas key to paste. MCP is the identity-scoped companion
+to the keyed [Deploy API](/docs/api/deploy-api): the Deploy API acts on one canvas with
+its secret key; MCP acts across every canvas you own or edit, as you.
 
 ## Connect
 
@@ -14,8 +14,9 @@ Add the instance's endpoint to your MCP client:
 {base}/mcp
 ```
 
-The transport is Streamable HTTP and stateless: each request is authenticated on its
-own, and there is no session to keep alive.
+The transport is Streamable HTTP and stateless: every request is authenticated on its
+own, and there is no session to keep alive. The server identifies itself as
+`canvas-drop`, version `1`.
 
 A first session, as tool calls:
 
@@ -39,24 +40,28 @@ canvas-drop is its own OAuth 2.1 authorization server; it does not proxy your id
 provider. A compliant client needs nothing but the URL:
 
 1. **Discovery.** `{base}/.well-known/oauth-authorization-server` and
-   `{base}/.well-known/oauth-protected-resource` (RFC 8414 and RFC 9728). The only
-   scope is `canvas-drop`.
+   `{base}/.well-known/oauth-protected-resource` (RFC 8414 and RFC 9728). The issuer is
+   `{base}`; the only scope is `canvas-drop`.
 2. **Registration.** `POST {base}/register` (Dynamic Client Registration).
-3. **Authorization.** `{base}/authorize` opens the instance's normal sign-in; identity is
-   resolved server-side by the same auth strategy the dashboard uses, then checked
-   against the email-domain allowlist and the blocked flag. In `oidc` mode a signed-out
-   browser goes through the usual login and back; in `proxy` and `dev` mode identity is
-   already present, and a request without it is denied. PKCE `S256` is required.
-4. **Tokens.** `POST {base}/token` exchanges the single-use code (60 s lifetime) for an
-   access token (`expires_in: 3600`) and a refresh token. Refresh tokens rotate on every
-   use. `POST {base}/revoke` revokes.
+3. **Authorization.** `{base}/authorize` resolves identity server-side with the same auth
+   strategy the dashboard uses, then checks the email allowlist and the blocked flag. In
+   `oidc` mode a signed-out browser goes through the normal login and back; in `proxy`
+   and `dev` mode identity is already present, and a request without it is denied. PKCE
+   `S256` is required.
+4. **Tokens.** `POST {base}/token` exchanges the single-use code (60 s lifetime; client
+   id and redirect URI must match) for an access token (`token_type: "bearer"`,
+   `expires_in: 3600`) and a refresh token. Refresh tokens rotate on every use.
+   `POST {base}/revoke` revokes.
 
-Every tool call carries `Authorization: Bearer <access_token>`. The server looks the
-token up and re-checks that the account is still active on each call, so blocking a
-user or removing their email domain from the allowlist ends a live token on the next
-request. A rejected token answers `401 { "error": "unauthorized" }` with a
-`WWW-Authenticate` header pointing at the protected-resource metadata. Nothing the
-client asserts about identity reaches the tools.
+Every tool call carries `Authorization: Bearer <access_token>`. Tokens are stored
+hashed. On each call the server looks the token up and re-checks that the account is
+still active, so blocking a user or removing their email domain from the allowlist ends
+a live token on the next request. A missing or rejected token answers
+`401 { "error": "unauthorized" }` with a `WWW-Authenticate: Bearer` header whose
+`resource_metadata` points at `{base}/.well-known/oauth-protected-resource`. Nothing the
+client asserts about identity reaches the tools; org membership is resolved server-side
+on every request. Sign-in and token events are audited (`mcp_authorize_ok`,
+`mcp_authorize_denied`, `mcp_token_issue`, `mcp_token_revoke`).
 
 ## How every tool behaves
 
@@ -70,17 +75,19 @@ client asserts about identity reaches the tools.
   cross-account management. Admins get no extra reach on this surface.
 - **Roles.** An editor can do everything the owner can except `delete_canvas`,
   `transfer_canvas`, and the guest-AI fields of `update_canvas` (`guestAiEnabled`,
-  `guestAiCap`). Those answer `OWNER_ONLY: …` for an editor. Roles are resolved on every
-  call; a demotion or removal applies to your next request.
+  `guestAiCap`). Those answer `OWNER_ONLY: Only the canvas owner can do this.` for an
+  editor. Roles are resolved on every call; a demotion or removal applies to your next
+  request.
 - **Disabled canvases.** When an admin has disabled a canvas, read tools keep working and
   every mutation answers `DISABLED: This canvas has been disabled by an administrator.`
-  (plus the reason when one was given), the same contract as the management API's
-  `409 { "code": "DISABLED" }`. Only an admin can re-enable it.
+  (followed by `Reason: …` when one was given), the same contract as the management
+  API's `409 { "code": "DISABLED" }`. Only an admin can re-enable it.
 - **Archived canvases.** Deploy, publish, and rollback refuse with `NOT_ACTIVE: …`; call
   `unarchive_canvas` first.
-- **Limits.** Calls are rate-limited per account using the canvas-API bucket
+- **Limits.** Calls are rate-limited per account from the canvas-API bucket
   (`CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN`, default 120 per minute); over the limit
-  answers `429` with `Retry-After`. Request bodies above 110 MB answer `413`.
+  answers `429 { "error": "rate_limited" }` with `Retry-After`. A request body over
+  110 MiB answers `413 { "error": "payload_too_large" }`.
 - **Audit.** Every mutation writes the same audit event as its dashboard equivalent.
 
 Refusal codes you will meet across tools:
@@ -91,14 +98,15 @@ Refusal codes you will meet across tools:
 | `DISABLED` | Admin takedown; the canvas is read-only. |
 | `NOT_ACTIVE` | The canvas is archived. |
 | `GUEST_VIEWER_ONLY` | `editor` was requested for a guest (an email outside the org); guests are always viewers. |
-| `PUBLIC_LINK_OWNER_GATED` | The owner's account cannot publish public links; the entitlement follows the owner, whoever acts. |
+| `PUBLIC_LINK_OWNER_GATED` | You are an editor and the owner's account cannot publish public links; the entitlement follows the owner, whoever acts. The owner hears `PUBLIC_NOT_ALLOWED` for the same state. |
 | `DRAFT_CONFLICT` | A stale draft write; see the draft tools. |
 | `INVALID_REQUEST` | Mutually exclusive inputs were both supplied, or neither was. |
 
 ## Tools
 
-46 tools. Optional inputs are marked `?`. "View" is the canvas projection described
-under Return shapes below.
+46 tools: 13 open to any signed-in account, 31 at minimum role editor, 2 owner-only.
+Optional inputs are marked `?`. "View" is the canvas projection described under Return
+shapes below.
 
 ### Account, lists, create
 
@@ -108,38 +116,39 @@ Available to any signed-in account.
 |---|---|---|
 | `whoami` | none | `{id, email, name, orgs: [{id, name}], teams: [{id, name, slug, orgId}], isGuest}`. `orgs` is empty when no org boundary is configured; `isGuest` is true only when an org boundary exists and you belong to no org. |
 | `list_canvases` | `role?` (`owned` \| `edited`), `query?`, `tags?` (string[]), `sort?` (`updated` default, `created`, `title`, `popular`), `limit?` (1-100, default 50) | `{total, canvases: [View + {owner: {id, name, email}, role: "owner" \| "editor", recentViews}]}`. `query` is a forgiving text filter over title, description, tags, and slug (case-, accent-, and whitespace-insensitive; words are AND-ed). `tags` matches canvases carrying any of the given tags. `popular` ranks by views in the last 30 days (`recentViews`). |
-| `list_shared_canvases` | `query?`, `sort?` (`updated` default, `title`, `owner`), `limit?` (default 50), `offset?` (default 0) | `{total, limit, offset, canvases: [{id, slug, url, title, description, tags, access: {kind: "direct" \| "team" \| "whole_org", label, teamIds?, teamNames?}, hasPassword, hasPreview, owner, createdAt, updatedAt}]}`. Canvases you can open but do not manage: direct Specific-people grants plus the Team and Whole-org shares their owner listed. Display-only; open the `url`. |
-| `create_canvas` | `title?`, `description?`, `backendEnabled?`, `slug?` (≤63), `orgId?` (string or null) | View + `apiKey` (the deploy key, returned once) + `deploy` (ready-to-run endpoints, see Return shapes). `orgId` from `whoami.orgs` homes the canvas in that org so it can be shared org-wide; omit it for a personal canvas. `ORG_FORBIDDEN`, `INVALID_SLUG`, `SLUG_TAKEN`. |
-| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas, or a Team canvas whose granted team you belong to. Anything else reads `canvas not found`. |
+| `list_shared_canvases` | `query?`, `sort?` (`updated` default, `title`, `owner`), `limit?` (1-100, default 50), `offset?` (default 0) | `{total, limit, offset, canvases: [{id, slug, url, title, description, tags, access: {kind: "direct" \| "team" \| "whole_org", label, teamIds?, teamNames?}, hasPassword, hasPreview, owner: {id, name, avatarUrl} \| null, createdAt, updatedAt}]}`. Canvases you can open but do not manage: direct Specific-people grants plus the Team and Whole-org shares their owner listed. Display-only; open the `url`. |
+| `create_canvas` | `title?`, `description?`, `backendEnabled?`, `slug?` (≤63), `orgId?` (string or null) | View + `apiKey` (the deploy key, returned once) + `deploy` (ready-to-run endpoints with the real key embedded, see Return shapes). `orgId` from `whoami.orgs` homes the canvas in that org so it can be shared org-wide; omit it for a personal canvas. `ORG_FORBIDDEN`, `INVALID_SLUG`, `SLUG_TAKEN`. |
+| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas (org-scoped), or a Team canvas whose granted team you belong to. Anything else reads `canvas not found`. |
 
 ### Read a canvas
 
-Minimum role: editor.
+Minimum role: editor. These keep working on a disabled canvas.
 
 | Tool | Input | Result |
 |---|---|---|
 | `get_canvas` | `id` | View + `owner`, `role`, `teamIds` (when `access` is `team`), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
 | `list_versions` | `id` | `{versions: [{number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, current, downloadUrl}]}`. `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
-| `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails when the canvas has no live version. |
+| `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
-| `list_access` | `id` | `{entries: [{id, kind, role, email, name, userId, teamId, teamOrgId, createdAt}]}`: the owner first, then people, pending sign-in grants, and teams. `role` is `owner`, `viewer`, or `editor`. Entry ids are stable (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`, `team:<teamId>`); pass them to `set_access_role` and `revoke_access`. When you are the owner the result also carries `transferCandidates: [{id, name, email}]`, the set `transfer_canvas` accepts. |
-| `search_people` | `context` (`canvas` \| `team`), `canvasId?`, `teamId?`, `q` (1-80 chars) | `{people: [{id, email, name}]}`: the dashboard's Add person suggestions, scoped to a canvas you own or edit (`canvasId`) or a team you can see (`teamId`). `INVALID_REQUEST` when the matching id is missing. Does not expose the admin People directory. |
+| `list_access` | `id` | `{entries: [{id, kind, role, email, name, userId, teamId, teamOrgId, createdAt}]}`: the owner first, then people, pending sign-in grants, and teams. `kind` is `owner`, `member`, `guest`, `pending`, or `team`; `role` is `owner`, `viewer`, or `editor`. Entry ids are stable (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`, `team:<teamId>`); pass them to `set_access_role` and `revoke_access`. When you are the owner the result also carries `transferCandidates: [{id, name, email}]`, the set `transfer_canvas` accepts. |
+| `search_people` | `context` (`canvas` \| `team`), `canvasId?`, `teamId?`, `q` (1-80 chars) | `{people: [{id, email, name}]}`: the dashboard's Add person suggestions, scoped to a canvas you own or edit (`canvasId`) or a team you can see (`teamId`). `INVALID_REQUEST: missing canvasId or teamId for context` when the matching id is absent; a canvas you do not manage or a team you cannot see reads `not found`. Does not expose the admin People directory. |
 
 ### Deploy
 
-Minimum role: editor; the canvas must be active. Every deploy goes live at once as a new
-immutable version. There is no draft step on this path; for a draft, use the editor
-tools below.
+Minimum role: editor. `deploy_canvas`, `begin_deploy`, and `finalize_deploy` also
+require an active canvas (`NOT_ACTIVE`); `add_files` needs only the open handle. Every
+deploy goes live at once as a new immutable version. There is no draft step on this
+path; for a draft, use the editor tools below.
 
 | Tool | Input | Result |
 |---|---|---|
-| `deploy_canvas` | `id`, and exactly one of `zipBase64` or `files: [{path, content, encoding?: "utf8" \| "base64"}]` | `{url, version, fileCount, totalBytes, warnings: []}`. `INVALID_REQUEST` for both or neither. Ingest failures use the Deploy API codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `INVALID_ZIP`, `INVALID_PATH`, `INVALID_ENCODING`, `ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`. |
+| `deploy_canvas` | `id`, and exactly one of `zipBase64` or `files: [{path, content, encoding?: "utf8" \| "base64"}]` | `{url, version, fileCount, totalBytes, warnings: []}`. `INVALID_REQUEST` for both or neither; `empty deploy` for a zero-byte ZIP. Ingest failures use the Deploy API codes: `EMPTY_DEPLOY`, `TOO_MANY_FILES`, `FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `INVALID_ZIP`, `INVALID_PATH`, `INVALID_ENCODING`, `ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`. |
 | `begin_deploy` | `id`, `manifest: [{path, hash, size}]` (`hash` is the sha256 hex of the bytes) | `{uploadId, missingHashes}`: the blobs the server does not already hold. The handle lives 15 minutes. `INVALID_MANIFEST`. |
-| `add_files` | `id`, `uploadId`, `files: [{path, content, encoding?}]` | `{staged: <count>}`. Call repeatedly to chunk. `UPLOAD_HANDLE_INVALID`, `UPLOAD_EXPIRED`, `UPLOAD_ALREADY_FINALIZED`, `UPLOAD_UNEXPECTED_BLOB`, `BLOB_HASH_MISMATCH`. |
+| `add_files` | `id`, `uploadId`, `files: [{path, content, encoding?}]` | `{staged: <count>}`. Call repeatedly to chunk. `UPLOAD_HANDLE_INVALID`, `UPLOAD_EXPIRED`, `UPLOAD_ALREADY_FINALIZED`, `UPLOAD_UNEXPECTED_BLOB`, `BLOB_HASH_MISMATCH`, `INVALID_ENCODING`. |
 | `finalize_deploy` | `id`, `uploadId` | Same result as `deploy_canvas`. Single-use. `UPLOAD_MISSING_BLOB` (stage it and retry), `UPLOAD_IN_PROGRESS` (a 60 s lease), `UPLOAD_ALREADY_FINALIZED`. |
 
-Limits: 100 MB per canvas, 25 MB per file, 2000 files. Read "Which deploy tool to use"
-below before sending bytes through a tool call.
+Limits: 100 MiB per canvas, 25 MiB per file, 2000 files. Read "Which deploy tool to
+use" below before sending bytes through a tool call.
 
 ### Versions and lifecycle
 
@@ -147,12 +156,12 @@ Minimum role: editor unless marked owner-only.
 
 | Tool | Input | Result |
 |---|---|---|
-| `rollback_canvas` | `id`, `version` (integer) | View + `version`. The target must be a ready version. |
-| `unpublish_canvas` | `id` | `{url, publicationState: "draft", currentVersionId: null}`. Takes the canvas offline and drops live sockets. `CANNOT_UNPUBLISH`. |
+| `rollback_canvas` | `id`, `version` (integer) | View + `version`. The target must be a ready version (`no ready version N` otherwise); `NOT_ACTIVE` on an archived canvas; `that version was just removed; retry` if it was pruned mid-swap. |
+| `unpublish_canvas` | `id` | `{url, publicationState: "draft", currentVersionId: null}`. Takes the canvas offline, drops live sockets, and revokes legacy guest grants. `CANNOT_UNPUBLISH: this canvas isn't published`. |
 | `delete_version` | `id`, `version` (integer > 0) | `{ok: true, version}`. The current version is protected (`CURRENT_VERSION`); also `VERSION_NOT_FOUND`, `VERSION_UNAVAILABLE`. Blobs shared with other versions or the draft are retained. |
-| `archive_canvas` | `id` | View with `status: "archived"`. Reversible; takes the URL offline and revokes any retained legacy guest sessions. `NOT_ACTIVE`. |
-| `unarchive_canvas` | `id` | View + `owner`, `role`, with `status: "active"`. `NOT_ARCHIVED`. |
-| `delete_canvas` (owner-only) | `id` | `{ok: true}`. Soft-delete: the URL stops resolving and the canvas is purged after the retention window. Refused on a disabled canvas. Not reversible over MCP. |
+| `archive_canvas` | `id` | View with `status: "archived"`. Reversible; takes the URL offline. `NOT_ACTIVE: only an active canvas can be archived`. |
+| `unarchive_canvas` | `id` | View + `owner`, `role`, with `status: "active"`. `NOT_ARCHIVED: canvas is not archived`. |
+| `delete_canvas` (owner-only) | `id` | `{ok: true}`. Soft-delete: the URL stops resolving and the canvas is purged after the retention window. Refused with `DISABLED` on a disabled canvas; `OWNER_ONLY` for an editor. Not reversible over MCP. |
 | `transfer_canvas` (owner-only) | `id`, `toUserId` (a user id, never an email) | `{ok: true, canvas: View, previousOwnerEditor, publicLinkReverted}`. Instant: the recipient, an existing editor (see `transferCandidates`), becomes owner and you stay on as an editor; the public-link entitlement now follows their account, and `publicLinkReverted` tells you if a public link had to be turned off. A team cannot receive a canvas. `NOT_ELIGIBLE`, `TARGET_NOT_FOUND`, `TARGET_BLOCKED`, `TARGET_NOT_MEMBER`, `ALREADY_OWNER`, `SELF`, `CONFLICT`. |
 
 ### Settings
@@ -161,24 +170,31 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `specific_people` \| `team` \| `whole_org` \| `public_link`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds?`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. |
+| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `specific_people` \| `team` \| `whole_org` \| `public_link`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds?`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
 | `set_capabilities` | `id`, `backendEnabled?`, `kv?`, `files?`, `ai?`, `realtime?`, `authoring?` (all booleans) | View + `owner`, `role`. `backendEnabled` is the master switch; the others take effect only when it is on. `authoring` also needs the instance switch on. Omitted fields are unchanged; switching a capability off drops sockets that lost access. |
-| `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy`. The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
-| `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; decoded ≤25 MB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, the custom cover is cleared back to `auto`. `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. |
-| `regenerate_deploy_key` | `id` | `{apiKey, deploy}`. Mints a new `cd_…` key (returned once) and invalidates the old one. An editor may rotate it; the owner is emailed naming the actor. |
+| `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
+| `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; the string ≤40 MiB, decoded ≤25 MiB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, a custom cover is cleared back to `auto` (an auto-captured screenshot is left alone). `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. For the auto/off toggle use `update_canvas` `previewMode`. |
+| `regenerate_deploy_key` | `id` | `{apiKey, deploy}`. Mints a new `cd_…` key (returned once, embedded in `deploy.curl`) and invalidates the old one. An editor may rotate it; the owner is emailed naming the actor. |
 
 Notes on `update_canvas`:
 
-- Sharing and listing need a published canvas (`SHARE_REQUIRES_PUBLISH`,
-  `NOT_PUBLISHED`). `public_link` needs the instance switch on (`PUBLIC_LINKS_DISABLED`)
-  and an entitled owner (`PUBLIC_LINK_OWNER_GATED`). A password un-lists from the gallery
-  (`PASSWORD_PROTECTED`).
+- Any rung above `private` needs a published canvas: active with a live version
+  (`SHARE_REQUIRES_PUBLISH`). `public_link` also needs the instance switch on
+  (`PUBLIC_LINKS_DISABLED`) and an owner whose account may publish public links
+  (`PUBLIC_NOT_ALLOWED` to the owner, `PUBLIC_LINK_OWNER_GATED` to an editor). When an
+  org boundary is configured, `whole_org` needs a canvas homed in an org
+  (`ORG_REQUIRED`); pass `orgId` at `create_canvas`.
 - To share with teams, set `access: "team"` and `teamIds` with at least one team you
   belong to. Personal teams fit any canvas you own; org teams must match the canvas's org
   (`TEAM_REQUIRED`, `TEAM_FORBIDDEN`). Leaving the `team` rung clears the grants.
 - `discoverability` controls only whether a Team or Whole-org canvas appears in Shared;
   it never widens URL access. Setting `galleryListed: true` on a Whole-org canvas also
-  sets `discoverability: "listed"`.
+  sets `discoverability: "listed"`; passing `link_only` in the same call is refused
+  (`DISCOVERY_CONFLICT`).
+- Gallery listing needs a shared, published, password-free canvas on `public_link` or a
+  listed `whole_org` (`NOT_SHARED`, `NOT_PUBLISHED`, `PASSWORD_PROTECTED`,
+  `NOT_GALLERY_ELIGIBLE`). `galleryTemplatable: true` needs the canvas listed first
+  (`NOT_LISTED`).
 - The Specific-people list itself is managed with `grant_access` and `revoke_access`.
 
 ### Sharing and people
@@ -187,9 +203,9 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `grant_access` | `id`, exactly one of `email` or `teamId`, `role?` (`viewer` default \| `editor`) | Person: `{ok: true, status: "granted" \| "pending" \| "role_changed", role, emailDelivery?}`. An existing user is granted now; an admissible new email becomes a pending sign-in grant that carries the role; passing `role` for someone already listed updates it, and omitting it never changes an existing entry. Team: `{ok: true, status: "granted" \| "role_changed" \| "already_added", role, from}`. Only org members and teams can be editors (`GUEST_VIEWER_ONLY`). A viewer grant takes effect on the `specific_people` and `team` rungs; an editor always has access. Also `NOT_PERMITTED`, `AUTH_ADMISSION_REQUIRED`, `BLOCKED`, `RATE_LIMITED`, `TEAM_FORBIDDEN`, `EMAIL_NOT_CONFIGURED`. |
+| `grant_access` | `id`, exactly one of `email` or `teamId`, `role?` (`viewer` default \| `editor`) | Person: `{ok: true, status: "granted" \| "pending" \| "role_changed" \| "already_added" \| "already_pending", role, emailDelivery?}`. An existing user is granted now; an admissible new email becomes a pending sign-in grant that carries the role; passing `role` for someone already listed updates it, and omitting it never changes an existing entry. Team: `{ok: true, status: "granted" \| "role_changed" \| "already_added", role, from}`. Only org members and teams can be editors (`GUEST_VIEWER_ONLY`). A viewer grant takes effect on the `specific_people` and `team` rungs; an editor always has access. Also `INVALID_REQUEST: pass exactly one of email or teamId`, `NOT_PERMITTED`, `AUTH_ADMISSION_REQUIRED`, `BLOCKED`, `RATE_LIMITED`, `TEAM_FORBIDDEN`, `EMAIL_NOT_CONFIGURED`. |
 | `invite_to_canvas` | `id`, `email`, `role?` | The same person result as `grant_access`, through the same Add person service, and it sends the access email. A brand-new external email is refused for a non-admin unless the instance allows it (`NOT_PERMITTED`); `RATE_LIMITED` past the cap. |
-| `revoke_access` | `id`, `entryId` (from `list_access`) | `{ok: true}`. Removes a person (another editor, or yourself), a pending grant, a legacy guest row, or a team grant; sockets the entry no longer permits are dropped. The `owner` entry refuses (`OWNER_ONLY`). |
+| `revoke_access` | `id`, `entryId` (from `list_access`) | `{ok: true}`. Removes a person (another editor, or yourself), a pending grant, a legacy guest row, or a team grant; sockets the entry no longer permits are dropped. The `owner` entry refuses (`OWNER_ONLY`); an unknown id reads `access entry not found`. |
 | `set_access_role` | `id`, `entryId`, `role` (`viewer` \| `editor`) | `{ok: true}`. A guest can only be a viewer (`GUEST_VIEWER_ONLY`); the `owner` entry refuses (`OWNER_ONLY`; use `transfer_canvas`). Demoting drops the person's live editor sockets. |
 
 ### Draft editor loop
@@ -197,16 +213,17 @@ Minimum role: editor.
 Minimum role: editor. These mirror the browser editor: a per-canvas draft that
 `publish_draft` snapshots into a live version. DraftView is
 `{files: [{path, size, mime, hash, updatedBy, updatedByName, updatedAt}], stale, baseVersionId, updatedAt, dirty}`,
-where `dirty` means the draft differs from live.
+where `dirty` means the draft differs from live and `stale` means live moved on since
+the draft was based.
 
 | Tool | Input | Result |
 |---|---|---|
-| `get_draft` | `id` | DraftView. Created from the live version on first open. |
-| `read_draft_file` | `id`, `path` | `{path, encoding, content, hash, updatedBy, updatedByName, updatedAt}`. |
-| `write_draft_file` | `id`, `path`, `content`, `encoding?`, `create?`, `expectedHash?` | DraftView. `create: true` refuses to overwrite (`PATH_EXISTS`). `expectedHash` is the `hash` you loaded, or the literal `none` for a path you believe absent; a mismatch fails with `DRAFT_CONFLICT: … (path= currentHash= updatedBy= updatedByName= updatedAt=)`: re-read and retry with the current hash. Without `expectedHash` the write still fails with `DRAFT_CONFLICT` if a different user wrote that file last. Two editors in different files never conflict. |
+| `get_draft` | `id` | DraftView. Created from the live version on first open. Works on a disabled canvas. |
+| `read_draft_file` | `id`, `path` | `{path, encoding, content, hash, updatedBy, updatedByName, updatedAt}`. `no draft file at "…"`. |
+| `write_draft_file` | `id`, `path`, `content`, `encoding?` (`utf8` default \| `base64`), `create?`, `expectedHash?` | DraftView. `create: true` refuses to overwrite (`PATH_EXISTS`). `expectedHash` is the `hash` you loaded, or the literal `none` for a path you believe absent; a mismatch fails with `DRAFT_CONFLICT: … (path= currentHash= updatedBy= updatedByName= updatedAt=)`: re-read and retry with the current hash. Without `expectedHash` the write still fails with `DRAFT_CONFLICT` if a different user wrote that file last. Two editors in different files never conflict. |
 | `delete_draft_file` | `id`, `path`, `expectedHash?` | DraftView. |
 | `rename_draft_file` | `id`, `from`, `to`, `expectedHash?` (checked on `from`) | DraftView. |
-| `publish_draft` | `id` | `{version, versionId, fileCount, totalBytes}`. `NOT_ACTIVE`, `EMPTY_DEPLOY`, `DISABLED`. |
+| `publish_draft` | `id` | `{version, versionId, fileCount, totalBytes}`. `NOT_ACTIVE: unarchive this canvas before publishing`, `EMPTY_DEPLOY`, `DISABLED`. |
 | `restore_draft` | `id`, `version` (integer > 0) | DraftView, reset to that version's files. |
 
 ### Teams
@@ -216,13 +233,13 @@ a team id.
 
 | Tool | Input | Result |
 |---|---|---|
-| `list_teams` | none | `{teams: [{id, orgId, name, slug, mine, canManage}]}`. `mine`: you belong to it. `canManage`: you created it, so you can rename or delete it. |
+| `list_teams` | none | `{teams: [{id, orgId, name, slug, mine, canManage}]}`. `orgId` is null for a personal team. `mine`: you belong to it. `canManage`: you created it, so you can rename or delete it. |
 | `create_team` | `orgId?` (string or null), `name` (1-80 chars) | `{id, orgId, name, slug}`. Omit `orgId` for a personal team; pass one from `whoami.orgs` to attach the team to that org. You become its first member and its manager. |
-| `rename_team` | `id`, `name` | `{id, name}`. |
-| `delete_team` | `id` | `{ok: true}`. Every canvas shared with the team is unshared; the canvases are untouched. |
-| `add_team_member` | `id`, `email` | `{status: "granted" \| "pending", emailDelivery?}`. An org team takes same-org members only; a brand-new external email on a personal team is refused for a non-admin unless the instance allows it. |
+| `rename_team` | `id`, `name` (1-80 chars) | `{id, name}`. Creator only (`FORBIDDEN`). |
+| `delete_team` | `id` | `{ok: true}`. Creator only (`FORBIDDEN`). |
+| `add_team_member` | `id`, `email` | `{status: "granted" \| "pending", emailDelivery?}`. Any member may add; an org team takes same-org members only; a brand-new external email on a personal team is refused for a non-admin unless the instance allows it. |
 | `remove_team_member` | `id`, `userId` | `{ok: true}`. Pass your own id to leave. |
-| `cancel_team_invite` | `id`, `inviteId` (a `pending` row id from `list_team_members`) | `{ok: true}`. |
+| `cancel_team_invite` | `id`, `inviteId` (a `pending` row id from `list_team_members`) | `{ok: true}`. A stale id reads `TARGET_NOT_FOUND`. |
 | `list_team_members` | `id` | `{members: [{userId, email, name}], pending: [{id, email, invitedAt}]}`. |
 
 Team error codes: `NOT_A_MEMBER`, `TEAM_NOT_FOUND`, `TEAM_NAME_TAKEN`, `FORBIDDEN`,
@@ -242,8 +259,9 @@ Team error codes: `NOT_A_MEMBER`, `TEAM_NOT_FOUND`, `TEAM_NAME_TAKEN`, `FORBIDDE
 ```
 
 `publicationState` is `draft`, `published`, `archived`, `disabled`, or `deleted`.
-Identity-bearing tools add `owner` and `role`. The password hash and the API key are
-never included.
+`previewUrl` is present when a preview exists. Identity-bearing tools add
+`owner: {id, name, email} | null` and `role: "owner" | "editor"`; `teamIds` appears when
+`access` is `team`. The password hash and the API key are never included.
 
 **deploy**, returned by `create_canvas`, `get_canvas`, `set_canvas_slug`, and
 `regenerate_deploy_key`: the exact keyed [Deploy API](/docs/api/deploy-api) endpoints
@@ -251,23 +269,23 @@ for this canvas, so there is nothing to probe.
 
 ```json
 {
-  "apiBase": "https://api.example.com/v1/canvases/{id}",
-  "zipUpload": "PUT https://api.example.com/v1/canvases/{id}/deploy",
+  "apiBase": "https://canvases.example.com/v1/canvases/{id}",
+  "zipUpload": "PUT https://canvases.example.com/v1/canvases/{id}/deploy",
   "staged": {
-    "begin": "POST https://api.example.com/v1/canvases/{id}/uploads",
-    "stageBlob": "PUT https://api.example.com/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}",
-    "finalize": "POST https://api.example.com/v1/canvases/{id}/uploads/{uploadId}/finalize"
+    "begin": "POST https://canvases.example.com/v1/canvases/{id}/uploads",
+    "stageBlob": "PUT https://canvases.example.com/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}",
+    "finalize": "POST https://canvases.example.com/v1/canvases/{id}/uploads/{uploadId}/finalize"
   },
-  "readback": "GET https://api.example.com/v1/canvases/{id}/files",
-  "curl": "curl -X PUT \"https://api.example.com/v1/canvases/{id}/deploy\" -H \"Authorization: Bearer $CANVAS_KEY\" --data-binary @site.zip"
+  "readback": "GET https://canvases.example.com/v1/canvases/{id}/files",
+  "curl": "curl -X PUT \"https://canvases.example.com/v1/canvases/{id}/deploy\" -H \"Authorization: Bearer $CANVAS_KEY\" --data-binary @site.zip"
 }
 ```
 
 `create_canvas` and `regenerate_deploy_key` embed the real key in `curl` (returned
 once); `get_canvas` and `set_canvas_slug` show the `$CANVAS_KEY` placeholder, so set it
 from your own copy. The host is `CANVAS_DROP_API_BASE_URL`, falling back to
-`CANVAS_DROP_BASE_URL`. In `subdomain` mode it usually differs from the canvas hosts,
-which is why you should use the advertised endpoints rather than guessing.
+`CANVAS_DROP_BASE_URL`. In `subdomain` mode it differs from the canvas hosts, which is
+why you should use the advertised endpoints rather than guessing.
 
 ## Which deploy tool to use
 
@@ -292,12 +310,13 @@ resending unchanged files and from chunking.
 **Prefer `curl` and the keyed Deploy API for the file transfer whenever you can run
 shell commands.** Every MCP deploy tool inlines file contents into the tool call, so they
 pass through the model. If you lack command or network permission, request it rather
-than inlining bytes. The same staged flow runs over plain HTTP: `POST …/uploads` with
-the manifest, `PUT …/uploads/{uploadId}/blobs/{hash}` with each blob's raw bytes, then
-`POST …/uploads/{uploadId}/finalize`. The bytes go from disk to the server without
-entering the model context, with no tool-call size ceiling. `create_canvas` returns the
-per-canvas key and the exact URLs in its `deploy` block. Reserve the MCP deploy tools
-for a small first publish when shell access is unavailable.
+than inlining bytes. The same staged flow runs over plain HTTP: `POST {apiBase}/uploads`
+with the manifest, `PUT {apiBase}/uploads/{uploadId}/blobs/{hash}` with each blob's raw
+bytes, then `POST {apiBase}/uploads/{uploadId}/finalize`. The bytes go from disk to the
+server without entering the model context, with no tool-call size ceiling.
+`create_canvas` returns the per-canvas key and the exact URLs in its `deploy` block.
+Reserve the MCP deploy tools for a small first publish when shell access is
+unavailable.
 
 ## Verify a deploy
 
@@ -316,14 +335,22 @@ unauthenticated `GET` returns a login page, not your files. Verify through the s
 Each `list_versions` row carries a `downloadUrl` for a complete ZIP export of that
 immutable version. Fetch it with the same OAuth access token in the
 `Authorization: Bearer …` header; the route accepts no query-string token and no
-dashboard cookie, and answers `503 VERSION_INCOMPLETE` rather than a partial archive
-when a referenced blob is missing.
+dashboard cookie, and applies the same role gate and rate limit as the tools. It answers
+`application/zip` on success, `404 { "error": "not_found" }` for a canvas you hold no
+role on, `400 { "error": "invalid_version" }` for a version that is not a positive
+integer, `404 { "code": "NOT_FOUND" }` for a version that does not exist, and
+`503 { "code": "VERSION_INCOMPLETE" }` rather than a partial archive when a referenced
+blob is missing.
 
 ## Enabling and disabling
 
-The MCP surface is on by default. `CANVAS_DROP_MCP=off` removes the `/mcp` endpoint,
-the version download route, and the OAuth routes entirely (they are not mounted, so they
-answer like any unknown path). See [Configuration](/docs/self-hosting/configuration).
+The MCP surface is on by default (`CANVAS_DROP_MCP=on`). `CANVAS_DROP_MCP=off` removes
+the `/mcp` endpoint, the version download route, and the OAuth routes (`/authorize`,
+`/token`, `/register`, `/revoke`, `/.well-known/*`) entirely: they are not mounted, so
+they answer like any unknown path. Behind a reverse proxy or identity-aware proxy, `/mcp`
+must reach the app with its `Authorization` header intact and bypass the proxy's own
+login; MCP carries its own auth. See [Configuration](/docs/self-hosting/configuration)
+and [Deploy](/docs/self-hosting/deploy).
 
 ## Which path should an agent use?
 

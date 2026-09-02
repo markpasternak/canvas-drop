@@ -42,7 +42,7 @@ CI is the authoritative gate — there is no local pre-push hook. Run the full g
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
-`pnpm test` runs **both** dialects in-process (SQLite + PGlite) plus the dashboard suite. CI re-runs the full matrix (lint, typecheck, test-sqlite, test-dashboard, test-postgres against real Postgres/MinIO, build) on the PR, and that green is what authorizes the merge. The lint job also asserts the generated docs are up to date, so if you edit `docs/site/`, run `pnpm docs:build` and commit the result.
+`pnpm test` runs **both** dialects in-process (SQLite + PGlite) plus the dashboard suite. CI re-runs the full matrix (lint, typecheck, test-sqlite, test-dashboard, test-postgres against real Postgres/MinIO, build) on the PR, and that green is what authorizes the merge. The lint job also asserts the generated docs are up to date, so if you edit `docs/site/`, run `pnpm docs:build` and commit the result (likewise `pnpm docs:mermaid` if you touch `scripts/docs-mermaid.src.mjs`, since the bundled `docs/site/assets/mermaid.js` is diff-checked too).
 
 ## Code standards
 

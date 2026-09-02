@@ -1,42 +1,51 @@
 # Deploy
 
-Run canvas-drop in production: one Node process behind a TLS-terminating reverse
-proxy that asserts who the user is. The app is a single Hono server that routes the
-dashboard, auth, the management and platform APIs, canvas content, MCP, and the docs
-from one port, with one log stream. Postgres, the identity-aware proxy, and
-S3-compatible storage are separate off-the-shelf services you run next to it.
+This page is for the operator putting canvas-drop in production. By the end you run one
+Node process behind a TLS-terminating reverse proxy that asserts who the user is, with
+Postgres and S3-compatible storage beside it, and you know how to check its health, back
+it up, and upgrade it. The full variable reference is on
+[Configuration](/docs/self-hosting/configuration).
 
-Identity only ever comes from the app's server-side auth context, so the proxy has one
-security job: assert the user correctly. Everything else on this page is a config
-switch. The full variable reference is on [Configuration](/docs/self-hosting/configuration).
-
-The fastest way to see the production shape running is the bundled compose stack:
-canvas-drop in real `proxy` mode behind Caddy, oauth2-proxy, and a demo IdP, with
-Postgres.
+The production recipe:
 
 ```bash
-docker compose up --build          # add -d to run in the background
+docker build -t canvas-drop .
+cp .env.production.example canvas-drop.env      # replace every CHANGE_ME / REPLACE_ME
+docker run -d --name canvas-drop --env-file canvas-drop.env \
+  -p 127.0.0.1:3000:3000 -v canvas-drop-data:/data canvas-drop
+curl -fsS http://127.0.0.1:3000/healthz
+# {"status":"ok","db":"ok","version":"..."}
+```
+
+Then point your identity-aware proxy at `127.0.0.1:3000` under the contract below. To see
+the whole shape running first, with a bundled IdP and no external setup, use the compose
+stack:
+
+```bash
+docker compose up --build     # add -d to run in the background
 # open http://localhost:8080 and sign in as demo@example.com / canvasdrop
 ```
 
-This page covers the recommended profile, what the reverse proxy must do, auth at the
-edge, the Docker image and compose stack, the bare-process alternative, and day-two
-operations: health, upgrades, backups, logs.
+The app is a single Hono server: dashboard, auth, management and platform APIs, canvas
+content, MCP, docs, and the realtime WebSocket all share one port and one log stream.
+Identity only ever comes from the app's server-side auth context, so the proxy has one
+security job: assert the user correctly. Everything else on this page is a config switch.
 
 ## Recommended production profile
 
-- **URL mode:** `subdomain` (`{slug}.{base}`), so every canvas is its own browser
-  origin. Needs a non-localhost `CANVAS_DROP_BASE_URL`, wildcard DNS
-  (`*.canvases.example.com`), and a wildcard certificate at the proxy.
-- **Auth:** `proxy` with JWT verification, behind an identity-aware proxy (IAP).
-- **Database:** Postgres (`CANVAS_DROP_DB=postgres`).
-- **Storage:** S3-compatible (`CANVAS_DROP_STORAGE=s3`).
-- **TLS:** terminated at the proxy, covering `{base}` and `*.{base}`.
+| Interface | Setting | Notes |
+|---|---|---|
+| URL mode | `CANVAS_DROP_URL_MODE=subdomain` | Every canvas is its own browser origin (`{slug}.{base}`). Needs a non-localhost `CANVAS_DROP_BASE_URL`, wildcard DNS (`*.canvases.example.com`), and a wildcard certificate at the proxy. |
+| Auth | `CANVAS_DROP_AUTH_MODE=proxy` on the JWKS path | An identity-aware proxy (IAP) in front forwards a signed JWT; the app verifies it. |
+| Database | `CANVAS_DROP_DB=postgres` | `CANVAS_DROP_DATABASE_URL` is required. |
+| Storage | `CANVAS_DROP_STORAGE=s3` | Bucket, region, access key, and secret key are required; `CANVAS_DROP_S3_ENDPOINT` for MinIO or R2. |
+| TLS | at the proxy | One certificate covering `{base}` and `*.{base}`. The proxy-to-app hop is plain HTTP. |
 
-`.env.production.example` in the repo is this profile, annotated. Any Docker host,
-VPS, PaaS, or Kubernetes cluster works; the design target is a single modest box.
-None of these choices is mandatory. Each interface (database, storage, URL mode,
-auth) is a config switch you can change later without touching code.
+`.env.production.example` in the repo is this profile, annotated. Any Docker host, VPS,
+PaaS, or Kubernetes cluster works; the design target is a single process on one modest
+box. None of these choices is mandatory: SQLite plus local disk needs only a volume, and
+each interface (database, storage, URL mode, auth) is a config switch you can change
+later without touching code (see "Changing drivers later").
 
 ## Shape
 
@@ -54,55 +63,63 @@ The app must not be reachable directly; only the proxy talks to it. The proxy mu
 
 ## What the reverse proxy must do
 
-Whichever proxy you run (an IAP, Caddy, nginx, a tunnel), the app needs these
-behaviors from it:
+Whichever proxy you run (an IAP, Caddy, nginx, a tunnel), the app needs these behaviors
+from it:
 
-- **Preserve `Host`.** In subdomain mode the app picks the canvas from the `Host`
-  header (`{slug}.{baseHost}`). Caddy forwards it by default; nginx needs
-  `proxy_set_header Host $host`.
-- **Pass WebSocket upgrades.** The realtime primitive is a WebSocket on the same
-  port as everything else.
+- **Preserve `Host`.** In subdomain mode the app picks the canvas from the `Host` header
+  (`{slug}.{baseHost}`); the base host itself routes by path. Caddy forwards `Host` by
+  default; nginx needs `proxy_set_header Host $host`.
+- **Pass WebSocket upgrades.** The realtime primitive is a WebSocket on the same port as
+  everything else.
 - **Allow large request bodies on deploy routes.** The app accepts up to 110 MB on
-  `PUT /v1/canvases/{id}/deploy` and the dashboard deploy routes, and 26 MB per
-  staged blob (`PUT /v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}`). It returns
-  `413` above those limits itself; a proxy with a lower cap fails deploys first.
+  `PUT /v1/canvases/{id}/deploy` and the dashboard deploy routes, and 26 MB per staged
+  blob (`PUT /v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}`). It answers `413` above
+  those limits itself; a proxy with a lower cap fails deploys first.
 - **Forward `Authorization` untouched** on `/v1/canvases/*` and `/mcp`, and route those
   paths around the IAP's login (see "Agents and CI behind an IAP" below).
 - **Set `CANVAS_DROP_BASE_URL` to the public `https://` origin.** The app builds every
   absolute URL (canvas URLs, the OIDC redirect URI, MCP discovery metadata) from that
-  variable and never reads `X-Forwarded-Proto`, so the plain-HTTP hop between proxy
-  and app is fine.
+  variable and never reads `X-Forwarded-Proto`, so the plain-HTTP hop between proxy and
+  app is fine.
+- **Give it 5 seconds to stop.** On `SIGTERM` the app closes WebSockets, drops idle
+  keep-alive connections, force-closes after 5 s, flushes the audit log, and closes the
+  database. Set your stop grace period to at least that.
 
 ## Auth at the edge
 
-In `proxy` mode the app is sessionless: the IAP owns the session, and the app verifies
-identity on every request from what the proxy forwards. Pick exactly one trust path.
-They do not compose.
+In `proxy` mode the app is sessionless: the IAP owns the session, and the app re-derives
+identity on every request from what the proxy forwards, so a proxy-side logout takes
+effect on the next request. Pick exactly one trust path. They do not compose.
 
 - **JWT / JWKS (preferred, cryptographic).** The proxy forwards a signed JWT (default
   header `Cf-Access-Jwt-Assertion`; set `CANVAS_DROP_AUTH_PROXY_JWT_HEADER` to change it).
   Set `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL`, `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER`, and
-  `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE`. The app checks the signature against the JWKS
-  plus `iss`, `aud`, `exp`, and `nbf`, and takes the identity from the token's `email`
-  claim. When a JWKS URL is set, plain identity headers are never honored: a stray
-  `X-Auth-Request-Email` without a valid JWT resolves to anonymous and is logged.
-- **Trusted header (only when no JWKS URL is set).** The app trusts the forwarded
-  email header (default `X-Auth-Request-Email`) only when the request's TCP peer IP is
-  listed in `CANVAS_DROP_TRUSTED_PROXY_IPS` (CSV of IPv4 addresses or CIDRs). Each entry
-  is validated at boot: `/0`, malformed entries, and IPv6 are rejected, so
-  "trust everything" cannot be configured. A header from any other peer is ignored.
+  `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE`; boot refuses a JWKS URL without both issuer and
+  audience. The app checks the signature against the JWKS plus `iss`, `aud`, and expiry,
+  and takes the identity from the token's `email` claim (a token without one resolves
+  to anonymous). When a JWKS URL is set, plain identity headers are never honored: a
+  stray `X-Auth-Request-Email` without a valid JWT resolves to anonymous and is logged.
+- **Trusted header (only when no JWKS URL is set).** The app trusts the forwarded email
+  header (default `X-Auth-Request-Email`; display name from
+  `X-Auth-Request-Preferred-Username`) only when the request's TCP peer IP is listed in
+  `CANVAS_DROP_TRUSTED_PROXY_IPS` (CSV of IPv4 addresses or CIDRs). The peer IP is the
+  socket address, never a forwarded header. Each entry is validated at boot: `/0`,
+  malformed entries, and IPv6 are rejected, so "trust everything" cannot be configured.
+  A header from any other peer is ignored and logged.
 
-Proxy mode refuses to boot without a JWKS URL or a trusted-proxy IP list. In `proxy`
-and `oidc` modes you must also set `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (one or more
-domains; CSV, lowercased), which is enforced on every request, and a
-`CANVAS_DROP_SESSION_SECRET` of at least 32 characters. The
-[Security model](/docs/self-hosting/security-model) covers the invariants behind
-these rules.
+Proxy mode refuses to boot without a JWKS URL or a trusted-proxy IP list. In `proxy` and
+`oidc` modes you must also set `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` (one or more domains;
+CSV, lowercased), which is enforced on every request, and a `CANVAS_DROP_SESSION_SECRET`
+of at least 32 characters (also required whenever `NODE_ENV=production`, which the Docker
+image sets). A request that yields no identity gets `401 { "error": "unauthorized" }`
+in `proxy` mode; the IAP is expected to have bounced it first. The
+[Security model](/docs/self-hosting/security-model) covers the invariants behind these
+rules.
 
 Running real auth (`proxy` or `oidc`) in `path` URL mode also requires
-`CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, because path mode puts every canvas on
-one browser origin. Set it only when you accept that tradeoff. The demo compose stack
-does, since `subdomain` cannot boot on localhost. `subdomain` mode needs no opt-in.
+`CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, because path mode puts every canvas on one
+browser origin. Set it only when you accept that tradeoff. The demo compose stack does,
+since `subdomain` cannot boot on localhost. `subdomain` mode needs no opt-in.
 
 The third mode, `dev`, auto-signs-in a fixed local user with no verification and is
 rejected at boot when `NODE_ENV=production`.
@@ -113,29 +130,33 @@ Two surfaces authenticate themselves and never carry the IAP's browser session:
 
 - **The Deploy API**, `/v1/canvases/*`, authenticates with a per-canvas secret key
   (`Authorization: Bearer cd_...`).
-- **The MCP endpoint**, `/mcp`, authenticates with an OAuth 2.1 bearer token issued by
-  the app itself; the endpoints it uses are advertised under `/.well-known/`. The
-  one-time authorization step is a browser round-trip and does go through the IAP.
+- **The MCP endpoint**, `/mcp`, authenticates with an OAuth 2.1 bearer token issued by the
+  app itself. Clients discover the endpoints at `/.well-known/oauth-authorization-server`
+  and `/.well-known/oauth-protected-resource`, register at `/register`, and exchange
+  codes at `/token` (`/revoke` revokes). Only the `/authorize` step is a browser
+  round-trip, and it does go through the IAP.
 
-Configure the IAP to let those paths through unauthenticated and to forward
-`Authorization` unchanged; the app rejects bad or missing tokens with `401`. In
-subdomain mode a common layout is a dedicated API host: set
-`CANVAS_DROP_API_BASE_URL` (for example `https://api.canvases.example.com`) so the MCP
-tools advertise the right endpoints to agents. The demo Caddyfile strips
-`Authorization` on purpose, which is why the Deploy API is unreachable in the demo.
+Configure the IAP to let `/v1/canvases/*`, `/mcp`, `/.well-known/*`, `/register`,
+`/token`, and `/revoke` through unauthenticated and to forward `Authorization` unchanged;
+the app rejects bad or missing tokens with `401`. In subdomain mode a common layout is a
+dedicated API host: set `CANVAS_DROP_API_BASE_URL` (for example
+`https://api.canvases.example.com`) so the MCP tools advertise the right endpoints to
+agents; `api`, `v1`, `sdk`, `auth`, and `mcp` are reserved slugs, so no canvas can
+collide with it. The demo Caddyfile strips `Authorization` on purpose, which is why the
+Deploy API is unreachable in the demo.
 
-Two related facts about anonymous traffic. `GET /healthz` is unauthenticated at the
-app; the container health check calls it from inside, so expose it externally only if
-a monitor needs it. And a Public-link canvas is only public if the IAP lets anonymous
+Two related facts about anonymous traffic. `GET /healthz` is unauthenticated at the app;
+the container health check calls it from inside, so expose it externally only if a
+monitor needs it. And a Public link canvas is only public if the IAP lets anonymous
 requests reach the app: the app serves that rung (static files only) to a request with
-no identity and nothing else. Behind an IAP that demands sign-in on every host, public
+no identity, and nothing else. Behind an IAP that demands sign-in on every host, public
 links land on the IAP's login page.
 
 ## Without an identity-aware proxy: `oidc`
 
 If you do not run an IAP, use the built-in `oidc` mode and point it at your OpenID
 provider. Run it in `subdomain` mode so you keep per-canvas origin isolation without
-standing up a proxy; a plain TLS-terminating proxy in front is enough.
+standing up an IAP; a plain TLS-terminating proxy in front is enough.
 
 ```
 CANVAS_DROP_URL_MODE=subdomain
@@ -149,20 +170,24 @@ CANVAS_DROP_SESSION_SECRET=...   # >= 32 chars; openssl rand -hex 32
 ```
 
 Register `{base}/auth/callback` as the redirect URI at your provider. The app runs
-Authorization Code + PKCE, rejects unverified emails, and issues its own session
-cookie (`__canvasdrop_session`: HttpOnly, `Secure` in production, `SameSite=Lax`,
-scoped to `.{baseHost}` in subdomain mode, 14-day rolling expiry). A request with no
-session is redirected to `/auth/login`.
+Authorization Code + PKCE (`S256`) with `scope=openid email profile`, requires an `email`
+claim, rejects a token whose `email_verified` is `false`, and issues its own session
+cookie (`__canvasdrop_session`: `HttpOnly`, `Secure` in production, `SameSite=Lax`,
+scoped to `.{baseHost}` in subdomain mode and host-only in path mode, 14-day rolling
+expiry). A request with no session is redirected to `/auth/login?returnTo=...`;
+`/auth/logout` revokes the local session only. Every rejected sign-in is audited as
+`auth_denied` with its reason.
 
 `oidc` mode also honors `CANVAS_DROP_TRUSTED_PROXY_IPS` (and `CANVAS_DROP_CLIENT_IP_HEADER`)
-so login throttling and audit rows key on the real client IP behind your proxy; in
-this mode those settings never assert identity. See [Behind a CDN](/docs/self-hosting/cdn).
+so login throttling and audit rows key on the real client IP behind your proxy; in this
+mode those settings never assert identity. See [Behind a CDN](/docs/self-hosting/cdn).
 
 ## Run with Docker
 
 There is no published image; build it from the repo. The `Dockerfile` is multi-stage on
-`node:24-slim`: a `builder` stage compiles the workspace, and a `runtime` stage carries
-no compilers and runs as a dedicated non-root `canvasdrop` user (uid/gid 1001).
+`node:24-slim`: a `builder` stage compiles the workspace (it needs `python3`, `make`, and
+`g++` for the SQLite driver), and a `runtime` stage carries no compilers and runs as a
+dedicated non-root `canvasdrop` user (uid/gid 1001).
 
 ```bash
 docker build -t canvas-drop .
@@ -171,15 +196,19 @@ docker build -t canvas-drop .
 The image's operational contract:
 
 - **Entry:** `node --conditions=node-dist apps/server/dist/index.js`, with
-  `NODE_ENV=production` and `CANVAS_DROP_PORT=3000` (`EXPOSE 3000`) preset.
+  `NODE_ENV=production`, `CANVAS_DROP_PORT=3000` (`EXPOSE 3000`), and
+  `CANVAS_DROP_DASHBOARD_DIST=/app/apps/dashboard/dist` preset. Because `NODE_ENV` is
+  `production`, `dev` auth is refused; configure `proxy` or `oidc`.
 - **State:** `VOLUME /data`, pre-created and owned by the non-root user. In-image
   defaults: `CANVAS_DROP_SQLITE_PATH=/data/canvasdrop.db` and
   `CANVAS_DROP_STORAGE_PATH=/data/storage`. Mount a volume there on the SQLite +
   local-storage profile; on Postgres + S3 the container holds no state.
-- **Health:** `HEALTHCHECK` fetches `http://127.0.0.1:3000/healthz` every 15 s with a
-  60 s start period, which covers Postgres coming up and migrations running on a cold
-  start. Wire the same URL into your orchestrator's readiness probe.
-- **Config:** pass `CANVAS_DROP_*` as container environment. The image reads no `.env`.
+- **Health:** `HEALTHCHECK` fetches `http://127.0.0.1:3000/healthz` every 15 s (5 s
+  timeout, 5 retries) with a 60 s start period, which covers Postgres coming up and
+  migrations running on a cold start. Wire the same URL into your orchestrator's
+  readiness probe.
+- **Config:** pass `CANVAS_DROP_*` as container environment (`--env-file` or your
+  orchestrator's secrets). The image reads no `.env`.
 - **Screenshots (optional):** the default image has no browser. Build with
   `--build-arg SCREENSHOTS=1` to add Chromium (about 300 MB), then run with
   `CANVAS_DROP_SCREENSHOTS=on` and flip the admin toggle. See
@@ -187,37 +216,39 @@ The image's operational contract:
 
 ### The compose stack
 
-`docker-compose.yml` boots the whole production shape with no external setup. It is
-a demo of the wiring, not a production deployment as-is.
+`docker-compose.yml` boots the whole production shape with no external setup. It is a
+demo of the wiring, not a production deployment as-is.
 
 | Service | Image | Role |
 |---|---|---|
-| `caddy` | `caddy:2-alpine` | Edge proxy and the only service with a published port (`8080`). Routes `/dex/*` to Dex and everything else to oauth2-proxy, and strips client-supplied identity and `Authorization` headers on the way in. Plain HTTP for the demo; in production it would terminate TLS. |
+| `caddy` | `caddy:2-alpine` | Edge proxy and the only service with a published port (`8080`). Routes `/dex/*` to Dex and everything else to oauth2-proxy, and strips client-supplied `X-Forwarded-Access-Token`, `X-Auth-Request-Email`, `X-Auth-Request-User`, `X-Auth-Request-Preferred-Username`, and `Authorization` headers on the way in. Plain HTTP for the demo; in production it would terminate TLS. |
 | `oauth2-proxy` | `quay.io/oauth2-proxy/oauth2-proxy:v7.6.0` | The identity-aware proxy. Signs users in against Dex and forwards the Dex-signed access token to the app in `X-Forwarded-Access-Token`. |
 | `dex` | `dexidp/dex:v2.41.1` | Bundled demo IdP with one static user, `demo@example.com` / `canvasdrop`. |
-| `app` | built from the repo as `canvas-drop:dev` | canvas-drop in real `proxy` mode on the JWKS path: `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL=http://dex:5556/dex/keys`, issuer `http://localhost:8080/dex`, audience `canvas-drop-demo`. `path` URL mode with `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, Postgres, local storage on the `app-data` volume, a `backups` volume. No published port. |
-| `postgres` | `postgres:16-alpine` | The database, on the `pg-data` volume, with a `pg_isready` health check the app waits on. |
-| `minio` | `minio/minio:RELEASE.2024-11-07T00-52-20Z` | Optional S3-compatible storage behind `--profile minio`. Starting it does not switch the app to S3; edit the `app` service's `environment:` block as shown on [Install](/docs/self-hosting/install). |
+| `app` | built from the repo as `canvas-drop:dev` | canvas-drop in real `proxy` mode on the JWKS path: `CANVAS_DROP_AUTH_PROXY_JWT_HEADER=X-Forwarded-Access-Token`, `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL=http://dex:5556/dex/keys`, issuer `http://localhost:8080/dex`, audience `canvas-drop-demo`. `path` URL mode with `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, Postgres, local storage on the `app-data` volume, plus a `backups` volume. No published port; waits for the Postgres health check. |
+| `postgres` | `postgres:16-alpine` | The database, on the `pg-data` volume, with a `pg_isready` health check. |
+| `minio` | `minio/minio:RELEASE.2024-11-07T00-52-20Z` | Optional S3-compatible storage behind `--profile minio`. Starting it does not switch the app to S3; edit the `app` service's `environment:` block as shown on [Install](/docs/self-hosting/install), and create the bucket yourself. |
 
-The app verifies a Dex-signed JWT against Dex's JWKS, the same cryptographic trust
-path you run in production. The smoke test boots the stack and asserts the launch
-invariants: the app reports healthy, the app has no host port, an unauthenticated
-request is redirected, a forged `X-Forwarded-Access-Token` / `X-Auth-Request-Email`
-pair is still redirected, a real Dex login resolves `demo@example.com` with
-`authMode: proxy`, and the same user id survives `docker compose restart app postgres`.
+The app verifies a Dex-signed JWT against Dex's JWKS, the same cryptographic trust path
+you run in production. The smoke test boots the stack and asserts the launch invariants:
+the app reports healthy, the app has no host port, an unauthenticated request is
+redirected, a forged `X-Forwarded-Access-Token` / `X-Auth-Request-Email` pair is still
+redirected, a real Dex login resolves `demo@example.com` with `authMode: proxy`, and the
+same user id survives `docker compose restart app postgres`.
 
 ```bash
 ./scripts/compose-smoke.sh              # leaves the stack running
 KEEP_UP=0 ./scripts/compose-smoke.sh    # tears it down (docker compose down -v)
 ```
 
-Every Dex and oauth2-proxy secret under `docker/` is a labeled demo placeholder, and
-the stack runs plain HTTP in path mode. Work the checklist below before anyone but you
-can reach it.
+Every Dex and oauth2-proxy secret under `docker/` is a labeled demo placeholder, and the
+stack runs plain HTTP in path mode. Work the checklist below before anyone but you can
+reach it.
 
 The compose file also carries a commented-out `maintenance` service: a supercronic
-sidecar on the same image and volumes that runs the nightly `backup` (14-day retention)
-and weekly `purge` from `docker/maintenance.cron`. Uncomment it and start it with
+sidecar on the same image and volumes that runs `docker/maintenance.cron`, a nightly
+`backup` at 03:15 UTC (tarred, 14-day retention, the prune runs only after a good new
+backup exists) and `purge 30` at 03:45 UTC on Sundays. Uncomment it, keep its
+`CANVAS_DROP_DB` / storage variables in step with the `app` service, and start it with
 `docker compose --profile maintenance up -d`.
 
 ### Graduating to a real IdP
@@ -242,7 +273,7 @@ Moving off the bundled IdP is configuration, not code, but each step matters:
 ## Running the bare process
 
 To run without Docker, build the workspace and start the compiled server. Node 24 or
-newer and pnpm 11 are required.
+newer and pnpm 11 (`corepack enable` picks up the pinned version) are required.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -257,20 +288,25 @@ without `tsx`.
 Supply configuration through the process manager, not a `.env` file; only `pnpm dev`
 reads `.env`. A systemd unit with `EnvironmentFile=` and a TLS proxy in front (Caddy,
 nginx, a tunnel) is enough for a small instance on one box: the app binds a local port
-(default `3000`) and the proxy reverse-proxies to it under the contract above.
+(default `3000`) and the proxy reverse-proxies to it under the contract above. If the
+port is already bound, the process prints a hint and exits `1` rather than retrying.
 
 ## Health, boot, and upgrades
 
 `GET /healthz` pings the database and answers `{"status":"ok","db":"ok","version":...}`
-with `200`, or `status: degraded` with `503` when the database is unreachable. The
-process validates its configuration first and exits with a message naming every
-invalid variable, then runs pending migrations, then opens the port. A passing health
-check therefore means the database is reachable and the schema is current.
+with `200`, or `{"status":"degraded","db":"error",...}` with `503` when the database is
+unreachable. At boot the process validates its configuration first and exits `1` with a
+message naming every invalid variable, then connects to the database, runs pending
+migrations, opens storage, and only then opens the port. A passing health check
+therefore means the database is reachable and the schema is current.
 
-Migrations run at boot in every mode; there is no separate migrate command. To
-upgrade, take a backup, replace the image or the built tree, and restart. Migrations
-are written to be additive, so an existing database is not rewritten in place; the
-backup is your rollback.
+Migrations run at boot in every mode; there is no separate migrate command. To upgrade,
+take a backup, replace the image or the built tree, and restart. Migrations are written
+to be additive, so an existing database is not rewritten in place; the backup is your
+rollback.
+
+Rate-limit counters (fixed 60 s windows, `CANVAS_DROP_RATELIMIT_*`) and realtime channels
+live in process memory, which is why the profile above is one process per instance.
 
 ## Backups and maintenance
 
@@ -285,29 +321,34 @@ $BIN purge 30                                      # reclaim canvases deleted 30
 ```
 
 A backup is a self-describing directory (`meta.json`, `db/<table>.ndjson`, `blobs/<key>`)
-written through the database and storage interfaces, so it is driver-agnostic: a
-backup taken on SQLite + local disk restores into Postgres + S3 and vice versa. That
-makes backup then restore the supported way to migrate between drivers. Restore
-refuses a non-empty database without `--force` and verifies every row count and blob
-hash before writing anything.
+written through the database and storage interfaces, so it is driver-agnostic: a backup
+taken on SQLite + local disk restores into Postgres + S3 and vice versa. That makes
+backup then restore the supported way to migrate between drivers. `backup` runs pending
+migrations before it reads. `restore` refuses a non-empty database without `--force` and
+verifies row counts, blob count and bytes, and every blob's SHA-256 before writing
+anything.
 
-A backup is as sensitive as the database: it contains credential hashes, OAuth client
-secrets, and personal data. Keep it on a separate volume, restrict it to the app user,
-and encrypt it before it leaves the host. Run a restore drill into a throwaway instance
-periodically; a green restore is the only proof a backup is real.
+A backup is as sensitive as the database: it is a cleartext export of credential
+material (password and API-key hashes, OAuth client secrets, session and MCP-token rows)
+and personal data (allowed emails, audit-log actor IPs). Keep it on a separate volume,
+restrict it to the app user, and encrypt it before it leaves the host. Run a restore
+drill into a throwaway instance periodically; a green restore is the only proof a backup
+is real.
 
-`purge` also prunes `usage_events` and `ai_usage` rows older than 90 days. A sensible
-schedule is a nightly backup with 14-day local retention and a weekly `purge 30`,
-either from a host crontab or the compose `maintenance` sidecar. The full runbook,
-including cron lines and the restore drill, is `docs/ops.md` in the repo.
+`purge [days]` reclaims the storage and version rows of canvases soft-deleted longer ago
+than `days`, then prunes `usage_events` and `ai_usage` rows older than 90 days. A
+sensible schedule is a nightly backup with 14-day local retention and a weekly
+`purge 30`, either from a host crontab or the compose `maintenance` sidecar. The full
+runbook, including the crontab lines and the restore drill, is `docs/ops.md` in the repo.
 
 ## Logs
 
-Structured JSON to stdout via pino: no app-side files, rotation, or shipping. Tune
-with `LOG_LEVEL` (default `info`) and `LOG_FORMAT` (`json` when `NODE_ENV=production`,
-otherwise `pretty`). Correlation IDs are taken from `X-Correlation-ID` or `X-Request-Id`.
-`/healthz` is excluded from request logging. Error tracking is off unless you set
-`CANVAS_DROP_SENTRY_DSN`. There is no telemetry or phone-home.
+Structured JSON to stdout via pino: no app-side files, rotation, or shipping. Tune with
+`LOG_LEVEL` (default `info`) and `LOG_FORMAT` (`json` when `NODE_ENV=production`,
+otherwise `pretty`). Each request gets a correlation ID, taken from an inbound
+`X-Correlation-ID` or `X-Request-Id` header or generated, and echoed back as
+`X-Correlation-ID`. `/healthz` is excluded from request logging. Error tracking is off
+unless you set `CANVAS_DROP_SENTRY_DSN`. There is no telemetry or phone-home.
 
 ## Changing drivers later
 

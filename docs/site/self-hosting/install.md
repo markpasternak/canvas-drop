@@ -1,59 +1,72 @@
 # Install
 
-Get a canvas-drop instance running. There are two starting points:
-
-- **Docker Compose**: one command boots the production shape (an identity-aware
-  proxy in front, canvas-drop in real `proxy` auth mode, Postgres) with a bundled
-  demo identity provider. Start here to evaluate or self-host.
-- **Node dev profile**: `pnpm dev` runs the source with SQLite, local storage, and
-  automatic sign-in. Start here to develop canvas-drop itself.
-
-Both run the same code. Everything you swap later (database, storage, URL mode,
-auth) is a config change, never a code change.
-
-## Docker Compose
-
-Requires Docker and Docker Compose v2 (`docker compose`, not the legacy
-`docker-compose`).
+You are standing up canvas-drop for the first time. By the end of this page you
+have an instance you can sign in to, and you know which database, storage, URL
+mode, and auth driver it is running. Two starting points, same repository:
 
 ```bash
 git clone https://github.com/markpasternak/canvas-drop.git
 cd canvas-drop
+
+# Evaluate or self-host: the production shape behind an identity-aware proxy
 docker compose up --build
 # open http://localhost:8080  and sign in as  demo@example.com / canvasdrop
+
+# Develop canvas-drop itself: SQLite, local storage, automatic sign-in
+pnpm install && cp .env.example .env && pnpm dev
+# open http://localhost:5173
 ```
 
-The first `--build` compiles the workspace inside the image. The stack is ready
-when `docker compose ps app` reports `healthy`: the app's health check polls
-`GET /healthz`, which returns 503 until Postgres is reachable and migrations have
-run, with a 60-second start period.
+| Path | Needs | What you get |
+|---|---|---|
+| [Docker Compose](#docker-compose) | Docker with Compose v2 (`docker compose`, not the legacy `docker-compose`) | An identity-aware proxy in front, canvas-drop in real `proxy` auth mode, Postgres, and a bundled demo identity provider on `http://localhost:8080`. Evaluate here; graduating the same files to a real IdP is configuration. |
+| [From source](#run-from-source) | Node 24 or newer, pnpm 11 | `pnpm dev` on `http://localhost:5173` with SQLite, local storage, and `dev` auth that signs every request in. Develop canvas-drop itself, or try Bearer deploys and MCP with no proxy in the way. |
+
+Both run the same code. Database, storage, URL mode, and auth are drivers behind
+one switch variable each; swapping one later is a config change, never a code
+change. The switches are listed in [What you choose at install
+time](#what-you-choose-at-install-time).
+
+## Docker Compose
+
+```bash
+docker compose up --build
+docker compose ps app          # STATUS ends in "(healthy)" when the stack is ready
+```
+
+The first `--build` compiles the workspace inside the image. The server does not
+listen until Postgres is reachable and migrations have run, and `GET /healthz`
+returns 503 while the database is unreachable, so the container's health check
+allows a 60-second start period before it counts failures. Sign in at
+`http://localhost:8080` as `demo@example.com` / `canvasdrop`.
 
 What comes up:
 
 | Service | Image | Role |
 |---|---|---|
-| `caddy` | `caddy:2-alpine` | Edge proxy on host port `8080`, the only published port. Routes `/dex/*` to Dex and everything else to oauth2-proxy, and strips client-supplied identity headers before they reach the auth layer. |
-| `oauth2-proxy` | `quay.io/oauth2-proxy/oauth2-proxy:v7.6.0` | Identity-aware proxy. Signs users in against Dex and forwards the signed JWT to the app. |
+| `caddy` | `caddy:2-alpine` | Edge proxy on host port `8080`, the only published port. Routes `/dex/*` to Dex and everything else to oauth2-proxy, and strips client-supplied identity and `Authorization` headers before they reach the auth layer. Plain HTTP for the demo; in production it would terminate TLS. |
+| `oauth2-proxy` | `quay.io/oauth2-proxy/oauth2-proxy:v7.6.0` | Identity-aware proxy. Signs users in against Dex and forwards the Dex-signed access token to the app in `X-Forwarded-Access-Token`. |
 | `dex` | `dexidp/dex:v2.41.1` | Bundled demo identity provider with one static user, `demo@example.com` / `canvasdrop`. |
-| `app` | built from the repo `Dockerfile` as `canvas-drop:dev` | canvas-drop in `proxy` auth mode, verifying the JWT against Dex's JWKS. Path URL mode, Postgres, local storage on the `app-data` volume. No published port. |
-| `postgres` | `postgres:16-alpine` | Database, on the `pg-data` volume. |
+| `app` | built from the repo `Dockerfile` as `canvas-drop:dev` | canvas-drop in `proxy` auth mode, verifying the JWT against Dex's JWKS (`CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL=http://dex:5556/dex/keys`). Path URL mode, Postgres, local storage on the `app-data` volume, a separate `backups` volume. No published port. |
+| `postgres` | `postgres:16-alpine` | Database, on the `pg-data` volume, with a `pg_isready` health check the app waits on. |
 | `minio` | `minio/minio:RELEASE.2024-11-07T00-52-20Z` | Optional S3-compatible storage. Starts only with `--profile minio` (below). |
 
-A few things to know about the demo:
+What to know about the demo:
 
 - The demo user is also the instance admin (`CANVAS_DROP_ADMIN_EMAILS:
   demo@example.com`), so the Admin area is available on first sign-in.
-- It runs path URL mode (`{base}/c/{slug}/`) because subdomain mode cannot boot
-  on a localhost `CANVAS_DROP_BASE_URL`; `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE`
+- It runs path URL mode (`{base}/c/{slug}/`) because subdomain mode refuses to
+  boot on a localhost `CANVAS_DROP_BASE_URL`; `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE`
   is set to `true` for that reason. Path mode shares one browser origin across
   all canvases, so isolation is weaker than subdomain mode; production should use
   subdomain mode (see the [Security model](/docs/self-hosting/security-model)).
-- The Deploy API (`/v1/canvases/*`) is not reachable through this edge:
-  oauth2-proxy gates every route and Caddy strips `Authorization`. Deploy from the
-  dashboard, or use the dev profile to try Bearer deploys.
-- The app's config lives in an inline `environment:` block on the `app` service
-  in `docker-compose.yml` (no `env_file`), so you change it by editing that file
-  and running `docker compose up -d` again.
+- The Deploy API (`/v1/canvases/*`) and MCP (`/mcp`) are not reachable through
+  this edge: oauth2-proxy gates every route and Caddy strips `Authorization`.
+  Deploy from the dashboard, or use the from-source profile to try Bearer
+  deploys.
+- The app's config is an inline `environment:` block on the `app` service in
+  `docker-compose.yml` (no `env_file`). Change it by editing that file and running
+  `docker compose up -d` again.
 
 Pause the stack with `docker compose stop`. Tear it down and delete every volume
 (`app-data`, `backups`, `pg-data`, `minio-data`) with `docker compose down -v`.
@@ -66,10 +79,12 @@ Pause the stack with `docker compose stop`. Tear it down and delete every volume
 
 ### Verify the launch invariants
 
-`scripts/compose-smoke.sh` boots the stack (`docker compose up -d --build`) and
-asserts the load-bearing invariants: the app reports healthy, publishes no host
-port, redirects unauthenticated requests, ignores forged identity headers, resolves
-a real Dex sign-in as the demo user, and returns the same user after
+`scripts/compose-smoke.sh` boots the stack (`docker compose up -d --build`), waits
+up to two minutes for `app` to report healthy, and asserts the load-bearing
+invariants: the app publishes no host port, an unauthenticated request is
+redirected, a forged `X-Forwarded-Access-Token` / `X-Auth-Request-Email` pair is
+still redirected, a real Dex sign-in resolves `/api/me` as `demo@example.com`
+with `authMode: proxy`, and the same user id survives
 `docker compose restart app postgres`. It needs `curl`.
 
 ```bash
@@ -77,13 +92,13 @@ a real Dex sign-in as the demo user, and returns the same user after
 KEEP_UP=0 ./scripts/compose-smoke.sh   # same, then `docker compose down -v`
 ```
 
-### Optional: S3-compatible storage via MinIO
+### Switch the demo to S3-compatible storage (MinIO)
 
 `--profile minio` adds a MinIO container (`minioadmin` / `minioadmin`, data on the
 `minio-data` volume). It does not switch the app over by itself: the `app` service
-keeps `CANVAS_DROP_STORAGE: local` until you change it. Do this on a fresh instance;
-blobs already written to local storage are not moved when the driver changes (to
-move an existing instance, use `backup` and `restore`, below).
+keeps `CANVAS_DROP_STORAGE: local` until you change it. Do this on a fresh
+instance; blobs already written to local storage are not moved when the driver
+changes (to move an existing instance, use `backup` and `restore`, below).
 
 1. Start MinIO alongside the stack. Pass `--profile minio` on every later
    `docker compose` command too, or Compose leaves the MinIO container out.
@@ -95,7 +110,8 @@ move an existing instance, use `backup` and `restore`, below).
 2. Create the bucket. Neither MinIO nor the storage driver creates it on first
    write. The compose file publishes no MinIO port, so either run your S3 client
    inside the compose network, or add `ports: ["9000:9000"]` to the `minio`
-   service and create it from the host the way CI does:
+   service and create it from the host (the AWS CLI works, as CI does for its
+   own test bucket):
 
    ```bash
    AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_DEFAULT_REGION=us-east-1 \
@@ -119,7 +135,8 @@ move an existing instance, use `backup` and `restore`, below).
 
    `CANVAS_DROP_S3_ENDPOINT` is MinIO's in-network address.
    `CANVAS_DROP_S3_FORCE_PATH_STYLE` already defaults to `true`; it is shown for
-   clarity.
+   clarity. Boot refuses `CANVAS_DROP_STORAGE=s3` without bucket, region, access
+   key, and secret key, naming each missing variable.
 
 4. Apply. Compose recreates `app` with the new environment:
 
@@ -127,7 +144,7 @@ move an existing instance, use `backup` and `restore`, below).
    docker compose --profile minio up -d
    ```
 
-### Optional: canvas screenshots
+### Add Chromium for canvas screenshots
 
 The preview/screenshot pipeline ships off, and the default image contains no
 browser. Build with the `SCREENSHOTS` build arg (about 300 MB more, via
@@ -155,10 +172,11 @@ In the compose stack, give the `app` service the build arg and the env var:
 Details, tuning variables, and the memory cost are on the
 [Screenshots](/docs/self-hosting/screenshots) page.
 
-### The image on its own
+### Run the image with your own proxy, database, and IdP
 
-If you bring your own proxy, database, and identity provider, build and run the
-application image directly.
+There is no published image; build it from the repo. If you bring your own
+reverse proxy, database, and identity provider, run the application image
+directly.
 
 ```bash
 docker build -t canvas-drop .
@@ -168,22 +186,31 @@ docker run -d --name canvas-drop \
   -p 127.0.0.1:3000:3000 \
   -v canvas-drop-data:/data \
   canvas-drop
+curl -fsS http://127.0.0.1:3000/healthz
+# 200 {"status":"ok","db":"ok","version":"..."}   (503 "degraded" until the DB answers)
 ```
 
 `.env.production.example` is the annotated subdomain + `proxy` (JWKS) + Postgres +
 S3 profile; `docker run --env-file` reads its `KEY=VALUE` lines and ignores the
-comments. The image fixes `NODE_ENV=production` (so `dev` auth is refused;
-configure `proxy` or `oidc`), `CANVAS_DROP_PORT=3000`, a non-root `canvasdrop`
-user (uid/gid 1001), `/data` as the writable volume with
-`CANVAS_DROP_SQLITE_PATH=/data/canvasdrop.db` and
-`CANVAS_DROP_STORAGE_PATH=/data/storage`,
-`CANVAS_DROP_DASHBOARD_DIST=/app/apps/dashboard/dist`, and a `HEALTHCHECK` on
-`/healthz`. Mount `/data` whenever you use SQLite or local storage. Boot validates
-the whole config and exits listing every problem, for example a
-`CANVAS_DROP_SESSION_SECRET` shorter than 32 characters. Put a TLS-terminating
-proxy in front; the [Deploy](/docs/self-hosting/deploy) page covers the shape.
+comments. What the image fixes:
 
-### Upgrade
+| Preset | Value |
+|---|---|
+| `NODE_ENV` | `production` (`dev` auth is refused; configure `proxy` or `oidc`) |
+| `CANVAS_DROP_PORT` | `3000` (`EXPOSE 3000`) |
+| Runtime user | `canvasdrop`, uid/gid 1001, non-root |
+| `VOLUME /data` | writable, owned by the app user; `CANVAS_DROP_SQLITE_PATH=/data/canvasdrop.db`, `CANVAS_DROP_STORAGE_PATH=/data/storage` |
+| `CANVAS_DROP_DASHBOARD_DIST` | `/app/apps/dashboard/dist` |
+| `HEALTHCHECK` | `http://127.0.0.1:3000/healthz` every 15 s, 5 s timeout, 60 s start period, 5 retries |
+
+Mount `/data` whenever you use SQLite or local storage; on Postgres + S3 the
+container holds no state. The image reads no `.env`; pass `CANVAS_DROP_*` as
+container environment. Boot validates the whole config and exits 1 listing every
+problem, for example a `CANVAS_DROP_SESSION_SECRET` shorter than 32 characters.
+Bind the port to loopback as above and put a TLS-terminating proxy in front; the
+[Deploy](/docs/self-hosting/deploy) page covers what that proxy must do.
+
+### Upgrade the compose stack
 
 Pull, rebuild, restart. Pending migrations run at boot, so the new version applies
 its own schema changes. Take a backup first: the app binary doubles as the backup
@@ -197,10 +224,14 @@ docker compose up -d --build
 
 `restore <backup-dir>` is the inverse; it refuses a non-empty database without
 `--force`. A backup is a cleartext export that includes credential hashes, so keep
-it off the data volume and encrypt it before it leaves the host. The full runbook,
-including scheduled backups and the `purge` job, is `docs/ops.md` in the repo.
+it off the data volume and encrypt it before it leaves the host. For scheduled
+backups, `docker-compose.yml` carries a commented-out `maintenance` sidecar
+(`docker compose --profile maintenance up -d`) that runs the nightly `backup` and
+weekly `purge` from `docker/maintenance.cron`. The full runbook is `docs/ops.md`
+in the repo; the [Deploy](/docs/self-hosting/deploy) page summarises it under
+"Backups and maintenance".
 
-## Node dev profile
+## Run from source
 
 For developing canvas-drop, or for a zero-config local instance. Requires Node 24
 or newer and pnpm 11 (`package.json` pins `pnpm@11.0.9`; `corepack enable` selects
@@ -212,6 +243,8 @@ cd canvas-drop
 pnpm install
 cp .env.example .env
 pnpm dev
+curl -fsS http://localhost:3000/healthz
+# 200 {"status":"ok","db":"ok","version":"..."}
 ```
 
 `pnpm install` builds `better-sqlite3` natively; the build is pre-approved in
@@ -227,8 +260,7 @@ This is the zero-config profile: path URL mode, SQLite at `./data/canvasdrop.db`
 local storage at `./data/storage`, and `dev` auth, which signs every request in as
 `dev@example.com` and makes that user the admin. The `data/` directory is created
 on first boot. `dev` auth is refused when `NODE_ENV=production`; it is for local
-use only. `curl http://localhost:3000/healthz` returns 200 once the database is
-reachable and migrations have run.
+use only.
 
 What `pnpm dev` does:
 
@@ -238,21 +270,32 @@ What `pnpm dev` does:
   else reads `.env`; production takes config from the process environment.
 - Seeds 100 sample canvases the first time the database has none. Skip with
   `CANVAS_DROP_DEV_SEED=0`; wipe the local database and storage with
-  `pnpm reset:data`.
+  `pnpm reset:data` (stop the dev server first).
 - Runs the server (`tsx watch`), the dashboard (`vite`), and the browser SDK build
   (esbuild watch) in parallel. Ctrl-C or `pnpm dev:stop` stops all three.
 
 Ports: `CANVAS_DROP_PORT` moves the server and the Vite proxy target together;
-`CANVAS_DROP_DASHBOARD_PORT` moves the Vite server. Vite fails instead of hopping
-to a free port when `5173` is taken, which usually means a stale dev server is
-still running.
+`CANVAS_DROP_DASHBOARD_PORT` moves the Vite server. Neither hops to a free port:
+Vite fails when `5173` is taken, and the server exits 1 with a message naming the
+bound port. Either usually means a stale dev server is still running
+(`pnpm dev:stop`).
 
 The server serves the built dashboard from `apps/dashboard/dist` whenever it
 exists, so after `pnpm build` the dashboard also answers on
 `http://localhost:3000` (without HMR); before a build, that route returns 503
 `dashboard_not_built`. That is the production layout: one process serves the
-dashboard, the API, and the canvases. To run it that way without Docker, see
-"Running the bare process" on the [Deploy](/docs/self-hosting/deploy) page.
+dashboard, the API, and the canvases. To run it that way without Docker:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+node --conditions=node-dist apps/server/dist/index.js
+```
+
+Supply configuration through the process manager (for example systemd
+`EnvironmentFile=`), not a `.env` file; only `pnpm dev` reads `.env`. "Running the
+bare process" on the [Deploy](/docs/self-hosting/deploy) page covers the proxy in
+front.
 
 Next, publish your first canvas: [Quickstart](/docs/quickstart).
 

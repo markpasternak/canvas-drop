@@ -36,12 +36,20 @@ The security-critical surface is the five hard invariants (see the
    session, canvas API key, or canvas content; keys and tokens are hashed at
    rest and shown once.
 3. **No unauthorized access** — a canvas is reachable only by principals its
-   access rung allows (owner or editor; any allowed org member at `whole_org`;
-   a member of a granted team at `team`; a listed principal — an existing user,
-   or a pending email once that email has verified through the configured auth
-   — at `specific_people`; anyone at `public_link`, static-only);
-   revoke/expiry/password are honored, including **live** on open realtime
-   sockets. An admin gets **no** special access to canvases it doesn't own.
+   access rung allows (owner or editor, where an editor is an org member holding
+   the editor role on the canvas's people list, directly or through an
+   editor-role team, and is owner-equivalent except for delete, transfer, and
+   the guest-AI opt-in, which answer `OWNER_ONLY`; any allowed org member at
+   `whole_org`; a member of a granted team at `team`; a listed principal — an
+   existing user, or a pending email once that email has verified through the
+   configured auth — at `specific_people`; anyone at `public_link`, static-only
+   and only while the instance public-link switch is on and the owner account
+   is not revoked). Pending grants confer nothing; revoke/expiry/password are
+   honored, including **live** on open realtime sockets. An admin gets **no**
+   special access to canvases it doesn't own: cross-owner admin power is limited
+   to the dedicated admin routes (all-canvases list, disable/enable/restore,
+   reassign owner). The one recorded exception is the authoring API, whose
+   update-in-place and revoke routes admit an admin as an owner.
 4. **No cross-canvas reach in subdomain mode** — one canvas (or its code, SDK,
    or socket) cannot read, write, or act on another canvas's data, files, AI
    quota, or realtime channels. Path mode has reduced browser isolation and is
@@ -50,9 +58,10 @@ The security-critical surface is the five hard invariants (see the
    regen, key regen, rung lowering, allowlist/pending-grant removal, and
    unpublish take effect on the next request and drop live realtime sockets.
 
-The deploy pipeline's upload safety (rejecting zip-slip and serving server-side
-executables as inert text) is a §12.1 input-hardening control that is also in
-scope, alongside the five hard invariants above.
+The deploy pipeline's upload safety (rejecting zip-slip and zip-bomb archives,
+enforcing the per-file, per-canvas, and file-count limits, and serving
+server-side executables as inert text) is a §12.1 input-hardening control that
+is also in scope, alongside the five hard invariants above.
 
 Findings that bypass any of these are high priority. Reports against
 non-invariant surfaces are welcome too and triaged proportionately —

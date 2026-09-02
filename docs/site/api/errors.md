@@ -1,13 +1,15 @@
 # Error codes
 
-Branch on the error's `code`, never on its message text. Every failure from the
-runtime API is JSON with a stable `code` and an HTTP status, and the browser SDK
-throws typed errors that extend `CanvasdropError`, each with a readonly `.code`
-and `.status` (plus `.hint` when the server sent a remediation hint).
+If you call the Runtime API or the browser SDK from a canvas, or you are an agent
+handling its failures, this page is the contract. Branch on the error's `code`,
+never on its message text. Every refusal from `/v1/c/{slug}/*` is JSON with a
+stable `code` and an HTTP status, and the browser SDK throws typed errors that
+extend `CanvasdropError`, each with a readonly `.code` and `.status` (plus `.hint`
+when the server sent a remediation hint).
 
 The browser global is `window.canvasdrop`, loaded from `{base}/sdk/v1.js`; there
-is no `cd` alias. The error classes and the `ERROR_CODES` table are named exports
-of `@canvas-drop/sdk` for code that imports the package.
+is no `cd` alias. The error classes, `ERROR_CODES`, and `errorFromResponse` are
+named exports of `@canvas-drop/sdk` for code that imports the package.
 
 ```js
 try {
@@ -32,8 +34,8 @@ no `try/catch`.
 
 ## The codes
 
-Codes, statuses, and meanings are the SDK's exported `ERROR_CODES`, verbatim
-(each entry is `{ status, summary }`; `ErrorCode` is its key type).
+Codes, statuses, and meanings below are the SDK's exported `ERROR_CODES`, in the
+same order (each entry is `{ status, summary }`; `ErrorCode` is its key type).
 
 | Code | Status | Meaning |
 |------|--------|---------|
@@ -43,7 +45,7 @@ Codes, statuses, and meanings are the SDK's exported `ERROR_CODES`, verbatim
 | `CROSS_CANVAS_FORBIDDEN` | 403 | A request targeted another canvas's resources. |
 | `MODEL_NOT_ALLOWED` | 403 | The requested AI model is not in the allow-list. |
 | `DISABLED` | 403 | The canvas has been disabled by an administrator. |
-| `STATIC_ONLY` | 403 | The canvas is a public link (`public_link`) — every backend primitive is refused for non-owners. |
+| `STATIC_ONLY` | 403 | The canvas is a public link (`public_link`): every backend primitive is refused for non-owners. |
 | `GUEST_AI_DISABLED` | 403 | AI is not enabled for a retained legacy guest-session viewer. |
 | `GUEST_AI_CAP` | 429 | The canvas reached its retained legacy guest-session AI spend cap. |
 | `NOT_FOUND` | 404 | The key, file, or canvas does not exist. |
@@ -61,39 +63,55 @@ Codes, statuses, and meanings are the SDK's exported `ERROR_CODES`, verbatim
 | `SHARE_REVOKED` | 409 | `canvasdrop.canvases.update` was called on an unpublished share without a bundle; include a bundle to publish it again. |
 | `REQUEST_FAILED` | 0 | A request failed without a more specific code. |
 
-Three rows need a note:
+Five rows need a note:
 
-- `STATIC_ONLY` applies to every caller except the canvas's owner and editors.
-  A signed-in member gets it on a Public link canvas too, not only an anonymous
-  visitor.
+- `NOT_AUTHENTICATED` is what the SDK throws for **any** 401. The auth gateway's
+  own 401 (in `dev` and `proxy` modes) has the shape `{ "error": "unauthorized" }`
+  with no `code`; the SDK normalizes it. In `oidc` mode the gateway does not
+  return 401 at all: a signed-out request is redirected (302) to the login page.
+  The authoring routes return `401 { "code": "NOT_AUTHENTICATED" }` to a retained
+  legacy guest session, since only org members can author.
+- `STATIC_ONLY` applies to every caller except the canvas's owner and its
+  editors. A signed-in member gets it on a Public link canvas too, not only an
+  anonymous visitor.
 - `QUOTA_EXCEEDED` is 429 from AI (the body adds `scope`: `user_daily` or
-  `canvas_monthly`) but **409** when a file upload would exceed the per-canvas
-  byte quota. `err.code` is the same in both cases; `err.status` tells them apart.
+  `canvas_monthly`) and from authoring (`scope`: `user_daily` or `user_total`),
+  but **409** when a file upload would exceed the per-canvas byte quota.
+  `err.code` is the same in all three cases; `err.status` and `scope` tell them
+  apart.
+- `INVALID_BODY` is 400 everywhere except one case: an authoring bundle over
+  50 MiB returns `413 { "code": "INVALID_BODY", "message": "bundle too large" }`,
+  and the SDK's any-413 rule puts it on `QuotaExceededError` (see below).
 - `REQUEST_FAILED` is the SDK's fallback when a response carries no `code`. The
   `0` is nominal; `err.status` holds the real HTTP status.
 
 > **`CAPABILITY_DISABLED` is self-repairing.** Its 403 body carries extra fields
 > beyond `code`, so a caller (or an agent) can fix it without guessing:
-> `capability` (which one), `backendEnabled` (the master switch, off by default on
-> a new canvas), `reason` (`backend_off`, `feature_off`, or `operator_disabled`),
-> and a human-readable `hint`. The SDK puts the hint on the thrown
+> `capability` (which one), `backendEnabled` (the master switch, `false` on a new
+> canvas), `reason` (`backend_off`, `feature_off`, or `operator_disabled`), and a
+> human-readable `hint`. The SDK puts the hint on the thrown
 > `CapabilityDisabledError` as both its message and `.hint`. For `backend_off` and
 > `feature_off` the fix is the owner's or an editor's: the canvas's **Backend** tab,
 > the `set_capabilities` MCP tool, or
-> `PATCH /api/canvases/:id/capabilities {"kv": true}`. `operator_disabled` (AI,
-> realtime, and authoring only) is a deployment-level setting: no AI provider key,
-> `CANVAS_DROP_REALTIME=off`, or authoring switched off by the operator. See
+> `PATCH /api/canvases/{id}/capabilities {"backendEnabled": true, "kv": true}`.
+> `operator_disabled` (AI, realtime, and authoring only) is a deployment-level
+> setting: no AI provider key, `CANVAS_DROP_REALTIME=off`, or
+> `CANVAS_DROP_AUTHORING=off` (the default). See
 > [Capabilities](/docs/authoring/capabilities).
 
-> **`DISABLED` has two surfaces.** On the runtime API (viewers, the browser SDK) a
+> **`DISABLED` has two surfaces.** On the Runtime API (viewers, the browser SDK) a
 > canvas an admin has taken down returns `DISABLED` with status **403**, the row
-> above. On the owner management API and over MCP, the same takedown makes the
-> canvas read-only to its owner and editors: reads succeed, but every mutation
-> (settings, sharing, tags, capabilities, slug, preview, deploy, publish, rollback,
-> archive, unpublish, draft edits) is refused with HTTP **409**
+> above. On the owner management API (`/api/canvases/{id}/...`), the authoring
+> routes' `PUT`/`DELETE`, and over MCP, the same takedown makes the canvas
+> read-only to its owner and editors: reads succeed, but every mutation (settings,
+> sharing, tags, capabilities, slug, preview, deploy, publish, rollback, archive,
+> unpublish, draft edits) is refused with HTTP **409**
 > `{ "code": "DISABLED", "message": "This canvas has been disabled by an administrator." }`,
 > with ` Reason: <text>` appended when the admin set one. The MCP tool result is
-> `DISABLED: <that message>`.
+> `DISABLED: <that message>`. The same management surfaces refuse an editor's
+> owner-only act (delete, transfer, the guest-AI opt-in) with **403**
+> `{ "code": "OWNER_ONLY", "message": "Only the canvas owner can do this." }`; do
+> not confuse it with the Runtime API's `OWNER_ONLY`, which is a 404 (next section).
 
 ## Typed SDK errors
 
@@ -110,7 +128,7 @@ response.
 | `PublishFailedError` | `PUBLISH_FAILED` | 502 | `.id`: the created canvas's id, when the failure happened after creation |
 | `CanvasdropError` (base) | any | any | `.hint` when the server sent one |
 
-The SDK picks the class from the HTTP response in this order:
+The SDK picks the class from the HTTP response in this order (`errorFromResponse`):
 
 1. Status 401 → `NotAuthenticatedError` (any body `code` is ignored).
 2. Status 403 with `code: "CAPABILITY_DISABLED"` → `CapabilityDisabledError`.
@@ -123,30 +141,31 @@ The SDK picks the class from the HTTP response in this order:
 
 So `QuotaExceededError` is the one limit-shaped class and it is reused: expect
 `.code` values of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT` (409),
-`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE` (413), and, from realtime,
-`CONNECTION_LIMIT` (429). `NOT_NUMERIC` is a 409 but not a limit, so it stays on
-the base class. Never assume a `QuotaExceededError` is literally `QUOTA_EXCEEDED`;
-read `err.code`.
+`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`, `BODY_TOO_LARGE`,
+`INVALID_BODY` (413), and, from realtime, `CONNECTION_LIMIT` (429). `NOT_NUMERIC`
+is a 409 but not a limit, so it stays on the base class. Never assume a
+`QuotaExceededError` is literally `QUOTA_EXCEEDED`; read `err.code`.
 
 Classes such as `PasswordRequiredError`, `ModelNotAllowedError`, or
 `CrossCanvasForbiddenError` do not exist. `PASSWORD_REQUIRED`, `STATIC_ONLY`,
 `DISABLED`, `MODEL_NOT_ALLOWED`, `CROSS_CANVAS_FORBIDDEN`, `GUEST_AI_DISABLED`,
-`INVALID_BODY`, `NOT_NUMERIC`, `SHARE_REVOKED`, and `AI_UPSTREAM_ERROR` all arrive
-on the base `CanvasdropError`. Branching on `err.code` is the only reliable check.
+`INVALID_BODY` (at 400), `NOT_NUMERIC`, `SHARE_REVOKED`, and `AI_UPSTREAM_ERROR`
+all arrive on the base `CanvasdropError`. Branching on `err.code` is the only
+reliable check.
 
 ## Server codes outside the enum
 
-The runtime API can return a few codes that are not in `ERROR_CODES`. They are
+The Runtime API can return a few codes that are not in `ERROR_CODES`. They are
 stable; the table shows how each reaches SDK callers.
 
 | Code | Status | When | In the SDK |
 |------|--------|------|------------|
-| `RATE_LIMITED` | 429 | The per-user, per-canvas request bucket is spent (default 120/min; AI routes 10/min). Headers: `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`. | `CanvasdropError`, `code: "RATE_LIMITED"` |
-| `ARCHIVED`, `NOT_INVITED`, `OWNER_ONLY`, `SHARE_EXPIRED` | 404 | The canvas resolved but access was denied (archived, guest scoped elsewhere, not on the sharing rung, share expired). | `NotFoundError`, `code: "NOT_FOUND"`; the body's code is not preserved |
+| `RATE_LIMITED` | 429 | A request bucket is spent. Primitives: per user per canvas, default 120/min. `.../ai/*`: per user across all canvases, default 10/min. Headers: `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`. | `CanvasdropError`, `code: "RATE_LIMITED"` |
+| `ARCHIVED`, `NOT_INVITED`, `OWNER_ONLY`, `SHARE_EXPIRED` | 404 | The canvas resolved but access was denied (archived; guest scoped to another canvas; not on the sharing rung, including a non-owner admin; share expired). | `NotFoundError`, `code: "NOT_FOUND"`; the body's code is not preserved |
 | `CROSS_SITE_FORBIDDEN` | 403 | Path mode only: `Sec-Fetch-Site` is present and not `same-origin` or `none`. | `CanvasdropError` |
 | `BODY_TOO_LARGE` | 413 | `POST .../ai/chat` body over 256 KiB. | `QuotaExceededError`, `code: "BODY_TOO_LARGE"` (every 413 maps there) |
 | `ORG_REQUIRED`, `SLUG_TAKEN` | 409 | Authoring publish/update. | `CanvasdropError` |
-| `PUBLIC_LINKS_DISABLED`, `PUBLIC_NOT_ALLOWED`, `PUBLIC_LINK_OWNER_GATED` | 403 | Authoring publish/update asked for a Public link the instance, the actor, or the actor's role cannot grant. | `CanvasdropError` |
+| `PUBLIC_LINKS_DISABLED`, `PUBLIC_NOT_ALLOWED`, `PUBLIC_LINK_OWNER_GATED` | 403 | Authoring publish/update asked for a Public link the instance, the actor, or the actor's role (editor) cannot grant. | `CanvasdropError` |
 
 The full per-route list, including which routes emit `INVALID_BODY` with a
 `reason` field, is on the [Runtime API](/docs/api/runtime-api) page.
@@ -161,19 +180,20 @@ base `CanvasdropError`s and are not in `ERROR_CODES`, so `err.code` is typed
 |------|--------|------|
 | `NO_STREAM` | the HTTP status | The AI response had no body. |
 | `MALFORMED_FRAME` | 502 | An SSE `data:` line was not valid JSON (proxy teardown, partial flush). |
-| `AI_ERROR` | 502 | An in-stream `error` frame arrived without a `code`. |
+| `AI_ERROR` | 502 | An in-stream `error` frame arrived without a string `code`. |
 | `DISCONNECTED` | 0 | The realtime socket dropped while a `presence()` call was in flight; the SDK is reconnecting, retry the call. |
-| `CHANNEL_CLOSED` | 0 | `publish()` or `presence()` was called on a channel after `close()`. |
+| `CHANNEL_CLOSED` | 0 | `publish()` or `presence()` was called on a channel after `close()`; pending `presence()` calls also reject with it when `close()` runs. |
 
 ## AI stream errors
 
 `ai.chat` and `ai.stream` consume a server-sent event stream. Failures surface in
 two ways:
 
-- **Before the stream starts**, as an HTTP error mapped per the tables above:
-  `INVALID_BODY` (400), `MODEL_NOT_ALLOWED` (403), `CAPABILITY_DISABLED` (403),
-  `GUEST_AI_DISABLED` (403), `GUEST_AI_CAP` (429), `QUOTA_EXCEEDED` (429),
-  `RATE_LIMITED` (429), or `BODY_TOO_LARGE` (413).
+- **Before the stream starts**, as an HTTP error mapped per the tables above, in
+  the server's check order: `BODY_TOO_LARGE` (413), `INVALID_BODY` (400),
+  `MODEL_NOT_ALLOWED` (403), `GUEST_AI_DISABLED` (403), `GUEST_AI_CAP` (429),
+  `QUOTA_EXCEEDED` (429), or `CAPABILITY_DISABLED` (403). `RATE_LIMITED` (429)
+  fires before any of them.
 - **Mid-stream**, as an `error` frame. `CAPABILITY_DISABLED` becomes
   `CapabilityDisabledError`; `QUOTA_EXCEEDED` and `GUEST_AI_CAP` become
   `QuotaExceededError` with status 429; any other code becomes a base
@@ -194,7 +214,7 @@ calls on the same client throw it.
 | Close code | Error |
 |------------|-------|
 | `4403` | `CapabilityDisabledError` (`realtime` is off) |
-| `4401` | `NotAuthenticatedError` (access revoked, canvas gone, password gate, or user inactive) |
+| `4401` | `NotAuthenticatedError` (access lost, canvas gone, canvas turned Public link, password gate newly set, or user inactive) |
 | `4429` | `QuotaExceededError` (`code: "CONNECTION_LIMIT"`, status 429; 30 connections per canvas) |
 
 An in-band `{ "type": "error", "code": "CAPABILITY_DISABLED" }` frame is terminal

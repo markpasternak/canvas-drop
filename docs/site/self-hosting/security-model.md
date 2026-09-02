@@ -14,7 +14,7 @@ because the product is meant to be frictionless among colleagues.
 
 | Env var | Production choice | Why it matters |
 | --- | --- | --- |
-| `CANVAS_DROP_AUTH_MODE` | `proxy` (or `oidc` when nothing fronts the app) | Decides how identity is established (invariant 1). |
+| `CANVAS_DROP_AUTH_MODE` | `proxy` (or `oidc` when nothing fronts the app) | Decides how identity is established (invariant 1). Default `dev`. |
 | `CANVAS_DROP_URL_MODE` | `subdomain` | Gives each canvas its own origin so the browser isolates canvases from each other (invariant 4). |
 
 A production baseline behind an identity-aware proxy that forwards a signed JWT:
@@ -43,9 +43,17 @@ CANVAS_DROP_OIDC_CLIENT_SECRET=<client secret>
 CANVAS_DROP_SESSION_SECRET=<32 or more random characters>
 ```
 
-Both are config swaps, never code changes. Config is validated at boot and refuses to
-start on an unsafe combination; the guards are listed under each invariant below. See
-[Configuration](/docs/self-hosting/configuration) for every variable and
+Both are config swaps, never code changes. Config is validated at boot, and the
+process refuses to start on an unsafe combination:
+
+| Mode | Refuses to start when |
+| --- | --- |
+| `dev` | `NODE_ENV=production` |
+| `proxy` | neither `CANVAS_DROP_AUTH_PROXY_JWT_JWKS_URL` nor `CANVAS_DROP_TRUSTED_PROXY_IPS` is set; a JWKS URL is set without both `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER` and `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE`; a trusted-IP entry is malformed, IPv6, or `/0` |
+| `oidc` | any of `CANVAS_DROP_OIDC_ISSUER`, `CANVAS_DROP_OIDC_CLIENT_ID`, `CANVAS_DROP_OIDC_CLIENT_SECRET` is missing |
+| `proxy` or `oidc` | `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS` is empty; `CANVAS_DROP_SESSION_SECRET` is shorter than 32 characters; `CANVAS_DROP_URL_MODE=path` without `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true` |
+
+See [Configuration](/docs/self-hosting/configuration) for every variable and
 [Deploy](/docs/self-hosting/deploy) for the proxy layout.
 
 ## The trust boundary
@@ -54,8 +62,10 @@ A request becomes a *member* only after the auth gateway resolves an identity
 server-side, checks the email allowlist (the `CANVAS_DROP_ALLOWED_EMAIL_DOMAINS`
 domains, or an individual sign-in permit an admin added), maps it to a user, and
 rejects blocked users. The gateway runs on every request; nothing is cached between
-requests. The only way past it without an identity is the public-link carve-out, which
-grants an anonymous principal for an active `public_link` canvas and nothing else.
+requests. The only way past it without an identity is the public-link carve-out: an
+active, unexpired `public_link` canvas whose owner may still publish publicly, while
+the instance switch is on. It grants an anonymous principal for that one canvas and
+nothing else; a password on the canvas is still enforced by the gate.
 
 ```mermaid
 flowchart TD
@@ -86,7 +96,7 @@ What each denial looks like, so you can read your logs and support tickets:
 | Email not on the domain list or the permit list | same as no identity | `auth_denied` / `domain_not_allowed` |
 | User blocked by an admin | `403 {"error":"forbidden"}` | `auth_denied` / `blocked` |
 | Signed in, but no route into the canvas | `404 {"error":"not_found"}`, never a "forbidden" that confirms the canvas exists | none (the gateway already logged `auth_ok`) |
-| Canvas disabled by an admin | `403` disabled page, shown to the owner and to admins too | none |
+| Canvas disabled by an admin | `403` disabled page on the canvas URL, shown to the owner, editors, and admins alike; the runtime API answers `403 {"code":"DISABLED"}`, management writes `409 {"code":"DISABLED"}` | none |
 | Canvas archived or deleted | `404`, opaque even to the owner | none |
 
 If the allowlist lookup itself fails (a database error), the gateway denies. It fails
@@ -114,21 +124,22 @@ after this one names the mechanism behind one of them.
    hashes; an API key is shown once; a session token rides only in an HttpOnly cookie.
 3. **No unauthorized access.** A canvas is reachable by its owner and its editors, and
    otherwise only through the access rung the owner chose. Admins get no special access
-   to canvases they do not own. Anyone without a route in gets `404`.
+   to canvases they do not own. Anyone without a route in gets an opaque `404`; an editor
+   attempting an owner-only act gets an explicit `403 OWNER_ONLY`.
 4. **No cross-canvas reach in subdomain mode.** One canvas, its code, its SDK calls, or
    its socket cannot read, write, or act on another canvas's data, files, AI quota, or
    realtime channels. Path mode has reduced browser isolation and must be opted into.
 5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug regen, key
-   regen, rung lowering, removal from a list, team, or org, and unpublish take effect on
-   the next request, and sharing changes revalidate live realtime sockets. Nothing
-   grants access from a cache.
+   regen, rung lowering, removal from a list, team, or org, ownership moves, and unpublish
+   take effect on the next request, and sharing changes revalidate live realtime
+   sockets. Nothing grants access from a cache.
 
 ## Identity is always server-side (invariant 1)
 
 | Mode | Identity comes from | App session | Unauthenticated request |
 | --- | --- | --- | --- |
 | `dev` | the configured dev user | cookie, used only by `/auth/logout` | never happens |
-| `proxy`, JWT path | the proxy's signed JWT: signature against the JWKS, `iss`, `aud`, `exp`, `nbf`, and a string `email` claim | none | `401` |
+| `proxy`, JWT path | the proxy's signed JWT: signature against the JWKS, `iss`, `aud`, `exp`, and a string `email` claim | none | `401` |
 | `proxy`, trusted-header path | `X-Auth-Request-Email` (configurable), accepted only from a TCP peer in `CANVAS_DROP_TRUSTED_PROXY_IPS` | none | `401` |
 | `oidc` | the app's own session cookie, minted by the OIDC callback | `__canvasdrop_session`, 14-day rolling expiry | `302` to `/auth/login` |
 
@@ -147,12 +158,14 @@ omit the JWT to fall back to the weaker header path.
   and audience. The email header is never consulted in this mode. A request that carries
   an identity header but no valid JWT resolves to anonymous and is logged as a downgrade
   probe. `CANVAS_DROP_AUTH_PROXY_JWT_ISSUER` and `CANVAS_DROP_AUTH_PROXY_JWT_AUDIENCE` are
-  required when the JWKS URL is set.
+  required when the JWKS URL is set. A JWKS fetch failure is logged as
+  `proxy JWT verification failed (§12.5)`, so you can tell "bad token" from "IdP down".
 - **Trusted-header path (only when no JWKS URL is set).** The email header (default
-  `X-Auth-Request-Email`) is honored only when the request's socket peer matches an entry
-  in `CANVAS_DROP_TRUSTED_PROXY_IPS`. The check gates on the real TCP peer address, never
-  on `X-Forwarded-For` or any other header. A header from any other source is ignored
-  and logged as "ignored identity header from untrusted source".
+  `X-Auth-Request-Email`; the optional name header defaults to
+  `X-Auth-Request-Preferred-Username`) is honored only when the request's socket peer
+  matches an entry in `CANVAS_DROP_TRUSTED_PROXY_IPS`. The check gates on the real TCP
+  peer address, never on `X-Forwarded-For` or any other header. A header from any other
+  source is ignored and logged as `ignored identity header from untrusted source (§12.5)`.
 
 Boot guards for `proxy` mode: the app refuses to start without a JWKS URL or a non-empty
 trusted-IP list, so an unguarded "trust any header" config cannot exist. Every
@@ -174,7 +187,9 @@ identity fires only in `proxy` mode.
 Login uses PKCE (S256), a random `state`, and `prompt=login`. The callback rejects a
 missing or mismatched state, a failed code exchange, a missing `email` claim, and
 `email_verified=false`, and only then runs the same allowlist and blocked checks as every
-other request. Every rejection writes an `auth_denied` audit row.
+other request. Every rejection writes an `auth_denied` audit row with its reason
+(`missing_oidc_state`, `state_mismatch`, `token_exchange_failed`, `no_email_claim`,
+`email_not_verified`, `email_domain_not_allowed`, `blocked`).
 
 The session token is 256 bits of randomness; only its SHA-256 hash is stored, so the raw
 token never lands in the database. The cookie is HttpOnly always, Secure in production,
@@ -184,18 +199,30 @@ characters outside `dev` mode; it also signs the password-gate grants below.
 
 ### Agents
 
-Agents connect over MCP with OAuth 2.1 tokens the instance issues itself. Every tool
-resolves the caller's user server-side and runs the same owner-or-editor role gate as
-the dashboard. The keyed [Deploy API](/docs/api/deploy-api) has no user at all: its
-writes are attributed to the canvas owner. See [MCP server](/docs/agents/mcp).
+Agents connect over MCP at `{base}/mcp` with OAuth tokens the instance issues itself
+(audited as `mcp_token_issue`, `mcp_token_revoke`, `mcp_authorize_ok`,
+`mcp_authorize_denied`). Every tool resolves the caller's user server-side and runs the
+same owner-or-editor role gate as the dashboard. The keyed [Deploy API](/docs/api/deploy-api)
+has no user at all: its writes are attributed to the canvas owner. See
+[MCP server](/docs/agents/mcp).
 
 ## Access is decided on every request (invariant 3)
 
 Per-canvas roles and the access ladder are resolved from the server-side principal on
-each request, never cached on a session or an agent's token. Owner and **editor** are
-the management roles: an editor is owner-equivalent except for deleting, transferring,
-and the guest-AI switch (an editor attempting those gets `OWNER_ONLY`). Only org members
-can be editors. Viewers and everyone else are admitted, or not, by the rung:
+each request, never cached on a session or an agent's token. Two roles manage a canvas:
+
+- The **owner**: the single account on the canvas record. Only the owner can delete the
+  canvas, transfer ownership, or switch on AI for added people. An editor who tries gets
+  `403 {"code":"OWNER_ONLY"}`.
+- An **editor**: owner-equivalent for everything else, including settings, sharing, the
+  draft editor, publish, rollback, the deploy key, and adding or removing other editors.
+  An editor is a signed-in member holding a direct editor row or membership of an
+  editor-role team. With an org boundary configured (below), the grant holds only while
+  they are currently a member of the canvas's home org; the check runs on every request.
+  A guest or anonymous visitor never holds a role.
+
+A principal with no role sees the management surface as `404 {"error":"not_found"}`.
+Viewers and everyone else are admitted, or not, by the rung:
 
 | Rung | Who is admitted | Password and expiry |
 | --- | --- | --- |
@@ -207,30 +234,45 @@ can be editors. Viewers and everyone else are admitted, or not, by the rung:
 
 The owner and editors are admitted at every rung, never see the password prompt, and
 are unaffected by expiry. A canvas that admits no one at the current rung returns
-`404`. A password is checked with argon2; a successful attempt sets an HttpOnly grant
-cookie (`__canvasdrop_gate`) bound to the canvas id and its password version, so
-changing the password invalidates every outstanding grant at once. In subdomain mode
-the grant is host-only; in path mode it is scoped to the canvas path. The gate is rate
-limited (`CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN`, default 5).
+`404`. A password is checked with argon2id; a successful attempt sets an HttpOnly grant
+cookie (`__canvasdrop_gate`), HMAC-signed with `CANVAS_DROP_SESSION_SECRET` and bound to
+the canvas id and its password version, so changing the password invalidates every
+outstanding grant at once. In subdomain mode the grant is host-only; in path mode it is
+scoped to the canvas path. Attempts are limited to
+`CANVAS_DROP_RATELIMIT_PASSWORD_GATE_PER_MIN` (default 5) per user per canvas, or per
+client IP for an anonymous public visitor; over the limit the gate answers `429` with
+`Retry-After`.
+
+**Ownership moves are instant and audited.** The owner can hand a canvas to an existing
+editor who is an org member (`POST /api/canvases/{id}/transfer`, MCP `transfer_canvas`).
+The previous owner stays on as an editor while their account is active and passes the
+org check; if the new owner may not publish publicly, a Public link rung is turned off;
+the deploy key is unchanged. An admin can **reassign** a canvas whose owner has left
+from the admin routes, with a recorded reason. A reassign rotates the deploy key in the
+same write (the plaintext is discarded; the new owner issues a fresh one) and never gives
+the acting admin content access. Both write an audit row (`canvas_transfer`,
+`canvas_reassign_owner`) and revalidate the canvas's live realtime sockets.
 
 **Public links are doubly gated.** Admin → Configuration → `access.publicLinksEnabled`
-(default on) is the instance switch; turning it off returns every public-link canvas to
-private. Each owner also needs the publish-public capability, granted and revoked per
+(default on) is the instance switch; turning it off sweeps every public-link canvas back
+to private. Each owner also needs the publish-public capability, granted and revoked per
 user under Admin → People; revoking it sweeps that owner's public-link canvases back to
-private. A public-link visitor gets files only: every runtime API call is refused with
-`403 {"code":"STATIC_ONLY"}`, including for signed-in members who are not the owner or
-an editor. In `proxy` mode a public link works only for requests your proxy lets reach
-the app.
+private. Both gates are also re-checked on every request, so a canvas whose owner lost
+the grant is unreachable even before the sweep lands. A public-link visitor gets files
+only: every runtime API call is refused with `403 {"code":"STATIC_ONLY"}`, including for
+signed-in members who are not the owner or an editor. In `proxy` mode a public link
+works only for requests your proxy lets reach the app.
 
 **Admins have no back door.** For a canvas they do not own, an admin is an ordinary
 member: a private canvas returns `404`, a password prompts them, and they cannot open
 the editor or change settings. Cross-owner admin power lives on the dedicated admin
 routes: the all-canvases list, disable / enable / restore, reassigning the owner when
 someone leaves, and gallery featuring. It never extends to canvas content, the runtime
-API, or realtime. One recorded exception: the authoring API (off by default) still lets
-an admin manage an authored share it does not own.
+API, or realtime. One recorded exception: the authoring API (`CANVAS_DROP_AUTHORING`,
+default `off`) still admits an admin to update or revoke an authored share it does not
+own.
 
-The retired guest magic-link flow is gone. Old `/guest/<token>` links return an
+The retired guest magic-link flow is gone. Old `/guest/{token}` links return an
 invalid-link page, never set a cookie, and never consume a token; the sharing paths
 below record pending access against your configured auth instead.
 
@@ -255,8 +297,8 @@ boundary:
 
 The boundary is inert until an org is named, so it is an opt-in tightening. Turning it on
 for an existing instance is a one-time, dry-run-first cutover; see
-[Configuration → Tenancy](/docs/self-hosting/configuration) and the `docs/tenancy.md`
-runbook in the repo.
+[Configuration → Tenancy](/docs/self-hosting/configuration#tenancy-the-org-boundary-optional)
+and the `docs/tenancy.md` runbook in the repo.
 
 ## Adds are auth-delegated (no app-owned credentials)
 
@@ -272,15 +314,16 @@ Who may permit a **brand-new email** to sign in is gated:
 
 - In `proxy` mode, an email that cannot already sign in (its domain is not allowed and
   it holds no permit) must be admitted at the proxy first. canvas-drop cannot widen an
-  upstream IAP, so the add is refused with `auth_admission_required` until then.
+  upstream IAP, so the add is refused with `403 {"code":"AUTH_ADMISSION_REQUIRED"}` until
+  then.
 - An **admin** can add a permit under Sign-in permits.
 - A **member** can only when the admin setting `invites.allowMemberNewEmails` is on (off
-  by default), or when the email already authenticates. Otherwise the add is rejected; a
-  member cannot widen who may sign in to your instance.
+  by default), or when the email already authenticates. Otherwise the add is refused with
+  `403 {"code":"NOT_PERMITTED"}`; a member cannot widen who may sign in to your instance.
 
 Add volume is bounded per actor with `invites.maxPerActorPerHour` (default 20) and
 `invites.pendingCap` (default 50). Both are DB-managed admin settings; see
-[Sign-in permits & access emails](/docs/self-hosting/configuration#sign-in-permits--access-emails).
+[Sign-in permits and access emails](/docs/self-hosting/configuration#sign-in-permits-and-access-emails).
 
 ## No secrets in the browser (invariant 2)
 
@@ -293,7 +336,9 @@ Deploy keys are `cd_` Bearer secrets: 32 random bytes, stored only as a SHA-256 
 shown once at creation or regeneration. A key works only on its own canvas (`403` on any
 other), only while that canvas is active (`401` the moment it is archived or disabled),
 and dies the moment it is regenerated. Cloning a canvas mints a fresh key; it never
-copies the source's. See the [Deploy API](/docs/api/deploy-api).
+copies the source's. The key is per canvas, not per person: removing an editor does not
+invalidate a key they copied, so regenerate it when someone leaves (the dashboard offers
+this). See the [Deploy API](/docs/api/deploy-api).
 
 ## Path mode vs subdomain mode (invariant 4)
 
@@ -310,10 +355,12 @@ copies the source's. See the [Deploy API](/docs/api/deploy-api).
   and wildcard TLS at the proxy, and a non-localhost `CANVAS_DROP_BASE_URL`.
 
 Server-side isolation holds in both modes: blobs, KV, files, AI usage, and realtime
-channels are keyed by canvas id, and management mutations require a same-origin request
-(`Sec-Fetch-Site`, else a matching `Origin`). Subdomain mode adds the browser's origin
-boundary on top. If you do not run an identity-aware proxy, run subdomain mode with
-`oidc` so you keep that boundary without standing up a proxy.
+channels are keyed by canvas id, and management and admin writes require a same-origin
+request: `Sec-Fetch-Site: same-origin` (or `none`), else an `Origin` whose host matches
+`CANVAS_DROP_BASE_URL`; anything else gets `403 {"error":"cross_origin_forbidden"}`.
+Subdomain mode adds the browser's origin boundary on top. If you do not run an
+identity-aware proxy, run subdomain mode with `oidc` so you keep that boundary without
+standing up a proxy.
 
 ## Lifecycle changes land on the next request (invariant 5)
 
@@ -323,6 +370,9 @@ Nothing about access is cached. Concretely:
   or removing someone from a list, team, or org denies them on their very next request.
   Share, people-list, ownership, password, and unpublish changes also revalidate that
   canvas's live realtime sockets right away, and sockets that lost access are dropped.
+- A heartbeat re-authorizes every live socket once a minute as a backstop, so a share
+  expiry passing, or an admin block or delete (which fire no mutation hook), drops the
+  socket within one tick.
 - A blocked user is refused at the gateway on the next request, whatever session or
   agent token they hold.
 - An archived, disabled, or deleted canvas rejects its own deploy key with `401`.
@@ -335,25 +385,28 @@ Nothing about access is cached. Concretely:
 ## Reducing canvas XSS blast radius
 
 Subdomain mode contains the blast radius of a compromised canvas to that canvas's
-origin; private-by-default limits who can be exposed to it. Canvas responses carry
-`X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
-`Cross-Origin-Opener-Policy: same-origin`, and a `Content-Security-Policy` of
-`frame-ancestors 'self'` plus the dashboard origin, so no other canvas can frame it. The
-dashboard itself runs under a strict CSP (`script-src 'self'`, `frame-ancestors 'none'`).
-Tell canvas authors to prefer `textContent` over `innerHTML`.
+origin; private-by-default limits who can be exposed to it. Every response carries
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and
+`Cross-Origin-Opener-Policy: same-origin`. Canvas content adds a
+`Content-Security-Policy` of `frame-ancestors 'self' {base origin}` in subdomain mode
+(`frame-ancestors 'self'` in path mode), so the dashboard can preview a canvas and no
+other canvas can frame it. The dashboard itself runs under a strict CSP (`script-src
+'self'`, `frame-ancestors 'none'`). Tell canvas authors to prefer `textContent` over
+`innerHTML`.
 
 ## What gets audited
 
 The audit log records `auth_ok` and `auth_denied` (with the reason) on every gateway
 decision, `session_create` and `session_revoke` in `oidc` mode, and every OIDC callback
 rejection. Canvas actions are attributed to the acting user or agent: `deploy`,
-`rollback`, `canvas_unpublish`, `share_change`, `password_change`, `slug_regen`, and key
-rotation, among others. Admin actions are audited by name: `canvas_disable`,
-`canvas_enable`, `canvas_restore`, `user_block`, `user_unblock`, `user_promote`,
+`rollback`, `publish`, `canvas_unpublish`, `share_change`, `password_change`,
+`password_attempt`, `slug_regen`, `key_regen`, `canvas_transfer`, among others. Admin
+actions are audited by name: `canvas_disable`, `canvas_enable`, `canvas_restore`,
+`canvas_reassign_owner`, `canvas_feature`, `user_block`, `user_unblock`, `user_promote`,
 `user_demote`, `user_grant_public`, `user_revoke_public`, `allowed_email_add`,
-`allowed_email_remove`. Rows carry the client IP described above. Login attempts are
-limited to `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` (default 10) per client IP; see
-[Rate limiting](/docs/self-hosting/configuration#rate-limiting).
+`allowed_email_remove`, `admin_settings_update`. Rows carry the client IP described
+above. Login attempts are limited to `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` (default 10)
+per client IP; see [Rate limiting](/docs/self-hosting/configuration#rate-limiting).
 
 ## No telemetry
 

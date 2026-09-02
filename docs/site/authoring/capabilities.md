@@ -1,18 +1,19 @@
 # Capabilities
 
 Give a canvas a backend, one feature at a time, and know exactly when a call
-from the page will work. A canvas is static until its owner or an editor
-switches **Enable backend** on in the canvas's **Backend** tab. With the backend
-on, five features toggle independently: KV, files, AI, realtime, and authoring.
-Identity (`me()`) has no toggle; it is on whenever the backend is on.
+from the page will work. This page is for a canvas's owner or editor. A canvas
+is static until you switch **Enable backend** on in its **Backend** tab. With
+the backend on, five features toggle independently: KV, files, AI, realtime, and
+authoring. Identity (`me()`) has no toggle; it is on whenever the backend is on.
 
 ## Turn on the backend
 
 1. Open the canvas and go to the **Backend** tab.
 2. Switch **Enable backend** on. It is off by default. You can also set it when
-   you create the canvas (**Enable backend (optional)** on the create page).
+   you create the canvas: **Enable backend (optional)** on the create page, or
+   `"backendEnabled": true` on `POST /api/canvases` and `POST /api/canvases/paste`.
 3. Check the feature toggles. **Key-value storage**, **File storage**, **AI**,
-   and **Realtime** are pre-enabled, so they go live as soon as the backend is
+   and **Realtime** are on by default, so they go live as soon as the backend is
    on (where the instance supports them). **Authoring** starts off and stays off
    until you turn it on.
 
@@ -27,16 +28,25 @@ setup:
 </script>
 ```
 
-Agents and scripts flip the same switches: the MCP tool `set_capabilities`, or
-`PATCH {base}/api/canvases/{id}/capabilities` with any subset of
+Agents and scripts flip the same switches. The MCP tool `set_capabilities` and
+`PATCH {base}/api/canvases/{id}/capabilities` take the same body: any subset of
 `backendEnabled`, `kv`, `files`, `ai`, `realtime`, `authoring` as booleans.
-Omitted fields are unchanged. The response is the canvas view, which carries
-both `capabilities` (what is stored) and `effective` (what actually runs).
+Omitted fields are unchanged.
 
-Owners and editors can change capabilities. Every change is audited
-(`capabilities_update`) and applies on the next request; turning the backend or
-realtime off also drops live realtime sockets. A canvas an admin has disabled
-refuses the change with `409 DISABLED`.
+```json
+{ "backendEnabled": true, "realtime": false }
+```
+
+The response is the canvas view. Every canvas view (the management API and the
+MCP `get_canvas` tool included) carries two objects: `capabilities` (what is
+stored) and `effective` (what runs right now, after the instance switches
+below are applied).
+
+Owners and editors can change capabilities; viewers cannot. Every change is
+audited (`capabilities_update`, with the list of changed fields) and applies on
+the next request. Turning the backend or realtime off also drops the canvas's
+live realtime sockets. A canvas an admin has disabled refuses the change with
+`409 DISABLED`.
 
 ## The toggles
 
@@ -57,24 +67,38 @@ is not.
 
 ## When a feature is effective
 
-A feature runs only when every gate in its row is open. The server applies this
-rule on each request; the Backend tab shows the outcome.
+A feature runs only when every gate in its row is open: the backend, its own
+toggle, and (for AI, realtime, and authoring) an instance switch the operator
+controls. The server applies this rule on each request; the Backend tab shows
+the outcome, and `effective` in the API is the same answer.
 
-| Feature | Backend on | Its toggle on | Operator switch |
+| Feature | Backend on | Its toggle on | Instance switch |
 |---|---|---|---|
 | Identity (`me()`) | yes | none | none |
 | KV | yes | yes | none |
 | Files | yes | yes | none |
-| AI | yes | yes | An AI provider key is configured (`CANVAS_DROP_AI_API_KEY`, or set by an admin at runtime) |
+| AI | yes | yes | An AI provider key is configured: `CANVAS_DROP_AI_API_KEY`, or the **Provider API key** an admin sets in Admin → Settings |
 | Realtime | yes | yes | `CANVAS_DROP_REALTIME=on` (the default) |
-| Authoring | yes | yes | `CANVAS_DROP_AUTHORING=on` (default `off`; an admin can turn it on at runtime) |
+| Authoring | yes | yes | `CANVAS_DROP_AUTHORING=on` (default `off`), or **Authoring enabled** set by an admin in Admin → Settings |
 
-KV and files have no operator switch: your two toggles are the whole story. When
-your toggle is on but the operator switch is off, the toggle stays on and the
-row is labelled **Disabled by your administrator for this instance.** The AI key
-and the authoring switch are read per request, so an admin's change applies
-immediately; realtime follows `CANVAS_DROP_REALTIME` as set when the server
-started.
+KV and files have no instance switch: your two toggles are the whole story.
+When your toggle is on but the instance switch is off, the toggle stays on and
+the row is labelled **Disabled by your administrator for this instance.** The
+AI key and the authoring switch are read per request, so an admin's change
+applies immediately. Realtime follows `CANVAS_DROP_REALTIME` as set when the
+server started; the admin panel shows it but cannot change it.
+
+## Limits
+
+Each feature has fixed ceilings. Exceeding one returns the error named in the
+last column, not `CAPABILITY_DISABLED`; see [error codes](/docs/api/errors).
+
+| Feature | Limit | Admin-adjustable | Error |
+|---|---|---|---|
+| KV | 64 KB per value, 512 bytes per key; 10 000 shared keys and 1 000 per-viewer keys per canvas | the key counts | `VALUE_TOO_LARGE`, `KEY_TOO_LARGE`, `KEY_LIMIT` |
+| Files | 25 MB per file, 1 GB per canvas | both | `FILE_TOO_LARGE`, `QUOTA_EXCEEDED` |
+| AI | Models on the allowlist (`CANVAS_DROP_AI_MODELS`); spend caps of `CANVAS_DROP_AI_USER_DAILY_USD` (default `5`) per viewer per day and `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` (default `50`) per canvas per month | allowlist and both caps | `MODEL_NOT_ALLOWED`, `QUOTA_EXCEEDED` |
+| Realtime | 30 concurrent connections per canvas, 16 KB per message | no | `CONNECTION_LIMIT` (socket close `4429`) |
 
 ## When a feature is off
 
@@ -106,9 +130,11 @@ try {
 ```
 
 Realtime reports the same condition over the socket: a connection opened while
-realtime is off receives one `{ "type": "error", "code": "CAPABILITY_DISABLED" }`
-frame and is closed with code `4403`. The SDK turns that into the same
-`CapabilityDisabledError` and does not reconnect. See
+realtime is off receives one
+`{ "type": "error", "code": "CAPABILITY_DISABLED", "capability": "realtime" }`
+frame and is closed with code `4403`. A socket that is already open when
+realtime is turned off is closed with `4403` too. The SDK turns both into the
+same `CapabilityDisabledError` and does not reconnect. See
 [error codes](/docs/api/errors) for the full list.
 
 ## Public links are static-only
@@ -123,19 +149,25 @@ restricted rung; see [Sharing & access](/docs/authoring/sharing).
 ## Authoring
 
 Authoring lets a signed-in org member viewing your canvas create a new canvas
-from the page, as themselves, through `canvasdrop.canvases.publish(...)`. The new
-canvas is created under the viewer's own account and appears in their
-dashboard; they can `update`, `list`, and `revoke` it later. Guests and
-public-link visitors cannot use it.
+from the page, as themselves, through `canvasdrop.canvases.publish(...)`. The
+new canvas is created under the viewer's own account and appears in their
+dashboard; they can `update`, `list`, and `revoke` it later. Legacy guest
+sessions and public-link visitors cannot use it.
 
 Because it mints canvases, authoring is the one feature whose stored flag starts
-off, and its operator switch (`CANVAS_DROP_AUTHORING`) is off by default as
+off, and its instance switch (`CANVAS_DROP_AUTHORING`) is off by default as
 well. The operator also sets the policy a publish is checked against:
-per-viewer quotas (`CANVAS_DROP_AUTHORING_USER_DAILY_MAX`, default 20;
-`CANVAS_DROP_AUTHORING_USER_TOTAL_MAX`, default 200), which access rungs may be
-requested (`CANVAS_DROP_AUTHORING_ALLOWED_RUNGS`, default all four), and whether
-a share expiry is required or capped (`CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY`,
-`CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS`). See the
+
+| Policy | Env var | Default |
+|---|---|---|
+| Canvases one viewer may publish per day | `CANVAS_DROP_AUTHORING_USER_DAILY_MAX` | `20` |
+| Canvases one viewer may publish in total | `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` |
+| Access rungs a publish may request | `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` |
+| Longest allowed share expiry, in days | `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` (no cap) |
+| Whether a share expiry is required | `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` |
+
+An admin can change the two quotas at runtime in Admin → Settings; the rung and
+expiry policy is env-only. The `team` rung is not in the default set. See the
 [authoring SDK reference](/docs/sdk/authoring).
 
 ## Clones start static
@@ -150,4 +182,5 @@ turns the backend on when they need it.
 Capabilities are enforced by the server, per request, from the signed-in
 session: the canvas can ask, the server decides. Canvas files never carry a
 secret, and a static canvas has no backend surface at all. Turning a capability
-on is a per-canvas choice its owner or an editor makes.
+on is a per-canvas choice its owner or an editor makes; an admin controls only
+the instance switches above, not any canvas's toggles.

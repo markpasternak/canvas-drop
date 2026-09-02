@@ -42,19 +42,19 @@ const SITE = {
   name: "canvas-drop",
   domain: "canvas-drop.com",
   /** Hero promise: one line, product-true. */
-  tagline: "Deploy and share the small web tools your org builds, behind your sign-in.",
+  tagline: "Deploy and share your org's small web tools, behind your sign-in.",
   /** Short eyebrow above the headline. */
   eyebrow: "Self-hosted canvases for your org",
   /** Big headline. Two short clauses read well at display scale. */
   headline: "Drop it in. Share it out.",
   /** Sub-headline beneath the H1. */
   subhead:
-    "Your team builds working web tools, often with AI, then has nowhere safe to put them. canvas-drop is where they land: paste HTML or drop a folder, get a live URL in seconds, and share it behind your org sign-in instead of a screenshot or a slide deck.",
+    "Your team builds working web tools, often with AI, then has nowhere safe to put them. canvas-drop is where they land: paste HTML or drop a folder, get a live URL in seconds, and share it behind your org sign-in, not as a screenshot in a slide deck.",
   /** Open-source project URL. */
   githubUrl: "https://github.com/markpasternak/canvas-drop",
   /** SEO/meta description (plain text, ≤ ~160 chars). */
   metaDescription:
-    "Deploy and share the small web tools your org builds. Static canvases, live in seconds, behind your organization's sign-in. Open source, self-hosted.",
+    "Deploy and share your org's small web tools. Static canvases, live in seconds, behind your sign-in. AI agents deploy over MCP. Open source, self-hosted.",
 } as const;
 
 /** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
@@ -81,7 +81,7 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
   {
     name: "Identity",
     tag: "identity",
-    blurb: "Know who is viewing. `me()` returns the signed-in org member, resolved server-side.",
+    blurb: "Know who is viewing. me() returns the signed-in org member, resolved server-side.",
     glyph: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M5 20a7 7 0 0 1 14 0",
   },
   {
@@ -96,19 +96,15 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
 const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Deploy in seconds",
-    body: "Paste HTML, drag a folder, upload a ZIP, curl one to the deploy API, or connect your AI agent over MCP and let it create and publish canvases for you. A canvas is static files: no build to wait on, nothing to provision.",
+    body: "Paste HTML, drag a folder, upload a ZIP, or curl one to the Deploy API. Connect an AI agent over MCP and it creates, edits, and publishes canvases for you. A canvas is static files: no build to wait on, nothing to provision.",
   },
   {
     title: "Shared exactly as far as you mean",
-    body: "One access rung per canvas: private, a named few, a team, the whole org, or a public link that admins can switch off instance-wide or withhold per account. Add a password or an expiry. Revoke anytime; the next request is refused, and live sockets drop with it.",
-  },
-  {
-    title: "Editors, not a bottleneck",
-    body: "Make a colleague or a whole team an editor and they run the canvas with you: edit, publish, roll back, change sharing, rotate the deploy key. You stay the owner; only delete, transfer, and the guest-AI switch stay yours. Saves are checked per file, so two editors never overwrite each other silently. When someone moves on, hand the canvas over in one click.",
+    body: "One access rung per canvas: Private, Specific people, Team, Whole org, or Public link. Add a password or an expiry. Make a colleague or a team an editor and they publish, roll back, and change sharing with you; you stay the owner. Revoke anytime and the next request is refused.",
   },
   {
     title: "Versions you can roll back",
-    body: "Each publish snapshots an immutable version, and the last ten are kept. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click, or download any version as a ZIP.",
+    body: "Every publish is an immutable version, and the last ten are kept. Edit in the browser, preview the draft, then publish. If something breaks, make an earlier version current again in one click, or download any version as a ZIP. Saves are checked per file, so two editors never overwrite each other silently.",
   },
 ];
 
@@ -117,7 +113,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
  *  matches the product's rung order (private → specific_people → team → whole_org → public_link). */
 const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
   { rung: "Private", who: "Only you and the editors you name." },
-  { rung: "Specific people", who: "A named few, added by email." },
+  { rung: "Specific people", who: "A named few, added by email, as viewers or editors." },
   {
     rung: "Team",
     who: "A group you create once and grant on as many canvases as you like.",
@@ -138,7 +134,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "landing-dashboard",
     label: "Your dashboard",
     caption:
-      "Every canvas you own or edit. Search by title, description, or tag, filter by access or status, and see the current version and sharing at a glance.",
+      "Every canvas you own or edit. Search by title, description, tag, or slug; filter by access, status, or role; and see the current version and sharing at a glance.",
   },
   {
     img: "tour-editor",
@@ -150,13 +146,13 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-shared",
     label: "Shared with you",
     caption:
-      "Canvases other people opened to you, directly or through a team or the whole org. Search, sort by owner or update, and open the right one fast.",
+      "Canvases other people opened to you, directly or through a team or the whole org. Search, sort by owner or last update, and open the right one fast.",
   },
   {
     img: "landing-gallery",
     label: "Opt-in gallery",
     caption:
-      "Browse public and listed org-wide canvases. Filter by tag, search, and start from any one marked as a template. Admins pin featured picks at the top.",
+      "Browse public canvases and the org-wide ones their owners chose to list. Search, filter by tag, and start from any one marked as a template. Admins can feature their picks.",
   },
   {
     img: "tour-preview",
@@ -174,19 +170,19 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-people",
     label: "People & editors",
     caption:
-      "One people list per canvas. Add a person or a team as a viewer or an editor; editors manage the canvas with you, and ownership moves to any editor in one click.",
+      "One people list per canvas. Add a person or a team as a viewer or an editor. Editors run the canvas with you, and the owner can hand it to any editor from the same list.",
   },
   {
     img: "tour-teams",
     label: "Teams & invites",
     caption:
-      "Make a team once and grant it on any canvas. Add people by email before they've ever signed in; they're in the instant they first sign in through your org's auth, with no password for you to manage.",
+      "Make a team once and grant it on any canvas. Add people by email before they have ever signed in; they're in the moment they first sign in through your org's auth, with no password for you to manage.",
   },
   {
     img: "tour-capabilities",
     label: "Backend in a click",
     caption:
-      "The backend is off until you switch it on. Then pick the primitives this canvas may use: KV, files, AI, identity, realtime.",
+      "The backend is off until you switch it on. Then choose which primitives this canvas may use: KV, files, AI, identity, realtime.",
   },
   {
     img: "tour-admin",
@@ -206,23 +202,23 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
 const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   {
     title: "Teams & invites",
-    body: "Group people into a team and grant it on any canvas, as viewers or as editors. Add colleagues by email before they've ever signed in; access materializes on their first login through your auth. Bringing in people from outside your domain is an admin's call, or a policy admins can hand to members.",
+    body: "Group people into a team and grant it on any canvas, as viewers or as editors. Add colleagues by email before they have ever signed in; access materializes on their first login through your auth. Inviting people from outside your domain is an admin's call, or a policy admins can hand to members.",
   },
   {
     title: "Editors & ownership",
-    body: "Give a person or a team the editor role on a canvas and they can do everything the owner can, except delete it, transfer it, or switch on guest AI. Org members only, re-checked on every request. Owners hand a canvas to an editor in one click; admins reassign the canvases of anyone who leaves.",
+    body: "Give a person or a team the editor role and they can do everything the owner can, except delete the canvas, transfer it, or switch on guest AI. Org members only, re-checked on every request. Owners hand a canvas to an editor from the people list; admins reassign the canvases of anyone who leaves.",
   },
   {
     title: "Org sign-in (SSO)",
-    body: "Everyone signs in through your OIDC provider, Google included, or behind your identity-aware proxy. Access is gated by email domain and an admin allowlist, and canvas-drop holds no user passwords.",
+    body: "Everyone signs in through your OIDC provider or behind your identity-aware proxy. Access is gated by email domain and an admin allowlist, and canvas-drop holds no user passwords.",
   },
   {
     title: "Admin console",
-    body: "Set AI spend quotas and defaults, switch public links on or off instance-wide, and choose which members may publish them.",
+    body: "Set AI spend quotas and defaults, switch public links on or off instance-wide, and choose which members may publish them. Disable any canvas with a stated reason and re-enable it later.",
   },
   {
     title: "Your brand, your look",
-    body: "Flip the whole instance, dashboard, editor, and this page included, to one of four design skins from the admin console. No restart, no code.",
+    body: "Switch the whole instance, dashboard, editor, and this page included, to one of four design skins from the admin console. No restart, no code.",
   },
   {
     title: "Member management",
@@ -230,7 +226,7 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Audit log",
-    body: "Sign-ins, deploys, publishes, sharing changes, and admin actions are recorded, so there is always an account of who changed what.",
+    body: "Sign-ins, deploys, publishes, sharing changes, and admin actions are recorded in an audit table in your database. Query it with the tools you already have.",
   },
 ];
 
@@ -250,7 +246,7 @@ const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Backend off by default",
-    body: "A canvas reaches no backend until you switch it on, one primitive at a time. Public visitors get static files only.",
+    body: "A canvas reaches no backend until you switch it on, and you choose which primitives it may use. Public visitors get static files only.",
   },
   {
     title: "Your infrastructure",
@@ -760,11 +756,11 @@ ${values}
     <div class="wrap">
       <p class="kicker reveal">Sharing</p>
       <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
-      <p class="s-sub reveal">One rung per canvas, from only you to anyone with the link. Teams sit in the middle: a group you create once and grant on as many canvases as you like. Team and Whole-org shares can stay link-only, or appear in Shared for the people who already have access.</p>
+      <p class="s-sub reveal">One rung per canvas, from only you to anyone with the link. Teams sit in the middle: create one, grant it anywhere. Team and Whole-org shares can stay link-only, or appear in Shared for the people who already have access.</p>
       <div class="ladder reveal">
 ${LADDER.map(ladderRung).join("\n")}
       </div>
-      <p class="ladder-note reveal"><strong>Add people by email</strong>, before they have ever signed in. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. Anyone can add a colleague in your domain; bringing in contractors or friends and family from outside it is an admin's call, or a policy admins can hand to members. A personal team needs no org at all.</p>
+      <p class="ladder-note reveal"><strong>Add people by email</strong>, before they have ever signed in. They're in the moment they sign in through your instance's auth: <strong>no app-managed passwords, no magic-link accounts</strong>. Anyone can add a colleague in your domain; inviting someone from outside it is an admin's call, or a policy admins can hand to members. Personal teams need no org setup at all.</p>
     </div>
   </section>
 
@@ -793,8 +789,8 @@ ${TEAM.map(featItem).join("\n")}
   <section>
     <div class="wrap">
       <p class="kicker reveal">Make it yours</p>
-      <h2 class="s-head reveal">One platform, your look.</h2>
-      <p class="s-sub reveal">Pick one of four design skins in the admin console and the whole instance re-voices its accent colour, display type, and corner shape: dashboard, editor, and this page. Same app, your brand. No restart, no code.</p>
+      <h2 class="s-head reveal">Same app, your look.</h2>
+      <p class="s-sub reveal">Pick one of four design skins in the admin console and the whole instance re-voices its accent colour, display type, and corner radius: dashboard, editor, and this page. No restart, no code.</p>
       <figure class="skins-figure reveal">
         <img src="${assetSrc("landing-skins")}" width="2320" height="824" alt="The same canvas-drop dashboard shown in two design skins side by side: Editorial (deep-teal serif) and Canvas (violet, bold). Shows the admin-flippable skin layer." loading="lazy" decoding="async">
       </figure>
@@ -839,7 +835,7 @@ ${PRIVACY.map(featItem).join("\n")}
         <a href="${cta.href}">${cta.short}</a>
       </nav>
     </div>
-    <div class="colophon">${escapeHtml(SITE.name)} is where your organization's small web tools, AI-built or hand-built, get deployed and shared. Open source under the MIT license.</div>
+    <div class="colophon">${escapeHtml(SITE.name)} is where your organization's small web tools, AI-built or hand-built, get deployed and shared. Inspired by Shopify's Quick, not affiliated with Shopify. Open source under the MIT license.</div>
   </div>
 </footer>
 
