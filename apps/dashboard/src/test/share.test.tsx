@@ -54,7 +54,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockFetch(handlers: Record<string, () => Response>) {
+function mockFetch(handlers: Record<string, () => Response | Promise<Response>>) {
   const calls: { method: string; url: string; body?: string }[] = [];
   const defaults: Record<string, () => Response> = {
     "GET /api/me": () => json(ME),
@@ -710,6 +710,66 @@ describe("share route", () => {
     expect(screen.queryByText(/only you currently have access/i)).toBeNull();
     expect(screen.queryByText(/gates no one/i)).toBeNull();
     expect(screen.getByText(/asked for this password too/i)).toBeInTheDocument();
+    expect(screen.getByText(/try again before relying on who appears here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no one added yet/i)).toBeNull();
+  });
+
+  it("clears the prior canvas's people list while navigation loads the next one", async () => {
+    let resolveSecondList: ((response: Response) => void) | undefined;
+    const secondList = new Promise<Response>((resolve) => {
+      resolveSecondList = resolve;
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "member:old",
+              kind: "member",
+              role: "viewer",
+              email: "old@example.com",
+              userId: "old",
+            },
+          ],
+        }),
+      "GET /api/canvases/c2": () =>
+        json({
+          ...CANVAS,
+          id: "c2",
+          slug: "second-canvas",
+          url: "http://x/c/second-canvas",
+          publicationState: "published",
+          currentVersionId: "v2",
+        }),
+      "GET /api/canvases/c2/allowlist": () => secondList,
+    });
+    const router = renderShare();
+    expect(await screen.findByText("old@example.com")).toBeInTheDocument();
+
+    await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    await vi.waitFor(() =>
+      expect(
+        calls.some((call) => call.method === "GET" && call.url === "/api/canvases/c2/allowlist"),
+      ).toBe(true),
+    );
+    expect(screen.queryByText("old@example.com")).toBeNull();
+
+    resolveSecondList?.(
+      json({
+        entries: [
+          {
+            id: "member:new",
+            kind: "member",
+            role: "viewer",
+            email: "new@example.com",
+            userId: "new",
+          },
+        ],
+      }),
+    );
+    expect(await screen.findByText("new@example.com")).toBeInTheDocument();
   });
 
   it("the password notice names editors AND legacy guests as exempt, and says 'gates no one' only for a loaded empty list (review #2)", async () => {

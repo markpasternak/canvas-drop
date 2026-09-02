@@ -22,7 +22,7 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 
 - **Distribution is the problem it solves.** AI build tools make the artifact. canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
 - **Agents ship from where they already work.** A keyed Deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) with 46 tools let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop.
-- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) behind one `<script>` tag, no provisioning, **no secrets in the browser**. The backend is off per canvas until you switch it on; stay fully static when you do not need it.
+- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) plus an authoring capability behind one `<script>` tag, no provisioning, **no secrets in the browser**. Authoring lets signed-in viewers create and manage canvases as themselves. The backend and authoring are off per canvas until you switch them on; stay fully static when you do not need them.
 - **The whole lifecycle is scriptable.** Create, deploy (including a content-addressed staged upload that sends only changed blobs), read back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
 - **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so a re-deploy writes only what changed.
 - **Roles on the people list.** Anyone on a canvas's people list, a person or a whole team, is a **viewer** or an **editor**. Editors manage the canvas as fully as the owner (content, deploys, settings, sharing, the people list); only deleting, transferring, and the guest-AI opt-in stay with the owner. Ownership moves in one step to an existing editor, and an admin can reassign a departed owner's canvases. Two editors on the same file get a named conflict, never a silent overwrite.
@@ -81,7 +81,7 @@ Limits: 100 MB per canvas, 25 MB per file, 2 000 files; the last 10 versions are
 
 ---
 
-## Backend in five primitives
+## Backend primitives + authoring
 
 Switch on **Backend** in the canvas's Backend tab (off by default; KV, files, AI, and realtime each have their own toggle, and identity is on whenever the backend is), then add one tag. No build step, no keys, no config:
 
@@ -100,15 +100,16 @@ for await (const delta of canvasdrop.ai.stream(messages, { model })) out.textCon
 const ch = canvasdrop.realtime.channel("room"); ch.subscribe(render); ch.publish("cursor", { x, y });
 ```
 
-| Primitive | What it gives a canvas |
-|-----------|------------------------|
+| Capability | What it gives a canvas |
+|------------|------------------------|
 | **KV** | Shared (`kv.*`) and per-viewer (`kv.user.*`) key/value with `get`, `set`, `delete`, `list`, and atomic `increment`. |
 | **Files** | Per-canvas `upload`, `list`, `delete`, and `url`; served as inert bytes. |
 | **AI** | A server-side proxy to the provider (Anthropic by default) with streaming, a model allowlist, and metered per-user and per-canvas quotas. The provider key never leaves the server. Off until a key is configured (`CANVAS_DROP_AI_API_KEY`, or set in the admin panel). |
 | **Identity** | `me()`: id, email, name, avatar, and `kind` (`member` or `guest`), resolved from org auth, never the client. |
 | **Realtime** | Ephemeral publish/subscribe plus presence per canvas over one WebSocket. Revoking a share drops the socket. |
+| **Authoring** | `canvasdrop.canvases.publish`, `update`, `list`, and `revoke`: signed-in viewers create and manage canvases as themselves. Off by default both instance-wide and per canvas. |
 
-Public-link canvases are static-only: anonymous visitors get no primitives. The full, agent-optimized contract is served at **`{base}/llms.txt`**; the readable reference is [`docs/sdk.md`](docs/sdk.md) and the per-primitive pages under [`docs/site/sdk/`](docs/site/sdk/).
+Public-link canvases are static-only: anonymous visitors get no primitives or authoring. The full, agent-optimized contract is served at **`{base}/llms.txt`**; the readable reference is [`docs/sdk.md`](docs/sdk.md), with the [authoring reference](docs/site/sdk/authoring.md) and per-capability pages under [`docs/site/sdk/`](docs/site/sdk/).
 
 ---
 

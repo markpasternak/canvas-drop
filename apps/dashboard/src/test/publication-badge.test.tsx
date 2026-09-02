@@ -16,11 +16,11 @@ describe("PublicationBadge", () => {
 });
 
 describe("VisibilityBadge", () => {
-  it("renders Shared vs Private", () => {
+  it("renders Shared vs Restricted", () => {
     const { rerender } = render(<VisibilityBadge shared={true} />);
     expect(screen.getByText("Shared")).toBeInTheDocument();
     rerender(<VisibilityBadge shared={false} />);
-    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.getByText("Restricted")).toBeInTheDocument();
   });
 });
 

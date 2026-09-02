@@ -19,7 +19,7 @@ to reason about it per canvas — just honor the origin headers:
 | Response | `Cache-Control` | A shared CDN may… |
 |----------|-----------------|-------------------|
 | HTML of a **public** canvas (`public_link`, no password) | `public, max-age=0, s-maxage=<TTL>` | cache at the edge for the TTL; the browser still revalidates |
-| HTML of any **auth-gated** canvas (private / org / specific-people / password) | `private, no-cache` | **never** store it |
+| HTML of any **auth-gated** canvas (Restricted / Whole org / password) | `private, no-cache` | **never** store it |
 | Content-hashed asset (`app.a1b2c3d4.js`) of a **public** canvas | `public, max-age=1y, immutable` | cache forever |
 | Content-hashed asset of an **auth-gated** canvas | `private, max-age=1y, immutable` | **never** store it (the browser still caches) |
 
@@ -71,7 +71,7 @@ never bypass authentication.
 
 `CANVAS_DROP_PUBLIC_EDGE_CACHE_TTL` (default **300s**) is the `s-maxage` on public HTML.
 It is also, by definition, **how long a CDN can keep showing a canvas after its owner
-makes it private** — the cached public copy lives until it expires. The dashboard warns
+makes it Restricted** — the cached public copy lives until it expires. The dashboard warns
 owners about this in plain language whenever they restrict a public canvas (the warning
 quotes this exact TTL), and the same advisory is returned by the MCP `update_canvas` tool
 for agents.
@@ -90,7 +90,7 @@ One caveat the warning's TTL figure doesn't capture: it describes the **HTML pag
 Content-hashed sub-assets (`app.a1b2c3d4.js`) cached at the edge *while the canvas was
 public* were sent with `public, immutable` and a one-year max-age, so a CDN won't
 revalidate them until then. Their URLs include the content hash and aren't discoverable
-without the (now-private, uncached) HTML, so the practical exposure stays the HTML
+without the (now auth-gated, uncached) HTML, so the practical exposure stays the HTML
 window above — but a full hard cut-over should purge the whole canvas path, not just its
 root, at the CDN.
 

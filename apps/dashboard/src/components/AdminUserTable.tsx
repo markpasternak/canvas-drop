@@ -166,8 +166,8 @@ function RowActions({ person, meId }: { person: AdminPersonRow; meId: string | u
         destructive
         loading={publishPublic.isPending}
       >
-        Every canvas they've shared as a public link goes back to private immediately. You can
-        restore the permission later, but their links won't re-open on their own.
+        Every canvas they've shared as a public link becomes Restricted immediately. You can restore
+        the permission later, but their links won't re-open on their own.
       </ConfirmDialog>
     </>
   );

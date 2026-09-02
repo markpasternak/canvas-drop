@@ -1,6 +1,6 @@
-import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
+import { ArrowSquareOut, Buildings, Globe, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -109,7 +109,7 @@ export default function Share() {
   };
 
   // The gallery only ever lists Whole-org or Public-link canvases (mirrors the server's
-  // galleryVisibilityFilters). A Private OR Specific-people canvas can never appear, so
+  // galleryVisibilityFilters). A Restricted canvas can never appear, so
   // don't offer the toggle for it — explain instead of letting it save a no-op (plan 002
   // review fix; `canvas.shared` was too loose — it let specific_people through).
   const galleryEligible = canvas.access === "whole_org" || canvas.access === "public_link";
@@ -621,40 +621,42 @@ function AccessLadder({
       (!r.orgGated || allowOrg || choice === r.value),
   );
   return (
-    <fieldset className="space-y-2">
+    <fieldset className="grid gap-3 md:grid-cols-3">
       <legend className="sr-only">General access — who else can open this canvas</legend>
       {rungs.map((r) => {
         // A Personal canvas can't be shared org-wide — disable the "Whole org" rung + explain,
         // rather than letting the click bounce off the server's 409 with no feedback.
         const disabled = r.orgGated && orgRungDisabled && choice !== r.value;
         const selected = choice === r.value;
+        const Icon =
+          r.value === "restricted" ? LockKey : r.value === "whole_org" ? Buildings : Globe;
         return (
-          <Fragment key={r.value}>
-            <label
-              className={`flex items-start gap-3 rounded-lg border border-border p-3 ${
-                disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
-              } ${selected ? "border-accent bg-surface-sunken" : ""}`}
-            >
-              <input
-                type="radio"
-                name="access-rung"
-                className="mt-1"
-                checked={selected}
-                disabled={disabled}
-                onChange={() => onChange(r.value)}
-              />
-              <span>
-                <span className="block text-sm font-semibold text-fg">{r.label}</span>
-                <span className="block text-xs text-muted">
-                  {disabled
-                    ? "This canvas is Personal — only a canvas in a workspace can be shared with your whole org."
-                    : r.value === "restricted"
-                      ? restrictedHint
-                      : r.hint}
-                </span>
+          <label
+            key={r.value}
+            className={`flex min-h-32 items-start gap-3 rounded-lg border border-border p-4 transition-colors ${
+              disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer hover:bg-surface-hover"
+            } ${selected ? "border-accent bg-surface-sunken" : "bg-surface"}`}
+          >
+            <input
+              type="radio"
+              name="access-rung"
+              className="mt-1"
+              checked={selected}
+              disabled={disabled}
+              onChange={() => onChange(r.value)}
+            />
+            <Icon className="mt-0.5 shrink-0 text-muted" size={20} aria-hidden />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-fg">{r.label}</span>
+              <span className="mt-1 block text-xs leading-relaxed text-muted">
+                {disabled
+                  ? "This canvas is Personal — only a canvas in a workspace can be shared with your whole org."
+                  : r.value === "restricted"
+                    ? restrictedHint
+                    : r.hint}
               </span>
-            </label>
-          </Fragment>
+            </span>
+          </label>
         );
       })}
       {choice === "public_link" && (

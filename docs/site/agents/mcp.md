@@ -31,7 +31,7 @@ get_canvas_file  { "id": "<id>", "path": "index.html" }
                  -> { version, path, size, mime, hash, encoding: "utf8", content }
 ```
 
-The canvas is live after the third call. A new canvas starts on the `private` rung, so
+The canvas is live after the third call. A new canvas starts Restricted (the `private` API value), so
 its URL serves content only to you until you widen access with `update_canvas`.
 
 ### Sign-in (OAuth 2.1)

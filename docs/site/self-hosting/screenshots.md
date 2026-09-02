@@ -23,9 +23,9 @@ same image can back additional surfaces (e.g. dashboard thumbnails) without re-c
   and is reused across captures (a fresh, isolated browser context per job, recycled
   periodically). Jobs are drained from a small database queue one at a time by default
   (`CANVAS_DROP_SCREENSHOTS_CONCURRENCY`), so a burst of publishes just queues up.
-- **Private by default.** Previews are stored privately and served through an
+- **Access-gated by default.** Previews are stored privately and served through an
   **access-gated** route: a canvas's preview is only served to someone already allowed
-  to see that canvas. Private/gated canvas previews are **never** exposed publicly — a
+  to see that canvas. Restricted and otherwise gated canvas previews are **never** exposed publicly — a
   per-canvas OG image is emitted only for `public_link` canvases.
 - **Capture is sandboxed.** While a canvas is being captured, its backend primitives
   (AI, realtime, network) are neutered — a capture makes no AI spend and no outbound

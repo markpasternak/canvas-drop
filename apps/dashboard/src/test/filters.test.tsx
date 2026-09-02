@@ -6,7 +6,7 @@ import { type FilterOption, FilterSelect } from "../components/Filters.js";
 
 const OPTIONS: FilterOption[] = [
   { value: "all", label: "All access" },
-  { value: "private", label: "Private" },
+  { value: "restricted", label: "Restricted" },
   { value: "public", label: "Public" },
 ];
 
@@ -42,8 +42,8 @@ describe("FilterSelect", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
-    expect(onChange).toHaveBeenCalledWith("private");
-    expect(trigger).toHaveTextContent("Private");
+    expect(onChange).toHaveBeenCalledWith("restricted");
+    expect(trigger).toHaveTextContent("Restricted");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 

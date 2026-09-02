@@ -133,7 +133,7 @@ Working notes:
 - Typical flow: `create_canvas`, deploy, verify. `create_canvas` returns the canvas
   view, the one-time `apiKey`, and a `deploy` block (`apiBase`, `zipUpload`,
   `staged.begin` / `stageBlob` / `finalize`, `readback`, and a ready-to-run `curl`
-  with the key filled in). A new canvas is empty and `private`; its URL serves
+  with the key filled in). A new canvas is empty and Restricted (`private` in the API); its URL serves
   content only after a deploy.
 - Prefer `curl` for bytes. `deploy_canvas` takes exactly one of `zipBase64` or
   `files: [{path, content, encoding?}]` (`utf8` default, or `base64`) and, like

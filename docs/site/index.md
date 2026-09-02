@@ -78,7 +78,7 @@ provider (Dex), Postgres, and the app in real `proxy` auth mode at
 - Secrets stay server-side. AI provider keys and deploy keys never reach the
   browser.
 - The backend is off by default; each primitive is a per-canvas opt-in.
-- Every canvas starts Private. Only its owner or an editor widens access, and
+- Every canvas starts Restricted. Only its owner or an editor widens access, and
   Public link is gated by an instance switch plus a per-account grant on the
   owner.
 - Your infrastructure, your data. No telemetry, no phone-home.

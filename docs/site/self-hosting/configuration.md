@@ -358,7 +358,7 @@ The share policy (the last three rows) is env-only.
 | `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` | All-time cap per viewer. **Runtime-editable.** |
 | `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` | CSV of `access` values a publish may request (`specific_people` is a legacy alias of `private`). `public_link` also covers the SDK's `access: "password"`. |
 | `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` | Max share expiry in days; `0` = no cap. |
-| `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` | boolean. Require an expiry on shared rungs. |
+| `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` | boolean. Require an expiry for **Whole org** and **Public link** authoring publishes. Restricted values (`private`, `specific_people`, `team`) never require one. |
 
 ## Email transport
 
@@ -403,7 +403,7 @@ personal-team adds, canvas Add person, and admin sign-in permits.
 | `invites.allowMemberNewEmails` | `false` | Let a non-admin member add a brand-new external email. Off = only admins can permit new emails; members can add people who can already sign in. |
 | `invites.maxPerActorPerHour` | `20` | Add-person actions per actor per hour (admins get a higher allowance). |
 | `invites.pendingCap` | `50` | Max unconsumed pending sign-ins one actor may hold. |
-| `access.publicLinksEnabled` | `true` | Instance-wide switch for the Public link rung. Off denies new public-link publishes and returns existing public-link canvases to private. |
+| `access.publicLinksEnabled` | `true` | Instance-wide switch for the Public link rung. Off denies new public-link publishes and returns existing public-link canvases to **Restricted**. |
 
 Adding a brand-new person to a team or canvas sends them the sign-in invitation, gated only by
 the master switch and the mailer; existing team members are not re-notified.

@@ -257,17 +257,17 @@ the acting admin content access. Both write an audit row (`canvas_transfer`,
 `canvas_reassign_owner`) and revalidate the canvas's live realtime sockets.
 
 **Public links are doubly gated.** Admin → Configuration → `access.publicLinksEnabled`
-(default on) is the instance switch; turning it off sweeps every public-link canvas back
-to private. Each owner also needs the publish-public capability, granted and revoked per
+(default on) is the instance switch; turning it off makes every public-link canvas
+Restricted. Each owner also needs the publish-public capability, granted and revoked per
 user under Admin → People; revoking it sweeps that owner's public-link canvases back to
-private. Both gates are also re-checked on every request, so a canvas whose owner lost
+Restricted. Both gates are also re-checked on every request, so a canvas whose owner lost
 the grant is unreachable even before the sweep lands. A public-link visitor gets files
 only: every runtime API call is refused with `403 {"code":"STATIC_ONLY"}`, including for
 signed-in members who are not the owner or an editor. In `proxy` mode a public link
 works only for requests your proxy lets reach the app.
 
 **Admins have no back door.** For a canvas they do not own, an admin is an ordinary
-member: a private canvas returns `404`, a password prompts them, and they cannot open
+member: a Restricted canvas returns `404`, a password prompts them, and they cannot open
 the editor or change settings. Cross-owner admin power lives on the dedicated admin
 routes: the all-canvases list, disable / enable / restore, reassigning the owner when
 someone leaves, and gallery featuring. It never extends to canvas content, the runtime
@@ -382,13 +382,13 @@ Nothing about access is cached. Concretely:
 - Regenerating a slug invalidates the old URL and drops every live socket so clients
   reconnect under the new one. Regenerating a key invalidates the old key at once.
 - Changing a canvas password invalidates every outstanding gate grant.
-- Turning off public links, or revoking one owner's publish-public capability, returns
-  the affected canvases to private immediately.
+- Turning off public links, or revoking one owner's publish-public capability, makes
+  the affected canvases Restricted immediately.
 
 ## Reducing canvas XSS blast radius
 
 Subdomain mode contains the blast radius of a compromised canvas to that canvas's
-origin; private-by-default limits who can be exposed to it. Every response carries
+origin; Restricted-by-default access limits who can be exposed to it. Every response carries
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and
 `Cross-Origin-Opener-Policy: same-origin`. Canvas content adds a
 `Content-Security-Policy` of `frame-ancestors 'self' {base origin}` in subdomain mode
