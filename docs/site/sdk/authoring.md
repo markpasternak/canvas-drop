@@ -60,7 +60,7 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | `discoverability` | `"link_only" \| "listed"` | whether eligible org/team shares appear in discovery surfaces |
 | `galleryTemplatable` | `boolean` | whether gallery viewers may use the canvas as a template |
 | `viewerRole` | `"owner" \| "editor" \| "admin"` | why the current viewer may manage this record |
-| `audienceSummary` | `{ count: number \| null; names: string[] }` | safe summary of specific people or team grants |
+| `audienceSummary` | `{ count: number \| null; names: string[] }` | safe summary of the viewer people and teams on the list (`count` = both; `names` = the teams) |
 | `status` | `"live" \| "expired" \| "revoked" \| "private"` | derived; precedence `revoked` › `expired` › `private` › `live` |
 | `createdAt` / `updatedAt` | `number` | unix ms |
 | `expiresAt` / `revokedAt` | `number \| null` | share expiry; when it was revoked |
@@ -79,7 +79,7 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | `bundle` | `Blob \| ArrayBuffer` | required — the static-site **zip** |
 | `slug` | `string?` | omit for a readable-random slug |
 | `tags` | `string[]?` | |
-| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | audience; defaults to `"private"`; `"password"` remains a compatibility shorthand for public link + password |
+| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | General access; defaults to `"private"` (Restricted: the people-and-teams list only). `"specific_people"` is a legacy alias of `"private"`; `"password"` remains a compatibility shorthand for public link + password |
 | `password` | `string?` | optional extra lock on any audience; required with the `"password"` shorthand |
 | `expiresAt` | `number?` | unix ms; the operator may require an expiry and cap how far out it may be |
 | `metadata` | `Record<string, unknown>?` | free-form structured state (`sourceApp`/`sourceKind`/`theme`/…), bounded in size |
@@ -148,7 +148,7 @@ await canvasdrop.canvases.list({ sourceKind: "roadmap-share", tags: ["q3"] });
   administrator may still update or revoke a known share id through the explicit admin
   allowance; an unauthorized id reads as **not-found**.
 - `expiresAt` uses the same share-expiry mechanism as the dashboard, so it only means
-  something on a shareable rung (`public_link` / `password` / `whole_org` / `specific_people`).
+  something for people other than the owner and editors.
 
 ## Errors
 

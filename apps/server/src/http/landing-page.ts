@@ -100,7 +100,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "Shared exactly as far as you mean",
-    body: "One access rung per canvas: Private, Specific people, Team, Whole org, or Public link. Add a password or an expiry. Make a colleague or a team an editor and they publish, roll back, and change sharing with you; you stay the owner. Revoke anytime and the next request is refused.",
+    body: "Name people and teams as viewers or editors, then pick who else may open it: Restricted, Whole org, or a Public link. Add a password or an expiry. An editor publishes, rolls back, and changes sharing with you; you stay the owner. Revoke anytime and the next request is refused.",
   },
   {
     title: "Versions you can roll back",
@@ -110,15 +110,15 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
 
 /** The per-canvas access ladder (the sharing model, plan 003). Rendered as a marketing
  *  visual. The landing is the widest-reaching surface for the team + invite story. Order
- *  matches the product's rung order (private → specific_people → team → whole_org → public_link). */
+ *  reads top-down the way the Share tab does: the people-and-teams list first (it always
+ *  applies), then the three General-access choices (private → whole_org → public_link). */
 const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
-  { rung: "Private", who: "Only you and the editors you name." },
-  { rung: "Specific people", who: "A named few, added by email, as viewers or editors." },
   {
-    rung: "Team",
-    who: "A group you create once and grant on as many canvases as you like.",
+    rung: "People & teams",
+    who: "Name a colleague by email, or a team you create once and grant anywhere — each a viewer or an editor. Whatever you pick below, they're in.",
     feature: true,
   },
+  { rung: "Restricted", who: "Nobody else. With no one added, that's just you." },
   { rung: "Whole org", who: "Anyone signed in to your organization." },
   {
     rung: "Public link",
@@ -164,7 +164,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-sharing",
     label: "Share link & access",
     caption:
-      "Copy the live URL, choose who can open it, add a password or an expiry, and decide whether to keep Team and Whole-org shares link-only or list them in Shared.",
+      "Copy the live URL, choose who else can open it — Restricted, Whole org, or Public link — and add a password or an expiry. People and teams you add always get in.",
   },
   {
     img: "tour-people",
@@ -471,7 +471,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .value:nth-child(3) .num { color: oklch(0.5 0.14 168); }
 .value p { margin: .25rem 0 0; color: var(--muted); }
 
-/* sharing ladder: the access model as an editorial list, the Team rung accented */
+/* sharing ladder: the access model as an editorial list, the people-and-teams entry accented */
 .ladder { display: grid; gap: .55rem; max-width: 62ch; margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 .rung { display: grid; grid-template-columns: 1.6rem 1fr; gap: 1rem; align-items: start; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
 .rung .r-step { font-family: var(--font-serif); font-weight: 500; font-size: 1.5rem; line-height: 1.1; color: var(--muted); text-align: right; }
@@ -756,7 +756,7 @@ ${values}
     <div class="wrap">
       <p class="kicker reveal">Sharing</p>
       <h2 class="s-head reveal">An access ladder that fits how people actually share.</h2>
-      <p class="s-sub reveal">One rung per canvas, from only you to anyone with the link. Teams sit in the middle: create one, grant it anywhere. Team and Whole-org shares can stay link-only, or appear in Shared for the people who already have access.</p>
+      <p class="s-sub reveal">Two controls, the way you already share documents: the people and teams you name always get in, and General access says who else does — from nobody to anyone with the link. Teams you create once can be granted anywhere.</p>
       <div class="ladder reveal">
 ${LADDER.map(ladderRung).join("\n")}
       </div>

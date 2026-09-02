@@ -37,7 +37,8 @@ Today the Share tab has two places that both decide who can open a canvas: the p
 4. **Team grants are managed only in the list.** A rung change never deletes team grants. The legacy `teamIds` field on the settings routes keeps working as "replace the set of viewer-team grants" (same org and membership checks), and `access: "team"` without `teamIds` is accepted rather than refused with `TEAM_REQUIRED`.
 5. **`SHARE_REQUIRES_PUBLISH` narrows to the two open rungs.** Moving an unpublished canvas to Whole org or Public link is still refused; moving between the restricted family is not (nothing opens).
 6. **Whole org also admits listed guests.** A guest (outside-org email) on the list opens the canvas at `whole_org` too, because the list always applies. Public link admits everyone already.
-7. **Shared discovery becomes rung-agnostic.** The "Shared" list shows every canvas the viewer holds a viewer grant on (direct or via a viewer team) regardless of rung; team-page discovery no longer requires the `team` rung.
+7. **Shared discovery becomes rung-agnostic.** The "Shared" list shows every canvas the viewer holds a viewer grant on (direct or via a viewer team) regardless of rung, with no discoverability opt-in for team grants (they enumerate like direct grants). `discoverability` keeps its meaning for Whole org only, where the Share tab's toggle becomes **List for your org**.
+8. **The list also applies at Public link.** A listed person or team member gets full (not static-only) access on a `public_link` canvas; the anonymous public stays static-only.
 
 ### Actors
 
@@ -52,11 +53,11 @@ Today the Share tab has two places that both decide who can open a canvas: the p
 ### Requirements
 
 **Server**
-- R1. `decideCanvasAccess` admits a principal with a direct viewer/editor grant, or membership in a granted team, at `private`, `specific_people`, `team` and `whole_org`. `resolveAccessContext` computes `isAllowed` and `teamMatch` for every rung except `public_link`.
+- R1. `decideCanvasAccess` admits a principal with a direct viewer/editor grant, or membership in a granted team, at every rung — `public_link` included, where a listed person gets full rather than static-only access. `resolveAccessContext` computes `isAllowed` and `teamMatch` at every rung for any principal that can be listed (a member, or the canvas's own guest).
 - R2. The realtime hub's revalidation and gated-drop paths reach the same verdicts as R1 (shared predicate, not a parallel switch).
-- R3. `listDirectSharedWithUser` drops the `access = specific_people` filter; team discovery (`liveTeamCanvas`) drops the `access === "team"` requirement. Existing discoverability semantics for team pages are preserved unchanged otherwise.
+- R3. `listDirectSharedWithUser` drops the `access = specific_people` filter; team discovery (`liveTeamCanvas`) drops both the `access === "team"` requirement and the discoverability gate, so team grants enumerate like direct grants. `discoverability` applies to `whole_org` only (settings-update pins every other rung to `link_only`).
 - R4. `settings-update`: `SHARE_REQUIRES_PUBLISH` only when the target rung is `whole_org` or `public_link` and the canvas is unpublished.
-- R5. Management and MCP settings routes: a rung change never calls `setCanvasTeams(clear)`; `teamIds` (when sent) replaces the viewer-team grant set with the existing `canGrantTeam` checks; `TEAM_REQUIRED` is only returned for an explicit empty `teamIds` array together with `access: "team"` (legacy shape), never for a bare rung change.
+- R5. Management, MCP and authoring settings routes: a rung change never clears team grants; `teamIds` (when sent) replaces the viewer-team grant set with the existing `canGrantTeam` checks; an explicit empty `teamIds` array is refused with `TEAM_REQUIRED` in any shape (removals go through the people-list revoke path), and a bare rung change never returns it.
 - R6. If any runtime capability check (guest AI cap, `me()` scope) is keyed on the `specific_people` rung rather than on the grant, key it on the grant. Verified at U4 start; today's guest-scope logic is expected to be grant-keyed already.
 - R7. Admin canvas filters accept `restricted` as an alias for the family; per-rung admin stats group the family under `restricted` while still emitting the raw counts.
 
@@ -106,7 +107,7 @@ Today the Share tab has two places that both decide who can open a canvas: the p
 
 ### Open Questions
 
-None blocking. Two verify-at-start items are recorded under Assumptions (guest-AI keying; the team discoverability flag).
+None. Both verify-at-start items were settled during the round: guest AI is keyed on the principal kind (A1), and team discoverability folded into "always listed" (A2).
 
 ### How This Work Fits Together
 
@@ -152,13 +153,15 @@ request ─▶ owner? ─▶ editorMatch? ─▶ capture ─▶ guest scope ─�
 ### Assumptions
 
 - A1. Guest scope (the "capture → guest scope" step) is keyed on the grant, not the rung. **Verify at U1 start**; if rung-keyed, fix in U1.
-- A2. Team-page discoverability is a flag on the team grant / canvas independent of rung. **Verify at U3 start**; preserve its semantics, only drop the rung condition.
+- A2 (resolved). `discoverability` is a per-canvas flag the Share tab exposed for `team` and `whole_org` ("List for people with access"). Under the fold, team grants enumerate in Shared like direct grants and the toggle remains for Whole org only ("List for your org"); a team share that had stayed `link_only` becomes listed for its members — a discoverability widening within people who already had access, noted in the PR body.
 - A3. `CanvasListItem` does not carry grant counts, so the Restricted secondary label is static ("People and teams you add"). If a count is available, prefer "Only you" when zero.
 
 ### System-Wide Impact
 
 - **Access widening (intended):** existing canvases at `private` with stale viewer rows (added before this round and never "activated" by a rung flip) become openable by those viewers. This is the feature; it is called out in the PR body and the solutions entry.
 - **Access narrowing:** none. Whole org / Public link unchanged for unlisted users.
+- **Org departure:** an editor who leaves the org loses management immediately (the editor predicate is org-scoped) but keeps VIEW access through their lingering direct row, like any invited outsider, until the owner removes the row. Previously the `private` rung masked the row; the demoted-editor and org-departure scenarios were rewritten to pin this.
+- **Demotion:** a demoted editor keeps a viewer socket (the list still admits them); removal drops it.
 - **Hub:** live connections re-evaluated on rung change with the same predicate; no new message types.
 - **MCP parity:** no new tools; `update_canvas` / `list_shared_canvases` descriptions change; the inventory/role-matrix tests are unaffected.
 - **Admin:** filter alias only.

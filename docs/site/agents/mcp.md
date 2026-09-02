@@ -170,7 +170,7 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `specific_people` \| `team` \| `whole_org` \| `public_link`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds?`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
+| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds?`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
 | `set_capabilities` | `id`, `backendEnabled?`, `kv?`, `files?`, `ai?`, `realtime?`, `authoring?` (all booleans) | View + `owner`, `role`. `backendEnabled` is the master switch; the others take effect only when it is on. `authoring` also needs the instance switch on. Omitted fields are unchanged; switching a capability off drops sockets that lost access. |
 | `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
 | `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; the string ≤40 MiB, decoded ≤25 MiB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, a custom cover is cleared back to `auto` (an auto-captured screenshot is left alone). `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. For the auto/off toggle use `update_canvas` `previewMode`. |
@@ -178,24 +178,26 @@ Minimum role: editor.
 
 Notes on `update_canvas`:
 
-- Any rung above `private` needs a published canvas: active with a live version
-  (`SHARE_REQUIRES_PUBLISH`). `public_link` also needs the instance switch on
+- The people-and-teams list (`grant_access` / `revoke_access`) applies at every `access`
+  value; `access` only says who else may open the canvas. `whole_org` and `public_link`
+  need a published canvas: active with a live version (`SHARE_REQUIRES_PUBLISH`). `public_link` also needs the instance switch on
   (`PUBLIC_LINKS_DISABLED`) and an owner whose account may publish public links
   (`PUBLIC_NOT_ALLOWED` to the owner, `PUBLIC_LINK_OWNER_GATED` to an editor). When an
   org boundary is configured, `whole_org` needs a canvas homed in an org
   (`ORG_REQUIRED`); pass `orgId` at `create_canvas`.
-- To share with teams, set `access: "team"` and `teamIds` with at least one team you
-  belong to. Personal teams fit any canvas you own; org teams must match the canvas's org
-  (`TEAM_REQUIRED`, `TEAM_FORBIDDEN`). Leaving the `team` rung clears the grants.
-- `discoverability` controls only whether a Team or Whole-org canvas appears in Shared;
-  it never widens URL access. Setting `galleryListed: true` on a Whole-org canvas also
+- To share with a team, `grant_access` it with `teamId` (and a `role`). The legacy
+  `teamIds` field replaces the viewer-team grants on the list (at least one team you
+  belong to; personal teams fit any canvas you own, org teams must match the canvas's org:
+  `TEAM_REQUIRED`, `TEAM_FORBIDDEN`). Changing `access` never touches team grants.
+- `discoverability` controls only whether a Whole-org canvas appears in Shared for the
+  whole org; people and teams on the list always see it there. It never widens URL access. Setting `galleryListed: true` on a Whole-org canvas also
   sets `discoverability: "listed"`; passing `link_only` in the same call is refused
   (`DISCOVERY_CONFLICT`).
 - Gallery listing needs a shared, published, password-free canvas on `public_link` or a
   listed `whole_org` (`NOT_SHARED`, `NOT_PUBLISHED`, `PASSWORD_PROTECTED`,
   `NOT_GALLERY_ELIGIBLE`). `galleryTemplatable: true` needs the canvas listed first
   (`NOT_LISTED`).
-- The Specific-people list itself is managed with `grant_access` and `revoke_access`.
+- The people-and-teams list itself is managed with `grant_access`, `set_access_role`, and `revoke_access`.
 
 ### Sharing and people
 

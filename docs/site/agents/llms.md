@@ -256,15 +256,17 @@ One access rung per canvas, set on the Share tab or with `update_canvas.access`.
 Access is evaluated on every request, so a revoke, an expiry, or a role change
 takes effect on the next request; a canvas you may not open reads as `404`.
 
-| Rung | Who can open it |
+The people-and-teams list (`grant_access` / `revoke_access`) always applies: a viewer or
+editor row, or membership of a granted team, opens the canvas at every `access` value.
+`access` (General access) says who else can:
+
+| `access` | Who else can open it |
 |---|---|
-| `private` | the owner and editors |
-| `specific_people` | people granted directly on the people list: existing users at once, new emails pending until their first verified sign-in |
-| `team` | members of the granted teams (`teamIds`); `discoverability: "listed"` shows it in Shared |
-| `whole_org` | any signed-in org member; `listed` shows it in Shared and makes it gallery-eligible |
+| `private` | nobody beyond the owner, the editors, and the list (**Restricted**). `specific_people` and `team` are legacy aliases of this value — accepted, stored, treated identically |
+| `whole_org` | any signed-in org member; `discoverability: "listed"` shows it in Shared for them and makes it gallery-eligible |
 | `public_link` | anyone with the link, while the instance switch is on and the owner may publish publicly (`canPublishPublic`); static only for everyone except the owner and editors: every primitive answers `403 STATIC_ONLY` |
 
-An editor grant, direct or through an editor-role team, opens every rung. Editors
+An editor grant, direct or through an editor-role team, also manages the canvas. Editors
 skip the password gate and the share expiry. A password lock answers
 `403 PASSWORD_REQUIRED` on the runtime API until the viewer passes the gate; a
 share expiry (`sharedExpiresAt`) turns other viewers away with

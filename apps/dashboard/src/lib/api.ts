@@ -1182,8 +1182,8 @@ export const api = {
       `/api/canvases/${id}/allowlist`,
       jsonBody(role ? { email, role } : { email }),
     ),
-  /** Grant a team with a role (editor-roles plan): a viewer team keeps the Team rung's
-   *  semantics; an editor team makes every live member an editor at any rung. */
+  /** Grant a team with a role (editor-roles plan): a viewer team opens the canvas for every
+   *  live member at any General-access choice; an editor team makes each of them an editor. */
   addAllowlistTeam: (id: string, teamId: string, role: AccessRole) =>
     request<{ ok: true; status: string; role: AccessRole }>(
       `/api/canvases/${id}/allowlist`,

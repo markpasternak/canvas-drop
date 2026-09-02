@@ -5,17 +5,17 @@ and "everyone." Share a canvas with a team from its **Share** tab, and every mem
 can open and use it (full backend, like a member). Manage teams on the **Teams**
 page in the dashboard, or over [MCP](/docs/agents/mcp).
 
-Teams sit on the middle rung of the per-canvas **access ladder**:
+A team is one kind of entry on a canvas's **Share with people and teams** list, next to
+individual people. Whatever is on that list can open the canvas at every **General access**
+choice:
 
-| Rung | Who can open it |
+| General access | Who else can open it |
 | --- | --- |
-| **Private** | Just you, the owner. |
-| **Specific people** | A named few you add by email. |
-| **Team** | Members of the teams you grant — **a personal team, or a subset of your org.** |
+| **Restricted** | Nobody beyond the owner, the editors, and the people and teams on the list. |
 | **Whole org** | Anyone signed in to your organization. |
 | **Public link** | Anyone with the URL — static files only while the instance switch is on and the owner account has not been revoked. |
 
-See [Sharing & access](/docs/authoring/sharing) for the full ladder and the
+See [Sharing & access](/docs/authoring/sharing) for the full model and the
 password / expiry modifiers.
 
 ## Personal vs org teams
@@ -70,17 +70,15 @@ unshares every canvas shared with it, but the canvases themselves are untouched.
 
 ## Sharing a canvas with a team
 
-On a canvas's **Share** tab, choose the **Team** rung and pick one or more teams you
-belong to. The picker labels each team **Personal** or by its **org**, so you can see
-how far the share reaches. A team grant is independent of your own membership
-afterward: if you later leave the team, the canvas stays shared with it until you
-change the rung.
+On a canvas's **Share** tab, under **Share with people and teams**, pick a team you belong
+to and add it as **Viewer** (or **Editor**). The list labels each team **Personal** or by
+its **org**, so you can see how far the share reaches. A team grant is independent of your
+own membership afterward: if you later leave the team, the canvas stays shared with it
+until you remove it from the list. Changing **General access** never touches it.
 
-Team canvases are **strictly team-scoped** — they never appear in the org-wide
-gallery. They are link-only by default: team members can open the URL, but the
-canvas does not appear in discovery. On the canvas **Share** tab, turn on
-**List for people with access** when members should find it under **Shared** in the
-dashboard (or through `list_shared_canvases` over MCP).
+Members can open the canvas at once and find it under **Shared** in the dashboard (or
+through `list_shared_canvases` over MCP) — there is no listing switch to turn on. A canvas
+shared only with people and teams never appears in the org-wide gallery.
 
 ## Editor teams
 
@@ -89,7 +87,7 @@ A team can also be granted the **editor** role on a canvas, from the canvas's
 then manages that canvas like the owner — content, publishing, settings, sharing —
 except deleting or transferring it; membership changes apply on the next request, and
 for an org team the live org membership is re-checked as well. A team added as
-**viewers** only applies on the Team rung. See
+**viewers** opens the canvas for its members at every General-access choice. See
 [Roles: viewers and editors](/docs/authoring/sharing#roles-viewers-and-editors).
 
 ## Over MCP (agents)
@@ -99,5 +97,6 @@ same service the dashboard uses: `create_team` (omit `orgId` for a personal team
 `add_team_member` (returns `granted` or `pending`), `cancel_team_invite` (take back
 a pending invite by its roster `id`), `list_team_members` (members +
 pending), `grant_access` (with `teamId` and a `role` of `viewer` or `editor`), `set_access_role`,
-`list_shared_canvases`, and `update_canvas` with `access: "team"` + `teamIds`. Add `discoverability: "listed"` when a team share should
-show in Shared; leave it unset or set `discoverability: "link_only"` for URL-only access.
+`revoke_access`, and `list_shared_canvases`. The legacy `update_canvas` fields `access: "team"`
+(an alias of `private`) and `teamIds` (replace the viewer-team grants) are still accepted;
+team members see a shared canvas in Shared without any `discoverability` setting.

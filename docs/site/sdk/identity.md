@@ -77,7 +77,7 @@ it; the server already knows it.
 
 ### Legacy guest sessions
 
-People you add at the Specific people rung sign in through the org's normal
+People you add under Share with people and teams sign in through the org's normal
 login and arrive as `"member"`, so on a current instance that is the only
 `kind` you will see. `"guest"` remains for guest sessions retained from older
 instances. A guest's `id` is namespaced `guest:<inviteId>` so it never collides

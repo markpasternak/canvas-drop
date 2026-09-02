@@ -1093,15 +1093,16 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     {
       description:
         "Update a canvas you own or edit (mirrors the dashboard Settings + Share tabs). All fields optional; " +
-        "omitted = unchanged. Set the access rung, a password (or null to clear), a share expiry, " +
+        "omitted = unchanged. Set General access, a password (or null to clear), a share expiry, " +
         "rename/redescribe, the SPA fallback, and gallery listing/metadata — the server enforces the " +
-        "preconditions (sharing/listing need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
-        "password un-lists from the gallery). The allowlist for `specific_people` is managed with " +
-        "grant_access / revoke_access. `discoverability` controls only whether Team/Whole-org " +
-        "canvases are findable in Shared (it never widens URL access). To share with one or more teams, set access='team' AND pass " +
-        "`teamIds` (the teams you belong to — see whoami.teams / list_teams); personal teams can be " +
-        "granted to any canvas you own, while org teams must match the canvas org. Switching off the team rung clears the grants. When " +
-        "restricting a previously-public canvas, the response may include a `warning` string (a " +
+        "preconditions (opening to the org or the public, and gallery listing, need a published canvas; public_link needs the instance switch on and no per-user revoke; a " +
+        "password un-lists from the gallery). The people-and-teams list (grant_access / set_access_role / revoke_access) ALWAYS applies, " +
+        "at every `access` value; `access` only says who else may open the canvas: private = Restricted (nobody else), whole_org, public_link. " +
+        "`specific_people` and `team` are accepted as legacy aliases of private. `discoverability` controls only whether a Whole-org " +
+        "canvas is findable in Shared by the whole org (people and teams on the list always see it; it never widens URL access). " +
+        "To share with a team, grant_access it with teamId; the legacy `teamIds` field replaces the viewer-team grants on the list " +
+        "(teams you belong to — see whoami.teams / list_teams; personal teams fit any canvas you own, org teams must match the canvas org). " +
+        "Changing `access` never touches team grants. When restricting a previously-public canvas, the response may include a `warning` string (a " +
         "plain-language CDN edge-cache staleness notice) — surface it to the user.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
@@ -1117,21 +1118,27 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           ),
         access: z
           .enum(["private", "specific_people", "team", "whole_org", "public_link"])
-          .optional(),
+          .optional()
+          .describe(
+            "General access — who can open the canvas BEYOND the people-and-teams list (which always applies): " +
+              "private = Restricted (nobody else), whole_org, public_link. specific_people and team are legacy " +
+              "aliases of private, accepted for compatibility.",
+          ),
         discoverability: z
           .enum(["link_only", "listed"])
           .optional()
           .describe(
-            "Listing policy for Team/Whole-org canvases: link_only = URL access only; listed = " +
-              "people who already have access can find it in Shared. Does not change who can open it.",
+            "Listing policy for a Whole-org canvas: link_only = URL access only; listed = every org member " +
+              "can find it in Shared (and it becomes gallery-eligible). People and teams on the list always " +
+              "see it in Shared. Does not change who can open it.",
           ),
         teamIds: z
           .array(z.string().min(1))
           .max(50)
           .optional()
           .describe(
-            "Teams to grant when access='team'. Personal teams can be granted to any canvas you own; " +
-              "org teams must match the canvas org. Required (≥1) when setting access='team'; ignored for other rungs.",
+            "Legacy: replaces the VIEWER-role team grants on the people-and-teams list (prefer grant_access with teamId). " +
+              "Personal teams can be granted to any canvas you own; org teams must match the canvas org. An empty array is refused.",
           ),
         password: z
           .string()
@@ -1440,9 +1447,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "existing user is granted now (`status: granted`; an existing entry's role is updated " +
         "when you pass one — `status: role_changed` — and never changed when you omit it); an " +
         "admissible new email becomes a pending sign-in grant (`status: pending`) that " +
-        "materializes after verified sign-in, carrying the role. A viewer grant takes effect " +
-        "on the `specific_people` / `team` rungs (set with update_canvas); an editor always has " +
-        "access. Available to the owner and editors.",
+        "materializes after verified sign-in, carrying the role. Every grant opens the canvas at once, " +
+        "whatever General access (update_canvas `access`) says; an editor also manages it. " +
+        "Available to the owner and editors.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().optional().describe("The person's email (or pass teamId)."),
@@ -1477,7 +1484,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "(`status: granted`); a brand-new email gets a sign-in invitation and reaches the canvas " +
         "on their first sign-in (`status: pending`). A brand-new EXTERNAL email is refused for a " +
         "non-admin unless the instance allows it (NOT_PERMITTED); RATE_LIMITED if you invite too " +
-        "many. The grant lands on the `specific_people` rung — set that with update_canvas.",
+        "many. The grant opens the canvas at once, whatever General access says.",
       inputSchema: {
         id: z.string().describe("The canvas id."),
         email: z.string().email().describe("The person's email."),
@@ -1826,9 +1833,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
     "list_shared_canvases",
     {
       description:
-        "List non-owned canvases discoverable to you in Shared: direct Specific-people grants, " +
-        "Team canvases whose owner opted into discoverability, and Whole-org canvases whose owner " +
-        "opted into discoverability. Excludes your own canvases, public links, expired shares, " +
+        "List non-owned canvases discoverable to you in Shared: canvases you are on the people-and-teams " +
+        "list of (directly, or through a team — at any General-access value), plus Whole-org canvases " +
+        "whose owner opted into discoverability. Excludes canvases you own or edit, expired shares, " +
         "and anything not live. Display-only; open via the returned url.",
       inputSchema: {
         query: z

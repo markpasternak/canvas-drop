@@ -122,10 +122,10 @@ after this one names the mechanism behind one of them.
 2. **No credential or canvas theft.** No user can read another user's session, canvas
    API key, or canvas content. Session tokens and API keys are stored only as SHA-256
    hashes; an API key is shown once; a session token rides only in an HttpOnly cookie.
-3. **No unauthorized access.** A canvas is reachable by its owner and its editors (people
-   or teams holding the editor role on its people list, resolved live on every request and
-   admitted on any rung), and otherwise only through the access rung the owner chose:
-   Specific people, Team, Whole org, or Public link. Admins get no special access to
+3. **No unauthorized access.** A canvas is reachable by its owner, by everyone on its
+   people-and-teams list (viewers and editors, people and teams, resolved live on every
+   request and admitted at every General-access choice), and otherwise only as widely as
+   the owner chose: Restricted (nobody else), Whole org, or Public link. Admins get no special access to
    canvases they do not own; cross-owner admin power is limited to the dedicated admin
    routes (list, disable/enable/restore, reassign owner). Anyone without a route in gets an
    opaque `404`; an editor attempting an owner-only act gets an explicit `403 OWNER_ONLY`.
@@ -225,19 +225,19 @@ each request, never cached on a session or an agent's token. Two roles manage a 
   A guest or anonymous visitor never holds a role.
 
 A principal with no role sees the management surface as `404 {"error":"not_found"}`.
-Viewers and everyone else are admitted, or not, by the rung:
+The people-and-teams list is consulted at every General-access choice; the choice itself
+decides who else is admitted:
 
-| Rung | Who is admitted | Password and expiry |
+| Who | Admitted when | Password and expiry |
 | --- | --- | --- |
-| Private | the owner and editors only | not applicable |
-| Specific people | signed-in principals on the canvas list: an existing user, or a pending email once that exact email has signed in through your configured auth | both apply |
-| Team | members of a granted team. A personal team admits by membership alone; an org team also requires the viewer to be a current member of that team's org, re-joined live on every request, so a stale team row cannot widen access | both apply |
+| A person on the list | always — an existing user by id, or a pending email once that exact email has signed in through your configured auth | both apply |
+| A member of a team on the list | always. A personal team admits by membership alone; an org team also requires the viewer to be a current member of that team's org, re-joined live on every request, so a stale team row cannot widen access | both apply |
+| Anyone else at Restricted (`private`, or its legacy aliases `specific_people` / `team`) | never | — |
 | Whole org | any signed-in member. When an org is named (below), members of the canvas's home org only | both apply |
 | Public link | anyone, static files only, while the instance-wide switch is on and the owner still holds the publish-public capability | both apply; an anonymous visitor reaches the password prompt |
 
-The owner and editors are admitted at every rung, never see the password prompt, and
-are unaffected by expiry. A canvas that admits no one at the current rung returns
-`404`. A password is checked with argon2id; a successful attempt sets an HttpOnly grant
+The owner and editors are admitted at every choice, never see the password prompt, and
+are unaffected by expiry. Anyone with no route in gets `404`. A password is checked with argon2id; a successful attempt sets an HttpOnly grant
 cookie (`__canvasdrop_gate`), HMAC-signed with `CANVAS_DROP_SESSION_SECRET` and bound to
 the canvas id and its password version, so changing the password invalidates every
 outstanding grant at once. In subdomain mode the grant is host-only; in path mode it is

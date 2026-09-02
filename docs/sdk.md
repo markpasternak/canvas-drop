@@ -295,7 +295,7 @@ made.
 ```js
 const share = await canvasdrop.canvases.publish({
   title: "Q3 plan",
-  access: "whole_org",             // "private" | "specific_people" | "whole_org" | "public_link" | "password"
+  access: "whole_org",             // "private" (Restricted) | "whole_org" | "public_link" | "password"; "specific_people" = legacy alias of "private"
   tags: ["plan"],
   metadata: { sourceApp: "planner", sourceKind: "doc" },
   bundle: zipBlob,                  // Blob | ArrayBuffer; a zip of the static files
@@ -340,9 +340,10 @@ AuthoredCanvas = {
 }
 ```
 
-`ShareAudience` is the persisted rung, `"private" | "specific_people" | "team"
-| "whole_org" | "public_link"` (a `"password"` request is stored as
-`public_link` with `hasPassword: true`).
+`ShareAudience` is the persisted General-access value, `"private" | "specific_people" | "team"
+| "whole_org" | "public_link"`; `"specific_people"` and `"team"` are legacy aliases of
+`"private"` (Restricted), and a `"password"` request is stored as `public_link` with
+`hasPassword: true`. The people-and-teams list applies at every value.
 
 Only org members can author; a legacy guest gets `NotAuthenticatedError`.
 Publishing is metered per viewer (`CANVAS_DROP_AUTHORING_USER_DAILY_MAX`,
