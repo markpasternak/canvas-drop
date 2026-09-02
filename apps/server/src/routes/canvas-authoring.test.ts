@@ -8,6 +8,7 @@ import type { DbClient } from "../db/factory.js";
 import { authoringUsageRepository } from "../db/repositories/authoring-usage.js";
 import { type CanvasesRepository, canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
+import { type TeamsRepository, teamsRepository } from "../db/repositories/teams.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
 import { makeTestDb } from "../db/testing.js";
@@ -121,7 +122,11 @@ function buildApi(
   client: DbClient,
   setup: Setup,
   config = ON,
-  opts: { publicLinksEnabled?: boolean; canvases?: CanvasesRepository } = {},
+  opts: {
+    publicLinksEnabled?: boolean;
+    canvases?: CanvasesRepository;
+    teams?: TeamsRepository;
+  } = {},
 ) {
   const { audit, events } = fakeAudit();
   const canvases = opts.canvases ?? canvasesRepository(client);
@@ -154,6 +159,7 @@ function buildApi(
       audit,
       engine,
       authoringUsage: authoringUsageRepository(client),
+      teams: opts.teams,
     }),
   );
   return { app, events, canvases };
@@ -297,7 +303,8 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     const backing = canvasesRepository(client);
     const faulty: CanvasesRepository = {
       ...backing,
-      updateSettings: (id, patch) => backing.updateSettings(id, { ...patch, access: undefined }),
+      updateSettingsAtomic: (id, patch, options) =>
+        backing.updateSettingsAtomic(id, { ...patch, access: undefined }, options),
     };
     const { app } = buildApi(client, asMember(owner.id), ON, { canvases: faulty });
 
@@ -339,7 +346,7 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     const { app, canvases } = buildApi(client, asMember(owner.id));
     const res = await publish(
       app,
-      publishBody({ title: "B", access: "password", password: "hunter2" }),
+      publishBody({ title: "B", access: "password", password: "hunter2", tags: ["roadmap"] }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string; access: string; hasPassword: boolean };
@@ -348,6 +355,21 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
     const b = await canvases.findById(body.id);
     expect(b?.access).toBe("public_link");
     expect(b?.passwordHash).toBeTruthy();
+    expect(b?.tags).toEqual(["roadmap"]);
+  });
+
+  it("treats password as an orthogonal lock on an explicitly private audience", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app } = buildApi(client, asMember(owner.id));
+
+    const response = await publish(
+      app,
+      publishBody({ title: "Private lock", access: "private", password: "hunter2" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ access: "private", hasPassword: true });
   });
 
   it("502 PUBLISH_FAILED carries the id when deploy fails (no auto-revoke) and STILL counts against quota", async () => {
@@ -498,6 +520,11 @@ type AuthoredCanvas = {
   sourceApp: string | null;
   expiresAt: number | null;
   galleryListed: boolean;
+  galleryTemplatable: boolean;
+  discoverability: "link_only" | "listed";
+  viewerRole: "owner" | "editor" | "admin";
+  updatedAt: number;
+  audienceSummary: { count: number | null; names: string[] };
 };
 
 describe("canvasAuthoringRoutes — managed shares (v2)", () => {
@@ -604,7 +631,8 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     const backing = canvasesRepository(client);
     const faulty: CanvasesRepository = {
       ...backing,
-      updateSettings: (id, patch) => backing.updateSettings(id, { ...patch, access: undefined }),
+      updateSettingsAtomic: (id, patch, options) =>
+        backing.updateSettingsAtomic(id, { ...patch, access: undefined }, options),
     };
     const app = buildApi(client, asMember(owner.id), ON, { canvases: faulty }).app;
 
@@ -696,6 +724,128 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
       hasPassword: true,
     });
     expect((await canvases.findById(published.id))?.passwordHash).toBe(originalHash);
+  });
+
+  it("re-sending a non-public audience preserves its existing password lock", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "whole_org", password: "keep-this" }))
+    ).json()) as AuthoredCanvas;
+    const originalHash = (await canvases.findById(published.id))?.passwordHash;
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({ title: "Updated", access: "whole_org" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ access: "whole_org", hasPassword: true });
+    expect((await canvases.findById(published.id))?.passwordHash).toBe(originalHash);
+  });
+
+  it("applies access + password together and normalizes stale listing/discoverability", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "whole_org" }))
+    ).json()) as AuthoredCanvas;
+    await canvases.updateSettings(published.id, {
+      discoverability: "listed",
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({ access: "private", password: "new-lock" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      access: "private",
+      hasPassword: true,
+      discoverability: "link_only",
+      galleryListed: false,
+      galleryTemplatable: false,
+    });
+  });
+
+  it("clears stale viewer-team grants when authoring changes away from team access", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const teams = teamsRepository(client);
+    const team = await teams.create({ orgId: null, name: "Old audience", createdBy: owner.id });
+    const { app, canvases } = buildApi(client, asMember(owner.id), ON, { teams });
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    await teams.setCanvasTeams(published.id, [team.id]);
+    await canvases.updateSettings(published.id, { access: "team", discoverability: "listed" });
+
+    const response = await putUpdate(app, published.id, formData({ access: "private" }));
+
+    expect(response.status).toBe(200);
+    expect(await teams.listTeamIdsForCanvas(published.id)).toEqual([]);
+    expect(await response.json()).toMatchObject({
+      access: "private",
+      discoverability: "link_only",
+    });
+  });
+
+  it("returns 409 SHARE_CONFLICT when expectedUpdatedAt is stale", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "S", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    await canvases.updateSettings(published.id, { title: "Changed elsewhere" });
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({ title: "Stale overwrite", expectedUpdatedAt: published.updatedAt }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "SHARE_CONFLICT",
+      current: { id: published.id, title: "Changed elsewhere" },
+    });
+    expect((await canvases.findById(published.id))?.title).toBe("Changed elsewhere");
+  });
+
+  it("leaves settings and the live version unchanged when bundle staging fails", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const published = (await (
+      await publish(app, publishBody({ title: "Before", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    const corrupt = new File([new Uint8Array([1, 2, 3])], "bad.zip", {
+      type: "application/zip",
+    });
+
+    const response = await putUpdate(
+      app,
+      published.id,
+      formData({ title: "Settings applied", expectedUpdatedAt: published.updatedAt }, corrupt),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      code: "PUBLISH_FAILED",
+      id: published.id,
+    });
+    expect(await canvases.findById(published.id)).toMatchObject({
+      title: "Before",
+      currentVersionId: published.version,
+    });
   });
 
   it("update with a bundle republishes an unpublished share at the same URL", async () => {
@@ -796,6 +946,36 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(filtered.canvases.map((s) => s.sourceApp)).toEqual(["product-roadmap"]);
   });
 
+  it("list projects discoverability, template state, role, and a safe team audience summary", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const teams = teamsRepository(client);
+    const team = await teams.create({ orgId: null, name: "Roadmap crew", createdBy: owner.id });
+    const editorTeam = await teams.create({
+      orgId: null,
+      name: "Roadmap editors",
+      createdBy: owner.id,
+    });
+    const { app, canvases } = buildApi(client, asMember(owner.id), ON, { teams });
+    const published = (await (
+      await publish(app, publishBody({ title: "Team share", access: "private" }))
+    ).json()) as AuthoredCanvas;
+    await teams.setCanvasTeams(published.id, [team.id]);
+    await teams.setCanvasTeamRole(published.id, editorTeam.id, "editor");
+    await canvases.updateSettings(published.id, { access: "team", discoverability: "listed" });
+
+    const list = (await (await app.request("/v1/c/app/authoring", { method: "GET" })).json()) as {
+      canvases: AuthoredCanvas[];
+    };
+    expect(list.canvases[0]).toMatchObject({
+      id: published.id,
+      discoverability: "listed",
+      galleryTemplatable: false,
+      viewerRole: "owner",
+      audienceSummary: { count: 1, names: ["Roadmap crew"] },
+    });
+  });
+
   it("revoked + expired shares stay listed with the right status (AE3/AE4)", async () => {
     client = await makeTestDb("sqlite");
     const { owner } = await makeSource(client);
@@ -864,6 +1044,29 @@ describe("canvasAuthoringRoutes — editor role (admin allowance retained)", () 
     expect((await putUpdate(asAdmin, pub.id, formData({ title: "by admin" }))).status).toBe(200);
     const asNobody = buildApi(client, asMember(nobody.id)).app;
     expect((await putUpdate(asNobody, pub.id, formData({ title: "hax" }))).status).toBe(404);
+  });
+
+  it("GET / lists authored shares the viewer currently manages and returns their role", async () => {
+    const { editor, nobody, admin, pub } = await seedShare();
+    const editorApp = buildApi(client, asMember(editor.id)).app;
+    const editorList = (await (
+      await editorApp.request("/v1/c/app/authoring", { method: "GET" })
+    ).json()) as { canvases: AuthoredCanvas[] };
+    expect(editorList.canvases).toEqual([
+      expect.objectContaining({ id: pub.id, viewerRole: "editor" }),
+    ]);
+
+    const nobodyApp = buildApi(client, asMember(nobody.id)).app;
+    const nobodyList = (await (
+      await nobodyApp.request("/v1/c/app/authoring", { method: "GET" })
+    ).json()) as { canvases: AuthoredCanvas[] };
+    expect(nobodyList.canvases).toEqual([]);
+
+    const adminApp = buildApi(client, asMember(admin.id, { isAdmin: true })).app;
+    const adminList = (await (
+      await adminApp.request("/v1/c/app/authoring", { method: "GET" })
+    ).json()) as { canvases: AuthoredCanvas[] };
+    expect(adminList.canvases).toEqual([]);
   });
 
   it("DELETE /:id (revoke): editor 204; no-role member 404 with the share untouched", async () => {

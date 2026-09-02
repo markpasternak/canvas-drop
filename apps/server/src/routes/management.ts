@@ -28,7 +28,7 @@ import {
   requireCanvasRole,
 } from "../canvas/owner-guard.js";
 import { OWNERSHIP_ERROR_STATUS, ownershipService } from "../canvas/ownership.js";
-import { hashPassword } from "../canvas/password.js";
+import { hashPasswordMutation } from "../canvas/password.js";
 import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import {
   accessRoleSchema,
@@ -799,13 +799,10 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const { patch, password, targetAccess, warning } = resolution;
 
-    // Team grant flow (plan 003 U4/U5): resolve + persist the canvas→team grants BEFORE
-    // the access write, so a forbidden grant never leaves a team canvas with zero teams (an
-    // explicit deny to everyone). The shared resolver (also used by MCP update_canvas)
-    // validates owner-team membership (KTD4), requires ≥1 team when sharing, lets an agent
-    // change the grant set without re-sending `access`, and clears on a rung change away
-    // from team. `teamGranted` drives the audit for a grant-only change (no rung change).
+    // Resolve viewer-team grants before mutating, then commit them with the canvas row.
+    // `teamGranted` drives the audit for a grant-only change (no rung change).
     let teamGranted = false;
+    let viewerTeamIds: string[] | undefined;
     if (deps.teams) {
       const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
         canvasOrgId: cv.orgId,
@@ -822,26 +819,28 @@ export function managementRoutes(deps: ManagementDeps) {
         return c.json({ code: grant.code, message }, status);
       }
       if (grant.kind === "write") {
-        await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
+        viewerTeamIds = grant.teamIds;
         teamGranted = true;
       } else if (grant.kind === "clear") {
-        await deps.teams.setCanvasTeams(cv.id, []);
+        viewerTeamIds = [];
       }
     }
 
     let updated = cv;
+    const passwordHash = await hashPasswordMutation(password);
+    if (password !== undefined || Object.keys(patch).length > 0 || viewerTeamIds !== undefined) {
+      updated = (await deps.canvases.updateSettingsAtomic(cv.id, patch, {
+        passwordHash,
+        viewerTeamIds,
+      })) as Canvas;
+    }
     if (password !== undefined) {
-      const hash = password === null ? null : await hashPassword(password);
-      updated = await deps.canvases.setPassword(cv.id, hash);
       deps.audit.recordAudit({
         action: "password_change",
         actorId: c.get("user").id,
         targetId: cv.id,
         meta: { cleared: password === null },
       });
-    }
-    if (Object.keys(patch).length > 0) {
-      updated = await deps.canvases.updateSettings(cv.id, patch);
     }
     // Leaving `custom` for auto/off through the settings API (or MCP update_canvas) must
     // drop the owner-uploaded renditions, exactly as DELETE /:id/preview does — otherwise

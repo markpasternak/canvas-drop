@@ -12,6 +12,7 @@ import {
   PublishFailedError,
   QuotaExceededError,
   type RealtimeMessage,
+  UpdatePartialError,
   type WebSocketLike,
 } from "./index.js";
 
@@ -304,6 +305,7 @@ describe("createClient", () => {
     const client = createClient({ context: ctx, fetch });
     const out = await client.canvases.update("cvB", {
       title: "New",
+      expectedUpdatedAt: 123,
       metadata: { sourceApp: "product-roadmap" },
       bundle: new ArrayBuffer(4),
     });
@@ -312,7 +314,10 @@ describe("createClient", () => {
     expect(url).toBe("https://canvases.example.com/v1/c/foo/authoring/cvB");
     expect(init?.method).toBe("PUT");
     const form = init?.body as FormData;
-    expect(JSON.parse(String(form.get("metadata")))).toMatchObject({ title: "New" });
+    expect(JSON.parse(String(form.get("metadata")))).toMatchObject({
+      title: "New",
+      expectedUpdatedAt: 123,
+    });
     expect(form.get("bundle")).toBeTruthy();
   });
 
@@ -334,6 +339,23 @@ describe("createClient", () => {
     const err = await client.canvases.update("cvB", { title: "x" }).catch((e) => e);
     expect(err).toBeInstanceOf(CanvasdropError);
     expect((err as CanvasdropError).code).toBe("SHARE_REVOKED");
+  });
+
+  it("canvases.update exposes a stage-aware partial error with the surviving share", async () => {
+    const fetch = fetchMock(async () =>
+      res(502, {
+        code: "UPDATE_PARTIAL",
+        stage: "deploy",
+        current: { id: "cvB", title: "Settings applied" },
+      }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    const err = await client.canvases.update("cvB", { title: "x" }).catch((e) => e);
+    expect(err).toBeInstanceOf(UpdatePartialError);
+    expect(err).toMatchObject({
+      stage: "deploy",
+      current: { id: "cvB", title: "Settings applied" },
+    });
   });
 
   it("canvases.list serializes the {sourceApp,sourceKind,tags} filter to the query string", async () => {

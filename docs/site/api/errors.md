@@ -61,6 +61,8 @@ same order (each entry is `{ status, summary }`; `ErrorCode` is its key type).
 | `AI_UPSTREAM_ERROR` | 502 | The AI provider returned an error. |
 | `PUBLISH_FAILED` | 502 | `canvasdrop.canvases.publish` created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke. |
 | `SHARE_REVOKED` | 409 | `canvasdrop.canvases.update` was called on an unpublished share without a bundle; include a bundle to publish it again. |
+| `SHARE_CONFLICT` | 409 | `canvasdrop.canvases.update` sent a stale `expectedUpdatedAt`: the share changed after it was read. The current state is returned; refresh before retrying. |
+| `UPDATE_PARTIAL` | 502 | `canvasdrop.canvases.update` saved the share settings, but a later stage (the bundle deploy) failed; `stage` names it and `current` carries the saved state. |
 | `REQUEST_FAILED` | 0 | A request failed without a more specific code. |
 
 Five rows need a note:
@@ -115,7 +117,7 @@ Five rows need a note:
 
 ## Typed SDK errors
 
-The SDK exports the base class and five subclasses. Any code without a dedicated
+The SDK exports the base class and six subclasses. Any code without a dedicated
 subclass is thrown as the base `CanvasdropError` with `.code` set from the
 response.
 
@@ -126,6 +128,7 @@ response.
 | `NotFoundError` | `NOT_FOUND` | 404 | |
 | `QuotaExceededError` | `QUOTA_EXCEEDED` by default; see below | 429 by default; see below | message is always `quota exceeded` |
 | `PublishFailedError` | `PUBLISH_FAILED` | 502 | `.id`: the created canvas's id, when the failure happened after creation |
+| `UpdatePartialError` | `UPDATE_PARTIAL` | 502 | `.stage`: the stage that failed after the settings were saved; `.current`: the saved share state, when the server returned it |
 | `CanvasdropError` (base) | any | any | `.hint` when the server sent one |
 
 The SDK picks the class from the HTTP response in this order (`errorFromResponse`):
@@ -134,9 +137,10 @@ The SDK picks the class from the HTTP response in this order (`errorFromResponse
 2. Status 403 with `code: "CAPABILITY_DISABLED"` → `CapabilityDisabledError`.
 3. Status 404 → `NotFoundError` (any body `code` is ignored; see the next section).
 4. `code: "PUBLISH_FAILED"` → `PublishFailedError` with `.id` from the body.
-5. `code` of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, or `KEY_LIMIT`, or **any 413** →
+5. `code: "UPDATE_PARTIAL"` → `UpdatePartialError` with `.stage` and `.current` from the body.
+6. `code` of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, or `KEY_LIMIT`, or **any 413** →
    `QuotaExceededError`, keeping the body's `code` and the response's status.
-6. Anything else → `CanvasdropError` with the body's `code` (or `REQUEST_FAILED`),
+7. Anything else → `CanvasdropError` with the body's `code` (or `REQUEST_FAILED`),
    the response status, and the body's `hint` or `message` as the message.
 
 So `QuotaExceededError` is the one limit-shaped class and it is reused: expect
@@ -149,8 +153,8 @@ is a 409 but not a limit, so it stays on the base class. Never assume a
 Classes such as `PasswordRequiredError`, `ModelNotAllowedError`, or
 `CrossCanvasForbiddenError` do not exist. `PASSWORD_REQUIRED`, `STATIC_ONLY`,
 `DISABLED`, `MODEL_NOT_ALLOWED`, `CROSS_CANVAS_FORBIDDEN`, `GUEST_AI_DISABLED`,
-`INVALID_BODY` (at 400), `NOT_NUMERIC`, `SHARE_REVOKED`, and `AI_UPSTREAM_ERROR`
-all arrive on the base `CanvasdropError`. Branching on `err.code` is the only
+`INVALID_BODY` (at 400), `NOT_NUMERIC`, `SHARE_REVOKED`, `SHARE_CONFLICT`, and
+`AI_UPSTREAM_ERROR` all arrive on the base `CanvasdropError`. Branching on `err.code` is the only
 reliable check.
 
 ## Server codes outside the enum

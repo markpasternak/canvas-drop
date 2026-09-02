@@ -311,7 +311,9 @@ DELETE {base}/v1/c/{slug}/authoring/{id}     revoke               → 204
 ```
 
 `POST` and `PUT` are `multipart/form-data` with two parts: `metadata`, a JSON string, and
-`bundle`, the static-site zip (required on `POST`, optional on `PUT`, never empty).
+`bundle`, the static-site zip (required on `POST`, optional on `PUT`, never empty). The
+password is an optional lock independent of the audience; `access: "password"` is the
+compatibility shorthand for a Public link plus a password.
 
 | `metadata` field | `POST` | `PUT` | Notes |
 |---|---|---|---|
@@ -322,6 +324,7 @@ DELETE {base}/v1/c/{slug}/authoring/{id}     revoke               → 204
 | `password` | optional, 1-200 chars | optional; `null` clears | Required when `access` is `password`. |
 | `expiresAt` | optional, epoch ms | optional; `null` clears | Must be in the future and within `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` (default `0`, no cap); required when `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` is on (default off). |
 | `metadata` | optional object | optional | Free-form, ≤ 16 KiB. |
+| `expectedUpdatedAt` | not accepted | optional, epoch ms | Compare-and-swap token: the `updatedAt` you last read. A stale value is refused with `409 SHARE_CONFLICT` and the current record. |
 
 **`POST`** creates the canvas under your account, deploys the bundle, and applies the
 share settings in one call. It counts against the authoring quota (`429 QUOTA_EXCEEDED`
@@ -331,10 +334,12 @@ deploy or share-config failure after the row exists still counts.
 
 **`PUT`** updates an existing share in place: a new immutable version at the same URL when
 `bundle` is included, settings and metadata only when it is omitted. You must be the
-owner or an editor of `{id}` (an instance admin also passes); anything else reads as
-`404 NOT_FOUND`. It does not consume quota. Gates are checked against the share's
-resulting state, so clearing a password or dropping an expiry on a Public link faces the
-same checks a fresh publish would.
+owner or an editor of `{id}` (an instance admin acting on a known id also passes);
+anything else reads as `404 NOT_FOUND`. It does not consume quota. Gates are checked
+against the share's resulting state, so clearing a password or dropping an expiry on a
+Public link faces the same checks a fresh publish would. Settings are saved before the
+bundle deploys: if the deploy then fails, the response is `502 UPDATE_PARTIAL` with
+`stage` and the saved `current` record, so nothing you changed is lost.
 
 **`GET`** returns the shares you authored and still manage as owner or editor, including
 revoked and expired ones; archived, deleted, and admin-disabled canvases are omitted.
@@ -349,7 +354,8 @@ settings-only `PUT` on a revoked share is `409 SHARE_REVOKED`.
 
 ```
 { id, url, title, tags, access, hasPassword, status, createdAt, updatedAt, expiresAt,
-  galleryListed, revokedAt, createdBy, version, bundleUpdatedAt, sourceApp, sourceKind, metadata }
+  galleryListed, galleryTemplatable, discoverability, revokedAt, createdBy, viewerRole,
+  audienceSummary, version, bundleUpdatedAt, sourceApp, sourceKind, metadata }
 ```
 
 `status` is derived, first match wins: `revoked` (`revokedAt` set), `expired` (`expiresAt`
@@ -357,7 +363,9 @@ passed), `private` (`access` is `private`), else `live`. `version` is the id of 
 current published version (`null` when none) and advances on every deploy;
 `bundleUpdatedAt` is the row's last write (deploy or settings), the same value as
 `updatedAt`, so watch `version` to detect a bundle change. `sourceApp` and `sourceKind`
-are read from the free-form `metadata` when they are strings.
+are read from the free-form `metadata` when they are strings. `viewerRole` (`owner`,
+`editor`, or `admin`) says why you may manage the record; `audienceSummary`
+(`{ count, names }`) is a safe summary of the people and teams on its list.
 
 | Code | HTTP | When |
 |---|---|---|
@@ -373,7 +381,9 @@ are read from the free-form `metadata` when they are strings.
 | `NOT_FOUND` | 404 | `PUT` or `DELETE` on a canvas you hold no role on, or that is missing, deleted, or (for `DELETE`) not active. |
 | `DISABLED` | 409 | `PUT` or `DELETE` on an admin-disabled canvas. Note the status: `409` here, `403` from the shared pipeline. |
 | `SHARE_REVOKED` | 409 | Settings-only `PUT` on a revoked share. |
+| `SHARE_CONFLICT` | 409 | `PUT` with a stale `expectedUpdatedAt`; the body carries the current record. |
 | `PUBLISH_FAILED` | 502 | Create, deploy, or share config failed. `id` is included once the record exists so you can retry or revoke. |
+| `UPDATE_PARTIAL` | 502 | `PUT` saved the settings but the bundle deploy failed; `stage` and `current` are included. |
 
 The SDK wraps these four routes as [`canvasdrop.canvases`](/docs/sdk/authoring).
 

@@ -108,7 +108,7 @@ The [Capabilities](/docs/authoring/capabilities) page covers the tab.
 ## Errors
 
 Every failure throws an error extending `CanvasdropError`: a string `.code`, a
-numeric `.status`, and, when the server sent one, a `.hint` with the fix. Five
+numeric `.status`, and, when the server sent one, a `.hint` with the fix. Six
 subclasses cover the cases you most often branch on:
 
 | Class | `.code` | `.status` |
@@ -118,6 +118,7 @@ subclasses cover the cases you most often branch on:
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 |
 | `QuotaExceededError` | `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, `CONNECTION_LIMIT`, or a size code (`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`) | 429, 409, or 413 (the wire status) |
 | `PublishFailedError` | `PUBLISH_FAILED`, with the new canvas's `.id` | 502 |
+| `UpdatePartialError` | `UPDATE_PARTIAL`, with `.stage` and the saved `.current` record | 502 |
 
 Everything else (`PASSWORD_REQUIRED`, `STATIC_ONLY`, `DISABLED`,
 `MODEL_NOT_ALLOWED`, `NOT_NUMERIC`, `INVALID_BODY`, and the rest) arrives as the

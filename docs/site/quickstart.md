@@ -162,8 +162,8 @@ version. The ladder, from narrowest to widest:
 
 | Rung | Who can open the URL |
 |------|----------------------|
-| **Private** (default) | You, and any editors on the People list. A non-owner admin is treated like any member and gets a 404. |
-| **Specific people** | People and teams on the People list, each as viewer or editor. A brand-new email becomes live only after that person's first verified sign-in. |
+| **Private** (default) | You, and any editors on the people and teams list. A non-owner admin is treated like any member and gets a 404. |
+| **Specific people** | People and teams on the people and teams list, each as viewer or editor. A brand-new email becomes live only after that person's first verified sign-in. |
 | **Team** | Members of the teams on the list. |
 | **Whole org** | Any signed-in member with the link. |
 | **Public link** | Anyone with the link, static files only: the primitives are refused for anonymous visitors. Needs the instance's public-links switch (on by default) and the owner account's public-link permission (granted by default, revocable by an admin). |

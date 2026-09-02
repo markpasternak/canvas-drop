@@ -11,12 +11,14 @@ import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
 import { requireCapability } from "../canvas/capability-guard.js";
 import { disabledError } from "../canvas/owner-guard.js";
-import { hashPassword } from "../canvas/password.js";
+import { hashPasswordMutation } from "../canvas/password.js";
 import { type RoleGrant, resolveManagementGrant } from "../canvas/role.js";
+import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { resolveCreateSlug } from "../canvas/slug.js";
 import { canvasUrl } from "../canvas/url.js";
 import type { AuthoringUsageRepository } from "../db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "../db/repositories/canvases.js";
+import type { TeamsRepository } from "../db/repositories/teams.js";
 import { isUniqueViolation, SLUG_UNIQUE } from "../db/unique-violation.js";
 import type { DeployEngine } from "../deploy/engine.js";
 import { fromZip } from "../deploy/ingest.js";
@@ -51,6 +53,8 @@ export interface CanvasAuthoringDeps {
    *  Omitted → defaults on. A `public_link` publish is refused when this is off, so
    *  authoring can't bypass the admin's instance switch. */
   publicLinksEnabled?: () => Promise<boolean>;
+  /** Canonical team-grant cleanup + management-only audience projection. */
+  teams?: Pick<TeamsRepository, "setCanvasTeams" | "listCanvasTeamGrants" | "findByIds">;
 }
 
 const accessEnum = z.enum(["private", "specific_people", "whole_org", "public_link", "password"]);
@@ -75,6 +79,8 @@ const updateMeta = z.object({
   access: accessEnum.optional(),
   password: z.string().min(1).max(200).nullable().optional(),
   expiresAt: z.number().int().positive().nullable().optional(),
+  /** Compare-and-swap token returned as AuthoredCanvas.updatedAt. */
+  expectedUpdatedAt: z.number().int().positive().optional(),
   metadata: metadataSchema.optional(),
 });
 
@@ -160,10 +166,23 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
   /** The management projection (authoring v2). Assembled ONLY here (the authenticated
    *  management API) — the public canvas-serve path never reads `metadata`, so a reader
    *  structurally cannot receive author/management data (reader isolation). */
-  function toAuthoredCanvas(cv: Canvas) {
+  async function toAuthoredCanvas(cv: Canvas, viewerRole: "owner" | "editor" | "admin") {
     const now = Date.now();
     const metadata = (cv.metadata ?? {}) as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === "string" ? v : null);
+    let audienceSummary: { count: number | null; names: string[] } = { count: null, names: [] };
+    if (cv.access === "specific_people") {
+      const viewers = (await deps.canvases.listAllowlist(cv.id)).filter(
+        (entry) => entry.role === "viewer",
+      );
+      audienceSummary = { count: viewers.length, names: [] };
+    } else if (cv.access === "team" && deps.teams) {
+      const grants = (await deps.teams.listCanvasTeamGrants(cv.id)).filter(
+        (grant) => grant.role === "viewer",
+      );
+      const teams = await deps.teams.findByIds(grants.map((g) => g.teamId));
+      audienceSummary = { count: grants.length, names: teams.map((team) => team.name) };
+    }
     return {
       id: cv.id,
       url: canvasUrl(deps.config, cv.slug),
@@ -175,8 +194,12 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       createdAt: cv.createdAt,
       updatedAt: cv.updatedAt,
       expiresAt: cv.sharedExpiresAt ?? null,
+      discoverability: cv.discoverability,
       galleryListed: cv.galleryListed,
+      galleryTemplatable: cv.galleryTemplatable,
       revokedAt: cv.revokedAt ?? null,
+      viewerRole,
+      audienceSummary,
       createdBy: cv.ownerId,
       // The bundle-change signal: `currentVersionId` advances on every deploy;
       // `bundleUpdatedAt` is the row's last-write stamp (deploy or settings).
@@ -204,7 +227,11 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     pol: Awaited<ReturnType<typeof policy>>,
     // The public-link entitlement follows the canvas OWNER's account, whoever acts
     // (editor-roles plan, KD7/R10); `actorIsOwner` picks the refusal wording (KTD6).
-    entitlement: { ownerCanPublishPublic: boolean; actorIsOwner: boolean },
+    entitlement: {
+      ownerCanPublishPublic: boolean;
+      actorIsOwner: boolean;
+      publicLinksEnabled: boolean;
+    },
     s: {
       /** True when this request explicitly sets the access rung (publish: always). */
       accessExplicit: boolean;
@@ -240,8 +267,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       };
     }
     if (s.runPublicLinkGate) {
-      const publicLinksOn = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
-      if (!publicLinksOn) {
+      if (!entitlement.publicLinksEnabled) {
         return {
           code: "PUBLIC_LINKS_DISABLED",
           message: "Public links are disabled for this instance.",
@@ -333,6 +359,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     const pol = await policy();
     const now = Date.now();
+    const publicLinksEnabled = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
     // A fresh share always sets its rung (defaulting to private), so validate that
     // resolved rung — an omitted access is checked against allowedRungs just like an
     // explicit one — and enforce requireExpiry on the resulting shareable state.
@@ -355,13 +382,13 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     // A fresh share is the viewer's own canvas: the viewer IS the owner.
     const gateErr = await validateGates(
       pol,
-      { ownerCanPublishPublic: viewer.canPublishPublic, actorIsOwner: true },
+      { ownerCanPublishPublic: viewer.canPublishPublic, actorIsOwner: true, publicLinksEnabled },
       {
         accessExplicit: true,
         requestedRung: rung,
         wantsPasswordAccess: requestedAccess === "password",
         effectiveRung: rung,
-        willHavePassword: requestedAccess === "password" && !!meta.password,
+        willHavePassword: !!meta.password,
         runPublicLinkGate: rung === "public_link",
         effectiveExpiry: meta.expiresAt ?? null,
         newExpiry: meta.expiresAt,
@@ -425,19 +452,36 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "deploy failed" }, 502);
     }
 
-    // Configure. Password FIRST (while still private) then flip access LAST, so a mid-op
-    // failure can never leave the canvas public without its intended password.
+    // Configure through the canonical settings resolver and ONE atomic row write, so
+    // audience and password are orthogonal and gallery/discoverability invariants match
+    // dashboard/MCP updates.
     let finalCv: Canvas;
     try {
-      if (requestedAccess === "password" && meta.password) {
-        await deps.canvases.setPassword(canvasB.id, await hashPassword(meta.password));
+      const deployed = (await deps.canvases.findById(canvasB.id)) ?? canvasB;
+      const resolution = resolveSettingsUpdate(
+        deployed,
+        {
+          access: rung,
+          password: meta.password,
+          tags: meta.tags,
+          sharedExpiresAt: meta.expiresAt,
+        },
+        {
+          publicLinksEnabled,
+          ownerCanPublishPublic: viewer.canPublishPublic,
+          actorIsOwner: true,
+          publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
+          now,
+          tenancyActive: !!deps.config.org.name,
+        },
+      );
+      if (!resolution.ok) {
+        return c.json({ code: resolution.code, message: resolution.message }, resolution.status);
       }
-      finalCv = await deps.canvases.updateSettings(canvasB.id, {
-        access: rung,
-        tags: meta.tags,
-        sharedExpiresAt: meta.expiresAt,
-        metadata: meta.metadata as Json | undefined,
-      });
+      if (meta.metadata !== undefined) resolution.patch.metadata = meta.metadata as Json;
+      finalCv = (await deps.canvases.updateSettingsAtomic(canvasB.id, resolution.patch, {
+        passwordHash: await hashPasswordMutation(resolution.password),
+      })) as Canvas;
     } catch (err) {
       c.get("log")?.error({ err, id: canvasB.id }, "authoring: configure failed");
       return c.json({ code: "PUBLISH_FAILED", id: canvasB.id, message: "configure failed" }, 502);
@@ -458,7 +502,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       );
     }
 
-    return c.json(toAuthoredCanvas(finalCv));
+    return c.json(await toAuthoredCanvas(finalCv, "owner"));
   });
 
   // ── PUT /:id — update in place (new version and/or settings; stable URL) ─────
@@ -497,6 +541,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
 
     const pol = await policy();
     const now = Date.now();
+    const publicLinksEnabled = deps.publicLinksEnabled ? await deps.publicLinksEnabled() : true;
     // Resolve the share's END STATE (not just the changed fields) so the gate catches
     // exposure-widening updates — clearing a password on a public link, or dropping the
     // expiry on a shareable rung — that a field-only check would wave through.
@@ -527,11 +572,13 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     // Expiry after this op: undefined keeps the row's, null clears it, a number sets it.
     const effectiveExpiry =
       meta.expiresAt === undefined ? (cv.sharedExpiresAt ?? null) : meta.expiresAt;
+    const ownerCanPublishPublic = await deps.canvases.isOwnerPublishEnabled(cv.ownerId);
     const gateErr = await validateGates(
       pol,
       {
-        ownerCanPublishPublic: await deps.canvases.isOwnerPublishEnabled(cv.ownerId),
+        ownerCanPublishPublic,
         actorIsOwner: managed.role === "owner",
+        publicLinksEnabled,
       },
       {
         accessExplicit: requestedAccess !== undefined,
@@ -551,36 +598,92 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
     );
     if (gateErr) return c.json(gateErr, gateErr.status);
 
-    // Deploy a new immutable version (stable URL) when a bundle is supplied.
-    if (form.bundle) {
-      try {
-        const buffer = Buffer.from(await form.bundle.arrayBuffer());
-        await deps.engine.deploy(cv, "api", fromZip(buffer), viewer.id);
-      } catch (err) {
-        c.get("log")?.error({ err, id: cv.id }, "authoring: update deploy failed");
-        return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "deploy failed" }, 502);
-      }
-    }
-
-    // Apply settings. Password FIRST (mirrors publish's ordering safety).
-    let finalCv: Canvas;
-    try {
-      if (meta.password !== undefined) {
-        await deps.canvases.setPassword(
-          cv.id,
-          meta.password === null ? null : await hashPassword(meta.password),
-        );
-      }
-      finalCv = await deps.canvases.updateSettings(cv.id, {
+    // Resolve authoring through the same canonical settings rules as dashboard/MCP.
+    // A revoked share with a supplied bundle is about to be published, so validate its
+    // requested post-deploy audience against that planned state.
+    const plannedCv =
+      form.bundle && cv.currentVersionId === null ? { ...cv, currentVersionId: "pending" } : cv;
+    const settings = resolveSettingsUpdate(
+      plannedCv,
+      {
         title: meta.title,
         access: rung,
-        tags: meta.tags,
+        password: meta.password,
         sharedExpiresAt: meta.expiresAt,
-        metadata: meta.metadata as Json | undefined,
-      });
-    } catch (err) {
-      c.get("log")?.error({ err, id: cv.id }, "authoring: update configure failed");
-      return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "configure failed" }, 502);
+        tags: meta.tags,
+      },
+      {
+        publicLinksEnabled,
+        ownerCanPublishPublic,
+        actorIsOwner: managed.role === "owner",
+        publicEdgeCacheTtlSec: deps.config.serving.publicEdgeCacheTtlSec,
+        now,
+        tenancyActive: !!deps.config.org.name,
+      },
+    );
+    if (!settings.ok) {
+      return c.json({ code: settings.code, message: settings.message }, settings.status);
+    }
+    if (meta.metadata !== undefined) settings.patch.metadata = meta.metadata as Json;
+
+    const passwordHash = await hashPasswordMutation(settings.password);
+    const viewerTeamIds = cv.access === "team" && (rung ?? cv.access) !== "team" ? [] : undefined;
+    const conflictResponse = async () => {
+      const current = await deps.canvases.findById(cv.id);
+      return c.json(
+        {
+          code: "SHARE_CONFLICT",
+          message: "This share changed since it was loaded. Refresh and try again.",
+          current: current ? await toAuthoredCanvas(current, managed.role) : null,
+        },
+        409,
+      );
+    };
+
+    let finalCv: Canvas | undefined;
+    if (form.bundle) {
+      let activationConflict = false;
+      try {
+        const buffer = Buffer.from(await form.bundle.arrayBuffer());
+        await deps.engine.deploy(cv, "api", fromZip(buffer), viewer.id, {
+          activateVersion: async (versionId) => {
+            finalCv = await deps.canvases.updateSettingsAtomic(cv.id, settings.patch, {
+              passwordHash,
+              expectedUpdatedAt: meta.expectedUpdatedAt,
+              currentVersionId: versionId,
+              viewerTeamIds,
+            });
+            if (!finalCv) {
+              activationConflict = true;
+              throw new Error("authoring share changed before activation");
+            }
+          },
+        });
+      } catch (err) {
+        if (activationConflict) return conflictResponse();
+        c.get("log")?.error({ err, id: cv.id }, "authoring: update deploy failed");
+        return c.json(
+          { code: "PUBLISH_FAILED", id: cv.id, message: "The new bundle was not published." },
+          502,
+        );
+      }
+    } else {
+      try {
+        finalCv = await deps.canvases.updateSettingsAtomic(cv.id, settings.patch, {
+          passwordHash,
+          expectedUpdatedAt: meta.expectedUpdatedAt,
+          viewerTeamIds,
+        });
+      } catch (err) {
+        c.get("log")?.error({ err, id: cv.id }, "authoring: update configure failed");
+        return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "configure failed" }, 502);
+      }
+      if (!finalCv) return conflictResponse();
+    }
+
+    if (!finalCv) {
+      c.get("log")?.error({ id: cv.id }, "authoring: update completed without activation state");
+      return c.json({ code: "PUBLISH_FAILED", id: cv.id, message: "update failed" }, 502);
     }
 
     if (rung !== undefined && finalCv.access !== rung) {
@@ -604,41 +707,58 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       targetId: cv.id,
       meta: { requestedAccess: requestedAccess ?? null, persistedAccess: finalCv.access },
     });
-    return c.json(toAuthoredCanvas(finalCv));
+    return c.json(await toAuthoredCanvas(finalCv, managed.role));
   });
 
   // ── GET / — list the viewer's authored shares (+ filter) ────────────────────
   app.get("/", async (c) => {
     const viewer = requireMember(c);
     if (!viewer) return c.json({ code: "NOT_AUTHENTICATED" }, 401);
-    const ids = await deps.authoringUsage.authoredIdsByActor(viewer.id);
-    const rows = await Promise.all(ids.map((id) => deps.canvases.findById(id)));
+    const orgIds = c.get("orgIds") ?? new Set<string>();
+    const ids = await deps.authoringUsage.authoredIdsAmong(
+      await deps.canvases.listManagedCanvasIds(viewer.id, {
+        tenancyActive: !!deps.config.org.name,
+        viewerOrgIds: orgIds,
+      }),
+    );
+    const rowsById = new Map(
+      (await deps.canvases.findByIds(ids)).map((canvas) => [canvas.id, canvas]),
+    );
+    const rows = ids.map((id) => rowsById.get(id) ?? null);
     // Include unpublished shares (they stay `active` + revoked_at), but keep the
     // authoring view aligned with the dashboard's active-canvas view: archived,
     // deleted, and admin-disabled canvases are not reusable shares. Exclude any the
     // viewer no longer manages (owner or editor — a share whose ownership moved away
-    // stays listed while the author remains an editor). The per-viewer set is bounded
-    // by the authoring total cap, so the per-row resolve is small.
-    const principal = memberPrincipal(viewer, c.get("orgIds") ?? new Set<string>());
+    // stays listed while the author remains an editor).
+    const principal = memberPrincipal(viewer, orgIds);
     const grants = await Promise.all(
-      rows.map((cv) =>
-        resolveManagementGrant(cv && cv.status === "active" ? cv : null, principal, roleDeps),
-      ),
+      rows.map(async (cv): Promise<RoleGrant | null> => {
+        if (cv?.status !== "active") return null;
+        return resolveManagementGrant(cv, principal, roleDeps);
+      }),
     );
-    let shares = grants
-      .filter((g): g is RoleGrant => g !== null)
-      .map((g) => toAuthoredCanvas(g.canvas));
-
-    // In-memory filter (the per-viewer set is bounded by the authoring total cap).
     const fSourceApp = c.req.query("sourceApp");
     const fSourceKind = c.req.query("sourceKind");
     const fTags = (c.req.query("tags") ?? "")
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    if (fSourceApp) shares = shares.filter((s) => s.sourceApp === fSourceApp);
-    if (fSourceKind) shares = shares.filter((s) => s.sourceKind === fSourceKind);
-    if (fTags.length) shares = shares.filter((s) => fTags.every((t) => s.tags.includes(t)));
+    const matchingGrants = grants
+      .filter((g): g is RoleGrant => g !== null)
+      .filter(({ canvas }) => {
+        const metadata = (canvas.metadata ?? {}) as Record<string, unknown>;
+        const tags = (canvas.tags as string[] | null) ?? [];
+        return (
+          (!fSourceApp || metadata.sourceApp === fSourceApp) &&
+          (!fSourceKind || metadata.sourceKind === fSourceKind) &&
+          (!fTags.length || fTags.every((tag) => tags.includes(tag)))
+        );
+      });
+    // Project audience details only after the cheap source/tag filters. Team and
+    // specific-people summaries require extra repository reads per matching share.
+    const shares = await Promise.all(
+      matchingGrants.map((grant) => toAuthoredCanvas(grant.canvas, grant.role)),
+    );
 
     c.header("Cache-Control", "private, no-store");
     return c.json({ canvases: shares });

@@ -85,7 +85,7 @@ dashboard (or through `list_shared_canvases` over MCP).
 ## Editor teams
 
 A team can also be granted the **editor** role on a canvas, from the canvas's
-**People with access** list (choose the team, pick **Editor**). Every current member
+**Share with people and teams** section (choose the team, pick **Editor**). Every current member
 then manages that canvas like the owner — content, publishing, settings, sharing —
 except deleting or transferring it; membership changes apply on the next request, and
 for an org team the live org membership is re-checked as well. A team added as

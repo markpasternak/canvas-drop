@@ -288,12 +288,14 @@ Details: [Capabilities](/docs/authoring/capabilities).
 ## Errors
 
 Every failure carries a stable string `code`; branch on it, not on message text.
-The SDK throws `CanvasdropError` with `.code` and `.status`, plus five subclasses:
+The SDK throws `CanvasdropError` with `.code` and `.status`, plus six subclasses:
 `NotAuthenticatedError` (any 401), `NotFoundError` (any 404),
 `CapabilityDisabledError` (403 `CAPABILITY_DISABLED`, with `.hint`),
 `QuotaExceededError` (`QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, and every 413
-size code), and `PublishFailedError` (502, from `canvasdrop.canvases.publish`, with
-the new canvas `.id`). Every other code arrives as a plain `CanvasdropError`.
+size code), `PublishFailedError` (502, from `canvasdrop.canvases.publish`, with
+the new canvas `.id`), and `UpdatePartialError` (502, from `canvasdrop.canvases.update`
+when the settings saved but the bundle deploy failed, with `.stage` and `.current`).
+Every other code arrives as a plain `CanvasdropError`.
 `kv.get` returns `null` for a missing key instead of throwing.
 
 Codes you will meet most on the runtime API: `401 {"error":"unauthorized"}` (no

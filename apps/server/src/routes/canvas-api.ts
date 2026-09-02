@@ -43,7 +43,10 @@ export interface CanvasApiDeps {
   /** Teams store (plan 003 U4) — resolves the `team` rung for the runtime API gate.
    *  Optional: omitted in suites that don't exercise teams (a team canvas then matches
    *  no one — fail-closed). */
-  teams?: Pick<TeamsRepository, "teamMatch">;
+  teams?: Pick<
+    TeamsRepository,
+    "teamMatch" | "setCanvasTeams" | "listCanvasTeamGrants" | "findByIds"
+  >;
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
@@ -206,6 +209,7 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
         audit: deps.audit,
         settings: deps.authoringSettings,
         publicLinksEnabled: deps.publicLinksEnabled,
+        teams: deps.teams,
       }),
     );
   }

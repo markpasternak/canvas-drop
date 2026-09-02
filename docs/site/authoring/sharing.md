@@ -5,14 +5,14 @@ You own or edit a canvas and want to decide who can open it, who edits it with y
 Every canvas starts **Private**: only the owner can open it. Sharing is one choice plus optional layers:
 
 1. Pick one **access rung**: Private, Specific people, Team, Whole org, or Public link.
-2. Add named people or teams as **viewers** or **editors** under **People with access**.
+2. Add named people or teams as **viewers** or **editors** under **Share with people and teams**.
 3. Optionally add a **password** or a **share expiry** under **Locks**.
 4. Optionally opt into discovery: **List for people with access** (the Shared page) or **List in the gallery**.
 
 ## Share with one colleague
 
 1. Publish first. Until the canvas has a live version, the Share tab shows one locked panel with a **Publish** button.
-2. Under **People with access**, type their email, pick **Viewer** or **Editor**, and confirm.
+2. Under **Share with people and teams**, type their email, pick **Viewer** or **Editor**, and confirm.
 3. Set the rung to **Specific people**. A viewer is admitted only by a rung that reads the list; an editor is admitted at every rung.
 
 An existing user can open the canvas on their next request. Over MCP the same two steps are:
@@ -33,8 +33,8 @@ One rung per canvas, stored as `access` (default `private`):
 | Rung | Who can open it | Backend primitives |
 | --- | --- | --- |
 | **Private** | The owner and any editors. | Full (whatever the Backend tab enables). |
-| **Specific people** | The viewers on the People list: signed-in users, plus pending emails that activate after a verified sign-in. | Full, for the people admitted. |
-| **Team** | Members of the teams added to the People list as viewers. A team can be personal or org-attached; see [teams](/docs/authoring/teams). | Full, for team members. |
+| **Specific people** | The viewers on the people and teams list: signed-in users, plus pending emails that activate after a verified sign-in. | Full, for the people admitted. |
+| **Team** | Members of the teams added to the people and teams list as viewers. A team can be personal or org-attached; see [teams](/docs/authoring/teams). | Full, for team members. |
 | **Whole org** | Any signed-in member with the link. | Full, for members. |
 | **Public link** | Anyone with the URL, no sign-in, while the instance switch is on and the owner's account may publish publicly. | **None**: static files only. |
 
@@ -64,9 +64,9 @@ Team and Whole-org shares default to **link-only**: anyone the rung admits can o
 
 ## Roles: viewers and editors
 
-Every entry under **People with access**, whether a person, a pending email, or a team, is a **viewer** or an **editor**. The owner is pinned first and has no role control.
+Every entry under **Share with people and teams**, whether a person, a pending email, or a team, is a **viewer** or an **editor**. The owner is pinned first and has no role control.
 
-![The People with access list: the owner pinned first, then people and teams, each with a role control, and the Transfer ownership action](/docs/assets/tour-people.webp)
+![The Share with people and teams section: the owner pinned first, then people and teams, each with a role control, and the Transfer ownership action](/docs/assets/tour-people.webp)
 
 | | Viewer | Editor |
 | --- | --- | --- |
@@ -99,7 +99,7 @@ When an owner leaves, an admin can **reassign** any of their canvases to another
 
 ## Roles: viewers and editors
 
-Every entry on the People list — a person, a pending invitee, or a team — carries a
+Every entry on the people and teams list — a person, a pending invitee, or a team — carries a
 role: **Viewer** (the default) or **Editor**. A viewer can open the canvas when the
 access rung admits them (Specific people or Team). An editor can *always* open the
 canvas, on any rung, and manages it as fully as you do: the editor draft and Publish,
@@ -113,7 +113,7 @@ immediately (and drops their live editor sockets). Two editors saving the same d
 file get a named stale-save conflict instead of a silent overwrite; edits to different
 files never conflict.
 
-**Transfer ownership** (owner only, from the People list) hands the canvas to one of
+**Transfer ownership** (owner only, from the people and teams list) hands the canvas to one of
 its existing editors in one step: they become the owner and you stay on as an editor.
 The public-link entitlement follows the new owner's account, so a Public link is
 turned off if their account may not publish one. An admin can also reassign a departed
@@ -123,7 +123,7 @@ owner-only `transfer_canvas`.
 
 ## Adding specific people
 
-Under **People with access**, add by email as a **viewer** or an **editor**. The outcome is deterministic:
+Under **Share with people and teams**, add by email as a **viewer** or an **editor**. The outcome is deterministic:
 
 | Outcome | Meaning |
 | --- | --- |
@@ -145,7 +145,7 @@ Pending people show in the list with the role you gave them and can be re-roled 
 
 ## Sharing with a team
 
-A team can be granted two ways from **People with access**:
+A team can be granted two ways from **Share with people and teams**:
 
 - As **viewers**: honoured on the **Team** rung. Set the rung to Team and members of every viewer team can open and use the canvas (full backend). The rung needs at least one viewer team on the list (`TEAM_REQUIRED`, HTTP 409, otherwise); with none, the Share tab points you to add one.
 - As **editors**: every current member edits at any rung. People who join the team later are editors too; a member who leaves the team stops being one.
