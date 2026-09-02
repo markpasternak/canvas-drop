@@ -213,7 +213,7 @@ in one metered call. `PUT` updates an existing share **in place** — a new immu
 version at the same URL when a `bundle` is included (omit it to change only settings/
 metadata), owner-or-admin only, and it does **not** consume authoring quota. Both
 return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `hasPassword`, `status`,
-`createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `createdBy`, `version`,
+`createdAt`, `updatedAt`, `expiresAt`, `galleryListed`, `revokedAt`, `createdBy`, `version`,
 `bundleUpdatedAt`, `sourceApp`, `sourceKind`, `metadata`).
 
 `GET` returns the viewer's active canvas records — **including** unpublished and

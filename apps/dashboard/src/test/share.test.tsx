@@ -557,6 +557,32 @@ describe("share route", () => {
     expect(screen.queryByText(/this share expired/i)).toBeNull();
   });
 
+  it("clears an existing share expiry with one explicit action", async () => {
+    const future = Date.now() + 24 * 60 * 60 * 1000;
+    const published = {
+      ...CANVAS,
+      publicationState: "published",
+      access: "public_link" as const,
+      shared: true,
+      currentVersionId: "v1",
+      sharedExpiresAt: future,
+    };
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "PATCH /api/canvases/c1/settings": () => json({ ...published, sharedExpiresAt: null }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    await user.click(await screen.findByRole("button", { name: /remove expiry/i }));
+    await vi.waitFor(() => {
+      const patch = calls.find(
+        (c) => c.method === "PATCH" && c.url === "/api/canvases/c1/settings",
+      );
+      expect(patch?.body).toContain('"sharedExpiresAt":null');
+    });
+  });
+
   it("gallery-listing control is discoverable but disabled until the canvas is gallery-eligible", async () => {
     // Published but still private: sharing is unlocked, so the gallery control is
     // visible, but listBlocker (only Whole-org / Public-link canvases can be listed)

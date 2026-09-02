@@ -408,6 +408,7 @@ export interface AuthoredCanvas {
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
+  galleryListed: boolean;
   revokedAt: number | null;
   /** The creator (owner) id. */
   createdBy: string;
