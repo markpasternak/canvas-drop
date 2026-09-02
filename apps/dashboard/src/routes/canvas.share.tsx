@@ -405,17 +405,31 @@ export default function Share() {
 
           {canvas.shared && (
             <div className="border-t border-border pt-4">
-              <Field
-                label="Share expiry"
-                type="datetime-local"
-                min={toDatetimeLocal(Date.now())}
-                hint={canvas.sharedExpiresAt ? "auto-revokes at this time" : "optional"}
-                defaultValue={canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : ""}
-                onBlur={(e) => {
-                  const v = e.target.value ? new Date(e.target.value).getTime() : null;
-                  if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });
-                }}
-              />
+              <div className="space-y-2">
+                <Field
+                  label="Share expiry"
+                  type="datetime-local"
+                  min={toDatetimeLocal(Date.now())}
+                  hint={canvas.sharedExpiresAt ? "Auto-unpublishes at this time" : "No expiry"}
+                  defaultValue={
+                    canvas.sharedExpiresAt ? toDatetimeLocal(canvas.sharedExpiresAt) : ""
+                  }
+                  onBlur={(e) => {
+                    const v = e.target.value ? new Date(e.target.value).getTime() : null;
+                    if (v !== canvas.sharedExpiresAt) save({ sharedExpiresAt: v });
+                  }}
+                />
+                {canvas.sharedExpiresAt !== null && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={update.isPending}
+                    onClick={() => save({ sharedExpiresAt: null })}
+                  >
+                    Remove expiry
+                  </Button>
+                )}
+              </div>
               {canvas.sharedExpiresAt !== null && canvas.sharedExpiresAt <= Date.now() && (
                 <InlineNotice tone="warning" className="mt-3 py-2 text-xs">
                   This share expired {relativeTime(canvas.sharedExpiresAt)}. Non-owners now get a

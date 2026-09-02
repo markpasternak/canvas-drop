@@ -497,6 +497,7 @@ type AuthoredCanvas = {
   metadata: Record<string, unknown>;
   sourceApp: string | null;
   expiresAt: number | null;
+  galleryListed: boolean;
 };
 
 describe("canvasAuthoringRoutes — managed shares (v2)", () => {
@@ -527,6 +528,36 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(events.find((e) => e.action === "canvas_authored_update")).toMatchObject({
       targetId: pub.id,
       meta: { requestedAccess: null, persistedAccess: "private" },
+    });
+  });
+
+  it("update omission preserves expiry and gallery visibility", async () => {
+    client = await makeTestDb("sqlite");
+    const { owner } = await makeSource(client);
+    const { app, canvases } = buildApi(client, asMember(owner.id));
+    const expiresAt = Date.now() + 5 * 86_400_000;
+    const pub = (await (
+      await publish(
+        app,
+        publishBody({
+          title: "S",
+          access: "public_link",
+          expiresAt,
+        }),
+      )
+    ).json()) as AuthoredCanvas;
+    await canvases.updateSettings(pub.id, { galleryListed: true });
+
+    const response = await putUpdate(
+      app,
+      pub.id,
+      formData({ title: "Updated" }, zipFile({ "index.html": "<h1>v2</h1>" })),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as AuthoredCanvas).toMatchObject({
+      expiresAt,
+      galleryListed: true,
     });
   });
 

@@ -175,6 +175,7 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       createdAt: cv.createdAt,
       updatedAt: cv.updatedAt,
       expiresAt: cv.sharedExpiresAt ?? null,
+      galleryListed: cv.galleryListed,
       revokedAt: cv.revokedAt ?? null,
       createdBy: cv.ownerId,
       // The bundle-change signal: `currentVersionId` advances on every deploy;

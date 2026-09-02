@@ -58,6 +58,7 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | `status` | `"live" \| "expired" \| "revoked" \| "private"` | derived; precedence `revoked` › `expired` › `private` › `live` |
 | `createdAt` / `updatedAt` | `number` | unix ms |
 | `expiresAt` / `revokedAt` | `number \| null` | share expiry; when it was revoked |
+| `galleryListed` | `boolean` | whether the canvas is explicitly listed in the gallery |
 | `createdBy` | `string` | the creator (owner) id |
 | `version` | `string \| null` | the current version id — advances on every bundle deploy (a change signal) |
 | `bundleUpdatedAt` | `number` | last-write stamp (deploy or settings change) |

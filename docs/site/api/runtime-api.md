@@ -282,10 +282,16 @@ GET    {base}/v1/c/{slug}/authoring          list your shares     → 200 { canv
 DELETE {base}/v1/c/{slug}/authoring/{id}     revoke               → 204
 ```
 
-`POST` and `PUT` are `multipart/form-data` with two parts: `metadata`, a JSON string, and
-`bundle`, a zip of the static site. The bundle is required on `POST` and optional on
-`PUT`; a bundle on `PUT` publishes a new version at the same URL, and omitting it changes
-settings only.
+`POST` and `PUT` are `multipart/form-data`: a JSON `metadata` part (`title`, optional
+`slug` (POST only), `tags`, `access`, `password`, `expiresAt`, and a free-form
+`metadata` object) plus a `bundle` part (the static-site zip). `POST` creates the
+canvas under the viewer's account, deploys the bundle, and applies the share settings
+in one metered call. `PUT` updates an existing share **in place** — a new immutable
+version at the same URL when a `bundle` is included (omit it to change only settings/
+metadata), owner-or-admin only, and it does **not** consume authoring quota. Both
+return the full `AuthoredCanvas` (`id`, `url`, `title`, `tags`, `access`, `hasPassword`, `status`,
+`createdAt`, `updatedAt`, `expiresAt`, `galleryListed`, `revokedAt`, `createdBy`, `version`,
+`bundleUpdatedAt`, `sourceApp`, `sourceKind`, `metadata`).
 
 `metadata` fields:
 
