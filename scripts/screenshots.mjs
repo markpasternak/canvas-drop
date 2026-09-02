@@ -105,7 +105,8 @@ async function resolveShots(page) {
       // Share link + access/discoverability. Keep this at the top of the Share tab so the
       // marketing tour shows the copyable URL, the selected audience, and the Shared
       // listing control in one frame.
-      { path: `/canvases/${id}/share`, name: "tour-sharing.webp", scrollTo: "#share-link" },
+      // General access (Restricted / Whole org / Public link) with the Locks right below it.
+      { path: `/canvases/${id}/share`, name: "tour-sharing.webp", scrollTo: "#access" },
       // People with access (editor-roles plan): the owner row, a direct editor, a viewer, an
       // editor team, and a pending editor invite — seeded by `pnpm seed:collaborators`.
       { path: `/canvases/${id}/share`, name: "tour-people.webp", scrollTo: "#people" },
