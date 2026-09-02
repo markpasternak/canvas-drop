@@ -327,6 +327,7 @@ export const connectionProfiles = sqliteTable(
     label: c.text("label").notNull(),
     origin: c.text("origin").notNull(),
     allowedMethods: c.json("allowed_methods").$type<ConnectionMethod[]>().notNull(),
+    protectedHeaderNames: c.json("protected_header_names").$type<string[]>().notNull(),
     protectedHeadersEnvelope: c.text("protected_headers_envelope"),
     enabled: c.bool("enabled").notNull().default(true),
     createdBy: c

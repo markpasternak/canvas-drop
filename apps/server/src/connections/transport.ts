@@ -106,6 +106,12 @@ const FORBIDDEN_REQUEST_HEADERS = new Set([
   "x-forwarded-proto",
 ]);
 
+// Admin-supplied credentials may legitimately use Authorization. These headers
+// still cannot alter routing, framing, compression, browser identity, or cookies.
+const FORBIDDEN_PROTECTED_HEADERS = new Set(
+  [...FORBIDDEN_REQUEST_HEADERS].filter((name) => name !== "authorization"),
+);
+
 const SAFE_RESPONSE_HEADERS = new Set([
   "content-language",
   "content-type",
@@ -143,7 +149,7 @@ export function prepareConnectionHeaders(
   const fixed = new Map<string, string>();
   for (const [name, value] of protectedHeaders) {
     const normalized = validateHeader(name, value);
-    if (FORBIDDEN_REQUEST_HEADERS.has(normalized)) {
+    if (FORBIDDEN_PROTECTED_HEADERS.has(normalized)) {
       fail("INVALID_BODY", "connection profile contains a forbidden protected header");
     }
     if (protectedNames.has(normalized)) {

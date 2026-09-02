@@ -267,6 +267,13 @@
       "when": 1788365076815,
       "tag": "0037_admin_granted_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788365314694,
+      "tag": "0038_connection_header_names",
+      "breakpoints": true
     }
   ]
 }

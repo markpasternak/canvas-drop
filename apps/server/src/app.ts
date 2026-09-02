@@ -23,6 +23,8 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { blobKey } from "./canvas/storage-keys.js";
 import { canvasUrl } from "./canvas/url.js";
+import { createSecretCipher } from "./connections/secret-cipher.js";
+import { connectionService } from "./connections/service.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
@@ -32,6 +34,7 @@ import {
 } from "./db/repositories/allowed-emails.js";
 import { authoringUsageRepository } from "./db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
+import { connectionsRepository } from "./db/repositories/connections.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { invitationsRepository } from "./db/repositories/invitations.js";
@@ -188,6 +191,12 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     config: deps.config,
     // Which env vars were set — for the admin Configuration view's source labels.
     envPresent: deps.envPresent,
+  });
+  const connections = connectionService({
+    repository: connectionsRepository(deps.db),
+    canvases: deps.canvases,
+    cipher: createSecretCipher(deps.config.connections.encryptionKey),
+    audit: deps.audit,
   });
 
   // One shared in-process rate-limit store (§9.7, M7) — used by the broad
@@ -718,6 +727,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       invitations,
       invites,
       audit: deps.audit,
+      connections,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
       orgMembership,
       hub: deps.hub,

@@ -15,6 +15,9 @@ import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { MAX_CANVAS_BYTES, MAX_FILE_BYTES } from "../canvas/files-service.js";
 import { OWNERSHIP_ERROR_STATUS, ownershipService } from "../canvas/ownership.js";
 import { canvasUrl } from "../canvas/url.js";
+import { SecretCipherError } from "../connections/secret-cipher.js";
+import { type ConnectionService, ConnectionServiceError } from "../connections/service.js";
+import { ConnectionValidationError } from "../connections/validation.js";
 import type {
   AdminCanvasContextFilter,
   AdminCanvasExpiryFilter,
@@ -55,6 +58,7 @@ export interface AdminRoutesDeps {
    *  email gets a courtesy email and, on a matching domain, org membership on first login). */
   invites: InviteService;
   audit: AuditLog;
+  connections: ConnectionService;
   /** Revoke a user's live MCP OAuth tokens (called on block) so the agent control
    *  plane honors the block instantly, not just on the token's next use. */
   revokeMcpTokensForUser?: (userId: string) => Promise<void>;
@@ -125,6 +129,19 @@ const quotasBody = z.object({
 const configBody = z.object({
   value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
 });
+const protectedHeadersBody = z.array(
+  z.object({ name: z.string().max(200), value: z.string().max(16_384) }),
+);
+const connectionCreateBody = z.object({
+  key: z.string().max(100),
+  label: z.string().max(200),
+  origin: z.string().max(2_000),
+  allowedMethods: z.array(z.string()).max(6),
+  protectedHeaders: protectedHeadersBody.optional(),
+  enabled: z.boolean().optional(),
+});
+const connectionUpdateBody = connectionCreateBody.omit({ key: true }).partial();
+const connectionDeleteBody = z.object({ expectedAffectedCanvasCount: z.number().int().min(0) });
 
 /** An email-template override body (plan 003 phase 3). Bodies are bounded; the renderer
  *  HTML-escapes interpolated values, so an admin can paste HTML here intentionally. */
@@ -337,6 +354,93 @@ export function adminRoutes(deps: AdminRoutesDeps) {
       aiTokens: ai.inputTokens + ai.outputTokens,
       aiCalls: ai.calls,
     });
+  });
+
+  // --- Admin-granted outbound connection profiles and canvas authority. ---
+  app.get("/connections", async (c) => c.json({ connections: await deps.connections.listAdmin() }));
+
+  app.post("/connections", sameOrigin, async (c) => {
+    const body = connectionCreateBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      const connection = await deps.connections.create(c.get("user").id, body.data);
+      return c.json({ connection }, 201);
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.get("/connections/:id", async (c) => {
+    try {
+      return c.json({ connection: await deps.connections.getAdmin(c.req.param("id")) });
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.put("/connections/:id", sameOrigin, async (c) => {
+    const body = connectionUpdateBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      const connection = await deps.connections.update(
+        c.get("user").id,
+        c.req.param("id"),
+        body.data,
+      );
+      return c.json({ connection });
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.delete("/connections/:id", sameOrigin, async (c) => {
+    const body = connectionDeleteBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "invalid_body" }, 400);
+    try {
+      return c.json(
+        await deps.connections.remove(
+          c.get("user").id,
+          c.req.param("id"),
+          body.data.expectedAffectedCanvasCount,
+        ),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.get("/connections/:id/canvases", async (c) => {
+    try {
+      return c.json({ canvases: await deps.connections.listCanvases(c.req.param("id")) });
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.put("/connections/:id/canvases/:canvasId", sameOrigin, async (c) => {
+    try {
+      return c.json(
+        await deps.connections.attach(c.get("user").id, c.req.param("id"), c.req.param("canvasId")),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.delete("/connections/:id/canvases/:canvasId", sameOrigin, async (c) => {
+    try {
+      return c.json(
+        await deps.connections.detach(c.get("user").id, c.req.param("id"), c.req.param("canvasId")),
+      );
+    } catch (error) {
+      return connectionAdminError(c, error);
+    }
+  });
+
+  app.get("/canvases/:id/connections", async (c) => {
+    const canvas = await loadCanvas(deps, c.req.param("id"));
+    if (!canvas) return c.json({ error: "not_found" }, 404);
+    return c.json({ connections: await deps.connections.listForCanvas(canvas.id) });
   });
 
   // --- AI usage breakdown (§6.10.7): top-spending canvases (and their owners).
@@ -891,6 +995,21 @@ export function adminRoutes(deps: AdminRoutesDeps) {
   });
 
   return app;
+}
+
+function connectionAdminError(c: import("hono").Context<AppEnv>, error: unknown) {
+  if (error instanceof ConnectionValidationError) {
+    return c.json({ error: error.code, message: error.message }, 400);
+  }
+  if (error instanceof SecretCipherError) {
+    return c.json({ error: error.code, message: error.message }, 503);
+  }
+  if (error instanceof ConnectionServiceError) {
+    const status =
+      error.code === "CONNECTION_NOT_FOUND" || error.code === "CANVAS_NOT_FOUND" ? 404 : 409;
+    return c.json({ error: error.code, message: error.message }, status);
+  }
+  throw error;
 }
 
 /** Load any canvas by id (admin sees every status); null when missing. */

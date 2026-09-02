@@ -4,12 +4,15 @@ import { pino } from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { adminSettingsService } from "../admin/settings-service.js";
 import { createAuditLog } from "../audit/audit-log.js";
+import { createSecretCipher } from "../connections/secret-cipher.js";
+import { connectionService } from "../connections/service.js";
 import type { DbClient } from "../db/factory.js";
 import { adminRepository } from "../db/repositories/admin.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { allowedEmailsRepository } from "../db/repositories/allowed-emails.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { connectionsRepository } from "../db/repositories/connections.js";
 import { emailTemplatesRepository } from "../db/repositories/email-templates.js";
 import { filesRepository } from "../db/repositories/files.js";
 import {
@@ -38,6 +41,12 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
   const canvases = canvasesRepository(client);
   const invitations = invitationsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
+  const connections = connectionService({
+    repository: connectionsRepository(client),
+    canvases,
+    cipher: createSecretCipher(Buffer.alloc(32, 7).toString("base64")),
+    audit,
+  });
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("user", { id: actor.id, isAdmin: actor.isAdmin } as never);
@@ -60,6 +69,7 @@ function buildAdminApp(client: DbClient, actor: { id: string; isAdmin: boolean }
       invitations,
       invites: makeInviteService(client, config),
       audit,
+      connections,
     }),
   );
   return { app, audit, canvases, invitations };
@@ -104,6 +114,7 @@ describe("admin routes", () => {
       ["GET", "/api/admin/ai-usage"],
       ["GET", "/api/admin/settings/models"],
       ["GET", "/api/admin/settings/quotas"],
+      ["GET", "/api/admin/connections"],
     ] as const) {
       const res = await app.request(path, { method });
       expect(res.status).toBe(404);
@@ -1037,6 +1048,77 @@ describe("admin routes", () => {
     for (const action of ["block", "unblock", "promote", "demote"] as const) {
       expect((await app.request(`/api/admin/users/nope/${action}`, post())).status).toBe(404);
     }
+  });
+
+  it("manages sanitized profiles and explicit canvas grants", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app, canvases } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const canvas = await canvases.create({
+      ownerId: admin.id,
+      slug: "stocks-1111-2222",
+      apiKeyHash: "hash",
+    });
+
+    const created = await app.request(
+      "/api/admin/connections",
+      post({
+        key: "stocks",
+        label: "Stock data",
+        origin: "https://stocks.example.com",
+        allowedMethods: ["GET"],
+        protectedHeaders: [{ name: "User-Agent", value: "controlled-secret-agent" }],
+      }),
+    );
+    expect(created.status).toBe(201);
+    const createdText = await created.text();
+    expect(createdText).not.toContain("controlled-secret-agent");
+    expect(createdText).not.toContain("protectedHeadersEnvelope");
+    const id = (JSON.parse(createdText) as { connection: { id: string } }).connection.id;
+
+    expect(
+      (
+        await app.request(`/api/admin/connections/${id}/canvases/${canvas.id}`, {
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const listed = await app.request("/api/admin/connections");
+    expect(await listed.json()).toMatchObject({
+      connections: [
+        {
+          id,
+          protectedHeaders: [{ name: "user-agent", set: true }],
+          affectedCanvasCount: 1,
+        },
+      ],
+    });
+    const canvasAuthority = await app.request(`/api/admin/canvases/${canvas.id}/connections`);
+    const authorityText = await canvasAuthority.text();
+    expect(authorityText).toContain('"key":"stocks"');
+    expect(authorityText).not.toContain("user-agent");
+    expect(authorityText).not.toContain("controlled-secret-agent");
+  });
+
+  it("rejects cross-site connection mutations before creating a profile", async () => {
+    client = await makeTestDb("sqlite");
+    const admin = await seedUser(client, "admin");
+    const { app } = buildAdminApp(client, { id: admin.id, isAdmin: true });
+    const response = await app.request("/api/admin/connections", {
+      ...post({
+        key: "stocks",
+        label: "Stocks",
+        origin: "https://stocks.example.com",
+        allowedMethods: ["GET"],
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://evil.example",
+        "sec-fetch-site": "cross-site",
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await (await app.request("/api/admin/connections")).json()).toEqual({ connections: [] });
   });
 
   it("cannot block the last functioning admin (409 last_admin)", async () => {
