@@ -170,6 +170,10 @@ or read `err.code` / `err.status`.
 - The canvas was created but its deploy or share-config failed →
   `PublishFailedError` (`status: 502`, `code: "PUBLISH_FAILED"`). Its `.id` is the new
   canvas's id, so you can retry the publish or `canvasdrop.canvases.revoke(id)`.
+- `update` saved the settings but the bundle deploy then failed →
+  `UpdatePartialError` (`status: 502`, `code: "UPDATE_PARTIAL"`). `.stage` names the
+  failed stage and `.current` is the saved share state, so nothing you changed is lost;
+  retry the `update` with the bundle.
 
 See [error codes](/docs/api/errors). The underlying HTTP endpoints live under
 `/v1/c/<slug>/authoring` — see the [Runtime API](/docs/api/runtime-api).

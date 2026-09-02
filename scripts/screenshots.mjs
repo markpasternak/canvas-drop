@@ -11,7 +11,9 @@
 // The landing shots are the light, populated product imagery the marketing page
 // (apps/server/src/http/landing-page.ts) embeds — hero + the product-tour
 // carousel (dashboard, editor, Shared, gallery, sharing, capabilities, admin, usage).
-// Seed generic demo data first so they aren't empty: `pnpm seed:canvases`
+// Seed generic demo data first so they aren't empty: `pnpm seed:canvases`, then
+// `pnpm seed:demo-apps` (real covers) and `pnpm seed:collaborators` (editors, a viewer,
+// an editor team, and a pending invite on the tour canvas — the people-list shot)
 // (neutral tool names, @example.com owners — no real org data, so the shots stay
 // org-agnostic, R11). The landing capture DISCOVERS a canvas id from the
 // dashboard so the canvas-scoped tour screens (editor/sharing/…) work without a
@@ -104,6 +106,9 @@ async function resolveShots(page) {
       // marketing tour shows the copyable URL, the selected audience, and the Shared
       // listing control in one frame.
       { path: `/canvases/${id}/share`, name: "tour-sharing.webp", scrollTo: "#share-link" },
+      // People with access (editor-roles plan): the owner row, a direct editor, a viewer, an
+      // editor team, and a pending editor invite — seeded by `pnpm seed:collaborators`.
+      { path: `/canvases/${id}/share`, name: "tour-people.webp", scrollTo: "#people" },
       { path: `/canvases/${id}/capabilities`, name: "tour-capabilities.webp" },
       { path: `/canvases/${id}/usage`, name: "tour-usage.webp" },
       // The per-canvas preview control (auto/off + custom cover). Scroll the Preview
