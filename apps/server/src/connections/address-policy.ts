@@ -72,8 +72,12 @@ export function normalizeConnectionOrigin(value: string): string {
   return url.origin;
 }
 
-export function buildConnectionTarget(origin: string, relativePath: string): URL {
-  if (new TextEncoder().encode(relativePath).byteLength > CONNECTION_MAX_RELATIVE_URL_BYTES) {
+export function buildConnectionTarget(
+  origin: string,
+  relativePath: string,
+  maxBytes = CONNECTION_MAX_RELATIVE_URL_BYTES,
+): URL {
+  if (new TextEncoder().encode(relativePath).byteLength > maxBytes) {
     throw new Error("connection relative URL is too large");
   }
   if (!relativePath.startsWith("/") || relativePath.startsWith("//")) {

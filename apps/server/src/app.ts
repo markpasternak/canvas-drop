@@ -23,8 +23,14 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { blobKey } from "./canvas/storage-keys.js";
 import { canvasUrl } from "./canvas/url.js";
+import { connectionLimits } from "./connections/limits.js";
 import { createSecretCipher } from "./connections/secret-cipher.js";
 import { connectionService } from "./connections/service.js";
+import {
+  connectionTransport as makeConnectionTransport,
+  nodeConnectionRequest,
+  resolveConnectionHost,
+} from "./connections/transport.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
@@ -130,6 +136,8 @@ export interface BuildAppDeps {
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
+  /** Outbound connection transport seam; tests inject a no-network fake. */
+  connectionTransport?: ReturnType<typeof makeConnectionTransport>;
   /** Env vars explicitly set (from `presentEnvVars()` at boot) — admin config source labels. */
   envPresent?: Set<string>;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
@@ -198,6 +206,10 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     cipher: createSecretCipher(deps.config.connections.encryptionKey),
     audit: deps.audit,
   });
+  const connectionHttp =
+    deps.connectionTransport ??
+    makeConnectionTransport({ resolve: resolveConnectionHost, request: nodeConnectionRequest });
+  const connectionAdmission = connectionLimits(deps.config.connections);
 
   // One shared in-process rate-limit store (§9.7, M7) — used by the broad
   // post-gateway middleware AND the out-of-band mount points (Bearer deploy,
@@ -610,6 +622,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         quota: settingsSvc.effectiveQuota,
       }),
       usage,
+      connections: {
+        service: connections,
+        transport: connectionHttp,
+        limits: connectionAdmission,
+      },
       audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
       aiUsage,

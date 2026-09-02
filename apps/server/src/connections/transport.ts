@@ -2,16 +2,16 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { type IncomingHttpHeaders, validateHeaderName, validateHeaderValue } from "node:http";
 import { request as httpsRequest, type RequestOptions } from "node:https";
 import type { LookupFunction } from "node:net";
+import type { ConnectionMethod } from "@canvas-drop/shared/db";
 import {
   buildConnectionTarget,
   isPublicAddress,
   normalizeConnectionOrigin,
 } from "./address-policy.js";
 
-export type ConnectionMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
-
 export type ConnectionTransportErrorCode =
   | "INVALID_BODY"
+  | "REQUEST_TOO_LARGE"
   | "METHOD_NOT_ALLOWED"
   | "DESTINATION_BLOCKED"
   | "UPSTREAM_TIMEOUT"
@@ -70,6 +70,9 @@ export interface ConnectionFetchInput {
   maxResponseBytes: number;
   timeoutMs: number;
   maxRedirects: number;
+  maxUrlBytes?: number;
+  maxCallerHeaders?: number;
+  maxCallerHeaderBytes?: number;
   signal?: AbortSignal;
 }
 
@@ -140,8 +143,12 @@ function validateHeader(name: string, value: string): string {
 export function prepareConnectionHeaders(
   caller: readonly (readonly [string, string])[],
   protectedHeaders: readonly (readonly [string, string])[],
+  limits: { maxHeaders: number; maxBytes: number } = {
+    maxHeaders: MAX_CALLER_HEADERS,
+    maxBytes: MAX_CALLER_HEADER_BYTES,
+  },
 ): Headers {
-  if (caller.length > MAX_CALLER_HEADERS) {
+  if (caller.length > limits.maxHeaders) {
     fail("INVALID_BODY", "connection request has too many headers");
   }
   let callerBytes = 0;
@@ -163,7 +170,7 @@ export function prepareConnectionHeaders(
   const seen = new Set<string>();
   for (const [name, value] of caller) {
     callerBytes += Buffer.byteLength(name) + Buffer.byteLength(value);
-    if (callerBytes > MAX_CALLER_HEADER_BYTES) {
+    if (callerBytes > limits.maxBytes) {
       fail("INVALID_BODY", "connection request headers are too large");
     }
     const normalized = validateHeader(name, value);
@@ -258,14 +265,27 @@ async function readBoundedBody(
 export function connectionTransport(deps: ConnectionTransportDeps) {
   return {
     async fetch(input: ConnectionFetchInput): Promise<ConnectionFetchResult> {
-      const origin = normalizeConnectionOrigin(input.origin);
+      let origin: string;
+      try {
+        origin = normalizeConnectionOrigin(input.origin);
+      } catch {
+        fail("DESTINATION_BLOCKED", "connection destination is invalid");
+      }
       if (!input.allowedMethods.includes(input.method)) {
         fail("METHOD_NOT_ALLOWED", "connection method is not allowed");
       }
-      let url = buildConnectionTarget(origin, input.path);
+      let url: URL;
+      try {
+        url = buildConnectionTarget(origin, input.path, input.maxUrlBytes);
+      } catch {
+        fail("INVALID_BODY", "connection relative URL is invalid");
+      }
       let method = input.method;
       let body = input.body;
-      let headers = prepareConnectionHeaders(input.callerHeaders, input.protectedHeaders);
+      let headers = prepareConnectionHeaders(input.callerHeaders, input.protectedHeaders, {
+        maxHeaders: input.maxCallerHeaders ?? MAX_CALLER_HEADERS,
+        maxBytes: input.maxCallerHeaderBytes ?? MAX_CALLER_HEADER_BYTES,
+      });
       let timedOut = false;
       const controller = new AbortController();
       const abortFromCaller = () => controller.abort(input.signal?.reason);

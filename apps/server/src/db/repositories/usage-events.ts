@@ -4,7 +4,7 @@ import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
 /** A primitive op type recorded for stats (D24). */
-export type UsageType = "kv_op" | "file_op" | "view" | "deploy" | "rt_connect";
+export type UsageType = "kv_op" | "file_op" | "view" | "deploy" | "rt_connect" | "connection_op";
 
 export interface UsageEventInput {
   canvasId: string;

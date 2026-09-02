@@ -31,6 +31,7 @@ import type { AppEnv } from "../http/types.js";
 import type { RealtimeHub } from "../realtime/hub.js";
 import { type AiSettings, canvasAiRoutes } from "./canvas-ai.js";
 import { type AuthoringSettings, canvasAuthoringRoutes } from "./canvas-authoring.js";
+import { type CanvasConnectionsDeps, canvasConnectionsRoutes } from "./canvas-connections.js";
 import { canvasFilesRoutes } from "./canvas-files.js";
 import { canvasKvRoutes } from "./canvas-kv.js";
 import { canvasRealtimeRoutes } from "./canvas-realtime.js";
@@ -50,6 +51,8 @@ export interface CanvasApiDeps {
   kv: KvRepository;
   files: FilesService;
   usage: UsageEventsRepository;
+  /** Admin-granted outbound connections. Omitted only by focused legacy tests. */
+  connections?: Omit<CanvasConnectionsDeps, "config" | "usage">;
   /** Audit sink (M7) — KV/file MUTATIONS are recorded for the §12.1.8 security
    *  trail. Optional so an AI/realtime-only suite needn't wire it; app.ts always
    *  provides it in production. */
@@ -182,6 +185,13 @@ export function canvasApiRoutes(deps: CanvasApiDeps): Hono<AppEnv> {
   // KV primitive (U6) and Files primitive (U7).
   app.route("/kv", canvasKvRoutes(deps));
   app.route("/files", canvasFilesRoutes(deps));
+
+  if (deps.connections) {
+    app.route(
+      "/connections",
+      canvasConnectionsRoutes({ config: deps.config, usage: deps.usage, ...deps.connections }),
+    );
+  }
 
   // AI primitive (M9, area H). Behind requireCapability("ai") inside the router.
   app.route(

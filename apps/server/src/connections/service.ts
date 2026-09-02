@@ -21,7 +21,10 @@ export type ConnectionServiceErrorCode =
   | "CONNECTION_NOT_FOUND"
   | "CANVAS_NOT_FOUND"
   | "CONNECTION_KEY_TAKEN"
-  | "CONNECTION_CONFIRMATION_REQUIRED";
+  | "CONNECTION_CONFIRMATION_REQUIRED"
+  | "CONNECTION_NOT_GRANTED"
+  | "CONNECTION_DISABLED"
+  | "CONNECTION_KEY_UNAVAILABLE";
 
 export class ConnectionServiceError extends Error {
   constructor(
@@ -276,6 +279,32 @@ export function connectionService(deps: {
       return (await deps.repository.listForCanvas(canvasId)).map(({ profile }) =>
         managerView(profile),
       );
+    },
+
+    /** Internal runtime projection. Never serialize this result: it contains credentials. */
+    async resolveRuntime(canvasId: string, key: string) {
+      const granted = await deps.repository.findGranted(canvasId, key);
+      if (!granted) {
+        throw new ConnectionServiceError("CONNECTION_NOT_GRANTED", "connection is not granted");
+      }
+      if (!granted.profile.enabled) {
+        throw new ConnectionServiceError("CONNECTION_DISABLED", "connection is disabled");
+      }
+      if (granted.profile.protectedHeadersEnvelope && !deps.cipher.available) {
+        throw new ConnectionServiceError(
+          "CONNECTION_KEY_UNAVAILABLE",
+          "connection credentials are unavailable",
+        );
+      }
+      return {
+        id: granted.profile.id,
+        key: granted.profile.key,
+        origin: granted.profile.origin,
+        allowedMethods: granted.profile.allowedMethods,
+        protectedHeaders: granted.profile.protectedHeadersEnvelope
+          ? deps.cipher.decrypt(granted.profile.id, granted.profile.protectedHeadersEnvelope)
+          : {},
+      };
     },
   };
 }
