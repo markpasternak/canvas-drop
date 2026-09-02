@@ -1,13 +1,13 @@
 # Browser SDK
 
-Give a static canvas memory, file storage, the signed-in viewer's identity, a
-model, and live sync through one global, `canvasdrop`. There is no build step
+Add KV storage, file storage, AI, the signed-in viewer's identity, and realtime
+sync to a static canvas through one global, `canvasdrop`. There is no build step
 and nothing to configure in the page: identity comes from the viewer's session,
 the canvas is identified from its own URL, and no key ever reaches the browser.
 
 ## Add it to a canvas
 
-Drop in one script tag, then call the global:
+One script tag, then call the global:
 
 ```html
 <script src="/sdk/v1.js"></script>
@@ -18,13 +18,16 @@ Drop in one script tag, then call the global:
 </script>
 ```
 
-`type="module"` lets you use top-level `await`; the SDK tag itself is a plain
-`<script>` and runs first. The bundle is served at `{base}/sdk/v1.js` behind the
-same sign-in as everything else, and a relative `src` resolves in both URL modes.
+The SDK tag is a plain `<script>`, so it runs before your module; `type="module"`
+gives you top-level `await`. The root-relative `src` resolves against the
+canvas's own origin, where the server serves the script in both URL modes,
+behind the same sign-in as the canvas. A fresh local instance (`pnpm dev`, `dev`
+auth) is already signed in, so the snippet runs as soon as the canvas has
+**Backend** switched on (see [Turn the backend on first](#turn-the-backend-on-first)).
 
-The snippet runs as soon as the canvas has **Backend** switched on (see
-[Turn the backend on first](#turn-the-backend-on-first)). A fresh local
-instance (`pnpm dev`, `dev` auth) is already signed in.
+`{base}/sdk/v1.js` is a stable path for the life of v1, cached for an hour
+(`cache-control: public, max-age=3600`), so deployed canvases pick up SDK fixes
+without a redeploy.
 
 ## One global: `canvasdrop`
 
@@ -32,9 +35,9 @@ The script defines exactly one global, `window.canvasdrop`. There is no `cd`
 alias, no second name, and no version property on the object.
 
 If you import the `@canvas-drop/sdk` package as a module instead, it exports
-`createClient`, `detectContext`, `SDK_VERSION`, `ERROR_CODES`, and the error
-classes. The served script is that same client with the context detected for
-you.
+`createClient`, `detectContext`, `SDK_VERSION`, `ERROR_CODES`,
+`errorFromResponse`, and the error classes. The served script is that same
+client with the context detected for you.
 
 ## How the SDK finds your canvas
 
@@ -58,25 +61,27 @@ canvas's **Backend** tab. That master switch is off by default and gates every
 primitive, including `me()`. With it on:
 
 - **Identity** has no toggle of its own; `me()` works whenever the backend is on.
-- **KV**, **files**, **AI**, and **realtime** each have their own toggle. AI and
-  realtime also depend on the operator having configured them for the instance.
-- **Authoring** stays off until the owner enables it and the operator has opted
-  the instance in.
+- **KV**, **files**, **AI**, and **realtime** each have their own toggle, on by
+  default. AI also needs a provider key configured by the operator; realtime
+  also needs the operator to have enabled it for the instance.
+- **Authoring** is off by default and stays off until the owner enables it and
+  the operator has opted the instance in.
 
 A call to anything that is off throws `CapabilityDisabledError` (code
 `CAPABILITY_DISABLED`, status 403); its `.hint` names the gate that failed and
-how to fix it. The [Capabilities](/docs/authoring/capabilities) page covers the
-tab.
+how to open it. On a canvas shared as a public link, public visitors get
+`STATIC_ONLY` (403) from every primitive even with Backend on. The
+[Capabilities](/docs/authoring/capabilities) page covers the tab.
 
 ## The surface
 
 | Namespace | What it does | Reference |
 | --- | --- | --- |
-| `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind }`, where `kind` is `"member"` or `"guest"`. | [Identity](/docs/sdk/identity) |
+| `canvasdrop.me()` | The signed-in viewer: `{ id, email, name, avatarUrl, kind }`. `kind` is `"member"`, or `"guest"` for a retained legacy guest session. | [Identity](/docs/sdk/identity) |
 | `canvasdrop.kv` | `get`, `set`, `delete`, `list`, `increment`. The same five on `canvasdrop.kv.user` store per viewer. `get` resolves `null` for a missing key. | [KV](/docs/sdk/kv) |
 | `canvasdrop.files` | `upload(file)`, `list()`, `delete(id)`, and the synchronous `url(id)`. | [Files](/docs/sdk/files) |
-| `canvasdrop.ai` | `chat(messages, { model })` resolves the full text with usage and cost; `stream(messages, { model })` yields text chunks. | [AI](/docs/sdk/ai) |
-| `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `close`. | [Realtime](/docs/sdk/realtime) |
+| `canvasdrop.ai` | `chat(messages, { model })` resolves the full text with usage and cost; `stream(messages, { model })` yields text chunks. `model` is required. | [AI](/docs/sdk/ai) |
+| `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `close`, over one shared WebSocket that reconnects on its own. | [Realtime](/docs/sdk/realtime) |
 | `canvasdrop.canvases` | `publish`, `update`, `list`, `revoke`: a signed-in viewer creates and manages canvases from the page, as themselves (the authoring capability). | [Authoring](/docs/sdk/authoring) |
 
 ## Errors

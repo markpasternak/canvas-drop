@@ -2,8 +2,8 @@
 
 Know who is looking at your canvas. `canvasdrop.me()` returns the signed-in
 viewer, resolved from the server-side session: the page never handles a token,
-and a viewer cannot claim to be someone else. `me()` works whenever the canvas's
-backend is on; it has no toggle of its own (see
+and a viewer cannot claim to be someone else. `me()` is available whenever the
+canvas's backend is on; it has no toggle of its own (see
 [Capabilities](/docs/authoring/capabilities)).
 
 ```js
@@ -19,8 +19,8 @@ document.querySelector("#greeting").textContent = `Hi, ${me.name}`;
 ```
 
 Call it once per page load and keep the result. The runtime API is rate-limited
-per viewer per canvas (120 requests a minute by default), so a `me()` on every
-render spends budget for nothing.
+per viewer per canvas (120 requests a minute by default, shared with `kv` and
+`files`), so a `me()` on every render spends budget for nothing.
 
 ## Signature
 
@@ -51,9 +51,11 @@ information stays on the dashboard side.
 ## Where the identity comes from
 
 `me()` calls `GET {base}/v1/c/{slug}/me` with the viewer's session cookie
-(`credentials: "include"`). The server resolves the user from that session and
-returns the projection above. Nothing in the page identifies the viewer, so
-nothing in the page can be edited to impersonate someone.
+(`credentials: "include"`). In path mode that is the canvas's own origin; in
+subdomain mode the SDK calls the base host, not the canvas subdomain. The server
+resolves the user from the session and returns the projection above. Nothing in
+the page identifies the viewer, so nothing in the page can be edited to
+impersonate someone.
 
 The same server-side `id` is what scopes the [per-viewer KV
 namespace](/docs/sdk/kv) (`canvasdrop.kv.user`) and what appears as `from.id`
@@ -62,23 +64,31 @@ it; the server already knows it.
 
 ### Legacy guest sessions
 
-Add person grants sign people in as regular users, so on a current instance
-`kind` is `"member"`. `"guest"` remains for guest sessions retained from older
+People you add at the Specific people rung sign in through the org's normal
+login and arrive as `"member"`, so on a current instance that is the only
+`kind` you will see. `"guest"` remains for guest sessions retained from older
 instances. A guest's `id` is namespaced `guest:<inviteId>` so it never collides
-with an org user id, and its `name` is its email. Guests never hold org
-capabilities.
+with an org user id; its `name` is its email and its `avatarUrl` is `null`.
+Guests hold no org capabilities, and AI for guests has its own per-canvas switch
+(see [AI](/docs/sdk/ai)).
 
 ## Errors
 
-`me()` rejects with a `CanvasdropError` subclass; branch on `err.code`. The
-codes you will actually meet:
+`me()` rejects with a `CanvasdropError` (or a subclass); branch on `err.code`.
+The codes you will actually meet:
 
 | Code | Status | When |
 | --- | --- | --- |
-| `CAPABILITY_DISABLED` | 403 | The canvas's backend is off. `err.hint` names the switch to turn on. Thrown as `CapabilityDisabledError`. |
+| `CAPABILITY_DISABLED` | 403 | The canvas's backend is off. `err.hint` names the switch: the dashboard Backend tab, the `set_capabilities` MCP tool, or the capabilities PATCH. Thrown as `CapabilityDisabledError`. |
 | `STATIC_ONLY` | 403 | The canvas is at the Public link rung. Every backend primitive, `me()` included, is refused for anyone who is not the owner or an editor, signed in or not. |
-| `NOT_AUTHENTICATED` | 401 | No session. Rare in practice: a viewer who reached the canvas has already signed in. Thrown as `NotAuthenticatedError`. |
-| `RATE_LIMITED` | 429 | Too many runtime-API calls from this viewer on this canvas. Back off and retry. |
+| `RATE_LIMITED` | 429 | Too many runtime-API calls from this viewer on this canvas within the last minute. Back off and retry. A plain `CanvasdropError`, not a `QuotaExceededError`. |
+| `NOT_AUTHENTICATED` | 401 | No session. Rare in practice: a viewer who reached the canvas has already signed in. In `proxy` and `dev` auth modes the gateway answers 401; in `oidc` mode it redirects to login instead. Thrown as `NotAuthenticatedError`. |
+
+Access is re-checked on every call, so `me()` can also fail later in a session
+when the viewer's access changed after the page loaded: `PASSWORD_REQUIRED`
+(403) when the password gate must be passed again, `DISABLED` (403) when an
+admin disabled the canvas, and a `NotFoundError` (404) when the share expired or
+was revoked. A page reload sends the viewer back through the normal entry flow.
 
 ```js
 try {

@@ -1,6 +1,6 @@
 # canvas-drop
 
-**Your org's place to ship the small web tools you build with AI. Drop a folder, get a secure URL, behind your own SSO, on infrastructure you control.**
+**Deploy and share the small web tools your org builds, behind your sign-in. Drop a folder, get a URL, on infrastructure you control.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/markpasternak/canvas-drop/actions/workflows/ci.yml/badge.svg)](https://github.com/markpasternak/canvas-drop/actions/workflows/ci.yml)
@@ -10,58 +10,60 @@
   <img src="docs/site/assets/tour.webp" alt="canvas-drop: the dashboard, Shared, in-browser editor, gallery, sharing, backend, and admin" width="100%">
 </p>
 
-AI builds a working dashboard, form, or internal tool in minutes. Then it stalls, because there is nowhere safe and instant to put it: emailing a zip, or spinning up a project on someone else's cloud outside your org boundary, or waiting on a platform team. canvas-drop closes that last mile. It is the creation-and-sharing layer for AI-built tools, prototypes, dashboards, demos, and lightweight internal apps. Self-hosted inside your trust boundary, MIT-licensed, with **no telemetry and no phone-home**.
+AI builds a working dashboard, form, or internal tool in minutes. Then it stalls, because there is nowhere safe and instant to put it: a zip in an email, a project on someone else's cloud outside your org boundary, or a ticket to a platform team. canvas-drop closes that last mile. It is the creation-and-sharing layer for AI-built tools, prototypes, dashboards, demos, and lightweight internal apps: self-hosted inside your trust boundary, MIT-licensed, with **no telemetry and no phone-home**.
 
-It is inspired by [Quick](https://shopify.engineering/quick), Shopify's internal "drop a folder, get a URL" platform that shifted their culture to demos over memos. Quick lives inside Shopify and there was no open way to run the same idea on your own infrastructure with a real backend, so I built canvas-drop and took it further.
+It is inspired by [Quick](https://shopify.engineering/quick), Shopify's internal "drop a folder, get a URL" platform. Quick lives inside Shopify; canvas-drop is the open way to run the same idea on your own infrastructure, with a real backend, versioning, and a sharing model an org can govern.
 
-Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/docs)**.
+Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/docs)**. Every instance serves the same pages at `{base}/docs`; the source is [`docs/site/`](docs/site/).
 
 ---
 
 ## Why canvas-drop
 
 - **Distribution is the problem it solves.** AI build tools make the artifact. canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
-- **Agents ship from the workflow they already use.** A keyed deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop. The building happens where you already work, not inside a chat box bolted onto the tool.
-- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) added with one `<script>` tag, no provisioning, **no secrets in the browser**. Stay fully static when you do not.
-- **A rich, scriptable API.** The whole lifecycle is programmable: create, deploy (including a content-addressed staged upload that sends only changed bytes), read-back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
-- **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so re-deploys write only what changed.
-- **Roles on the people list.** Anyone on a canvas's people list — a person or a whole team — is a **viewer** or an **editor**. Editors manage the canvas as fully as the owner (content, deploys, settings, sharing, the people list) without relaying through them; only deleting, transferring, and the guest-AI opt-in stay with the owner. Ownership moves in one step to an existing editor, and an admin can reassign a departed owner's canvases. Two editors on the same file get a named conflict, never a silent overwrite.
-- **A deliberate sharing ladder.** Private, Specific people (signed-in members or pending external people), a Team (a self-serve group — personal *friends & family* or org-attached), Whole org, or a static Public link that admins can disable globally or revoke per account. Team and Whole-org shares can stay link-only or be listed in **Shared** for people who already have access. An owner can also opt a Whole-org canvas into the organization-scoped gallery in one action; it remains invisible to other organizations. Invites are **auth-delegated**: a brand-new person gets access on their first sign-in through your configured auth — no app-owned passwords or magic-link accounts.
-- **Run anywhere.** Database, storage, URL mode, and auth all sit behind interfaces, so the same image runs on a laptop, a $5 VPS, or a corporate cloud. Swapping a driver is a config change, never a code change.
-- **Rich admin and configuration, sensible defaults.** It runs the moment you clone it, with a sane default for every choice, so there is nothing to configure to start. When you want control it is all there: an admin panel (all-canvases governance, takedown and restore, the AI model allowlist, global quota defaults) plus typed env config for drivers, limits, and per-capability gates, validated at boot so a bad combination fails loud instead of silently.
+- **Agents ship from where they already work.** A keyed deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) with 46 tools let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop.
+- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) behind one `<script>` tag, no provisioning, **no secrets in the browser**. The backend is off per canvas until you switch it on; stay fully static when you do not need it.
+- **The whole lifecycle is scriptable.** Create, deploy (including a content-addressed staged upload that sends only changed blobs), read back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
+- **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so a re-deploy writes only what changed.
+- **Roles on the people list.** Anyone on a canvas's people list, a person or a whole team, is a **viewer** or an **editor**. Editors manage the canvas as fully as the owner (content, deploys, settings, sharing, the people list); only deleting, transferring, and the guest-AI opt-in stay with the owner. Ownership moves in one step to an existing editor, and an admin can reassign a departed owner's canvases. Two editors on the same file get a named conflict, never a silent overwrite.
+- **A deliberate sharing ladder.** Private, Specific people, Team (a self-serve group, personal or attached to your org), Whole org, or a static Public link that admins can switch off globally or revoke per account. Team and Whole-org shares can stay link-only or be listed in **Shared** for the people who already have access; a Whole-org canvas can also be listed in the org-scoped gallery. Adding a new person is **auth-delegated**: they get access on their first sign-in through your configured auth, with no app-owned passwords or magic links.
+- **Run anywhere.** Database, storage, URL mode, and auth sit behind interfaces, so the same image runs on a laptop, a small VPS, or a corporate cloud. Swapping a driver is a config change, never a code change.
+- **Sensible defaults, full control when you want it.** It runs the moment you clone it. When you want control: an admin panel (all-canvases governance, disable and restore, owner reassignment, the AI model allowlist, quota defaults, public-link governance, design skins) plus typed env config validated at boot, so a bad combination fails loud instead of silently.
 
-> Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that simplicity and adds the rich API, the versioned storage model, the five primitives, and the sharing ladder, so the same "drop a folder" gesture also covers the parts an org actually needs.
+> Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that gesture and adds the API surface, the versioned storage model, the five primitives, and the sharing ladder, so "drop a folder" also covers the parts an org actually needs.
 
 ---
 
 ## Quickstart (local dev)
 
-Requires **Node 24** and **pnpm**. Clone to a running instance in well under five minutes:
+Requires **Node 24** and **pnpm 11**. Clone to a running instance in a few minutes:
 
 ```bash
 git clone https://github.com/markpasternak/canvas-drop.git
 cd canvas-drop
 pnpm install
 cp .env.example .env       # defaults: path mode, SQLite, local storage, dev auth
-pnpm dev                   # server + dashboard in watch mode (Ctrl-C stops both)
+pnpm dev                   # server + dashboard + SDK in watch mode (Ctrl-C stops all)
 ```
 
 | URL | What |
 |-----|------|
-| **http://localhost:5173** | The **dashboard** (Vite HMR). Develop here; it proxies `/api`, `/auth`, and `/v1` to the server. |
-| **http://localhost:3000** | The **Hono server**: API, deploy endpoints, and hosted canvases. |
+| **http://localhost:5173** | The **dashboard** (Vite HMR). Develop here; it proxies `/api`, `/auth`, `/v1`, and the docs paths to the server. |
+| **http://localhost:3000** | The **server**: API, deploy endpoints, hosted canvases, `/docs`, `/mcp`. |
 
-`dev` auth auto-logs-in a fake local user, so there is zero setup. `curl http://localhost:3000/healthz` confirms the server is alive. Port already in use? `CANVAS_DROP_PORT=3001 pnpm dev`.
+`dev` auth signs you in as a fixed local user (`dev@example.com`, an admin by default), so there is nothing to set up. `pnpm dev` seeds sample canvases into an empty database (`CANVAS_DROP_DEV_SEED=0` skips that). `curl http://localhost:3000/healthz` confirms the server is up. Port taken? `CANVAS_DROP_PORT=3001 pnpm dev`.
+
+The `.env` file is read only by `pnpm dev`. In production, config comes from the process manager or container environment.
 
 ---
 
 ## Deploy a canvas
 
-Every publish produces the same thing: an immutable version served at an unguessable URL. The first three are in the dashboard; the fourth is for scripts and agents.
+Every deploy produces the same thing: an immutable version served at an unguessable URL. Three paths live in the dashboard; the fourth is for scripts and agents.
 
 1. **Drag a folder or ZIP** with `index.html` and its assets.
-2. **Paste HTML** for a single-file artifact (often what an AI just wrote).
-3. **Edit in the browser**: a file manager plus CodeMirror editor work against a mutable **draft** with autosave; an explicit **Publish** snapshots it into an immutable version.
+2. **Paste HTML** for a single-file artifact (often what an AI just wrote). It publishes in one step.
+3. **Edit in the browser**: a file tree plus CodeMirror editor work against a mutable **draft** with autosave; **Publish** snapshots it into an immutable version. A single-HTML draft also gets an on-page text-editing mode.
 4. **Deploy API**: `PUT` a ZIP with the canvas's secret key. `deploy = live`, no draft loop.
 
 ```bash
@@ -70,21 +72,21 @@ curl -X PUT "$BASE_URL/v1/canvases/$CANVAS_ID/deploy" \
   --data-binary @site.zip
 ```
 
-The key operates only on its own canvas and **never belongs in canvas files**. `GET /v1/canvases/:id`, `GET …/versions`, `GET …/files` (read back the live version to verify), `POST …/rollback`, and `POST …/unpublish` round out the surface. For large or frequently re-deployed canvases there is a **staged upload** (`begin` then per-blob `PUT` then `finalize`): a content-addressed manifest sends only changed files, and bytes go straight to the server instead of through an agent's context. See [canvas-drop.com/docs](https://canvas-drop.com/docs).
+The key (`cd_…`, shown once) operates only on its own canvas and **never belongs in canvas files**. `GET /v1/canvases/:id`, `GET …/versions`, `GET …/files` (read back the live version to verify), `POST …/rollback`, and `POST …/unpublish` round out the surface. For large or frequently re-deployed canvases there is a **staged upload**: `POST …/uploads` returns the blob hashes the server is missing, `PUT …/uploads/:uploadId/blobs/:hash` stages each one, and `POST …/uploads/:uploadId/finalize` publishes. Only changed files cross the wire.
 
-You can also **clone** any active canvas you own, or a gallery-listed template, as an unpublished draft with a fresh slug and key.
+Limits: 100 MB per canvas, 25 MB per file, 2 000 files; the last 10 versions are kept. You can also **clone** a canvas you own, or a gallery-listed template, as an unpublished draft with a fresh slug and key. Three starter canvases live in [`examples/`](examples/).
 
 ---
 
 ## Backend in five primitives
 
-Add one tag, no build step, no keys, no config:
+Switch on **Backend** in the canvas's Backend tab (off by default; each primitive has its own toggle), then add one tag. No build step, no keys, no config:
 
 ```html
 <script src="/sdk/v1.js"></script>
 ```
 
-The global `canvasdrop` appears. Identity rides the signed-in session; the canvas is identified from its own URL. Every method throws a typed, `instanceof`-catchable error.
+The global `canvasdrop` appears. Identity rides the signed-in session; the canvas is identified from its own URL. Every method throws a typed, `instanceof`-catchable error; a primitive that is off fails with `CAPABILITY_DISABLED`.
 
 ```js
 const me = await canvasdrop.me();                       // { id, email, name, avatarUrl, kind }
@@ -97,13 +99,13 @@ const ch = canvasdrop.realtime.channel("room"); ch.subscribe(render); ch.publish
 
 | Primitive | What it gives a canvas |
 |-----------|------------------------|
-| **KV** | Shared (`kv.*`) and per-viewer (`kv.user.*`) key/value with `list` and atomic `increment`. |
-| **Files** | Per-canvas upload/list/delete; served as safe, non-executable bytes. |
-| **AI** | Anthropic-first proxy behind a provider abstraction: streaming, model allowlist, metered quotas. The provider key stays server-side. |
+| **KV** | Shared (`kv.*`) and per-viewer (`kv.user.*`) key/value with `get`, `set`, `delete`, `list`, and atomic `increment`. |
+| **Files** | Per-canvas `upload`, `list`, `delete`, and `url`; served as inert bytes. |
+| **AI** | A server-side proxy to the provider (Anthropic by default) with streaming, a model allowlist, and metered per-user and per-canvas quotas. The provider key never leaves the server. Off until `CANVAS_DROP_AI_API_KEY` is set. |
 | **Identity** | `me()`: id, email, name, avatar, and `kind` (`member` or `guest`), resolved from org auth, never the client. |
-| **Realtime** | Ephemeral broadcast plus presence per canvas. Revoking a share drops the socket instantly. |
+| **Realtime** | Ephemeral publish/subscribe plus presence per canvas over one WebSocket. Revoking a share drops the socket. |
 
-The full, agent-optimized contract is served live at **`{base}/llms.txt`**. See also [`docs/sdk.md`](docs/sdk.md).
+Public-link canvases are static-only: anonymous visitors get no primitives. The full, agent-optimized contract is served at **`{base}/llms.txt`**; the readable version is [`docs/sdk.md`](docs/sdk.md).
 
 ---
 
@@ -112,101 +114,111 @@ The full, agent-optimized contract is served live at **`{base}/llms.txt`**. See 
 canvas-drop treats agents as first-class authors. Three ways in, all thin clients of the same service layer:
 
 - **Deploy API**: a per-canvas key `PUT`s files straight to a live version (above).
-- **Agent skill**: an installable skill ([`docs/site/agents/skill.md`](docs/site/agents/skill.md)) with the full SDK contract, so any coding agent builds canvases out of the box.
-- **MCP server** ([`docs/site/agents/mcp.md`](docs/site/agents/mcp.md)): a connect-once remote server at `{base}/mcp`, signing in through your org's own login (OAuth 2.1). It exposes identity-scoped tools at **full dashboard parity**, so anything a person can do in the UI (deploy, version, roll back, share, manage the people list and roles, transfer ownership, edit the draft, set the preview cover, clone, read usage) an agent can do over MCP — as the owner *or* as an editor, with the same owner-only refusals. On by default; disable with `CANVAS_DROP_MCP=off`.
+- **Agent skill**: an installable skill ([`docs/site/agents/skill.md`](docs/site/agents/skill.md), served as `{base}/skill.zip`) with the full SDK and deploy contract, so any coding agent builds canvases out of the box.
+- **MCP server** ([`docs/site/agents/mcp.md`](docs/site/agents/mcp.md)): a connect-once remote server at `{base}/mcp` that signs in through your org's own login (OAuth 2.1). Its 46 identity-scoped tools cover the dashboard surface: anything a person can do in the UI (deploy, version, roll back, share, manage the people list and roles, transfer ownership, edit the draft, set the preview cover, clone, read usage) an agent can do over MCP, as the owner or as an editor, with the same owner-only refusals. On by default; `CANVAS_DROP_MCP=off` disables it.
 
 ---
 
 ## Configuration
 
-Everything is set by environment variables, validated at boot, with a precise message on an invalid combination. Full surface in [`.env.example`](.env.example). Swappable drivers:
+Everything is set by environment variables, validated at boot with a precise message on an invalid combination. Every key is annotated in [`.env.example`](.env.example) and documented in [`docs/site/self-hosting/configuration.md`](docs/site/self-hosting/configuration.md). The drivers:
 
 | Concern | Options | Env |
 |---------|---------|-----|
-| Database | SQLite, Postgres | `CANVAS_DROP_DB` |
-| Storage | local disk, S3-compatible (AWS S3, MinIO, Cloudflare R2) | `CANVAS_DROP_STORAGE` |
-| URL mode | path, subdomain | `CANVAS_DROP_URL_MODE` |
-| Auth | `proxy` (recommended prod), `oidc`, `dev` | `CANVAS_DROP_AUTH_MODE` |
-| Email (invite notifications) | `log`, `smtp`, `mailgun`, `noop` | `CANVAS_DROP_EMAIL_DRIVER` |
-| Tenancy (org boundary, off by default) | name an org so guests can't see whole-org canvases | `CANVAS_DROP_ORG_NAME` |
+| Database | `sqlite` (default), `postgres` | `CANVAS_DROP_DB` |
+| Storage | `local` (default), `s3` (AWS S3, MinIO, Cloudflare R2) | `CANVAS_DROP_STORAGE` |
+| URL mode | `path` (default), `subdomain` | `CANVAS_DROP_URL_MODE` |
+| Auth | `dev` (default), `proxy` (recommended for production), `oidc` | `CANVAS_DROP_AUTH_MODE` |
+| Email (invite notifications) | `log` (default), `smtp`, `mailgun`, `noop` | `CANVAS_DROP_EMAIL_DRIVER` |
+| Tenancy (org boundary) | unset (default, inert) or an org name | `CANVAS_DROP_ORG_NAME` |
 
-The blessed production profile is **subdomain mode plus an identity-aware proxy** (e.g. Cloudflare Access) verifying a signed JWT, with Postgres and S3.
+The blessed production profile is **subdomain mode plus an identity-aware proxy** verifying a signed JWT against its JWKS, with Postgres and S3. [`.env.production.example`](.env.production.example) is that profile, annotated.
 
-**Tenancy (optional).** Set `CANVAS_DROP_ORG_NAME` to draw a member-vs-guest boundary: members (by verified email domain) can share to the **whole org**, while brought-in guests only see canvases they're invited to. It's **inert until named** — deploy first, migrate later. Migrating an existing instance is a dry-run-first cutover; see [`docs/tenancy.md`](docs/tenancy.md).
+**Tenancy (optional).** Set `CANVAS_DROP_ORG_NAME` to draw a member-vs-guest boundary: members (by verified email domain) can share to the **whole org**, while brought-in guests only see canvases they are invited to. It is inert until named, so deploy first and migrate later. Turning it on for an existing instance is a dry-run-first cutover (`pnpm tenancy:plan`, then `--apply`); see [`docs/tenancy.md`](docs/tenancy.md).
 
-Day-to-day operation lives in the in-app **admin panel**: the all-canvases list with usage, disable/takedown/restore, the AI model allowlist, and global quota defaults. Operator-tunable settings are editable there or via env; the auth and rate-limit hot path stays read-only.
+Day-to-day operation lives in the in-app **admin panel**: every canvas across owners with usage, disable and restore, owner reassignment, gallery features, people (block, promote, public-link grants, sign-in permits), and the DB-editable settings (AI key, models, quotas, the public-link switch, screenshots, skin, invite policy). Auth, drivers, and rate limits stay env-only and are read-only there.
 
 ---
 
-## Self-host (Docker, ~5 min)
+## Self-host (Docker)
 
-Requires **Docker** and **Docker Compose v2**. The repo ships a one-command demo stack that runs canvas-drop in its real `proxy` mode behind an identity-aware proxy (oauth2-proxy) and a bundled demo IdP (Dex), so you can try the production shape with zero external setup:
+Requires **Docker** and **Docker Compose v2**. The repo ships a one-command demo stack that runs canvas-drop in its real `proxy` mode behind an identity-aware proxy (oauth2-proxy) and a bundled demo IdP (Dex), so you can try the production shape with no external setup:
 
 ```bash
 docker compose up --build          # first build takes a few minutes; add -d for background
-# then open http://localhost:8080  and log in as  demo@example.com / canvasdrop
+# open http://localhost:8080 and sign in as demo@example.com / canvasdrop
 docker compose down -v             # tear down and wipe data
 ```
 
-The app verifies a Dex-signed JWT against Dex's JWKS, the same cryptographic trust path you run in production, with Postgres for data and an optional MinIO profile for S3. The app is never exposed directly; only the proxy is.
+The app verifies a Dex-signed JWT against Dex's JWKS, the same cryptographic trust path you run in production, with Postgres for data and an optional MinIO profile (`--profile minio`) when you want to point storage at S3. Only the proxy publishes a port; the app is never exposed directly. `scripts/compose-smoke.sh` asserts that shape end to end. Add `--build-arg SCREENSHOTS=1` to bake Chromium into the image for the optional preview-screenshot pipeline.
 
-> **The demo stack is for local evaluation only.** Its secrets and the `demo@example.com` login are public placeholders, and it runs on plain HTTP in path mode. Rotate every secret and follow the graduation checklist before any real use.
+> **The demo stack is for local evaluation only.** Its secrets and the `demo@example.com` login are public placeholders, and it runs plain HTTP in path mode. Rotate every secret before any real use.
 
-Going to production is a configuration change: copy [`.env.production.example`](.env.production.example), point the proxy/JWKS at your real IdP, move to subdomain mode behind real TLS, and rotate all secrets. Full walkthrough: [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
+Going to production is a configuration change: start from [`.env.production.example`](.env.production.example), point the proxy and JWKS at your real IdP, move to subdomain mode behind real TLS, and rotate all secrets. Full walkthrough: [`docs/site/self-hosting/deploy.md`](docs/site/self-hosting/deploy.md).
 
 ---
 
 ## Security model
 
-canvas-drop runs inside a **trusted organization**: everyone reaching it has passed org SSO, and an email-domain allowlist keeps outsiders out. That posture deletes whole problem classes (anonymous abuse, spam, public bot threats). What remains is a short list of **hard invariants that must never break** ([`BUILD_BRIEF.md` §12.0](BUILD_BRIEF.md)):
+canvas-drop runs inside a **trusted organization**: everyone reaching it has passed org sign-in, and an email-domain allowlist keeps outsiders out. That posture deletes whole problem classes (anonymous abuse, spam, public bot traffic). What remains is a short list of **hard invariants that must never break** ([`BUILD_BRIEF.md` §12.0](BUILD_BRIEF.md); operator view in [`docs/site/self-hosting/security-model.md`](docs/site/self-hosting/security-model.md)):
 
-1. **No impersonation.** Identity always comes from the server-side auth context, never anything the client sends.
-2. **No credential or canvas theft.** API keys and tokens are hashed at rest and shown once; canvas passwords are argon2id.
-3. **No unauthorized access.** A canvas is reachable only by its owner, its editors (org members given the editor role on its people list, directly or through a team — resolved live on every request), and whoever its access rung allows. An admin gets no special access to canvases it does not own; cross-owner admin power is limited to the dedicated admin routes (list, disable/enable/restore, reassign owner). Everything else 404s.
+1. **No impersonation.** Identity always comes from the server-side auth context, never anything the client sends. In `proxy` mode only the trusted proxy may assert identity: a verified JWT, or headers from a peer listed in `CANVAS_DROP_TRUSTED_PROXY_IPS`.
+2. **No credential or canvas theft.** API keys and session tokens are SHA-256-hashed at rest and shown once; canvas passwords are argon2id.
+3. **No unauthorized access.** A canvas is reachable only by its owner, its editors, and whoever its access rung allows, re-evaluated on every request. An admin gets no special access to canvases it does not own; cross-owner admin power is limited to the dedicated admin routes. Everything else 404s.
 4. **No cross-canvas reach in subdomain mode.** Each canvas is its own browser origin and cannot read, write, or act on another's data.
-5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug-regen, and key-regen take effect on the next request and drop live sockets.
+5. **Lifecycle is honored instantly.** Revoke, expiry, disable, delete, slug regen, and key regen take effect on the next request and drop live sockets.
 
-**URL-mode isolation is a real choice.** Subdomain mode (`{slug}.example.com`) gives full browser-origin isolation and is recommended for any multi-user production deployment. Path mode (`host/c/{slug}/`) shares one origin and is perfect for localhost and trusted single-user hosting; multi-user path mode requires an explicit opt-in and an admin warning. No secrets ever reach the browser; every endpoint is Zod-validated; uploads are zip-slip checked and served as inert bytes; an audit log records auth, deploys, sharing, AI usage, and admin actions.
+**URL-mode isolation is a real choice.** Subdomain mode (`{slug}.canvases.example.com`) gives full browser-origin isolation and is the recommended multi-user production shape. Path mode (`host/c/{slug}/`) shares one origin and suits localhost and trusted single-user hosting; multi-user path mode requires `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true` and surfaces an admin warning. No secrets reach the browser; every endpoint is Zod-validated; uploads are zip-slip checked and served as inert bytes; an audit log records auth, deploys, sharing, and admin actions. Report a vulnerability via [`SECURITY.md`](SECURITY.md).
 
 ---
 
 ## Architecture
 
 ```
-apps/server        Hono server, one role-routed process: API, deploy, hosted canvases
+apps/server        Hono server, one role-routed process: API, deploy, hosted canvases, MCP, docs
 apps/dashboard     Vite + React SPA dashboard
 packages/shared    zod config, dual-dialect Drizzle schema, shared types
 packages/sdk       the zero-config browser SDK (the `canvasdrop` global)
-docs/              BUILD_BRIEF, plans, compounding learnings, docs-site source
+examples/          hello-static, kv-counter, and the primitives showcase
+docs/              BUILD_BRIEF, plans, compounding learnings, docs-site source (docs/site)
 ```
 
-**Dual-dialect is sacred:** SQLite and Postgres stay in lockstep via shared column helpers, and the CI matrix runs the full suite on both. **Config is the only `process.env` reader.** Everything load-bearing sits behind an interface, so the four drivers swap by config alone.
+**Dual-dialect is sacred:** the SQLite and Postgres schemas stay in lockstep via shared column helpers, migrations run at boot, and the CI matrix runs the full suite on both. **Config is the only `process.env` reader.** Everything load-bearing sits behind an interface, so the four drivers swap by config alone.
 
 ---
 
 ## Status
 
-**v1 is feature-complete and hardening toward a public release**, built unit-by-unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. M1 through M9 plus a wave of post-v1 work (the sharing ladder, Shared discovery, the MCP server at full dashboard parity, clone-as-template, staged uploads, custom slugs, optional canvas screenshots, an admin-flippable [design-skin layer](docs/site/self-hosting/configuration.md#design-skins), and the [authoring capability](docs/site/sdk/authoring.md) — a signed-in viewer creating a new canvas from the page, as themselves) have shipped; ops/packaging (M10) is the only milestone still in progress — its Docker image/compose, **backup/restore + scheduled maintenance** ([`docs/ops.md`](docs/ops.md)), and secret-scan are in, with the single-VPS load test and the IAP colleague pilot still deferred. See [`docs/plans/`](docs/plans/).
+**v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
 
-> **Maturity, honestly:** canvas-drop is **not yet running in production anywhere serious.** It boots, passes a dual-dialect suite, and self-hosts via Docker, but it has not been battle-tested under a real org's load yet. That is exactly what is next. Self-host reports, issues, and PRs are very welcome.
+Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (46 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](docs/site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](docs/site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, and **editor roles with ownership transfer**.
+
+**M10 ops/packaging is the one open milestone.** Shipped: the Docker image and compose stack, vendor-neutral deploy docs, backup/restore tooling with a scheduled-maintenance runbook ([`docs/ops.md`](docs/ops.md)), the security review of the five invariants ([`docs/security/`](docs/security/)), a secret scan in CI, this README and the quickstart, and three starter examples. Still deferred: an executed backup/restore drill, the single-VPS load test, and a 10 to 15 person colleague pilot behind an IAP.
+
+> **Maturity, honestly:** canvas-drop boots, passes the dual-dialect suite, and self-hosts via Docker, but it has not been load-tested or run through a multi-user pilot yet; those are the open M10 items. Self-host reports, issues, and PRs are welcome.
+
+Plans and their status live in [`docs/plans/`](docs/plans/).
 
 ---
 
 ## Commands
 
 ```bash
-pnpm dev          # server + dashboard in watch mode
-pnpm test         # full suite, BOTH dialects (sqlite + pglite) in-process
-pnpm lint         # biome check
-pnpm format       # biome check --write (also sorts imports)
-pnpm typecheck    # tsc --noEmit across server, sdk, dashboard
-pnpm build        # build all workspace packages
-pnpm purge [days] # reclaim storage from soft-deleted canvases (dry-run supported)
-pnpm backup <dir> # full instance backup (DB + storage) → a portable directory
-pnpm restore <dir> # restore a backup into a fresh, empty instance
+pnpm dev            # server + dashboard + SDK in watch mode
+pnpm test           # full suite: BOTH dialects (sqlite + pglite) in-process, then the dashboard
+pnpm test:sqlite    # sqlite leg only
+pnpm test:pg        # postgres (pglite) leg only
+pnpm lint           # biome check
+pnpm format         # biome check --write (also sorts imports)
+pnpm typecheck      # tsc --noEmit across the workspace
+pnpm build          # build all workspace packages
+pnpm purge [days]   # reclaim storage from soft-deleted canvases (dry-run supported)
+pnpm backup <dir>   # full instance backup (every table + every blob) to a portable directory
+pnpm restore <dir>  # restore a backup into a fresh, empty instance
+pnpm seed:showcase  # deploy examples/showcase as the `showcase` canvas with every primitive on
 ```
 
-Deleting a canvas is a soft-delete (a tombstone row). `pnpm purge` is the maintenance sweep that reclaims the heavy data; it reads the same config as the server. **`backup`/`restore`** capture and recover the whole instance (every table + every content-addressed blob) in a driver-agnostic format — so they also migrate between drivers (SQLite↔Postgres, local↔S3). In production these are subcommands of the server binary (`node … apps/server/dist/index.js {backup,restore,purge}`), so cron runs them with the app image. Full runbook + a recommended backup/purge cron schedule: [`docs/ops.md`](docs/ops.md).
+Deleting a canvas is a soft delete (a tombstone row). `pnpm purge` is the maintenance sweep that reclaims the heavy data and prunes usage events older than 90 days; it reads the same config as the server. `backup` and `restore` capture and recover the whole instance in a driver-agnostic format, so they also migrate between drivers (SQLite to Postgres, local to S3). In production all three are subcommands of the server binary (`node --conditions=node-dist apps/server/dist/index.js {backup,restore,purge}`), so cron runs them with the app image. Runbook and a recommended schedule: [`docs/ops.md`](docs/ops.md).
 
 ---
 

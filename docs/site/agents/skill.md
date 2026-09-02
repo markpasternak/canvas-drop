@@ -1,55 +1,86 @@
 # Agent skill
 
-Install this skill so your coding agent deploys and extends canvases against this
-instance, first try, without manual correction. It ships in the standard skill
-format (a `SKILL.md` with `name`/`description` frontmatter and a when-to-use
-trigger), so an agent loads it automatically when a task matches.
+Install this skill so your coding agent can create, deploy, verify, and extend
+canvases on this instance first try. It is a standard skill package: a `SKILL.md`
+with `name`/`description` frontmatter and a when-to-use trigger, so an agent host
+that discovers skills loads it on its own when a task matches.
 
-## Download and install
+## Install
 
-`GET /skill.zip` is public — no session or API key required — so an agent can fetch
-and unpack it in one step:
+`GET {base}/skill.zip` is public. No session, cookie, or API key is required, so an
+agent can fetch and unpack it in one step:
 
 ```bash
-curl -fLOJ "{base}/skill.zip"
-unzip canvas-drop-skill.zip -d ~/.claude/skills/
+curl -fL "{base}/skill.zip" -o canvas-drop-skill.zip
+unzip -o canvas-drop-skill.zip -d ~/.claude/skills/
 ```
 
-Replace `{base}` with this instance's base URL. The download is named
-`canvas-drop-skill.zip` and unpacks to a single `canvas-drop/` folder containing
-`SKILL.md` plus an optional `examples/` directory. Point your agent at the unpacked
-`SKILL.md`, or drop the folder wherever your agent discovers skills. The skill is
-self-contained: it refers to this instance by base URL and asks the user for
-`{base}` when it doesn't know it.
+Replace `{base}` with the instance's base URL. The archive unpacks to one folder:
 
-## What's inside
+```
+canvas-drop/
+  SKILL.md          # the skill (frontmatter: name: canvas-drop)
+  examples/poll.md  # a single-file live poll built on KV
+```
 
-The zip is built from an explicit allowlist (`SKILL.md` plus `examples/*.md`), so it
-never carries a stray secret. The skill covers four ways to work against this
-instance:
+Drop that folder wherever your agent discovers skills (the command above uses the
+per-user Claude Code location), or point the agent at the unpacked `SKILL.md`
+directly. The skill carries no instance-specific configuration: it refers to the
+instance as `{base}` and asks the user for the base URL when it does not know it.
+
+To check the install:
+
+```bash
+ls ~/.claude/skills/canvas-drop
+# SKILL.md  examples
+```
+
+## What the skill teaches
+
+The zip is built in-process from an explicit allowlist (`SKILL.md` plus
+`examples/*.md`), never a directory glob, so it cannot carry a stray file or secret.
+Inside, the skill covers the same surface as this docs site, condensed for an agent:
 
 - **Connect over MCP.** Add `{base}/mcp`, sign in once through the instance's own
-  login, then call identity-scoped tools (`whoami`, `list_canvases`,
-  `create_canvas`, `deploy_canvas`, `get_canvas_file`, `rollback_canvas`, the
-  draft-editor loop, version export/deletion, and more — 44 tools in all) with no key to paste. See the
+  login, then call identity-scoped tools with no key to paste: `whoami`,
+  `list_canvases`, `create_canvas`, `deploy_canvas`, the staged
+  `begin_deploy` / `add_files` / `finalize_deploy` upload, `get_canvas_file` to
+  verify what went live, `rollback_canvas`, the draft-editor loop, sharing and
+  people tools, and more. 46 tools in all, each acting only on canvases you own or
+  edit; anything else reads as `canvas not found`. See the
   [MCP server](/docs/agents/mcp).
-- **Deploy over HTTP** with a per-canvas API key:
-  `PUT {base}/v1/canvases/{id}/deploy` (Bearer auth, ZIP body) publishes
-  immediately. Companion read-back and recovery routes (`GET {base}/v1/canvases/{id}`,
-  `…/versions`, `…/files`, `POST …/rollback`, `POST …/unpublish`) let an agent
-  confirm what went live and undo it. See [Deploy API](/docs/api/deploy-api).
+- **Deploy over HTTP** with a per-canvas `cd_…` key. `PUT {base}/v1/canvases/{id}/deploy`
+  (Bearer auth, ZIP body) publishes immediately. For large or repeat deploys the skill
+  uses the staged upload (`POST …/uploads` → `PUT …/uploads/{uploadId}/blobs/{hash}` →
+  `POST …/uploads/{uploadId}/finalize`) so only changed blobs are sent. Read-back and
+  recovery routes (`GET …/{id}`, `…/versions`, `…/files`, `POST …/rollback`,
+  `POST …/unpublish`) let the agent confirm a deploy and undo it. The skill prefers
+  `curl` for file transfer so bytes stream from disk instead of through the model.
+  See the [Deploy API](/docs/api/deploy-api).
 - **Add backend capability** with the zero-config browser SDK. One
-  `<script src="/sdk/v1.js">` tag defines the global `window.canvasdrop` and rides the
-  signed-in session cookie, so the five primitives (KV, files, `me()`, AI, realtime)
-  work with no keys in client code. See the [SDK overview](/docs/sdk/overview).
+  `<script src="/sdk/v1.js"></script>` tag defines the global `window.canvasdrop`
+  (there is no `cd` alias) and rides the signed-in session cookie, so the five
+  primitives (KV, files, AI, identity via `me()`, realtime) work with no keys in
+  canvas code. See the [SDK overview](/docs/sdk/overview).
 - **The golden rules.** Never put a secret in canvas files. Canvases are static
-  only, with no server build step. Every primitive is off until the owner enables
-  Backend plus that feature, so a disabled call throws `CapabilityDisabledError`
-  (`code: "CAPABILITY_DISABLED"`, status 403).
-- **Typed errors.** Branch on a stable `err.code` / `err.status` rather than parsing
-  messages. Full table at [Error codes](/docs/api/errors).
+  files only, with no server-side build step. Backend is off by default; a call to
+  a primitive that is not switched on throws `CapabilityDisabledError`
+  (`code: "CAPABILITY_DISABLED"`, status 403) until an owner or editor enables it
+  (Backend tab, or `set_capabilities` over MCP).
+- **Typed errors.** Branch on the stable `err.code` and `err.status` rather than
+  parsing messages. Full table at [Error codes](/docs/api/errors).
+
+## Keeping it current
+
+The zip is assembled from the running instance's own `skill/` files, so what you
+download always matches the version the instance is serving. After an instance
+upgrade, run the install command again; `unzip -o` overwrites the previous copy.
+
+A `404` from `{base}/skill.zip` means the instance was deployed without its `skill/`
+directory. That is an operator fix, not something the agent can work around.
 
 ## Lighter alternative
 
 For a copy-into-context version with no install step, use
-[`{base}/llms.txt`](/llms.txt), the single-file agent quick reference.
+[`{base}/llms.txt`](/llms.txt), the single-file agent quick reference. It is public
+too. The [llms.txt page](/docs/agents/llms) explains what it contains.

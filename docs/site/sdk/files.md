@@ -8,16 +8,18 @@ Switch on the files capability for the canvas first (see
 [Capabilities](/docs/authoring/capabilities)).
 
 ```js
-const f = await canvasdrop.files.upload(input.files[0]); // { id, name, size, url }
-img.src = f.url;                                          // absolute content URL
+// <input type="file" id="picker">
+const f = await canvasdrop.files.upload(picker.files[0]); // { id, name, size, url }
+img.src = f.url;                                           // absolute content URL
 
-const all = await canvasdrop.files.list();                // FileMeta[]
-const href = canvasdrop.files.url(f.id);                  // same URL, no request
-await canvasdrop.files.delete(f.id);
+const all = await canvasdrop.files.list();                 // FileMeta[]
+const href = canvasdrop.files.url(f.id);                   // same URL, no request
+await canvasdrop.files.delete(f.id);                       // the URL now returns 404
 ```
 
 Files belong to the canvas, not to the viewer who uploaded them: every viewer
-who can open the canvas can list, read, and delete every file in it.
+who can open the canvas can list, read, and delete every file in it. There is no
+per-viewer scope for files (KV has one; files does not).
 
 ## Methods
 
@@ -44,16 +46,21 @@ interface FileMeta {
 `file`. The stored name is `file.name` (or `upload` when the `File` has none)
 and the stored MIME type is `file.type` (or `application/octet-stream`). It
 resolves to `{ id, name, size, url }` only; call `list()` when you need `mime`
-or `createdAt`. There is no progress callback; for a large file, show your own
-pending state around the `await`.
+or `createdAt`. There is no progress callback and no upload option; for a large
+file, show your own pending state around the `await`.
 
 `list()` returns every file in the canvas with its metadata.
 
-`delete(id)` removes the file and its bytes. It rejects with `NotFoundError`
-when `id` does not exist.
+`delete(id)` removes the file row and its bytes. It rejects with `NotFoundError`
+when `id` is not a file of this canvas. After a delete, the file's content URL
+returns `404`.
 
 `url(id)` builds the content URL synchronously from the id, without a request.
-It is the same value `upload` returns in `url`.
+It is the same value `upload` returns in `url`. It does not check that the id
+exists.
+
+Every call (upload, list, download, delete) counts in the canvas's usage stats;
+uploads and deletes are also written to the audit log.
 
 ## Content URLs
 
@@ -64,9 +71,11 @@ mode it is the base host, and the response carries the credentialed CORS headers
 your canvas origin needs. The SDK detects the mode from `location`, so you never
 build this URL by hand.
 
-Content is served behind the same sign-in as the canvas. An `<img src>` works
-directly. When you `fetch()` a content URL yourself, send credentials so the
-request succeeds in subdomain mode too:
+Content is served behind the same sign-in as the canvas, and through the same
+cross-canvas isolation as every other runtime API call, so use a file's URL from
+the canvas that owns it. An `<img src>` works directly. When you `fetch()` a
+content URL yourself, send credentials so the request succeeds in subdomain mode
+too:
 
 ```js
 const res = await fetch(canvasdrop.files.url(id), { credentials: "include" });
@@ -87,14 +96,17 @@ galleries.
 Uploaded bytes come from other people, so the content endpoint treats them as
 untrusted:
 
-- `X-Content-Type-Options: nosniff` on every response.
+- `Content-Type` is the MIME type stored at upload, with
+  `X-Content-Type-Options: nosniff` on every response.
 - `Content-Disposition: inline` only for `image/png`, `image/jpeg`, `image/gif`,
   `image/webp`, and `image/avif`. Everything else, SVG and HTML included, is
   served as an `attachment` and downloads instead of rendering.
 - The filename in `Content-Disposition` is sanitized and RFC 5987 encoded.
 
 This keeps an uploaded active document (HTML, or a scriptable SVG) from
-running against another viewer's session on the canvas origin.
+running against another viewer's session on the canvas origin. If your canvas
+needs to display an SVG a viewer uploaded, `fetch()` it and render it yourself
+in a way that does not execute its scripts.
 
 ## Limits
 
@@ -103,10 +115,15 @@ running against another viewer's session on the canvas origin.
 | Bytes per file | 25 MiB | `FILE_TOO_LARGE` (413) |
 | Bytes per canvas, all files | 1 GiB | `QUOTA_EXCEEDED` (409) |
 
-Both are admin-tunable per instance (`files.bytes.file`, `files.bytes.canvas`).
-The request body itself is capped at 25 MiB plus 1 MiB of multipart framing, and
-that transport cap is fixed, so raising the per-file setting above 25 MiB has no
-effect on uploads through the SDK.
+Both defaults are admin-tunable per instance (Admin settings, Limits group:
+"Max file bytes" and "Max canvas bytes"). The request body itself is capped at
+25 MiB plus 1 MiB of multipart framing, and that transport cap is fixed: an
+admin can lower the per-file limit, but raising it above 25 MiB has no effect on
+uploads through the SDK.
+
+The per-canvas quota is a check before the write, not a reservation. Two
+uploads racing at the boundary can both succeed; this is acceptable on the
+trusted-org model the platform is built for.
 
 ## Errors
 
@@ -114,7 +131,9 @@ Every method rejects with a `CanvasdropError` subclass; branch on `err.code`, or
 catch the subclass you care about.
 
 - `FILE_TOO_LARGE` (413) and `QUOTA_EXCEEDED` (409) throw `QuotaExceededError`
-  with the wire code in `err.code` and the status in `err.status`.
+  with the wire code in `err.code` and the status in `err.status`. Note the 409:
+  on this route the per-canvas quota is a storage conflict, not the 429 that
+  `QUOTA_EXCEEDED` means for AI spend.
 - `INVALID_BODY` (400) throws a plain `CanvasdropError`: the request was not
   multipart, or the `file` field was missing or not a `File`.
 - `NOT_FOUND` (404) from `delete` throws `NotFoundError`.
@@ -134,6 +153,7 @@ try {
 } catch (err) {
   if (err.code === "FILE_TOO_LARGE") showToast("Keep files under 25 MiB");
   else if (err.code === "QUOTA_EXCEEDED") showToast("This canvas is out of file storage");
+  else if (err.code === "CAPABILITY_DISABLED") showToast("File storage is off for this canvas");
   else throw err;
 }
 ```

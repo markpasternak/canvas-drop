@@ -1,162 +1,263 @@
 # llms.txt
 
-If you are an agent deploying a canvas, start here. canvas-drop serves a single
-plain-text contract at [`{base}/llms.txt`](/llms.txt) — no markup chrome,
-designed to be dropped straight into context. It is **public** (served from the
-docs band, readable without a session) so you can learn the API before you hold
-credentials.
+If you are an agent putting a canvas on a canvas-drop instance, start here. The
+instance serves this page and its companions as one plain-text file at
+[`{base}/llms.txt`](/llms.txt), meant to be dropped straight into context. It is
+public: served on the instance's base host ahead of the sign-in gateway, so you
+can read the contract before you hold any credential. `{base}` is the instance
+origin (a fresh local instance is `http://localhost:3000`).
 
-## Deploy in two steps
+There are three ways in. Pick by what you hold.
 
-1. **Get a per-canvas API key** — the canvas owner creates the canvas in the
-   dashboard (the `api` create method mints the canvas plus a one-time secret
-   key) and hands you that key, shown once.
-2. **Push your artifact** with the Bearer key and a ZIP body:
+| You hold | Use | Reach |
+|---|---|---|
+| A per-canvas secret key (`cd_...`) | Deploy API at `{base}/v1/canvases/{id}/...` | that one canvas: deploy, read back, roll back, unpublish |
+| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 46 tools |
+| Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the five primitives for that canvas: KV, files, AI, identity, realtime |
 
-   ```
-   PUT {base}/v1/canvases/{id}/deploy
-   Authorization: Bearer <secret-key>
-   Content-Type: application/zip
-   ```
+## Deploy with a key
 
-   This publishes a new live version directly — no draft loop. Read-back and
-   companion routes: `GET /v1/canvases/{id}`, `GET /v1/canvases/{id}/versions`,
-   `GET /v1/canvases/{id}/files`, `POST /v1/canvases/{id}/rollback`,
-   `POST /v1/canvases/{id}/unpublish`. For large or repeat deploys, the staged
-   content-addressed flow (`POST /uploads` → `PUT /uploads/{uploadId}/blobs/{hash}`
-   → `POST /uploads/{uploadId}/finalize`) sends only changed blobs. See the
-   [Deploy API](/docs/api/deploy-api).
+1. Get a canvas and its key. The owner creates the canvas with the dashboard's
+   `api` method, or you call `create_canvas` over MCP. Either mints the canvas plus
+   a one-time secret key, shown once.
+2. PUT a ZIP with `index.html` at its root:
 
-`{base}` is the instance origin. The key is verified per-canvas; it only
-deploys to the one canvas it belongs to.
+```bash
+curl -fsS -X PUT "{base}/v1/canvases/{id}/deploy" \
+  -H "Authorization: Bearer $CANVAS_KEY" \
+  --data-binary @site.zip
+# 200 {"url":"...","version":7,"fileCount":12,"totalBytes":348201,"warnings":[]}
+```
 
-## Connect over MCP (no key to paste)
+The deploy publishes a live version immediately; there is no draft step on this
+path. `{id}` is the canvas id, not the slug. The Deploy API host is
+`CANVAS_DROP_API_BASE_URL`, which defaults to the instance base URL and can differ
+from the dashboard host in `subdomain` mode; `create_canvas` returns the exact
+endpoints so you never guess.
 
-If your host speaks the Model Context Protocol, add `{base}/mcp` instead of handling
-keys. You sign in once through the instance's normal org login (OAuth, with automatic
-client registration) and then get identity-scoped tools across every canvas you own:
-`whoami`, `list_canvases`, `create_canvas`, `get_canvas`, `list_versions`,
-`deploy_canvas`, `begin_deploy`/`add_files`/`finalize_deploy`, `get_canvas_file`,
-`rollback_canvas`, `delete_version`, `unpublish_canvas`, plus the full management surface
-(`update_canvas` settings/sharing/`previewMode`, `set_canvas_preview` custom cover,
-`set_capabilities`, `set_canvas_slug`,
-`regenerate_deploy_key`, `archive_canvas`/`unarchive_canvas`, `delete_canvas`,
-`clone_canvas`, `get_canvas_usage`, the people-list tools `list_access`/`grant_access`/
-`invite_to_canvas`/`set_access_role`/`revoke_access` (every entry is a `viewer` or an
-`editor`; editors manage the canvas like the owner except delete, transfer, and the
-guest-AI opt-in, which refuse `OWNER_ONLY`), `transfer_canvas` (owner → an existing
-editor), the team tools `list_teams`/
-`create_team` (omit `orgId` for a personal team)/`rename_team`/`delete_team`/
-`add_team_member`/`remove_team_member`/`cancel_team_invite`/`list_team_members`/
-`list_shared_canvases` (plus `update_canvas` with `access: "team"` + `teamIds` to share
-a canvas with a team), and the editor draft loop `get_draft`/
-`read_draft_file`/`write_draft_file`/`delete_draft_file`/`rename_draft_file`/
-`publish_draft`/`restore_draft`). The MCP is at **full parity with the dashboard** —
-anything an owner *or editor* can do in the UI, an agent can do here. The full table is
-in the [MCP server](/docs/agents/mcp) reference. Management tools touch the canvases
-you own or edit (`list_canvases` returns both, each with `role`); `list_shared_canvases`
-returns canvases you can open but don't manage. Draft writes take an `expectedHash`
-per file so two editors never silently overwrite each other (`DRAFT_CONFLICT`). Typical
-flow: `create_canvas` then `deploy_canvas`. `list_canvases` takes a forgiving `query`
-(matches title + description + tags + slug, case/accent/whitespace-insensitive, multi-word
-AND) and a `tags` any-match filter; `update_canvas` sets the single `description` (max 2000)
-and the canvas's unified `tags` (max 20, ≤50 chars each — one set used for both owner-list
-filtering and public gallery display, no separate "gallery summary"/"gallery tags").
-For Team and Whole-org shares, `update_canvas.discoverability` is `link_only` by default;
-set it to `listed` only when people who already have access should find the canvas in
-Shared. When the
-instance has an org boundary configured, `whoami` also returns your `orgs`, your `teams`, and
-an `isGuest` flag; pass an org `id` as `create_canvas`'s `orgId` to home a canvas in the org so
-it can be shared org-wide (omit for personal). With no org configured these are no-ops.
-If an admin has disabled a canvas it becomes **read-only**: reads keep working but every
-mutation tool fails with `DISABLED: <reason>`. Every deploy **publishes immediately** (no
-draft step). The live URL is **access-controlled** (org sign-in), so don't verify a
-deploy by fetching it — an unauthenticated GET returns a login page. Verify through the
-server: the returned `{version, fileCount}`, `list_versions`, or `get_canvas_file`
-(reads back the live files/content). **Strongly prefer `curl` for the file transfer** —
-the MCP deploy tools inline bytes into the model, so when you can run shell commands,
-`curl` the staged Deploy API and PUT each blob's raw bytes instead (ask for command
-permission if needed). Reserve MCP deploys for a small first publish without shell
-access. `create_canvas` returns a `deploy` block with the exact curl endpoints (incl. a
-`readback` URL) so you never probe for the API host. Use the `readback` URL from
-that block to confirm the live files, or call `get_canvas_file` (no `path` lists the
-manifest; a `path` reads back content, capped at 256 KiB). Full reference:
-[MCP server](/docs/agents/mcp).
+The key is verified per canvas. A missing or unknown key, including a key for an
+archived, disabled, or deleted canvas, answers `401 {"error":"unauthorized"}`; a key
+for a different canvas answers `403`. Validation failures answer `400 {"code",
+"message", "path"}` with codes such as `EMPTY_DEPLOY`, `TOO_MANY_FILES`,
+`FILE_TOO_LARGE`, `CANVAS_TOO_LARGE`, `INVALID_ZIP`, `INVALID_PATH`,
+`ZIP_SLIP_REJECTED`, `ZIP_BOMB_REJECTED`. Deploys are throttled at 10 per minute
+per canvas (`429 {"error":"rate_limited"}` with `Retry-After`).
 
-`list_versions` returns a bearer-authenticated `downloadUrl` for each complete historical
-ZIP. `delete_version` permanently removes only a non-current ready version; the current
-version and disabled canvases are protected.
+Companion routes, same Bearer key:
 
-## Backend capability: the browser SDK
+| Route | Purpose |
+|---|---|
+| `GET /v1/canvases/{id}` | canvas metadata |
+| `GET /v1/canvases/{id}/versions` | list versions |
+| `GET /v1/canvases/{id}/files` | read back the live version; the way to verify a deploy |
+| `POST /v1/canvases/{id}/rollback` | make a prior ready version current |
+| `POST /v1/canvases/{id}/unpublish` | take the canvas back to Draft |
 
-Inside a canvas, load the zero-config SDK — no keys in page code; identity rides
-the session cookie:
+For large or repeat deploys, the staged flow sends only changed blobs:
+`POST /v1/canvases/{id}/uploads` with `{"manifest":[{"path","hash","size"}]}`
+(sha256 hex) returns `{uploadId, missingHashes}`; `PUT
+/v1/canvases/{id}/uploads/{uploadId}/blobs/{hash}` with the raw bytes of each
+missing blob returns `204`; `POST /v1/canvases/{id}/uploads/{uploadId}/finalize`
+returns the same `DeployResult`. A session lives 15 minutes and finalizes once.
+
+Limits: 100 MB per canvas, 25 MB per file, 2 000 files. Every deploy is an
+immutable version; the last 10 are kept. Full contract:
+[Deploy API](/docs/api/deploy-api).
+
+## Connect over MCP
+
+Add `{base}/mcp` to an MCP-capable host. First use runs OAuth 2.1 against
+canvas-drop itself (RFC 8414/9728 discovery, Dynamic Client Registration, PKCE
+`S256`), sends you through the instance's normal org sign-in, and returns a 1 h
+access token plus a rotating refresh token. Every call re-checks that the account
+is still active. Transport is Streamable HTTP, stateless; calls are limited to 120
+per minute per account.
+
+**Scope and roles.** Tools act on the canvases the account owns or edits. A canvas
+you hold no role on reads as `canvas not found`. Each tool has a minimum role:
+`any` (identity, lists, create, teams), `editor` (everything on a canvas), or
+`owner` (`delete_canvas`, `transfer_canvas`). An editor calling an owner-only tool,
+or setting `guestAiEnabled` / `guestAiCap` through `update_canvas`, gets
+`OWNER_ONLY: ...`. `id` parameters are canvas ids (team tools take team ids), never
+slugs. Results are JSON in a text content block; failures are `isError: true` with
+the text `CODE: message`. An admin-disabled canvas stays readable but every
+mutation fails `DISABLED: <reason>`; an archived canvas refuses deploy and publish
+with `NOT_ACTIVE`.
+
+| Group | Tools |
+|---|---|
+| Identity, lists, create (`any`) | `whoami`, `list_canvases`, `list_shared_canvases`, `create_canvas`, `clone_canvas` |
+| Read (`editor`) | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` |
+| Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` |
+| Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
+| Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key` |
+| Sharing (`editor`) | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` |
+| Draft loop (`editor`) | `get_draft`, `read_draft_file`, `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft` |
+| Teams (`any`) | `list_teams`, `create_team`, `rename_team`, `delete_team`, `add_team_member`, `remove_team_member`, `cancel_team_invite`, `list_team_members` |
+
+Working notes:
+
+- Typical flow: `create_canvas`, deploy, verify. `create_canvas` returns the canvas
+  view, the one-time `apiKey`, and a `deploy` block (`apiBase`, `zipUpload`,
+  `staged.begin` / `stageBlob` / `finalize`, `readback`, and a ready-to-run `curl`
+  with the key filled in).
+- Prefer `curl` for bytes. `deploy_canvas` (`zipBase64` or
+  `files: [{path, content, encoding}]`) and `add_files` inline file content into
+  the model context. When you can run shell commands, use the `deploy` block's
+  curl, whole ZIP or staged; keep `deploy_canvas` for a small first publish without
+  a shell.
+- Verify through the server, not the URL. The live URL is behind org sign-in: a
+  signed-out GET is redirected to login (`oidc`) or answered `401` (`proxy`, `dev`)
+  unless the canvas is on the `public_link` rung. Check the returned
+  `{version, fileCount}`, `list_versions`, the `readback` URL, or `get_canvas_file`
+  (no `path` lists the manifest; a `path` returns the content as `utf8` or
+  `base64`, capped at 256 KiB).
+- `list_canvases` returns owned and edited canvases, each with `role` and `owner`;
+  `role: "owned" | "edited"` narrows. `query` is a forgiving filter over title,
+  description, tags, and slug (case, accent, and whitespace insensitive; multiple
+  words AND). `tags` is any-match. `limit` defaults to 50, max 100.
+  `list_shared_canvases` lists canvases you can open but do not manage.
+- Draft loop: `write_draft_file`, `delete_draft_file`, and `rename_draft_file` take
+  `expectedHash` (the file's current hash, or `"none"` for a new file); a mismatch
+  fails `DRAFT_CONFLICT` with the current hash and last writer, so two editors never
+  overwrite each other silently. `publish_draft` snapshots the draft into a live
+  version.
+- `update_canvas` fields: `title` (max 200), `description` (max 2000, or `null`),
+  `tags` (max 20, each max 50 chars; one set serves list filtering and the gallery),
+  `access`, `discoverability` (`link_only` by default; `listed` shows a Team or
+  Whole-org canvas in Shared and makes a Whole-org canvas gallery-eligible),
+  `teamIds`, `password`, `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto` or
+  `off`; `set_canvas_preview` with an image sets `custom`), `galleryListed`,
+  `galleryTemplatable`, and the owner-only `guestAiEnabled` / `guestAiCap`. Sharing
+  needs a published canvas (`SHARE_REQUIRES_PUBLISH`). `set_capabilities` takes
+  `backendEnabled`, `kv`, `files`, `ai`, `realtime`, `authoring`.
+- People: `list_access` entries are `viewer` or `editor`. `grant_access` takes
+  exactly one of `email` or `teamId` plus `role`; a new email is `pending` until its
+  first verified sign-in through the instance's identity provider; guests are
+  viewers only (`GUEST_VIEWER_ONLY`). `set_access_role` changes an entry's role;
+  `transfer_canvas` moves ownership to an existing editor and makes the previous
+  owner an editor.
+- Tenancy: `whoami` returns `orgs`, `teams`, and `isGuest` (true only when an org
+  boundary is configured and you belong to none). `create_canvas.orgId`: omit to
+  default to your only org, pass `null` for a personal canvas; an org you do not
+  belong to fails `ORG_FORBIDDEN`. Under an active org boundary the `whole_org`
+  rung needs an org-homed canvas (`ORG_REQUIRED`).
+- Versions: `list_versions` carries a bearer-authenticated `downloadUrl` per
+  version (`{base}/mcp/canvases/{id}/versions/{n}/download`). `delete_version`
+  removes a non-current version only (`CURRENT_VERSION` otherwise).
+
+Parameters and return shapes for every tool: [MCP server](/docs/agents/mcp).
+
+## Browser SDK inside a canvas
 
 ```html
 <script src="/sdk/v1.js"></script>
+<script type="module">
+  const me = await canvasdrop.me();
+  await canvasdrop.kv.set("last-viewer", me.name);
+  const views = await canvasdrop.kv.increment("views");
+</script>
 ```
 
-It exposes one global, **`canvasdrop`** (there is no `cd` alias). Mode and slug
-are auto-detected from the canvas URL; every call hits
-`{apiBase}/v1/c/{slug}/...` with the session cookie.
+One global, `window.canvasdrop`; there is no `cd` alias and no version property.
+Zero config: the slug and API base are read from the page URL (`/c/{slug}/` in
+path mode, `{slug}.{host}` in subdomain mode), every call goes to
+`{apiBase}/v1/c/{slug}/...` with the session cookie, and no key ever reaches the
+page. The canvas must have Backend switched on (see Capabilities below).
 
-- `canvasdrop.me()` → `{ id, email, name, avatarUrl, kind }`. `kind` is normally
-  `"member"` for the current signed-in user; `"guest"` is retained only for legacy
-  guest sessions from older instances. New Add person grants materialize as
-  signed-in users after verified auth.
-- `canvasdrop.kv` and `canvasdrop.kv.user` — `get(key)` → value or `null`,
-  `set(key, value)`, `delete(key)`, `list({ prefix?, cursor?, limit? })` →
-  `{ entries, nextCursor }`, `increment(key, by = 1)` → number. `kv.user` is
-  per-viewer, the root scope is shared.
-- `canvasdrop.files` — `upload(file)` → `{ id, name, size, url }`, `list()`,
-  `delete(id)`, `url(id)` (synchronous; returns the content URL).
-- `canvasdrop.ai` — `chat(messages, { model })` →
-  `{ text, usage: { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens }, cost }`,
-  and `stream(messages, { model })` → `AsyncIterable<string>` (SSE; the provider
-  key is server-side only). `model` is required.
-- `canvasdrop.realtime.channel(name)` — `publish(event, data)`,
-  `subscribe(handler)`, `unsubscribe()`, `presence()`, `onPresence`, `onJoin`,
-  `onLeave`, `close()`. There is no generic `.on(...)`.
+- `me()` returns `{ id, email, name, avatarUrl, kind }`. `kind` is `"member"`;
+  `"guest"` appears only for retained legacy guest sessions.
+- `kv` (shared) and `kv.user` (per viewer) have the same five methods: `get(key)`
+  returns the value or `null`; `set(key, value)` stores any JSON except `null`;
+  `delete(key)` is idempotent; `list({ prefix?, cursor?, limit? })` returns
+  `{ entries: [{ key, value }], nextCursor }`; `increment(key, by = 1)` returns the
+  new number. Key max 512 bytes, value max 64 KiB, 10 000 shared and 1 000
+  per-user keys per canvas.
+- `files`: `upload(file)` returns `{ id, name, size, url }`; `list()` returns
+  `[{ id, name, size, mime, createdAt }]`; `delete(id)`; `url(id)` is synchronous.
+  25 MiB per file, 1 GiB per canvas.
+- `ai`: `chat(messages, { model, system?, maxTokens? })` returns `{ text, usage:
+  { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens },
+  cost }`; `stream(messages, options)` returns an `AsyncIterable<string>` of text
+  deltas with no usage. `model` is required and must be on the instance allowlist
+  (`MODEL_NOT_ALLOWED`). Messages are `{ role: "user" | "assistant", content }`; the
+  system prompt goes in `options.system`. The provider key stays server-side.
+- `realtime.channel(name)` returns a handle with `publish(event, data)` (fire and
+  forget), `subscribe(handler)` where `handler` receives `{ event, data, from:
+  { id, name } }` and the call returns `void`, `unsubscribe()` (clears every
+  handler on the channel), `presence()` resolving to `[{ id, name }]`, `onPresence`,
+  `onJoin`, `onLeave`, and `close()`. One shared socket per page with automatic
+  reconnect. There is no generic `.on(...)`.
+- `canvases` (the `authoring` capability, off by default): `publish`, `update`,
+  `list`, `revoke` let a signed-in viewer create and manage a share canvas from a
+  page.
 
-Full signatures and types: [SDK overview](/docs/sdk/overview).
+Full signatures and types: [SDK overview](/docs/sdk/overview). Raw routes:
+[Runtime API](/docs/api/runtime-api).
 
-## Sharing & access
+## Sharing and access
 
-Sharing is one **access rung** per canvas, set by the owner from the dashboard's
-Share tab (or its session-authenticated management API). The rung is one of:
+One access rung per canvas, set on the Share tab or with `update_canvas.access`.
+Access is evaluated on every request, so a revoke, an expiry, or a role change
+takes effect on the next request; a canvas you may not open reads as `404`.
 
-- `private` — owner only.
-- `specific_people` — a named allowlist of signed-in users and/or pending emails
-  that materialize after exact-email verified sign-in.
-- `team` — members of the granted teams. A team is personal (friends & family) or
-  org-attached (a subset of the org, re-checked against live org membership on every
-  request). Link-only by default; set `discoverability: "listed"` to show it in Shared.
-- `whole_org` — any authenticated org member with the link. Link-only by default; set
-  `discoverability: "listed"` to show it in Shared and make it eligible for gallery listing.
-- `public_link` — anyone with the link while the instance switch is on and the owner
-  account has not been revoked (`canPublishPublic`), and **static-only** for non-owners: every backend
-  primitive is refused, returning `403 STATIC_ONLY`.
+| Rung | Who can open it |
+|---|---|
+| `private` | the owner and editors |
+| `specific_people` | the people list: signed-in users and teams granted now, new emails pending until their first verified sign-in |
+| `team` | members of the granted teams (`teamIds`); `discoverability: "listed"` shows it in Shared |
+| `whole_org` | any signed-in org member; `listed` shows it in Shared and makes it gallery-eligible |
+| `public_link` | anyone with the link, while the instance switch is on and the owner may publish publicly (`canPublishPublic`); static only for everyone except the owner and editors: every primitive answers `403 STATIC_ONLY` |
 
-Specific people are added through auth-delegated Add person grants: existing users are
-granted now; admissible new emails show as pending until first verified sign-in. Team and
-Whole-org shares can stay URL-only or be listed in Shared for people who already have access.
-Public links, password locks, share expiry, and the full access model are in
-[Sharing & access](/docs/authoring/sharing).
+Editors have access at every rung and skip the password gate. A password lock
+answers `403 PASSWORD_REQUIRED` on the runtime API until the viewer passes the
+gate; a share expiry (`sharedExpiresAt`) turns non-owners away with `404` once it
+passes. Details: [Sharing & access](/docs/authoring/sharing).
 
-## Capabilities and errors
+## Capabilities
 
-A canvas must opt into **backend** (off by default); then `kv`, `files`, `ai`,
-and `realtime` toggle independently. Identity (`me()`) is on whenever backend
-is. AI also requires a configured provider key and realtime an enabled operator
-global. A disabled feature returns `403 CAPABILITY_DISABLED`.
+`backendEnabled` is off by default. With it on, `kv`, `files`, `ai`, and
+`realtime` default on and `authoring` defaults off; each toggles independently.
+Effective rule: `identity = backend`; `kv = backend && capKv`; `files = backend &&
+capFiles`; `ai = backend && capAi && provider key configured`; `realtime = backend
+&& capRealtime && CANVAS_DROP_REALTIME=on`; `authoring = backend && capAuthoring &&
+CANVAS_DROP_AUTHORING=on`.
 
-Errors are machine-readable: every failure carries a stable string `.code`
-(e.g. `NOT_AUTHENTICATED` (401), `NOT_FOUND` (404), `CROSS_CANVAS_FORBIDDEN`
-(403), `STATIC_ONLY` (403), `MODEL_NOT_ALLOWED` (403), `QUOTA_EXCEEDED` (429),
-`VALUE_TOO_LARGE` (413)). In the browser SDK every error is a `CanvasdropError`
-with that `.code`; four codes also have dedicated subclasses —
-`NotAuthenticatedError`, `NotFoundError`, `CapabilityDisabledError`,
-`QuotaExceededError`. Branch on `.code`, not on message text.
+An off feature answers `403 {"code":"CAPABILITY_DISABLED","capability":"kv",
+"backendEnabled":false,"reason":"backend_off"|"feature_off"|"operator_disabled",
+"hint":"..."}`; the SDK throws `CapabilityDisabledError`. Toggle from the canvas's
+Backend tab, `PATCH /api/canvases/{id}/capabilities`, or `set_capabilities`.
+Details: [Capabilities](/docs/authoring/capabilities).
+
+## Errors
+
+Every failure carries a stable string `code`; branch on it, not on message text.
+The SDK throws `CanvasdropError` with `.code` and `.status`, plus five subclasses:
+`NotAuthenticatedError` (401), `NotFoundError` (404), `CapabilityDisabledError`
+(403 `CAPABILITY_DISABLED`), `QuotaExceededError` (429 `QUOTA_EXCEEDED`; also
+`GUEST_AI_CAP`, `KEY_LIMIT` at 409, and the 413 size codes), and
+`PublishFailedError` (502, from `canvasdrop.canvases.publish`). Every other code
+arrives as a plain `CanvasdropError`. `kv.get` returns `null` for a missing key
+instead of throwing.
+
+Codes you will meet most on the runtime API: `NOT_AUTHENTICATED` 401,
+`NOT_FOUND` 404, `PASSWORD_REQUIRED` 403, `STATIC_ONLY` 403,
+`CAPABILITY_DISABLED` 403, `CROSS_CANVAS_FORBIDDEN` 403, `MODEL_NOT_ALLOWED` 403,
+`DISABLED` 403, `INVALID_BODY` 400, `KEY_TOO_LARGE` / `VALUE_TOO_LARGE` /
+`FILE_TOO_LARGE` 413, `KEY_LIMIT` 409, `NOT_NUMERIC` 409, `QUOTA_EXCEEDED` 429,
+`CONNECTION_LIMIT` 429, `RATE_LIMITED` 429, `AI_STREAM_TRUNCATED` /
+`AI_UPSTREAM_ERROR` 502. Full table: [Error codes](/docs/api/errors).
+
+## Rate limits
+
+Defaults; each is an env var the operator can change.
+
+| Surface | Default | Keyed by | Env var |
+|---|---|---|---|
+| Deploy API (`deploy`, `uploads`, `finalize`) | 10/min | canvas | `CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN` |
+| Runtime API `/v1/c/{slug}/...` | 120/min | user + canvas | `CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN` |
+| Runtime AI `/v1/c/{slug}/ai/...` | 10/min | user | `CANVAS_DROP_RATELIMIT_AI_PER_MIN` |
+| MCP `/mcp` | 120/min | account | `CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN` |
 
 For a packaged, installable version of this guidance, see the
 [Agent skill](/docs/agents/skill).

@@ -36,19 +36,19 @@ The security-critical surface is the five hard invariants (see the
    session, canvas API key, or canvas content; keys and tokens are hashed at
    rest and shown once.
 3. **No unauthorized access** — a canvas is reachable only by principals its
-   access rung allows (owner; any allowed org member at `whole_org`; a listed
-   principal — org member or invited guest — at `specific_people`; anyone at
-   `public_link`); revoke/expiry/password are honored, including **live** on
-   open realtime sockets. An admin gets **no** special access to canvases it
-   doesn't own.
+   access rung allows (owner or editor; any allowed org member at `whole_org`;
+   a member of a granted team at `team`; a listed principal — an existing user,
+   or a pending email once that email has verified through the configured auth
+   — at `specific_people`; anyone at `public_link`, static-only);
+   revoke/expiry/password are honored, including **live** on open realtime
+   sockets. An admin gets **no** special access to canvases it doesn't own.
 4. **No cross-canvas reach in subdomain mode** — one canvas (or its code, SDK,
    or socket) cannot read, write, or act on another canvas's data, files, AI
    quota, or realtime channels. Path mode has reduced browser isolation and is
    for local/trusted own-hosting unless the operator opts into the tradeoff.
 5. **Lifecycle is honored instantly** — revoke, expiry, disable, delete, slug
-   regen, key regen, rung lowering, allowlist removal, guest-invite revocation,
-   and unpublish take effect on the next request and drop live realtime sockets
-   (including guest sockets).
+   regen, key regen, rung lowering, allowlist/pending-grant removal, and
+   unpublish take effect on the next request and drop live realtime sockets.
 
 The deploy pipeline's upload safety (rejecting zip-slip and serving server-side
 executables as inert text) is a §12.1 input-hardening control that is also in
@@ -61,5 +61,5 @@ internet (see the security model doc).
 
 ## Supported versions
 
-canvas-drop is pre-1.0; security fixes land on `main`. Pin to a commit you have
-reviewed and update deliberately.
+canvas-drop is pre-1.0 with no tagged releases yet; security fixes land on
+`main`. Pin to a commit you have reviewed and update deliberately.
