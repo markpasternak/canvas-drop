@@ -90,7 +90,10 @@ export function resolveSettingsUpdate(
   // predicate so the at-rest row can't reach a listed-but-invisible state.
   const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
   const effectiveAccess = targetAccess ?? cv.access;
-  const discoverableAccess = effectiveAccess === "team" || effectiveAccess === "whole_org";
+  // Only the whole_org rung has an enumeration policy to set: people and teams on the list
+  // always see the canvas in Shared (restricted access model), and the restricted family
+  // and public_link have no org-wide listing surface. Any other rung pins `link_only`.
+  const discoverableAccess = effectiveAccess === "whole_org";
   // Gallery listing is itself an explicit discovery opt-in. For Whole-org canvases,
   // make that single owner action supply the narrower `discoverability='listed'` fact
   // used by both Shared and the org-scoped gallery predicate. Keeping this resolution

@@ -786,9 +786,9 @@ describe("decideCanvasAccess — the list always applies (restricted access mode
       }),
     ).toEqual({ action: "allow", needsPasswordGate: false, staticOnly: false });
     // …and an unlisted guest is still an outsider there.
-    expect(decideCanvasAccess(canvas({ access: "whole_org" }), guest("cv1"), NOW, {})).toMatchObject(
-      { action: "deny", status: 404 },
-    );
+    expect(
+      decideCanvasAccess(canvas({ access: "whole_org" }), guest("cv1"), NOW, {}),
+    ).toMatchObject({ action: "deny", status: 404 });
   });
 
   it("active tenancy: a listed member of a DIFFERENT org opens a whole_org canvas (the list beats the org scope)", () => {

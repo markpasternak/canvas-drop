@@ -1790,7 +1790,7 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(text(res)).toContain("TEAM_FORBIDDEN");
   });
 
-  it("list_shared_canvases surfaces only listed team canvases to a teammate, not the owner", async () => {
+  it("list_shared_canvases surfaces a team-granted canvas to a teammate at once (no discoverability opt-in), never to the owner", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
@@ -1822,18 +1822,12 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       arguments: { id: cv.id, password: "secret" },
     });
     const mateMcp = await connectMember(mateId, org.id);
-    expect(
-      payload(await mateMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
-    ).toHaveLength(0);
-    await ownerMcp.callTool({
-      name: "update_canvas",
-      arguments: { id: cv.id, discoverability: "listed" },
-    });
     // The owner does NOT see their own canvas in Shared.
     expect(
       payload(await ownerMcp.callTool({ name: "list_shared_canvases", arguments: {} })).canvases,
     ).toHaveLength(0);
-    // The teammate does after the owner opts the grant into discovery.
+    // The teammate does, immediately: a team on the list is an open door (restricted access
+    // model) — no `discoverability` opt-in, which now only governs whole_org listing.
     const { canvases } = payload(
       await mateMcp.callTool({ name: "list_shared_canvases", arguments: { query: "design" } }),
     );

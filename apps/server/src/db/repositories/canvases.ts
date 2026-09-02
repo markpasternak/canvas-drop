@@ -802,9 +802,11 @@ export function canvasesRepository(client: DbClient) {
     },
 
     /**
-     * Direct `specific_people` shares discoverable to the viewer. This is only one
-     * candidate source for Shared; team/org candidates are resolved separately and merged
-     * by the shared-list service so access-context labels stay clear.
+     * Canvases the viewer holds a DIRECT grant on, at ANY rung (restricted access model:
+     * the people-and-teams list always applies, so a direct grant is always an open door
+     * worth listing). This is only one candidate source for Shared; team/org candidates
+     * are resolved separately and merged by the shared-list service so access-context
+     * labels stay clear.
      */
     async listDirectSharedWithUser(userId: string, now: number): Promise<Canvas[]> {
       const rows = (await db
@@ -815,7 +817,6 @@ export function canvasesRepository(client: DbClient) {
           and(
             eq(allowlistT.principalKind, "member"),
             eq(allowlistT.userId, userId),
-            eq(t.access, "specific_people"),
             ne(t.ownerId, userId),
             eq(t.status, "active"),
             isNotNull(t.currentVersionId),

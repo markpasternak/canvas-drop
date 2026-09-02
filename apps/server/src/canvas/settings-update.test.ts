@@ -241,13 +241,15 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     }
   });
 
-  it("persists listed discoverability for a team canvas without gallery listing", () => {
+  it("pins a team-rung canvas's discoverability to link_only — only whole_org carries a listing policy (restricted access model)", () => {
+    // A team on the list always sees the canvas in Shared, so there is nothing to opt into;
+    // the legacy `team` rung is a Restricted alias and takes the family's pinned value.
     const r = resolve(canvas({ access: "team", discoverability: "link_only" }), {
       discoverability: "listed",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.patch.discoverability).toBe("listed");
+      expect(r.patch.discoverability).toBe("link_only");
       expect(r.patch.galleryListed).toBe(false);
     }
   });

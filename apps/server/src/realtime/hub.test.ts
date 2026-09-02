@@ -707,7 +707,13 @@ describe("RealtimeHub — the list applies at every rung (restricted access mode
       "c1",
       {
         ...user("guest:inv1"),
-        principal: { kind: "guest", id: "guest:inv1", inviteId: "inv1", canvasId: "c1", email: "g@x.com" },
+        principal: {
+          kind: "guest",
+          id: "guest:inv1",
+          inviteId: "inv1",
+          canvasId: "c1",
+          email: "g@x.com",
+        },
       },
       guestSock,
     );
