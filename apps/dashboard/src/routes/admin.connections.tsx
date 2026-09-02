@@ -337,6 +337,7 @@ function RecentEvents({ profileId }: { profileId: string }) {
                 <th className="py-2 pr-3">Canvas</th>
                 <th className="py-2 pr-3">Method</th>
                 <th className="py-2 pr-3">Outcome</th>
+                <th className="py-2 pr-3">Bytes</th>
                 <th className="py-2">Latency</th>
               </tr>
             </thead>
@@ -349,6 +350,9 @@ function RecentEvents({ profileId }: { profileId: string }) {
                   <td className="py-2 pr-3 font-mono">{event.canvasId}</td>
                   <td className="py-2 pr-3">{event.method ?? "—"}</td>
                   <td className="py-2 pr-3">{event.outcome ?? "—"}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {event.requestBytes ?? 0} → {event.responseBytes ?? 0}
+                  </td>
                   <td className="py-2">
                     {event.durationMs === null ? "—" : `${event.durationMs} ms`}
                   </td>

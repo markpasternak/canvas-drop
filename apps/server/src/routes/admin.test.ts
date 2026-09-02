@@ -1111,6 +1111,7 @@ describe("admin routes", () => {
         outcome: "success",
         upstreamStatus: 200,
         durationMs: 12,
+        requestBytes: 0,
         responseBytes: 42,
         path: "/private-symbol?token=canary-query",
         headers: "canary-secret-header",

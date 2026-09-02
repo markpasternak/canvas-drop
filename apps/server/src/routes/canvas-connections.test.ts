@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createClient } from "@canvas-drop/sdk";
 import { type Config, loadConfig } from "@canvas-drop/shared";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -108,7 +109,13 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
 
   it("forwards a granted relative stock path with the protected agent and hardened response", async () => {
     const { app, canvas, fetch, usage } = await fixture();
-    const response = await app.request("/v1/c/stocks/connections/market/quote?symbol=ACME");
+    const sdk = createClient({
+      context: { slug: "stocks", apiBase: "http://canvas-drop.test" },
+      fetch: async (input, init) => app.request(input, init),
+    });
+    const response = await sdk.connections.fetch("market", "/quote?symbol=ACME", {
+      headers: { accept: "application/json", "x-market-tenant": "demo" },
+    });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ price: 42 });
     expect(response.headers.get("x-canvas-drop-connection-response")).toBe("upstream");
@@ -120,6 +127,10 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
         origin: "https://stocks.example.com",
         path: "/quote?symbol=ACME",
         method: "GET",
+        callerHeaders: expect.arrayContaining([
+          ["accept", "application/json"],
+          ["x-market-tenant", "demo"],
+        ]),
         protectedHeaders: [["user-agent", "controlled-stock-agent"]],
       }),
     );
@@ -135,6 +146,9 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
     const missing = await fixture({ grant: false });
     expect((await missing.app.request("/v1/c/stocks/connections/market/quote")).status).toBe(404);
     expect(missing.fetch).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      expect((await missing.usage.countByType(missing.canvas.id, null)).connection_op).toBe(1);
+    });
     await client.close();
 
     const backendOff = await fixture({ backendEnabled: false });
@@ -142,6 +156,11 @@ describe.each(DIALECTS)("canvas connections runtime [%s]", (dialect) => {
       403,
     );
     expect(backendOff.fetch).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      expect((await backendOff.usage.countByType(backendOff.canvas.id, null)).connection_op).toBe(
+        1,
+      );
+    });
   });
 
   it("rejects a disallowed method and cross-site request before outbound work", async () => {

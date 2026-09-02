@@ -51,7 +51,10 @@ export const ERROR_CODES = {
   KEY_LIMIT: { status: 409, summary: "The canvas hit its key-count limit." },
   NOT_NUMERIC: { status: 409, summary: "increment was called on a non-numeric value." },
   QUOTA_EXCEEDED: { status: 429, summary: "A spend or rate quota was exceeded." },
-  CONNECTION_LIMIT: { status: 429, summary: "Too many concurrent realtime connections." },
+  CONNECTION_LIMIT: {
+    status: 429,
+    summary: "A realtime or outbound connection concurrency limit was reached.",
+  },
   CONNECTION_RATE_LIMIT: {
     status: 429,
     summary: "The outbound connection rate limit was reached.",
@@ -190,7 +193,10 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
         : undefined;
     return new CapabilityDisabledError(cap, hint);
   }
-  if (status === 404) return new NotFoundError();
+  // A missing grant is deliberately opaque at the HTTP layer (404), but unlike
+  // canvas/content existence it is a documented Connection policy result. Preserve
+  // its stable code so canvas code can ask an administrator for the named grant.
+  if (status === 404 && code !== "CONNECTION_NOT_GRANTED") return new NotFoundError();
   if (code === "PUBLISH_FAILED") {
     const id =
       typeof body === "object" && body && "id" in body

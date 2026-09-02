@@ -1,7 +1,6 @@
 import type { Config } from "@canvas-drop/shared";
 import type { ConnectionMethod, Json } from "@canvas-drop/shared/db";
 import { type Context, Hono } from "hono";
-import { createMiddleware } from "hono/factory";
 import type { StatusCode } from "hono/utils/http-status";
 import { ConnectionLimitError, type ConnectionLimits } from "../connections/limits.js";
 import { SecretCipherError } from "../connections/secret-cipher.js";
@@ -138,24 +137,6 @@ async function readRequestBody(
 export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
   const app = new Hono<AppEnv>();
 
-  app.use(
-    "*",
-    createMiddleware<AppEnv>(async (c, next) => {
-      if (!requireCanvas(c).backendEnabled) {
-        return c.json(
-          {
-            code: "CAPABILITY_DISABLED",
-            capability: "connections",
-            reason: "backend_off",
-            hint: "Turn on this canvas's Backend master switch.",
-          },
-          403,
-        );
-      }
-      await next();
-    }),
-  );
-
   const handle = async (c: Context<AppEnv>) => {
     const startedAt = Date.now();
     const canvas = requireCanvas(c);
@@ -166,8 +147,22 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
     let admission: ReturnType<ConnectionLimits["acquire"]> | undefined;
     let outcome = "platform_rejection";
     let upstreamStatus: number | undefined;
+    let requestBytes = 0;
     let responseBytes = 0;
     try {
+      if (!canvas.backendEnabled) {
+        outcome = "capability_disabled";
+        c.header("Cache-Control", "private, no-store");
+        return c.json(
+          {
+            code: "CAPABILITY_DISABLED",
+            capability: "connections",
+            reason: "backend_off",
+            hint: "Turn on this canvas's Backend master switch.",
+          },
+          403,
+        );
+      }
       if (!(CONNECTION_METHODS as readonly string[]).includes(method)) {
         throw new ConnectionTransportError(
           "METHOD_NOT_ALLOWED",
@@ -199,6 +194,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         method === "GET" || method === "HEAD"
           ? undefined
           : await readRequestBody(c.req.raw, deps.config.connections.maxBodyBytes);
+      requestBytes = rawBody?.byteLength ?? 0;
       admission = deps.limits.acquire({
         actorId: user.id,
         canvasId: canvas.id,
@@ -236,20 +232,19 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
       return platformResponse(c, response);
     } finally {
       admission?.release();
-      if (profileId) {
-        const meta: Record<string, Json> = {
-          profileId,
-          key,
-          method,
-          outcome,
-          durationMs: Date.now() - startedAt,
-          responseBytes,
-        };
-        if (upstreamStatus !== undefined) meta.upstreamStatus = upstreamStatus;
-        void deps.usage
-          .record({ canvasId: canvas.id, userId: user.id, type: "connection_op", meta })
-          .catch(() => {});
-      }
+      const meta: Record<string, Json> = {
+        key,
+        method,
+        outcome,
+        durationMs: Date.now() - startedAt,
+        requestBytes,
+        responseBytes,
+      };
+      if (profileId) meta.profileId = profileId;
+      if (upstreamStatus !== undefined) meta.upstreamStatus = upstreamStatus;
+      void deps.usage
+        .record({ canvasId: canvas.id, userId: user.id, type: "connection_op", meta })
+        .catch(() => {});
     }
   };
 

@@ -22,6 +22,7 @@ export interface ConnectionUsageEvent {
   outcome: string | null;
   upstreamStatus: number | null;
   durationMs: number | null;
+  requestBytes: number | null;
   responseBytes: number | null;
   createdAt: number;
 }
@@ -127,6 +128,7 @@ export function usageEventsRepository(client: DbClient) {
           outcome: text(meta, "outcome"),
           upstreamStatus: number(meta, "upstreamStatus"),
           durationMs: number(meta, "durationMs"),
+          requestBytes: number(meta, "requestBytes"),
           responseBytes: number(meta, "responseBytes"),
           createdAt: row.createdAt,
         };

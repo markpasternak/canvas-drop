@@ -146,18 +146,24 @@ describe("createClient", () => {
   });
 
   it("connections.fetch throws platform errors and rejects unsafe paths locally", async () => {
-    const fetch = fetchMock(async () => res(503, { code: "CONNECTION_DISABLED" }));
+    const fetch = fetchMock()
+      .mockResolvedValueOnce(res(503, { code: "CONNECTION_DISABLED" }))
+      .mockResolvedValueOnce(res(404, { code: "CONNECTION_NOT_GRANTED" }));
     const client = createClient({ context: ctx, fetch });
     await expect(client.connections.fetch("stocks", "/quote")).rejects.toMatchObject({
       code: "CONNECTION_DISABLED",
       status: 503,
+    });
+    await expect(client.connections.fetch("stocks", "/quote")).rejects.toMatchObject({
+      code: "CONNECTION_NOT_GRANTED",
+      status: 404,
     });
     for (const path of ["quote", "//evil.example/quote", "https://evil.example", "/a\\b", "/a#b"]) {
       await expect(client.connections.fetch("stocks", path)).rejects.toMatchObject({
         code: "INVALID_CONNECTION_PATH",
       });
     }
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("connections.fetch forwards only the supported request-init fields", async () => {

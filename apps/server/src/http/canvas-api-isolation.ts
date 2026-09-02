@@ -53,8 +53,15 @@ export function canvasApiPreflight(config: Config) {
     const origin = c.req.header("origin");
     const expected = slug ? expectedCanvasOrigin(config, slug) : null;
     if (expected && origin === expected) applyCors(c, origin);
-    c.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-    c.header("Access-Control-Allow-Headers", "Content-Type");
+    c.header("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
+    // Connections may deliberately forward safe caller headers. A matching canvas
+    // origin may therefore preflight names beyond Content-Type; the runtime route
+    // still validates/counts/strips them and applies protected headers last.
+    const requestedHeaders = c.req.header("access-control-request-headers")?.trim();
+    c.header(
+      "Access-Control-Allow-Headers",
+      requestedHeaders && requestedHeaders.length <= 16 * 1024 ? requestedHeaders : "Content-Type",
+    );
     return c.body(null, 204);
   });
 }

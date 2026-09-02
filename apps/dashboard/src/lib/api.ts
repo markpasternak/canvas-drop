@@ -1058,6 +1058,7 @@ export interface AdminConnectionEvent {
   outcome: string | null;
   upstreamStatus: number | null;
   durationMs: number | null;
+  requestBytes: number | null;
   responseBytes: number | null;
   createdAt: number;
 }
