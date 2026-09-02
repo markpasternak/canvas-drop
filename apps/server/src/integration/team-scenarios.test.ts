@@ -219,7 +219,7 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
     expect(await denied.text()).not.toContain("team secret");
   });
 
-  it("Shared lists only discoverable team canvases for a member, excluding owner and non-member", async () => {
+  it("Shared lists a team-granted canvas for a member at once — no discoverability opt-in — excluding owner and non-member", async () => {
     client = await makeTestDb(dialect);
     const acmeId = await seedAcme(client);
     const h = makeHarness(client, { config: teamConfig() });
@@ -232,15 +232,15 @@ describe.each(DIALECTS)("team scenarios [%s]", (dialect) => {
         )
       ).canvases.map((c) => c.id);
 
-    // URL access works for the team member, but Shared is still opt-in.
-    expect(await idsFor(MATE)).not.toContain(canvasId);
+    // A team on the list is an open door (restricted access model): the teammate sees the
+    // canvas in Shared immediately; the owner does NOT (it's their own); a non-member never.
+    expect(await idsFor(MATE)).toContain(canvasId);
+    // `discoverability` now governs whole_org listing only — setting it here changes nothing.
     const listed = await h.SEND(OWNER, "PATCH", `/api/canvases/${canvasId}/settings`, {
       discoverability: "listed",
     });
     expect(listed.status).toBe(200);
     await listed.text();
-
-    // The teammate sees it; the owner does NOT (it's their own); a non-member doesn't either.
     expect(await idsFor(MATE)).toContain(canvasId);
     expect(await idsFor(OWNER)).not.toContain(canvasId);
     expect(await idsFor(NONMEMBER)).not.toContain(canvasId);

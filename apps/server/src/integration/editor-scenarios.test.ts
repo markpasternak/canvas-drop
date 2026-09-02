@@ -140,7 +140,7 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
     await client?.close();
   });
 
-  it("AE12: a demoted editor loses management, draft, MCP and the live socket on the next request", async () => {
+  it("AE12: a demoted editor loses management, draft and MCP on the next request; the live socket survives as a viewer and drops once the row is removed", async () => {
     client = await makeTestDb(dialect);
     const acmeId = await seedAcme(client);
     const h = makeHarness(client, { config: editorConfig() });
@@ -194,8 +194,23 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
       expect(demote.status).toBe(200);
       await demote.text();
 
-      // The realtime sweep (what the heartbeat runs) drops the socket with the
-      // unauthorized close code.
+      // The realtime sweep (what the heartbeat runs) KEEPS the socket: demotion removes the
+      // management role, not the door — a listed viewer opens the canvas at every rung
+      // (restricted access model), private included.
+      await h.hub.revalidateCanvas(canvasId);
+      const stillOpen = await Promise.race([
+        closed.then(() => false),
+        new Promise<boolean>((r) => setTimeout(() => r(true), 300)),
+      ]);
+      expect(stillOpen).toBe(true);
+      // Removing the row closes the door, and with it the socket (unauthorized close code).
+      const revoke = await h.SEND(
+        OWNER,
+        "DELETE",
+        `/api/canvases/${canvasId}/allowlist/${await entryIdFor(h, canvasId, EDITOR)}`,
+      );
+      expect([200, 204]).toContain(revoke.status);
+      await revoke.text();
       await h.hub.revalidateCanvas(canvasId);
       expect(await Promise.race([closed, timeout(3000, "socket close")])).toBe(CLOSE_UNAUTHORIZED);
     } finally {
@@ -321,14 +336,27 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
     const row = await h.repos.canvases.findMemberEntry(canvasId, mateId);
     expect(row?.role).toBe("editor");
 
-    // Next request: no role anywhere — management, draft, and the canvas itself.
+    // Next request: no management role anywhere — management and the draft are gone…
     expect(await roleOf(h, MATE, canvasId)).toBeNull();
     const put = await putDraft(h, MATE, canvasId, "<h1>outsider</h1>");
     expect(put.status).toBe(404);
     await put.text();
+    // …but the lingering row still names them on the people-and-teams list, and the list
+    // applies at every rung (restricted access model): they keep VIEW access exactly like
+    // any invited outsider until the owner removes the row. Editing power alone is org-scoped.
     const view = await h.GET(MATE, `/c/${slug}/`);
-    expect(view.status).toBe(404);
+    expect(view.status).toBe(200);
     await view.text();
+    const revoke = await h.SEND(
+      OWNER,
+      "DELETE",
+      `/api/canvases/${canvasId}/allowlist/member:${(row as { id: string }).id}`,
+    );
+    expect([200, 204]).toContain(revoke.status);
+    await revoke.text();
+    const gone = await h.GET(MATE, `/c/${slug}/`);
+    expect(gone.status).toBe(404);
+    await gone.text();
     // The owner-visible draft is untouched by the refused write.
     const draft = await h.GET(OWNER, `/api/canvases/${canvasId}/draft/file?path=index.html`);
     expect(await draft.text()).toBe("<h1>mate edit</h1>");

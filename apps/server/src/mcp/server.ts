@@ -1178,17 +1178,15 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
 
-      // Team grant flow (plan 003 U6) — the SAME shared resolver the management PATCH route
-      // uses (agent-native parity), run BEFORE the access write so a forbidden grant never
-      // leaves a team canvas with zero teams (a deny to everyone). Validates owner-team
-      // membership (KTD4), requires ≥1 team when sharing, lets an agent change the grant set
-      // without re-sending `access`, and clears on a rung change away from team.
+      // Legacy `teamIds` (plan 003 U6) — the SAME shared resolver the management PATCH route
+      // uses (agent-native parity): when sent, it replaces the VIEWER-role team grants after
+      // validating owner-team membership (KTD4); an empty set is refused. Team grants live on
+      // the people-and-teams list and apply at every rung (restricted access model), so a
+      // rung change never clears them.
       let teamGranted = false;
       {
         const grant = await resolveTeamGrant(deps.teams, caller.userId, {
           canvasOrgId: cv.orgId,
-          currentAccess: cv.access,
-          targetAccess,
           teamIds: input.teamIds,
         });
         if (grant.kind === "error") {
@@ -1201,8 +1199,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         if (grant.kind === "write") {
           await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
           teamGranted = true;
-        } else if (grant.kind === "clear") {
-          await deps.teams.setCanvasTeams(cv.id, []);
         }
       }
 

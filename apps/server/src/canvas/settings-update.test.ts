@@ -187,11 +187,24 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "DISCOVERY_CONFLICT", status: 409 });
   });
 
-  it("NOT_GALLERY_ELIGIBLE: team canvases cannot be listed in the gallery", () => {
-    const r = resolve(canvas({ access: "team", discoverability: "listed" }), {
-      galleryListed: true,
-    });
-    expect(r).toMatchObject({ ok: false, code: "NOT_GALLERY_ELIGIBLE", status: 409 });
+  it("NOT_SHARED: a Restricted canvas (the legacy team / specific_people aliases included) cannot be listed in the gallery", () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      const r = resolve(canvas({ access, discoverability: "listed" }), { galleryListed: true });
+      expect(r).toMatchObject({ ok: false, code: "NOT_SHARED", status: 409 });
+    }
+  });
+
+  it("SHARE_REQUIRES_PUBLISH fires only for the two open rungs — moving within the restricted family needs no publish", () => {
+    for (const access of ["private", "specific_people", "team"] as const) {
+      expect(resolve(canvas({ access: "private", currentVersionId: null }), { access }).ok).toBe(
+        true,
+      );
+    }
+    for (const access of ["whole_org", "public_link"] as const) {
+      expect(
+        resolve(canvas({ access: "private", currentVersionId: null }), { access }),
+      ).toMatchObject({ ok: false, code: "SHARE_REQUIRES_PUBLISH", status: 409 });
+    }
   });
 
   it("NOT_LISTED: enabling templatable without the canvas being listed is rejected (409)", () => {

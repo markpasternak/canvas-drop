@@ -799,18 +799,15 @@ export function managementRoutes(deps: ManagementDeps) {
     }
     const { patch, password, targetAccess, warning } = resolution;
 
-    // Team grant flow (plan 003 U4/U5): resolve + persist the canvas→team grants BEFORE
-    // the access write, so a forbidden grant never leaves a team canvas with zero teams (an
-    // explicit deny to everyone). The shared resolver (also used by MCP update_canvas)
-    // validates owner-team membership (KTD4), requires ≥1 team when sharing, lets an agent
-    // change the grant set without re-sending `access`, and clears on a rung change away
-    // from team. `teamGranted` drives the audit for a grant-only change (no rung change).
+    // Legacy `teamIds` (plan 003 U4/U5): when sent, replace the VIEWER-role team grants
+    // through the shared resolver (also used by MCP update_canvas), which validates
+    // owner-team membership (KTD4) and refuses an empty set. Team grants live on the
+    // people-and-teams list and apply at every rung (restricted access model), so a rung
+    // change never clears them. `teamGranted` drives the audit for a grant-only change.
     let teamGranted = false;
     if (deps.teams) {
       const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
         canvasOrgId: cv.orgId,
-        currentAccess: cv.access,
-        targetAccess,
         teamIds: body.data.teamIds,
       });
       if (grant.kind === "error") {
@@ -824,8 +821,6 @@ export function managementRoutes(deps: ManagementDeps) {
       if (grant.kind === "write") {
         await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
         teamGranted = true;
-      } else if (grant.kind === "clear") {
-        await deps.teams.setCanvasTeams(cv.id, []);
       }
     }
 
