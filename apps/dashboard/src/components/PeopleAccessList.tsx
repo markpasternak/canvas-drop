@@ -14,6 +14,7 @@ import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PeopleEmailCombobox } from "./PeopleEmailCombobox.js";
+import { SegmentedControl } from "./SegmentedControl.js";
 import { Skeleton } from "./Skeleton.js";
 import { InlineNotice } from "./Surface.js";
 import { useToast } from "./Toast.js";
@@ -48,6 +49,12 @@ export interface PeopleAccessListProps {
 }
 
 const ROLE_LABEL: Record<AccessRole, string> = { viewer: "Viewer", editor: "Editor" };
+/** The two roles as a segmented choice — a real either/or, never a dropdown that reads as
+ *  a button (share-tab UX fix). */
+const ROLE_ITEMS = [
+  { value: "viewer", label: ROLE_LABEL.viewer, title: "Can open the canvas" },
+  { value: "editor", label: ROLE_LABEL.editor, title: "Manages the canvas with the owner" },
+] as const;
 
 function entryLabel(e: AllowlistEntry): string {
   if (e.kind === "team") return e.name ?? "Team";
@@ -87,6 +94,9 @@ export function PeopleAccessList({
   // KTD11 / AE19: after an editor leaves (removed or demoted), offer to rotate the deploy
   // key they may have copied. Declining removes only the grant.
   const [keyPrompt, setKeyPrompt] = useState<string | null>(null);
+  // Removal is confirmed first (it is destructive for the person on their next request).
+  const [removing, setRemoving] = useState<AllowlistEntry | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const search = email.trim();
@@ -175,12 +185,16 @@ export function PeopleAccessList({
   }
 
   async function remove(e: AllowlistEntry) {
+    setRemoveBusy(true);
     try {
       await api.removeAllowlistEntry(canvasId, e.id);
+      setRemoving(null);
       await reload();
       if (e.role === "editor") setKeyPrompt(entryLabel(e));
     } catch (err) {
       toast(err instanceof ApiError ? err.hint : "Couldn't remove", "error");
+    } finally {
+      setRemoveBusy(false);
     }
   }
 
@@ -198,23 +212,24 @@ export function PeopleAccessList({
   }
 
   const roleSelect = (e: AllowlistEntry) => (
-    <select
+    <SegmentedControl
       aria-label={`Role for ${entryLabel(e)}`}
-      className={`${inputControl} h-8 w-auto py-0 text-xs`}
+      size="sm"
+      items={ROLE_ITEMS}
       value={e.role === "editor" ? "editor" : "viewer"}
-      onChange={(ev) => void changeRole(e, ev.target.value as AccessRole)}
-    >
-      <option value="viewer">Viewer</option>
-      <option value="editor">Editor</option>
-    </select>
+      onChange={(next) => {
+        if (next !== (e.role === "editor" ? "editor" : "viewer")) void changeRole(e, next);
+      }}
+    />
   );
 
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted">
-        Viewers can open the canvas whatever the general access below says. Editors can also change
-        its content, settings, and sharing — everything except deleting or transferring it. Only org
-        members and teams can be editors.
+        Everyone listed here can open the canvas, whatever General access below says. An
+        <strong className="font-medium text-fg"> editor</strong> also runs it with you — content,
+        settings, sharing — everything except deleting or transferring it. Only org members and
+        teams can be editors.
       </p>
 
       <div className="flex flex-wrap items-end gap-2">
@@ -230,15 +245,12 @@ export function PeopleAccessList({
             searching={searchingPeople}
           />
         </div>
-        <select
+        <SegmentedControl
           aria-label="Role for the person to add"
-          className={`${inputControl} h-9 w-auto py-0`}
+          items={ROLE_ITEMS}
           value={personRole}
-          onChange={(ev) => setPersonRole(ev.target.value as AccessRole)}
-        >
-          <option value="viewer">Viewer</option>
-          <option value="editor">Editor</option>
-        </select>
+          onChange={setPersonRole}
+        />
         <Button
           size="sm"
           variant="secondary"
@@ -269,15 +281,12 @@ export function PeopleAccessList({
               ))}
             </select>
           </label>
-          <select
+          <SegmentedControl
             aria-label="Role for the team to add"
-            className={`${inputControl} h-9 w-auto py-0`}
+            items={ROLE_ITEMS}
             value={teamRole}
-            onChange={(ev) => setTeamRole(ev.target.value as AccessRole)}
-          >
-            <option value="viewer">Viewer</option>
-            <option value="editor">Editor</option>
-          </select>
+            onChange={setTeamRole}
+          />
           <Button
             size="sm"
             variant="secondary"
@@ -293,7 +302,7 @@ export function PeopleAccessList({
       {entries === null ? (
         <Skeleton className="h-8" />
       ) : (
-        <ul className="divide-y divide-border" aria-label="People with access">
+        <ul className="divide-y divide-border" aria-label="People and teams">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center justify-between gap-3 py-2 text-sm">
               <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -325,7 +334,12 @@ export function PeopleAccessList({
                   roleSelect(e)
                 )}
                 {e.kind !== "owner" && (
-                  <Button size="sm" variant="ghost" onClick={() => void remove(e)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted hover:text-danger"
+                    onClick={() => setRemoving(e)}
+                  >
                     Remove
                   </Button>
                 )}
@@ -365,6 +379,24 @@ export function PeopleAccessList({
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => {
+          if (removing) void remove(removing);
+        }}
+        title={removing ? `Remove ${entryLabel(removing)}?` : "Remove?"}
+        actionLabel="Remove"
+        destructive
+        loading={removeBusy}
+      >
+        {removing?.kind === "team"
+          ? "The team's members lose the access this grant gave them on their next request. Their own grants, if any, stay."
+          : removing?.kind === "pending"
+            ? "The pending invite is cancelled; they get nothing when they sign in."
+            : "They lose access on their next request. Nothing they saved changes."}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={keyPrompt !== null}

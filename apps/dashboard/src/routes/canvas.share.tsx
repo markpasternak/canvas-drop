@@ -24,16 +24,16 @@ import { useSectionNav } from "../lib/use-section-nav.js";
 
 const BASE_SECTIONS = [
   { id: "share-link", label: "Share link" },
-  { id: "people", label: "People" },
-  { id: "access", label: "Access" },
+  { id: "people", label: "People & teams" },
+  { id: "access", label: "General access" },
   { id: "locks", label: "Locks" },
   { id: "gallery", label: "Gallery" },
 ] as const;
 
 const PEOPLE_SECTIONS = [
   { id: "share-link", label: "Share link" },
-  { id: "people", label: "People" },
-  { id: "access", label: "Access" },
+  { id: "people", label: "People & teams" },
+  { id: "access", label: "General access" },
   { id: "locks", label: "Locks" },
   { id: "added-people-ai", label: "Added people" },
   { id: "gallery", label: "Gallery" },
@@ -211,8 +211,8 @@ export default function Share() {
 
         <Section
           id="people"
-          title="People with access"
-          description="Named people and teams, each as a viewer or an editor. Editors manage the canvas with you."
+          title="Share with people and teams"
+          description="Add someone as a viewer or an editor. Editors manage the canvas with you."
         >
           <PeopleAccessList
             canvasId={canvas.id}
@@ -246,8 +246,8 @@ export default function Share() {
 
         <Section
           id="access"
-          title="Access"
-          description="Pick the audience that can open this canvas."
+          title="General access"
+          description="Who else can open the canvas, beyond the people and teams above."
         >
           <AccessLadder
             // Reflect the in-flight "Team" pick before it's committed, so the radio
@@ -678,7 +678,7 @@ function AccessLadder({
   );
   return (
     <fieldset className="space-y-2">
-      <legend className="sr-only">Who can access this canvas</legend>
+      <legend className="sr-only">General access — who else can open this canvas</legend>
       {rungs.map((r) => {
         // A Personal canvas can't be shared org-wide — disable the "Whole org" rung + explain,
         // rather than letting the click bounce off the server's 409 with no feedback. The Team
