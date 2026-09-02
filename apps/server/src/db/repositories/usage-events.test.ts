@@ -57,6 +57,56 @@ describe.each(DIALECTS)("usageEventsRepository [%s]", (dialect) => {
     expect((await repo.countByType(canvasId, null)).kv_op).toBe(1);
   });
 
+  it("reads only one profile's sanitized, paginated connection outcomes", async () => {
+    client = await makeTestDb(dialect);
+    const { canvasId, userId } = await seed(client);
+    const repo = usageEventsRepository(client);
+    await repo.record({
+      canvasId,
+      userId,
+      type: "connection_op",
+      meta: {
+        profileId: "profile-a",
+        key: "stocks",
+        origin: "https://stocks.example.com",
+        method: "GET",
+        outcome: "success",
+        upstreamStatus: 200,
+        durationMs: 8,
+        responseBytes: 120,
+        path: "/secret?token=canary",
+        headers: "canary-header",
+      },
+    });
+    await repo.record({
+      canvasId,
+      userId,
+      type: "connection_op",
+      meta: { profileId: "profile-b", key: "other", outcome: "success" },
+    });
+
+    const rows = await repo.recentConnectionEvents({
+      profileId: "profile-a",
+      sinceMs: 0,
+      limit: 1,
+      offset: 0,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      canvasId,
+      userId,
+      key: "stocks",
+      origin: "https://stocks.example.com",
+      method: "GET",
+      outcome: "success",
+      upstreamStatus: 200,
+      durationMs: 8,
+      responseBytes: 120,
+    });
+    expect(JSON.stringify(rows)).not.toContain("secret");
+    expect(JSON.stringify(rows)).not.toContain("canary");
+  });
+
   it("pruneBefore deletes rows older than the cutoff and keeps newer ones", async () => {
     client = await makeTestDb(dialect);
     const { canvasId, userId } = await seed(client);

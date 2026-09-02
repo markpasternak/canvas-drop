@@ -330,10 +330,11 @@ Add volume is bounded per actor with `invites.maxPerActorPerHour` (default 20) a
 
 ## No secrets in the browser (invariant 2)
 
-The AI provider key (`CANVAS_DROP_AI_API_KEY`) and every canvas API key are server-side
-only. The browser SDK rides the viewer's session, so a canvas calls the primitives (KV,
-files, AI, identity, realtime) with no secret in its code. The deploy engine lints every
-upload and warns when a file appears to contain a canvas API key.
+The AI provider key (`CANVAS_DROP_AI_API_KEY`), every canvas API key, and every Connection
+protected header are server-side only. The browser SDK rides the viewer's session, so a
+canvas calls the primitives (KV, files, AI, identity, realtime, and admin-granted
+Connections) with no secret in its code. The deploy engine lints every upload and warns
+when a file appears to contain a canvas API key.
 
 Deploy keys are `cd_` Bearer secrets: 32 random bytes, stored only as a SHA-256 hash,
 shown once at creation or regeneration. A key works only on its own canvas (`403` on any
@@ -342,6 +343,31 @@ and dies the moment it is regenerated. Cloning a canvas mints a fresh key; it ne
 copies the source's. The key is per canvas, not per person: removing an editor does not
 invalidate a key they copied, so regenerate it when someone leaves (the dashboard offers
 this). See the [Deploy API](/docs/api/deploy-api).
+
+### Connections: bounded outbound authority
+
+A Connection is an admin-created, reusable outbound profile, not a general proxy or a
+Lambda runtime. It names one exact HTTPS DNS origin, a set of allowed HTTP methods, and
+optional protected headers such as `Authorization` or a controlled `User-Agent`. An admin
+grants that profile to individual canvases. The canvas supplies only a root-relative path,
+query, body, and non-protected request headers; the server adds protected headers last.
+Anonymous Public-link viewers cannot call it because the whole runtime API stays
+static-only for them.
+
+Protected header values are encrypted with AES-256-GCM under
+`CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY`, authenticated to the profile id, and are
+write-only in the admin API and UI. Logs, usage events, MCP results, and error bodies expose
+neither the values nor requested paths/query strings. Backups contain ciphertext but not
+the root key; preserve that key separately as described in the operations runbook.
+
+Outbound requests resolve DNS on every hop and pin the selected public address into the
+socket while retaining the hostname for TLS SNI and certificate validation. Literal IPs,
+credentials in the URL, private/link-local/loopback/reserved IPv4 and IPv6, mixed public
+and private DNS answers, redirects to a different origin, and redirects to disallowed
+methods are rejected. Request and response sizes, total duration, concurrency, and rate
+are bounded. As defense in depth, restrict the app container's network egress to the APIs
+your profiles actually need; application-layer SSRF checks should not be the only barrier
+between a canvas and your internal network. See [Connections](/docs/sdk/connections).
 
 ## Path mode vs subdomain mode (invariant 4)
 
@@ -357,8 +383,8 @@ this). See the [Deploy API](/docs/api/deploy-api).
   the browser isolates them and invariant 4 holds in full. Needs a wildcard DNS record
   and wildcard TLS at the proxy, and a non-localhost `CANVAS_DROP_BASE_URL`.
 
-Server-side isolation holds in both modes: blobs, KV, files, AI usage, and realtime
-channels are keyed by canvas id, and management and admin writes require a same-origin
+Server-side isolation holds in both modes: blobs, KV, files, AI usage, realtime channels,
+and Connection grants are keyed by canvas id, and management and admin writes require a same-origin
 request: `Sec-Fetch-Site: same-origin` (or `none`), else an `Origin` whose host matches
 `CANVAS_DROP_BASE_URL`; anything else gets `403 {"error":"cross_origin_forbidden"}`.
 Subdomain mode adds the browser's origin boundary on top. If you do not run an
@@ -407,7 +433,8 @@ rejection. Canvas actions are attributed to the acting user or agent: `deploy`,
 actions are audited by name: `canvas_disable`, `canvas_enable`, `canvas_restore`,
 `canvas_reassign_owner`, `canvas_feature`, `user_block`, `user_unblock`, `user_promote`,
 `user_demote`, `user_grant_public`, `user_revoke_public`, `allowed_email_add`,
-`allowed_email_remove`, `admin_settings_update`. Rows carry the client IP described
+`allowed_email_remove`, `admin_settings_update`, and the Connection profile/grant actions.
+Rows carry the client IP described
 above. Login attempts are limited to `CANVAS_DROP_RATELIMIT_LOGIN_PER_MIN` (default 10)
 per client IP; see [Rate limiting](/docs/self-hosting/configuration#rate-limiting).
 
@@ -415,4 +442,5 @@ per client IP; see [Rate limiting](/docs/self-hosting/configuration#rate-limitin
 
 canvas-drop does not phone home. There is no analytics, usage reporting, or third-party
 beacon in the product. Nothing leaves your instance unless you configure an outbound
-integration yourself, such as an OIDC provider, an AI provider, or a mail transport.
+integration yourself, such as an OIDC provider, an AI provider, a mail transport, or an
+admin-granted Connection.

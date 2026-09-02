@@ -104,7 +104,7 @@ Refusal codes you will meet across tools:
 
 ## Tools
 
-46 tools: 13 open to any signed-in account, 31 at minimum role editor, 2 owner-only.
+47 tools: 13 open to any signed-in account, 32 at minimum role editor, 2 owner-only.
 Optional inputs are marked `?`. "View" is the canvas projection described under Return
 shapes below.
 
@@ -130,6 +130,7 @@ Minimum role: editor. These keep working on a disabled canvas.
 | `list_versions` | `id` | `{versions: [{number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, current, downloadUrl}]}`. `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
 | `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
+| `list_canvas_connections` | `id` | `{connections: [{key, label, origin, allowedMethods, protectedHeaderNames, enabled, available, unavailableReason}]}`. This is sanitized authority metadata only: protected header values are never returned. A Connection works only while its live admin grant and profile remain enabled and the canvas backend is on. |
 | `list_access` | `id` | `{entries: [{id, kind, role, email, name, userId, teamId, teamOrgId, createdAt}]}`: the owner first, then people, pending sign-in grants, and teams. `kind` is `owner`, `member`, `guest`, `pending`, or `team`; `role` is `owner`, `viewer`, or `editor`. Entry ids are stable (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`, `team:<teamId>`); pass them to `set_access_role` and `revoke_access`. When you are the owner the result also carries `transferCandidates: [{id, name, email}]`, the set `transfer_canvas` accepts. |
 | `search_people` | `context` (`canvas` \| `team`), `canvasId?`, `teamId?`, `q` (1-80 chars) | `{people: [{id, email, name}]}`: the dashboard's Add person suggestions, scoped to a canvas you own or edit (`canvasId`) or a team you can see (`teamId`). `INVALID_REQUEST: missing canvasId or teamId for context` when the matching id is absent; a canvas you do not manage or a team you cannot see reads `not found`. Does not expose the admin People directory. |
 

@@ -1,7 +1,7 @@
 # Runtime API
 
-The runtime API is the HTTP surface a canvas calls from the browser: the five primitives
-(KV, files, AI, identity, realtime) plus authoring, each under `{base}/v1/c/{slug}`. The
+The runtime API is the HTTP surface a canvas calls from the browser: the six fixed primitives
+(KV, files, AI, identity, realtime, and admin-granted Connections) plus authoring, each under `{base}/v1/c/{slug}`. The
 [browser SDK](/docs/sdk/overview) (`window.canvasdrop`, served at `{base}/sdk/v1.js`)
 builds every one of these requests, speaks the SSE and WebSocket wire formats, and maps
 errors to typed exceptions, so reach for it first. Use this page when you need the raw
@@ -98,8 +98,9 @@ JSON rather than a CORS failure. In `path` mode the canvas is same-origin and no
 headers are sent.
 
 Preflight `OPTIONS /v1/c/{slug}/*` is answered before the auth gateway: always `204`,
-`Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS`,
-`Access-Control-Allow-Headers: Content-Type`, plus the credentialed headers above in
+`Access-Control-Allow-Methods: GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS`, and either
+`Access-Control-Allow-Headers: Content-Type` or the canvas origin's requested header names,
+plus the credentialed headers above in
 `subdomain` mode when `Origin` matches. It never returns `401`.
 
 **5. Capability gate.** Each primitive checks its capability and returns `403` when it is
@@ -118,6 +119,7 @@ remediation string.
 | `kv`, `files` | backend on, plus the capability's own switch |
 | `ai` | backend on, switch on, and the instance has a provider key |
 | `realtime` | backend on, switch on, and `CANVAS_DROP_REALTIME=on` (the default) |
+| `connections` | backend on, plus a live enabled profile and per-canvas admin grant; the external encryption key must be available when the profile has protected headers |
 | `authoring` | backend on, switch on, and `CANVAS_DROP_AUTHORING=on` (default `off`) |
 
 ## Identity
@@ -248,6 +250,45 @@ Errors, by when they happen:
 
 Usage and spend are recorded exactly once per request: on success, on upstream error, and
 when the client aborts mid-stream.
+
+## Outbound Connections
+
+Capability: `connections`. A grant, not a canvas-owned feature flag, is the
+switch. An instance administrator defines one exact HTTPS origin, the allowed
+standard methods, and optional protected headers, then attaches that profile to
+individual canvases. Backend must also be on.
+
+```
+GET|HEAD|POST|PUT|PATCH|DELETE
+  {base}/v1/c/{slug}/connections/{profile}/{relative-path}?query
+```
+
+`{relative-path}` stays under the approved origin. An empty suffix means `/`.
+Only methods selected for the profile are accepted. `GET` and `HEAD` have no
+request body; the other supported methods accept at most 256 KiB. Canvas caller
+headers are limited to 32 and 16 KiB total. Cookies, authorization, forwarding,
+host, compression, and hop-by-hop headers are stripped; fixed protected headers
+are applied last.
+
+The upstream response status and bounded body are returned unchanged, including
+`4xx` and `5xx`, with only safe response headers. Canvas Drop adds
+`X-Canvas-Drop-Connection-Response: upstream`, `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, and `Content-Security-Policy: sandbox`.
+Upstream cookies, redirects, CORS policy, server identification, and hop-by-hop
+headers are removed. Non-identity content encoding is refused.
+
+Platform failures are JSON and carry one of the stable connection codes on the
+[Error codes](/docs/api/errors) page. Default bounds are an 8 KiB relative URL,
+2 MiB response, 10-second total DNS/request/body deadline, three exact-origin
+redirects, 60 requests/minute per actor+canvas+profile, 600/minute per profile,
+five concurrent requests per canvas, and 50 per server process.
+
+Security is enforced before every socket: IP literals and non-HTTPS origins are
+invalid; every A/AAAA answer must be public; mixed public/private answers reject;
+the validated address is pinned to the socket while TLS verifies the approved
+hostname; every redirect retains the exact origin and re-runs DNS validation.
+See [Outbound Connections](/docs/sdk/connections) for the SDK contract and the
+remaining upstream-reflection trust boundary.
 
 ## Realtime
 

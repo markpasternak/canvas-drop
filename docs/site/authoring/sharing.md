@@ -137,7 +137,7 @@ A canvas with a password cannot be listed in the gallery. Setting a password alw
 
 ## Public links
 
-**Public link** lets anyone with the URL view the canvas with no sign-in, **static-only**: the page and its files serve, while every backend primitive (KV, files, AI, identity, realtime) is refused for public visitors, so the open internet never touches your org's spend or stored data. Signed-in members hitting a public-link canvas are static-only too; only the owner and editors get full content.
+**Public link** lets anyone with the URL view the canvas with no sign-in, **static-only**: the page and its files serve, while every backend primitive (KV, files, AI, identity, realtime, Connections) is refused for public visitors, so the open internet never touches your org's spend, stored data, or granted outbound authority. Signed-in members hitting a public-link canvas are static-only too; only the owner and editors get full content.
 
 Two switches govern it:
 

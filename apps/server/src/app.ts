@@ -23,6 +23,14 @@ import { passwordGate } from "./canvas/password-gate.js";
 import { serveCanvas } from "./canvas/serve.js";
 import { blobKey } from "./canvas/storage-keys.js";
 import { canvasUrl } from "./canvas/url.js";
+import { connectionLimits } from "./connections/limits.js";
+import { createSecretCipher } from "./connections/secret-cipher.js";
+import { connectionService } from "./connections/service.js";
+import {
+  connectionTransport as makeConnectionTransport,
+  nodeConnectionRequest,
+  resolveConnectionHost,
+} from "./connections/transport.js";
 import { serveSpa } from "./dashboard/serve-spa.js";
 import type { DbClient } from "./db/factory.js";
 import { adminRepository } from "./db/repositories/admin.js";
@@ -32,6 +40,7 @@ import {
 } from "./db/repositories/allowed-emails.js";
 import { authoringUsageRepository } from "./db/repositories/authoring-usage.js";
 import type { CanvasesRepository } from "./db/repositories/canvases.js";
+import { connectionsRepository } from "./db/repositories/connections.js";
 import type { DraftsRepository } from "./db/repositories/drafts.js";
 import { emailTemplatesRepository } from "./db/repositories/email-templates.js";
 import { invitationsRepository } from "./db/repositories/invitations.js";
@@ -127,6 +136,8 @@ export interface BuildAppDeps {
   peerIp?: (c: import("hono").Context<AppEnv>) => string | undefined;
   /** Inject a rate-limit store (tests use a fake clock); defaults to in-process. */
   rateLimitStore?: RateLimitStore;
+  /** Outbound connection transport seam; tests inject a no-network fake. */
+  connectionTransport?: ReturnType<typeof makeConnectionTransport>;
   /** Env vars explicitly set (from `presentEnvVars()` at boot) — admin config source labels. */
   envPresent?: Set<string>;
   /** AI model provider (default Anthropic from config; tests inject a fake). */
@@ -189,6 +200,16 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
     // Which env vars were set — for the admin Configuration view's source labels.
     envPresent: deps.envPresent,
   });
+  const connections = connectionService({
+    repository: connectionsRepository(deps.db),
+    canvases: deps.canvases,
+    cipher: createSecretCipher(deps.config.connections.encryptionKey),
+    audit: deps.audit,
+  });
+  const connectionHttp =
+    deps.connectionTransport ??
+    makeConnectionTransport({ resolve: resolveConnectionHost, request: nodeConnectionRequest });
+  const connectionAdmission = connectionLimits(deps.config.connections);
 
   // One shared in-process rate-limit store (§9.7, M7) — used by the broad
   // post-gateway middleware AND the out-of-band mount points (Bearer deploy,
@@ -466,6 +487,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         usage,
         files,
         aiUsage,
+        connections,
         audit: deps.audit,
         publicLinksEnabled: () => settingsSvc.effectivePublicLinksEnabled(),
         // OAuth-lifecycle events (authorize/token issue+revoke) into the audit log.
@@ -601,6 +623,11 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         quota: settingsSvc.effectiveQuota,
       }),
       usage,
+      connections: {
+        service: connections,
+        transport: connectionHttp,
+        limits: connectionAdmission,
+      },
       audit: deps.audit,
       quota: settingsSvc.effectiveQuota,
       aiUsage,
@@ -669,6 +696,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       usage,
       files,
       aiUsage,
+      connections,
       hub: deps.hub,
       guests: deps.guests,
       invites,
@@ -718,6 +746,8 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
       invitations,
       invites,
       audit: deps.audit,
+      connections,
+      usage,
       revokeMcpTokensForUser: (id) => oauth.tokens.revokeAllForUser(id),
       orgMembership,
       hub: deps.hub,

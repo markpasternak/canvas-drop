@@ -5,6 +5,7 @@ import {
   type Canvas,
   type CanvasCapabilitiesPatch,
   type CanvasSettings,
+  type ConnectionProfileInput,
   type DraftView,
   isRestrictedRung,
 } from "./api.js";
@@ -509,6 +510,72 @@ export function useBulkDelete() {
 
 function invalidateAdmin(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["admin"] });
+}
+
+export function useCreateConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ConnectionProfileInput) => api.admin.createConnection(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminConnections }),
+  });
+}
+
+export function useUpdateConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: Omit<Partial<ConnectionProfileInput>, "key">;
+    }) => api.admin.updateConnection(id, input),
+    onSuccess: (_connection, { id }) => {
+      qc.invalidateQueries({ queryKey: keys.adminConnections });
+      qc.invalidateQueries({ queryKey: keys.adminConnectionCanvases(id) });
+      qc.invalidateQueries({ queryKey: ["canvas"] });
+    },
+  });
+}
+
+export function useDeleteConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, affectedCanvasCount }: { id: string; affectedCanvasCount: number }) =>
+      api.admin.deleteConnection(id, affectedCanvasCount),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.adminConnections });
+      qc.invalidateQueries({ queryKey: ["canvas"] });
+    },
+  });
+}
+
+export function useAttachConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, canvasId }: { id: string; canvasId: string }) =>
+      api.admin.attachConnection(id, canvasId),
+    onSuccess: (_result, { id, canvasId }) => {
+      qc.invalidateQueries({ queryKey: keys.adminConnections });
+      qc.invalidateQueries({ queryKey: keys.adminConnectionCanvases(id) });
+      qc.invalidateQueries({ queryKey: keys.adminCanvasConnections(canvasId) });
+      qc.invalidateQueries({ queryKey: keys.canvasConnections(canvasId) });
+    },
+  });
+}
+
+export function useDetachConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, canvasId }: { id: string; canvasId: string }) =>
+      api.admin.detachConnection(id, canvasId),
+    onSuccess: (_result, { id, canvasId }) => {
+      qc.invalidateQueries({ queryKey: keys.adminConnections });
+      qc.invalidateQueries({ queryKey: keys.adminConnectionCanvases(id) });
+      qc.invalidateQueries({ queryKey: keys.adminCanvasConnections(canvasId) });
+      qc.invalidateQueries({ queryKey: keys.canvasConnections(canvasId) });
+    },
+  });
 }
 
 export function useAdminDisableCanvas() {

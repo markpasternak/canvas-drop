@@ -1,0 +1,1 @@
+ALTER TABLE "connection_profiles" ADD COLUMN "protected_header_names" jsonb NOT NULL;

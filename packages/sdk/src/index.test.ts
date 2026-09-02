@@ -122,6 +122,71 @@ describe("errorFromResponse", () => {
 });
 
 describe("createClient", () => {
+  it("connections.fetch returns upstream success and error responses without flattening them", async () => {
+    const fetch = fetchMock()
+      .mockResolvedValueOnce(
+        new Response('{"price":42}', {
+          status: 200,
+          headers: { "x-canvas-drop-connection-response": "upstream" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('{"error":"symbol"}', {
+          status: 404,
+          headers: { "x-canvas-drop-connection-response": "upstream" },
+        }),
+      );
+    const client = createClient({ context: ctx, fetch });
+    expect((await client.connections.fetch("stocks", "/quote?symbol=ACME")).status).toBe(200);
+    expect((await client.connections.fetch("stocks", "/missing")).status).toBe(404);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://canvases.example.com/v1/c/foo/connections/stocks/quote?symbol=ACME",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+  });
+
+  it("connections.fetch throws platform errors and rejects unsafe paths locally", async () => {
+    const fetch = fetchMock()
+      .mockResolvedValueOnce(res(503, { code: "CONNECTION_DISABLED" }))
+      .mockResolvedValueOnce(res(404, { code: "CONNECTION_NOT_GRANTED" }));
+    const client = createClient({ context: ctx, fetch });
+    await expect(client.connections.fetch("stocks", "/quote")).rejects.toMatchObject({
+      code: "CONNECTION_DISABLED",
+      status: 503,
+    });
+    await expect(client.connections.fetch("stocks", "/quote")).rejects.toMatchObject({
+      code: "CONNECTION_NOT_GRANTED",
+      status: 404,
+    });
+    for (const path of ["quote", "//evil.example/quote", "https://evil.example", "/a\\b", "/a#b"]) {
+      await expect(client.connections.fetch("stocks", path)).rejects.toMatchObject({
+        code: "INVALID_CONNECTION_PATH",
+      });
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("connections.fetch forwards only the supported request-init fields", async () => {
+    const fetch = fetchMock(
+      async () =>
+        new Response(null, {
+          status: 204,
+          headers: { "x-canvas-drop-connection-response": "upstream" },
+        }),
+    );
+    const client = createClient({ context: ctx, fetch });
+    await client.connections.fetch("stocks", "/watch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+      body: "{}",
+    });
+  });
+
   it("me() GETs the right URL with credentials and parses JSON", async () => {
     const fetch = fetchMock(async () =>
       res(200, { id: "u1", email: "a@b.c", name: "A", avatarUrl: null }),

@@ -51,7 +51,26 @@ export const ERROR_CODES = {
   KEY_LIMIT: { status: 409, summary: "The canvas hit its key-count limit." },
   NOT_NUMERIC: { status: 409, summary: "increment was called on a non-numeric value." },
   QUOTA_EXCEEDED: { status: 429, summary: "A spend or rate quota was exceeded." },
-  CONNECTION_LIMIT: { status: 429, summary: "Too many concurrent realtime connections." },
+  CONNECTION_LIMIT: {
+    status: 429,
+    summary: "A realtime or outbound connection concurrency limit was reached.",
+  },
+  CONNECTION_RATE_LIMIT: {
+    status: 429,
+    summary: "The outbound connection rate limit was reached.",
+  },
+  CONNECTION_NOT_GRANTED: { status: 404, summary: "The connection is not granted to this canvas." },
+  CONNECTION_DISABLED: { status: 503, summary: "The connection profile is disabled." },
+  CONNECTION_KEY_UNAVAILABLE: {
+    status: 503,
+    summary: "The connection credential encryption key is unavailable.",
+  },
+  METHOD_NOT_ALLOWED: { status: 405, summary: "The connection method is not allowed." },
+  DESTINATION_BLOCKED: { status: 403, summary: "The connection destination was blocked." },
+  UPSTREAM_TIMEOUT: { status: 504, summary: "The connection upstream timed out." },
+  UPSTREAM_UNAVAILABLE: { status: 502, summary: "The connection upstream is unavailable." },
+  RESPONSE_TOO_LARGE: { status: 502, summary: "The connection response exceeded its limit." },
+  REQUEST_TOO_LARGE: { status: 413, summary: "The connection request exceeded its limit." },
   AI_STREAM_TRUNCATED: { status: 502, summary: "An AI stream ended before completion." },
   AI_UPSTREAM_ERROR: { status: 502, summary: "The AI provider returned an error." },
   PUBLISH_FAILED: {
@@ -174,7 +193,10 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
         : undefined;
     return new CapabilityDisabledError(cap, hint);
   }
-  if (status === 404) return new NotFoundError();
+  // A missing grant is deliberately opaque at the HTTP layer (404), but unlike
+  // canvas/content existence it is a documented Connection policy result. Preserve
+  // its stable code so canvas code can ask an administrator for the named grant.
+  if (status === 404 && code !== "CONNECTION_NOT_GRANTED") return new NotFoundError();
   if (code === "PUBLISH_FAILED") {
     const id =
       typeof body === "object" && body && "id" in body
@@ -202,6 +224,8 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
     code === "QUOTA_EXCEEDED" ||
     code === "GUEST_AI_CAP" ||
     code === "KEY_LIMIT" ||
+    code === "CONNECTION_LIMIT" ||
+    code === "CONNECTION_RATE_LIMIT" ||
     status === 413
   ) {
     return new QuotaExceededError(code || undefined, status);
@@ -390,6 +414,21 @@ export interface RealtimeNamespace {
   channel(name: string): Channel;
 }
 
+// --- Admin-granted outbound connections ------------------------------------
+
+export type ConnectionMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+export interface ConnectionRequestInit {
+  method?: ConnectionMethod;
+  headers?: RequestInit["headers"];
+  body?: RequestInit["body"];
+  signal?: RequestInit["signal"];
+}
+export interface ConnectionsNamespace {
+  /** Fetch a relative path through an admin-approved profile. Upstream HTTP errors
+   *  are returned as Response; Canvas Drop policy/platform errors are thrown. */
+  fetch(profile: string, path: string, init?: ConnectionRequestInit): Promise<Response>;
+}
+
 // --- Authoring / managed shares (plan 2026-07-04, v2 2026-07-05) -------------
 
 /** Access rung a share may request. `"password"` = a public link protected by a password. */
@@ -520,6 +559,7 @@ export interface CanvasdropClient {
   };
   ai: AiNamespace;
   realtime: RealtimeNamespace;
+  connections: ConnectionsNamespace;
   canvases: CanvasesNamespace;
 }
 
@@ -940,11 +980,55 @@ export function createClient(options: ClientOptions): CanvasdropClient {
   };
   const shared = kvNamespace(opts, "/kv");
   const base = (p: string) => `${opts.context.apiBase}/v1/c/${opts.context.slug}${p}`;
+  const connections: ConnectionsNamespace = {
+    async fetch(profile, path, init = {}) {
+      if (!/^[a-z][a-z0-9_-]{0,62}$/.test(profile)) {
+        throw new CanvasdropError("INVALID_CONNECTION", 0, "invalid connection profile key");
+      }
+      if (
+        !path.startsWith("/") ||
+        path.startsWith("//") ||
+        path.includes("\\") ||
+        path.includes("#") ||
+        [...path].some((character) => {
+          const codePoint = character.codePointAt(0) ?? 0;
+          return codePoint <= 31 || codePoint === 127;
+        })
+      ) {
+        throw new CanvasdropError(
+          "INVALID_CONNECTION_PATH",
+          0,
+          "connection path must be root-relative",
+        );
+      }
+      const method = (init.method ?? "GET").toUpperCase() as ConnectionMethod;
+      if (
+        !new Set<ConnectionMethod>(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]).has(method)
+      ) {
+        throw new CanvasdropError("METHOD_NOT_ALLOWED", 0, "unsupported connection method");
+      }
+      const response = await opts.fetch(base(`/connections/${profile}${path}`), {
+        method,
+        headers: init.headers,
+        body: init.body,
+        signal: init.signal,
+        credentials: "include",
+      });
+      if (response.headers.get("x-canvas-drop-connection-response") === "upstream") {
+        return response;
+      }
+      if (!response.ok) {
+        throw errorFromResponse(response.status, await response.json().catch(() => null));
+      }
+      return response;
+    },
+  };
   return {
     me: () => request<Me>(opts, "GET", "/me"),
     kv: { ...shared, user: kvNamespace(opts, "/kv/user") },
     ai: aiNamespace(opts, base),
     realtime: createRealtime(opts),
+    connections,
     files: {
       async upload(file: File) {
         const form = new FormData();

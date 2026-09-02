@@ -24,7 +24,7 @@ A backup is a **self-describing directory**:
 <dir>/blobs/<key>        every content-addressed storage object, verbatim
 ```
 
-It captures the **whole instance**: the database (all 20 tables) and the content-addressed
+It captures the **whole instance**: the database (all 31 tables) and the content-addressed
 storage (every canvas's deployed files). Take one with:
 
 ```bash
@@ -37,7 +37,8 @@ node --conditions=node-dist apps/server/dist/index.js backup /backups/$(date -u 
 
 > ⚠️ **A backup is sensitive — treat it like the database itself.** It is a cleartext export
 > of credential material (password / API-key hashes, `oauth_clients` secrets, session and
-> MCP-token rows) and PII (`allowed_emails`, `audit_log` actor IPs). Restrict the backup
+> MCP-token rows, plus encrypted Connection credential envelopes) and PII (`allowed_emails`,
+> `audit_log` actor IPs). Restrict the backup
 > directory to the app user — a `0700` dir on a dedicated volume, not one shared with
 > untrusted workloads — and **encrypt the archive before it leaves the host** (`age` / `gpg`,
 > or rely on bucket-side encryption + locked-down access). The `backups` volume below is
@@ -57,6 +58,15 @@ tar -czf "$DEST.tar.gz" -C "$(dirname "$DEST")" "$(basename "$DEST")" && rm -rf 
 and vice-versa. So backup→restore is also the supported way to **migrate** between drivers
 (e.g. graduate a trial from SQLite to Postgres, or local disk to S3) — point the target
 instance's config at the new drivers and restore.
+
+Connection credentials have one extra recovery dependency. The backup contains their
+AES-GCM ciphertext, but deliberately does **not** contain
+`CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY`. Keep that root key in your secret manager and
+restore the same value into the target environment before starting it. Without the key,
+profile metadata and grants can still be inspected or removed, but any protected profile
+fails closed at request time. Recovery is to re-enter each protected header map under
+Admin → Connections. In this first release, rotating the root key likewise means replacing
+the protected headers on every protected profile; never print or log the old or new key.
 
 ---
 
@@ -88,7 +98,8 @@ transfer can't restore silently short.
 2. Bring up a **throwaway** instance pointed at an empty DB + empty storage
    (e.g. `CANVAS_DROP_DB_PATH=/tmp/drill.db`, `CANVAS_DROP_STORAGE_PATH=/tmp/drill-store`).
 3. `… restore <backup-dir>` into it.
-4. Sign in and spot-check: a known canvas loads, its files serve, settings/users are intact.
+4. Sign in and spot-check: a known canvas loads, its files serve, settings/users are intact,
+   and an admin-granted Connection still succeeds without exposing its protected headers.
 5. Tear the throwaway down.
 
 A green restore is the only proof a backup is real. The automated round-trip

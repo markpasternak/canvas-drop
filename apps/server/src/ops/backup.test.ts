@@ -9,6 +9,7 @@ import { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DbClient } from "../db/factory.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { connectionsRepository } from "../db/repositories/connections.js";
 import { settingsRepository } from "../db/repositories/settings.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { DIALECTS, type Dialect, makeFreshPgTestDb, makeTestDb } from "../db/testing.js";
@@ -42,6 +43,25 @@ async function seed(db: DbClient, storage: ReturnType<typeof memStorage>) {
     slug: "lucky-yak",
     apiKeyHash: "hash-abc",
     title: "Three.js demo",
+  });
+  const profile = await connectionsRepository(db).create({
+    id: "conn-stock-data",
+    key: "stocks",
+    label: "Stock data",
+    origin: "https://api.example.com",
+    allowedMethods: ["GET"],
+    protectedHeaderNames: ["authorization", "user-agent"],
+    protectedHeadersEnvelope: "v1.test-encrypted-envelope",
+    enabled: true,
+    createdBy: user.id,
+    createdAt: Date.parse("2026-09-02T12:00:00.000Z"),
+    updatedAt: Date.parse("2026-09-02T12:00:00.000Z"),
+  });
+  await connectionsRepository(db).attach({
+    connectionId: profile.id,
+    canvasId: canvas.id,
+    createdBy: user.id,
+    createdAt: Date.parse("2026-09-02T12:00:00.000Z"),
   });
   await settingsRepository(db).set("config.core.designSkin", "workshop");
   await storage.put(`canvas/${canvas.id}/index.html`, enc.encode("<!doctype html><h1>hi</h1>"));
@@ -128,10 +148,13 @@ describe("BACKUP_TABLE_ORDER", () => {
       ["team_members", "teams"],
       ["team_members", "users"],
       ["invitations", "users"],
+      ["connection_profiles", "users"],
       ["canvas_teams", "canvases"],
       ["canvas_teams", "teams"],
       ["canvases", "orgs"],
       ["canvases", "users"],
+      ["canvas_connections", "connection_profiles"],
+      ["canvas_connections", "canvases"],
       ["canvas_allowlist", "canvases"],
       ["guest_invites", "canvases"],
       ["guest_sessions", "guest_invites"],
@@ -212,6 +235,8 @@ describe.each(DIALECTS)("backup/restore round-trip [%s]", (dialect) => {
     expect(meta.dialect).toBe(dialect);
     expect(meta.tableRows.users).toBe(1);
     expect(meta.tableRows.canvases).toBe(1);
+    expect(meta.tableRows.connection_profiles).toBe(1);
+    expect(meta.tableRows.canvas_connections).toBe(1);
     expect(meta.tableRows.settings).toBe(1);
     expect(meta.blobCount).toBe(2);
 

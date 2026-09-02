@@ -15,8 +15,8 @@ own infrastructure.
 
 The constraint is the product: a small, fixed set of primitives done well, not a
 general-purpose hosting platform. There is no server-side build step and no
-secret in the page. A canvas gains backend capability only through five
-primitives (KV, files, AI, identity, realtime) served by a zero-config browser
+secret in the page. A canvas gains backend capability only through six fixed
+primitives (KV, files, AI, identity, realtime, and admin-granted Connections) served by a zero-config browser
 SDK, and that backend stays off until the owner or an editor turns it on.
 
 ## Try it
@@ -66,8 +66,9 @@ provider (Dex), Postgres, and the app in real `proxy` auth mode at
 | Roles | Each person or team on the people list is a **viewer** or an **editor**. Editors edit, publish, roll back, change settings and sharing, and rotate the deploy key; deleting, transferring ownership, and the guest-AI switch stay with the owner (`OWNER_ONLY`). Only org members can be editors. A stale save is refused with `DRAFT_CONFLICT`, so two editors never overwrite each other silently. Ownership transfers to an editor in one step. | [Roles: viewers and editors](/docs/authoring/sharing#roles-viewers-and-editors) |
 | Teams | Any signed-in user can create a personal team; org members can create org-attached teams. Add people by email, then grant the team viewer or editor access to a canvas. | [Teams](/docs/authoring/teams) |
 | Backend | Turn on the backend per canvas, then toggle KV, files, AI, and realtime independently; identity (`canvasdrop.me()`) is on whenever the backend is. A call to a disabled primitive fails with `CAPABILITY_DISABLED`. A further opt-in, authoring, lets a page create canvases as the signed-in viewer. | [Capabilities](/docs/authoring/capabilities), [Browser SDK](/docs/sdk/overview) |
+| Connections | An admin can define a reusable exact-origin HTTPS profile with selected methods and write-only protected headers, then grant it to specific canvases. Canvas code gets a bounded `fetch`-like API; no arbitrary backend code runs. | [Connections](/docs/sdk/connections) |
 | Discover | **Shared** lists the canvases already opened to you. The **Gallery** is opt-in: Public-link canvases and Whole-org canvases their owners list, scoped to your org. An owner can also allow a listed canvas to be used as a template, which others clone. | [Gallery, description, and tags](/docs/authoring/sharing#gallery-description-and-tags) |
-| Agents | The MCP server at `{base}/mcp` (OAuth 2.1, 46 identity-scoped tools) covers everything the dashboard can do, with the same owner/editor/viewer checks. `{base}/llms.txt` and the agent skill (`{base}/skill.zip`) describe the whole surface for models. | [MCP server](/docs/agents/mcp), [llms.txt](/docs/agents/llms), [Agent skill](/docs/agents/skill) |
+| Agents | The MCP server at `{base}/mcp` (OAuth 2.1, 47 identity-scoped tools) covers everything the dashboard can do, with the same owner/editor/viewer checks. `{base}/llms.txt` and the agent skill (`{base}/skill.zip`) describe the whole surface for models. | [MCP server](/docs/agents/mcp), [llms.txt](/docs/agents/llms), [Agent skill](/docs/agents/skill) |
 | Admin | Disable or restore any canvas, reassign owners, feature canvases in the gallery, block users, grant public-link publishing per account, and edit runtime settings (AI key and quotas, screenshots, design skin) without a restart. | [Configuration](/docs/self-hosting/configuration) |
 | Operate | SQLite or Postgres, local disk or S3-compatible storage, `path` or `subdomain` URLs, `dev` / `proxy` / `oidc` auth: each is a config swap, never a code change. Docker image and compose stack; `pnpm backup`, `pnpm restore`, `pnpm purge`. | [Install](/docs/self-hosting/install), [Deploy](/docs/self-hosting/deploy), [Security model](/docs/self-hosting/security-model) |
 
@@ -75,7 +76,7 @@ provider (Dex), Postgres, and the app in real `proxy` auth mode at
 
 - Identity comes from the server-side auth context, never from the client. In
   `proxy` mode only the trusted proxy may assert it.
-- Secrets stay server-side. AI provider keys and deploy keys never reach the
+- Secrets stay server-side. AI provider keys, deploy keys, and Connection protected headers never reach the
   browser.
 - The backend is off by default; each primitive is a per-canvas opt-in.
 - Every canvas starts Restricted. Only its owner or an editor widens access, and
@@ -95,8 +96,8 @@ primitives and SDK, admin and hardening, the gallery, AI and realtime) are
 shipped, along with the post-v1 work in the table above: the access ladder,
 editor roles and ownership transfer, teams and auth-delegated invites, Shared
 discovery, the MCP server, staged uploads, custom slugs, clone-as-template,
-usage stats, optional screenshots and preview covers, design skins, and the
-authoring capability.
+usage stats, optional screenshots and preview covers, design skins, the
+authoring capability, and admin-granted outbound Connections.
 
 Ops and packaging (M10) is the only open milestone. The Docker image and compose
 stack, vendor-neutral deploy docs, backup/restore tooling (with an automated

@@ -233,7 +233,7 @@ describe("buildApp", () => {
         host: "canvases.example.com",
         origin,
         "access-control-request-method": "PUT",
-        "access-control-request-headers": "content-type",
+        "access-control-request-headers": "content-type, x-market-tenant",
       },
     });
     expect(res.status).toBe(204);
@@ -241,7 +241,10 @@ describe("buildApp", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
     // The methods list proves canvasApiPreflight answered (its set), not @hono/mcp's cors().
-    expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET,POST,PUT,DELETE,OPTIONS");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toBe(
+      "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS",
+    );
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("content-type, x-market-tenant");
   });
 
   it("browser unauthenticated requests in proxy mode get an HTML 401 page", async () => {

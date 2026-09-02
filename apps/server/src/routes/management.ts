@@ -50,6 +50,7 @@ import {
   VersionHistoryError,
   type VersionHistoryService,
 } from "../canvas/version-history.js";
+import type { ConnectionService } from "../connections/service.js";
 import type { AiUsageRepository } from "../db/repositories/ai-usage.js";
 import {
   type CanvasesRepository,
@@ -115,6 +116,8 @@ export interface ManagementDeps extends PreviewHintDeps {
   usage: UsageEventsRepository;
   files: FilesRepository;
   aiUsage: AiUsageRepository;
+  /** Sanitized connection-grant inspection; production always wires this shared service. */
+  connections?: Pick<ConnectionService, "listForCanvas">;
   /**
    * Realtime hub for revoke-drops-socket (D-RT-6). Optional — when present, access-
    * changing mutations (settings, capabilities, disable, delete, slug regen) drop
@@ -763,6 +766,14 @@ export function managementRoutes(deps: ManagementDeps) {
     if (!cv) return c.json({ error: "not_found" }, 404);
     return c.json(await canvasView(cv, roleOf(c)));
   });
+
+  if (deps.connections) {
+    app.get("/:id/connections", async (c) => {
+      const cv = await managedCanvas(c);
+      if (!cv) return c.json({ error: "not_found" }, 404);
+      return c.json({ connections: await deps.connections?.listForCanvas(cv.id) });
+    });
+  }
 
   // Owner usage stats (D24): KV op count + file storage (M6) + AI tokens/cost and
   // realtime connect count (M9), derived from usage_events + files + ai_usage.

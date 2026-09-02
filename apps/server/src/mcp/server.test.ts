@@ -12,10 +12,13 @@ import { devStrategy } from "../auth/dev.js";
 import { sessionService } from "../auth/session.js";
 import { cloneService } from "../canvas/clone-service.js";
 import { versionHistoryService } from "../canvas/version-history.js";
+import { createSecretCipher } from "../connections/secret-cipher.js";
+import { connectionService } from "../connections/service.js";
 import type { DbClient } from "../db/factory.js";
 import { aiUsageRepository } from "../db/repositories/ai-usage.js";
 import { auditRepository } from "../db/repositories/audit.js";
 import { canvasesRepository } from "../db/repositories/canvases.js";
+import { connectionsRepository } from "../db/repositories/connections.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { filesRepository } from "../db/repositories/files.js";
 import { invitationsRepository } from "../db/repositories/invitations.js";
@@ -97,6 +100,12 @@ async function connect(
   const versions = versionsRepository(client);
   const draftsRepo = draftsRepository(client);
   const audit = createAuditLog(auditRepository(client), silent);
+  const connections = connectionService({
+    repository: connectionsRepository(client),
+    canvases,
+    cipher: createSecretCipher(cfg.connections.encryptionKey),
+    audit,
+  });
   const teams = teamsRepository(client);
   const orgMembers = orgMembersRepository(client);
   const engine = deployEngine({
@@ -151,6 +160,7 @@ async function connect(
       usage: usageEventsRepository(client),
       files: filesRepository(client),
       aiUsage: aiUsageRepository(client),
+      connections,
       audit,
       log: silent,
       screenshots: screenshotsRepository(client),
@@ -214,6 +224,43 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const mcp = await connect(client, { userId });
     const res = await mcp.callTool({ name: "whoami", arguments: {} });
     expect(payload(res)).toMatchObject({ id: userId, email: "owner@example.com" });
+  });
+
+  it("list_canvas_connections mirrors the sanitized manager projection", async () => {
+    client = await makeTestDb(dialect);
+    const userId = await seedUser(client, "owner@example.com");
+    const mcp = await connect(client, { userId });
+    const canvas = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    const repository = connectionsRepository(client);
+    await repository.create({
+      id: "profile-1",
+      key: "market",
+      label: "Market data",
+      origin: "https://stocks.example.com",
+      allowedMethods: ["GET"],
+      protectedHeaderNames: ["authorization"],
+      protectedHeadersEnvelope: "opaque-ciphertext",
+      enabled: true,
+      createdBy: userId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await repository.attach({
+      canvasId: canvas.id,
+      connectionId: "profile-1",
+      createdBy: userId,
+      createdAt: 1,
+    });
+
+    const result = await mcp.callTool({
+      name: "list_canvas_connections",
+      arguments: { id: canvas.id },
+    });
+    const serialized = JSON.stringify(payload(result));
+    expect(serialized).toContain("stocks.example.com");
+    expect(serialized).toContain("encryption_key_unavailable");
+    expect(serialized).not.toContain("authorization");
+    expect(serialized).not.toContain("opaque-ciphertext");
   });
 
   it("create_canvas then deploy_canvas succeeds in one session (AE5), no per-canvas key handled", async () => {
@@ -1018,6 +1065,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     const bClient = await connect(client, { userId: ownerB });
     for (const name of [
       "get_canvas",
+      "list_canvas_connections",
       "list_versions",
       "delete_version",
       "unpublish_canvas",
@@ -3145,6 +3193,7 @@ describe.each(DIALECTS)(
      *  only distinguishes "the gate let the role through" from the two role refusals. */
     const ARGS: Record<CanvasToolName, (c: Ctx) => Record<string, unknown>> = {
       get_canvas: ({ id }) => ({ id }),
+      list_canvas_connections: ({ id }) => ({ id }),
       update_canvas: ({ id }) => ({ id, title: "matrix" }),
       set_capabilities: ({ id }) => ({ id, kv: true }),
       set_canvas_slug: ({ id }) => ({ id }),

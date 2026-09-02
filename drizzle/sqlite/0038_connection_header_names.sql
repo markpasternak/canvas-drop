@@ -1,0 +1,1 @@
+ALTER TABLE `connection_profiles` ADD `protected_header_names` text NOT NULL;

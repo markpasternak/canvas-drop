@@ -21,8 +21,8 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 ## Why canvas-drop
 
 - **Distribution is the problem it solves.** AI build tools make the artifact. canvas-drop is where it lands: every canvas sits behind your org sign-in, on infra you control, reachable at an unguessable URL the moment it deploys. No new vendor, no data leaving the boundary.
-- **Agents ship from where they already work.** A keyed Deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) with 46 tools let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop.
-- **A real backend when you need it.** Five built-in primitives (KV, files, AI, identity, realtime) plus an authoring capability behind one `<script>` tag, no provisioning, **no secrets in the browser**. Authoring lets signed-in viewers create and manage canvases as themselves. The backend and authoring are off per canvas until you switch them on; stay fully static when you do not need them.
+- **Agents ship from where they already work.** A keyed Deploy API, an installable [agent skill](docs/site/agents/skill.md), and a connect-once [MCP server](docs/site/agents/mcp.md) with 47 tools let an AI agent create and ship a canvas from your editor, terminal, or CI with no human in the loop.
+- **A real backend when you need it.** Six built-in primitives (KV, files, AI, identity, realtime, and admin-granted outbound connections) plus an authoring capability behind one `<script>` tag, no provisioning, **no secrets in the browser**. Authoring lets signed-in viewers create and manage canvases as themselves. The backend and authoring are off per canvas until you switch them on; stay fully static when you do not need them.
 - **The whole lifecycle is scriptable.** Create, deploy (including a content-addressed staged upload that sends only changed blobs), read back and verify, versions, rollback, unpublish, sharing, and the full draft-editor loop. The agent contract is one machine-readable page at `{base}/llms.txt`.
 - **Versioned, content-addressed storage.** Every publish is an immutable version; roll back to any of the last 10 in one click. Blobs are keyed by hash and versions are manifests over shared blobs, so a re-deploy writes only what changed.
 - **Roles on the people list.** Anyone on a canvas's people list, a person or a whole team, is a **viewer** or an **editor**. Editors manage the canvas as fully as the owner (content, deploys, settings, sharing, the people list); only deleting, transferring, and the guest-AI opt-in stay with the owner. Ownership moves in one step to an existing editor, and an admin can reassign a departed owner's canvases. Two editors on the same file get a named conflict, never a silent overwrite.
@@ -30,7 +30,7 @@ Full documentation lives at **[canvas-drop.com/docs](https://canvas-drop.com/doc
 - **Run anywhere.** Database, storage, URL mode, and auth sit behind interfaces, so the same image runs on a laptop, a small VPS, or a corporate cloud. Swapping a driver is a config change, never a code change.
 - **Sensible defaults, full control when you want it.** It runs the moment you clone it. When you want control: an admin panel (all-canvases governance, disable and restore, owner reassignment, the AI model allowlist, quota defaults, public-link governance, design skins) plus typed env config validated at boot, so a bad combination fails loud instead of silently.
 
-> Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that gesture and adds the API surface, the versioned storage model, the five primitives, and the sharing ladder, so "drop a folder" also covers the parts an org actually needs.
+> Quick is files plus a tiny API behind an identity proxy. canvas-drop keeps that gesture and adds the API surface, the versioned storage model, the six primitives, and the sharing ladder, so "drop a folder" also covers the parts an org actually needs.
 
 ---
 
@@ -98,6 +98,8 @@ await canvasdrop.kv.user.set("theme", "dark");          // per-viewer scope
 const f = await canvasdrop.files.upload(input.files[0]); // { id, name, size, url }
 for await (const delta of canvasdrop.ai.stream(messages, { model })) out.textContent += delta;
 const ch = canvasdrop.realtime.channel("room"); ch.subscribe(render); ch.publish("cursor", { x, y });
+const prices = await canvasdrop.connections.fetch("stocks", `/quote?symbol=${symbol}`);
+renderQuote(await prices.json()); // exact origin + credentials were approved by an admin
 ```
 
 | Capability | What it gives a canvas |
@@ -107,6 +109,7 @@ const ch = canvasdrop.realtime.channel("room"); ch.subscribe(render); ch.publish
 | **AI** | A server-side proxy to the provider (Anthropic by default) with streaming, a model allowlist, and metered per-user and per-canvas quotas. The provider key never leaves the server. Off until a key is configured (`CANVAS_DROP_AI_API_KEY`, or set in the admin panel). |
 | **Identity** | `me()`: id, email, name, avatar, and `kind` (`member` or `guest`), resolved from org auth, never the client. |
 | **Realtime** | Ephemeral publish/subscribe plus presence per canvas over one WebSocket. Revoking a share drops the socket. |
+| **Connections** | `connections.fetch(profile, relativePath, init?)` forwards a bounded request to one exact HTTPS origin an admin attached to the canvas. Fixed credentials and headers stay encrypted server-side; canvas code never receives them. |
 | **Authoring** | `canvasdrop.canvases.publish`, `update`, `list`, and `revoke`: signed-in viewers create and manage canvases as themselves. Off by default both instance-wide and per canvas. |
 
 Public-link canvases are static-only: anonymous visitors get no primitives or authoring. The full, agent-optimized contract is served at **`{base}/llms.txt`**; the readable reference is [`docs/sdk.md`](docs/sdk.md), with the [authoring reference](docs/site/sdk/authoring.md) and per-capability pages under [`docs/site/sdk/`](docs/site/sdk/).
@@ -119,7 +122,7 @@ canvas-drop treats agents as first-class authors. Three ways in, all thin client
 
 - **Deploy API**: a per-canvas key `PUT`s files straight to a live version (above).
 - **Agent skill**: an installable skill ([`docs/site/agents/skill.md`](docs/site/agents/skill.md), served as `{base}/skill.zip`) with the full SDK and deploy contract, so any coding agent builds canvases out of the box.
-- **MCP server** ([`docs/site/agents/mcp.md`](docs/site/agents/mcp.md)): a connect-once remote server at `{base}/mcp` that signs in through your org's own login (OAuth 2.1). Its 46 identity-scoped tools cover the dashboard surface: anything a person can do in the UI (deploy, version, roll back, share, manage the people list and roles, transfer ownership, edit the draft, set the preview cover, clone, read usage) an agent can do over MCP, as the owner or as an editor, with the same owner-only refusals. On by default; `CANVAS_DROP_MCP=off` disables it.
+- **MCP server** ([`docs/site/agents/mcp.md`](docs/site/agents/mcp.md)): a connect-once remote server at `{base}/mcp` that signs in through your org's own login (OAuth 2.1). Its 47 identity-scoped tools cover the dashboard surface: anything a person can do in the UI (deploy, version, roll back, share, manage the people list and roles, transfer ownership, edit the draft, set the preview cover, clone, read usage and connection grants) an agent can do over MCP, as the owner or as an editor, with the same owner-only refusals. On by default; `CANVAS_DROP_MCP=off` disables it.
 
 ---
 
@@ -140,7 +143,7 @@ The blessed production profile is **subdomain mode plus an identity-aware proxy*
 
 **Tenancy (optional).** Set `CANVAS_DROP_ORG_NAME` to draw a member-vs-guest boundary: members (by verified email domain) can share to the **whole org**, while brought-in guests only see canvases they are invited to. It is inert until named, so deploy first and migrate later. Turning it on for an existing instance is a dry-run-first cutover (`pnpm tenancy:plan`, then `--apply`); see [`docs/tenancy.md`](docs/tenancy.md).
 
-Day-to-day operation lives in the in-app **admin panel**: every canvas across owners with usage, disable and restore, owner reassignment, gallery features, people (block, promote, public-link grants, sign-in permits), and the DB-editable settings (AI key, models, quotas, the public-link switch, screenshots, skin, invite policy, email templates). Auth, drivers, and rate limits stay env-only and are read-only there.
+Day-to-day operation lives in the in-app **admin panel**: every canvas across owners with usage, disable and restore, owner reassignment, gallery features, people (block, promote, public-link grants, sign-in permits), reusable outbound connection profiles and their per-canvas grants, and the DB-editable settings (AI key, models, quotas, the public-link switch, screenshots, skin, invite policy, email templates). Auth, drivers, and rate limits stay env-only and are read-only there.
 
 ---
 
@@ -196,9 +199,9 @@ BUILD_BRIEF.md     the product spec the units are built from
 
 ## Status
 
-**v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
+**v1 is feature-complete**, built unit by unit from [`BUILD_BRIEF.md`](BUILD_BRIEF.md) with CI green on both dialects at every merge. Milestones M1 through M9 are shipped: foundation, hosting and deploy, the dashboard, canvas management, the editor and draft/publish model, the original five primitives and the SDK, admin and hardening, the gallery, and AI and realtime.
 
-Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (46 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](docs/site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](docs/site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, **editor roles with ownership transfer**, and the simplified **Sharing and permissions** hierarchy with direct/team viewer clone parity.
+Post-v1 work merged to `main`: the sharing ladder and **Shared** discovery, usage stats, server-side list filters and search, the docs system (`/docs`, `/llms.txt`, `/skill.zip`), clone-as-template, custom slugs, the MCP server (47 tools, dashboard parity), the staged content-addressed upload, the signed-out landing page, preview covers with an optional screenshot pipeline, admin-flippable [design skins](docs/site/self-hosting/configuration.md#design-skins), the org boundary (tenancy) with teams and auth-delegated invites, the [authoring capability](docs/site/sdk/authoring.md) and managed shares, prompt caching for the AI proxy, version download and delete, the org-scoped gallery, popularity sort and bulk actions, **editor roles with ownership transfer**, the simplified **Sharing and permissions** hierarchy with direct/team viewer clone parity, and admin-granted [outbound Connections](docs/site/sdk/connections.md).
 
 **M10 ops/packaging is the one open milestone.**
 

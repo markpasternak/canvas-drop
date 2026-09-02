@@ -223,6 +223,74 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     fromConfig: (c) => c.authoring.enabled,
   },
 
+  // ── Admin-granted outbound Connections ─────────────────────────────────
+  {
+    key: "connections.encryptionKey",
+    env: "CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY",
+    group: "Core",
+    label: "Connections encryption key",
+    help: "External AES-256-GCM root key for protected profile headers. Required only when protected headers are stored; env-only and never returned raw.",
+    type: "string",
+    secret: true,
+    editable: false,
+    fromConfig: (c) => c.connections.encryptionKey,
+  },
+  ...(
+    [
+      ["maxUrlBytes", "CANVAS_DROP_CONNECTIONS_MAX_URL_BYTES", "Connection URL bytes"],
+      ["maxBodyBytes", "CANVAS_DROP_CONNECTIONS_MAX_BODY_BYTES", "Connection request bytes"],
+      [
+        "maxResponseBytes",
+        "CANVAS_DROP_CONNECTIONS_MAX_RESPONSE_BYTES",
+        "Connection response bytes",
+      ],
+      ["timeoutMs", "CANVAS_DROP_CONNECTIONS_TIMEOUT_MS", "Connection deadline (ms)"],
+      ["maxRedirects", "CANVAS_DROP_CONNECTIONS_MAX_REDIRECTS", "Connection redirects"],
+      [
+        "canvasConcurrency",
+        "CANVAS_DROP_CONNECTIONS_CANVAS_CONCURRENCY",
+        "Connection concurrency per canvas",
+      ],
+      [
+        "instanceConcurrency",
+        "CANVAS_DROP_CONNECTIONS_INSTANCE_CONCURRENCY",
+        "Connection concurrency per process",
+      ],
+      [
+        "actorPerMin",
+        "CANVAS_DROP_CONNECTIONS_ACTOR_PER_MIN",
+        "Connection requests per actor/profile/min",
+      ],
+      [
+        "profilePerMin",
+        "CANVAS_DROP_CONNECTIONS_PROFILE_PER_MIN",
+        "Connection requests per profile/min",
+      ],
+      [
+        "maxCallerHeaders",
+        "CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADERS",
+        "Connection caller header count",
+      ],
+      [
+        "maxCallerHeaderBytes",
+        "CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADER_BYTES",
+        "Connection caller header bytes",
+      ],
+    ] as const
+  ).map(
+    ([property, env, label]): ConfigField => ({
+      key: `connections.${property}`,
+      env,
+      group: "Limits",
+      label,
+      help: "Read-only outbound connection safety limit; change the environment and restart.",
+      type: "number",
+      secret: false,
+      editable: false,
+      fromConfig: (c) => c.connections[property],
+    }),
+  ),
+
   // ── AI ──────────────────────────────────────────────────────────────────
   {
     key: "ai.apiKey",

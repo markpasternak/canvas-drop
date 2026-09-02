@@ -2,8 +2,9 @@
 
 You have a static canvas and want it to remember data, accept files, call a
 model, know who is looking, or sync between viewers. One `<script>` tag defines
-the `canvasdrop` global, which carries the five primitives: KV (`kv`), files
-(`files`), AI (`ai`), identity (`me()`), and realtime (`realtime`), plus
+the `canvasdrop` global, which carries the six fixed primitives: KV (`kv`), files
+(`files`), AI (`ai`), identity (`me()`), realtime (`realtime`), and admin-granted
+outbound Connections (`connections`), plus
 `canvases` for publishing new canvases from a page. There is no build step and
 nothing to configure: identity comes from the viewer's signed-in session, the
 canvas is identified from its own URL, and no key ever reaches the browser.
@@ -44,7 +45,7 @@ bundle has not been built yet: run `pnpm build` (or
 
 The script defines exactly one global, `window.canvasdrop`. There is no `cd`
 alias, no second name, and no version property on the object. The client has
-`me()`, `kv`, `files`, `ai`, `realtime`, and `canvases`, and nothing else.
+`me()`, `kv`, `files`, `ai`, `realtime`, `connections`, and `canvases`, and nothing else.
 
 ## Turn Backend on first
 
@@ -59,6 +60,7 @@ is off throws `CapabilityDisabledError`; `err.hint` says what to switch on.
 | `files` | **Enable backend** + **File storage** | nothing else |
 | `ai` | **Enable backend** + **AI** | an AI provider key configured by the operator |
 | `realtime` | **Enable backend** + **Realtime** | `CANVAS_DROP_REALTIME=on` (the default) |
+| `connections` | **Enable backend**; an admin grant is the per-canvas switch | an enabled profile; the external encryption key when it has protected headers |
 | `canvases` | **Enable backend** + **Authoring** | `CANVAS_DROP_AUTHORING=on` (default `off`) |
 
 ### How the SDK finds your canvas
@@ -219,6 +221,27 @@ has not opted into AI. Mid-stream, a disabled capability throws
 provider failure throws `CanvasdropError` with `.code === "AI_UPSTREAM_ERROR"`
 (502). A stream that ends without a terminal frame throws
 `.code === "AI_STREAM_TRUNCATED"` (502).
+
+## Connections: `connections.fetch()`
+
+```js
+const response = await canvasdrop.connections.fetch(
+  "stocks",
+  `/quote?symbol=${encodeURIComponent(symbol)}`,
+  { headers: { accept: "application/json" } },
+);
+if (!response.ok) throw new Error(`upstream ${response.status}`);
+const quote = await response.json();
+```
+
+An admin defines the `stocks` profile: one exact HTTPS origin, allowed standard
+methods, optional fixed protected headers, and the canvases that may use it.
+Canvas code supplies only a root-relative path/query, an approved method, safe
+headers, and a bounded body. Upstream `4xx`/`5xx` responses resolve as native
+`Response` objects; Canvas Drop policy/transport failures throw typed errors.
+Protected values remain encrypted server-side and are applied last. Full
+contract, limits, SSRF boundary, and upstream-reflection warning:
+[`docs/site/sdk/connections.md`](site/sdk/connections.md).
 
 ## Realtime: `realtime.channel()`
 
@@ -386,14 +409,16 @@ remediation `.hint`. Five subclasses exist:
 | --- | --- | --- | --- |
 | `NotAuthenticatedError` | `NOT_AUTHENTICATED` | 401 | the viewer is not signed in, or a guest called `canvases.*` |
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 | Backend, or the specific feature, is off for this canvas; the message is the server's `.hint` when it sent one, otherwise it names the capability |
-| `NotFoundError` | `NOT_FOUND` | 404 | the key, file, or canvas does not exist, or the viewer has no access (any 404) |
-| `QuotaExceededError` | `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, `CONNECTION_LIMIT`, or any 413 code (`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`, `BODY_TOO_LARGE`) | 429, 409, or 413 | a spend, rate, count, or size limit |
+| `NotFoundError` | `NOT_FOUND` | 404 | the key, file, or canvas does not exist, or the viewer has no access (every 404 except `CONNECTION_NOT_GRANTED`) |
+| `QuotaExceededError` | `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, `CONNECTION_LIMIT`, `CONNECTION_RATE_LIMIT`, or any 413 code (`KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`, `BODY_TOO_LARGE`, `REQUEST_TOO_LARGE`) | 429, 409, or 413 | a spend, rate, count, or size limit |
 | `PublishFailedError` | `PUBLISH_FAILED` | 502 | `canvases.publish` created the canvas but its deploy or share settings failed; `.id` is the new canvas |
 
 The mapping is by precedence: any 401 → `NotAuthenticatedError`; a 403 with
-code `CAPABILITY_DISABLED` → `CapabilityDisabledError`; any 404 →
+code `CAPABILITY_DISABLED` → `CapabilityDisabledError`; any 404 except
+`CONNECTION_NOT_GRANTED` →
 `NotFoundError`; code `PUBLISH_FAILED` → `PublishFailedError`; codes
-`QUOTA_EXCEEDED` / `GUEST_AI_CAP` / `KEY_LIMIT` or any 413 →
+`QUOTA_EXCEEDED` / `GUEST_AI_CAP` / `KEY_LIMIT` / `CONNECTION_LIMIT` /
+`CONNECTION_RATE_LIMIT` or any 413 →
 `QuotaExceededError`. Everything else is a base `CanvasdropError` whose `.code`
 is the wire code, so branch on `err.code` rather than on class:
 

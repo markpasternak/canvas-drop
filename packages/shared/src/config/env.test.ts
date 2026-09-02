@@ -83,6 +83,36 @@ describe("loadConfig", () => {
     expect(loadConfig({}).mcp.enabled).toBe(true);
   });
 
+  it("boots connections disabled-by-authority with bounded defaults and no encryption key", () => {
+    const config = loadConfig({});
+    expect(config.connections).toEqual({
+      encryptionKey: undefined,
+      maxUrlBytes: 8 * 1024,
+      maxBodyBytes: 256 * 1024,
+      maxResponseBytes: 2 * 1024 * 1024,
+      timeoutMs: 10_000,
+      maxRedirects: 3,
+      canvasConcurrency: 5,
+      instanceConcurrency: 50,
+      actorPerMin: 60,
+      profilePerMin: 600,
+      maxCallerHeaders: 32,
+      maxCallerHeaderBytes: 16 * 1024,
+    });
+  });
+
+  it("carries an optional connection encryption key without exposing it elsewhere", () => {
+    const config = loadConfig({ CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY: "  configured-key  " });
+    expect(config.connections.encryptionKey).toBe("configured-key");
+  });
+
+  it("rejects unsafe zero connection limits at boot", () => {
+    expect(() => loadConfig({ CANVAS_DROP_CONNECTIONS_TIMEOUT_MS: "0" })).toThrow(ConfigError);
+    expect(() => loadConfig({ CANVAS_DROP_CONNECTIONS_INSTANCE_CONCURRENCY: "0" })).toThrow(
+      ConfigError,
+    );
+  });
+
   it("disables the MCP surface when CANVAS_DROP_MCP=off", () => {
     expect(loadConfig({ CANVAS_DROP_MCP: "off" }).mcp.enabled).toBe(false);
   });
