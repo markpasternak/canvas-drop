@@ -476,7 +476,9 @@ describe("canvasAuthoringRoutes — list + revoke", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     const { canvases } = (await res.json()) as { canvases: Array<{ id: string }> };
-    expect(canvases.map((c) => c.id)).toEqual([cv.id, archived.id]);
+    // These rows can share the same millisecond timestamp in fast CI. The list contract
+    // does not promise an ID tie-break, so assert membership rather than incidental order.
+    expect(new Set(canvases.map((c) => c.id))).toEqual(new Set([cv.id, archived.id]));
   });
 
   it("DELETE /:id revokes the viewer's own canvas (204); another owner's id is 404 (no leak)", async () => {
