@@ -115,11 +115,16 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("github.com/markpasternak/canvas-drop");
   });
 
-  it("shows the five primitives, authoring, and the regenerable screenshots", () => {
+  it("shows the six primitives, authoring, and the regenerable screenshots", () => {
     const html = renderLandingPage();
-    for (const tag of ["kv", "files", "ai", "identity", "realtime", "authoring"]) {
+    for (const tag of ["kv", "files", "ai", "identity", "realtime", "connections", "authoring"]) {
       expect(html).toContain(`>${tag}</span>`);
     }
+    expect(html).toContain("Six primitives + authoring");
+    expect(html).toContain("Six runtime primitives");
+    expect(html).toContain("controlled access to third-party APIs");
+    expect(html).toContain("admin-granted Connections");
+    expect(html).not.toContain("Five primitives + authoring");
     // Light, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
     // Each carries a `?v=<hash>` cache-bust, so match the path without the closing quote.
     expect(html).toContain('src="/docs/assets/landing-dashboard.webp');
@@ -142,7 +147,9 @@ describe("landing page — rendered content", () => {
     // Per-primitive colour tints are present.
     expect(html).toContain('class="prim p-kv"');
     expect(html).toContain('class="prim p-realtime"');
+    expect(html).toContain('class="prim p-connections"');
     expect(html).toContain('class="prim p-authoring"');
+    expect(html).toContain(".p-authoring { grid-column: 1 / -1; }");
     expect(html).toContain("signed-in viewers publish canvases as themselves");
     // No indigo-violet anywhere (the parity scan's hue — kept clean).
     expect(html).not.toMatch(/oklch\([^)]*\b27[0-9]\b/);

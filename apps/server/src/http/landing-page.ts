@@ -57,7 +57,7 @@ const SITE = {
     "Deploy and share your org's small web tools. Static canvases, live in seconds, behind your sign-in. AI agents deploy over MCP. Open source, self-hosted.",
 } as const;
 
-/** The five runtime primitives (BUILD_BRIEF §11) plus the separately gated authoring capability. */
+/** The six runtime primitives (BUILD_BRIEF §11) plus the separately gated authoring capability. */
 const BACKEND_CAPABILITIES: ReadonlyArray<{
   name: string;
   tag: string;
@@ -96,6 +96,14 @@ const BACKEND_CAPABILITIES: ReadonlyArray<{
     tag: "realtime",
     blurb: "Publish, subscribe, and see who's present over a managed socket. No server to run.",
     glyph: "M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0M12 12h.01",
+  },
+  {
+    name: "Connections",
+    tag: "connections",
+    blurb:
+      "Call approved third-party APIs through exact-origin profiles. Credentials stay server-side.",
+    glyph:
+      "M10 13a5 5 0 0 0 7.54.54l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15M14 11a5 5 0 0 0-7.54-.54l-2 2a5 5 0 0 0 7.07 7.07l1.14-1.14",
   },
   {
     name: "Authoring",
@@ -200,7 +208,7 @@ const TOUR: ReadonlyArray<{ img: string; label: string; caption: string }> = [
     img: "tour-capabilities",
     label: "Backend in a click",
     caption:
-      "The backend is off until you switch it on. Then choose which primitives this canvas may use: KV, files, AI, identity, realtime.",
+      "The backend is off until you switch it on. Then add data, files, AI, identity, realtime, or controlled third-party requests through admin-granted Connections.",
   },
   {
     img: "tour-admin",
@@ -523,10 +531,13 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .p-identity .tag { background: oklch(0.95 0.05 350); }
 .p-realtime .ic, .p-realtime .tag { color: oklch(0.46 0.16 240); }
 .p-realtime .tag { background: oklch(0.94 0.05 240); }
+.p-connections .ic, .p-connections .tag { color: oklch(0.45 0.14 115); }
+.p-connections .tag { background: oklch(0.95 0.05 115); }
 .p-authoring .ic, .p-authoring .tag { color: oklch(0.48 0.14 28); }
 .p-authoring .tag { background: oklch(0.95 0.05 28); }
+.p-authoring { grid-column: 1 / -1; }
 @media (prefers-color-scheme: dark) {
-  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag, .p-authoring .tag { background: oklch(1 0 0 / 0.06); }
+  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag, .p-connections .tag, .p-authoring .tag { background: oklch(1 0 0 / 0.06); }
 }
 
 /* framed screenshot (carousel slides) */
@@ -789,9 +800,9 @@ ${LADDER.map(ladderRung).join("\n")}
 
   <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
     <div class="wrap">
-      <p class="kicker reveal">Five primitives + authoring</p>
+      <p class="kicker reveal">Six primitives + authoring</p>
       <h2 class="s-head reveal">Static files first. A backend when you ask for one.</h2>
-      <p class="s-sub reveal">A canvas ships as static files, with no server build. Five runtime primitives add data, files, AI, identity, and realtime. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Every capability is enforced on each request. Secrets stay server-side, always.</p>
+      <p class="s-sub reveal">A canvas ships as static files, with no server build. Six runtime primitives add data, files, AI, identity, realtime, and controlled access to third-party APIs. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Every capability is enforced on each request. Secrets stay server-side, always.</p>
       <div class="prims reveal">
 ${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}
       </div>
