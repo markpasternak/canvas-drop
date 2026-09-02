@@ -433,7 +433,7 @@ try {
 The served script is the same client that the workspace package
 `@canvas-drop/sdk` exports, with the context detected for you. The package
 exports `createClient`, `detectContext`, `SDK_VERSION` (the string `"1"`),
-`ERROR_CODES` (the 23 wire codes with status and summary), `errorFromResponse`,
+`ERROR_CODES` (the 25 wire codes with status and summary), `errorFromResponse`,
 the base error class and its six subclasses for `instanceof` checks, and every
 interface above (`CanvasdropClient`, `Me`, `KvNamespace`, `KvList`, `FileMeta`, `AiMessage`,
 `AiChatOptions`, `AiUsage`, `AiResult`, `Channel`, `RealtimeMessage`,

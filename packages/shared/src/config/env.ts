@@ -199,6 +199,8 @@ const rawSchema = z
     CANVAS_DROP_S3_FORCE_PATH_STYLE: bool(true),
 
     // Auth
+    // Dev-only sibling read by `scripts/dev.mjs` (not by config): CANVAS_DROP_DEV_SEED=0
+    // skips seeding the sample canvases on `pnpm dev`. Listed here so the docs can name it.
     CANVAS_DROP_AUTH_MODE: AUTH_MODES.optional().default("dev"),
     CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: csv(),
     // Tenancy (plan 002 U2). Naming an org turns on the member boundary: `whole_org`
