@@ -13,6 +13,7 @@ interface PeopleEmailComboboxProps {
   suggestions: PersonSuggestion[];
   searchEnabled: boolean;
   searching: boolean;
+  inputClassName?: string;
 }
 
 const itemToString = (item: PersonSuggestion | null) => item?.email ?? "";
@@ -26,6 +27,7 @@ export function PeopleEmailCombobox({
   suggestions,
   searchEnabled,
   searching,
+  inputClassName,
 }: PeopleEmailComboboxProps) {
   const inputId = useId();
   const labelId = useId();
@@ -96,7 +98,7 @@ export function PeopleEmailCombobox({
       </label>
       <input
         {...getInputProps({
-          className: inputControl,
+          className: cn(inputControl, inputClassName),
           placeholder,
           type: "email",
           onFocus: () => {

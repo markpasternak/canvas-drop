@@ -426,7 +426,16 @@ describe("share route", () => {
     const peopleTab = screen.getByRole("tab", { name: "People" });
     const teamsTab = screen.getByRole("tab", { name: "Teams" });
     expect(peopleTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("Person's email")).toBeVisible();
+    const emailInput = screen.getByLabelText("Person's email");
+    const personRole = screen.getByRole("combobox", { name: "Role for the person to add" });
+    const addButton = screen.getByRole("button", { name: "Add" });
+    expect(emailInput).toBeVisible();
+    expect(emailInput).toHaveClass("h-10");
+    expect(personRole).toHaveClass("h-10");
+    expect(addButton).toHaveClass("h-10", "bg-accent");
+    expect(addButton).toBeDisabled();
+    await user.type(emailInput, "madeleine.gedda@seenthis.se");
+    expect(addButton).toBeEnabled();
 
     teamsTab.focus();
     await user.keyboard("{Enter}");

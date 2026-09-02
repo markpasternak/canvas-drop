@@ -312,13 +312,14 @@ export function PeopleAccessList({
               suggestions={suggestions}
               searchEnabled={searchEnabled}
               searching={searchingPeople}
+              inputClassName="h-10"
             />
           </div>
           <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
             Role
             <select
               aria-label="Role for the person to add"
-              className={`${inputControl} h-9 min-w-28 py-0`}
+              className={`${inputControl} h-10 min-w-28 py-0`}
               value={personRole}
               onChange={(event) => setPersonRole(event.target.value as AccessRole)}
             >
@@ -327,8 +328,7 @@ export function PeopleAccessList({
             </select>
           </label>
           <Button
-            size="sm"
-            variant="secondary"
+            size="md"
             loading={personBusy}
             disabled={!email.trim()}
             onClick={() => void addPerson()}
@@ -347,7 +347,7 @@ export function PeopleAccessList({
             Team
             <select
               aria-label="Team to add"
-              className={`${inputControl} h-9 py-0`}
+              className={`${inputControl} h-10 py-0`}
               value={teamId}
               onChange={(event) => setTeamId(event.target.value)}
             >
@@ -372,13 +372,7 @@ export function PeopleAccessList({
               <option value="editor">Editor</option>
             </select>
           </label>
-          <Button
-            size="sm"
-            variant="secondary"
-            loading={teamBusy}
-            disabled={!teamId}
-            onClick={() => void addTeam()}
-          >
+          <Button size="md" loading={teamBusy} disabled={!teamId} onClick={() => void addTeam()}>
             Add
           </Button>
         </div>
