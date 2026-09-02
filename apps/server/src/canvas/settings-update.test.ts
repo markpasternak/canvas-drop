@@ -149,6 +149,29 @@ describe("resolveSettingsUpdate — denial paths", () => {
     expect(r).toMatchObject({ ok: false, code: "PUBLIC_NOT_ALLOWED", status: 403 });
   });
 
+  it("re-checks the public-link gate when removing a password widens an existing link", () => {
+    const r = resolve(
+      canvas({ access: "public_link", passwordHash: "argon2-hash" }),
+      { password: null },
+      PUBLIC_DENIED,
+    );
+    expect(r).toMatchObject({ ok: false, code: "PUBLIC_NOT_ALLOWED", status: 403 });
+  });
+
+  it("re-checks the public-link gate when removing or extending an expiry", () => {
+    const expiring = canvas({ access: "public_link", sharedExpiresAt: NOW + 1_000 });
+    expect(resolve(expiring, { sharedExpiresAt: null }, PUBLIC_GLOBAL_OFF)).toMatchObject({
+      ok: false,
+      code: "PUBLIC_LINKS_DISABLED",
+      status: 403,
+    });
+    expect(resolve(expiring, { sharedExpiresAt: NOW + 10_000 }, PUBLIC_DENIED)).toMatchObject({
+      ok: false,
+      code: "PUBLIC_NOT_ALLOWED",
+      status: 403,
+    });
+  });
+
   it("NOT_SHARED: listing a private canvas is rejected (409)", () => {
     const r = resolve(canvas({ access: "private" }), { galleryListed: true });
     expect(r).toMatchObject({ ok: false, code: "NOT_SHARED", status: 409 });
@@ -292,17 +315,16 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     }
   });
 
-  it("setting a password un-lists AND clears the gallery tags (keeps the description)", () => {
+  it("setting a password un-lists while preserving canvas tags and description", () => {
     const cv = canvas({ galleryListed: true, description: "s", tags: ["a"] });
     const r = resolve(cv, { password: "hunter2" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.patch.galleryListed).toBe(false);
       expect(r.patch.galleryTemplatable).toBe(false);
-      // The unified description (U21) is the canvas's own overview field, not gallery-only,
-      // so it survives a password-set; only the gallery listing + tags are reset.
+      // Description and tags are canvas identity, not publication settings.
       expect(r.patch.description).toBeUndefined();
-      expect(r.patch.tags).toBeNull();
+      expect(r.patch.tags).toBeUndefined();
     }
   });
 
@@ -313,7 +335,7 @@ describe("resolveSettingsUpdate — happy paths + invariant enforcement", () => 
     if (r.ok) {
       expect(r.patch.galleryListed).toBe(false);
       expect(r.patch.galleryTemplatable).toBe(false);
-      // Description/tags are NOT cleared on going-private (tags only on setting a password).
+      // Description/tags are NOT cleared on going private.
       expect(r.patch.description).toBeUndefined();
       expect(r.patch.tags).toBeUndefined();
       expect(r.targetAccess).toBe("private");

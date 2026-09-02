@@ -52,8 +52,9 @@ export type SettingsResolution =
  * owner has it on, and an editor with it may not when the owner lacks it
  * (`PUBLIC_LINK_OWNER_GATED`). The guest-AI opt-in and its spend cap are owner-only
  * (R7): a non-owner's write touching them refuses with `OWNER_ONLY`. The caller applies
- * the result: `updateSettings(patch)` + `setPassword(hash)` when `password !== undefined`,
- * then audits `share_change` when `targetAccess` is set.
+ * the result with `updateSettingsAtomic(patch, { passwordHash })`, then audits
+ * `share_change` when `targetAccess` is set. Keeping both values in one repository
+ * write prevents a public/unprotected intermediate state.
  */
 export function resolveSettingsUpdate(
   cv: Canvas,
@@ -91,6 +92,8 @@ export function resolveSettingsUpdate(
   // predicate so the at-rest row can't reach a listed-but-invisible state.
   const willBeProtected = password === undefined ? cv.passwordHash !== null : password !== null;
   const effectiveAccess = targetAccess ?? cv.access;
+  const effectiveExpiresAt =
+    rest.sharedExpiresAt !== undefined ? rest.sharedExpiresAt : cv.sharedExpiresAt;
   // Only the whole_org rung has an enumeration policy to set: people and teams on the list
   // always see the canvas in Shared (restricted access model), and the restricted family
   // and public_link have no org-wide listing surface. Any other rung pins `link_only`.
@@ -125,7 +128,13 @@ export function resolveSettingsUpdate(
       status: 409,
     };
   }
-  if (targetAccess === "public_link") {
+  const widensPublicExposure =
+    effectiveAccess === "public_link" &&
+    (targetAccess === "public_link" ||
+      (cv.passwordHash !== null && password === null) ||
+      (cv.sharedExpiresAt !== null &&
+        (effectiveExpiresAt === null || effectiveExpiresAt > cv.sharedExpiresAt)));
+  if (widensPublicExposure) {
     if (!opts.publicLinksEnabled) {
       return {
         ok: false,
@@ -235,10 +244,8 @@ export function resolveSettingsUpdate(
   } else if (discoverability !== undefined || targetAccess !== undefined) {
     patch.discoverability = "link_only";
   }
-  // Dropping to private un-lists but KEEPS the tags (re-sharing restores listing);
-  // a newly-set password un-lists AND clears the gallery tags (R10). The unified
-  // `description` (U21) is the canvas's own overview field — NOT gallery-only — so it
-  // is never cleared here; only the gallery listing + tags are reset.
+  // Dropping to private or setting a password un-lists the canvas but keeps its tags.
+  // Tags describe the canvas itself and are not equivalent to gallery publication.
   if (!galleryEligible) {
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
@@ -246,7 +253,6 @@ export function resolveSettingsUpdate(
   if (typeof password === "string") {
     patch.galleryListed = false;
     patch.galleryTemplatable = false;
-    patch.tags = null;
   }
 
   // CDN staleness advisory: if this change moves the canvas OFF the anonymously-public
@@ -256,8 +262,6 @@ export function resolveSettingsUpdate(
   // included on both sides so restricting via a past `sharedExpiresAt` warns too, and
   // setting a future expiry on a still-public canvas does not. Suppressed when shared
   // caching is off (TTL 0).
-  const effectiveExpiresAt =
-    rest.sharedExpiresAt !== undefined ? rest.sharedExpiresAt : cv.sharedExpiresAt;
   const wasAnonPublic = isAnonymouslyPublic(
     cv.access,
     cv.passwordHash !== null,

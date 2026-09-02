@@ -49,6 +49,8 @@ This table is the SDK's exported `ERROR_CODES`, verbatim. Each entry is
 | `AI_UPSTREAM_ERROR` | 502 | The AI provider returned an error. |
 | `PUBLISH_FAILED` | 502 | `canvasdrop.canvases.publish` created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke. |
 | `SHARE_REVOKED` | 409 | `canvasdrop.canvases.update` was called on an unpublished share without a bundle; include a bundle to publish it again. |
+| `SHARE_CONFLICT` | 409 | The share changed after it was loaded; refresh before retrying the update. |
+| `UPDATE_PARTIAL` | 502 | The share settings were saved, but a later update stage failed; inspect the returned current state. |
 | `REQUEST_FAILED` | 0 | A request failed without a more specific code. |
 
 `REQUEST_FAILED` carries status `0` — it's the fallback when a request fails
@@ -76,7 +78,7 @@ without a more specific code.
 
 ## Typed SDK errors
 
-The SDK exports four `CanvasdropError` subclasses. Any code without a dedicated
+The SDK exports dedicated `CanvasdropError` subclasses for common recovery flows. Any code without a dedicated
 subclass is thrown as the base `CanvasdropError` with its `.code` set from the
 table above.
 
@@ -86,6 +88,8 @@ table above.
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 |
 | `NotFoundError` | `NOT_FOUND` | 404 |
 | `QuotaExceededError` | `QUOTA_EXCEEDED` (default) | 429 (default) |
+| `PublishFailedError` | `PUBLISH_FAILED` | 502 |
+| `UpdatePartialError` | `UPDATE_PARTIAL` | 502 |
 | `CanvasdropError` (base) | any code | any status |
 
 `QuotaExceededError` is the one quota-shaped class, so it's reused for related

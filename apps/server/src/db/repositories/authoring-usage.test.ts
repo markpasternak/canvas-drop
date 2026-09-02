@@ -71,6 +71,20 @@ describe.each(DIALECTS)("authoringUsageRepository [%s]", (dialect) => {
     expect(await repo.countByActor("nobody")).toBe(0);
   });
 
+  it("filters canonical authored ids from a caller-authorized candidate set", async () => {
+    client = await makeTestDb(dialect);
+    const a = await seed(client, "managed-a");
+    const b = await seed(client, "managed-b");
+    const repo = authoringUsageRepository(client);
+    await repo.record(a);
+    await repo.record(b);
+
+    expect(await repo.authoredIdsAmong([a.authoredCanvasId, a.sourceCanvasId])).toEqual([
+      a.authoredCanvasId,
+    ]);
+    expect(await repo.authoredIdsAmong([])).toEqual([]);
+  });
+
   it("pruneBefore deletes old rows but leaves the all-time count queryable on newer ones", async () => {
     client = await makeTestDb(dialect);
     const s = await seed(client);
