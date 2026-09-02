@@ -7,6 +7,7 @@ import {
 import {
   buildPinnedRequestOptions,
   connectionTransport,
+  prepareConnectionHeaders,
   type RawConnectionResponse,
 } from "./transport.js";
 
@@ -35,6 +36,15 @@ const BLOCKED_ADDRESSES = [
   "fe80::1",
   "ff02::1",
 ];
+
+it("rejects an explicit caller override of a protected header", () => {
+  expect(() =>
+    prepareConnectionHeaders(
+      [["user-agent", "caller-agent"]],
+      [["user-agent", "admin-controlled-agent"]],
+    ),
+  ).toThrow("connection request cannot override a protected header");
+});
 
 describe("connection address policy", () => {
   it.each(PUBLIC_ADDRESSES)("accepts globally routable address %s", (address) => {

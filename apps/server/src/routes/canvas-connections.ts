@@ -17,6 +17,10 @@ import type { AppEnv } from "../http/types.js";
 
 export const CONNECTION_RESPONSE_MARKER = "x-canvas-drop-connection-response";
 
+// Browsers attach User-Agent to every fetch but do not let canvas JavaScript author it.
+// It is transport metadata, not a caller override of an admin-protected upstream header.
+const BROWSER_AMBIENT_HEADERS = new Set(["user-agent"]);
+
 export interface CanvasConnectionsDeps {
   config: Config;
   service: ConnectionService;
@@ -96,6 +100,12 @@ function upstreamResponse(c: Context<AppEnv>, result: ConnectionFetchResult) {
     bodyForbidden ? null : Uint8Array.from(result.body),
     result.status as StatusCode,
     Object.fromEntries(headers.entries()),
+  );
+}
+
+function callerHeaders(request: Request): [string, string][] {
+  return [...request.headers.entries()].filter(
+    ([name]) => !BROWSER_AMBIENT_HEADERS.has(name.toLowerCase()),
   );
 }
 
@@ -212,7 +222,7 @@ export function canvasConnectionsRoutes(deps: CanvasConnectionsDeps) {
         path: `${relativePath}${search}`,
         method: method as ConnectionMethod,
         allowedMethods: profile.allowedMethods,
-        callerHeaders: [...c.req.raw.headers.entries()],
+        callerHeaders: callerHeaders(c.req.raw),
         protectedHeaders: Object.entries(profile.protectedHeaders),
         body: rawBody,
         maxResponseBytes: deps.config.connections.maxResponseBytes,
