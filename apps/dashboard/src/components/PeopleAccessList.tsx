@@ -300,7 +300,7 @@ export function PeopleAccessList({
           id={`${tabsId}-people-panel`}
           role="tabpanel"
           aria-labelledby={`${tabsId}-people-tab`}
-          className="flex flex-wrap items-end gap-2"
+          className="flex flex-wrap items-start gap-2"
         >
           <div className="min-w-[16rem] flex-1">
             <PeopleEmailCombobox
@@ -327,21 +327,26 @@ export function PeopleAccessList({
               <option value="editor">Editor</option>
             </select>
           </label>
-          <Button
-            size="md"
-            loading={personBusy}
-            disabled={!email.trim()}
-            onClick={() => void addPerson()}
-          >
-            Add
-          </Button>
+          <div className="flex flex-col gap-1.5">
+            <span aria-hidden="true" className="invisible text-sm font-medium">
+              Action
+            </span>
+            <Button
+              size="md"
+              loading={personBusy}
+              disabled={!email.trim()}
+              onClick={() => void addPerson()}
+            >
+              Add
+            </Button>
+          </div>
         </div>
       ) : (
         <div
           id={`${tabsId}-teams-panel`}
           role="tabpanel"
           aria-labelledby={`${tabsId}-teams-tab`}
-          className="flex flex-wrap items-end gap-2"
+          className="flex flex-wrap items-start gap-2"
         >
           <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg">
             Team
@@ -364,7 +369,7 @@ export function PeopleAccessList({
             Role
             <select
               aria-label="Role for the team to add"
-              className={`${inputControl} h-9 min-w-28 py-0`}
+              className={`${inputControl} h-10 min-w-28 py-0`}
               value={teamRole}
               onChange={(event) => setTeamRole(event.target.value as AccessRole)}
             >
@@ -372,9 +377,14 @@ export function PeopleAccessList({
               <option value="editor">Editor</option>
             </select>
           </label>
-          <Button size="md" loading={teamBusy} disabled={!teamId} onClick={() => void addTeam()}>
-            Add
-          </Button>
+          <div className="flex flex-col gap-1.5">
+            <span aria-hidden="true" className="invisible text-sm font-medium">
+              Action
+            </span>
+            <Button size="md" loading={teamBusy} disabled={!teamId} onClick={() => void addTeam()}>
+              Add
+            </Button>
+          </div>
         </div>
       )}
 

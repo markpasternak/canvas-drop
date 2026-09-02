@@ -92,7 +92,7 @@ export function PeopleEmailCombobox({
   );
 
   return (
-    <div className="relative flex-1 space-y-1.5">
+    <div className="relative flex flex-1 flex-col gap-1.5">
       <label {...getLabelProps({ className: "text-sm font-medium text-fg" })} htmlFor={inputId}>
         {label}
       </label>

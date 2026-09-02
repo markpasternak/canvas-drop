@@ -433,6 +433,10 @@ describe("share route", () => {
     expect(emailInput).toHaveClass("h-10");
     expect(personRole).toHaveClass("h-10");
     expect(addButton).toHaveClass("h-10", "bg-accent");
+    expect(addButton.parentElement).toHaveClass("flex", "flex-col", "gap-1.5");
+    expect(addButton.parentElement?.querySelector('[aria-hidden="true"]')).toHaveTextContent(
+      "Action",
+    );
     expect(addButton).toBeDisabled();
     await user.type(emailInput, "madeleine.gedda@seenthis.se");
     expect(addButton).toBeEnabled();
@@ -442,6 +446,8 @@ describe("share route", () => {
     expect(teamsTab).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByLabelText("Person's email")).toBeNull();
     expect(within(list).getByText("owner@example.com")).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Team to add" })).toHaveClass("h-10");
+    expect(screen.getByRole("combobox", { name: "Role for the team to add" })).toHaveClass("h-10");
     await user.selectOptions(screen.getByRole("combobox", { name: "Team to add" }), "t1");
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Role for the team to add" }),
