@@ -223,6 +223,23 @@ describe("draftApiRoutes", () => {
     expect(pub.status).toBe(200);
     expect((await jsonOf<{ version: number }>(pub)).version).toBe(1);
     expect((await canvases.findById(canvas.id))?.currentVersionId).toBeTruthy();
+
+    // Publishing through the dashboard route also revives an explicitly unpublished
+    // canvas. `publicationStatusOf` reads revokedAt before currentVersionId, so both
+    // fields must change together or a live version would still report Unpublished.
+    expect(await canvases.revoke(canvas.id)).toBeTruthy();
+    expect((await canvases.findById(canvas.id))?.revokedAt).not.toBeNull();
+    await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: SO,
+      body: enc("<h1>publish me again</h1>"),
+    });
+    const republished = await app.request(`/api/canvases/${canvas.id}/publish`, {
+      method: "POST",
+      headers: SO,
+    });
+    expect(republished.status).toBe(200);
+    expect((await canvases.findById(canvas.id))?.revokedAt).toBeNull();
   });
 
   it("publishing an empty draft returns EMPTY_DEPLOY (400)", async () => {

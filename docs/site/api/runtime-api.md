@@ -342,7 +342,7 @@ bundle deploys: if the deploy then fails, the response is `502 UPDATE_PARTIAL` w
 `stage` and the saved `current` record, so nothing you changed is lost.
 
 **`GET`** returns the shares you authored and still manage as owner or editor, including
-revoked and expired ones; archived, deleted, and admin-disabled canvases are omitted.
+draft, revoked, expired, archived, and admin-disabled rows. Deleted canvases are omitted.
 Filters: `?sourceApp=&sourceKind=&tags=a,b` (every listed tag must match). The response
 is `Cache-Control: private, no-store`.
 

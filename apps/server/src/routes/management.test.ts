@@ -3627,6 +3627,18 @@ describe("managementRoutes — clone by a granted-team viewer (restricted access
     expect((await cloneAs(mate)).status).toBe(404);
     expect((await cloneAs(owner)).status).toBe(201);
   });
+
+  it("the fences: an archived source reads opaque 404 for the team viewer", async () => {
+    const { canvases, src, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.archive(src.id);
+    expect((await cloneAs(mate)).status).toBe(404);
+  });
+
+  it("the fences: an admin-disabled source reads opaque 404 for the team viewer", async () => {
+    const { canvases, src, mate, cloneAs } = await seedTeamCanvas({ publish: true });
+    await canvases.setDisabled(src.id, "policy");
+    expect((await cloneAs(mate)).status).toBe(404);
+  });
 });
 
 // --- People-list roles over HTTP (editor-roles plan U4/U5) --------------------------------

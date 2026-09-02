@@ -148,8 +148,8 @@ describe("deployApiRoutes (Bearer key)", () => {
     );
   });
 
-  it("unpublish via the Bearer API: published → draft; 409 CANNOT_UNPUBLISH on a draft; wrong key → 403", async () => {
-    const { app, mkCanvas } = await setup();
+  it("unpublish via the Bearer API: published → draft; a later deploy clears revokedAt; wrong key → 403", async () => {
+    const { app, canvases, mkCanvas } = await setup();
     const a = await mkCanvas();
     const b = await mkCanvas();
 
@@ -175,6 +175,20 @@ describe("deployApiRoutes (Bearer key)", () => {
     const body = await jsonOf<{ publicationState: string; currentVersionId: string | null }>(ok);
     expect(body.publicationState).toBe("draft");
     expect(body.currentVersionId).toBeNull();
+    expect((await canvases.findById(a.id))?.revokedAt).toBeNull();
+
+    // Authoring revocation is a stronger lifecycle marker than ordinary unpublish.
+    // A later keyed deploy is still a publish path and must clear that marker.
+    expect(await canvases.revoke(a.id)).toBeTruthy();
+    expect((await canvases.findById(a.id))?.revokedAt).not.toBeNull();
+
+    const republish = await app.request(`/v1/canvases/${a.id}/deploy`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${a.key}` },
+      body: zip(),
+    });
+    expect(republish.status).toBe(200);
+    expect((await canvases.findById(a.id))?.revokedAt).toBeNull();
 
     // A's key cannot unpublish B's canvas.
     const cross = await app.request(`/v1/canvases/${b.id}/unpublish`, {

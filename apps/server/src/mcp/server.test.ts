@@ -1353,6 +1353,19 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       await mcp.callTool({ name: "unpublish_canvas", arguments: { id: made.id } }),
     );
     expect(unpub.publicationState).toBe("draft");
+    const canvases = canvasesRepository(client);
+    expect((await canvases.findById(made.id))?.revokedAt).toBeNull();
+    expect(await canvases.revoke(made.id)).toBeTruthy();
+    expect((await canvases.findById(made.id))?.revokedAt).not.toBeNull();
+
+    const republished = payload(
+      await mcp.callTool({
+        name: "deploy_canvas",
+        arguments: { id: made.id, zipBase64: zip({ "index.html": "v3" }) },
+      }),
+    );
+    expect(republished.version).toBe(3);
+    expect((await canvases.findById(made.id))?.revokedAt).toBeNull();
   });
 
   it("surfaces a typed error (not a crash) for an invalid deploy body", async () => {
@@ -2140,7 +2153,7 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(text(denied)).toContain("not found");
   });
 
-  it("clone_canvas: a viewer-team member may clone a canvas that stays PRIVATE (the list applies at every rung); a non-member cannot", async () => {
+  it("clone_canvas: a viewer-team member may clone a Restricted canvas, while a direct viewer cannot (explicit product asymmetry)", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
@@ -2175,6 +2188,10 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       name: "grant_access",
       arguments: { id: cv.id, teamId: team.id, role: "viewer" },
     });
+    await ownerMcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, email: "stranger@a.example", role: "viewer" },
+    });
     expect(
       payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
     ).toBe("private");
@@ -2183,6 +2200,9 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     );
     expect(cloned.id).toBeTruthy();
     expect(cloned.id).not.toBe(cv.id);
+    // Deliberate current asymmetry: a direct viewer can open the same canvas but does
+    // not enter the team-viewer clone path. Keep this pinned until the owner chooses
+    // whether all listed viewers should be able to clone.
     const denied = await (await conn(strangerId)).callTool({
       name: "clone_canvas",
       arguments: { id: cv.id },
@@ -2242,6 +2262,14 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     await repo.updateSettings(cv.id, { sharedExpiresAt: Date.now() - 60_000 });
     await expectNotFound();
     await repo.updateSettings(cv.id, { sharedExpiresAt: null });
+    // Offline lifecycle rows never become a back door to the source bytes.
+    await repo.archive(cv.id);
+    await expectNotFound();
+    await repo.unarchive(cv.id);
+    await ownerMcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await repo.setDisabled(cv.id, "policy");
+    await expectNotFound();
+    await repo.enable(cv.id);
     // Published, unprotected, unexpired: the granted team clones it (still `private`).
     expect(
       payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
@@ -2249,6 +2277,45 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     const cloned = payload(await cloneAsMate());
     expect(cloned.id).toBeTruthy();
     expect(cloned.id).not.toBe(cv.id);
+  });
+
+  it("the deprecated shared:false + teamIds:[] leave-Team shape is accepted and keeps grants", async () => {
+    client = await makeTestDb(dialect);
+    const email = `legacy-team-${dialect}@example.com`;
+    const cfg = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DEV_USER_EMAIL: email,
+    });
+    const app = managementApp(client, cfg);
+    expect(
+      (await app.request("/api/canvases", { headers: { host: "localhost:3000" } })).status,
+    ).toBe(200);
+    const actor = await usersRepository(client).findByEmail(email);
+    if (!actor) throw new Error("dev actor was not materialized");
+    const actorId = actor.id;
+    const mcp = await connect(client, { userId: actorId }, false, cfg);
+    const team = payload(
+      await mcp.callTool({ name: "create_team", arguments: { name: "Legacy viewers" } }),
+    );
+    const cv = payload(await mcp.callTool({ name: "create_canvas", arguments: {} }));
+    await mcp.callTool({ name: "deploy_canvas", arguments: { id: cv.id, zipBase64: html() } });
+    await mcp.callTool({
+      name: "update_canvas",
+      arguments: { id: cv.id, access: "team", teamIds: [team.id] },
+    });
+
+    const response = await app.request(`/api/canvases/${cv.id}/settings`, {
+      method: "PATCH",
+      headers: {
+        host: "localhost:3000",
+        "content-type": "application/json",
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ shared: false, teamIds: [] }),
+    });
+    const responseText = await response.text();
+    expect(response.status, responseText).toBe(200);
+    expect(JSON.parse(responseText)).toMatchObject({ access: "private", teamIds: [team.id] });
   });
 
   it("update_canvas legacy `teamIds: []` carve-out (review #8/#9): a no-op when leaving the `team` value, TEAM_REQUIRED with any other access value; the grants survive", async () => {

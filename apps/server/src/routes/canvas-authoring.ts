@@ -744,15 +744,15 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       (await deps.canvases.findByIds(ids)).map((canvas) => [canvas.id, canvas]),
     );
     const rows = ids.map((id) => rowsById.get(id) ?? null);
-    // Include unpublished shares (they stay `active` + revoked_at), but keep the
-    // authoring view aligned with the dashboard's active-canvas view: archived,
-    // deleted, and admin-disabled canvases are not reusable shares. Exclude any the
-    // viewer no longer manages (owner or editor — a share whose ownership moved away
-    // stays listed while the author remains an editor).
+    // Include every authored share the viewer still manages, whatever its lifecycle.
+    // `publicationStatus` exists so consumers can distinguish draft, archived, disabled,
+    // expired and unpublished rows; filtering those rows here would make the advertised
+    // states unreachable. `listManagedCanvasIds` omits deleted rows, which are the one
+    // lifecycle the authoring contract deliberately excludes.
     const principal = memberPrincipal(viewer, orgIds);
     const grants = await Promise.all(
       rows.map(async (cv): Promise<RoleGrant | null> => {
-        if (cv?.status !== "active") return null;
+        if (!cv) return null;
         return resolveManagementGrant(cv, principal, roleDeps);
       }),
     );
