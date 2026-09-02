@@ -82,12 +82,22 @@ canvas does not appear in discovery. On the canvas **Share** tab, turn on
 **List for people with access** when members should find it under **Shared** in the
 dashboard (or through `list_shared_canvases` over MCP).
 
+## Editor teams
+
+A team can also be granted the **editor** role on a canvas, from the canvas's
+**Share with people and teams** section (choose the team, pick **Editor**). Every current member
+then manages that canvas like the owner — content, publishing, settings, sharing —
+except deleting or transferring it; membership changes apply on the next request, and
+for an org team the live org membership is re-checked as well. A team added as
+**viewers** only applies on the Team rung. See
+[Roles: viewers and editors](/docs/authoring/sharing#roles-viewers-and-editors).
+
 ## Over MCP (agents)
 
 Everything here is available to an agent over [MCP](/docs/agents/mcp), wrapping the
 same service the dashboard uses: `create_team` (omit `orgId` for a personal team),
 `add_team_member` (returns `granted` or `pending`), `cancel_team_invite` (take back
 a pending invite by its roster `id`), `list_team_members` (members +
-pending), `grant_access`, `list_shared_canvases`, and `update_canvas` with
-`access: "team"` + `teamIds`. Add `discoverability: "listed"` when a team share should
+pending), `grant_access` (with `teamId` and a `role` of `viewer` or `editor`), `set_access_role`,
+`list_shared_canvases`, and `update_canvas` with `access: "team"` + `teamIds`. Add `discoverability: "listed"` when a team share should
 show in Shared; leave it unset or set `discoverability: "link_only"` for URL-only access.

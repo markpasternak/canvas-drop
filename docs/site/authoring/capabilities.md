@@ -1,113 +1,186 @@
 # Capabilities
 
-Give a canvas backend behavior by turning on capabilities per canvas, on its
-**Backend** tab. A canvas is static by default: the master switch and every
-feature are off until you enable them, and any SDK call to a feature that is off
-throws a `CapabilityDisabledError` (code `CAPABILITY_DISABLED`).
+Give a canvas a backend, one feature at a time, and know exactly when a call
+from the page will work. This page is for a canvas's owner or editor. A canvas
+is static until you switch **Enable backend** on in its **Backend** tab. With
+the backend on, five features toggle independently: KV, files, AI, realtime, and
+authoring. Identity (`me()`) has no toggle; it is on whenever the backend is on.
 
 ## Turn on the backend
 
 1. Open the canvas and go to the **Backend** tab.
-2. Switch **Enable backend** on. This is the master switch, off by default.
-3. With the backend on, toggle the features you need: **KV**, **Files**, **AI**,
-   **Realtime**, **Authoring**. Each is independent. (The feature toggles stay
-   disabled while the backend is off.) **Authoring** ships off even after you turn
-   the backend on — it is higher-privilege (it lets a viewer create canvases) and
-   also needs the operator to enable it for the instance.
+2. Switch **Enable backend** on. It is off by default. You can also set it when
+   you create the canvas: **Enable backend (optional)** on the create page, or
+   `"backendEnabled": true` on `POST /api/canvases` and `POST /api/canvases/paste`.
+3. Check the feature toggles. **Key-value storage**, **File storage**, **AI**,
+   and **Realtime** are on by default, so they go live as soon as the backend is
+   on (where the instance supports them). **Authoring** starts off and stays off
+   until you turn it on.
 
-Then call them from the page through `window.canvasdrop`. No keys, no setup:
+Then call the features from the page through `window.canvasdrop`. No keys, no
+setup:
 
-```js
-await canvasdrop.kv.set("count", 1);   // KV must be on
-const me = await canvasdrop.me();      // available whenever the backend is on
+```html
+<script src="/sdk/v1.js"></script>
+<script type="module">
+  const me = await canvasdrop.me();                 // on whenever the backend is on
+  await canvasdrop.kv.set("last-viewer", me.name);  // needs Key-value storage on
+</script>
 ```
 
-**Identity has no toggle.** `me()` is available exactly when the backend is on;
-the tab shows it as "Always on" once you enable the backend.
+Agents and scripts flip the same switches. The MCP tool `set_capabilities` and
+`PATCH {base}/api/canvases/{id}/capabilities` take the same body: any subset of
+`backendEnabled`, `kv`, `files`, `ai`, `realtime`, `authoring` as booleans.
+Omitted fields are unchanged.
 
-## The five primitives
+```json
+{ "backendEnabled": true, "realtime": false }
+```
 
-| Primitive | What it gives the canvas | SDK |
-|-----------|--------------------------|-----|
-| KV | Shared and per-viewer JSON storage, atomic increment | [kv](/docs/sdk/kv) |
-| Files | Upload, list, serve files | [files](/docs/sdk/files) |
-| Identity | The signed-in viewer's id, email, name, avatar | [identity](/docs/sdk/identity) |
-| AI | Server-side model calls, no provider key in the page | [ai](/docs/sdk/ai) |
-| Realtime | Ephemeral pub/sub + presence | [realtime](/docs/sdk/realtime) |
+The response is the canvas view. Every canvas view (the management API and the
+MCP `get_canvas` tool included) carries two objects: `capabilities` (what is
+stored) and `effective` (what runs right now, after the instance switches
+below are applied).
+
+Owners and editors can change capabilities; viewers cannot. Every change is
+audited (`capabilities_update`, with the list of changed fields) and applies on
+the next request. Turning the backend or realtime off also drops the canvas's
+live realtime sockets. A canvas an admin has disabled refuses the change with
+`409 DISABLED`.
+
+## The toggles
+
+| Backend tab row | Key | Stored default | What it gives the canvas | SDK |
+|---|---|---|---|---|
+| Enable backend | `backendEnabled` | off | The master switch; nothing below runs without it | |
+| Identity (no toggle) | `identity` | follows the backend | The signed-in viewer: id, email, name, avatar | [`me()`](/docs/sdk/identity) |
+| Key-value storage | `kv` | on | Shared and per-viewer JSON storage, atomic increment | [`kv`](/docs/sdk/kv) |
+| File storage | `files` | on | Upload, list, delete, and serve files | [`files`](/docs/sdk/files) |
+| AI | `ai` | on | Server-side model calls; no provider key in the page | [`ai`](/docs/sdk/ai) |
+| Realtime | `realtime` | on | Ephemeral pub/sub and presence over WebSockets | [`realtime`](/docs/sdk/realtime) |
+| Authoring | `authoring` | off | A signed-in viewer creates and manages canvases from the page, as themselves | [`canvases`](/docs/sdk/authoring) |
+
+The feature toggles are disabled in the UI while the backend is off. Their
+stored values are kept, so switching the backend back on restores the same set.
+The Identity row reads **Always on** when the backend is on and **Off** when it
+is not.
 
 ## When a feature is effective
 
-A feature is **effective** — usable from the SDK — only when every applicable
-condition is true:
+A feature runs only when every gate in its row is open: the backend, its own
+toggle, and (for AI, realtime, and authoring) an instance switch the operator
+controls. The server applies this rule on each request; the Backend tab shows
+the outcome, and `effective` in the API is the same answer.
 
-| Feature | Effective when |
-|---------|----------------|
-| Identity (`me()`) | Backend is on |
-| KV | Backend on **and** KV toggle on |
-| Files | Backend on **and** Files toggle on |
-| AI | Backend on **and** AI toggle on **and** the operator has configured an AI provider key |
-| Realtime | Backend on **and** Realtime toggle on **and** the operator has enabled realtime for the instance |
-| Authoring | Backend on **and** Authoring toggle on **and** the operator has enabled authoring for the instance (`CANVAS_DROP_AUTHORING`) |
+| Feature | Backend on | Its toggle on | Instance switch |
+|---|---|---|---|
+| Identity (`me()`) | yes | none | none |
+| KV | yes | yes | none |
+| Files | yes | yes | none |
+| AI | yes | yes | An AI provider key is configured: `CANVAS_DROP_AI_API_KEY`, or the **Provider API key** an admin sets in Admin → Settings |
+| Realtime | yes | yes | `CANVAS_DROP_REALTIME=on` (the default) |
+| Authoring | yes | yes | `CANVAS_DROP_AUTHORING=on` (default `off`), or **Authoring enabled** set by an admin in Admin → Settings |
 
-KV and Files have no operator-level switch: your two toggles are the whole
-story. AI needs the operator to have configured an AI provider key; Realtime
-needs the operator to have turned realtime on for the instance
-(`CANVAS_DROP_REALTIME`); Authoring needs the operator to have turned authoring
-on for the instance (`CANVAS_DROP_AUTHORING`, off by default). Each condition is
-resolved per request, so an admin
-flipping the instance setting takes effect immediately. A feature you've turned
-on can still report as off if the instance isn't set up for it: the toggle stays
-on, but the tab labels it **Disabled by your administrator** so you can see
-*why* it isn't running.
+KV and files have no instance switch: your two toggles are the whole story.
+When your toggle is on but the instance switch is off, the toggle stays on and
+the row is labelled **Disabled by your administrator for this instance.** The
+AI key and the authoring switch are read per request, so an admin's change
+applies immediately. Realtime follows `CANVAS_DROP_REALTIME` as set when the
+server started; the admin panel shows it but cannot change it.
 
-## Authoring: create canvases from the page
+## Limits
 
-The **Authoring** capability lets a canvas offer its signed-in viewers a way to
-create a brand-new canvas from the page — **as themselves**, with real ownership
-and no secret in the browser. A viewer calls
-[`canvasdrop.canvases.publish(...)`](/docs/sdk/authoring); the server creates the
-new canvas under the viewer's own account, deploys the bundle they supply, and
-applies the share settings they ask for. The new canvas shows up in *their*
-dashboard.
+Each feature has fixed ceilings. Exceeding one returns the error named in the
+last column, not `CAPABILITY_DISABLED`; see [error codes](/docs/api/errors).
 
-Because it mints canvases, authoring is the one feature that ships **off** even
-with the backend on, and it needs the operator to enable it for the instance.
-Guests and public-link visitors can't use it (creation needs a signed-in member),
-and the operator sets per-viewer quotas and which access rungs / share expiries a
-publish may request. See the [authoring SDK reference](/docs/sdk/authoring).
+| Feature | Limit | Admin-adjustable | Error |
+|---|---|---|---|
+| KV | 64 KB per value, 512 bytes per key; 10 000 shared keys and 1 000 per-viewer keys per canvas | the key counts | `VALUE_TOO_LARGE`, `KEY_TOO_LARGE`, `KEY_LIMIT` |
+| Files | 25 MB per file, 1 GB per canvas | both | `FILE_TOO_LARGE`, `QUOTA_EXCEEDED` |
+| AI | Models on the allowlist (`CANVAS_DROP_AI_MODELS`); spend caps of `CANVAS_DROP_AI_USER_DAILY_USD` (default `5`) per viewer per day and `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` (default `50`) per canvas per month | allowlist and both caps | `MODEL_NOT_ALLOWED`, `QUOTA_EXCEEDED` |
+| Realtime | 30 concurrent connections per canvas, 16 KB per message | no | `CONNECTION_LIMIT` (socket close `4429`) |
 
-## Public links are static-only
+## When a feature is off
 
-If a canvas is shared as a **public link** (the `public_link` access rung,
-anyone with the link), every primitive is inert for public visitors. The
-Backend tab shows a warning that the canvas serves static files only, and
-the server refuses backend calls from those visitors with `STATIC_ONLY`
-(status 403). The backend still works for you and for signed-in org members; use
-a more restricted access rung if the canvas needs a backend for everyone.
+A call to a feature that is off fails with a `403` whose body names the gate
+that failed:
 
-## What happens when a feature is off
+```json
+{
+  "code": "CAPABILITY_DISABLED",
+  "capability": "kv",
+  "backendEnabled": false,
+  "reason": "backend_off",
+  "hint": "This canvas's backend is off (the master switch, off by default). Turn it on in the dashboard Backend tab, the set_capabilities MCP tool, or PATCH /api/canvases/:id/capabilities {\"backendEnabled\": true}."
+}
+```
 
-The SDK throws at call time:
+`reason` is `backend_off`, `feature_off`, or `operator_disabled`; `hint` says
+what to turn on. The SDK throws a `CapabilityDisabledError`
+(`err.code === "CAPABILITY_DISABLED"`, `err.status === 403`) and exposes the
+server hint as `err.hint`, which is also the error message:
 
 ```js
 try {
   await canvasdrop.kv.set("count", 1);
 } catch (err) {
-  // err is a CapabilityDisabledError, err.code === "CAPABILITY_DISABLED".
-  // err.hint says exactly what to turn on (e.g. the backend master switch).
-  console.log(err.hint);
+  if (err.code === "CAPABILITY_DISABLED") console.log(err.hint);
+  else throw err;
 }
 ```
 
-The `CAPABILITY_DISABLED` response is self-describing: its body carries
-`backendEnabled`, a `reason` (`backend_off` · `feature_off` · `operator_disabled`),
-and a `hint` you can act on. See [error codes](/docs/api/errors) for the full list.
+Realtime reports the same condition over the socket: a connection opened while
+realtime is off receives one
+`{ "type": "error", "code": "CAPABILITY_DISABLED", "capability": "realtime" }`
+frame and is closed with code `4403`. A socket that is already open when
+realtime is turned off is closed with `4403` too. The SDK turns both into the
+same `CapabilityDisabledError` and does not reconnect. See
+[error codes](/docs/api/errors) for the full list.
+
+## Public links are static-only
+
+On the **Public link** rung (`public_link`) the server serves the canvas's files
+to anyone with the URL and refuses every primitive with `403 STATIC_ONLY` for
+everyone except the canvas's owner and editors. Signed-in org members are
+refused too. The Backend tab shows a warning when a public-link canvas has its
+backend on. If the canvas needs a backend for its audience, share it on a more
+restricted rung; see [Sharing & access](/docs/authoring/sharing).
+
+## Authoring
+
+Authoring lets a signed-in org member viewing your canvas create a new canvas
+from the page, as themselves, through `canvasdrop.canvases.publish(...)`. The
+new canvas is created under the viewer's own account and appears in their
+dashboard; they can `update`, `list`, and `revoke` it later. Legacy guest
+sessions and public-link visitors cannot use it.
+
+Because it mints canvases, authoring is the one feature whose stored flag starts
+off, and its instance switch (`CANVAS_DROP_AUTHORING`) is off by default as
+well. The operator also sets the policy a publish is checked against:
+
+| Policy | Env var | Default |
+|---|---|---|
+| Canvases one viewer may publish per day | `CANVAS_DROP_AUTHORING_USER_DAILY_MAX` | `20` |
+| Canvases one viewer may publish in total | `CANVAS_DROP_AUTHORING_USER_TOTAL_MAX` | `200` |
+| Access rungs a publish may request | `CANVAS_DROP_AUTHORING_ALLOWED_RUNGS` | `private,specific_people,whole_org,public_link` |
+| Longest allowed share expiry, in days | `CANVAS_DROP_AUTHORING_MAX_EXPIRY_DAYS` | `0` (no cap) |
+| Whether a share expiry is required | `CANVAS_DROP_AUTHORING_REQUIRE_EXPIRY` | `false` |
+
+An admin can change the two quotas at runtime in Admin → Settings; the rung and
+expiry policy is env-only. The `team` rung is not in the default set. See the
+[authoring SDK reference](/docs/sdk/authoring).
+
+## Clones start static
+
+Duplicating a canvas, or using a gallery template, creates a new canvas with the
+backend off and the feature flags at their defaults (KV, files, AI, and realtime
+on; authoring off). KV data, files, and usage are not copied. The new owner
+turns the backend on when they need it.
 
 ## Why off by default
 
-No secrets ever live in canvas files. Capabilities are server-enforced per
-request from the signed-in session — the canvas can ask, but the server decides.
-Turning a capability on is a deliberate choice the owner makes per canvas.
-
-Cloning a canvas as a template starts with the backend **off**: clones are
-static-first, and the new owner opts back in to whatever they need.
+Capabilities are enforced by the server, per request, from the signed-in
+session: the canvas can ask, the server decides. Canvas files never carry a
+secret, and a static canvas has no backend surface at all. Turning a capability
+on is a per-canvas choice its owner or an editor makes; an admin controls only
+the instance switches above, not any canvas's toggles.

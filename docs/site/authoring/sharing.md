@@ -1,199 +1,215 @@
 # Sharing & access
 
-Control who can open a canvas from its **Share** tab. Every canvas is
-**private by default** — only you, its owner, can open it. To let others in, pick
-one **access rung**, then optionally layer a password or an expiry on top.
+You own or edit a canvas and want to decide who can open it, who edits it with you, and where it shows up. Every control on this page lives on the canvas's **Share** tab. Agents reach the same controls over [MCP](#over-mcp), through the same service and the same role checks.
 
-**Publish first.** A canvas must have a published version before you can raise it
-above Private. If you try to share an unpublished canvas the server refuses with
-`SHARE_REQUIRES_PUBLISH` (409). Publish from the Editor or Versions tab, then set
-the rung.
+Every canvas starts **Private**: only the owner can open it. Sharing is one choice plus optional layers:
 
-> Admins don't get a back door into your content. For a canvas they don't own, an
-> admin is treated like any other org member: a private canvas returns a 404, a
-> password prompts them too, and they can't open the editor or change its
-> settings. An admin's cross-owner power is moderation only — see it in the
-> all-canvases list and disable / re-enable / restore it.
+1. Pick one **access rung**: Private, Specific people, Team, Whole org, or Public link.
+2. Add named people or teams as **viewers** or **editors** under **Share with people and teams**.
+3. Optionally add a **password** or a **share expiry** under **Locks**.
+4. Optionally opt into discovery: **List for people with access** (the Shared page) or **List in the gallery**.
+
+## Share with one colleague
+
+1. Publish first. Until the canvas has a live version, the Share tab shows one locked panel with a **Publish** button.
+2. Under **Share with people and teams**, type their email, pick **Viewer** or **Editor**, and confirm.
+3. Set the rung to **Specific people**. A viewer is admitted only by a rung that reads the list; an editor is admitted at every rung.
+
+An existing user can open the canvas on their next request. Over MCP the same two steps are:
+
+```text
+grant_access   { "id": "<canvas id>", "email": "someone@example.com", "role": "viewer" }
+update_canvas  { "id": "<canvas id>", "access": "specific_people" }
+```
+
+Raising the rung above Private on an unpublished or archived canvas is refused with `SHARE_REQUIRES_PUBLISH` (HTTP 409).
+
+> Admins have no back door into your content. For a canvas they do not own, an admin is an ordinary member: a private canvas returns 404, a password prompts them too, and they cannot open the editor or change settings. Cross-owner admin power is moderation and offboarding only: the all-canvases list, disable / re-enable / restore, and reassigning the owner when someone leaves.
 
 ## The access ladder
 
-One rung per canvas, stored as the `access` field (default `private`):
+One rung per canvas, stored as `access` (default `private`):
 
 | Rung | Who can open it | Backend primitives |
 | --- | --- | --- |
-| **Private** | Only you, the owner. | Full, for the owner. |
-| **Specific people** | A named allowlist — signed-in users plus pending emails that activate after verified sign-in. | Full, for authenticated people on the allowlist. |
-| **Team** | Members of the [teams](/docs/authoring/teams) you grant — a personal team (friends & family) or a subset of your org. | Full, for team members. |
-| **Whole org** | Any signed-in org member with the link. | Full, for org members. |
-| **Public link** | Anyone with the link (no sign-in), while the instance switch is on and the owner has not been revoked. | **None** — static files only. |
+| **Private** | The owner and any editors. | Full (whatever the Backend tab enables). |
+| **Specific people** | The viewers on the people and teams list: signed-in users, plus pending emails that activate after a verified sign-in. | Full, for the people admitted. |
+| **Team** | Members of the teams added to the people and teams list as viewers. A team can be personal or org-attached; see [teams](/docs/authoring/teams). | Full, for team members. |
+| **Whole org** | Any signed-in member with the link. | Full, for members. |
+| **Public link** | Anyone with the URL, no sign-in, while the instance switch is on and the owner's account may publish publicly. | **None**: static files only. |
 
-> **When an org boundary is configured** (the operator named an org — off by
-> default), **Whole org** means *members of this canvas's home org*, not "anyone
-> signed in." Members pick **Personal** or the workspace when they create a canvas
-> (a [fixed choice](/docs/authoring/create-and-publish#personal-vs-workspace)); a
-> Personal canvas can't be shared org-wide, and brought-in **external people** (people on a
-> non-org domain) never see Whole-org canvases — only the specific ones they're
-> added to. With no org configured, Whole org is simply "any signed-in user."
+Editors are admitted at every rung, never see the password prompt, and are unaffected by expiry. Everyone else is evaluated per request, with nothing cached: a change to the rung, the list, or the locks applies on the very next request. Anyone with no route in gets an opaque **404**, never a "forbidden" that confirms the canvas exists.
 
-Password and expiry are modifiers you can add on top of any rung. The slug in each
-canvas URL is defense-in-depth, not a substitute for a rung — and only when it's the
-default **random** slug (`quiet-otter-x7k2…`). If you give a canvas a **custom slug**
-(e.g. `team-dashboard`), the URL is human-guessable, so the rung is doing all the work:
-the dashboard shows a reminder when a canvas is both link-reachable (Whole org / Public
-link) and using a custom slug.
+**When an org boundary is configured** (the operator set `CANVAS_DROP_ORG_NAME`; off by default), **Whole org** means *members of this canvas's home org*, not "anyone signed in". Members pick **Personal** or the workspace when they create a canvas (a [fixed choice](/docs/authoring/create-and-publish#personal-vs-workspace)). A Personal canvas cannot be shared org-wide: the rung is shown disabled, and the server refuses with `ORG_REQUIRED` (HTTP 409). A **guest** (a signed-in user in no org) never sees Whole-org canvases, only the specific ones they are added to. With no org configured, Whole org is "any signed-in user".
 
-## URL access vs discovery
+Which rungs you see depends on your account: **Whole org** is hidden for guests, **Team** appears when you belong to a team or an org, and **Public link** appears only while your own account may publish publicly. A rung the canvas is already on stays visible either way.
 
-Access and discovery are separate:
+### Slugs are not a rung
+
+The random slug in a canvas URL (`quiet-otter-x7k2`) is defense in depth, not access control. A **custom slug** (`team-dashboard`) is guessable, so the rung does all the work; the Share tab shows a heads-up when a canvas is link-reachable (Whole org or Public link) and uses a custom slug.
+
+## Access vs discovery
+
+Access and discovery are separate settings:
 
 - The **access rung** decides who can open the URL.
-- **List for people with access** decides whether a **Team** or **Whole org** share is
-  discoverable in **Shared** for people who already have access.
+- **List for people with access** (`discoverability`: `link_only` or `listed`) decides whether a **Team** or **Whole org** share appears on the **Shared** page for people who can already open it. It never widens URL access.
 
-When listing is off, the canvas is **link-only**: anyone covered by the rung can still open
-the URL, but the canvas does not appear in Shared. This is the default for Team and Whole-org
-shares, matching the "restricted but open with the link" model. Explicitly adding a Whole-org
-canvas to the gallery turns listing on as part of that same action.
+Team and Whole-org shares default to **link-only**: anyone the rung admits can open the URL, but the canvas is not listed. Turn listing on and:
 
-When listing is on:
+- **Team** canvases appear in **Shared** for members of the viewer teams. They never appear in the gallery.
+- **Whole org** canvases appear in **Shared** for members of the home org and become eligible for the gallery. Listing a Whole-org canvas in the gallery turns this switch on as part of the same action; turning it off again also removes the canvas from the gallery.
 
-- **Team** canvases appear in **Shared** for members of the granted teams. They still never
-  appear in the gallery.
-- **Whole org** canvases appear in **Shared** for members of the canvas's home org. They can
-  also be added to that org's gallery; the gallery action supplies this listing opt-in.
+**Specific people** shares are addressed to named people, so active direct grants appear in those people's Shared view without a listing switch. **Public link** canvases never appear in Shared; use the gallery for deliberate discovery.
 
-**Specific people** shares are already addressed to named people, so active direct grants
-appear in those people's Shared view without a separate listing switch. **Public link**
-canvases do not appear in Shared; use the gallery for intentional public/org-wide discovery.
+## Roles: viewers and editors
+
+Every entry under **Share with people and teams**, whether a person, a pending email, or a team, is a **viewer** or an **editor**. The owner is pinned first and has no role control.
+
+![The Share with people and teams section: the owner pinned first, then people and teams, each with a role control, and the Transfer ownership action](/docs/assets/tour-people.webp)
+
+| | Viewer | Editor |
+| --- | --- | --- |
+| Open the canvas | When the rung admits them (a viewer row is what *Specific people* reads; a viewer team is what *Team* reads). | At every rung, no password prompt, no expiry. |
+| Edit the draft, publish, roll back, restore | No | Yes |
+| Change settings and sharing, add or remove people (other editors included) | No | Yes |
+| Deploy new versions, regenerate the deploy key, use the authoring routes | No | Yes |
+| Delete, transfer ownership, guest-AI opt-in | No | No: **owner only** (`OWNER_ONLY`, HTTP 403) |
+
+Editors see the canvas in **Your canvases**, marked `editor · <owner>` on a card and `owned by <owner> · editor` on a row, and can filter with **Owned by me** / **Editing**. Edited canvases do not appear in Shared.
+
+- **Only org members and teams can be editors.** A guest (someone outside your org domains) is always a viewer (`GUEST_VIEWER_ONLY`, HTTP 400), and a pending email can carry the editor role only when it belongs to an org domain. When an org boundary is configured, an editor grant holds only while the person is *currently* a member, checked on every request: someone who leaves the org loses edit access on their next request, and their editor session and realtime sockets are dropped. Removing or demoting an editor works the same way; if the rung still admits them, the canvas moves to **Shared** as view-only.
+- **Entitlements follow the owner.** An editor can switch on **Public link** only when the *owner's* account may publish publicly (`PUBLIC_LINK_OWNER_GATED`, HTTP 403, otherwise). Usage and AI spend stay attributed to the canvas and its owner.
+
+Pick the role when you add someone (**Viewer** is the default) and change it any time from the row. A person promoted to editor gets a courtesy email when outbound email is on; when an editor makes someone else an editor, the owner is notified too. After you remove or demote an editor, the dashboard offers to **regenerate the deploy key**: a key they copied keeps working until you do.
+
+### Two editors, one file
+
+There is no real-time co-editing. Each draft save carries the hash of the file the editor loaded; if someone else saved that file first, the save is refused with `DRAFT_CONFLICT` (HTTP 409) carrying `path`, `currentHash`, `updatedBy`, `updatedByName`, and `updatedAt`. The editor keeps your unsaved text next to the other version so you can use theirs or overwrite. Edits to *different* files never conflict. Each publish records who created the version, so the **Versions** tab shows authorship.
+
+### Transfer ownership
+
+The owner can hand the canvas to any current **editor who is an org member**, including a member of an editor team; never to a team itself, and never by email (the picker lists eligible people; anyone else is refused with `NOT_ELIGIBLE`, HTTP 409). The transfer applies at once and is audited:
+
+- The recipient becomes the owner; you stay on as an editor while your account is active and still passes the org check.
+- If the canvas was on **Public link** and the new owner's account cannot publish publicly, the rung is turned off (`publicLinkReverted`).
+- The deploy key keeps working; the new owner can rotate it.
+
+When an owner leaves, an admin can **reassign** any of their canvases to another member from **Admin → Canvases** with a recorded reason. The previous owner stays an editor when their account is still active, both parties are emailed, and the deploy key is rotated in the same step (the new owner issues a fresh one).
+
+## Roles: viewers and editors
+
+Every entry on the people and teams list — a person, a pending invitee, or a team — carries a
+role: **Viewer** (the default) or **Editor**. A viewer can open the canvas when the
+access rung admits them (Specific people or Team). An editor can *always* open the
+canvas, on any rung, and manages it as fully as you do: the editor draft and Publish,
+deploys and the deploy key, versions and rollback, settings, sharing, and the People
+list itself. Three acts stay with the owner and refuse `OWNER_ONLY` for an editor:
+deleting the canvas, transferring ownership, and the legacy guest-AI opt-in. Only org
+members and teams can be editors; a legacy guest is always a viewer.
+
+Roles are resolved on every request, so demoting or removing an editor takes effect
+immediately (and drops their live editor sockets). Two editors saving the same draft
+file get a named stale-save conflict instead of a silent overwrite; edits to different
+files never conflict.
+
+**Transfer ownership** (owner only, from the people and teams list) hands the canvas to one of
+its existing editors in one step: they become the owner and you stay on as an editor.
+The public-link entitlement follows the new owner's account, so a Public link is
+turned off if their account may not publish one. An admin can also reassign a departed
+owner's canvases from the admin routes. Agents do the same over
+[MCP](/docs/agents/mcp): `grant_access` with `role`, `set_access_role`, and the
+owner-only `transfer_canvas`.
 
 ## Adding specific people
 
-Choose **Specific people**, then add by email. The result is deterministic:
+Under **Share with people and teams**, add by email as a **viewer** or an **editor**. The outcome is deterministic:
 
-- An **existing signed-in user** is granted immediately. They open the canvas with
-  their normal sign-in and appear as active in the People list.
-- A **new email that your auth setup can admit** becomes a **pending sign-in grant**.
-  It has no login power by itself. It turns into real access only after that exact
-  email signs in through your configured auth (`oidc`, `proxy`, or `dev`).
-- A **brand-new external email** is refused unless policy allows it. Admins can add
-  external people from **Admin -> People**. A non-admin member can add one only when
-  the operator enables `invites.allowMemberNewEmails`, or when the email can already
-  authenticate through an allowed domain or an existing sign-in permit.
+| Outcome | Meaning |
+| --- | --- |
+| `granted` | An existing signed-in user; they can open the canvas now. |
+| `pending` | A new email your auth setup can admit. It has no login power by itself; access materializes after that exact email signs in through the configured auth (`oidc`, `proxy`, or `dev`). |
+| `already_added` / `already_pending` | Nothing changed. |
+| `role_changed` | You passed a role for someone already listed. An omitted role never changes an existing entry. |
+| `NOT_PERMITTED` (403) | A brand-new external email that policy does not let you admit. |
+| `AUTH_ADMISSION_REQUIRED` (403) | The identity provider must admit that email before canvas-drop can grant it. |
+| `GUEST_VIEWER_ONLY` (400) | Editor requested for a guest email. |
+| `BLOCKED` (403) | That account is blocked. |
+| `RATE_LIMITED` (429) | Too many adds in an hour, or the instance's pending-invite cap is reached. Try again later. |
 
-Pending people are visible in the People list and can be removed before they ever
-sign in. Removing an active or pending person takes effect on the next request.
+Who may admit a **brand-new external email**: admins always can, from the Share tab or **Admin → People**. A non-admin member can only when the operator turns on **Let members add brand-new emails** (`invites.allowMemberNewEmails`, off by default), or when the email can already authenticate through an allowed domain or an existing sign-in permit.
 
-The People list has one **Add person** action. It grants access immediately when it can,
-or records pending access for an email that must sign in first. When outbound email is
-enabled, the person gets a courtesy sign-in/access email. The action can return
-`granted`, `pending`, `already_added`, `already_pending`, or a policy/error state such as
-`NOT_PERMITTED` or `RATE_LIMITED`. There is no app-owned password or magic-link account;
-the person authenticates the same way everyone else does.
+Pending people show in the list with the role you gave them and can be re-roled or removed before they ever sign in. Removing an active or pending person takes effect on the next request. When outbound email is enabled (`CANVAS_DROP_EMAIL_DRIVER`), the person receives a courtesy sign-in or access email. There is no app-owned password or magic link; everyone authenticates the same way.
 
-> In `proxy` mode the upstream IAP owns admission. canvas-drop can record grants for
-> existing or already-admitted people, but it cannot make a brand-new external email
-> reachable by itself. Add that person to the upstream access policy or use
-> **Admin -> People** for app-managed admission where applicable.
+> In `proxy` mode the upstream identity-aware proxy owns admission. canvas-drop can record grants for people who already exist or are already admitted, but it cannot make a brand-new external email reachable on its own. Add that person to the upstream access policy first.
 
 ## Sharing with a team
 
-Choose **Team** to share with one or more [teams](/docs/authoring/teams)
-— named groups you create. A team can be **personal** (friends & family — anyone you add
-by email) or **org-attached** (a subset of your org). The share control lists only the teams
-**you belong to**; pick one or more, and every member can open and use the canvas (full
-backend, like a member). A team grant is independent of your own membership afterward — if
-you later leave the team, the canvas stays shared with it until you change the rung.
+A team can be granted two ways from **Share with people and teams**:
 
-Team canvases are **strictly team-scoped**: they never appear in the org-wide gallery.
-By default they are link-only. Turn on **List for people with access** if team members
-should be able to find them under **Shared** in the dashboard (or through
-`list_shared_canvases` over [MCP](/docs/agents/mcp)). For an **org** team, membership is
-re-checked on every request against your *live* org membership, so someone removed from the
-org loses access immediately, even if a stale team row lingers. For a **personal** team,
-direct membership is the boundary.
+- As **viewers**: honoured on the **Team** rung. Set the rung to Team and members of every viewer team can open and use the canvas (full backend). The rung needs at least one viewer team on the list (`TEAM_REQUIRED`, HTTP 409, otherwise); with none, the Share tab points you to add one.
+- As **editors**: every current member edits at any rung. People who join the team later are editors too; a member who leaves the team stops being one.
 
-> Unlike **Whole org**, the **Team** rung does **not** require an org workspace: any
-> signed-in user can create a personal team and share even a
-> [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas with it. You
-> manage teams — create, add people, leave — on the **Teams** page.
+You can grant only teams you belong to, and an org team must match the canvas's org (`TEAM_FORBIDDEN`, HTTP 403, otherwise). The grant is independent of your own membership afterward: if you leave the team, the canvas stays shared with it until you change the list. For an **org** team, membership is re-checked against live org membership on every request, so someone removed from the org loses access immediately even if a stale team row lingers. For a **personal** team, direct membership is the boundary.
+
+Team canvases are strictly team-scoped and never appear in the gallery. They are link-only by default; turn on **List for people with access** so members can find them under **Shared** (or through `list_shared_canvases` over MCP).
+
+> Unlike **Whole org**, the **Team** rung does not need an org workspace: any signed-in user can create a personal team and share even a [Personal](/docs/authoring/create-and-publish#personal-vs-workspace) canvas with it. Manage teams on the **Teams** page.
 
 ## Password & expiry
 
-- **Password** (the *Locks* section): set a password and non-owners are prompted
-  before the canvas opens (argon2id-hashed, scoped cookie). Owners are never prompted.
-- **Share expiry**: set a timestamp and access auto-revokes when it passes. You
-  see a countdown, then an expired state.
+Both live under **Locks** and apply on top of any rung:
 
-A canvas with a password cannot be listed in the gallery.
+- **Password**: non-owners who can open the canvas are prompted before it loads. The password is stored as an argon2id hash and cannot be shown again; **Generate** produces one you can copy. Owners and editors are never prompted; a non-owner admin is. A password has no effect while the canvas is Private.
+- **Share expiry**: set a timestamp and access auto-revokes when it passes. The tab shows a countdown, then an expired notice; non-owners get a 404 until you clear or extend it.
+
+A canvas with a password cannot be listed in the gallery. Setting a password always un-lists the canvas, turns off its template setting, and clears its tags, whether or not it was listed at the time.
 
 ## Public links
 
-**Public link** lets anyone with the URL view a canvas with no sign-in — but it's
-**static-only**: the page and its files serve, while every backend primitive (KV,
-files, AI, realtime) is refused for public visitors, so the open internet can
-never touch your org's spend or stored data. It's governed at two levels:
-**public links are available by default while the instance switch is on**, and an
-admin can revoke the publish-public capability for a specific account. For
-everyone except the owner, a public-link canvas is always static-only.
+**Public link** lets anyone with the URL view the canvas with no sign-in, **static-only**: the page and its files serve, while every backend primitive (KV, files, AI, identity, realtime) is refused for public visitors, so the open internet never touches your org's spend or stored data. Signed-in members hitting a public-link canvas are static-only too; only the owner and editors get full content.
 
-## Tags
+Two switches govern it:
 
-Every canvas has one set of **tags** — short labels you add on the canvas detail
-page (Enter or comma confirms each; tags are trimmed and lowercased). They serve
-double duty: in **Your canvases** they power the tag filter so you can narrow a
-large library, and once a canvas is **listed in the gallery** the same tags show
-publicly and drive the gallery's tag shortcuts. There is one tag set per canvas —
-not a separate "gallery tags" — so a tag you add for your own filtering is the
-same tag your colleagues see when the canvas is listed. The limit is **20 tags,
-up to 50 characters each**. Agents set the same field with `update_canvas` (the
-`tags` parameter) over MCP.
+- The instance-wide **Public links enabled** setting (`access.publicLinksEnabled`, on by default). Turning it off makes every existing public link stop working immediately, and new attempts fail with `PUBLIC_LINKS_DISABLED` (HTTP 403).
+- The per-account **publish public** entitlement an admin can grant or revoke. Without it the owner gets `PUBLIC_NOT_ALLOWED`, and an editor acting on that owner's canvas gets `PUBLIC_LINK_OWNER_GATED` (both HTTP 403).
 
-## Listing in the gallery
+## AI for added people
 
-The Share tab also has an opt-in **gallery** listing (the canvas's **description**,
-its **tags**, and an optional *use as template* toggle). Enabling it for **Whole org**
-also turns on **List for people with access**, so one owner action makes the canvas
-discoverable in Shared and in the organization-scoped gallery. A canvas can only be
-listed when it is published, has **no password** set, and is either:
+Shown only on the **Specific people** rung, and owner-only: **Allow added people to use AI** (`guestAiEnabled`, off by default) plus a USD **spend cap** (`guestAiCap`). Added people can already use KV, files, and realtime when those capabilities are on; AI is metered and billed to the owner, so it is opt-in per canvas. An editor who touches these fields gets `OWNER_ONLY`.
 
-- **Public link**, or
-- **Whole org**; gallery listing automatically enables organization discovery.
+## Gallery, description, and tags
 
-Team, Specific-people, and Whole-org canvases that have not been explicitly gallery-listed
-never appear there. Whole-org entries are returned only to authenticated members of the
-canvas's home org; Public-link entries remain discoverable to signed-in gallery viewers.
-The **description** is a single field (max 2000 characters) used everywhere the canvas is
-shown — the Overview tab, the gallery, Shared, and grid cards — there is no separate
-"gallery summary". Agents set it with `update_canvas` (the `description` parameter).
+**Gallery & templates** on the Share tab is an opt-in listing. A canvas can be listed only when it is published, has **no password**, and is either **Public link** or **Whole org** (listing a Whole-org canvas also turns on **List for people with access**). Team and Specific-people canvases never appear there. When an org boundary is configured, Whole-org entries are returned only to signed-in members of the canvas's home org; Public-link entries are visible to any signed-in gallery viewer. **Allow others to use as a template** lets colleagues clone the canvas as a starting point; your canvas is untouched.
 
-## Finding canvases (search)
+The **description** is one field (max 2000 characters) used everywhere the canvas is shown: Overview, Shared, grid cards, and the gallery. There is no separate gallery summary.
 
-**Your canvases**, **Shared**, and the **gallery** share one forgiving search. A query
-matches across a canvas's **title, description, tags, and slug**; Shared also matches
-the owner name and access context such as team name. Matching is
-**case-, accent-, and whitespace-insensitive** — `café`, `Cafe`, and `caf` all find
-"Café Menu". A multi-word query is AND-matched: every word must appear somewhere
-in those fields (the words can live in different fields — e.g. a word in the
-title and another in a tag). The same forgiving search backs the MCP `list_canvases`
-and `list_shared_canvases` `query` filters; `list_canvases` also takes a `tags`
-filter that matches any owned canvas carrying any of the given tags.
+**Tags** are one set per canvas, edited on the Overview tab (Enter or a comma confirms each; values are trimmed and lowercased; max **20 tags of up to 50 characters**). They power the tag filter in **Your canvases**, and once the canvas is gallery-listed the same tags show there and drive its tag shortcuts. Agents set both with `update_canvas` (`description`, `tags`).
+
+## Finding canvases
+
+**Your canvases**, **Shared**, and the **gallery** share one forgiving search over a canvas's **title, description, tags, and slug**; Shared also matches the owner's name and the access label (a team name, for example). Matching is case-, accent-, and whitespace-insensitive: `café`, `Cafe`, and `caf` all find "Café Menu". A multi-word query is AND-matched: every word must appear somewhere in those fields, in any combination. The same search backs the MCP `list_canvases` and `list_shared_canvases` `query` filters; `list_canvases` also takes a `tags` filter that matches canvases carrying any of the given tags.
 
 ## When an admin disables a canvas
 
-An admin can take a canvas down for moderation (the *disable* action in the
-all-canvases list). A disabled canvas becomes **read-only to its owner**: every
-owner mutation — settings, sharing, tags, capabilities, slug, preview, deploy /
-publish / rollback, archive / unpublish, and draft edits — is refused with a
-`DISABLED` error (HTTP 409 over the management API, a `DISABLED: …` failure over
-MCP). Reads still work, so you can still open the canvas, see its versions and
-usage, and read the **takedown reason** the admin left. An admin can re-enable or
-restore it; you cannot delete a disabled canvas while it's down.
+An admin can take a canvas down for moderation. A disabled canvas becomes **read-only to its owner and editors**: every mutation (settings, sharing, tags, capabilities, slug, preview, deploy / publish / rollback, archive / unpublish, draft edits) is refused with `DISABLED` (HTTP 409 over the management API, a `DISABLED: …` failure over MCP). Reads still work, so you can open the canvas, see its versions and usage, and read the takedown reason. You cannot delete a disabled canvas; an admin must re-enable or restore it first.
 
 ## Revoking
 
-Access is always revocable and never cached. Lowering the rung, removing an
-allowlist or pending entry, hitting an expiry, regenerating the slug, or
-unpublishing the canvas takes effect on the **next request** and drops live
-realtime sockets — no stale grants. Legacy guest rows retained from older
-deployments are revocation-only migration data; re-publishing a canvas does **not**
-silently restore old grants.
+Access is always revocable and never cached. Lowering the rung, removing a person, pending email, or team, hitting an expiry, regenerating the slug, or unpublishing takes effect on the **next request** and drops live realtime sockets. Legacy guest rows kept from older deployments (`guest:<id>` entries) are revocation-only migration data; re-publishing a canvas does not restore old grants.
+
+## Over MCP
+
+Every control above has an MCP tool that wraps the same service and role gate (owner or editor; a canvas you hold no role on reads as not found):
+
+| Tool | What it does |
+| --- | --- |
+| `list_access` | The people list with a `role` per entry and stable ids (`owner`, `member:<id>`, `guest:<id>`, `pending:<id>`, `team:<teamId>`); owners also get `transferCandidates`. |
+| `grant_access` | Add a person (`email`) or team (`teamId`) with `role` `viewer` or `editor`; the silent add. |
+| `invite_to_canvas` | The same add with a courtesy email. |
+| `set_access_role` | Change one entry's role. |
+| `revoke_access` | Remove an entry (the `owner` entry cannot be removed). |
+| `search_people` | Eligible-people suggestions for a canvas you own or edit, or a team you can see. |
+| `update_canvas` | `access`, `discoverability`, `teamIds`, `password`, `sharedExpiresAt`, `guestAiEnabled`, `guestAiCap`, `galleryListed`, `galleryTemplatable`, `description`, `tags`. |
+| `transfer_canvas` | Owner-only: hand the canvas to an existing editor by user id. |
+| `list_shared_canvases` | The Shared view: canvases opened to you that you do not own or edit. |

@@ -24,6 +24,7 @@ const FRAMES = [
   "tour-shared.webp",
   "landing-gallery.webp",
   "tour-sharing.webp",
+  "tour-people.webp",
   "tour-teams.webp",
   "tour-capabilities.webp",
   "tour-usage.webp",
