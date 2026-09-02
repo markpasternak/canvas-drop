@@ -242,8 +242,8 @@ export function PeopleAccessList({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        People and teams listed here can always open this canvas. Editors can also manage its
-        content, settings, and sharing. Only org members and teams can be editors.
+        General access never removes people or teams listed here. Editors can also manage the
+        canvas's content, settings, and sharing. Only org members and teams can be editors.
       </p>
 
       <div role="tablist" aria-label="Add direct access" className="flex border-b border-border">
@@ -427,7 +427,7 @@ export function PeopleAccessList({
         </ul>
       )}
       {entries !== null && !loadFailed && nonOwner.length === 0 && (
-        <p className="text-xs text-muted">No one added yet. Only you can open this.</p>
+        <p className="text-xs text-muted">No one else has direct access yet.</p>
       )}
 
       <ConfirmDialog

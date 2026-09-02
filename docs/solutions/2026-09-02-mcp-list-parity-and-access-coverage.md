@@ -71,26 +71,17 @@ Every publish path that can revive a revoked authoring share is now pinned: dash
 | Deploy API `GET` and publish | `GET` returns the established `publicationState` plus additive `accessMode`; bearer-key isolation stays canvas-scoped. Republish clears `revokedAt`. |
 | Dashboard lists | The shared owned-or-edited repository covers owner/direct-editor/team-editor membership; Shared covers direct/team viewers but excludes editors; gallery stays listed, published, unprotected, unexpired, and org-scoped. All SQL predicates run on both dialects. |
 | Share tab | Pending rows do not inflate “can open now” copy; legacy guests are named as password-exempt; a failed list read is explicit; navigating to another canvas invalidates the old mirror and ignores late success or failure responses. A failed post-mutation refresh also clears list-derived copy. |
-| Clone | Owner/editor and gallery-template paths remain as shipped. Viewer-team cloning is fenced by published + active + unexpired + unprotected. Archived and disabled now have explicit HTTP and dual-dialect MCP regression coverage. |
+| Clone | Owner/editor and gallery-template paths remain as shipped. Direct and team viewers now share one eligibility resolver and the same published + active + unexpired + unprotected fences. General access alone does not grant cloning. Archived, disabled, deleted, expired, password-protected, pending, guest, and no-role paths are denied. |
 
 ## Compatibility decision: `shared: false` with `teamIds: []`
 
 The deprecated boolean form is intentionally accepted under the same narrow carve-out as `access: "private"`: only a real transition from stored `team` to another value turns `teamIds: []` into a no-op. The viewer-team grants stay on the people-and-teams list. A bare empty array, an echoed non-team value, or a transition between two other values remains `TEAM_REQUIRED`. The test composes the real settings resolver with the management route and runs on both dialects.
 
-## Open product decision: who may clone?
+## Resolved product decision: direct and team viewers clone equally
 
-The shipped behavior is asymmetric:
+Mark chose the first option in follow-up issue #92: a signed-in viewer admitted through a direct person row may clone under the same conditions as a viewer admitted through a team. One shared resolver now owns the owner/editor, gallery-template, direct-viewer, and team-viewer paths. Viewer cloning is limited to active, published, unexpired, password-free sources; General access by itself, pending invitations, retained legacy guests, and no-role principals do not grant it.
 
-- a viewer admitted through a viewer-role **team** may clone a published, active, unexpired, unprotected canvas;
-- a viewer admitted through a **direct person row** may open the same canvas but cannot clone it.
-
-This round pins the asymmetry instead of silently changing authorization. The owner has three coherent options:
-
-1. Allow every listed viewer to clone eligible published content. This best matches “the list always applies” and is the least surprising because viewers can already read the published files.
-2. Remove viewer-team cloning and reserve cloning for owners, editors, and explicitly templatable gallery entries. This is the narrowest capability model.
-3. Keep the asymmetry and document team membership as an intentional clone capability. This preserves compatibility but needs a product reason users can understand.
-
-Recommendation: option 1 unless team-based cloning is meant to represent a distinct organizational trust grant.
+The clone is deliberately a durable copy, not a live entitlement. It starts as an unpublished Restricted canvas owned by the viewer, with an empty direct-access list, backend off, and a fresh slug and deploy key. Revoking the source grant does not delete or disable that copy. This follows the existing clone-as-template contract and is stated in the UI-facing and MCP documentation.
 
 ## The manual walkthrough gate
 

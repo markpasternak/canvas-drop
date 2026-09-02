@@ -577,10 +577,10 @@ export default function Share() {
 /**
  * U13 — the single locked panel shown while a canvas isn't published yet. It states
  * the dependency ONCE (sharing unlocks after the canvas is live) instead of repeating
- * a "publish first" notice beneath every disabled access rung, lock, and gallery
+ * a "publish first" notice beneath every disabled access rung, protection control, and gallery
  * control. The Publish CTA fires `usePublishDraft`, which invalidates the canvas-detail
  * query on success; `publicationState` flips to "published" and the parent re-renders
- * with the full access ladder / people / locks / gallery sections revealed in place —
+ * with the full access ladder / people / protection / gallery sections revealed in place —
  * no navigation, no manual reload. Open draft routes to the editor for those who want
  * to keep working before going live.
  */

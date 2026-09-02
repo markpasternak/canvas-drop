@@ -157,8 +157,8 @@ save shows a conflict banner instead. The **Versions** tab lists every kept
 version: **Make current** re-points the live URL at it (in either direction),
 **Restore** copies one back into the draft, **Download ZIP** exports it.
 
-The **Share** tab sets who can open the canvas, in two parts. **Share with people and
-teams** names people (by email) and teams, each as a **viewer** or an **editor**; that
+The **Sharing and permissions** page sets who can open the canvas, in two parts. **People and
+teams with direct access** names people (by email) and teams, each as a **viewer** or an **editor**; that
 list always applies, and a brand-new email becomes live only after that person's first
 verified sign-in. **General access** says who *else* can open the URL (opening it to the
 org or the public needs a published version):

@@ -70,7 +70,7 @@ describe("create audience", () => {
     ).toEqual(defaultCreateAudience());
   });
 
-  it("applies wider access and reports a fail-closed private fallback", async () => {
+  it("applies wider access and reports a fail-closed Restricted fallback", async () => {
     const update = vi.fn().mockResolvedValue({});
     await expect(
       applyCreateAudience("c1", { ...defaultCreateAudience(), choice: "workspace" }, update),

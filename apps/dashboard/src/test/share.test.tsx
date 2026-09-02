@@ -536,7 +536,7 @@ describe("share route", () => {
     });
     renderShare();
 
-    expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no one else has direct access yet/i)).toBeInTheDocument();
     await user.type(await screen.findByLabelText(/person's email/i), "colleague@example.com");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
