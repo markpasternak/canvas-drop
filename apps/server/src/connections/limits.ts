@@ -1,3 +1,5 @@
+import { inProcessRateLimitStore } from "../http/rate-limit.js";
+
 export type ConnectionLimitCode = "CONNECTION_RATE_LIMIT" | "CONNECTION_LIMIT";
 
 export class ConnectionLimitError extends Error {
@@ -27,29 +29,24 @@ export interface ConnectionAdmission {
 
 /** Single-process admission control for the small-data connection runtime. */
 export function connectionLimits(config: ConnectionLimitConfig, now = () => Date.now()) {
-  const actorWindows = new Map<string, number[]>();
-  const profileWindows = new Map<string, number[]>();
+  const rates = inProcessRateLimitStore(now);
   const canvasActive = new Map<string, number>();
   let instanceActive = 0;
 
-  function takeWindow(map: Map<string, number[]>, key: string, maximum: number, at: number) {
-    const since = at - 60_000;
-    const timestamps = (map.get(key) ?? []).filter((timestamp) => timestamp > since);
-    if (timestamps.length >= maximum) throw new ConnectionLimitError("CONNECTION_RATE_LIMIT", 60);
-    timestamps.push(at);
-    map.set(key, timestamps);
+  function takeWindow(key: string, maximum: number) {
+    const result = rates.hit(key, maximum, 60_000);
+    if (!result.allowed) {
+      throw new ConnectionLimitError("CONNECTION_RATE_LIMIT", result.retryAfterSec);
+    }
   }
 
   return {
     acquire(input: { actorId: string; canvasId: string; profileId: string }): ConnectionAdmission {
-      const at = now();
       takeWindow(
-        actorWindows,
-        `${input.actorId}:${input.canvasId}:${input.profileId}`,
+        `connection:actor:${input.actorId}:${input.canvasId}:${input.profileId}`,
         config.actorPerMin,
-        at,
       );
-      takeWindow(profileWindows, input.profileId, config.profilePerMin, at);
+      takeWindow(`connection:profile:${input.profileId}`, config.profilePerMin);
       const activeForCanvas = canvasActive.get(input.canvasId) ?? 0;
       if (
         instanceActive >= config.instanceConcurrency ||

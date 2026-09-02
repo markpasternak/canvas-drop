@@ -427,10 +427,16 @@ function ProfileCard({ profile }: { profile: AdminConnection }) {
 
   async function applyUpdate(input: Omit<Partial<ConnectionProfileInput>, "key">) {
     try {
-      await update.mutateAsync({ id: profile.id, input });
+      const saved = await update.mutateAsync({ id: profile.id, input });
       setPendingUpdate(null);
       setReplaceHeaders(false);
-      setDraft((current) => ({ ...current, headers: [] }));
+      setDraft({
+        key: saved.key,
+        label: saved.label,
+        origin: saved.origin,
+        allowedMethods: saved.allowedMethods,
+        headers: [],
+      });
       setEditing(false);
       toast("Connection profile updated");
     } catch (error) {

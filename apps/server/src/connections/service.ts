@@ -104,19 +104,17 @@ export function connectionService(deps: {
 
   const managerView = (profile: ConnectionProfile, backendEnabled = true): CanvasConnectionView => {
     const keyUnavailable = !!profile.protectedHeadersEnvelope && !deps.cipher.available;
+    let unavailableReason: CanvasConnectionView["unavailableReason"] = null;
+    if (keyUnavailable) unavailableReason = "encryption_key_unavailable";
+    else if (!profile.enabled) unavailableReason = "disabled";
+    else if (!backendEnabled) unavailableReason = "backend_off";
     return {
       key: profile.key,
       label: profile.label,
       origin: profile.origin,
       allowedMethods: profile.allowedMethods,
       available: backendEnabled && profile.enabled && !keyUnavailable,
-      unavailableReason: keyUnavailable
-        ? "encryption_key_unavailable"
-        : !profile.enabled
-          ? "disabled"
-          : !backendEnabled
-            ? "backend_off"
-            : null,
+      unavailableReason,
     };
   };
 
