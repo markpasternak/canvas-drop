@@ -64,6 +64,15 @@ export const ERROR_CODES = {
     summary:
       "canvasdrop.canvases.update was called on an unpublished share without a bundle; include a bundle to publish it again.",
   },
+  SHARE_CONFLICT: {
+    status: 409,
+    summary: "The share changed after it was loaded; refresh before retrying the update.",
+  },
+  UPDATE_PARTIAL: {
+    status: 502,
+    summary:
+      "The share settings were saved, but a later update stage failed; inspect the returned current state.",
+  },
   REQUEST_FAILED: { status: 0, summary: "A request failed without a more specific code." },
 } as const;
 
@@ -127,6 +136,18 @@ export class PublishFailedError extends CanvasdropError {
   }
 }
 
+/** Settings committed, but a later authoring-update stage (currently bundle deploy) failed. */
+export class UpdatePartialError extends CanvasdropError {
+  readonly stage: string;
+  readonly current?: AuthoredCanvas;
+  constructor(stage: string, current?: AuthoredCanvas, message?: string) {
+    super("UPDATE_PARTIAL", 502, message ?? "share update partially completed");
+    this.name = "UpdatePartialError";
+    this.stage = stage;
+    this.current = current;
+  }
+}
+
 /** Map an HTTP response (status + parsed body) to a typed error. */
 export function errorFromResponse(status: number, body: unknown): CanvasdropError {
   const code =
@@ -159,7 +180,18 @@ export function errorFromResponse(status: number, body: unknown): CanvasdropErro
       typeof body === "object" && body && "id" in body
         ? String((body as { id: unknown }).id)
         : undefined;
-    return new PublishFailedError(id);
+    return new PublishFailedError(id, message);
+  }
+  if (code === "UPDATE_PARTIAL") {
+    const stage =
+      typeof body === "object" && body && "stage" in body
+        ? String((body as { stage: unknown }).stage)
+        : "unknown";
+    const current =
+      typeof body === "object" && body && "current" in body
+        ? ((body as { current: AuthoredCanvas }).current ?? undefined)
+        : undefined;
+    return new UpdatePartialError(stage, current, message);
   }
   // Quota/limit errors map to QuotaExceededError, signalled either by code (AI:
   // 429 QUOTA_EXCEEDED, or the per-canvas guest AI cap: 429 GUEST_AI_CAP; KV
@@ -392,6 +424,8 @@ export interface UpdateOptions {
   password?: string | null;
   expiresAt?: number | null;
   metadata?: Record<string, unknown>;
+  /** AuthoredCanvas.updatedAt observed when editing. A stale token returns SHARE_CONFLICT. */
+  expectedUpdatedAt?: number;
   bundle?: Blob | ArrayBuffer;
 }
 
@@ -408,10 +442,16 @@ export interface AuthoredCanvas {
   createdAt: number;
   updatedAt: number;
   expiresAt: number | null;
+  discoverability: "link_only" | "listed";
   galleryListed: boolean;
+  galleryTemplatable: boolean;
   revokedAt: number | null;
-  /** The creator (owner) id. */
+  /** Current owner id (ownership may have transferred since authoring). */
   createdBy: string;
+  /** The current viewer's management role on this share. */
+  viewerRole: "owner" | "editor" | "admin";
+  /** Safe audience detail: names are included for teams; restricted people are count-only. */
+  audienceSummary: { count: number | null; names: string[] };
   /** The current version id — advances on every bundle deploy (a change signal). */
   version: string | null;
   bundleUpdatedAt: number;
@@ -425,10 +465,11 @@ export interface CanvasesNamespace {
    *  Throws `PublishFailedError` (with `.id`) if the deploy/config fails after create. */
   publish(opts: PublishOptions): Promise<AuthoredCanvas>;
   /** Update an existing share in place — a new version at the SAME URL, and/or changed
-   *  settings/metadata. Owner or admin only. */
+   *  settings/metadata. Owners and editors may update; the server's explicit admin
+   *  authoring allowance is also reflected by viewerRole="admin". */
   update(id: string, opts: UpdateOptions): Promise<AuthoredCanvas>;
-  /** The shares THIS viewer authored (viewer-scoped), incl. revoked/expired. Optionally
-   *  filtered by sourceApp/sourceKind/tags. */
+  /** Authored shares THIS viewer currently manages, incl. transferred/editor shares and
+   *  revoked/expired records. Optionally filtered by sourceApp/sourceKind/tags. */
   list(filter?: {
     sourceApp?: string;
     sourceKind?: string;

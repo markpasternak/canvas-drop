@@ -31,6 +31,11 @@ export interface DeployResult {
   warnings: string[];
 }
 
+export interface DeployCommitOptions {
+  /** Replace the normal live-pointer swap with a caller-owned atomic activation. */
+  activateVersion?: (versionId: string) => Promise<void>;
+}
+
 export interface DeployEngineDeps {
   config: Config;
   canvases: CanvasesRepository;
@@ -72,6 +77,7 @@ export function deployEngine(deps: DeployEngineDeps) {
       source: DeploySource,
       entries: AsyncIterable<DeployEntry> | Iterable<DeployEntry>,
       actorId: string,
+      commitOptions?: DeployCommitOptions,
     ): Promise<DeployResult> {
       // Concurrent deploys to one canvas can race nextNumber; the unique index on
       // (canvas_id, number) makes a collision a constraint error — retry rather
@@ -178,7 +184,14 @@ export function deployEngine(deps: DeployEngineDeps) {
         throw err;
       }
 
-      await this.commitReadyVersion(canvas, version, manifest, fileCount, totalBytes);
+      await this.commitReadyVersion(
+        canvas,
+        version,
+        manifest,
+        fileCount,
+        totalBytes,
+        commitOptions,
+      );
 
       return {
         url: canvasUrl(deps.config, canvas.slug),
@@ -201,6 +214,7 @@ export function deployEngine(deps: DeployEngineDeps) {
       manifest: Manifest,
       fileCount: number,
       totalBytes: number,
+      commitOptions?: DeployCommitOptions,
     ): Promise<void> {
       // Atomic-ish swap: mark ready, then move the canvas pointer. The pointer
       // swap is the commit — a crash before it leaves the old version live. If the
@@ -210,7 +224,8 @@ export function deployEngine(deps: DeployEngineDeps) {
       // `markReady` asserts exactly one row updated — a finalize whose canvas was
       // purged between createPending and here fails cleanly (plan 003 guard).
       await deps.versions.markReady(version.id, { fileCount, totalBytes, manifest });
-      await deps.canvases.setCurrentVersion(canvas.id, version.id);
+      if (commitOptions?.activateVersion) await commitOptions.activateVersion(version.id);
+      else await deps.canvases.setCurrentVersion(canvas.id, version.id);
 
       // Schedule a preview capture of the freshly deployed version (plan 004 / U13).
       // Effective-gated + best-effort inside the trigger — never fails the deploy.

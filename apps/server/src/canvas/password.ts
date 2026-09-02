@@ -12,6 +12,15 @@ export function hashPassword(password: string): Promise<string> {
   return hash(password, PARAMS);
 }
 
+/** Preserve an omitted password, clear an explicit null, or hash a replacement. */
+export function hashPasswordMutation(
+  password: string | null | undefined,
+): Promise<string> | null | undefined {
+  if (password === undefined) return undefined;
+  if (password === null) return null;
+  return hashPassword(password);
+}
+
 export async function verifyPassword(
   storedHash: string,
   password: string,

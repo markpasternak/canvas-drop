@@ -15,7 +15,8 @@ use it — creation needs a signed-in org member.
 // Create a durable share once.
 const share = await canvasdrop.canvases.publish({
   title: "Team roadmap — Q3 snapshot",
-  access: "public_link",             // "private" | "specific_people" | "whole_org" | "public_link" | "password"
+  access: "public_link",             // audience; defaults to "private"
+  password: "optional-extra-lock",   // independent of the audience
   tags: ["roadmap"],
   metadata: { sourceApp: "product-roadmap", sourceKind: "roadmap-share", theme: "light" },
   expiresAt: Date.now() + 7 * 864e5, // optional; the operator may require/limit it
@@ -54,14 +55,19 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | --- | --- | --- |
 | `id` / `url` | `string` | stable id and public URL (the URL never changes across updates) |
 | `title` / `tags` | `string` / `string[]` | |
-| `access` | `string` | the current access rung |
+| `access` | `string` | the current audience rung |
+| `hasPassword` | `boolean` | whether an additional password lock is currently set |
+| `discoverability` | `"link_only" \| "listed"` | whether eligible org/team shares appear in discovery surfaces |
+| `galleryTemplatable` | `boolean` | whether gallery viewers may use the canvas as a template |
+| `viewerRole` | `"owner" \| "editor" \| "admin"` | why the current viewer may manage this record |
+| `audienceSummary` | `{ count: number \| null; names: string[] }` | safe summary of specific people or team grants |
 | `status` | `"live" \| "expired" \| "revoked" \| "private"` | derived; precedence `revoked` › `expired` › `private` › `live` |
 | `createdAt` / `updatedAt` | `number` | unix ms |
 | `expiresAt` / `revokedAt` | `number \| null` | share expiry; when it was revoked |
 | `galleryListed` | `boolean` | whether the canvas is explicitly listed in the gallery |
 | `createdBy` | `string` | the creator (owner) id |
 | `version` | `string \| null` | the current version id — advances on every bundle deploy (a change signal) |
-| `bundleUpdatedAt` | `number` | last-write stamp (deploy or settings change) |
+| `bundleUpdatedAt` | `number` | legacy last-change stamp; use `version` to detect bundle changes |
 | `sourceApp` / `sourceKind` | `string \| null` | pulled from `metadata` (the filterable dimensions) |
 | `metadata` | `Record<string, unknown>` | your free-form blob, round-tripped verbatim |
 
@@ -73,8 +79,8 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | `bundle` | `Blob \| ArrayBuffer` | required — the static-site **zip** |
 | `slug` | `string?` | omit for a readable-random slug |
 | `tags` | `string[]?` | |
-| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | operator restricts the allowed set; `"password"` = a public link protected by `password` |
-| `password` | `string?` | required when `access` is `"password"` |
+| `access` | `"private" \| "specific_people" \| "whole_org" \| "public_link" \| "password"?` | audience; defaults to `"private"`; `"password"` remains a compatibility shorthand for public link + password |
+| `password` | `string?` | optional extra lock on any audience; required with the `"password"` shorthand |
 | `expiresAt` | `number?` | unix ms; the operator may require an expiry and cap how far out it may be |
 | `metadata` | `Record<string, unknown>?` | free-form structured state (`sourceApp`/`sourceKind`/`theme`/…), bounded in size |
 
@@ -93,6 +99,7 @@ settings/metadata (the URL and current version stay put).
 | `password` | `string \| null?` | set, or `null` to clear |
 | `expiresAt` | `number \| null?` | set, or `null` to clear |
 | `metadata` | `Record<string, unknown>?` | replaces the stored blob |
+| `expectedUpdatedAt` | `number?` | compare-and-swap token from the last read; stale updates reject with `SHARE_CONFLICT` |
 
 `publish` and `update` each send one `multipart/form-data` request
 (`credentials: "include"`): a JSON `metadata` part plus (optionally, for `update`) the
@@ -100,7 +107,8 @@ zip `bundle` part.
 
 ### `list` filter
 
-`list()` returns every active canvas record the viewer authored — **including**
+`list()` returns every active canvas record the viewer can currently manage as owner or
+editor — **including**
 unpublished and expired ones, but excluding archived, deleted, and admin-disabled
 canvases — so a management UI can show recoverable records. Pass a filter to narrow server-side:
 
@@ -136,8 +144,9 @@ await canvasdrop.canvases.list({ sourceKind: "roadmap-share", tags: ["q3"] });
 - Quota is consumed the moment the canvas is **created** by `publish` — a
   `PublishFailedError` still counts, since the canvas exists. **`update` does not consume
   quota** (it edits an existing share). `revoke` does not refund quota.
-- `update`, `list`, and `revoke` are scoped to the viewer's own shares (or an admin's);
-  a share id you don't own reads as **not-found**.
+- `list` is scoped to shares the viewer currently manages as owner or editor. An
+  administrator may still update or revoke a known share id through the explicit admin
+  allowance; an unauthorized id reads as **not-found**.
 - `expiresAt` uses the same share-expiry mechanism as the dashboard, so it only means
   something on a shareable rung (`public_link` / `password` / `whole_org` / `specific_people`).
 
@@ -156,6 +165,8 @@ or read `err.code` / `err.status`.
   missing/over-max expiry) → `CanvasdropError` (`status: 400`/`413`, `code: "INVALID_BODY"`).
 - settings-only `update` on a share that's unpublished → `CanvasdropError`
   (`status: 409`, `code: "SHARE_REVOKED"`) — include a bundle to publish it again.
+- An `expectedUpdatedAt` token is stale → `CanvasdropError`
+  (`status: 409`, `code: "SHARE_CONFLICT"`) with the current share state; refresh before retrying.
 - The canvas was created but its deploy or share-config failed →
   `PublishFailedError` (`status: 502`, `code: "PUBLISH_FAILED"`). Its `.id` is the new
   canvas's id, so you can retry the publish or `canvasdrop.canvases.revoke(id)`.

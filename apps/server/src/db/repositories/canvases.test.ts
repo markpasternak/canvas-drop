@@ -198,14 +198,18 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(after?.galleryTemplatable).toBe(false);
   });
 
-  it("revoke (authoring v2) stamps revoked_at + clears the version, but KEEPS access/tags/metadata + active status", async () => {
+  it("revoke clears publication state while preserving tags/metadata + active status", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
     const repo = canvasesRepository(client);
     const cv = await repo.create({ ownerId, slug: "share-1", apiKeyHash: "h" });
     await deploy(client, cv.id, ownerId);
     await repo.updateSettings(cv.id, {
-      access: "public_link",
+      access: "whole_org",
+      discoverability: "listed",
+      sharedExpiresAt: Date.now() + 86_400_000,
+      galleryListed: true,
+      galleryTemplatable: true,
       tags: ["q3"],
       metadata: { sourceApp: "product-roadmap", sourceKind: "roadmap-share" },
     });
@@ -215,6 +219,11 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(revoked?.revokedAt).not.toBeNull();
     expect(revoked?.currentVersionId).toBeNull(); // URL has no content → unreadable
     expect(revoked?.access).toBe("private"); // anonymous-public surface (social card/CDN) closed
+    expect(revoked?.discoverability).toBe("link_only");
+    expect(revoked?.sharedExpiresAt).toBeNull();
+    expect(revoked?.galleryListed).toBe(false);
+    expect(revoked?.galleryTemplatable).toBe(false);
+    expect(revoked?.galleryPublishedAt).toBeNull();
     // Unlike unpublish, revoke preserves the descriptive fields for the "revoked" list row:
     expect(revoked?.tags).toEqual(["q3"]);
     expect(revoked?.metadata).toMatchObject({ sourceApp: "product-roadmap" });
@@ -405,6 +414,34 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     expect(unshared.access).toBe("private");
   });
 
+  it("atomically updates access + password and rejects a stale updatedAt precondition", async () => {
+    client = await makeTestDb(dialect);
+    const ownerId = await seedOwner(client);
+    const repo = canvasesRepository(client);
+    const cv = await repo.create({ ownerId, slug: "atomic-share", apiKeyHash: "h" });
+
+    const applied = await repo.updateSettingsAtomic(
+      cv.id,
+      { access: "public_link" },
+      { passwordHash: "argon2-hash", expectedUpdatedAt: cv.updatedAt },
+    );
+    expect(applied?.access).toBe("public_link");
+    expect(applied?.passwordHash).toBe("argon2-hash");
+    expect(applied?.passwordVersion).toBe(cv.passwordVersion + 1);
+    expect(applied?.updatedAt).toBeGreaterThan(cv.updatedAt);
+
+    const stale = await repo.updateSettingsAtomic(
+      cv.id,
+      { access: "private" },
+      { passwordHash: null, expectedUpdatedAt: cv.updatedAt },
+    );
+    expect(stale).toBeUndefined();
+    expect(await repo.findById(cv.id)).toMatchObject({
+      access: "public_link",
+      passwordHash: "argon2-hash",
+    });
+  });
+
   it("setPassword bumps passwordVersion (invalidates gate cookies)", async () => {
     client = await makeTestDb(dialect);
     const ownerId = await seedOwner(client);
@@ -530,8 +567,11 @@ describe.each(DIALECTS)("canvasesRepository [%s]", (dialect) => {
     });
 
     // ready → swap succeeds and the pointer moves
+    const beforeSwap = await repo.findById(cv.id);
     expect(await repo.setCurrentVersionIfReady(cv.id, ready.id)).toBe(true);
-    expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
+    const afterSwap = await repo.findById(cv.id);
+    expect(afterSwap?.currentVersionId).toBe(ready.id);
+    expect(afterSwap?.updatedAt).toBeGreaterThan(beforeSwap?.updatedAt ?? 0);
     // pending (not ready) → refused, pointer unchanged (no dangling pointer)
     expect(await repo.setCurrentVersionIfReady(cv.id, pending.id)).toBe(false);
     expect((await repo.findById(cv.id))?.currentVersionId).toBe(ready.id);
