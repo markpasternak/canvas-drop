@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   type AllowlistEntry,
   ApiError,
@@ -9,12 +9,12 @@ import {
 import { inputControl } from "../lib/input-styles.js";
 import { addPersonFeedback } from "../lib/invite-feedback.js";
 import { usePeopleSearch } from "../lib/queries.js";
+import { ActionMenu, ActionMenuItem } from "./ActionMenu.js";
 import { ApiKeyReveal } from "./ApiKeyReveal.js";
 import { Badge } from "./Badge.js";
 import { Button } from "./Button.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 import { PeopleEmailCombobox } from "./PeopleEmailCombobox.js";
-import { SegmentedControl } from "./SegmentedControl.js";
 import { Skeleton } from "./Skeleton.js";
 import { InlineNotice } from "./Surface.js";
 import { useToast } from "./Toast.js";
@@ -36,25 +36,18 @@ export function TeamScopeBadge({
 
 export interface PeopleAccessListProps {
   canvasId: string;
-  /** The caller's role on the canvas — owner-only controls (Transfer) key off it (KTD14). */
-  role: "owner" | "editor" | null | undefined;
   /** Teams the caller may grant (the ones they belong to). */
   teams: Team[];
   orgs: Array<{ id: string; name: string }>;
   /** Fires with the fresh list after every load/change (the share view mirrors it). */
   onChanged?: (entries: AllowlistEntry[] | null) => void;
-  /** Owner-only: transfer ownership to the chosen editor. */
-  onTransfer?: (toUserId: string) => Promise<void>;
-  transferring?: boolean;
+  /** Reports server-derived transfer candidates to the owner-only Advanced section. */
+  onTransferCandidatesChanged?: (candidates: TransferCandidate[] | null) => void;
+  /** Bump after an external mutation (ownership transfer) to refresh the unified list. */
+  refreshKey?: number;
 }
 
 const ROLE_LABEL: Record<AccessRole, string> = { viewer: "Viewer", editor: "Editor" };
-/** The two roles as a segmented choice — a real either/or, never a dropdown that reads as
- *  a button (share-tab UX fix). */
-const ROLE_ITEMS = [
-  { value: "viewer", label: ROLE_LABEL.viewer, title: "Can open the canvas" },
-  { value: "editor", label: ROLE_LABEL.editor, title: "Manages the canvas with the owner" },
-] as const;
 
 function entryLabel(e: AllowlistEntry): string {
   if (e.kind === "team") return e.name ?? "Team";
@@ -64,18 +57,16 @@ function entryLabel(e: AllowlistEntry): string {
 /**
  * The unified people list (editor-roles plan, KD1/KTD5): the owner pinned first, then
  * people, pending invitees, and teams — each with a role control (viewer / editor; guests
- * are always viewers). One list, one add-a-person and one add-a-team control, so a
- * colleague or a whole team becomes an editor in a single grant. General access lives
- * below it, unchanged. The Transfer ownership action shows in the owner's view only.
+ * are always viewers). The People/Teams tabs switch only the add form; the unified list
+ * stays in place so changing input mode never changes the user's understanding of access.
  */
 export function PeopleAccessList({
   canvasId,
-  role,
   teams,
   orgs,
   onChanged,
-  onTransfer,
-  transferring = false,
+  onTransferCandidatesChanged,
+  refreshKey = 0,
 }: PeopleAccessListProps) {
   const toast = useToast();
   const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
@@ -84,14 +75,10 @@ export function PeopleAccessList({
   const [personRole, setPersonRole] = useState<AccessRole>("viewer");
   const [teamId, setTeamId] = useState("");
   const [teamRole, setTeamRole] = useState<AccessRole>("viewer");
+  const [addMode, setAddMode] = useState<"people" | "teams">("people");
   // One flag per action (review #21): adding a person never greys out Add team.
   const [personBusy, setPersonBusy] = useState(false);
   const [teamBusy, setTeamBusy] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [transferTo, setTransferTo] = useState<string | null>(null);
-  // Owner-only, server-derived (review #7): every effective editor, including the people
-  // behind an editor team — the list's team ROW can't be a transfer target.
-  const [candidates, setCandidates] = useState<TransferCandidate[] | null>(null);
   // KTD11 / AE19: after an editor leaves (removed or demoted), offer to rotate the deploy
   // key they may have copied. Declining removes only the grant.
   const [keyPrompt, setKeyPrompt] = useState<string | null>(null);
@@ -103,6 +90,9 @@ export function PeopleAccessList({
   // A canvas change can leave the previous allowlist request in flight. Only the latest
   // request may update either this component or the parent's list-aware copy.
   const requestGeneration = useRef(0);
+  const peopleTab = useRef<HTMLButtonElement>(null);
+  const teamsTab = useRef<HTMLButtonElement>(null);
+  const tabsId = useId();
   const search = email.trim();
   const searchEnabled = search.length >= 2;
   const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
@@ -113,17 +103,20 @@ export function PeopleAccessList({
   const reload = () => {
     const generation = ++requestGeneration.current;
     setEntries(null);
-    setCandidates(null);
     setLoadFailed(false);
     onChanged?.(null);
+    onTransferCandidatesChanged?.(null);
     return api
       .listAllowlist(canvasId)
       .then((view) => {
         if (generation !== requestGeneration.current) return;
         setEntries(view.entries);
-        setCandidates(view.transferCandidates ?? null);
         setLoadFailed(false);
         onChanged?.(view.entries);
+        const directEditors = view.entries
+          .filter((e) => e.kind === "member" && e.role === "editor" && e.userId)
+          .map((e) => ({ id: e.userId as string, name: e.name ?? "", email: e.email ?? "" }));
+        onTransferCandidatesChanged?.(view.transferCandidates ?? directEditors);
       })
       .catch((err) => {
         if (generation !== requestGeneration.current) return;
@@ -131,30 +124,23 @@ export function PeopleAccessList({
         // inaccessible list must be distinguishable from a real-empty one.
         toast(err instanceof ApiError ? err.hint : "Couldn't load the access list", "error");
         setEntries([]);
-        setCandidates(null);
         setLoadFailed(true);
+        onTransferCandidatesChanged?.(null);
       });
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvasId change only
+  // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvas or parent refresh only
   useEffect(() => {
     void reload();
     return () => {
       requestGeneration.current += 1;
     };
-  }, [canvasId]);
+  }, [canvasId, refreshKey]);
 
   const grantedTeamIds = new Set(
     (entries ?? []).filter((e) => e.kind === "team").map((e) => e.teamId),
   );
   const addableTeams = teams.filter((t) => !grantedTeamIds.has(t.id));
-  // Transfer recipients: the server's projection when present (owners), else the direct
-  // editor rows (legacy payloads) — never the team rows themselves.
-  const editors: TransferCandidate[] =
-    candidates ??
-    (entries ?? [])
-      .filter((e) => e.kind === "member" && e.role === "editor" && e.userId)
-      .map((e) => ({ id: e.userId as string, name: e.name ?? "", email: e.email ?? "" }));
   const nonOwner = (entries ?? []).filter((e) => e.kind !== "owner");
 
   async function addPerson() {
@@ -230,81 +216,162 @@ export function PeopleAccessList({
   }
 
   const roleSelect = (e: AllowlistEntry) => (
-    <SegmentedControl
+    <select
       aria-label={`Role for ${entryLabel(e)}`}
-      size="sm"
-      items={ROLE_ITEMS}
+      className={`${inputControl} h-8 w-auto min-w-24 py-0 text-xs`}
       value={e.role === "editor" ? "editor" : "viewer"}
-      onChange={(next) => {
+      onChange={(event) => {
+        const next = event.target.value as AccessRole;
         if (next !== (e.role === "editor" ? "editor" : "viewer")) void changeRole(e, next);
       }}
-    />
+    >
+      <option value="viewer">Viewer</option>
+      <option value="editor">Editor</option>
+    </select>
   );
+
+  function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const tabs: Array<"people" | "teams"> = teams.length > 0 ? ["people", "teams"] : ["people"];
+    const current = tabs.indexOf(addMode);
+    const next =
+      event.key === "Home"
+        ? tabs[0]
+        : event.key === "End"
+          ? tabs[tabs.length - 1]
+          : event.key === "ArrowRight"
+            ? tabs[(current + 1) % tabs.length]
+            : tabs[(current - 1 + tabs.length) % tabs.length];
+    if (!next) return;
+    setAddMode(next);
+    (next === "people" ? peopleTab : teamsTab).current?.focus();
+  }
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted">
-        Everyone listed here can open the canvas, whatever General access below says. An
-        <strong className="font-medium text-fg"> editor</strong> also runs it with you — content,
-        settings, sharing — everything except deleting or transferring it. Only org members and
-        teams can be editors.
+      <p className="text-sm text-muted">
+        General access never removes people or teams listed here. Editors can also manage the
+        canvas's content, settings, and sharing. Only org members and teams can be editors.
       </p>
 
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[16rem] flex-1">
-          <PeopleEmailCombobox
-            label="Person's email"
-            placeholder="colleague@example.com"
-            value={email}
-            onChange={setEmail}
-            onSubmit={() => void addPerson()}
-            suggestions={suggestions}
-            searchEnabled={searchEnabled}
-            searching={searchingPeople}
-          />
-        </div>
-        <SegmentedControl
-          aria-label="Role for the person to add"
-          items={ROLE_ITEMS}
-          value={personRole}
-          onChange={setPersonRole}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={personBusy}
-          disabled={!email.trim()}
-          onClick={() => void addPerson()}
+      <div role="tablist" aria-label="Add direct access" className="flex border-b border-border">
+        <button
+          ref={peopleTab}
+          id={`${tabsId}-people-tab`}
+          type="button"
+          role="tab"
+          aria-selected={addMode === "people"}
+          aria-controls={`${tabsId}-people-panel`}
+          tabIndex={addMode === "people" ? 0 : -1}
+          className={`border-b-2 px-3 py-2 text-sm font-medium ${
+            addMode === "people"
+              ? "border-accent text-fg"
+              : "border-transparent text-muted hover:text-fg"
+          }`}
+          onClick={() => setAddMode("people")}
+          onKeyDown={onTabKeyDown}
         >
-          Add person
-        </Button>
+          People
+        </button>
+        <button
+          ref={teamsTab}
+          id={`${tabsId}-teams-tab`}
+          type="button"
+          role="tab"
+          aria-selected={addMode === "teams"}
+          aria-controls={`${tabsId}-teams-panel`}
+          tabIndex={addMode === "teams" ? 0 : -1}
+          disabled={teams.length === 0}
+          className={`border-b-2 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+            addMode === "teams"
+              ? "border-accent text-fg"
+              : "border-transparent text-muted hover:text-fg"
+          }`}
+          onClick={() => setAddMode("teams")}
+          onKeyDown={onTabKeyDown}
+        >
+          Teams
+        </button>
       </div>
 
-      {teams.length > 0 ? (
-        <div className="flex flex-wrap items-end gap-2">
+      {addMode === "people" ? (
+        <div
+          id={`${tabsId}-people-panel`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-people-tab`}
+          className="flex flex-wrap items-end gap-2"
+        >
+          <div className="min-w-[16rem] flex-1">
+            <PeopleEmailCombobox
+              label="Person's email"
+              placeholder="colleague@example.com"
+              value={email}
+              onChange={setEmail}
+              onSubmit={() => void addPerson()}
+              suggestions={suggestions}
+              searchEnabled={searchEnabled}
+              searching={searchingPeople}
+            />
+          </div>
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+            Role
+            <select
+              aria-label="Role for the person to add"
+              className={`${inputControl} h-9 min-w-28 py-0`}
+              value={personRole}
+              onChange={(event) => setPersonRole(event.target.value as AccessRole)}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+            </select>
+          </label>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={personBusy}
+            disabled={!email.trim()}
+            onClick={() => void addPerson()}
+          >
+            Add
+          </Button>
+        </div>
+      ) : (
+        <div
+          id={`${tabsId}-teams-panel`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-teams-tab`}
+          className="flex flex-wrap items-end gap-2"
+        >
           <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5 text-sm font-medium text-fg">
             Team
             <select
               aria-label="Team to add"
               className={`${inputControl} h-9 py-0`}
               value={teamId}
-              onChange={(ev) => setTeamId(ev.target.value)}
+              onChange={(event) => setTeamId(event.target.value)}
             >
               <option value="">Choose a team…</option>
-              {addableTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                  {t.orgId === null ? " (personal)" : ""}
+              {addableTeams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                  {team.orgId === null ? " (personal)" : ""}
                 </option>
               ))}
             </select>
           </label>
-          <SegmentedControl
-            aria-label="Role for the team to add"
-            items={ROLE_ITEMS}
-            value={teamRole}
-            onChange={setTeamRole}
-          />
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-fg">
+            Role
+            <select
+              aria-label="Role for the team to add"
+              className={`${inputControl} h-9 min-w-28 py-0`}
+              value={teamRole}
+              onChange={(event) => setTeamRole(event.target.value as AccessRole)}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+            </select>
+          </label>
           <Button
             size="sm"
             variant="secondary"
@@ -312,17 +379,10 @@ export function PeopleAccessList({
             disabled={!teamId}
             onClick={() => void addTeam()}
           >
-            Add team
+            Add
           </Button>
         </div>
-      ) : null}
-
-      <div className="space-y-1 border-t border-border pt-4">
-        <h3 className="text-sm font-semibold text-fg">People and teams with direct access</h3>
-        <p className="text-xs text-muted">
-          General access below may let other people open the canvas too.
-        </p>
-      </div>
+      )}
 
       {entries === null ? (
         <Skeleton className="h-8" />
@@ -336,7 +396,6 @@ export function PeopleAccessList({
             <li key={e.id} className="flex items-center justify-between gap-3 py-2 text-sm">
               <span className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="truncate text-fg">{entryLabel(e)}</span>
-                {e.kind === "owner" && <Badge tone="accent">Owner</Badge>}
                 {e.kind === "team" && (
                   <TeamScopeBadge
                     team={{
@@ -352,7 +411,9 @@ export function PeopleAccessList({
                 {e.kind === "guest" && <span className="text-xs text-muted">legacy guest</span>}
               </span>
               <span className="flex shrink-0 items-center gap-1">
-                {e.kind === "owner" ? null : e.kind === "guest" ? (
+                {e.kind === "owner" ? (
+                  <span className="text-xs font-medium text-fg">Owner</span>
+                ) : e.kind === "guest" ? (
                   <span
                     className="text-xs text-muted"
                     title="Guests can only view — only org members can be editors."
@@ -363,14 +424,11 @@ export function PeopleAccessList({
                   roleSelect(e)
                 )}
                 {e.kind !== "owner" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted hover:text-danger"
-                    onClick={() => setRemoving(e)}
-                  >
-                    Remove
-                  </Button>
+                  <ActionMenu label={`Actions for ${entryLabel(e)}`}>
+                    <ActionMenuItem danger onSelect={() => setRemoving(e)}>
+                      Remove
+                    </ActionMenuItem>
+                  </ActionMenu>
                 )}
               </span>
             </li>
@@ -378,35 +436,7 @@ export function PeopleAccessList({
         </ul>
       )}
       {entries !== null && !loadFailed && nonOwner.length === 0 && (
-        <p className="text-xs text-muted">No one added yet. Only you can open this.</p>
-      )}
-
-      {role !== "editor" && onTransfer && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-fg">Transfer ownership</p>
-            <p className="text-xs text-muted">
-              Hand this canvas to one of its editors. It takes effect at once; you stay on as an
-              editor.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={editors.length === 0}
-            title={
-              editors.length === 0
-                ? "Add an editor first — ownership can only move to an editor."
-                : undefined
-            }
-            onClick={() => {
-              setTransferTo(editors[0]?.id ?? null);
-              setTransferOpen(true);
-            }}
-          >
-            Transfer ownership
-          </Button>
-        </div>
+        <p className="text-xs text-muted">No one else has direct access yet.</p>
       )}
 
       <ConfirmDialog
@@ -450,57 +480,6 @@ export function PeopleAccessList({
           }}
         />
       )}
-
-      <ConfirmDialog
-        open={transferOpen}
-        onClose={() => setTransferOpen(false)}
-        title="Transfer ownership?"
-        actionLabel="Transfer ownership"
-        destructive
-        loading={transferring}
-        onConfirm={() => {
-          if (!transferTo || !onTransfer) return;
-          // The owner row and the recipient's row both change hands: re-read the list
-          // once the transfer has applied so it never shows the pre-transfer roles.
-          void onTransfer(transferTo)
-            .then(async () => {
-              setTransferOpen(false);
-              await reload();
-            })
-            // The caller already toasts the failure; the dialog stays open for a retry.
-            .catch(() => {});
-        }}
-      >
-        <div className="space-y-3">
-          <p>
-            The person you pick becomes the owner immediately — sharing, the public-link
-            entitlement, and the deploy key follow their account. You keep editor access.
-          </p>
-          <fieldset className="space-y-1">
-            <legend className="text-xs font-medium text-fg">New owner</legend>
-            {editors.map((e) => (
-              <label
-                key={e.id}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-surface-hover"
-              >
-                <input
-                  type="radio"
-                  name="transfer-to"
-                  checked={transferTo === e.id}
-                  onChange={() => setTransferTo(e.id)}
-                />
-                <span className="text-sm text-fg">{e.name || e.email}</span>
-                {e.name && e.email && <span className="text-xs text-muted">{e.email}</span>}
-              </label>
-            ))}
-          </fieldset>
-          {editors.length === 0 && (
-            <InlineNotice tone="neutral" className="py-2 text-xs">
-              Add an editor first — ownership can only move to an existing editor.
-            </InlineNotice>
-          )}
-        </div>
-      </ConfirmDialog>
     </div>
   );
 }

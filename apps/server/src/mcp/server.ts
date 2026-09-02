@@ -8,7 +8,8 @@ import type { GuestService } from "../auth/guest.js";
 import { makeOrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
-import { type CloneService, isCloneableByGrantedTeam } from "../canvas/clone-service.js";
+import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
+import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { liveManifest } from "../canvas/manifest.js";
 import { isTextContentType } from "../canvas/mime.js";
@@ -28,7 +29,6 @@ import {
   loadManagementGrant,
   type ManagementRole,
   OWNER_ONLY_ACTS,
-  resolveManagementGrant,
 } from "../canvas/role.js";
 import { resolveSettingsUpdate } from "../canvas/settings-update.js";
 import { listSharedCanvases } from "../canvas/shared-list.js";
@@ -1678,34 +1678,24 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       description:
         "Clone a canvas into a NEW canvas you own, seeded from the source (mirrors gallery/Settings " +
         "Clone). You may clone any ACTIVE canvas you own or edit, a gallery-listed + templatable canvas " +
-        "someone else shared, or a published, unexpired, password-free canvas granted to a team you " +
-        "belong to (at any General-access value). The clone starts as an unpublished draft with a " +
+        "someone else shared, or a published, unexpired, password-free canvas granted directly to you " +
+        "or to a team you belong to (at any General-access value). The clone starts as an unpublished draft with a " +
         "fresh slug + key, backend off. Returns the new canvas. A non-eligible/unknown source reads as not found.",
       inputSchema: { id: z.string().describe("The source canvas id.") },
     },
     async ({ id }) => {
       const source = await deps.canvases.findById(id);
       if (!source || source.status === "deleted") return fail("canvas not found");
-      // Non-owner clone eligibility runs through the SAME org-scoped gallery predicate as
-      // the dashboard (plan 002 U7): an org template is cloneable only by a member of its
-      // org; a personal public_link template stays cloneable. Scoped to the caller's
-      // server-resolved orgIds.
-      // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage
-      // — the shared resolver (parity with the dashboard clone route).
-      const now = Date.now();
-      const eligible =
-        (await resolveManagementGrant(source, principal, roleDeps)) !== null
-          ? source.status === "active"
-          : (await deps.canvases.findCloneableTemplate(id, now, {
-              tenancyActive: caller.tenancyActive,
-              viewerOrgIds: caller.orgIds,
-            })) !== null ||
-            // Team branch (plan 003): a member of one of the canvas's granted teams may clone
-            // it at ANY rung (restricted access model) — same live-org `teamMatch` re-join the
-            // serve seam uses (KTD3), fenced to what the serve seam would show them:
-            // published, unexpired, no password (`isCloneableByGrantedTeam`; review #1).
-            (isCloneableByGrantedTeam(source, now) &&
-              (await deps.teams.teamMatch(id, caller.userId, caller.orgIds)));
+      const eligible = await isCloneEligibleForMember(
+        source,
+        principal,
+        {
+          canvases: deps.canvases,
+          teams: deps.teams,
+          tenancyActive: caller.tenancyActive,
+        },
+        Date.now(),
+      );
       if (!eligible) return fail("canvas not found");
       const { canvas } = await deps.clone.clone(source, caller.userId);
       deps.audit.recordAudit({

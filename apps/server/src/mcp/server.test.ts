@@ -2170,12 +2170,13 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     expect(text(denied)).toContain("not found");
   });
 
-  it("clone_canvas: a viewer-team member may clone a Restricted canvas, while a direct viewer cannot (explicit product asymmetry)", async () => {
+  it("clone_canvas: direct and team viewers may clone the same eligible Restricted canvas", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
     const mateId = await member("mate@a.example", org.id);
     const strangerId = await member("stranger@a.example", org.id);
+    const noGrantId = await member("no-grant@a.example", org.id);
     const store = memStorage();
     const conn = (userId: string) =>
       connect(
@@ -2209,6 +2210,21 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       name: "grant_access",
       arguments: { id: cv.id, email: "stranger@a.example", role: "viewer" },
     });
+    const repo = canvasesRepository(client);
+    // Neither an email-only legacy guest row nor a pending invitation is a durable
+    // member grant, even when the signed-in account has the same email.
+    await repo.addAllowlistEntry({
+      canvasId: cv.id,
+      principalKind: "guest",
+      email: "no-grant@a.example",
+      role: "viewer",
+    });
+    await invitationsRepository(client).record({
+      email: "no-grant@a.example",
+      target: { type: "canvas", id: cv.id },
+      role: "viewer",
+      invitedBy: ownerId,
+    });
     expect(
       payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
     ).toBe("private");
@@ -2217,22 +2233,43 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     );
     expect(cloned.id).toBeTruthy();
     expect(cloned.id).not.toBe(cv.id);
-    // Deliberate current asymmetry: a direct viewer can open the same canvas but does
-    // not enter the team-viewer clone path. Keep this pinned until the owner chooses
-    // whether all listed viewers should be able to clone.
-    const denied = await (await conn(strangerId)).callTool({
+    const directClone = payload(
+      await (await conn(strangerId)).callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+    );
+    expect(directClone.id).toBeTruthy();
+    expect(directClone.id).not.toBe(cv.id);
+
+    const noGrantMcp = await conn(noGrantId);
+    const restrictedDenied = await noGrantMcp.callTool({
       name: "clone_canvas",
       arguments: { id: cv.id },
     });
-    expect(isError(denied)).toBe(true);
-    expect(text(denied)).toContain("not found");
+    expect(isError(restrictedDenied)).toBe(true);
+    expect(text(restrictedDenied)).toContain("not found");
+    for (const access of ["whole_org", "public_link"] as const) {
+      await repo.updateSettings(cv.id, { access });
+      for (const grantedId of [mateId, strangerId]) {
+        const granted = await (await conn(grantedId)).callTool({
+          name: "clone_canvas",
+          arguments: { id: cv.id },
+        });
+        expect(isError(granted), `${grantedId} ${access}`).toBe(false);
+      }
+      const denied = await noGrantMcp.callTool({
+        name: "clone_canvas",
+        arguments: { id: cv.id },
+      });
+      expect(isError(denied), access).toBe(true);
+      expect(text(denied)).toContain("not found");
+    }
   });
 
-  it("clone_canvas fences for a team viewer (review #1): never-published, password-protected, or expired sources read not found; the same source clones once published, unprotected, unexpired", async () => {
+  it("clone_canvas applies the same source fences to direct and team viewers", async () => {
     client = await makeTestDb(dialect);
     const org = await seedOrg();
     const ownerId = await member("owner@a.example", org.id);
     const mateId = await member("mate@a.example", org.id);
+    const directId = await member("direct@a.example", org.id);
     const store = memStorage();
     const conn = (userId: string) =>
       connect(
@@ -2244,6 +2281,7 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       );
     const ownerMcp = await conn(ownerId);
     const mateMcp = await conn(mateId);
+    const directMcp = await conn(directId);
     const team = payload(
       await ownerMcp.callTool({
         name: "create_team",
@@ -2261,11 +2299,20 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
       name: "grant_access",
       arguments: { id: cv.id, teamId: team.id, role: "viewer" },
     });
-    const cloneAsMate = () => mateMcp.callTool({ name: "clone_canvas", arguments: { id: cv.id } });
+    await ownerMcp.callTool({
+      name: "grant_access",
+      arguments: { id: cv.id, email: "direct@a.example", role: "viewer" },
+    });
+    const cloneAsViewers = () =>
+      Promise.all([
+        mateMcp.callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+        directMcp.callTool({ name: "clone_canvas", arguments: { id: cv.id } }),
+      ]);
     const expectNotFound = async () => {
-      const r = await cloneAsMate();
-      expect(isError(r)).toBe(true);
-      expect(text(r)).toContain("not found");
+      for (const result of await cloneAsViewers()) {
+        expect(isError(result)).toBe(true);
+        expect(text(result)).toContain("not found");
+      }
     };
     // Never published: the clone would be seeded from the owner's private draft.
     await expectNotFound();
@@ -2287,13 +2334,17 @@ describe.each(DIALECTS)("MCP team parity (plan 003 U6) [%s]", (dialect) => {
     await repo.setDisabled(cv.id, "policy");
     await expectNotFound();
     await repo.enable(cv.id);
-    // Published, unprotected, unexpired: the granted team clones it (still `private`).
+    // Published, unprotected, unexpired: both grant shapes clone it (still Restricted).
     expect(
       payload(await ownerMcp.callTool({ name: "get_canvas", arguments: { id: cv.id } })).access,
     ).toBe("private");
-    const cloned = payload(await cloneAsMate());
-    expect(cloned.id).toBeTruthy();
-    expect(cloned.id).not.toBe(cv.id);
+    for (const result of await cloneAsViewers()) {
+      const cloned = payload(result);
+      expect(cloned.id).toBeTruthy();
+      expect(cloned.id).not.toBe(cv.id);
+    }
+    await repo.setStatus(cv.id, "deleted");
+    await expectNotFound();
   });
 
   it("the deprecated shared:false + teamIds:[] leave-Team shape is accepted and keeps grants", async () => {

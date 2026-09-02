@@ -362,6 +362,108 @@ describe("share route", () => {
     expect(screen.getByRole("radio", { name: /whole org/i })).toBeEnabled();
   });
 
+  it("uses the direct-access hierarchy, keeps the header URL controls, and preserves the Protection anchor", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+    });
+    renderShare();
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Sharing and permissions" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Control who can open this canvas and what they can do."),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Share link" })).toBeNull();
+    expect(screen.getByRole("link", { name: CANVAS.url })).toHaveAttribute("href", CANVAS.url);
+    expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
+    expect(document.getElementById("locks")).toHaveTextContent("Protection");
+
+    const sectionNames = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(sectionNames).toEqual([
+      "People and teams with direct access",
+      "General access",
+      "Protection",
+      "Gallery & templates",
+      "Advanced",
+    ]);
+  });
+
+  it("People and Teams tabs switch one add form while the unified list stays visible", async () => {
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/teams": () =>
+        json({
+          teams: [
+            { id: "t1", orgId: "o1", name: "Design", slug: "design", mine: true, canManage: true },
+          ],
+        }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+            },
+          ],
+        }),
+      "POST /api/canvases/c1/allowlist": () =>
+        json({ ok: true, status: "granted", role: "editor" }),
+    });
+    const user = userEvent.setup();
+    renderShare();
+
+    const list = await screen.findByRole("list", { name: "People and teams" });
+    expect(within(list).getByText("owner@example.com")).toBeVisible();
+    const peopleTab = screen.getByRole("tab", { name: "People" });
+    const teamsTab = screen.getByRole("tab", { name: "Teams" });
+    expect(peopleTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Person's email")).toBeVisible();
+
+    teamsTab.focus();
+    await user.keyboard("{Enter}");
+    expect(teamsTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByLabelText("Person's email")).toBeNull();
+    expect(within(list).getByText("owner@example.com")).toBeVisible();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Team to add" }), "t1");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Role for the team to add" }),
+      "editor",
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await vi.waitFor(() => {
+      const post = calls.find(
+        (call) => call.method === "POST" && call.url === "/api/canvases/c1/allowlist",
+      );
+      expect(post?.body).toContain('"teamId":"t1"');
+      expect(post?.body).toContain('"role":"editor"');
+    });
+
+    teamsTab.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(peopleTab).toHaveAttribute("aria-selected", "true");
+    expect(peopleTab).toHaveFocus();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(teamsTab).toHaveAttribute("aria-selected", "true");
+    expect(teamsTab).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(peopleTab).toHaveAttribute("aria-selected", "true");
+    expect(peopleTab).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(teamsTab).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(peopleTab).toHaveFocus();
+  });
+
   it("shows the human-guessable heads-up for a custom slug on a link-reachable rung", async () => {
     mockFetch({
       "GET /api/canvases/c1": () =>
@@ -445,9 +547,9 @@ describe("share route", () => {
     });
     renderShare();
 
-    expect(await screen.findByText(/no one added yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no one else has direct access yet/i)).toBeInTheDocument();
     await user.type(await screen.findByLabelText(/person's email/i), "colleague@example.com");
-    await user.click(screen.getByRole("button", { name: "Add person" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("colleague@example.com")).toBeInTheDocument();
   });
 
@@ -486,7 +588,7 @@ describe("share route", () => {
 
     await user.type(await screen.findByLabelText(/person's email/i), "newbie@example.com");
     expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add person" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("Access pending until sign-in. Email sent")).toBeInTheDocument();
     expect(await screen.findByText("newbie@example.com")).toBeInTheDocument();
     expect(screen.getByText(/pending sign-in/i)).toBeInTheDocument();
@@ -1276,16 +1378,16 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     const rows = within(list).getAllByRole("listitem");
     expect(rows[0]).toHaveTextContent("owner@example.com");
     expect(within(rows[0] as HTMLElement).getByText("Owner")).toBeInTheDocument();
-    expect(within(rows[0] as HTMLElement).queryByRole("button", { name: "Remove" })).toBeNull();
-    expect(screen.queryByRole("group", { name: /role for owner@example.com/i })).toBeNull();
+    expect(
+      within(rows[0] as HTMLElement).queryByRole("button", { name: /actions for/i }),
+    ).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /role for owner@example.com/i })).toBeNull();
     // Guests only view.
-    expect(screen.queryByRole("group", { name: /role for g@partner.com/i })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /role for g@partner.com/i })).toBeNull();
     // Promote Cole.
-    await user.click(
-      within(screen.getByRole("group", { name: "Role for colleague@example.com" })).getByRole(
-        "button",
-        { name: "Editor" },
-      ),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Role for colleague@example.com" }),
+      "editor",
     );
     await vi.waitFor(() => {
       const patch = calls.find(
@@ -1309,11 +1411,9 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     renderShare();
     expect(await screen.findByText("AI for added people")).toBeInTheDocument();
 
-    await user.click(
-      within(screen.getByRole("group", { name: "Role for colleague@example.com" })).getByRole(
-        "button",
-        { name: "Editor" },
-      ),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Role for colleague@example.com" }),
+      "editor",
     );
 
     expect(
@@ -1332,13 +1432,11 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     });
     renderShare();
     await user.type(await screen.findByLabelText(/person's email/i), "new@example.com");
-    await user.click(
-      within(screen.getByRole("group", { name: "Role for the person to add" })).getByRole(
-        "button",
-        { name: "Editor" },
-      ),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Role for the person to add" }),
+      "editor",
     );
-    await user.click(screen.getByRole("button", { name: "Add person" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     await vi.waitFor(() => {
       const post = calls.find((c) => c.method === "POST" && c.url === "/api/canvases/c1/allowlist");
       expect(post?.body).toContain('"role":"editor"');
@@ -1387,7 +1485,9 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
       },
     });
     renderShare();
-    await user.click(await screen.findByRole("button", { name: /transfer ownership/i }));
+    const transferButton = await screen.findByRole("button", { name: /transfer ownership/i });
+    await vi.waitFor(() => expect(transferButton).toBeEnabled());
+    await user.click(transferButton);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/you keep editor access/i)).toBeInTheDocument();
     // Only editors are offered (Edna), never viewers or guests.
@@ -1406,15 +1506,64 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
       const edna = within(list).getByText("edna@example.com").closest("li") as HTMLElement;
       expect(within(edna).getByText("Owner")).toBeInTheDocument();
       expect(
-        within(within(list).getByRole("group", { name: "Role for owner@example.com" })).getByRole(
-          "button",
-          { name: "Editor" },
-        ),
-      ).toHaveAttribute("aria-pressed", "true");
+        within(list).getByRole("combobox", { name: "Role for owner@example.com" }),
+      ).toHaveValue("editor");
     });
     expect(
       calls.filter((c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist").length,
     ).toBeGreaterThan(1);
+  });
+
+  it("ignores a transfer completion after navigation to another canvas", async () => {
+    const user = userEvent.setup();
+    let resolveTransfer: ((response: Response) => void) | undefined;
+    const pendingTransfer = new Promise<Response>((resolve) => {
+      resolveTransfer = resolve;
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () => json({ entries }),
+      "POST /api/canvases/c1/transfer": () => pendingTransfer,
+      "GET /api/canvases/c2": () =>
+        json({
+          ...published,
+          id: "c2",
+          slug: "second-canvas",
+          url: "http://x/c/second-canvas",
+        }),
+      "GET /api/canvases/c2/allowlist": () => json({ entries }),
+    });
+    const router = renderShare();
+    const transferButton = await screen.findByRole("button", { name: /transfer ownership/i });
+    await vi.waitFor(() => expect(transferButton).toBeEnabled());
+    await user.click(transferButton);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: /transfer ownership/i,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        calls.some((call) => call.method === "POST" && call.url === "/api/canvases/c1/transfer"),
+      ).toBe(true),
+    );
+
+    await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    expect(await screen.findByRole("link", { name: "http://x/c/second-canvas" })).toBeVisible();
+    resolveTransfer?.(
+      json({
+        ok: true,
+        canvas: { ...published, role: "editor", ownerId: "u3" },
+        previousOwnerEditor: true,
+        publicLinkReverted: false,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByText(/ownership transferred/i)).toBeNull();
+    expect(
+      calls.filter((call) => call.method === "GET" && call.url === "/api/canvases/c2/allowlist"),
+    ).toHaveLength(1);
   });
 
   it("editor's view: no Transfer ownership control; the added-people AI opt-in is owner-only", async () => {
@@ -1433,6 +1582,7 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     renderShare();
     await screen.findByRole("list", { name: /people and teams/i });
     expect(screen.queryByRole("button", { name: /transfer ownership/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Advanced" })).toBeNull();
     expect(await screen.findByText(/only the owner can change the ai opt-in/i)).toBeInTheDocument();
   });
 
@@ -1445,7 +1595,9 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
         json({ code: "NOT_ELIGIBLE", message: "Add them as an editor first." }, 400),
     });
     renderShare();
-    await user.click(await screen.findByRole("button", { name: /transfer ownership/i }));
+    const transferButton = await screen.findByRole("button", { name: /transfer ownership/i });
+    await vi.waitFor(() => expect(transferButton).toBeEnabled());
+    await user.click(transferButton);
     const dialog = await screen.findByRole("dialog");
     const readsBefore = calls.filter(
       (c) => c.method === "GET" && c.url === "/api/canvases/c1/allowlist",
@@ -1484,7 +1636,7 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     });
     renderShare();
     const button = await screen.findByRole("button", { name: /transfer ownership/i });
-    expect(button).toBeEnabled();
+    await vi.waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByLabelText(/Tia/)).toBeInTheDocument();
@@ -1507,7 +1659,8 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     renderShare();
     const list = await screen.findByRole("list", { name: /people and teams/i });
     const ednaRow = within(list).getByText("edna@example.com").closest("li") as HTMLElement;
-    await user.click(within(ednaRow).getByRole("button", { name: "Remove" }));
+    await user.click(within(ednaRow).getByRole("button", { name: "Actions for edna@example.com" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
     const confirm = await screen.findByRole("dialog", { name: /remove edna@example.com/i });
     await user.click(within(confirm).getByRole("button", { name: "Remove" }));
     // The grant is gone and the prompt is up.
@@ -1532,10 +1685,9 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
     });
     renderShare();
     await screen.findByRole("list", { name: /people and teams/i });
-    await user.click(
-      within(screen.getByRole("group", { name: "Role for edna@example.com" })).getByRole("button", {
-        name: "Viewer",
-      }),
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Role for edna@example.com" }),
+      "viewer",
     );
     const prompt = await screen.findByRole("dialog", { name: /regenerate the deploy key/i });
     await user.click(within(prompt).getByRole("button", { name: /regenerate key/i }));

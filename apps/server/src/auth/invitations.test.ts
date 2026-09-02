@@ -19,7 +19,7 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     const teams = teamsRepository(client);
     const canvases = canvasesRepository(client);
     const invitations = invitationsRepository(client);
-    const deps: InvitationApplyDeps = { invitations, teams, canvases };
+    const deps: InvitationApplyDeps = { invitations };
 
     // The inviter (a real user the invitation references).
     const inviter = await users.upsert({
@@ -81,6 +81,43 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
     expect(await invitations.countPendingByActor(inviter.id)).toBe(1); // still pending
   });
 
+  it("a cancelled team invitation cannot materialize a membership from a stale login read", async () => {
+    const { users, teams, invitations, inviter } = await harness();
+    const team = await teams.create({ orgId: null, name: "Cancelled", createdBy: inviter.id });
+    await invitations.record({
+      email: "cancelled-team@x.com",
+      target: { type: "team", id: team.id },
+      invitedBy: inviter.id,
+    });
+    const [invitation] = await invitations.listForEmail("cancelled-team@x.com");
+    const invitee = await users.upsert({
+      providerSub: "dev:cancelled-team",
+      email: "cancelled-team@x.com",
+      name: "Cancelled",
+      isAdmin: false,
+    });
+    const original = invitations.materializeTeamGrant.bind(invitations);
+    const racing: InvitationApplyDeps = {
+      invitations: {
+        listForEmail: invitations.listForEmail.bind(invitations),
+        findPendingById: invitations.findPendingById.bind(invitations),
+        materializeCanvasGrant: invitations.materializeCanvasGrant.bind(invitations),
+        materializeTeamGrant: async (input) => {
+          await invitations.cancelPendingForTarget("team", team.id, invitation?.id ?? "");
+          return original(input);
+        },
+      },
+    };
+
+    await materializePendingInvitations(racing, {
+      id: invitee.id,
+      email: "cancelled-team@x.com",
+    });
+
+    expect(await teams.isTeamMember(team.id, invitee.id)).toBe(false);
+    expect(await invitations.listForEmail("cancelled-team@x.com")).toEqual([]);
+  });
+
   it("a pending canvas invitation materializes a member allowlist row on first verified login", async () => {
     const { users, canvases, invitations, deps, inviter } = await harness();
     const cv = await canvases.create({ ownerId: inviter.id, slug: "deck-1", apiKeyHash: "h" });
@@ -98,6 +135,76 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
 
     await materializePendingInvitations(deps, { id: invitee.id, email: "guest@x.com" });
     expect(await canvases.isPrincipalAllowed(cv.id, { userId: invitee.id })).toBe(true);
+  });
+
+  it("a cancelled canvas invitation cannot materialize a durable grant from a stale login read", async () => {
+    const { users, canvases, invitations, inviter } = await harness();
+    const canvas = await canvases.create({
+      ownerId: inviter.id,
+      slug: "cancelled-canvas",
+      apiKeyHash: "h",
+    });
+    await invitations.record({
+      email: "cancelled-canvas@x.com",
+      target: { type: "canvas", id: canvas.id },
+      role: "viewer",
+      invitedBy: inviter.id,
+    });
+    const [invitation] = await invitations.listForEmail("cancelled-canvas@x.com");
+    const invitee = await users.upsert({
+      providerSub: "dev:cancelled-canvas",
+      email: "cancelled-canvas@x.com",
+      name: "Cancelled",
+      isAdmin: false,
+    });
+    const original = invitations.materializeCanvasGrant.bind(invitations);
+    const racing: InvitationApplyDeps = {
+      invitations: {
+        listForEmail: invitations.listForEmail.bind(invitations),
+        findPendingById: invitations.findPendingById.bind(invitations),
+        materializeTeamGrant: invitations.materializeTeamGrant.bind(invitations),
+        materializeCanvasGrant: async (input) => {
+          await invitations.cancelPendingForTarget("canvas", canvas.id, invitation?.id ?? "");
+          return original(input);
+        },
+      },
+    };
+
+    await materializePendingInvitations(racing, {
+      id: invitee.id,
+      email: "cancelled-canvas@x.com",
+    });
+
+    expect(await canvases.isPrincipalAllowed(canvas.id, { userId: invitee.id })).toBe(false);
+    expect(await invitations.listForEmail("cancelled-canvas@x.com")).toEqual([]);
+  });
+
+  it("a failed grant insert rolls back the invitation claim for a later login retry", async () => {
+    const { canvases, invitations, inviter } = await harness();
+    const canvas = await canvases.create({
+      ownerId: inviter.id,
+      slug: "retry-after-failure",
+      apiKeyHash: "h",
+    });
+    await invitations.record({
+      email: "retry@x.com",
+      target: { type: "canvas", id: canvas.id },
+      invitedBy: inviter.id,
+    });
+    const [invitation] = await invitations.listForEmail("retry@x.com");
+
+    await expect(
+      invitations.materializeCanvasGrant({
+        invitationId: invitation?.id ?? "",
+        canvasId: canvas.id,
+        userId: "missing-user",
+        expectedRole: null,
+        role: "viewer",
+        updateExistingRole: false,
+      }),
+    ).rejects.toThrow();
+
+    expect(await invitations.listForEmail("retry@x.com")).toHaveLength(1);
   });
 
   it("concurrent logins don't double-create the membership (idempotent + consume-guarded)", async () => {
@@ -182,22 +289,22 @@ describe.each(DIALECTS)("materialize-on-verified-login (plan 003 U4) [%s]", (dia
       name: "Late",
       isAdmin: false,
     });
-    // Interpose on the first consume: the owner demotes the pending entry just before it.
-    const original = invitations.consumeIfRole.bind(invitations);
+    // Interpose on the first atomic claim: the owner demotes the pending entry just before it.
+    const original = invitations.materializeCanvasGrant.bind(invitations);
     let demoted = false;
     const racing: InvitationApplyDeps = {
       ...deps,
       invitations: {
         ...invitations,
         listForEmail: invitations.listForEmail.bind(invitations),
-        consume: invitations.consume.bind(invitations),
         findPendingById: invitations.findPendingById.bind(invitations),
-        consumeIfRole: async (id, role) => {
+        materializeTeamGrant: invitations.materializeTeamGrant.bind(invitations),
+        materializeCanvasGrant: async (input) => {
           if (!demoted) {
             demoted = true;
             await invitations.setPendingRole("canvas", canvas.id, inv.id, "viewer");
           }
-          return original(id, role);
+          return original(input);
         },
       },
     };
@@ -217,7 +324,6 @@ describe.each(DIALECTS)("materialize — pending role (editor-roles plan U4) [%s
   it("a pending EDITOR invite materializes an editor row; a legacy null-role invite a viewer row", async () => {
     client = await makeTestDb(dialect);
     const users = usersRepository(client);
-    const teams = teamsRepository(client);
     const canvases = canvasesRepository(client);
     const invitations = invitationsRepository(client);
     const inviter = await users.upsert({
@@ -245,7 +351,7 @@ describe.each(DIALECTS)("materialize — pending role (editor-roles plan U4) [%s
       name: "N",
       isAdmin: false,
     });
-    await materializePendingInvitations({ invitations, teams, canvases }, person);
+    await materializePendingInvitations({ invitations }, person);
     expect((await canvases.findMemberEntry(a.id, person.id))?.role).toBe("editor");
     expect((await canvases.findMemberEntry(b.id, person.id))?.role).toBe("viewer");
     expect(await invitations.listForEmail("new@e.com")).toEqual([]);

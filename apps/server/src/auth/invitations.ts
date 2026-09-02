@@ -1,4 +1,3 @@
-import type { AccessRole } from "@canvas-drop/shared/db";
 import type { InvitationsRepository } from "../db/repositories/invitations.js";
 import type { Logger } from "../log/logger.js";
 
@@ -6,18 +5,8 @@ import type { Logger } from "../log/logger.js";
 export interface InvitationApplyDeps {
   invitations: Pick<
     InvitationsRepository,
-    "listForEmail" | "consume" | "consumeIfRole" | "findPendingById"
+    "listForEmail" | "materializeCanvasGrant" | "materializeTeamGrant" | "findPendingById"
   >;
-  teams: { addMember(teamId: string, userId: string): Promise<void> };
-  canvases: {
-    addAllowlistEntry(input: {
-      canvasId: string;
-      principalKind: "member" | "guest";
-      userId?: string | null;
-      email?: string | null;
-      role?: AccessRole;
-    }): Promise<unknown>;
-  };
 }
 
 /**
@@ -45,8 +34,11 @@ export async function materializePendingInvitations(
   for (const first of pending) {
     try {
       if (first.targetType === "team") {
-        await deps.teams.addMember(first.targetId, user.id);
-        await deps.invitations.consume(first.id);
+        await deps.invitations.materializeTeamGrant({
+          invitationId: first.id,
+          teamId: first.targetId,
+          userId: user.id,
+        });
         continue;
       }
       if (first.targetType !== "canvas") {
@@ -57,27 +49,24 @@ export async function materializePendingInvitations(
       // editor row is EFFECTIVE is decided live by the role resolver (org membership),
       // so a person who signs in without org membership holds view access only (AE15).
       //
-      // Apply-then-consume is role-aware (review #3): the consume only lands while the
-      // invite still carries the role we applied. A set-role that changed it in between
-      // wins — we re-read and re-apply the latest role (explicitly, so a downgrade takes)
-      // before consuming. Bounded: a third change in a row leaves the invite pending for
-      // the next login rather than looping.
+      // Claim-and-apply is role-aware and atomic: a set-role or cancellation that lands
+      // before the conditional claim wins. We re-read a role mismatch and apply the
+      // latest role explicitly (so a downgrade takes). Bounded: a third change in a row
+      // leaves the invite pending for the next login rather than looping.
       let inv = first;
       for (let attempt = 0; attempt < 3; attempt++) {
         const explicitRole = attempt > 0;
-        await deps.canvases.addAllowlistEntry({
+        const applied = await deps.invitations.materializeCanvasGrant({
+          invitationId: inv.id,
           canvasId: inv.targetId,
-          principalKind: "member",
           userId: user.id,
-          ...(inv.role === "editor"
-            ? { role: "editor" as const }
-            : explicitRole
-              ? { role: "viewer" as const }
-              : {}),
+          expectedRole: inv.role ?? null,
+          role: inv.role === "editor" ? "editor" : "viewer",
+          updateExistingRole: inv.role === "editor" || explicitRole,
         });
-        if (await deps.invitations.consumeIfRole(inv.id, inv.role ?? null)) break;
+        if (applied) break;
         const fresh = await deps.invitations.findPendingById(inv.id);
-        if (!fresh) break; // consumed elsewhere — nothing left to apply
+        if (!fresh) break; // cancelled or consumed elsewhere — no grant may be applied
         inv = fresh;
       }
     } catch (err) {

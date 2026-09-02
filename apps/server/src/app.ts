@@ -560,7 +560,7 @@ export function buildApp(deps: BuildAppDeps): Hono<AppEnv> {
         users: deps.users,
         allowedEmails,
         orgMembership,
-        invitations: { invitations, teams, canvases: deps.canvases },
+        invitations: { invitations },
         audit: deps.audit,
       }),
     ),

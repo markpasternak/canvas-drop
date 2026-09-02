@@ -19,7 +19,8 @@ import type { GuestService } from "../auth/guest.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
 import { memberPrincipal } from "../canvas/authorization.js";
-import { type CloneService, isCloneableByGrantedTeam } from "../canvas/clone-service.js";
+import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
+import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
 import { rootEntry } from "../canvas/manifest.js";
 import {
@@ -494,10 +495,11 @@ export function managementRoutes(deps: ManagementDeps) {
   });
 
   // Clone → a new canvas owned by the caller, seeded from an existing one (plan 002).
-  // An owner may clone any ACTIVE canvas they own; a non-owner only a gallery-listed
-  // + templatable one. Eligibility is re-derived server-side from the row (never the
-  // client); a non-eligible source 404s opaquely so its existence isn't revealed
-  // (§12.2). The clone gets its OWN fresh deploy key (the source's is never copied),
+  // An owner/editor may clone any ACTIVE canvas they manage. Other signed-in members
+  // may clone a gallery template or a published, active, unprotected canvas reached
+  // through a durable direct/team viewer grant. Eligibility is re-derived server-side
+  // from the row (never the client); a non-eligible source 404s opaquely so its
+  // existence isn't revealed (§12.2). The clone gets its OWN fresh deploy key,
   // but unlike create we do NOT return the plaintext here — a clone's key is revealed
   // on demand via Settings → Regenerate key, so an unused secret never transits the
   // wire (plan 002 decision).
@@ -507,31 +509,17 @@ export function managementRoutes(deps: ManagementDeps) {
     const source = await deps.canvases.findById(id);
     if (!source || source.status === "deleted") return c.json({ error: "not_found" }, 404);
 
-    // Non-owner clone eligibility runs through the SAME gallery visibility predicate as
-    // browse (plan 002 U5), org-scoped to the caller: an org template is cloneable only by
-    // a member of its org; a personal public_link template (org_id null) stays cloneable.
-    // PLUS the team branch (plan 003 U4): a member of one of a `team` canvas's granted teams
-    // may clone it — team canvases never reach the gallery, so this is their only clone path,
-    // gated by the SAME live-org `teamMatch` re-join that the serve seam uses (KTD3).
     const orgIds = c.get("orgIds") ?? new Set<string>();
-    // Owner OR editor (editor-roles plan, U3) may clone any ACTIVE canvas they manage —
-    // the shared resolver, not an owner comparison. The clone lands owned by the actor
-    // with an empty people list (existing behaviour).
-    const now = Date.now();
-    const eligible =
-      (await resolveManagementGrant(source, memberPrincipal(user, orgIds), roleDeps)) !== null
-        ? source.status === "active"
-        : (await deps.canvases.findCloneableTemplate(id, now, {
-            tenancyActive: !!deps.config.org.name,
-            viewerOrgIds: orgIds,
-          })) !== null ||
-          // A member of a granted team (restricted access model: team grants apply at every
-          // rung, so the clone path does too — the same live-org `teamMatch` the serve seam
-          // uses), fenced to what the serve seam would show them: published, unexpired, no
-          // password (`isCloneableByGrantedTeam`; review #1).
-          (isCloneableByGrantedTeam(source, now) &&
-            !!deps.teams &&
-            (await deps.teams.teamMatch(id, user.id, orgIds)));
+    const eligible = await isCloneEligibleForMember(
+      source,
+      memberPrincipal(user, orgIds),
+      {
+        canvases: deps.canvases,
+        teams: deps.teams,
+        tenancyActive: !!deps.config.org.name,
+      },
+      Date.now(),
+    );
     if (!eligible) return c.json({ error: "not_found" }, 404);
 
     const { canvas } = await deps.clone.clone(source, user.id);

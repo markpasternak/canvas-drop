@@ -155,10 +155,7 @@ describe.each(DIALECTS)("inviteService — roles [%s]", (dialect) => {
       name: "Newbie",
       isAdmin: false,
     });
-    await materializePendingInvitations(
-      { invitations, teams: teamsRepository(client), canvases },
-      { id: newbie.id, email: newbie.email },
-    );
+    await materializePendingInvitations({ invitations }, { id: newbie.id, email: newbie.email });
     expect((await canvases.findMemberEntry(canvas.id, newbie.id))?.role).toBe("editor");
   });
 

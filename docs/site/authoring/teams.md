@@ -5,7 +5,7 @@ and "everyone." Share a canvas with a team from its **Share** tab, and every mem
 can open and use it (full backend, like a member). Manage teams on the **Teams**
 page in the dashboard, or over [MCP](/docs/agents/mcp).
 
-A team is one kind of entry on a canvas's **Share with people and teams** list, next to
+A team is one kind of entry under **People and teams with direct access**, next to
 individual people. Whatever is on that list can open the canvas at every **General access**
 choice:
 
@@ -70,8 +70,8 @@ unshares every canvas shared with it, but the canvases themselves are untouched.
 
 ## Sharing a canvas with a team
 
-On a canvas's **Share** tab, under **Share with people and teams**, pick a team you belong
-to and add it as **Viewer** (or **Editor**). The list labels each team **Personal** or by
+On a canvas's **Share** tab, open the **Teams** tab under **People and teams with direct access**, pick a team you belong
+to, and add it as **Viewer** (or **Editor**). The list labels each team **Personal** or by
 its **org**, so you can see how far the share reaches. A team grant is independent of your
 own membership afterward: if you later leave the team, the canvas stays shared with it
 until you remove it from the list. Changing **General access** never touches it.
@@ -82,8 +82,8 @@ shared only with people and teams never appears in the org-wide gallery.
 
 ## Editor teams
 
-A team can also be granted the **editor** role on a canvas, from the canvas's
-**Share with people and teams** section (choose the team, pick **Editor**). Every current member
+A team can also be granted the **editor** role on a canvas, from the **Teams** tab under
+**People and teams with direct access** (choose the team, pick **Editor**). Every current member
 then manages that canvas like the owner — content, publishing, settings, sharing —
 except deleting or transferring it; membership changes apply on the next request, and
 for an org team the live org membership is re-checked as well. A team added as
