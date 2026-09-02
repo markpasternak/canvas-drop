@@ -465,9 +465,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if ("error" in gate) return gate.error;
       const cv = gate.canvas;
       const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-      // Echo the team grants for a team-scoped canvas (parity with the dashboard share view).
-      const teamIds =
-        cv.access === "team" ? await deps.teams.listTeamIdsForCanvas(cv.id) : undefined;
+      // Echo the team grants at any rung (parity with the dashboard share view — team grants
+      // live on the people-and-teams list, restricted access model).
+      const teamIds = await deps.teams.listTeamIdsForCanvas(cv.id);
       // Endpoints carry a `$CANVAS_KEY` placeholder here — the key is only handed out
       // once, at create. The agent substitutes the key it saved from create_canvas.
       return ok({
@@ -1245,9 +1245,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         await deps.hub.revalidateCanvas(cv.id).catch(() => {});
         if (typeof password === "string") await deps.hub.dropGatedNonOwners(cv.id).catch(() => {});
       }
-      // Echo the resolved team grants when the canvas is team-scoped (read-your-writes).
-      const teamIds =
-        updated.access === "team" ? await deps.teams.listTeamIdsForCanvas(updated.id) : undefined;
+      // Echo the resolved team grants at any rung (read-your-writes).
+      const teamIds = await deps.teams.listTeamIdsForCanvas(updated.id);
       // Identity rides on the mutation's echo too (review #10): the doc promises
       // `role`/`owner` on update_canvas exactly like get_canvas.
       const view = await viewWithIdentity(updated, gate.role, false, teamIds);

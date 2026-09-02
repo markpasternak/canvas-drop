@@ -9,7 +9,7 @@ import {
   validateSlug,
 } from "@canvas-drop/shared";
 import type { Canvas, CanvasStatus, Manifest } from "@canvas-drop/shared/db";
-import { publicationState } from "@canvas-drop/shared/db";
+import { isRestrictedRung, publicationState } from "@canvas-drop/shared/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -237,14 +237,14 @@ function ownerCanvasView(
     description: cv.description,
     access: cv.access,
     discoverability: cv.discoverability,
-    // The teams this canvas is shared with (plan 003 U5). Empty unless access==='team'
-    // (and only resolved on the single-canvas view; the list path leaves it []).
+    // The teams this canvas is shared with (plan 003 U5), at any rung — only resolved on
+    // the single-canvas view; the list path leaves it [].
     teamIds,
     // Home tenant (plan 002): null = Personal, else the org id. The dashboard maps it to a
     // name via /api/me.orgs to show the scope badge + gate the org-only share controls.
     orgId: cv.orgId,
-    // Back-compat boolean for the current dashboard (U4 switches it to read `access`).
-    shared: cv.access !== "private",
+    // Back-compat boolean: open beyond the people-and-teams list (whole_org / public_link).
+    shared: !isRestrictedRung(cv.access),
     guestAiEnabled: cv.guestAiEnabled,
     guestAiCap: cv.guestAiCap,
     sharedExpiresAt: cv.sharedExpiresAt,
@@ -308,7 +308,7 @@ const ownerListQuerySchema = z.object({
   // Access-rung filter (D4); `shared` stays as the legacy coarse boolean. `.catch`
   // (like the sibling fields) so a junk ?access= drops only this filter, not the whole set.
   access: z
-    .enum(["private", "specific_people", "team", "whole_org", "public_link"])
+    .enum(["private", "specific_people", "team", "whole_org", "public_link", "restricted"])
     .optional()
     .catch(undefined),
   shared: boolFlag,
@@ -375,10 +375,11 @@ export function managementRoutes(deps: ManagementDeps) {
    *  caller's role. */
   async function canvasView(cv: Canvas, role: ManagementRole) {
     const hasPreview = previewVisible(cv, await previewIds([cv.id]));
-    // Resolve the canvas's team grants only here (the single-canvas view) — the share
-    // picker pre-checks them. The list path skips this join (teamIds stays []).
+    // Resolve the canvas's team grants only here (the single-canvas view), at EVERY rung —
+    // team grants live on the people-and-teams list and apply regardless of the rung
+    // (restricted access model). The list path skips this join (teamIds stays []).
     const [teamIds, owner] = await Promise.all([
-      deps.teams && cv.access === "team" ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
+      deps.teams ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
       deps.users.findById(cv.ownerId),
     ]);
     return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds, {

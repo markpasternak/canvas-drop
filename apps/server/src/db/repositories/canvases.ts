@@ -10,6 +10,7 @@ import {
   type Json,
   type PreviewMode,
   pgSchema,
+  RESTRICTED_RUNGS,
   sqliteSchema,
 } from "@canvas-drop/shared/db";
 import {
@@ -230,7 +231,9 @@ export interface OwnerListOptions {
    *  as the gallery, so the two surfaces' tag semantics can't drift. */
   tag?: string[];
   /** Access/gallery-state filters — each maps to one canvas column. */
-  access?: AccessRung;
+  /** One rung, or `restricted` for the whole family (private + its legacy aliases). */
+  access?: AccessRung | "restricted";
+  /** Legacy coarse boolean: open beyond the people-and-teams list (whole_org / public_link). */
   shared?: boolean;
   protected?: boolean;
   listed?: boolean;
@@ -641,8 +644,9 @@ export function canvasesRepository(client: DbClient) {
 
     // Column-based state filters (plan 005 KTD3). `protected` keys off a set
     // password hash; `neverDeployed` off the absence of a published version.
-    if (opts.access) filters.push(eq(t.access, opts.access));
-    if (opts.shared) filters.push(ne(t.access, "private"));
+    if (opts.access === "restricted") filters.push(inArray(t.access, [...RESTRICTED_RUNGS]));
+    else if (opts.access) filters.push(eq(t.access, opts.access));
+    if (opts.shared) filters.push(notInArray(t.access, [...RESTRICTED_RUNGS]));
     if (opts.protected) filters.push(isNotNull(t.passwordHash));
     if (opts.listed) filters.push(eq(t.galleryListed, true));
     if (opts.template) filters.push(eq(t.galleryTemplatable, true));
