@@ -252,8 +252,8 @@ describe("canvas Overview tab", () => {
 
     expect(await screen.findByText("Not published yet")).toBeInTheDocument();
     expect(screen.getByText(/The URL has no live page/i)).toBeInTheDocument();
-    // "Private" appears in both the header Visibility chip and the Access fact.
-    expect(screen.getAllByText("Private").length).toBeGreaterThan(0);
+    // "Restricted" (the family's one label) appears in the header chip and the Access fact.
+    expect(screen.getAllByText("Restricted").length).toBeGreaterThan(0);
   });
 
   it("reframes the draft header around 'not live yet' with Open draft + Publish primaries", async () => {

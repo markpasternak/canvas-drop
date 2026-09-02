@@ -6,6 +6,7 @@ import {
   type CanvasCapabilitiesPatch,
   type CanvasSettings,
   type DraftView,
+  isRestrictedRung,
 } from "./api.js";
 import { keys } from "./queries.js";
 
@@ -56,16 +57,12 @@ export function useUpdateSettings(id: string) {
         if (patch.guestAiCap !== undefined) optimistic.guestAiCap = patch.guestAiCap;
         if (patch.access !== undefined) {
           optimistic.access = patch.access;
-          // `shared` is the derived "anyone but the owner can open it" boolean
-          // (access !== "private"); keep it in lockstep so the rung and the legacy
-          // chip don't flicker apart while the write is in flight.
-          optimistic.shared = patch.access !== "private";
-          // The team grant set is single-valued: leaving `team` clears it server-side,
-          // so mirror that optimistically (the picker collapses with the rung).
-          if (patch.access !== "team") optimistic.teamIds = [];
-          if (patch.access !== "team" && patch.access !== "whole_org") {
-            optimistic.discoverability = "link_only";
-          }
+          // `shared` is the derived "open beyond the people-and-teams list" boolean (the two
+          // wide rungs); keep it in lockstep so the rung and the legacy chip don't flicker
+          // apart while the write is in flight. Team grants live on the list and survive
+          // every rung change (restricted access model), so `teamIds` is left alone.
+          optimistic.shared = !isRestrictedRung(patch.access);
+          if (patch.access !== "whole_org") optimistic.discoverability = "link_only";
         }
         if (patch.galleryListed === true && optimistic.access === "whole_org") {
           optimistic.discoverability = "listed";

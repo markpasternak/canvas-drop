@@ -1,6 +1,6 @@
 import { ArrowSquareOut, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -15,7 +15,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { type AccessRung, type AllowlistEntry, ApiError } from "../lib/api.js";
+import { type AccessRung, ApiError, isRestrictedRung } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import { usePublishDraft, useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
@@ -49,19 +49,12 @@ export default function Share() {
   const { data: teams } = useTeams();
   const update = useUpdateSettings(id);
   const transfer = useTransferCanvas(id);
-  // The people list (editor-roles plan): the Team rung reads its viewer-role team grants.
-  const [people, setPeople] = useState<AllowlistEntry[]>([]);
-
   const [password, setPassword] = useState("");
   const [revealPassword, setRevealPassword] = useState(false);
   const [description, setDescription] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
-  // The "Team" rung was picked but not yet committed (no team chosen yet). The rung
-  // can't be saved with zero teams (the server 409s TEAM_REQUIRED), so clicking it
-  // reveals the picker; the save fires once at least one team is selected.
-  const [pendingTeam, setPendingTeam] = useState(false);
-
-  const sections = canvas?.access === "specific_people" ? PEOPLE_SECTIONS : BASE_SECTIONS;
+  // The "AI for added people" section rides the Restricted family (restricted access model).
+  const sections = canvas && isRestrictedRung(canvas.access) ? PEOPLE_SECTIONS : BASE_SECTIONS;
   const sectionIds = sections.map((s) => s.id);
   const { active: activeSection, select: selectSection } = useSectionNav(sectionIds, !!canvas);
 
@@ -72,27 +65,6 @@ export default function Share() {
     if (!canvas) return;
     setDescription(canvas.description ?? "");
   }, [canvas?.id]);
-
-  // A pending Team pick completes itself once a viewer team is granted in the people list
-  // (the old picker's "share once ≥1 team is selected", KTD5) — the radio is already
-  // selected, so there is nothing further to click.
-  const pendingViewerTeamIds = people
-    .filter((e) => e.kind === "team" && e.role !== "editor" && e.teamId)
-    .map((e) => e.teamId as string);
-  const pendingTeamKey = pendingViewerTeamIds.join(",");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fire on the grant set only
-  useEffect(() => {
-    if (!pendingTeam || pendingViewerTeamIds.length === 0) return;
-    setPendingTeam(false);
-    void update
-      .mutateAsync({ access: "team", teamIds: pendingViewerTeamIds })
-      .then(({ warning }) => {
-        if (warning) toast(warning);
-      })
-      .catch((err) =>
-        toast(err instanceof ApiError ? err.hint : "Couldn't save that change", "error"),
-      );
-  }, [pendingTeam, pendingTeamKey]);
 
   if (isLoading || !canvas) {
     return <Skeleton className="h-64" />;
@@ -176,11 +148,6 @@ export default function Share() {
   // the server re-checks via resolveTeamGrant, so an incompatible pick surfaces as a toast
   // rather than being silently hidden here.
   const shareableTeams = (teams ?? []).filter((t) => t.mine);
-  // Viewer-role team grants back the `team` rung (KTD4); editor teams are effective at
-  // every rung and never touched by rung changes.
-  const viewerTeamIds = people
-    .filter((e) => e.kind === "team" && e.role !== "editor" && e.teamId)
-    .map((e) => e.teamId as string);
   // Owner unless the server says editor (legacy payloads carry no role; the server enforces).
   const isOwner = canvas.role !== "editor";
 
@@ -219,7 +186,6 @@ export default function Share() {
             role={canvas.role}
             teams={shareableTeams}
             orgs={me?.orgs ?? []}
-            onChanged={setPeople}
             onTransfer={
               isOwner
                 ? async (toUserId) => {
@@ -250,77 +216,25 @@ export default function Share() {
           description="Who else can open the canvas, beyond the people and teams above."
         >
           <AccessLadder
-            // Reflect the in-flight "Team" pick before it's committed, so the radio
-            // stays selected while the picker is open and no team is chosen yet.
-            value={pendingTeam ? "team" : canvas.access}
+            value={canvas.access}
             allowPublic={me?.canPublishPublic ?? false}
             // Offer the "Whole org" rung to everyone EXCEPT a guest (a signed-in user in
             // no org). `isGuest` is only ever true under active tenancy, so inert
             // instances keep offering it to all members (plan 002 U6).
             allowOrg={!me?.isGuest}
-            // Disable "Whole org"/"Team" on a Personal canvas (no home org) when the
-            // viewer is a member — i.e. tenancy is active. The server would 409 it; don't
-            // make them bounce off that with no feedback (plan 002/003).
+            // Disable "Whole org" on a Personal canvas (no home org) when the viewer is a
+            // member — i.e. tenancy is active. The server would 409 it; don't make them
+            // bounce off that with no feedback (plan 002).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
-            // The "Team" rung (plan 003 U6) shows when the caller has a team to share to, OR is
-            // an org member (so org members discover it even before creating one — the picker
-            // then prompts them). A no-org friends-&-family user with a personal team gets it;
-            // a stranger with no teams and no org doesn't.
-            allowTeam={shareableTeams.length > 0 || (me?.orgs?.length ?? 0) > 0}
-            onChange={(access) => {
-              if (access === "team") {
-                // The Team rung admits the VIEWER teams on the people list (the old picker
-                // folded into the list's add-team control, KTD5). With none granted yet
-                // there is nothing to save (an empty team grant is a server 409): reveal
-                // the hint instead.
-                if (viewerTeamIds.length === 0) {
-                  setPendingTeam(true);
-                  return;
-                }
-                setPendingTeam(false);
-                save({ access: "team", teamIds: viewerTeamIds });
-                return;
-              }
-              setPendingTeam(false);
-              save({ access });
-            }}
-            // The "who" for the two list-based rungs is the People list above; the inline
-            // detail just says which rows the rung admits.
-            details={{
-              specific_people: (
-                <InlineNotice tone="neutral" className="py-2 text-xs">
-                  People added above can open this canvas (editors always can). A team added as
-                  viewers only applies on the Team rung; an editor team edits at any rung.
-                </InlineNotice>
-              ),
-              team:
-                viewerTeamIds.length === 0 ? (
-                  shareableTeams.length === 0 ? (
-                    <InlineNotice tone="neutral" className="py-2 text-xs">
-                      You're not in any team yet. Create or join one in{" "}
-                      <Link to="/teams" className="text-accent hover:underline">
-                        Teams
-                      </Link>{" "}
-                      to share a canvas with it.
-                    </InlineNotice>
-                  ) : (
-                    <InlineNotice tone="neutral" className="py-2 text-xs">
-                      Add a team as a viewer under People with access first — the Team rung admits
-                      the viewer teams listed there.
-                    </InlineNotice>
-                  )
-                ) : (
-                  <InlineNotice tone="neutral" className="py-2 text-xs">
-                    Members of the viewer teams listed above can open this canvas.
-                  </InlineNotice>
-                ),
-            }}
+            // Restricted writes `private`; the legacy `specific_people` / `team` values
+            // display as Restricted and are never written by the dashboard.
+            onChange={(choice) => save({ access: choice === "restricted" ? "private" : choice })}
           />
-          {(canvas.access === "team" || canvas.access === "whole_org") && (
+          {canvas.access === "whole_org" && (
             <div className="border-t border-border pt-4">
               <Toggle
-                label="List for people with access"
-                description="Show this canvas in Shared for people who can already open it. Turning this off keeps URL access working."
+                label="List for your org"
+                description="Show this canvas in Shared for everyone in your org. People and teams you add always see it there. Turning this off keeps URL access working."
                 checked={canvas.discoverability === "listed"}
                 onChange={(listed) => save({ discoverability: listed ? "listed" : "link_only" })}
               />
@@ -440,7 +354,7 @@ export default function Share() {
           )}
         </Section>
 
-        {canvas.access === "specific_people" && (
+        {isRestrictedRung(canvas.access) && (
           <Section
             id="added-people-ai"
             title="AI for added people"
@@ -607,33 +521,26 @@ function ShareLocked({ canvasId }: { canvasId: string }) {
   );
 }
 
-type SettableRung = "private" | "specific_people" | "team" | "whole_org" | "public_link";
+/** The three General-access choices (restricted access model). Restricted stands for the
+ *  whole family — `private` and its legacy aliases `specific_people` / `team` — and always
+ *  writes `private`. */
+type RungChoice = "restricted" | "whole_org" | "public_link";
 const RUNGS: {
-  value: SettableRung;
+  value: RungChoice;
   label: string;
   hint: string;
   adminGated?: boolean;
   orgGated?: boolean;
-  teamGated?: boolean;
 }[] = [
-  { value: "private", label: "Private", hint: "Only you can open this canvas." },
   {
-    value: "specific_people",
-    label: "Specific people",
-    hint: "Only the people you add below can open it.",
-  },
-  {
-    value: "team",
-    label: "Team",
-    hint: "Only members of the teams you pick below can open and use it.",
-    // Tenancy (plan 003): teams exist only under active tenancy, so the rung is hidden
-    // for a guest (a signed-in user in no org). The server denies it regardless.
-    teamGated: true,
+    value: "restricted",
+    label: "Restricted",
+    hint: "Only the people and teams above can open it. With nobody added, that's just you.",
   },
   {
     value: "whole_org",
     label: "Whole org",
-    hint: "Anyone in your org with the link can open and use it.",
+    hint: "Anyone in your org with the link can open and use it — plus the people and teams above.",
     // Tenancy (plan 002 U6): hidden for a guest (a signed-in user in no org), for whom
     // sharing "with the org" is meaningless. The server denies it regardless.
     orgGated: true,
@@ -646,54 +553,46 @@ const RUNGS: {
   },
 ];
 
+/** The choice a stored rung displays as. */
+function rungChoice(access: AccessRung): RungChoice {
+  return isRestrictedRung(access) ? "restricted" : (access as RungChoice);
+}
+
 function AccessLadder({
   value,
   allowPublic,
   allowOrg,
-  allowTeam,
   orgRungDisabled,
   onChange,
-  details,
 }: {
   value: AccessRung;
   allowPublic: boolean;
   allowOrg: boolean;
-  /** Show the "Team" rung (plan 003) — org members only; hidden for a guest. */
-  allowTeam: boolean;
   /** The "Whole org" rung is shown but DISABLED — this is a Personal canvas (no home org),
-   *  so it can't be shared org-wide. The Team rung stays enabled: a personal canvas CAN be
-   *  shared with a personal team (plan 003 U6). Never let the user pick what can't work. */
+   *  so it can't be shared org-wide. Never let the user pick what can't work. */
   orgRungDisabled: boolean;
-  onChange: (rung: SettableRung) => void;
-  /** Inline "who" detail for a rung (the Specific-people allowlist, the Team picker) —
-   *  rendered nested directly under the rung while it's the selected one, so the choice
-   *  reads as part of the option rather than living in a separate, far-off section. */
-  details?: Partial<Record<SettableRung, ReactNode>>;
+  onChange: (choice: RungChoice) => void;
 }) {
+  const choice = rungChoice(value);
   const rungs = RUNGS.filter(
     (r) =>
-      (!r.adminGated || allowPublic || value === r.value) &&
-      (!r.orgGated || allowOrg || value === r.value) &&
-      (!r.teamGated || allowTeam || value === r.value),
+      (!r.adminGated || allowPublic || choice === r.value) &&
+      (!r.orgGated || allowOrg || choice === r.value),
   );
   return (
     <fieldset className="space-y-2">
       <legend className="sr-only">General access — who else can open this canvas</legend>
       {rungs.map((r) => {
         // A Personal canvas can't be shared org-wide — disable the "Whole org" rung + explain,
-        // rather than letting the click bounce off the server's 409 with no feedback. The Team
-        // rung stays enabled (a personal team can hold a personal canvas — plan 003 U6).
-        const disabled = r.orgGated && orgRungDisabled && value !== r.value;
-        const selected = value === r.value;
-        const detail = selected && !disabled ? details?.[r.value] : null;
+        // rather than letting the click bounce off the server's 409 with no feedback.
+        const disabled = r.orgGated && orgRungDisabled && choice !== r.value;
+        const selected = choice === r.value;
         return (
           <Fragment key={r.value}>
             <label
               className={`flex items-start gap-3 rounded-lg border border-border p-3 ${
                 disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"
-              } ${selected ? "border-accent bg-surface-sunken" : ""} ${
-                detail ? "rounded-b-none border-b-0" : ""
-              }`}
+              } ${selected ? "border-accent bg-surface-sunken" : ""}`}
             >
               <input
                 type="radio"
@@ -712,17 +611,10 @@ function AccessLadder({
                 </span>
               </span>
             </label>
-            {/* The chosen rung's detail, visually fused to it: same accent border, the
-                seam between them removed (the label drops its bottom radius + border). */}
-            {detail && (
-              <div className="-mt-2 rounded-b-lg border border-accent border-t-0 bg-surface-sunken/40 p-3 pt-1">
-                {detail}
-              </div>
-            )}
           </Fragment>
         );
       })}
-      {value === "public_link" && (
+      {choice === "public_link" && (
         <InlineNotice tone="warning" className="py-2 text-xs">
           Anyone with the link can view this canvas. It serves static files only: no KV, files, AI,
           or realtime.
