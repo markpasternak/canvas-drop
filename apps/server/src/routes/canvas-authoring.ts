@@ -1,5 +1,6 @@
-import { type Config, shareStatus } from "@canvas-drop/shared";
+import { accessModeOf, type Config, publicationStatusOf, shareStatus } from "@canvas-drop/shared";
 import type { AccessRung, Canvas, Json } from "@canvas-drop/shared/db";
+import { isRestrictedRung } from "@canvas-drop/shared/db";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -195,6 +196,17 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
       title: cv.title,
       tags: (cv.tags as string[] | null) ?? [],
       access: cv.access,
+      // The two independent concepts consumers should branch on (restricted access model):
+      // WHO ELSE can open it, and WHETHER it is published. `status` below is the legacy
+      // conflation of both, frozen for existing clients.
+      accessMode: accessModeOf(cv.access),
+      publicationStatus: publicationStatusOf({
+        status: cv.status,
+        hasCurrentVersion: cv.currentVersionId !== null,
+        revokedAt: cv.revokedAt ?? null,
+        sharedExpiresAt: cv.sharedExpiresAt ?? null,
+        now,
+      }),
       hasPassword: cv.passwordHash !== null,
       status: shareStatus(cv.access, cv.sharedExpiresAt ?? null, cv.revokedAt ?? null, now),
       createdAt: cv.createdAt,
@@ -296,7 +308,9 @@ export function canvasAuthoringRoutes(deps: CanvasAuthoringDeps): Hono<AppEnv> {
             };
       }
     }
-    if (pol.requireExpiry && s.effectiveRung !== "private" && s.effectiveExpiry === null) {
+    // Only the two open audiences need an expiry: the restricted family (`private` and its
+    // legacy aliases) opens nothing beyond the people-and-teams list.
+    if (pol.requireExpiry && !isRestrictedRung(s.effectiveRung) && s.effectiveExpiry === null) {
       return { code: "INVALID_BODY", message: "an expiry is required", status: 400 };
     }
     if (typeof s.newExpiry === "number") {

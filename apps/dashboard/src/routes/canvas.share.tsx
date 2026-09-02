@@ -15,7 +15,7 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { type AccessRung, ApiError, isRestrictedRung } from "../lib/api.js";
+import { type AccessRung, type AllowlistEntry, ApiError, isRestrictedRung } from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import { usePublishDraft, useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
@@ -53,8 +53,14 @@ export default function Share() {
   const [revealPassword, setRevealPassword] = useState(false);
   const [description, setDescription] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
-  // The "AI for added people" section rides the Restricted family (restricted access model).
-  const sections = canvas && isRestrictedRung(canvas.access) ? PEOPLE_SECTIONS : BASE_SECTIONS;
+  // The people-and-teams list as the list component last loaded it: drives the Restricted
+  // hint ("only you" vs "you and the N above") and the legacy-guest AI section.
+  const [people, setPeople] = useState<AllowlistEntry[]>([]);
+  const listedCount = people.filter((e) => e.kind !== "owner").length;
+  // The "AI for added people" controls gate LEGACY guest sessions (canvas-ai.ts keys on the
+  // guest principal, at every rung), so they show exactly when such a guest is on the list.
+  const hasLegacyGuest = people.some((e) => e.kind === "guest");
+  const sections = hasLegacyGuest ? PEOPLE_SECTIONS : BASE_SECTIONS;
   const sectionIds = sections.map((s) => s.id);
   const { active: activeSection, select: selectSection } = useSectionNav(sectionIds, !!canvas);
 
@@ -186,6 +192,7 @@ export default function Share() {
             role={canvas.role}
             teams={shareableTeams}
             orgs={me?.orgs ?? []}
+            onChanged={setPeople}
             onTransfer={
               isOwner
                 ? async (toUserId) => {
@@ -226,10 +233,23 @@ export default function Share() {
             // member — i.e. tenancy is active. The server would 409 it; don't make them
             // bounce off that with no feedback (plan 002).
             orgRungDisabled={canvas.orgId === null && (me?.orgs?.length ?? 0) > 0}
+            // The Restricted hint tells the truth about the list: "only you" only when the
+            // list really is empty, otherwise how many people and teams it names.
+            restrictedHint={
+              listedCount === 0
+                ? "Only you currently have access. Add people or teams above to let them in."
+                : listedCount === 1
+                  ? "Only you and the one person or team above can open it."
+                  : `Only you and the ${listedCount} people and teams above can open it.`
+            }
             // Restricted writes `private`; the legacy `specific_people` / `team` values
             // display as Restricted and are never written by the dashboard.
             onChange={(choice) => save({ access: choice === "restricted" ? "private" : choice })}
           />
+          <p className="text-xs text-muted">
+            Changing this never removes the people and teams above; it only decides who else gets
+            in.
+          </p>
           {canvas.access === "whole_org" && (
             <div className="border-t border-border pt-4">
               <Toggle
@@ -290,9 +310,10 @@ export default function Share() {
               }
             />
             {canvas.hasPassword && !canvas.shared && (
-              <InlineNotice tone="warning" className="py-2 text-xs">
-                This password has no effect until the canvas is shared. Private canvases are
-                owner-only.
+              <InlineNotice tone="neutral" className="py-2 text-xs">
+                {listedCount === 0
+                  ? "Nobody but you can open this canvas yet, so the password gates no one until you add people or teams above, or widen General access."
+                  : "The people and teams above are asked for this password too; editors never are."}
               </InlineNotice>
             )}
             <div className="flex gap-2">
@@ -317,7 +338,7 @@ export default function Share() {
             </div>
           </div>
 
-          {canvas.shared && (
+          {(canvas.shared || listedCount > 0 || canvas.sharedExpiresAt !== null) && (
             <div className="border-t border-border pt-4">
               <div className="space-y-2">
                 <Field
@@ -354,7 +375,7 @@ export default function Share() {
           )}
         </Section>
 
-        {isRestrictedRung(canvas.access) && (
+        {hasLegacyGuest && (
           <Section
             id="added-people-ai"
             title="AI for added people"
@@ -535,7 +556,8 @@ const RUNGS: {
   {
     value: "restricted",
     label: "Restricted",
-    hint: "Only the people and teams above can open it. With nobody added, that's just you.",
+    // Replaced at render time by the list-aware `restrictedHint` (only-you vs the N above).
+    hint: "Only the people and teams above can open it.",
   },
   {
     value: "whole_org",
@@ -548,7 +570,7 @@ const RUNGS: {
   {
     value: "public_link",
     label: "Public link",
-    hint: "Anyone with the link can view it (static only, no backend). Admins can turn this off.",
+    hint: "Anyone with the link can view it (static only, no backend). People and teams above keep their full access. Admins can turn this off.",
     adminGated: true,
   },
 ];
@@ -563,11 +585,14 @@ function AccessLadder({
   allowPublic,
   allowOrg,
   orgRungDisabled,
+  restrictedHint,
   onChange,
 }: {
   value: AccessRung;
   allowPublic: boolean;
   allowOrg: boolean;
+  /** The Restricted choice's hint, computed from the loaded people-and-teams list. */
+  restrictedHint: string;
   /** The "Whole org" rung is shown but DISABLED — this is a Personal canvas (no home org),
    *  so it can't be shared org-wide. Never let the user pick what can't work. */
   orgRungDisabled: boolean;
@@ -607,7 +632,9 @@ function AccessLadder({
                 <span className="block text-xs text-muted">
                   {disabled
                     ? "This canvas is Personal — only a canvas in a workspace can be shared with your whole org."
-                    : r.hint}
+                    : r.value === "restricted"
+                      ? restrictedHint
+                      : r.hint}
                 </span>
               </span>
             </label>

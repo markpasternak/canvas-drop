@@ -306,12 +306,20 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "`role: 'owner'`. Pass role='owned' or 'edited' to narrow. Default order is " +
         'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
         "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
-        "and `lastViewedAt`.",
+        "and `lastViewedAt`. Pass `access` to narrow by audience — the same filter the " +
+        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases.",
       inputSchema: {
         role: z
           .enum(["owned", "edited"])
           .optional()
           .describe("Narrow to canvases you own, or to canvases you edit but don't own."),
+        access: z
+          .enum(["restricted", "whole_org", "public_link", "private", "specific_people", "team"])
+          .optional()
+          .describe(
+            "Narrow by audience: restricted (private + its legacy aliases specific_people / team), " +
+              "whole_org, or public_link. A single legacy value is accepted too.",
+          ),
         query: z
           .string()
           .optional()
@@ -330,7 +338,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
       },
     },
-    async ({ role, query, tags, sort, limit }) => {
+    async ({ role, access, query, tags, sort, limit }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
       const {
         items,
@@ -340,6 +348,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         actorId: caller.userId,
         scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
         role,
+        access,
         q: query,
         tag: tags,
         sort,
@@ -1196,6 +1205,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       {
         const grant = await resolveTeamGrant(deps.teams, caller.userId, {
           canvasOrgId: cv.orgId,
+          targetAccess,
           teamIds: input.teamIds,
         });
         if (grant.kind === "error") {
@@ -1627,10 +1637,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
               tenancyActive: caller.tenancyActive,
               viewerOrgIds: caller.orgIds,
             })) !== null ||
-            // Team branch (plan 003): a member of one of a `team` canvas's granted teams may
-            // clone it — same live-org `teamMatch` re-join the serve seam uses (KTD3).
-            (source.access === "team" &&
-              source.status === "active" &&
+            // Team branch (plan 003): a member of one of the canvas's granted teams may clone
+            // it at ANY rung (restricted access model) — same live-org `teamMatch` re-join the
+            // serve seam uses (KTD3).
+            (source.status === "active" &&
               (await deps.teams.teamMatch(id, caller.userId, caller.orgIds)));
       if (!eligible) return fail("canvas not found");
       const { canvas } = await deps.clone.clone(source, caller.userId);

@@ -9,6 +9,8 @@ export * from "./brand/contrast.js";
 export * from "./brand/logo.js";
 export * from "./brand/skins.js";
 export * from "./brand/tokens.js";
+export * from "./canvas/access-mode.js";
+export * from "./canvas/publication-status.js";
 export * from "./canvas/search-text.js";
 export * from "./canvas/share-status.js";
 export * from "./canvas/slug-policy.js";

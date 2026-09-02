@@ -439,11 +439,13 @@ export function createHub(deps: HubDeps) {
           try {
             isAllowed = await deps.isPrincipalAllowed(canvas.id, principalLookupKey(principal));
           } catch (err) {
-            // Fail closed: a transient DB error must drop the socket (deny), never
-            // leave a stale grant alive, and never abort the rest of the sweep.
+            // A failed lookup reads as "not on the list" — the strictest value for a list
+            // that only ever WIDENS access — so the rung alone decides, exactly as before the
+            // lookups ran at every rung: a restricted canvas drops the socket, a wide rung
+            // keeps the member it admits anyway. Never abort the rest of the sweep.
             deps.log?.error(
               { err, canvasId, userId: conn.user.id },
-              "realtime: isPrincipalAllowed error — failing closed",
+              "realtime: isPrincipalAllowed error — treating as no list match",
             );
             isAllowed = false;
           }
@@ -453,10 +455,10 @@ export function createHub(deps: HubDeps) {
           try {
             teamMatch = await deps.teamMatch(canvas.id, principal.id, principal.orgIds);
           } catch (err) {
-            // Fail closed, same as the allowlist guard above.
+            // Same as the allowlist guard above: no match, the rung decides.
             deps.log?.error(
               { err, canvasId, userId: conn.user.id },
-              "realtime: teamMatch error — failing closed",
+              "realtime: teamMatch error — treating as no team match",
             );
             teamMatch = false;
           }

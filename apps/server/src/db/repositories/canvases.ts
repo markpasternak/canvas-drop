@@ -1011,7 +1011,9 @@ export function canvasesRepository(client: DbClient) {
         .select({
           active: sumCase(isActive),
           archived: sumCase(eq(t.status, "archived")),
-          shared: sumCase(and(isActive, ne(t.access, "private"))),
+          // "Shared" = open beyond the people-and-teams list (restricted access model): the
+          // legacy aliases of `private` count as NOT shared, like `private` itself.
+          shared: sumCase(and(isActive, notInArray(t.access, [...RESTRICTED_RUNGS]))),
           protected: sumCase(and(isActive, isNotNull(t.passwordHash))),
           listed: sumCase(and(isActive, eq(t.galleryListed, true))),
           templates: sumCase(and(isActive, eq(t.galleryTemplatable, true))),
@@ -1069,7 +1071,9 @@ export function canvasesRepository(client: DbClient) {
         .select({
           active: sumCase(isActive),
           archived: sumCase(eq(t.status, "archived")),
-          shared: sumCase(and(isActive, ne(t.access, "private"))),
+          // "Shared" = open beyond the people-and-teams list (restricted access model): the
+          // legacy aliases of `private` count as NOT shared, like `private` itself.
+          shared: sumCase(and(isActive, notInArray(t.access, [...RESTRICTED_RUNGS]))),
           protected: sumCase(and(isActive, isNotNull(t.passwordHash))),
           listed: sumCase(and(isActive, eq(t.galleryListed, true))),
           templates: sumCase(and(isActive, eq(t.galleryTemplatable, true))),

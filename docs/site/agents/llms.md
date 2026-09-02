@@ -64,7 +64,7 @@ Companion routes, same Bearer key:
 
 | Route | Purpose |
 |---|---|
-| `GET /v1/canvases/{id}` | `{id, slug, url, title, status, publicationState, currentVersionId}` |
+| `GET /v1/canvases/{id}` | `{id, slug, url, title, status, publicationState, accessMode, currentVersionId}` (`accessMode`: `restricted` \| `whole_org` \| `public_link` — who else can open it beyond the people-and-teams list) |
 | `GET /v1/canvases/{id}/versions` | `{versions: [{number, source, status, createdBy, createdAt, fileCount, totalBytes, current}]}` |
 | `GET /v1/canvases/{id}/files` | the live manifest as JSON; `?path=` returns that file's raw bytes; `404 NOT_PUBLISHED` before the first deploy |
 | `POST /v1/canvases/{id}/rollback` | body `{"version": 6}`; makes that ready version current and returns `{url, version}`; `404` when no ready version has that number |

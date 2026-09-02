@@ -145,7 +145,7 @@ Two switches govern it:
 
 ## AI for added people
 
-Shown while General access is **Restricted**, and owner-only: **Allow added people to use AI** (`guestAiEnabled`, off by default) plus a USD **spend cap** (`guestAiCap`). Added people can already use KV, files, and realtime when those capabilities are on; AI is metered and billed to the owner, so it is opt-in per canvas. An editor who touches these fields gets `OWNER_ONLY`.
+Shown when a legacy guest session is on the people-and-teams list (at any General-access choice), and owner-only: **Allow added people to use AI** (`guestAiEnabled`, off by default) plus a USD **spend cap** (`guestAiCap`). Added people can already use KV, files, and realtime when those capabilities are on; AI is metered and billed to the owner, so it is opt-in per canvas. An editor who touches these fields gets `OWNER_ONLY`.
 
 ## Gallery, description, and tags
 

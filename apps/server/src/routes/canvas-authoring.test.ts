@@ -264,6 +264,15 @@ describe("canvasAuthoringRoutes — POST / (publish)", () => {
       publishBody({ title: "B", access: "public_link" }),
     );
     expect(missing.status).toBe(400);
+    // The restricted family opens nothing beyond the list, so it needs no expiry — the
+    // legacy alias exactly like `private` (restricted access model).
+    for (const access of ["private", "specific_people"] as const) {
+      const ok = await publish(
+        buildApi(client, asMember(owner.id), c2).app,
+        publishBody({ title: `No expiry ${access}`, access }),
+      );
+      expect(ok.status, access).toBe(200);
+    }
   });
 
   it("happy path: creates as the viewer, deploys, applies share settings, meters, audits", async () => {
@@ -512,6 +521,8 @@ type AuthoredCanvas = {
   url: string;
   title: string;
   status: string;
+  accessMode: string;
+  publicationStatus: string;
   version: string | null;
   tags: string[];
   access: string;
@@ -875,6 +886,9 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
       title: "S2",
       access: "public_link",
       status: "live",
+      // The two independent fields ride every response, additively.
+      accessMode: "public_link",
+      publicationStatus: "published",
     });
     expect((await canvases.findById(pub.id))?.revokedAt).toBeNull();
   });
@@ -1004,6 +1018,14 @@ describe("canvasAuthoringRoutes — managed shares (v2)", () => {
     expect(byId[live.id]).toBe("private");
     expect(byId[rev.id]).toBe("revoked"); // still listed (AE3)
     expect(byId[exp.id]).toBe("expired"); // still listed (AE4)
+    // Audience and lifecycle as two fields: the legacy `status: "private"` above is a
+    // PUBLISHED restricted share, and a revoked one is `unpublished`, not "private".
+    const split = Object.fromEntries(
+      list.canvases.map((s) => [s.id, `${s.accessMode}/${s.publicationStatus}`]),
+    );
+    expect(split[live.id]).toBe("restricted/published");
+    expect(split[rev.id]).toBe("restricted/unpublished");
+    expect(split[exp.id]).toBe("public_link/expired");
   });
 });
 

@@ -92,6 +92,9 @@ export function isRestrictedRung(access: string): boolean {
 }
 /** A list-filter value: one rung, or `restricted` for the whole family. */
 export type AccessFilter = AccessRung | "restricted";
+/** Server-derived audience: who else can open the canvas beyond the people-and-teams list.
+ *  Mirrors `accessModeOf` in the shared package (`private` + aliases = `restricted`). */
+export type AccessMode = "restricted" | "whole_org" | "public_link";
 
 /** Listing policy for Team/Whole-org canvases. It never changes URL access. */
 export type CanvasDiscoverability = "link_only" | "listed";
@@ -157,6 +160,8 @@ export interface Canvas {
   /** Effective state after the server ANDs backend + flag + operator globals. */
   effective: EffectiveCapabilities;
   status: CanvasStatus;
+  /** Server-derived audience (restricted access model). Absent on legacy payloads. */
+  accessMode?: AccessMode;
   /** Single derived lifecycle the UI renders as the Publication chip (server-computed). */
   publicationState: PublicationState;
   /** Admin takedown reason (§6.10.2) — owner-only surface; null unless disabled. */

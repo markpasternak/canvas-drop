@@ -353,13 +353,19 @@ settings-only `PUT` on a revoked share is `409 SHARE_REVOKED`.
 `AuthoredCanvas`:
 
 ```
-{ id, url, title, tags, access, hasPassword, status, createdAt, updatedAt, expiresAt,
-  galleryListed, galleryTemplatable, discoverability, revokedAt, createdBy, viewerRole,
-  audienceSummary, version, bundleUpdatedAt, sourceApp, sourceKind, metadata }
+{ id, url, title, tags, access, accessMode, publicationStatus, hasPassword, status,
+  createdAt, updatedAt, expiresAt, galleryListed, galleryTemplatable, discoverability,
+  revokedAt, createdBy, viewerRole, audienceSummary, version, bundleUpdatedAt, sourceApp,
+  sourceKind, metadata }
 ```
 
-`status` is derived, first match wins: `revoked` (`revokedAt` set), `expired` (`expiresAt`
-passed), `private` (`access` is `private`), else `live`. `version` is the id of the
+`accessMode` is the audience: `restricted` (`access` is `private` or a legacy alias —
+only the people and teams on the list, who are admitted at every value), `whole_org`, or
+`public_link`. `publicationStatus` is the lifecycle, independent of the audience, first
+match wins: `disabled`, `archived`, `unpublished` (`revokedAt` set), `draft` (no version),
+`expired` (`expiresAt` passed), else `published`; deleted canvases never appear. The older
+`status` (`revoked` › `expired` › `private` › `live`) is deprecated and frozen: its `private`
+means the persisted value is literally `private`, not that nobody can open the share. `version` is the id of the
 current published version (`null` when none) and advances on every deploy;
 `bundleUpdatedAt` is the row's last write (deploy or settings), the same value as
 `updatedAt`, so watch `version` to detect a bundle change. `sourceApp` and `sourceKind`

@@ -115,10 +115,10 @@ Available to any signed-in account.
 | Tool | Input | Result |
 |---|---|---|
 | `whoami` | none | `{id, email, name, orgs: [{id, name}], teams: [{id, name, slug, orgId}], isGuest}`. `orgs` is empty when no org boundary is configured; `isGuest` is true only when an org boundary exists and you belong to no org. |
-| `list_canvases` | `role?` (`owned` \| `edited`), `query?`, `tags?` (string[]), `sort?` (`updated` default, `created`, `title`, `popular`), `limit?` (1-100, default 50) | `{total, canvases: [View + {owner: {id, name, email}, role: "owner" \| "editor", recentViews}]}`. `query` is a forgiving text filter over title, description, tags, and slug (case-, accent-, and whitespace-insensitive; words are AND-ed). `tags` matches canvases carrying any of the given tags. `popular` ranks by views in the last 30 days (`recentViews`). |
-| `list_shared_canvases` | `query?`, `sort?` (`updated` default, `title`, `owner`), `limit?` (1-100, default 50), `offset?` (default 0) | `{total, limit, offset, canvases: [{id, slug, url, title, description, tags, access: {kind: "direct" \| "team" \| "whole_org", label, teamIds?, teamNames?}, hasPassword, hasPreview, owner: {id, name, avatarUrl} \| null, createdAt, updatedAt}]}`. Canvases you can open but do not manage: direct Specific-people grants plus the Team and Whole-org shares their owner listed. Display-only; open the `url`. |
+| `list_canvases` | `role?` (`owned` \| `edited`), `access?` (`restricted` \| `whole_org` \| `public_link`, or a legacy value), `query?`, `tags?` (string[]), `sort?` (`updated` default, `created`, `title`, `popular`), `limit?` (1-100, default 50) | `{total, canvases: [View + {owner: {id, name, email}, role: "owner" \| "editor", recentViews}]}`. `query` is a forgiving text filter over title, description, tags, and slug (case-, accent-, and whitespace-insensitive; words are AND-ed). `tags` matches canvases carrying any of the given tags. `popular` ranks by views in the last 30 days (`recentViews`). |
+| `list_shared_canvases` | `query?`, `sort?` (`updated` default, `title`, `owner`), `limit?` (1-100, default 50), `offset?` (default 0) | `{total, limit, offset, canvases: [{id, slug, url, title, description, tags, access: {kind: "direct" \| "team" \| "whole_org", label, teamIds?, teamNames?}, hasPassword, hasPreview, owner: {id, name, avatarUrl} \| null, createdAt, updatedAt}]}`. Canvases you can open but do not manage: anything you are on the people-and-teams list of (directly or through a team, at any `access` value), plus the Whole-org shares their owner listed. Display-only; open the `url`. |
 | `create_canvas` | `title?`, `description?`, `backendEnabled?`, `slug?` (≤63), `orgId?` (string or null) | View + `apiKey` (the deploy key, returned once) + `deploy` (ready-to-run endpoints with the real key embedded, see Return shapes). `orgId` from `whoami.orgs` homes the canvas in that org so it can be shared org-wide; omit it for a personal canvas. `ORG_FORBIDDEN`, `INVALID_SLUG`, `SLUG_TAKEN`. |
-| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas (org-scoped), or a Team canvas whose granted team you belong to. Anything else reads `canvas not found`. |
+| `clone_canvas` | `id` (the source) | View of the new canvas: an unpublished draft with a fresh slug and key, backend off. Eligible sources: any active canvas you own or edit, a gallery-listed templatable canvas (org-scoped), or an active canvas granted to a team you belong to (at any General-access value). Anything else reads `canvas not found`. |
 
 ### Read a canvas
 
@@ -126,7 +126,7 @@ Minimum role: editor. These keep working on a disabled canvas.
 
 | Tool | Input | Result |
 |---|---|---|
-| `get_canvas` | `id` | View + `owner`, `role`, `teamIds` (when `access` is `team`), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
+| `get_canvas` | `id` | View + `owner`, `role`, `teamIds` (the team grants on the people-and-teams list, at any `access` value; `[]` when none), `ownerOnlyActs: ["delete", "transfer", "guest_ai"]`, and `deploy` with a `$CANVAS_KEY` placeholder (the key is never re-issued). |
 | `list_versions` | `id` | `{versions: [{number, source, status, createdBy, createdByName, createdByEmail, createdAt, fileCount, totalBytes, current, downloadUrl}]}`. `downloadUrl` is `{base}/mcp/canvases/{id}/versions/{n}/download`, a ZIP of that version. |
 | `get_canvas_file` | `id`, `path?` | Without `path`: `{version, fileCount, files: [{path, size, mime, hash}]}` for the live version. With `path`: `{version, path, size, mime, hash, encoding: "utf8" \| "base64", content}`. A file over 256 KiB returns `truncated: true` and a `note` instead of `content`; compare the `hash`. Fails with `this canvas has no live version yet` or `no file at "…"`. |
 | `get_canvas_usage` | `id` | `{totalViews, uniqueViewers, lastViewedAt, viewsByDay, kvOps, fileOps, fileCount, fileBytes, aiCalls, aiTokens, aiCostUsd, realtimeConnects}`. |
@@ -170,7 +170,7 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds?`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
+| `update_canvas` | `id` plus any of: `title` (≤200), `description` (≤2000; null clears), `access` (`private` \| `whole_org` \| `public_link`; the legacy `specific_people` / `team` are accepted as aliases of `private`), `discoverability` (`link_only` \| `listed`), `teamIds` (string[], ≤50), `password` (null clears), `sharedExpiresAt` (Unix ms; null clears), `spaFallback`, `previewMode` (`auto` \| `off`), `galleryListed`, `galleryTemplatable`, `tags` (≤20, each ≤50 chars), and the owner-only `guestAiEnabled`, `guestAiCap` | View + `owner`, `role`, `teamIds`, and sometimes `warning` (an edge-cache staleness notice when restricting a formerly public canvas; surface it to the user). Omitted fields are unchanged. Audits `password_change` and `share_change`. |
 | `set_capabilities` | `id`, `backendEnabled?`, `kv?`, `files?`, `ai?`, `realtime?`, `authoring?` (all booleans) | View + `owner`, `role`. `backendEnabled` is the master switch; the others take effect only when it is on. `authoring` also needs the instance switch on. Omitted fields are unchanged; switching a capability off drops sockets that lost access. |
 | `set_canvas_slug` | `id`, `slug?` (≤63; omit for a fresh random slug) | View + `deploy` (`$CANVAS_KEY` placeholder). The old URL stops resolving immediately. `INVALID_SLUG`, `SLUG_TAKEN`. |
 | `set_canvas_preview` | `id`, `image?` (base64 PNG, JPEG, or WebP; the string ≤40 MiB, decoded ≤25 MiB) | View + `owner`, `role`. With `image`, `previewMode` becomes `custom` and a publish never overwrites the cover; without it, a custom cover is cleared back to `auto` (an auto-captured screenshot is left alone). `INVALID_IMAGE`, `IMAGE_TOO_LARGE`. For the auto/off toggle use `update_canvas` `previewMode`. |
@@ -190,7 +190,11 @@ Notes on `update_canvas`:
   belong to; personal teams fit any canvas you own, org teams must match the canvas's org:
   `TEAM_REQUIRED`, `TEAM_FORBIDDEN`). Changing `access` never touches team grants.
 - `discoverability` controls only whether a Whole-org canvas appears in Shared for the
-  whole org; people and teams on the list always see it there. It never widens URL access. Setting `galleryListed: true` on a Whole-org canvas also
+  whole org; people and teams on the list always see it there. It never widens URL access.
+  Off `whole_org` it is pinned to `link_only` on every write (a legacy `team` row that stored
+  `listed` reads `listed` until its next settings write).
+- Legacy shape: `teamIds: []` sent together with an `access` change away from `team` is a
+  no-op (the grants stay on the list); `teamIds: []` on its own is refused (`TEAM_REQUIRED`). Setting `galleryListed: true` on a Whole-org canvas also
   sets `discoverability: "listed"`; passing `link_only` in the same call is refused
   (`DISCOVERY_CONFLICT`).
 - Gallery listing needs a shared, published, password-free canvas on `public_link` or a
@@ -205,7 +209,7 @@ Minimum role: editor.
 
 | Tool | Input | Result |
 |---|---|---|
-| `grant_access` | `id`, exactly one of `email` or `teamId`, `role?` (`viewer` default \| `editor`) | Person: `{ok: true, status: "granted" \| "pending" \| "role_changed" \| "already_added" \| "already_pending", role, emailDelivery?}`. An existing user is granted now; an admissible new email becomes a pending sign-in grant that carries the role; passing `role` for someone already listed updates it, and omitting it never changes an existing entry. Team: `{ok: true, status: "granted" \| "role_changed" \| "already_added", role, from}`. Only org members and teams can be editors (`GUEST_VIEWER_ONLY`). A viewer grant takes effect on the `specific_people` and `team` rungs; an editor always has access. Also `INVALID_REQUEST: pass exactly one of email or teamId`, `NOT_PERMITTED`, `AUTH_ADMISSION_REQUIRED`, `BLOCKED`, `RATE_LIMITED`, `TEAM_FORBIDDEN`, `EMAIL_NOT_CONFIGURED`. |
+| `grant_access` | `id`, exactly one of `email` or `teamId`, `role?` (`viewer` default \| `editor`) | Person: `{ok: true, status: "granted" \| "pending" \| "role_changed" \| "already_added" \| "already_pending", role, emailDelivery?}`. An existing user is granted now; an admissible new email becomes a pending sign-in grant that carries the role; passing `role` for someone already listed updates it, and omitting it never changes an existing entry. Team: `{ok: true, status: "granted" \| "role_changed" \| "already_added", role, from}`. Only org members and teams can be editors (`GUEST_VIEWER_ONLY`). Every grant opens the canvas at once, whatever `access` (General access) says; an editor also manages it. Also `INVALID_REQUEST: pass exactly one of email or teamId`, `NOT_PERMITTED`, `AUTH_ADMISSION_REQUIRED`, `BLOCKED`, `RATE_LIMITED`, `TEAM_FORBIDDEN`, `EMAIL_NOT_CONFIGURED`. |
 | `invite_to_canvas` | `id`, `email`, `role?` | The same person result as `grant_access`, through the same Add person service, and it sends the access email. A brand-new external email is refused for a non-admin unless the instance allows it (`NOT_PERMITTED`); `RATE_LIMITED` past the cap. |
 | `revoke_access` | `id`, `entryId` (from `list_access`) | `{ok: true}`. Removes a person (another editor, or yourself), a pending grant, a legacy guest row, or a team grant; sockets the entry no longer permits are dropped. The `owner` entry refuses (`OWNER_ONLY`); an unknown id reads `access entry not found`. |
 | `set_access_role` | `id`, `entryId`, `role` (`viewer` \| `editor`) | `{ok: true}`. A guest can only be a viewer (`GUEST_VIEWER_ONLY`); the `owner` entry refuses (`OWNER_ONLY`; use `transfer_canvas`). Demoting drops the person's live editor sockets. |
@@ -254,16 +258,19 @@ Team error codes: `NOT_A_MEMBER`, `TEAM_NOT_FOUND`, `TEAM_NAME_TAKEN`, `FORBIDDE
 
 ```
 { id, slug, url, ownerId, title, description, status, publicationState,
-  currentVersionId, access, discoverability, hasPassword, sharedExpiresAt,
+  currentVersionId, access, accessMode, discoverability, hasPassword, sharedExpiresAt,
   spaFallback, backendEnabled, disabledReason, galleryListed, galleryTemplatable,
   tags, guestAiEnabled, guestAiCap, previewMode, viewCount, lastViewedAt,
   hasPreview, previewUrl? }
 ```
 
 `publicationState` is `draft`, `published`, `archived`, `disabled`, or `deleted`.
-`previewUrl` is present when a preview exists. Identity-bearing tools add
-`owner: {id, name, email} | null` and `role: "owner" | "editor"`; `teamIds` appears when
-`access` is `team`. The password hash and the API key are never included.
+`accessMode` is the audience — `restricted` (`private` or a legacy alias: only the
+people-and-teams list, which applies at every value), `whole_org`, or `public_link` — so an
+agent never has to know the three spellings of "restricted". `previewUrl` is present when a
+preview exists. Identity-bearing tools add `owner: {id, name, email} | null` and
+`role: "owner" | "editor"`; `teamIds` lists the granted teams at any `access` value. The
+password hash and the API key are never included.
 
 **deploy**, returned by `create_canvas`, `get_canvas`, `set_canvas_slug`, and
 `regenerate_deploy_key`: the exact keyed [Deploy API](/docs/api/deploy-api) endpoints

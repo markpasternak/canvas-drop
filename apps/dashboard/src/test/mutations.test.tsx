@@ -92,6 +92,41 @@ describe("useUpdateSettings (optimistic)", () => {
     });
   });
 
+  it("keeps the team grants and derives `shared` from the family when the rung changes (restricted access model)", async () => {
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const teamShared = {
+      ...CANVAS,
+      access: "team" as const,
+      teamIds: ["t1"],
+      shared: false,
+      discoverability: "listed" as const,
+    };
+    qc.setQueryData(keys.canvas("c1"), teamShared);
+    vi.spyOn(api, "updateSettings").mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useUpdateSettings("c1"), { wrapper: wrapper(qc) });
+    result.current.mutate({ access: "whole_org" });
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))).toMatchObject({
+        access: "whole_org",
+        shared: true,
+        // Team grants live on the people-and-teams list: a rung change never clears them.
+        teamIds: ["t1"],
+      }),
+    );
+
+    result.current.mutate({ access: "private" });
+    await waitFor(() =>
+      expect(qc.getQueryData<Canvas>(keys.canvas("c1"))).toMatchObject({
+        access: "private",
+        shared: false,
+        teamIds: ["t1"],
+        // Off whole_org the listing policy is pinned to link_only.
+        discoverability: "link_only",
+      }),
+    );
+  });
+
   it("uses the target access when Whole-org and gallery listing change together", async () => {
     const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     qc.setQueryData(keys.canvas("c1"), CANVAS);

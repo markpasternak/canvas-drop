@@ -1,21 +1,26 @@
 import type { AccessRung } from "../db/types.js";
 
 /**
- * The lifecycle status of a managed authoring share (authoring v2), as surfaced to
- * the creator's management UI (`canvasdrop.canvases.list()`). Derived, never stored —
- * one source of truth shared by the server projection and the browser SDK type.
+ * LEGACY. The original derived `status` of a managed authoring share, kept exactly as it
+ * was for existing consumers of `canvasdrop.canvases.*`. It conflates two concepts:
+ * `private` says the persisted `access` value is literally `"private"` (General access
+ * Restricted) — NOT that nobody can open the canvas, since the people-and-teams list
+ * applies at every rung — and the legacy aliases `specific_people` / `team` read `live`
+ * even though they mean the same audience. New consumers should read the two independent
+ * fields instead: `accessMode` ({@link accessModeOf}) for the audience and
+ * `publicationStatus` ({@link publicationStatusOf}) for the lifecycle.
+ *
+ * @deprecated Use `accessMode` + `publicationStatus`; this value is frozen for compatibility.
  */
 export type ShareStatus = "live" | "expired" | "revoked" | "private";
 
 /**
- * Derive a share's {@link ShareStatus} from its access rung, share expiry, and
- * revoked stamp. Pure (primitives + `now`) so the management projection and any
- * future surface evaluate it identically.
+ * Derive a share's legacy {@link ShareStatus}. Pure (primitives + `now`). Frozen behaviour:
+ * `revoked` (revoked_at set) › `expired` (share expiry has passed) › `private` (the
+ * persisted value is exactly `"private"`) › `live`. Do not "fix" the alias asymmetry here —
+ * it is documented, and the replacement fields carry the corrected semantics.
  *
- * Precedence (first match wins): `revoked` (revoked_at set) › `expired` (share
- * expiry has passed) › `private` (the rung is private — not publicly readable) ›
- * `live` (a shareable rung, active, unexpired). Revoked and expired shares are not
- * publicly readable; `private` is owner-only; only `live` is reachable by a reader.
+ * @deprecated Use {@link accessModeOf} + {@link publicationStatusOf}.
  */
 export function shareStatus(
   access: AccessRung | string,

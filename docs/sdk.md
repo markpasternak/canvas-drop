@@ -333,7 +333,9 @@ UpdateOptions = {                      // every field optional; no `slug`
 }
 AuthoredCanvas = {
   id, url, title, tags, access: ShareAudience, hasPassword,
-  status: "live" | "expired" | "revoked" | "private",
+  accessMode: "restricted" | "whole_org" | "public_link",   // who else can open it
+  publicationStatus: "draft" | "published" | "expired" | "unpublished" | "archived" | "disabled",
+  status: "live" | "expired" | "revoked" | "private",         // deprecated: use the two above
   createdAt, updatedAt, expiresAt: number | null, galleryListed,
   revokedAt: number | null, createdBy, version: string | null, bundleUpdatedAt,
   sourceApp: string | null, sourceKind: string | null, metadata,
@@ -343,7 +345,10 @@ AuthoredCanvas = {
 `ShareAudience` is the persisted General-access value, `"private" | "specific_people" | "team"
 | "whole_org" | "public_link"`; `"specific_people"` and `"team"` are legacy aliases of
 `"private"` (Restricted), and a `"password"` request is stored as `public_link` with
-`hasPassword: true`. The people-and-teams list applies at every value.
+`hasPassword: true`. The people-and-teams list applies at every value. Branch on
+`accessMode` (the audience) and `publicationStatus` (the lifecycle) rather than on `access`
+or the deprecated `status`: `status: "private"` only says the stored value is `private` —
+the people on the list can still open the share.
 
 Only org members can author; a legacy guest gets `NotAuthenticatedError`.
 Publishing is metered per viewer (`CANVAS_DROP_AUTHORING_USER_DAILY_MAX`,

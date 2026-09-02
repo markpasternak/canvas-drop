@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import {
+  accessModeOf,
   CANVAS_MAX_TAG_LENGTH,
   CANVAS_MAX_TAGS,
   type CapabilityGlobals,
@@ -236,6 +237,9 @@ function ownerCanvasView(
     title: cv.title,
     description: cv.description,
     access: cv.access,
+    // The effective audience — who else can open it beyond the people-and-teams list
+    // (restricted access model): `private` and its legacy aliases read `restricted`.
+    accessMode: accessModeOf(cv.access),
     discoverability: cv.discoverability,
     // The teams this canvas is shared with (plan 003 U5), at any rung — only resolved on
     // the single-canvas view; the list path leaves it [].
@@ -520,8 +524,9 @@ export function managementRoutes(deps: ManagementDeps) {
             tenancyActive: !!deps.config.org.name,
             viewerOrgIds: orgIds,
           })) !== null ||
-          (source.access === "team" &&
-            source.status === "active" &&
+          // A member of a granted team (restricted access model: team grants apply at every
+          // rung, so the clone path does too — the same live-org `teamMatch` the serve seam uses).
+          (source.status === "active" &&
             !!deps.teams &&
             (await deps.teams.teamMatch(id, user.id, orgIds)));
     if (!eligible) return c.json({ error: "not_found" }, 404);
@@ -811,6 +816,7 @@ export function managementRoutes(deps: ManagementDeps) {
     if (deps.teams) {
       const grant = await resolveTeamGrant(deps.teams, c.get("user").id, {
         canvasOrgId: cv.orgId,
+        targetAccess,
         teamIds: body.data.teamIds,
       });
       if (grant.kind === "error") {

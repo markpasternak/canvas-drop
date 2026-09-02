@@ -198,11 +198,9 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
       // management role, not the door — a listed viewer opens the canvas at every rung
       // (restricted access model), private included.
       await h.hub.revalidateCanvas(canvasId);
-      const stillOpen = await Promise.race([
-        closed.then(() => false),
-        new Promise<boolean>((r) => setTimeout(() => r(true), 300)),
-      ]);
-      expect(stillOpen).toBe(true);
+      // `dropConn` removes the connection synchronously inside the sweep, so the count is
+      // a deterministic witness that the socket survived (no wall-clock race).
+      expect(h.hub.connectionCount(canvasId)).toBe(1);
       // Removing the row closes the door, and with it the socket (unauthorized close code).
       const revoke = await h.SEND(
         OWNER,
@@ -212,6 +210,7 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
       expect([200, 204]).toContain(revoke.status);
       await revoke.text();
       await h.hub.revalidateCanvas(canvasId);
+      expect(h.hub.connectionCount(canvasId)).toBe(0);
       expect(await Promise.race([closed, timeout(3000, "socket close")])).toBe(CLOSE_UNAUTHORIZED);
     } finally {
       // A still-open client socket would hold the server's close() forever.

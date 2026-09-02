@@ -27,6 +27,23 @@ Google-Docs shape: **the list always applies; General access only widens.** Thre
 
 The five-rung "access ladder" is gone from every surface (doc site, README, SECURITY.md, llms.txt, the skill, the landing page): the ladder visual now leads with the people-and-teams entry (accented) and lists Restricted / Whole org / Public link. Legacy API values are documented as aliases wherever an enum is shown. The docs-refresh workflow was **not** re-run for this round; `pnpm docs:build` + the docs integrity/route tests gated the hand edits.
 
+## Audience and lifecycle are two fields (added mid-round)
+
+The authoring API's derived `status` (`revoked › expired › private › live`) conflated two questions — *who else can open it* and *whether it is published* — and the fold made that visible: a `status: "private"` share with people on its list is published and reachable by them, and the legacy aliases read `live`. Rather than change a frozen field, the round added two additive ones derived by shared pure helpers:
+
+- `accessModeOf(access)` → `restricted | whole_org | public_link` (`packages/shared/src/canvas/access-mode.ts`) — on the authoring, management and MCP projections.
+- `publicationStatusOf({ status, hasCurrentVersion, revokedAt, sharedExpiresAt, now })` → `draft | published | expired | unpublished | archived | disabled | deleted` (`packages/shared/src/canvas/publication-status.ts`) — on the authoring projection; it refines the dashboard's coarser `publicationState` with revocation and expiry. Precedence: row lifecycle beats share facts, revocation beats the version, expiry only matters for something otherwise live.
+
+`shareStatus` / `ShareStatus` stay exactly as they were (deprecated in JSDoc and docs). Consumers branch on the new fields. Lesson: when a derived field turns out to encode two concepts, add the two honest fields and freeze the old one — do not "fix" the old field's semantics under existing clients.
+
+## Review lessons from this round
+
+- **The list only widens.** The cross-model reviewer flagged a P0: a failed list lookup in the hub reads as "no match" and the rung then decides, so at `whole_org` a member keeps the socket through a DB failure. Validation rejected it — the list can only admit, never deny, so "no match" is the strictest possible value and the wide rung admits exactly whom it admitted before the round. The real defect was the comment claiming the code "fails closed". When a lookup can only widen access, a failed lookup is already the conservative outcome; say so in the comment and pin it with a test on both a restricted and a wide rung.
+- **Grep the rung one more time.** Three reviewers independently found the clone path still keyed on `access === "team"`; the inventory `shared` counts, the authoring `requireExpiry` gate and `shareStatus` were the same class of leftover. After folding values into a family, grep every literal comparison against each member and route it through the family predicate or a deliberate decision.
+- **Legacy request shapes deserve a carve-out, not an error.** Removing the `clear` kind made the old dashboard's "leave the Team rung" shape (`teamIds: []` with an `access` change) a `TEAM_REQUIRED` error. The compatible contract: that exact shape is a no-op (grants live on the list); a bare `[]` stays refused.
+- **Flags keyed on a renamed concept.** The dashboard's `canvas.shared` used to mean "not private"; the round redefined it as "open beyond the list", and two notices (password, expiry) silently became false for Restricted canvases with listed people. When a payload flag's meaning moves, grep the UI for every consumer, not just the tests.
+- **Mid-tier review agents stall under low-priority sessions.** Every Sonnet-tier reviewer dispatch stalled at the 600 s watchdog while the session ran in low-priority mode; session-model retries completed. When that pattern appears, re-dispatch the critical lenses on the session model instead of retrying the same tier.
+
 ## If you are touching access next
 
 1. Start from `decideCanvasAccess` and its test file; the hub, the shared-list service, settings-update, and the authoring API all follow it.

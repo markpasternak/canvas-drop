@@ -1041,11 +1041,13 @@ describe("managementRoutes", () => {
     expect(res.status).toBe(200);
     const view = await jsonOf<{
       publicationState: string;
+      accessMode: string;
       currentVersionId: string | null;
       shared: boolean;
       galleryListed: boolean;
     }>(res);
     expect(view.publicationState).toBe("draft");
+    expect(view.accessMode).toBe("restricted"); // audience rides alongside lifecycle
     expect(view.currentVersionId).toBeNull();
     expect(view.shared).toBe(false); // leaving Published reverts share
     expect(view.galleryListed).toBe(false);
@@ -2655,6 +2657,11 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
     await repo.create({ ownerId: owner.id, slug: "priv", apiKeyHash: "k1", title: "Keep me" });
     const pub = await repo.create({ ownerId: owner.id, slug: "pub", apiKeyHash: "k2" });
     await repo.setAccess(pub.id, "whole_org");
+    // Legacy aliases of `private` (restricted access model).
+    const people = await repo.create({ ownerId: owner.id, slug: "people", apiKeyHash: "k3" });
+    await repo.setAccess(people.id, "specific_people");
+    const teamy = await repo.create({ ownerId: owner.id, slug: "teamy", apiKeyHash: "k4" });
+    await repo.setAccess(teamy.id, "team");
 
     // access= narrows to the matching rung.
     const filtered = await jsonOf<{ canvases: Array<{ slug: string }> }>(
@@ -2663,6 +2670,25 @@ describe("managementRoutes — clone + listability edge cases (plan 002 review)"
       ),
     );
     expect(filtered.canvases.map((c) => c.slug)).toEqual(["pub"]);
+    // `restricted` = the whole family (the value the dashboard's filter sends).
+    const restricted = await jsonOf<{ canvases: Array<{ slug: string }> }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        "/api/canvases?access=restricted",
+      ),
+    );
+    expect(restricted.canvases.map((c) => c.slug).sort()).toEqual(["people", "priv", "teamy"]);
+    // An alias reads as NOT shared (open beyond the list) on the single-canvas view, with the
+    // family's access mode.
+    const view = await jsonOf<{ shared: boolean; accessMode: string; access: string }>(
+      await buildApp(client, { id: owner.id, isAdmin: false }).request(
+        `/api/canvases/${people.id}`,
+      ),
+    );
+    expect(view).toMatchObject({
+      access: "specific_people",
+      shared: false,
+      accessMode: "restricted",
+    });
 
     // A junk ?access= (.catch) drops only itself — the q= filter still applies.
     const junk = await jsonOf<{ canvases: Array<{ slug: string }> }>(

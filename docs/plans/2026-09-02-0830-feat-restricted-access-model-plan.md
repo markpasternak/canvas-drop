@@ -62,7 +62,8 @@ Today the Share tab has two places that both decide who can open a canvas: the p
 - R7. Admin canvas filters accept `restricted` as an alias for the family; per-rung admin stats group the family under `restricted` while still emitting the raw counts.
 
 **Dashboard**
-- R8. Share tab General access shows three options. Restricted is selected for any family rung; selecting it PATCHes `access: "private"`. The team picker that lived inside the Team rung is removed; the "AI for added people" section shows whenever the canvas is in the restricted family.
+- R8. Share tab General access shows three options. Restricted is selected for any family rung; selecting it PATCHes `access: "private"`. The team picker that lived inside the Team rung is removed. The Restricted hint is list-aware ("Only you currently have access" only when the list holds nobody but the owner; otherwise it counts the people and teams above); a note says changing General access never removes the list; the Public link hint says listed people keep full access. The "AI for added people" section shows exactly when a legacy guest session is on the list (its server gate keys on the guest principal, at any rung) — amended during review from "whenever the canvas is in the restricted family".
+- R13. **Audience and lifecycle are two fields.** The authoring, management and MCP projections carry an additive `accessMode` (`restricted` \| `whole_org` \| `public_link`, derived from `access` by one shared pure helper) and the authoring projection an additive `publicationStatus` (`draft` \| `published` \| `expired` \| `unpublished` \| `archived` \| `disabled`, derived by one shared pure helper with the precedence disabled › archived › unpublished › draft › expired › published; deleted rows are omitted). The legacy authoring `status` and the SDK `ShareStatus` are frozen and marked deprecated; `access`, `status`, and every other existing field keep their values. Clone eligibility and the authoring expiry requirement follow the family (a granted team may clone at any rung; the restricted family needs no expiry).
 - R9. The intro sentence under "Share with people and teams" stands as written in #85 and is now true; the General access description reads "Who else can open the canvas, beyond the people and teams above."
 - R10. Every rung label surface (`Badge` `ACCESS_BADGE`, `CanvasList` visibility, `DetailPanel` access fact, `AdminCanvasTable` filter and cell, Status tab) shows **Restricted** for the family, with secondary copy "People and teams you add" (plus "+ protected" when a password is set).
 
@@ -233,6 +234,14 @@ One branch (`feat/restricted-access-model`), one PR, one local commit per unit, 
 - Pages under R12; `landing-page.ts` LADDER + any TOUR caption; `landing-page.test.ts` if assets change.
 - Recapture `tour-sharing.webp` and the README tour loop (`scripts/landing-gif.mjs`) from the seeded demo (owner start script; `pnpm seed:canvases && pnpm seed:demo-apps && pnpm seed:collaborators`).
 - `docs/solutions/2026-09-02-restricted-access-model.md` + solutions README index line; AGENTS.md status sentence.
+
+**U11 · Audience and lifecycle as two independent fields (added during the round at Mark's request)**
+- `packages/shared`: `accessModeOf` (`canvas/access-mode.ts`) and `publicationStatusOf` (`canvas/publication-status.ts`) with state-matrix tests; `shareStatus` documented as frozen/deprecated.
+- Authoring projection gains `accessMode` + `publicationStatus`; management view and MCP view gain `accessMode`; SDK `AuthoredCanvas` gains both (types + deprecation on `ShareStatus`).
+- Clone eligibility (management + MCP) and the authoring `requireExpiry` gate use the family, not the legacy `team` / literal `private` value.
+- Share tab: list-aware Restricted hint, "never removes the list" note, Public link hint, guest-AI section keyed on a listed legacy guest.
+- Tests: shared matrix tests; authoring contract tests (publish/update/list return the new fields, old fields unchanged); management + MCP view tests; a clone test for a viewer-team member on a `private` canvas; a hub-vs-HTTP parity test over shared fixtures; dashboard hint/section tests.
+- Docs: `sdk/authoring.md`, `api/runtime-api.md`, `docs/sdk.md`, `agents/mcp.md`, `agents/llms.md`, `authoring/sharing.md`, `sdk/ai.md`.
 
 ### Phase D — review and ship
 

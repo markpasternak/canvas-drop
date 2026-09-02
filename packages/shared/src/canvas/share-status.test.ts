@@ -9,8 +9,11 @@ describe("shareStatus", () => {
     expect(shareStatus("specific_people", NOW + 1000, null, NOW)).toBe("live");
   });
 
-  it("private: the rung is private (owner-only), not revoked/expired", () => {
+  it("private: the persisted value is exactly `private` (legacy — says nothing about the list), not revoked/expired", () => {
     expect(shareStatus("private", null, null, NOW)).toBe("private");
+    // Frozen asymmetry: the legacy aliases of `private` still read `live`.
+    expect(shareStatus("specific_people", null, null, NOW)).toBe("live");
+    expect(shareStatus("team", null, null, NOW)).toBe("live");
   });
 
   it("expired: share expiry has passed (and not revoked)", () => {

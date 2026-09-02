@@ -496,7 +496,7 @@ describe("share route", () => {
     });
   });
 
-  it("updates added-people AI settings for specific people access", async () => {
+  it("updates added-people AI settings when a legacy guest is on the list", async () => {
     const calls = mockFetch({
       "GET /api/canvases/c1": () =>
         json({
@@ -506,7 +506,20 @@ describe("share route", () => {
           shared: true,
           currentVersionId: "v1",
         }),
-      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "guest:g9",
+              kind: "guest",
+              role: "viewer",
+              email: "g@partner.com",
+              name: null,
+              userId: null,
+              createdAt: 1,
+            },
+          ],
+        }),
       "PATCH /api/canvases/c1/settings": () =>
         json({
           ...CANVAS,
@@ -529,6 +542,120 @@ describe("share route", () => {
       expect(patch?.body).toContain("guestAiEnabled");
       expect(patch?.body).toContain("true");
     });
+  });
+
+  it("Restricted hint says 'only you' while the list holds just the owner, and counts the list otherwise", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      // The Public link choice (and its hint) only renders for an account that may publish publicly.
+      "GET /api/me": () => json({ ...ME, canPublishPublic: true }),
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(await screen.findByText(/only you currently have access/i)).toBeInTheDocument();
+    // Changing General access is explained as additive to the list.
+    expect(screen.getByText(/never removes the people and teams above/i)).toBeInTheDocument();
+    // Public link explains that listed people keep full access.
+    expect(screen.getByText(/people and teams above keep their full access/i)).toBeInTheDocument();
+  });
+
+  it("Restricted hint names how many people and teams the list holds — never 'only you' with grants", async () => {
+    const published = { ...CANVAS, publicationState: "published", currentVersionId: "v1" };
+    mockFetch({
+      "GET /api/canvases/c1": () => json(published),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "owner",
+              kind: "owner",
+              role: "owner",
+              email: "owner@example.com",
+              name: "Owner",
+              userId: "u1",
+              createdAt: 1,
+            },
+            {
+              id: "member:m1",
+              kind: "member",
+              role: "viewer",
+              email: "liam@example.com",
+              name: "Liam",
+              userId: "u2",
+              createdAt: 2,
+            },
+            {
+              id: "team:t1",
+              kind: "team",
+              role: "viewer",
+              email: null,
+              name: "Design",
+              userId: null,
+              teamId: "t1",
+              teamOrgId: "o1",
+              createdAt: 3,
+            },
+          ],
+        }),
+    });
+    renderShare();
+    expect(
+      await screen.findByText(/only you and the 2 people and teams above can open it/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/only you currently have access/i)).toBeNull();
+  });
+
+  it("the guest-AI section follows a legacy guest on the list, not General access", async () => {
+    const guest = {
+      id: "guest:g1",
+      kind: "guest",
+      role: "viewer",
+      email: "g@partner.com",
+      name: null,
+      userId: null,
+      createdAt: 1,
+    };
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({
+          ...CANVAS,
+          publicationState: "published",
+          access: "whole_org",
+          shared: true,
+          currentVersionId: "v1",
+        }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [guest] }),
+    });
+    renderShare();
+    // Whole org + a legacy guest: the AI opt-in is offered.
+    expect(
+      await screen.findByRole("switch", { name: /allow added people to use ai/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("the guest-AI section stays hidden on a Restricted canvas with no legacy guest", async () => {
+    mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () => json({ entries: [] }),
+    });
+    renderShare();
+    await screen.findByRole("radio", { name: /restricted/i });
+    expect(screen.queryByRole("switch", { name: /allow added people to use ai/i })).toBeNull();
   });
 
   it("warns when a shared canvas's expiry is already in the past", async () => {

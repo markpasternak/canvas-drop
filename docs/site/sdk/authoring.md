@@ -55,13 +55,15 @@ What `publish`, `update`, and each `list` entry return — a share plus its mana
 | --- | --- | --- |
 | `id` / `url` | `string` | stable id and public URL (the URL never changes across updates) |
 | `title` / `tags` | `string` / `string[]` | |
-| `access` | `string` | the current audience rung |
+| `access` | `string` | the persisted General-access value (`private`, `whole_org`, `public_link`, or a legacy alias of `private`: `specific_people` / `team`) |
+| `accessMode` | `"restricted" \| "whole_org" \| "public_link"` | **who else** can open it beyond the people-and-teams list, which applies at every value; `private` and its aliases read `restricted`. Branch on this, not on `access` |
+| `publicationStatus` | `"draft" \| "published" \| "expired" \| "unpublished" \| "archived" \| "disabled"` | **whether** it is published, independent of the audience; precedence `disabled` › `archived` › `unpublished` (revoked) › `draft` (no version) › `expired` › `published`. Deleted canvases are omitted from every authoring response |
 | `hasPassword` | `boolean` | whether an additional password lock is currently set |
 | `discoverability` | `"link_only" \| "listed"` | whether eligible org/team shares appear in discovery surfaces |
 | `galleryTemplatable` | `boolean` | whether gallery viewers may use the canvas as a template |
 | `viewerRole` | `"owner" \| "editor" \| "admin"` | why the current viewer may manage this record |
 | `audienceSummary` | `{ count: number \| null; names: string[] }` | safe summary of the viewer people and teams on the list (`count` = both; `names` = the teams) |
-| `status` | `"live" \| "expired" \| "revoked" \| "private"` | derived; precedence `revoked` › `expired` › `private` › `live` |
+| `status` | `"live" \| "expired" \| "revoked" \| "private"` | **deprecated**; frozen for older clients. `private` means the persisted value is literally `private` (the people on the list can still open it), and the legacy aliases read `live`. Read `accessMode` + `publicationStatus` instead |
 | `createdAt` / `updatedAt` | `number` | unix ms |
 | `expiresAt` / `revokedAt` | `number \| null` | share expiry; when it was revoked |
 | `galleryListed` | `boolean` | whether the canvas is explicitly listed in the gallery |
@@ -130,8 +132,12 @@ await canvasdrop.canvases.list({ sourceKind: "roadmap-share", tags: ["q3"] });
   `status: "revoked"`. Calling `update` with a bundle publishes it again at the same
   URL and clears `revokedAt`. A settings-only update while unpublished rejects with
   `SHARE_REVOKED`.
-- **Status is derived** from access + expiry + revoked state: `revoked` › `expired` ›
-  `private` › `live`. Only a `live` share is reachable by a reader.
+- **Two independent facts, not one status.** `accessMode` says who else can open the share
+  (`restricted`, `whole_org`, `public_link`); `publicationStatus` says whether it is
+  published (`draft`, `published`, `expired`, `unpublished`, `archived`, `disabled`). A
+  `restricted` share that is `published` is open to everyone on its people-and-teams list.
+  The older `status` field (`revoked` › `expired` › `private` › `live`) conflated the two
+  and is kept only for existing clients: its `private` does **not** mean owner-only.
 - **Reader isolation.** A public/permitted reader receives only the shared static
   content — never `metadata`, `createdBy`, `status`, or any management field. Those are
   assembled only on the authenticated management API.

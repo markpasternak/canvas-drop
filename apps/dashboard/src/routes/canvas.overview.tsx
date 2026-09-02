@@ -39,10 +39,7 @@ function galleryLabel(canvas: Canvas): string {
 
 function accessLabel(canvas: Canvas): string {
   const base = accessRungLabel(canvas.access);
-  const head =
-    !isRestrictedRung(canvas.access) && canvas.sharedExpiresAt
-      ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})`
-      : base;
+  const head = canvas.sharedExpiresAt ? `${base} (${expiryLabel(canvas.sharedExpiresAt)})` : base;
   const parts = [head];
   if (canvas.hasPassword) parts.push("password");
   return parts.join(", ");
