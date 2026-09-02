@@ -245,6 +245,22 @@ const rawSchema = z
     CANVAS_DROP_AI_USER_DAILY_USD: num(5),
     CANVAS_DROP_AI_CANVAS_MONTHLY_USD: num(50),
 
+    // Admin-granted outbound Connections primitive. The encryption key is optional
+    // at boot so existing static-only installations keep working; creating or using
+    // protected headers validates it as a base64-encoded 32-byte key in SecretCipher.
+    CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY: z.string().optional(),
+    CANVAS_DROP_CONNECTIONS_MAX_URL_BYTES: posInt(8 * 1024),
+    CANVAS_DROP_CONNECTIONS_MAX_BODY_BYTES: posInt(256 * 1024),
+    CANVAS_DROP_CONNECTIONS_MAX_RESPONSE_BYTES: posInt(2 * 1024 * 1024),
+    CANVAS_DROP_CONNECTIONS_TIMEOUT_MS: posInt(10_000),
+    CANVAS_DROP_CONNECTIONS_MAX_REDIRECTS: nonNegInt(3),
+    CANVAS_DROP_CONNECTIONS_CANVAS_CONCURRENCY: posInt(5),
+    CANVAS_DROP_CONNECTIONS_INSTANCE_CONCURRENCY: posInt(50),
+    CANVAS_DROP_CONNECTIONS_ACTOR_PER_MIN: posInt(60),
+    CANVAS_DROP_CONNECTIONS_PROFILE_PER_MIN: posInt(600),
+    CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADERS: posInt(32),
+    CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADER_BYTES: posInt(16 * 1024),
+
     // Authoring capability (plan 2026-07-04): a signed-in viewer creates a new canvas
     // from a backend-enabled canvas's page, as themselves. Instance-wide opt-in
     // (default OFF — higher-privilege than the other primitives), plus per-viewer
@@ -579,6 +595,21 @@ const rawSchema = z
         models: r.CANVAS_DROP_AI_MODELS,
         userDailyUsd: r.CANVAS_DROP_AI_USER_DAILY_USD,
         canvasMonthlyUsd: r.CANVAS_DROP_AI_CANVAS_MONTHLY_USD,
+      },
+
+      connections: {
+        encryptionKey: r.CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY?.trim() || undefined,
+        maxUrlBytes: r.CANVAS_DROP_CONNECTIONS_MAX_URL_BYTES,
+        maxBodyBytes: r.CANVAS_DROP_CONNECTIONS_MAX_BODY_BYTES,
+        maxResponseBytes: r.CANVAS_DROP_CONNECTIONS_MAX_RESPONSE_BYTES,
+        timeoutMs: r.CANVAS_DROP_CONNECTIONS_TIMEOUT_MS,
+        maxRedirects: r.CANVAS_DROP_CONNECTIONS_MAX_REDIRECTS,
+        canvasConcurrency: r.CANVAS_DROP_CONNECTIONS_CANVAS_CONCURRENCY,
+        instanceConcurrency: r.CANVAS_DROP_CONNECTIONS_INSTANCE_CONCURRENCY,
+        actorPerMin: r.CANVAS_DROP_CONNECTIONS_ACTOR_PER_MIN,
+        profilePerMin: r.CANVAS_DROP_CONNECTIONS_PROFILE_PER_MIN,
+        maxCallerHeaders: r.CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADERS,
+        maxCallerHeaderBytes: r.CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADER_BYTES,
       },
 
       authoring: {

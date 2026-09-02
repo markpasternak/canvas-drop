@@ -260,6 +260,13 @@
       "when": 1788289823271,
       "tag": "0036_canvas_access_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788365076815,
+      "tag": "0037_admin_granted_connections",
+      "breakpoints": true
     }
   ]
 }

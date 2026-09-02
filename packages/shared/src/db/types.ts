@@ -4,8 +4,10 @@ import type {
   auditLog,
   authoringUsage,
   canvasAllowlist,
+  canvasConnections,
   canvases,
   canvasTeams,
+  connectionProfiles,
   drafts,
   emailTemplates,
   files,
@@ -100,6 +102,10 @@ export type ScreenshotJob = typeof screenshotJobs.$inferSelect;
 export type NewScreenshotJob = typeof screenshotJobs.$inferInsert;
 export type CanvasAllowlistEntry = typeof canvasAllowlist.$inferSelect;
 export type NewCanvasAllowlistEntry = typeof canvasAllowlist.$inferInsert;
+export type ConnectionProfile = typeof connectionProfiles.$inferSelect;
+export type NewConnectionProfile = typeof connectionProfiles.$inferInsert;
+export type CanvasConnection = typeof canvasConnections.$inferSelect;
+export type NewCanvasConnection = typeof canvasConnections.$inferInsert;
 
 /** Screenshot job status values (stored as text, CHECK-constrained in the schema). */
 export type ScreenshotJobStatus = "pending" | "running" | "done" | "failed";
@@ -201,5 +207,14 @@ export type McpTokenKind = "access" | "refresh";
 /** Guest-invite lifecycle state (`guest_invites.state`, CHECK-constrained). */
 export type GuestInviteState = "pending" | "active" | "revoked";
 
-/** Usage-event types (`usage_events.type`). All five are live (see schema comment). */
-export type UsageEventType = "kv_op" | "file_op" | "view" | "deploy" | "rt_connect";
+/** Standard methods an admin may allow on a connection profile. */
+export type ConnectionMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/** Usage-event types (`usage_events.type`). */
+export type UsageEventType =
+  | "kv_op"
+  | "file_op"
+  | "view"
+  | "deploy"
+  | "rt_connect"
+  | "connection_op";

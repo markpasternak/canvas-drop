@@ -6,6 +6,7 @@ import { pg as c } from "./columns.js";
 // comparisons instead of raw `string`. Defined in types.js, the canonical surface.
 import type {
   CanvasDiscoverability,
+  ConnectionMethod,
   GuestInviteState,
   McpTokenKind,
   UsageEventType,
@@ -318,6 +319,53 @@ export const canvases = pgTable(
   ],
 );
 
+// Admin-owned outbound connection profiles. The encrypted envelope contains the
+// complete protected-header map; no secret value is stored in clear text.
+export const connectionProfiles = pgTable(
+  "connection_profiles",
+  {
+    id: c.text("id").primaryKey(),
+    key: c.text("key").notNull(),
+    label: c.text("label").notNull(),
+    origin: c.text("origin").notNull(),
+    allowedMethods: c.json("allowed_methods").$type<ConnectionMethod[]>().notNull(),
+    protectedHeadersEnvelope: c.text("protected_headers_envelope"),
+    enabled: c.bool("enabled").notNull().default(true),
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+    updatedAt: c.epochMs("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("connection_profiles_key_uq").on(t.key)],
+);
+
+// Explicit admin grant: a profile is invisible and unusable by a canvas until
+// this row exists. Deleting either side revokes the authority immediately.
+export const canvasConnections = pgTable(
+  "canvas_connections",
+  {
+    canvasId: c
+      .text("canvas_id")
+      .notNull()
+      .references(() => canvases.id, { onDelete: "cascade" }),
+    connectionId: c
+      .text("connection_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    createdBy: c
+      .text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: c.epochMs("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.canvasId, t.connectionId] }),
+    index("canvas_connections_connection_idx").on(t.connectionId),
+  ],
+);
+
 // Per-canvas access allowlist (D4 `specific_people` rung). Each row is one
 // principal allowed to reach the canvas: an org `member` (by user_id) or a `guest`
 // (by email — the guest's magic-link session is keyed back to this entry). Unique
@@ -526,7 +574,7 @@ export const drafts = pgTable(
 );
 
 // Per-op metering substrate (D24, plan 007 / M6). Append-only; one row per
-// primitive op. Current types: kv_op | file_op | view | deploy | rt_connect (all
+// primitive op. Current types: kv_op | file_op | view | deploy | rt_connect | connection_op (all
 // live — recordView writes 'view', canvas-realtime writes 'rt_connect'). Stats are
 // derived by COUNT over a window; a created_at-keyed prune bounds growth.
 export const usageEvents = pgTable(
@@ -540,7 +588,7 @@ export const usageEvents = pgTable(
     // Attribution: an org user id OR a guest principal id (`guest:<inviteId>`, U9),
     // so guest primitive ops are attributed — not an FK to users for that reason.
     userId: c.text("user_id").notNull(),
-    type: c.text("type").$type<UsageEventType>().notNull(), // kv_op | file_op | view | deploy | rt_connect
+    type: c.text("type").$type<UsageEventType>().notNull(),
     meta: c.json("meta"), // op detail, e.g. { op: 'set' }
     createdAt: c.epochMs("created_at").notNull(),
   },
