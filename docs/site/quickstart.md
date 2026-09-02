@@ -84,7 +84,7 @@ Click **Create canvas** in the dashboard (or open `/new`). Pick a source:
 | **Use the API** | Mints an empty canvas plus a per-canvas key (shown once) and a ready-to-run `curl` command. The canvas stays unpublished until your first deploy. |
 
 On the same screen you set a title, an optional custom slug (checked live for
-availability), the audience the canvas opens to once it publishes (**Only me**
+availability), the audience the canvas opens to once it publishes (**Restricted**
 by default), and **Enable backend (optional)**. The first three sources publish
 immediately.
 

@@ -15,7 +15,7 @@ use it — creation needs a signed-in org member.
 // Create a durable share once.
 const share = await canvasdrop.canvases.publish({
   title: "Team roadmap — Q3 snapshot",
-  access: "public_link",             // audience; defaults to "private"
+  access: "public_link",             // audience; defaults to Restricted (`private`)
   password: "optional-extra-lock",   // independent of the audience
   tags: ["roadmap"],
   metadata: { sourceApp: "product-roadmap", sourceKind: "roadmap-share", theme: "light" },
@@ -109,10 +109,10 @@ zip `bundle` part.
 
 ### `list` filter
 
-`list()` returns every active canvas record the viewer can currently manage as owner or
-editor — **including**
-unpublished and expired ones, but excluding archived, deleted, and admin-disabled
-canvases — so a management UI can show recoverable records. Pass a filter to narrow server-side:
+`list()` returns every canvas record the viewer can currently manage as owner or editor,
+including draft, unpublished, expired, archived, and admin-disabled rows. Deleted
+canvases are omitted. `publicationStatus` makes those lifecycle states explicit. Pass a
+filter to narrow server-side:
 
 ```js
 await canvasdrop.canvases.list({ sourceApp: "product-roadmap" });

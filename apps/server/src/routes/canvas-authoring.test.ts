@@ -11,7 +11,7 @@ import { draftsRepository } from "../db/repositories/drafts.js";
 import { type TeamsRepository, teamsRepository } from "../db/repositories/teams.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
@@ -440,7 +440,7 @@ describe("canvasAuthoringRoutes — list + revoke", () => {
     await client?.close();
   });
 
-  it("GET / lists only the viewer's own authored canvases", async () => {
+  it("GET / lists only the viewer's own non-deleted authored canvases", async () => {
     client = await makeTestDb("sqlite");
     const { owner, cv } = await makeSource(client);
     const other = await seedUser(client, "other");
@@ -476,7 +476,9 @@ describe("canvasAuthoringRoutes — list + revoke", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     const { canvases } = (await res.json()) as { canvases: Array<{ id: string }> };
-    expect(canvases.map((c) => c.id)).toEqual([cv.id]);
+    // These rows can share the same millisecond timestamp in fast CI. The list contract
+    // does not promise an ID tie-break, so assert membership rather than incidental order.
+    expect(new Set(canvases.map((c) => c.id))).toEqual(new Set([cv.id, archived.id]));
   });
 
   it("DELETE /:id revokes the viewer's own canvas (204); another owner's id is 404 (no leak)", async () => {
@@ -1143,3 +1145,113 @@ describe("canvasAuthoringRoutes — public link follows the OWNER's entitlement 
     expect(ok.status).toBe(200);
   });
 });
+
+describe.each(DIALECTS)(
+  "canvasAuthoringRoutes — publication lifecycle projection [%s]",
+  (dialect) => {
+    let client: DbClient;
+    afterEach(async () => {
+      await client?.close();
+    });
+
+    it("projects every authored lifecycle with additive publicationStatus and frozen status", async () => {
+      client = await makeTestDb(dialect);
+      const { owner, cv: source } = await makeSource(client);
+      const canvases = canvasesRepository(client);
+      const usage = authoringUsageRepository(client);
+      const rows = await Promise.all(
+        ["draft-share", "archived-share", "disabled-share", "deleted-share"].map((slug) =>
+          canvases.create({ ownerId: owner.id, slug, apiKeyHash: `h-${slug}` }),
+        ),
+      );
+      for (const row of rows) {
+        await usage.record({
+          actorId: owner.id,
+          sourceCanvasId: source.id,
+          authoredCanvasId: row.id,
+        });
+      }
+      const draft = rows[0];
+      const archived = rows[1];
+      const disabled = rows[2];
+      const deleted = rows[3];
+      if (!draft || !archived || !disabled || !deleted) {
+        throw new Error("expected four authored rows");
+      }
+      await canvases.archive(archived.id);
+      await canvases.setDisabled(disabled.id, "policy");
+      await canvases.setStatus(deleted.id, "deleted");
+
+      const { app } = buildApi(client, asMember(owner.id));
+      const live = (await (
+        await publish(app, publishBody({ title: "Live", access: "private" }))
+      ).json()) as AuthoredCanvas;
+      const expired = (await (
+        await publish(
+          app,
+          publishBody({
+            title: "Expired",
+            access: "private",
+            expiresAt: Date.now() + 86_400_000,
+          }),
+        )
+      ).json()) as AuthoredCanvas;
+      await canvases.updateSettings(expired.id, { sharedExpiresAt: Date.now() - 60_000 });
+      const unpublished = (await (
+        await publish(app, publishBody({ title: "Unpublished", access: "private" }))
+      ).json()) as AuthoredCanvas;
+      expect(
+        (await app.request(`/v1/c/app/authoring/${unpublished.id}`, { method: "DELETE" })).status,
+      ).toBe(204);
+
+      const response = await app.request("/v1/c/app/authoring");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { canvases: AuthoredCanvas[] };
+      expect(
+        Object.fromEntries(body.canvases.map((canvas) => [canvas.id, canvas.publicationStatus])),
+      ).toEqual({
+        [draft.id]: "draft",
+        [archived.id]: "archived",
+        [disabled.id]: "disabled",
+        [live.id]: "published",
+        [expired.id]: "expired",
+        [unpublished.id]: "unpublished",
+      });
+      for (const canvas of body.canvases.filter(
+        (row) => row.id !== expired.id && row.id !== unpublished.id,
+      )) {
+        expect(canvas.accessMode).toBe("restricted");
+        expect(canvas.status).toBe("private");
+      }
+      expect(body.canvases.find((row) => row.id === expired.id)?.status).toBe("expired");
+      expect(body.canvases.find((row) => row.id === unpublished.id)?.status).toBe("revoked");
+      expect(body.canvases.some((row) => row.id === deleted.id)).toBe(false);
+    });
+
+    it("republishing through authoring PUT clears revokedAt and returns published", async () => {
+      client = await makeTestDb(dialect);
+      const { owner } = await makeSource(client);
+      const { app, canvases } = buildApi(client, asMember(owner.id));
+      const authored = (await (
+        await publish(app, publishBody({ title: "Lifecycle", access: "private" }))
+      ).json()) as AuthoredCanvas;
+
+      expect(
+        (await app.request(`/v1/c/app/authoring/${authored.id}`, { method: "DELETE" })).status,
+      ).toBe(204);
+      expect((await canvases.findById(authored.id))?.revokedAt).not.toBeNull();
+
+      const republished = await putUpdate(
+        app,
+        authored.id,
+        formData({ title: "Lifecycle restored" }, zipFile({ "index.html": "restored" })),
+      );
+      expect(republished.status).toBe(200);
+      expect(await republished.json()).toMatchObject({
+        id: authored.id,
+        publicationStatus: "published",
+      });
+      expect((await canvases.findById(authored.id))?.revokedAt).toBeNull();
+    });
+  },
+);

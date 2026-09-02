@@ -54,7 +54,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function mockFetch(handlers: Record<string, () => Response>) {
+function mockFetch(handlers: Record<string, () => Response | Promise<Response>>) {
   const calls: { method: string; url: string; body?: string }[] = [];
   const defaults: Record<string, () => Response> = {
     "GET /api/me": () => json(ME),
@@ -710,7 +710,129 @@ describe("share route", () => {
     expect(screen.queryByText(/only you currently have access/i)).toBeNull();
     expect(screen.queryByText(/gates no one/i)).toBeNull();
     expect(screen.getByText(/asked for this password too/i)).toBeInTheDocument();
+    expect(screen.getByText(/try again before relying on who appears here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no one added yet/i)).toBeNull();
   });
+
+  it("clears the prior canvas's people list while navigation loads the next one", async () => {
+    let resolveSecondList: ((response: Response) => void) | undefined;
+    const secondList = new Promise<Response>((resolve) => {
+      resolveSecondList = resolve;
+    });
+    const calls = mockFetch({
+      "GET /api/canvases/c1": () =>
+        json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+      "GET /api/canvases/c1/allowlist": () =>
+        json({
+          entries: [
+            {
+              id: "member:old",
+              kind: "member",
+              role: "viewer",
+              email: "old@example.com",
+              userId: "old",
+            },
+          ],
+        }),
+      "GET /api/canvases/c2": () =>
+        json({
+          ...CANVAS,
+          id: "c2",
+          slug: "second-canvas",
+          url: "http://x/c/second-canvas",
+          publicationState: "published",
+          currentVersionId: "v2",
+        }),
+      "GET /api/canvases/c2/allowlist": () => secondList,
+    });
+    const router = renderShare();
+    expect(await screen.findByText("old@example.com")).toBeInTheDocument();
+
+    await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+    await vi.waitFor(() =>
+      expect(
+        calls.some((call) => call.method === "GET" && call.url === "/api/canvases/c2/allowlist"),
+      ).toBe(true),
+    );
+    expect(screen.queryByText("old@example.com")).toBeNull();
+
+    resolveSecondList?.(
+      json({
+        entries: [
+          {
+            id: "member:new",
+            kind: "member",
+            role: "viewer",
+            email: "new@example.com",
+            userId: "new",
+          },
+        ],
+      }),
+    );
+    expect(await screen.findByText("new@example.com")).toBeInTheDocument();
+  });
+
+  it.each(["success", "failure"] as const)(
+    "ignores a late %s from the previous canvas after the next list has loaded",
+    async (lateResult) => {
+      let resolveFirstList: ((response: Response) => void) | undefined;
+      const firstList = new Promise<Response>((resolve) => {
+        resolveFirstList = resolve;
+      });
+      mockFetch({
+        "GET /api/canvases/c1": () =>
+          json({ ...CANVAS, publicationState: "published", currentVersionId: "v1" }),
+        "GET /api/canvases/c1/allowlist": () => firstList,
+        "GET /api/canvases/c2": () =>
+          json({
+            ...CANVAS,
+            id: "c2",
+            slug: "second-canvas",
+            url: "http://x/c/second-canvas",
+            publicationState: "published",
+            currentVersionId: "v2",
+          }),
+        "GET /api/canvases/c2/allowlist": () =>
+          json({
+            entries: [
+              {
+                id: "member:new",
+                kind: "member",
+                role: "viewer",
+                email: "new@example.com",
+                userId: "new",
+              },
+            ],
+          }),
+      });
+      const router = renderShare();
+      await screen.findByRole("radio", { name: /restricted/i });
+
+      await router.navigate({ to: "/canvases/$id/share", params: { id: "c2" } });
+      expect(await screen.findByText("new@example.com")).toBeInTheDocument();
+
+      resolveFirstList?.(
+        lateResult === "success"
+          ? json({
+              entries: [
+                {
+                  id: "member:old",
+                  kind: "member",
+                  role: "viewer",
+                  email: "old@example.com",
+                  userId: "old",
+                },
+              ],
+            })
+          : json({ error: "late failure" }, 500),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(screen.getByText("new@example.com")).toBeInTheDocument();
+      expect(screen.queryByText("old@example.com")).toBeNull();
+      expect(screen.queryByText(/try again before relying on who appears here/i)).toBeNull();
+    },
+  );
 
   it("the password notice names editors AND legacy guests as exempt, and says 'gates no one' only for a loaded empty list (review #2)", async () => {
     mockFetch({
@@ -1171,6 +1293,34 @@ describe("share route — roles and ownership (editor-roles plan U6)", () => {
       );
       expect(patch?.body).toContain('"role":"editor"');
     });
+  });
+
+  it("invalidates the parent access mirror when a post-mutation list refresh fails", async () => {
+    let listReads = 0;
+    const user = userEvent.setup();
+    mockFetch({
+      "GET /api/canvases/c1": () => json({ ...published, hasPassword: true }),
+      "GET /api/canvases/c1/allowlist": () => {
+        listReads += 1;
+        return listReads === 1 ? json({ entries }) : json({ error: "refresh failed" }, 500);
+      },
+      "PATCH /api/canvases/c1/allowlist/member:e1": () => json({ ok: true }),
+    });
+    renderShare();
+    expect(await screen.findByText("AI for added people")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("group", { name: "Role for colleague@example.com" })).getByRole(
+        "button",
+        { name: "Editor" },
+      ),
+    );
+
+    expect(
+      await screen.findByText(/try again before relying on who appears here/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("AI for added people")).toBeNull();
+    expect(screen.queryByText(/gates no one/i)).toBeNull();
   });
 
   it("adding a person as an editor sends the role", async () => {

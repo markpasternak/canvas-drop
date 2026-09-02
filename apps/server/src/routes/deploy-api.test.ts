@@ -15,7 +15,7 @@ import { draftsRepository } from "../db/repositories/drafts.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { deployEngine } from "../deploy/engine.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
@@ -36,8 +36,8 @@ describe("deployApiRoutes (Bearer key)", () => {
   });
 
   /** Create a canvas + its plaintext key; return the wired app and ids. */
-  async function setup() {
-    client = await makeTestDb("sqlite");
+  async function setup(dialect: (typeof DIALECTS)[number] = "sqlite") {
+    client = await makeTestDb(dialect);
     const users = usersRepository(client);
     const canvases = canvasesRepository(client);
     const versions = versionsRepository(client);
@@ -148,41 +148,58 @@ describe("deployApiRoutes (Bearer key)", () => {
     );
   });
 
-  it("unpublish via the Bearer API: published → draft; 409 CANNOT_UNPUBLISH on a draft; wrong key → 403", async () => {
-    const { app, mkCanvas } = await setup();
-    const a = await mkCanvas();
-    const b = await mkCanvas();
+  it.each(DIALECTS)(
+    "unpublish via the Bearer API: published → draft; a later deploy clears revokedAt; wrong key → 403 [%s]",
+    async (dialect) => {
+      const { app, canvases, mkCanvas } = await setup(dialect);
+      const a = await mkCanvas();
+      const b = await mkCanvas();
 
-    // Draft (never published) → 409.
-    const onDraft = await app.request(`/v1/canvases/${a.id}/unpublish`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${a.key}` },
-    });
-    expect(onDraft.status).toBe(409);
-    expect((await jsonOf<{ code: string }>(onDraft)).code).toBe("CANNOT_UNPUBLISH");
+      // Draft (never published) → 409.
+      const onDraft = await app.request(`/v1/canvases/${a.id}/unpublish`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${a.key}` },
+      });
+      expect(onDraft.status).toBe(409);
+      expect((await jsonOf<{ code: string }>(onDraft)).code).toBe("CANNOT_UNPUBLISH");
 
-    // Publish, then unpublish → draft.
-    await app.request(`/v1/canvases/${a.id}/deploy`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${a.key}` },
-      body: zip(),
-    });
-    const ok = await app.request(`/v1/canvases/${a.id}/unpublish`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${a.key}` },
-    });
-    expect(ok.status).toBe(200);
-    const body = await jsonOf<{ publicationState: string; currentVersionId: string | null }>(ok);
-    expect(body.publicationState).toBe("draft");
-    expect(body.currentVersionId).toBeNull();
+      // Publish, then unpublish → draft.
+      await app.request(`/v1/canvases/${a.id}/deploy`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${a.key}` },
+        body: zip(),
+      });
+      const ok = await app.request(`/v1/canvases/${a.id}/unpublish`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${a.key}` },
+      });
+      expect(ok.status).toBe(200);
+      const body = await jsonOf<{ publicationState: string; currentVersionId: string | null }>(ok);
+      expect(body.publicationState).toBe("draft");
+      expect(body.currentVersionId).toBeNull();
+      expect((await canvases.findById(a.id))?.revokedAt).toBeNull();
 
-    // A's key cannot unpublish B's canvas.
-    const cross = await app.request(`/v1/canvases/${b.id}/unpublish`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${a.key}` },
-    });
-    expect(cross.status).toBe(403);
-  });
+      // Authoring revocation is a stronger lifecycle marker than ordinary unpublish.
+      // A later keyed deploy is still a publish path and must clear that marker.
+      expect(await canvases.revoke(a.id)).toBeTruthy();
+      expect((await canvases.findById(a.id))?.revokedAt).not.toBeNull();
+
+      const republish = await app.request(`/v1/canvases/${a.id}/deploy`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${a.key}` },
+        body: zip(),
+      });
+      expect(republish.status).toBe(200);
+      expect((await canvases.findById(a.id))?.revokedAt).toBeNull();
+
+      // A's key cannot unpublish B's canvas.
+      const cross = await app.request(`/v1/canvases/${b.id}/unpublish`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${a.key}` },
+      });
+      expect(cross.status).toBe(403);
+    },
+  );
 
   it("rollback to an existing-but-pending version → 404 (only ready versions are targets)", async () => {
     const { app, versions, mkCanvas, ownerId } = await setup();

@@ -460,7 +460,7 @@ export default function CreateCanvas() {
               ? {
                   title: "Sharing wasn't applied",
                   description:
-                    "Your canvas is published and still private. Save the key, then update access in Share.",
+                    "Your canvas is published and still Restricted. Save the key, then update access in Share.",
                 }
               : undefined
           }
@@ -503,8 +503,8 @@ function CreateAudience({
         {[
           {
             value: "private" as const,
-            label: "Only me",
-            description: "Keep it private. You can share it later.",
+            label: "Restricted",
+            description: "Only you and people or teams you add can open it.",
             disabled: false,
           },
           {

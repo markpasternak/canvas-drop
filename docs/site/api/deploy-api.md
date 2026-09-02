@@ -289,11 +289,11 @@ Authorization: Bearer cd_...
 
 Takes the canvas back to **Draft**. The live version pointer is cleared, so the canvas
 URL stops serving, and any live realtime sockets are dropped. Publication settings
-are reset at the same time: access returns to **Private**, **List for people with
+are reset at the same time: access returns to **Restricted**, **List for people with
 access** is turned off, any share expiry is cleared, and the canvas is unlisted from
 the gallery. The draft and the version history are kept. Publish again with a new
 deploy, or by rolling back to a kept version; either way the canvas comes back
-Private, so re-share it from the dashboard or with the `update_canvas` MCP tool.
+Restricted, so re-share it from the dashboard or with the `update_canvas` MCP tool.
 
 **Success, `200`:** `{ "url": "<canvas URL>", "publicationState": "draft", "currentVersionId": null }`.
 

@@ -79,12 +79,15 @@ function renderNew() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Create canvas — audience shortcut", () => {
-  it("defaults private, reveals workspace listing, and applies it after publish", async () => {
+  it("defaults to Restricted, reveals workspace listing, and applies it after publish", async () => {
     const calls = mockFetch();
     renderNew();
 
     expect(await screen.findByRole("heading", { name: "Audience" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Only me" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Restricted" })).toBeChecked();
+    expect(
+      screen.getByText("Only you and people or teams you add can open it."),
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("radio", { name: "Everyone in Acme" }));
     const listed = screen.getByRole("checkbox", { name: "List in Shared" });
     expect(listed).not.toBeChecked();
@@ -104,7 +107,7 @@ describe("Create canvas — audience shortcut", () => {
     });
   });
 
-  it("resets to Only me when destination changes and explains a disabled public link", async () => {
+  it("resets to Restricted when destination changes and explains a disabled public link", async () => {
     mockFetch({ ...ME, canPublishPublic: false });
     renderNew();
 
@@ -112,12 +115,12 @@ describe("Create canvas — audience shortcut", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Everyone in Acme" }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: /workspace/i }), "");
 
-    expect(screen.getByRole("radio", { name: "Only me" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Restricted" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Public link" })).toBeDisabled();
     expect(screen.getByText(/public links are unavailable for your account/i)).toBeInTheDocument();
   });
 
-  it("keeps a published canvas private when sharing fails and sends recovery to Share", async () => {
+  it("keeps a published canvas Restricted when sharing fails and sends recovery to Share", async () => {
     const calls = mockFetch({ ...ME, orgs: [] }, true);
     const router = renderNew();
 
@@ -126,7 +129,9 @@ describe("Create canvas — audience shortcut", () => {
     await userEvent.type(screen.getByLabelText("HTML"), "<h1>Hello</h1>");
     await userEvent.click(screen.getByRole("button", { name: "Create and publish" }));
 
-    expect(await screen.findByText(/canvas is published and still private/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/canvas is published and still Restricted/i),
+    ).toBeInTheDocument();
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: "Save key and open Share" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/c1/share"));

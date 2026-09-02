@@ -126,7 +126,7 @@ export function AccessBadge({ access }: { access: AccessRung }) {
 
 /** Visibility axis (legacy boolean): kept for callers that only know `shared`. */
 export function VisibilityBadge({ shared }: { shared: boolean }) {
-  return <Badge tone={shared ? "accent" : "neutral"}>{shared ? "Shared" : "Private"}</Badge>;
+  return <Badge tone={shared ? "accent" : "neutral"}>{shared ? "Shared" : "Restricted"}</Badge>;
 }
 
 /**

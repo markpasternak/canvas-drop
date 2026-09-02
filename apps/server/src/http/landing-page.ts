@@ -57,8 +57,15 @@ const SITE = {
     "Deploy and share your org's small web tools. Static canvases, live in seconds, behind your sign-in. AI agents deploy over MCP. Open source, self-hosted.",
 } as const;
 
-/** The five backend primitives a canvas can reach (BUILD_BRIEF §11). */
-const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyph: string }> = [
+/** The five runtime primitives (BUILD_BRIEF §11) plus the separately gated authoring capability. */
+const BACKEND_CAPABILITIES: ReadonlyArray<{
+  name: string;
+  tag: string;
+  blurb: string;
+  glyph: string;
+  glyphFill?: boolean;
+  viewBox?: string;
+}> = [
   {
     name: "Key-value",
     tag: "kv",
@@ -90,6 +97,17 @@ const PRIMITIVES: ReadonlyArray<{ name: string; tag: string; blurb: string; glyp
     blurb: "Publish, subscribe, and see who's present over a managed socket. No server to run.",
     glyph: "M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0M12 12h.01",
   },
+  {
+    name: "Authoring",
+    tag: "authoring",
+    blurb:
+      "Let signed-in viewers create and manage canvases as themselves. Off by default, instance-wide and per canvas.",
+    // PencilSimple, regular weight, from the MIT-licensed Phosphor icon set used by the dashboard.
+    glyph:
+      "M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z",
+    glyphFill: true,
+    viewBox: "0 0 256 256",
+  },
 ];
 
 /** Three editorial value props for the band under the hero. */
@@ -111,7 +129,7 @@ const VALUES: ReadonlyArray<{ title: string; body: string }> = [
 /** The per-canvas access ladder (the sharing model, plan 003). Rendered as a marketing
  *  visual. The landing is the widest-reaching surface for the team + invite story. Order
  *  reads top-down the way the Share tab does: the people-and-teams list first (it always
- *  applies), then the three General-access choices (private → whole_org → public_link). */
+ *  applies), then the three General-access choices (Restricted → Whole org → Public link). */
 const LADDER: ReadonlyArray<{ rung: string; who: string; tag?: string; feature?: boolean }> = [
   {
     rung: "People & teams",
@@ -230,11 +248,11 @@ const TEAM: ReadonlyArray<{ title: string; body: string }> = [
   },
 ];
 
-/** "Private by design": the privacy / security posture. */
+/** "Restricted by default": the privacy / security posture. */
 const PRIVACY: ReadonlyArray<{ title: string; body: string }> = [
   {
-    title: "Org-only by default",
-    body: "Every canvas starts private and stays behind your sign-in until you choose a wider rung.",
+    title: "Restricted by default",
+    body: "Every canvas starts Restricted: only its owner and the people or teams they add can open it until they choose a wider rung.",
   },
   {
     title: "No telemetry, ever",
@@ -484,7 +502,7 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .ladder-note strong { color: var(--fg); font-weight: 600; }
 
 /* primitives showcase */
-.prims { display: grid; gap: 1px; grid-template-columns: repeat(5, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
+.prims { display: grid; gap: 1px; grid-template-columns: repeat(3, 1fr); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
 @media (max-width: 900px) { .prims { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 520px) { .prims { grid-template-columns: 1fr; } }
 .prim { background: var(--surface); padding: 1.5rem 1.35rem; transition: background .15s var(--ease), transform .15s var(--ease); }
@@ -505,8 +523,10 @@ section { padding-block: clamp(1.5rem, 3vw, 2.25rem); }
 .p-identity .tag { background: oklch(0.95 0.05 350); }
 .p-realtime .ic, .p-realtime .tag { color: oklch(0.46 0.16 240); }
 .p-realtime .tag { background: oklch(0.94 0.05 240); }
+.p-authoring .ic, .p-authoring .tag { color: oklch(0.48 0.14 28); }
+.p-authoring .tag { background: oklch(0.95 0.05 28); }
 @media (prefers-color-scheme: dark) {
-  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag { background: oklch(1 0 0 / 0.06); }
+  .p-kv .tag, .p-files .tag, .p-ai .tag, .p-identity .tag, .p-realtime .tag, .p-authoring .tag { background: oklch(1 0 0 / 0.06); }
 }
 
 /* framed screenshot (carousel slides) */
@@ -570,7 +590,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 }
 .dot[aria-current="true"] { background: var(--accent); width: 1.5rem; }
 
-/* feature grids (Built for teams / Private by design) */
+/* feature grids (Built for teams / Restricted by default) */
 .feats { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1.25rem, 3vw, 2.25rem); margin-top: clamp(1.5rem, 3.5vw, 2.25rem); }
 @media (max-width: 720px) { .feats { grid-template-columns: 1fr; } }
 .feat { border-top: 1px solid var(--border); padding-top: 1rem; }
@@ -578,7 +598,7 @@ footer { background: var(--surface); border-top: 1px solid var(--border); paddin
 .feat h3 svg { width: 1.05rem; height: 1.05rem; flex: 0 0 auto; margin-top: .15rem; color: var(--accent); }
 .feat p { margin: 0; color: var(--muted); font-size: .95rem; line-height: 1.55; }
 
-/* dark band (Private by design): reuse the hero ink + on-ink tokens */
+/* dark band (Restricted by default): reuse the hero ink + on-ink tokens */
 .band-dark { background: linear-gradient(180deg, var(--ink-2), var(--ink)); color: var(--on-ink); border-top: 1px solid var(--on-ink-border); }
 .band-dark .s-sub { color: var(--on-ink-muted); }
 .band-dark .kicker { color: var(--amber); }
@@ -654,9 +674,12 @@ function ladderRung(r: (typeof LADDER)[number], i: number): string {
 </div>`;
 }
 
-function primitiveCard(p: (typeof PRIMITIVES)[number]): string {
+function capabilityCard(p: (typeof BACKEND_CAPABILITIES)[number]): string {
+  const paint = p.glyphFill
+    ? 'fill="currentColor"'
+    : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
   return `<div class="prim p-${escapeHtml(p.tag)}">
-  <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="${p.glyph}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+  <div class="ic"><svg viewBox="${p.viewBox ?? "0 0 24 24"}" aria-hidden="true"><path d="${p.glyph}" ${paint}/></svg></div>
   <h4>${escapeHtml(p.name)} <span class="tag mono">${escapeHtml(p.tag)}</span></h4>
   <p>${escapeHtml(p.blurb)}</p>
 </div>`;
@@ -766,11 +789,11 @@ ${LADDER.map(ladderRung).join("\n")}
 
   <section style="background:var(--surface-sunken);border-block:1px solid var(--border)">
     <div class="wrap">
-      <p class="kicker reveal">Five primitives</p>
+      <p class="kicker reveal">Five primitives + authoring</p>
       <h2 class="s-head reveal">Static files first. A backend when you ask for one.</h2>
-      <p class="s-sub reveal">A canvas ships as static files, with no server build. When it needs more, it reaches exactly five primitives through the browser SDK, each switched on per canvas and enforced on every request. Secrets stay server-side, always.</p>
+      <p class="s-sub reveal">A canvas ships as static files, with no server build. Five runtime primitives add data, files, AI, identity, and realtime. The separately gated authoring capability lets signed-in viewers publish canvases as themselves. Every capability is enforced on each request. Secrets stay server-side, always.</p>
       <div class="prims reveal">
-${PRIMITIVES.map(primitiveCard).join("\n")}
+${BACKEND_CAPABILITIES.map(capabilityCard).join("\n")}
       </div>
     </div>
   </section>
@@ -799,7 +822,7 @@ ${TEAM.map(featItem).join("\n")}
 
   <section class="band-dark">
     <div class="wrap">
-      <p class="kicker reveal">Private by design</p>
+      <p class="kicker reveal">Restricted by default</p>
       <h2 class="s-head reveal">Your tools, your data, your infrastructure.</h2>
       <p class="s-sub reveal">Privacy is the default posture, not a setting. canvas-drop keeps what it needs to run and reports to no one.</p>
       <div class="feats reveal">

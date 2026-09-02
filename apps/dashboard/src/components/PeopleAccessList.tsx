@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type AllowlistEntry,
   ApiError,
@@ -42,7 +42,7 @@ export interface PeopleAccessListProps {
   teams: Team[];
   orgs: Array<{ id: string; name: string }>;
   /** Fires with the fresh list after every load/change (the share view mirrors it). */
-  onChanged?: (entries: AllowlistEntry[]) => void;
+  onChanged?: (entries: AllowlistEntry[] | null) => void;
   /** Owner-only: transfer ownership to the chosen editor. */
   onTransfer?: (toUserId: string) => Promise<void>;
   transferring?: boolean;
@@ -79,6 +79,7 @@ export function PeopleAccessList({
 }: PeopleAccessListProps) {
   const toast = useToast();
   const [entries, setEntries] = useState<AllowlistEntry[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [email, setEmail] = useState("");
   const [personRole, setPersonRole] = useState<AccessRole>("viewer");
   const [teamId, setTeamId] = useState("");
@@ -99,6 +100,9 @@ export function PeopleAccessList({
   const [removeBusy, setRemoveBusy] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  // A canvas change can leave the previous allowlist request in flight. Only the latest
+  // request may update either this component or the parent's list-aware copy.
+  const requestGeneration = useRef(0);
   const search = email.trim();
   const searchEnabled = search.length >= 2;
   const { data: suggestions = [], isFetching: searchingPeople } = usePeopleSearch(
@@ -106,24 +110,38 @@ export function PeopleAccessList({
     searchEnabled,
   );
 
-  const reload = () =>
-    api
+  const reload = () => {
+    const generation = ++requestGeneration.current;
+    setEntries(null);
+    setCandidates(null);
+    setLoadFailed(false);
+    onChanged?.(null);
+    return api
       .listAllowlist(canvasId)
       .then((view) => {
+        if (generation !== requestGeneration.current) return;
         setEntries(view.entries);
         setCandidates(view.transferCandidates ?? null);
+        setLoadFailed(false);
         onChanged?.(view.entries);
       })
       .catch((err) => {
+        if (generation !== requestGeneration.current) return;
         // Surface the failure instead of silently showing an empty list — an
         // inaccessible list must be distinguishable from a real-empty one.
         toast(err instanceof ApiError ? err.hint : "Couldn't load the access list", "error");
         setEntries([]);
+        setCandidates(null);
+        setLoadFailed(true);
       });
+  };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: load on canvasId change only
   useEffect(() => {
     void reload();
+    return () => {
+      requestGeneration.current += 1;
+    };
   }, [canvasId]);
 
   const grantedTeamIds = new Set(
@@ -299,8 +317,19 @@ export function PeopleAccessList({
         </div>
       ) : null}
 
+      <div className="space-y-1 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold text-fg">People and teams with direct access</h3>
+        <p className="text-xs text-muted">
+          General access below may let other people open the canvas too.
+        </p>
+      </div>
+
       {entries === null ? (
         <Skeleton className="h-8" />
+      ) : loadFailed ? (
+        <InlineNotice tone="warning" className="py-2 text-xs">
+          Couldn't load the access list. Try again before relying on who appears here.
+        </InlineNotice>
       ) : (
         <ul className="divide-y divide-border" aria-label="People and teams">
           {entries.map((e) => (
@@ -348,7 +377,7 @@ export function PeopleAccessList({
           ))}
         </ul>
       )}
-      {entries !== null && nonOwner.length === 0 && (
+      {entries !== null && !loadFailed && nonOwner.length === 0 && (
         <p className="text-xs text-muted">No one added yet. Only you can open this.</p>
       )}
 

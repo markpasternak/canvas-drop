@@ -115,9 +115,9 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("github.com/markpasternak/canvas-drop");
   });
 
-  it("shows the five primitives and references the regenerable screenshots", () => {
+  it("shows the five primitives, authoring, and the regenerable screenshots", () => {
     const html = renderLandingPage();
-    for (const tag of ["kv", "files", "ai", "identity", "realtime"]) {
+    for (const tag of ["kv", "files", "ai", "identity", "realtime", "authoring"]) {
       expect(html).toContain(`>${tag}</span>`);
     }
     // Light, populated marketing shots served at /docs/assets (pnpm landing:screenshots).
@@ -142,6 +142,8 @@ describe("landing page — rendered content", () => {
     // Per-primitive colour tints are present.
     expect(html).toContain('class="prim p-kv"');
     expect(html).toContain('class="prim p-realtime"');
+    expect(html).toContain('class="prim p-authoring"');
+    expect(html).toContain("signed-in viewers publish canvases as themselves");
     // No indigo-violet anywhere (the parity scan's hue — kept clean).
     expect(html).not.toMatch(/oklch\([^)]*\b27[0-9]\b/);
   });
@@ -169,7 +171,7 @@ describe("landing page — rendered content", () => {
     expect(html).toContain("Shared with you");
     expect(html).toContain("Share link &amp; access");
     expect(html).toContain("Built for teams");
-    expect(html).toContain("Private by design");
+    expect(html).toContain("Restricted by default");
     expect(html).toContain("No telemetry, ever");
   });
 

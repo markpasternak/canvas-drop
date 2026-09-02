@@ -2,6 +2,7 @@ import { type Config, loadConfig } from "@canvas-drop/shared";
 import type { Canvas } from "@canvas-drop/shared/db";
 import { describe, expect, it } from "vitest";
 import { decideCanvasAccess } from "../canvas/authorization.js";
+import type { Principal } from "../http/types.js";
 import {
   CLOSE_CAPABILITY_DISABLED,
   CLOSE_UNAUTHORIZED,
@@ -854,5 +855,97 @@ describe("RealtimeHub — verdict parity with decideCanvasAccess over one fixtur
         expect(sock.closed === null, `${p.name} on ${access}`).toBe(httpKeepsSocket);
       });
     }
+  }
+
+  const edgeCases: Array<{
+    name: string;
+    canvas: Canvas;
+    principal: Principal;
+    isAllowed?: boolean;
+    teamMatch?: boolean;
+    tenancyActive?: boolean;
+    passwordGatePassed?: boolean;
+  }> = [
+    {
+      name: "password-gated listed member after a successful socket handshake",
+      canvas: fakeCanvas({ access: "private", passwordHash: "argon2hash" }),
+      principal: { kind: "member", id: "listed", isAdmin: false, orgIds: new Set() },
+      isAllowed: true,
+      passwordGatePassed: true,
+    },
+    {
+      name: "expired directly listed member",
+      canvas: fakeCanvas({ access: "private", sharedExpiresAt: Date.now() - 1_000 }),
+      principal: { kind: "member", id: "listed", isAdmin: false, orgIds: new Set() },
+      isAllowed: true,
+    },
+    {
+      name: "active-tenancy member of another org",
+      canvas: fakeCanvas({ access: "whole_org", orgId: "org-a" }),
+      principal: { kind: "member", id: "cross-org", isAdmin: false, orgIds: new Set(["org-b"]) },
+      tenancyActive: true,
+    },
+    {
+      name: "legacy guest on the people list",
+      canvas: fakeCanvas({ access: "private" }),
+      principal: {
+        kind: "guest",
+        id: "guest:invite",
+        inviteId: "invite",
+        canvasId: "c1",
+        email: "guest@example.com",
+      },
+      isAllowed: true,
+    },
+    {
+      name: "anonymous visitor to a public link",
+      canvas: fakeCanvas({ access: "public_link" }),
+      principal: { kind: "anonymous" },
+    },
+  ];
+
+  for (const testCase of edgeCases) {
+    it(`${testCase.name}: the socket re-authorization matches the HTTP access decision`, async () => {
+      const caseConfig = testCase.tenancyActive
+        ? loadConfig({ CANVAS_DROP_AUTH_MODE: "dev", CANVAS_DROP_ORG_NAME: "Acme" })
+        : config;
+      const hub = createHub({
+        config: caseConfig,
+        resolveCanvas: async () => testCase.canvas,
+        isPrincipalAllowed: async () => testCase.isAllowed ?? false,
+        teamMatch: async () => testCase.teamMatch ?? false,
+      });
+      const principal = testCase.principal;
+      const id =
+        principal.kind === "member" || principal.kind === "guest"
+          ? principal.id
+          : principal.kind === "capture"
+            ? `capture:${principal.canvasId}`
+            : "anonymous";
+      const connUser: ConnUser = {
+        id,
+        name: id,
+        isAdmin: principal.kind === "member" && principal.isAdmin,
+        orgIds: principal.kind === "member" ? principal.orgIds : new Set(),
+        principal,
+      };
+      const sock = new FakeSocket();
+      mc(hub, "c1", connUser, sock);
+      await hub.revalidateCanvas("c1");
+
+      const decision = decideCanvasAccess(testCase.canvas, principal, Date.now(), {
+        isAllowed: testCase.isAllowed,
+        teamMatch: testCase.teamMatch,
+        tenancyActive: testCase.tenancyActive,
+      });
+      // A live socket has already completed the password challenge at handshake. The
+      // password-setting mutation drops old sockets; subsequent heartbeats preserve a
+      // successfully gated socket until the password version changes.
+      if (testCase.passwordGatePassed) {
+        expect(decision).toMatchObject({ action: "allow", needsPasswordGate: true });
+      }
+      const httpKeepsEstablishedSocket = decision.action === "allow" && !decision.staticOnly;
+      expect(sock.closed === null, testCase.name).toBe(httpKeepsEstablishedSocket);
+    });
   }
 });

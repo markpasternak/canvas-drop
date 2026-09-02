@@ -109,8 +109,13 @@ async function roleOf(h: Harness, email: string, canvasId: string): Promise<stri
 }
 
 /** The people-list entry id for `email` (`member:<rowId>` / `pending:<invitationId>`). */
-async function entryIdFor(h: Harness, canvasId: string, email: string): Promise<string> {
-  const res = await h.GET(OWNER, `/api/canvases/${canvasId}/allowlist`);
+async function entryIdFor(
+  h: Harness,
+  canvasId: string,
+  email: string,
+  actor = OWNER,
+): Promise<string> {
+  const res = await h.GET(actor, `/api/canvases/${canvasId}/allowlist`);
   expect(res.status).toBe(200);
   const body = (await res.json()) as { entries?: PeopleRow[] } | PeopleRow[];
   const entries = Array.isArray(body) ? body : (body.entries ?? []);
@@ -138,6 +143,120 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
   let client: DbClient;
   afterEach(async () => {
     await client?.close();
+  });
+
+  it("F1/F4/F6/F7: two editors collaborate with conflict protection, then ownership transfers and the former owner is demoted and removed", async () => {
+    client = await makeTestDb(dialect);
+    await seedAcme(client);
+    const h = makeHarness(client, { config: editorConfig() });
+    const { canvasId, slug } = await setupCanvas(h, [OWNER, EDITOR, MATE]);
+    const editorId = await userId(client, EDITOR);
+
+    // F1: direct people-list grants make both colleagues effective editors immediately.
+    await grant(h, canvasId, { email: EDITOR, role: "editor" });
+    await grant(h, canvasId, { email: MATE, role: "editor" });
+    expect(await roleOf(h, EDITOR, canvasId)).toBe("editor");
+    expect(await roleOf(h, MATE, canvasId)).toBe("editor");
+
+    // Per-file concurrency also means editors working on different paths do not block
+    // one another. Both writes survive before the same-file conflict witness below.
+    expect((await putDraft(h, EDITOR, canvasId, "<h1>baseline</h1>")).status).toBe(200);
+    const mateFile = await h.app.request(`/api/canvases/${canvasId}/draft/file?path=mate.html`, {
+      method: "PUT",
+      headers: h.headers(MATE, {
+        "Sec-Fetch-Site": "same-origin",
+        "content-type": "application/octet-stream",
+      }),
+      body: "<p>mate path</p>",
+    });
+    expect(mateFile.status).toBe(200);
+    const editorFile = await h.app.request(
+      `/api/canvases/${canvasId}/draft/file?path=editor.html`,
+      {
+        method: "PUT",
+        headers: h.headers(EDITOR, {
+          "Sec-Fetch-Site": "same-origin",
+          "content-type": "application/octet-stream",
+        }),
+        body: "<p>editor path</p>",
+      },
+    );
+    expect(editorFile.status).toBe(200);
+    expect(
+      await (await h.GET(MATE, `/api/canvases/${canvasId}/draft/file?path=mate.html`)).text(),
+    ).toBe("<p>mate path</p>");
+    expect(
+      await (await h.GET(EDITOR, `/api/canvases/${canvasId}/draft/file?path=editor.html`)).text(),
+    ).toBe("<p>editor path</p>");
+
+    // F7: both editors open the same file at the same version. The first write lands;
+    // the second carries the now-stale hash and is refused instead of overwriting it.
+    const open = await h.GET(EDITOR, `/api/canvases/${canvasId}/draft`);
+    const { files } = await jsonOf<{ files: Array<{ path: string; hash: string }> }>(open);
+    const sharedHash = files.find((file) => file.path === "index.html")?.hash;
+    if (!sharedHash) throw new Error("index.html hash missing");
+
+    const first = await h.app.request(`/api/canvases/${canvasId}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: h.headers(EDITOR, {
+        "Sec-Fetch-Site": "same-origin",
+        "content-type": "application/octet-stream",
+        "If-Draft-File-Hash": sharedHash,
+      }),
+      body: "<h1>editor wins</h1>",
+    });
+    expect(first.status).toBe(200);
+    await first.text();
+    const stale = await h.app.request(`/api/canvases/${canvasId}/draft/file?path=index.html`, {
+      method: "PUT",
+      headers: h.headers(MATE, {
+        "Sec-Fetch-Site": "same-origin",
+        "content-type": "application/octet-stream",
+        "If-Draft-File-Hash": sharedHash,
+      }),
+      body: "<h1>mate overwrites</h1>",
+    });
+    expect(stale.status).toBe(409);
+    expect(await jsonOf<{ code: string; path: string }>(stale)).toMatchObject({
+      code: "DRAFT_CONFLICT",
+      path: "index.html",
+    });
+    expect((await putDraft(h, MATE, canvasId, "<h1>mate after refresh</h1>")).status).toBe(200);
+
+    // F4: transfer is owner-only and promotes the chosen direct editor; the former
+    // owner remains an editor so the hand-off does not strand their work.
+    const transfer = await h.SEND(OWNER, "POST", `/api/canvases/${canvasId}/transfer`, {
+      toUserId: editorId,
+    });
+    expect(transfer.status).toBe(200);
+    await transfer.text();
+    expect(await roleOf(h, EDITOR, canvasId)).toBe("owner");
+    expect(await roleOf(h, OWNER, canvasId)).toBe("editor");
+
+    // F6: the new owner can demote and then remove the former owner. Demotion retains
+    // view access through the row; removal closes the Restricted canvas completely.
+    const formerOwnerEntry = await entryIdFor(h, canvasId, OWNER, EDITOR);
+    const demote = await h.SEND(
+      EDITOR,
+      "PATCH",
+      `/api/canvases/${canvasId}/allowlist/${formerOwnerEntry}`,
+      { role: "viewer" },
+    );
+    expect(demote.status).toBe(200);
+    await demote.text();
+    expect(await roleOf(h, OWNER, canvasId)).toBeNull();
+    expect((await h.GET(OWNER, `/c/${slug}/`)).status).toBe(200);
+
+    const remove = await h.SEND(
+      EDITOR,
+      "DELETE",
+      `/api/canvases/${canvasId}/allowlist/${formerOwnerEntry}`,
+    );
+    expect([200, 204]).toContain(remove.status);
+    await remove.text();
+    const gone = await h.GET(OWNER, `/c/${slug}/`);
+    expect(gone.status).toBe(404);
+    await gone.text();
   });
 
   it("AE12: a demoted editor loses management, draft and MCP on the next request; the live socket survives as a viewer and drops once the row is removed", async () => {

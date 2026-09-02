@@ -22,7 +22,7 @@ grant_access   { "id": "<canvas id>", "email": "someone@example.com", "role": "v
 
 Opening General access to **Whole org** or **Public link** on an unpublished or archived canvas is refused with `SHARE_REQUIRES_PUBLISH` (HTTP 409); the people-and-teams list can be filled in before publishing.
 
-> Admins have no back door into your content. For a canvas they do not own, an admin is an ordinary member: a private canvas returns 404, a password prompts them too, and they cannot open the editor or change settings. Cross-owner admin power is moderation and offboarding only: the all-canvases list, disable / re-enable / restore, and reassigning the owner when someone leaves.
+> Admins have no back door into your content. For a canvas they do not own, an admin is an ordinary member: a Restricted canvas returns 404, a password prompts them too, and they cannot open the editor or change settings. Cross-owner admin power is moderation and offboarding only: the all-canvases list, disable / re-enable / restore, and reassigning the owner when someone leaves.
 
 ## General access
 

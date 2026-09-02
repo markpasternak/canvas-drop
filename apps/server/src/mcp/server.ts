@@ -307,7 +307,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
         "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
         "and `lastViewedAt`. Pass `access` to narrow by audience — the same filter the " +
-        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases.",
+        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases. " +
+        "Use `scope='archived'` for the archive, the boolean state filters for the matching " +
+        "dashboard chips, and `limit` + `offset` to page. The result includes the dashboard's " +
+        "filter-independent inventory `summary`.",
       inputSchema: {
         role: z
           .enum(["owned", "edited"])
@@ -320,6 +323,19 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
             "Narrow by audience: restricted (private + its legacy aliases specific_people / team), " +
               "whole_org, or public_link. A single legacy value is accepted too.",
           ),
+        scope: z
+          .enum(["active", "archived"])
+          .catch("active")
+          .optional()
+          .describe('Lifecycle scope (default "active"; invalid values also use "active").'),
+        shared: z
+          .boolean()
+          .optional()
+          .describe("Only canvases open beyond their people-and-teams list."),
+        protected: z.boolean().optional().describe("Only password-protected canvases."),
+        listed: z.boolean().optional().describe("Only canvases listed in the gallery."),
+        template: z.boolean().optional().describe("Only canvases enabled as gallery templates."),
+        undeployed: z.boolean().optional().describe("Only canvases with no published version yet."),
         query: z
           .string()
           .optional()
@@ -334,28 +350,67 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         sort: z
           .enum(["updated", "created", "title", "popular"])
           .optional()
-          .describe('Sort order (default "updated"). "popular" = most trending views (30d).'),
-        limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
+          .describe(
+            'Sort order (default "updated"). "popular" = most trending views (30d). ' +
+              'Use "created" or "title" when paging through a set you will mutate.',
+          ),
+        limit: z
+          .number()
+          .int()
+          .catch(50)
+          .optional()
+          .describe("Max results (clamped to 1–100; default 50)."),
+        offset: z
+          .number()
+          .int()
+          .catch(0)
+          .optional()
+          .describe("Results to skip (clamped to 0 or greater; default 0)."),
       },
     },
-    async ({ role, access, query, tags, sort, limit }) => {
+    async ({
+      role,
+      access,
+      scope,
+      shared,
+      protected: protectedOnly,
+      listed,
+      template,
+      undeployed,
+      query,
+      tags,
+      sort,
+      limit,
+      offset,
+    }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
-      const {
-        items,
-        total,
-        recentViews: rankedViews,
-      } = await deps.canvases.listForActorFiltered({
-        actorId: caller.userId,
-        scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
-        role,
-        access,
-        q: query,
-        tag: tags,
-        sort,
-        popularSinceMs: recentSinceMs,
-        limit: limit ?? 50,
-        offset: 0,
-      });
+      const resolvedLimit = Math.min(Math.max(limit ?? 50, 1), 100);
+      const resolvedOffset = Math.max(offset ?? 0, 0);
+      const actorScope = {
+        tenancyActive: caller.tenancyActive,
+        viewerOrgIds: caller.orgIds,
+      };
+      const [{ items, total, recentViews: rankedViews }, summary] = await Promise.all([
+        deps.canvases.listForActorFiltered({
+          actorId: caller.userId,
+          scope: actorScope,
+          role,
+          access,
+          shared,
+          protected: protectedOnly,
+          listed,
+          template,
+          neverDeployed: undeployed,
+          archived: scope === "archived",
+          q: query,
+          tag: tags,
+          sort,
+          popularSinceMs: recentSinceMs,
+          limit: resolvedLimit,
+          offset: resolvedOffset,
+        }),
+        deps.canvases.actorSummary(caller.userId, actorScope),
+      ]);
       // The popular sort already aggregated the page's counts — reuse them rather than
       // hitting usage_events twice (plan 004); other sorts aggregate the page here.
       const [previews, recentViews, owners] = await Promise.all([
@@ -370,6 +425,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const ownerById = new Map(owners.map((u) => [u.id, u]));
       return ok({
         total,
+        limit: resolvedLimit,
+        offset: resolvedOffset,
+        summary,
         canvases: items.map((cv) => {
           const owner = ownerById.get(cv.ownerId);
           return {
@@ -399,7 +457,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "zipUpload, the staged upload URLs, readback, and a copy-paste `curl` command with the " +
         "key already filled in). If you can run shell commands, deploy with that curl — you do " +
         "NOT need to know or probe for the API host; it's in the block. The " +
-        "canvas starts empty (no live version) and private; its URL only serves content after a " +
+        "canvas starts empty (no live version) and Restricted (`private` in the API); its URL only serves content after a " +
         "deploy, and only to viewers allowed by its access rung (default: sign-in required).",
       inputSchema: {
         title: z.string().optional(),
