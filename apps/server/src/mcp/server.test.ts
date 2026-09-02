@@ -1161,6 +1161,7 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     expect(sortedIds(archivedMcp)).toEqual(sortedIds(archivedHttp));
 
     for (const [name, expectedId] of [
+      ["shared", publicLink.id],
       ["protected", protectedCanvas.id],
       ["listed", listedCanvas.id],
       ["template", templateCanvas.id],
@@ -1198,9 +1199,25 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
     }
 
     const restricted = await overMcp({ access: "restricted", limit: 100 });
-    expect(restricted.canvases.map((cv) => cv.access)).toEqual(
-      expect.arrayContaining(["private", "specific_people", "team"]),
+    const restrictedHttp = await http("?access=restricted&limit=100");
+    expect(sortedIds(restricted)).toEqual(sortedIds(restrictedHttp));
+    expect(restricted.total).toBe(restrictedHttp.total);
+    expect(new Set(restricted.canvases.map((cv) => cv.access))).toEqual(
+      new Set(["private", "specific_people", "team"]),
     );
+
+    for (const [arguments_, query, expectedLimit, expectedOffset] of [
+      [{ limit: 0, offset: -1 }, "?limit=0&offset=-1", 1, 0],
+      [{ limit: 101 }, "?limit=101", 100, 0],
+      [{ scope: "not-a-scope" }, "?scope=not-a-scope", 50, 0],
+    ] as const) {
+      const mcpBody = await overMcp(arguments_ as Record<string, unknown>);
+      const httpBody = await http(query);
+      expect(sortedIds(mcpBody), query).toEqual(sortedIds(httpBody));
+      expect(mcpBody.total, query).toBe(httpBody.total);
+      expect(mcpBody.limit, query).toBe(expectedLimit);
+      expect(mcpBody.offset, query).toBe(expectedOffset);
+    }
   });
 
   it("list_canvases query inherits the forgiving search (matches a tag, case/accent-insensitive)", async () => {

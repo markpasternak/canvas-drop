@@ -325,8 +325,13 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           ),
         scope: z
           .enum(["active", "archived"])
+          .catch("active")
           .optional()
-          .describe('Lifecycle scope (default "active"); use "archived" for archived canvases.'),
+          .describe('Lifecycle scope (default "active"; invalid values also use "active").'),
+        shared: z
+          .boolean()
+          .optional()
+          .describe("Only canvases open beyond their people-and-teams list."),
         protected: z.boolean().optional().describe("Only password-protected canvases."),
         listed: z.boolean().optional().describe("Only canvases listed in the gallery."),
         template: z.boolean().optional().describe("Only canvases enabled as gallery templates."),
@@ -345,15 +350,29 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         sort: z
           .enum(["updated", "created", "title", "popular"])
           .optional()
-          .describe('Sort order (default "updated"). "popular" = most trending views (30d).'),
-        limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
-        offset: z.number().int().min(0).optional().describe("Results to skip (default 0)."),
+          .describe(
+            'Sort order (default "updated"). "popular" = most trending views (30d). ' +
+              'Use "created" or "title" when paging through a set you will mutate.',
+          ),
+        limit: z
+          .number()
+          .int()
+          .catch(50)
+          .optional()
+          .describe("Max results (clamped to 1–100; default 50)."),
+        offset: z
+          .number()
+          .int()
+          .catch(0)
+          .optional()
+          .describe("Results to skip (clamped to 0 or greater; default 0)."),
       },
     },
     async ({
       role,
       access,
       scope,
+      shared,
       protected: protectedOnly,
       listed,
       template,
@@ -365,8 +384,8 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       offset,
     }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
-      const resolvedLimit = limit ?? 50;
-      const resolvedOffset = offset ?? 0;
+      const resolvedLimit = Math.min(Math.max(limit ?? 50, 1), 100);
+      const resolvedOffset = Math.max(offset ?? 0, 0);
       const actorScope = {
         tenancyActive: caller.tenancyActive,
         viewerOrgIds: caller.orgIds,
@@ -377,6 +396,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           scope: actorScope,
           role,
           access,
+          shared,
           protected: protectedOnly,
           listed,
           template,

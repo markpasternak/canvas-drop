@@ -49,7 +49,7 @@ User-facing language also still leaks the old **Private** term in creation, badg
 
 **MCP list parity**
 
-- R1. `list_canvases` accepts additive `scope` (`active` default or `archived`), `protected`, `listed`, `template`, `undeployed`, and `offset` inputs with the same semantics and clamping as `ownerListQuerySchema`.
+- R1. `list_canvases` accepts additive `scope` (`active` default or `archived`), `shared`, `protected`, `listed`, `template`, `undeployed`, and `offset` inputs with the same semantics and clamping as `ownerListQuerySchema`.
 - R2. `list_canvases` passes every filter through `listForActorFiltered`, calls `actorSummary` for the same actor scope, and returns additive `limit`, `offset`, and `summary` fields while preserving all existing inputs and each canvas row.
 - R3. MCP and management list requests for the same actor return equivalent filtering, pagination totals, and summary counts on both database dialects.
 - R4. The MCP `access` filter continues to accept `restricted` and each legacy single value (`private`, `specific_people`, `team`) plus `whole_org` and `public_link`; single legacy values narrow to that exact persisted value.

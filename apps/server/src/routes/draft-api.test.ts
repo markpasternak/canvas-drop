@@ -9,7 +9,7 @@ import { canvasesRepository } from "../db/repositories/canvases.js";
 import { draftsRepository } from "../db/repositories/drafts.js";
 import { usersRepository } from "../db/repositories/users.js";
 import { versionsRepository } from "../db/repositories/versions.js";
-import { makeTestDb } from "../db/testing.js";
+import { DIALECTS, makeTestDb } from "../db/testing.js";
 import { draftService } from "../draft/service.js";
 import type { AppEnv } from "../http/types.js";
 import { memStorage } from "../storage/mem.js";
@@ -27,8 +27,8 @@ describe("draftApiRoutes", () => {
     await client?.close();
   });
 
-  async function setup() {
-    client = await makeTestDb("sqlite");
+  async function setup(dialect: (typeof DIALECTS)[number] = "sqlite") {
+    client = await makeTestDb(dialect);
     const storage = memStorage();
     const users = usersRepository(client);
     const canvases = canvasesRepository(client);
@@ -208,8 +208,8 @@ describe("draftApiRoutes", () => {
     expect(await survivor.text()).toBe("BBB");
   });
 
-  it("POST /publish freezes the draft into a live version", async () => {
-    const { appAs, owner, canvas, canvases } = await setup();
+  it.each(DIALECTS)("POST /publish freezes the draft into a live version [%s]", async (dialect) => {
+    const { appAs, owner, canvas, canvases } = await setup(dialect);
     const app = appAs(owner.id);
     await app.request(`/api/canvases/${canvas.id}/draft/file?path=index.html`, {
       method: "PUT",

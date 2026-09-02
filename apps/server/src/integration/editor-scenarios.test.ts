@@ -158,9 +158,39 @@ describe.each(DIALECTS)("editor role scenarios [%s]", (dialect) => {
     expect(await roleOf(h, EDITOR, canvasId)).toBe("editor");
     expect(await roleOf(h, MATE, canvasId)).toBe("editor");
 
+    // Per-file concurrency also means editors working on different paths do not block
+    // one another. Both writes survive before the same-file conflict witness below.
+    expect((await putDraft(h, EDITOR, canvasId, "<h1>baseline</h1>")).status).toBe(200);
+    const mateFile = await h.app.request(`/api/canvases/${canvasId}/draft/file?path=mate.html`, {
+      method: "PUT",
+      headers: h.headers(MATE, {
+        "Sec-Fetch-Site": "same-origin",
+        "content-type": "application/octet-stream",
+      }),
+      body: "<p>mate path</p>",
+    });
+    expect(mateFile.status).toBe(200);
+    const editorFile = await h.app.request(
+      `/api/canvases/${canvasId}/draft/file?path=editor.html`,
+      {
+        method: "PUT",
+        headers: h.headers(EDITOR, {
+          "Sec-Fetch-Site": "same-origin",
+          "content-type": "application/octet-stream",
+        }),
+        body: "<p>editor path</p>",
+      },
+    );
+    expect(editorFile.status).toBe(200);
+    expect(
+      await (await h.GET(MATE, `/api/canvases/${canvasId}/draft/file?path=mate.html`)).text(),
+    ).toBe("<p>mate path</p>");
+    expect(
+      await (await h.GET(EDITOR, `/api/canvases/${canvasId}/draft/file?path=editor.html`)).text(),
+    ).toBe("<p>editor path</p>");
+
     // F7: both editors open the same file at the same version. The first write lands;
     // the second carries the now-stale hash and is refused instead of overwriting it.
-    expect((await putDraft(h, EDITOR, canvasId, "<h1>baseline</h1>")).status).toBe(200);
     const open = await h.GET(EDITOR, `/api/canvases/${canvasId}/draft`);
     const { files } = await jsonOf<{ files: Array<{ path: string; hash: string }> }>(open);
     const sharedHash = files.find((file) => file.path === "index.html")?.hash;

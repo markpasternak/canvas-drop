@@ -660,7 +660,7 @@ function AccessLadder({
         );
       })}
       {choice === "public_link" && (
-        <InlineNotice tone="warning" className="py-2 text-xs">
+        <InlineNotice tone="warning" className="col-span-full py-2 text-xs">
           Anyone with the link can view this canvas. It serves static files only: no KV, files, AI,
           or realtime.
         </InlineNotice>

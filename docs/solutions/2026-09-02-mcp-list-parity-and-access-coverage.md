@@ -11,7 +11,7 @@ date: 2026-09-02
 
 ## What the round established
 
-`list_canvases` now mirrors the dashboard list without owning a second query implementation. Both surfaces normalize the same filters and call `listForActorFiltered` plus `actorSummary`. MCP adds `scope`, the four state chips, `offset`, normalized pagination metadata, and `summary`; its old arguments and canvas-row shape are unchanged.
+`list_canvases` now mirrors the dashboard list without owning a second query implementation. Both surfaces normalize the same filters and call `listForActorFiltered` plus `actorSummary`. MCP adds `scope`, the five state chips (`shared`, `protected`, `listed`, `template`, `undeployed`), `offset`, normalized pagination metadata, and `summary`; its old arguments and canvas-row shape are unchanged.
 
 The broader review confirmed the central permission model and found one real projection defect: the authoring list advertised `archived` and `disabled` publication states but discarded those rows before calling `publicationStatusOf`. It now returns every non-deleted authored canvas the caller still manages, including draft, published, expired, unpublished, archived, and disabled rows. Deleted rows remain deliberately omitted.
 
@@ -70,7 +70,7 @@ Every publish path that can revive a revoked authoring share is now pinned: dash
 | Authoring API | Both dialects now project every reachable publication state and preserve frozen legacy `status`; owner/editor/no-role behavior and owner entitlement are separately pinned. |
 | Deploy API `GET` and publish | `GET` returns the established `publicationState` plus additive `accessMode`; bearer-key isolation stays canvas-scoped. Republish clears `revokedAt`. |
 | Dashboard lists | The shared owned-or-edited repository covers owner/direct-editor/team-editor membership; Shared covers direct/team viewers but excludes editors; gallery stays listed, published, unprotected, unexpired, and org-scoped. All SQL predicates run on both dialects. |
-| Share tab | Pending rows do not inflate “can open now” copy; legacy guests are named as password-exempt; a failed list read is explicit; navigating to another canvas clears the old mirror before the next response. |
+| Share tab | Pending rows do not inflate “can open now” copy; legacy guests are named as password-exempt; a failed list read is explicit; navigating to another canvas invalidates the old mirror and ignores late success or failure responses. A failed post-mutation refresh also clears list-derived copy. |
 | Clone | Owner/editor and gallery-template paths remain as shipped. Viewer-team cloning is fenced by published + active + unexpired + unprotected. Archived and disabled now have explicit HTTP and dual-dialect MCP regression coverage. |
 
 ## Compatibility decision: `shared: false` with `teamIds: []`
@@ -97,7 +97,7 @@ Recommendation: option 1 unless team-based cloning is meant to represent a disti
 Dev auth cannot hold two browser identities at once. The remaining editor-role walkthrough was therefore closed with a real composed-app integration scenario on both dialects:
 
 - F1: add two colleagues as editors and observe immediate management access;
-- F7: both open one file at the same hash, the first save lands, the stale second save returns `DRAFT_CONFLICT`, and a refreshed save succeeds;
+- F7: both can save distinct files without blocking one another; when both open one file at the same hash, the first save lands, the stale second save returns `DRAFT_CONFLICT`, and a refreshed save succeeds;
 - F4: transfer ownership to an editor and verify the old owner becomes an editor;
 - F6: the new owner demotes then removes the former owner, with view access retained after demotion and revoked after removal.
 
