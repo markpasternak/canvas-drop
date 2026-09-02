@@ -1,14 +1,14 @@
 ---
 name: canvas-drop
-description: Deploy and extend small web artifacts ("canvases") on a canvas-drop instance. Use when the user wants to ship static HTML/JS to a shared URL, or give a canvas backend capability (KV, files, AI, identity, realtime) through the zero-config browser SDK. Connect over MCP for an identity-scoped tool surface, or deploy over HTTP with a per-canvas key.
+description: Deploy and extend small web artifacts ("canvases") on a canvas-drop instance. Use when the user wants to ship static HTML/JS to a shared URL, or give a canvas backend capability (KV, files, AI, identity, realtime, admin-granted Connections) through the zero-config browser SDK. Connect over MCP for an identity-scoped tool surface, or deploy over HTTP with a per-canvas key.
 ---
 
 # canvas-drop
 
 If you are an agent asked to put a static web artifact on a canvas-drop instance, or
 to give one a backend, this skill is the contract: create a canvas, deploy it, verify
-what shipped through the server, share it, and call the five primitives (KV, files,
-AI, identity, realtime) from the page. Nothing here needs a dashboard session: you
+what shipped through the server, share it, and call the six fixed primitives (KV, files,
+AI, identity, realtime, Connections) from the page. Nothing here needs a dashboard session: you
 act over MCP as the signed-in user, or over HTTP with a per-canvas key.
 
 `{base}` is the instance's base URL (a fresh local instance is `http://localhost:3000`).
@@ -46,11 +46,13 @@ No shell? `deploy_canvas(id, files: [{path, content}])` over MCP publishes in on
   or tokens. Identity rides the viewer's session cookie; the per-canvas `cd_…` key is
   used only by the deploy step and never ships inside the canvas.
 - **Static files only.** No server-side build. AI-generated HTML deploys unmodified.
-  Backend behaviour comes only from the five primitives.
-- **Backend is off by default.** Every primitive call throws `CapabilityDisabledError`
+  Backend behaviour comes only from the six fixed primitives.
+- **Backend is off by default.** A built-in primitive call throws `CapabilityDisabledError`
   (`code: "CAPABILITY_DISABLED"`, status 403) until an owner or editor turns on Backend
   plus the specific feature (dashboard Backend tab, or `set_capabilities` over MCP).
   Identity (`me()`) has no separate toggle; it is on whenever Backend is on.
+  Connections have no owner toggle: an admin creates and grants a profile, and Backend
+  must still be on.
 - **Deploy means live.** A deploy over the key API or the MCP deploy tools creates an
   immutable version and points the canvas at it in one step. The last 10 versions are
   kept; you can roll back to any of them.
@@ -96,13 +98,13 @@ editors. An admin-disabled canvas is read-only: every mutation fails with
 slug. Calls share one bucket of 120 per minute per user
 (`429 {"error":"rate_limited"}` with `Retry-After`).
 
-46 tools, grouped:
+47 tools, grouped:
 
 | Group | Tools | Notes |
 |---|---|---|
 | Identity and lists | `whoami`, `list_canvases`, `list_shared_canvases` | `list_canvases` takes `role` (`owned` / `edited`), `query` (case-, accent-, and whitespace-insensitive search over title, description, tags, and slug; multi-word AND), `tags` (any-match), `sort` (`updated` / `created` / `title` / `popular`), `limit` (default 50, max 100). Each row carries `owner` and `role`. |
 | Create | `create_canvas`, `clone_canvas` | `create_canvas(title?, description?, backendEnabled?, slug?, orgId?)` returns the canvas, its `apiKey` (shown once), and a `deploy` block with the exact endpoints (`apiBase`, `zipUpload`, `staged.begin` / `stageBlob` / `finalize`, `readback`, and a copy-paste `curl`). Use them verbatim; do not probe for the API host. `get_canvas` returns the same block with a `$CANVAS_KEY` placeholder. `clone_canvas(id)` copies the published files into a new private, unpublished canvas; its key is not returned (use `regenerate_deploy_key`). |
-| Read | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` | `get_canvas_file(id)` lists the live files; `get_canvas_file(id, path)` returns one file's content (`utf8` or `base64`; over 256 KiB comes back `truncated: true` without content). This is how you verify a deploy. `list_versions` rows carry a `downloadUrl` (ZIP export, same bearer token). `list_access` returns the people list with each entry's `id` (used by `revoke_access` / `set_access_role`) and, for the owner, `transferCandidates`. |
+| Read | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_canvas_connections`, `list_access`, `search_people` | `get_canvas_file(id)` lists the live files; `get_canvas_file(id, path)` returns one file's content (`utf8` or `base64`; over 256 KiB comes back `truncated: true` without content). This is how you verify a deploy. `list_versions` rows carry a `downloadUrl` (ZIP export, same bearer token). `list_canvas_connections(id)` returns sanitized admin-granted profile metadata, never protected header values. `list_access` returns the people list with each entry's `id` (used by `revoke_access` / `set_access_role`) and, for the owner, `transferCandidates`. |
 | Deploy | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` | `deploy_canvas(id, zipBase64)` or `deploy_canvas(id, files: [{path, content, encoding?}])` publishes in one call. Staged: `begin_deploy(id, manifest: [{path, hash, size}])` returns `{uploadId, missingHashes}`; `add_files` stages only those; `finalize_deploy` publishes. Session TTL 15 minutes. The canvas must be active (`NOT_ACTIVE` otherwise). |
 | Versions and lifecycle | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) | `rollback_canvas(id, version)` takes the `number` from `list_versions`. `delete_canvas` is a soft delete; only an admin can restore. `transfer_canvas(id, toUserId)` takes a user id from `list_access`'s `transferCandidates`, never an email; the recipient must already be an editor and an org member (`NOT_ELIGIBLE` otherwise). The result reports `previousOwnerEditor` (whether you were kept on as an editor) and `publicLinkReverted`. |
 | Settings | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key` | `update_canvas` covers `title`, `description` (max 2000 chars), `tags` (max 20, 50 chars each; one tag set drives list filters and the gallery), `access` rung, `discoverability`, `teamIds`, `password` (`null` clears), `sharedExpiresAt`, `spaFallback`, `previewMode` (`auto` / `off`), `galleryListed`, `galleryTemplatable`, and the owner-only `guestAiEnabled` / `guestAiCap`. `set_canvas_preview(id, image)` uploads a custom cover (`previewMode: "custom"`); without `image` it reverts to `auto`. `set_capabilities(id, backendEnabled?, kv?, files?, ai?, realtime?, authoring?)` clears a `CAPABILITY_DISABLED` error. `set_canvas_slug` changes the URL at once (omit `slug` for a fresh random one). `regenerate_deploy_key` returns the new key once with a refreshed `deploy` block; the old key stops working, and the owner is emailed when an editor rotates it. |
@@ -233,6 +235,14 @@ const files = await canvasdrop.files.list();             // [{ id, name, size, m
 const src = canvasdrop.files.url(f.id);                  // synchronous absolute URL
 await canvasdrop.files.delete(f.id);
 
+// Connections: profile authority is created and granted by an administrator
+const quote = await canvasdrop.connections.fetch(
+  "stocks",
+  `/v2/quote?symbol=${encodeURIComponent(symbol)}`,
+  { headers: { accept: "application/json" } },
+);
+if (!quote.ok) throw new Error(`upstream ${quote.status}`); // upstream 4xx/5xx are Responses
+
 // AI: model is required; the system prompt goes in options.system
 const { text, usage, cost } = await canvasdrop.ai.chat(
   [{ role: "user", content: "Summarize this." }],
@@ -266,12 +276,18 @@ Signatures that trip agents up:
   default (max 1000) and returns `nextCursor` for the next page.
 - `files.upload` takes a `File` and posts it as multipart field `file`. There is no
   progress callback.
+- `connections.fetch(profile, path, init?)` requires a root-relative path and an
+  admin-granted profile. The admin fixes one exact HTTPS origin, allowed methods, and
+  write-only protected headers; canvas code cannot change them. Platform policy failures
+  throw, while approved upstream 4xx/5xx resolve as native `Response` objects.
 
 Limits the server enforces: KV keys up to 512 bytes, values up to 64 KiB serialized,
 10 000 shared keys and 1 000 per-user keys per canvas; files up to 25 MiB each and
 1 GiB per canvas; AI calls 10 per minute per viewer, other runtime calls 120 per minute
 per viewer per canvas; realtime 30 connections per canvas, 64 channels and 100
-publishes per minute per connection, 16 KiB per frame.
+publishes per minute per connection, 16 KiB per frame; Connections default to 256 KiB
+request bodies, 2 MiB responses, 10 seconds total, 5 in flight per canvas, and 60 calls
+per minute per actor + canvas + profile.
 
 The page-driven `canvasdrop.canvases.*` namespace (publish, update, list, revoke a
 canvas from inside a canvas) sits behind the `authoring` capability, which is off by
@@ -302,13 +318,21 @@ the message.
 | `QUOTA_EXCEEDED` | 429 / 409 | AI spend quota exceeded (429) or per-canvas file storage full (409) |
 | `GUEST_AI_CAP` | 429 | guest AI spend cap reached |
 | `RATE_LIMITED` | 429 | per-viewer request rate exceeded |
-| `CONNECTION_LIMIT` | 429 | too many concurrent realtime connections |
+| `CONNECTION_LIMIT` | 429 | too many concurrent realtime or outbound connections |
+| `CONNECTION_NOT_GRANTED` | 404 | the requested Connection profile is not granted to this canvas |
+| `CONNECTION_DISABLED` / `CONNECTION_KEY_UNAVAILABLE` | 503 | the admin profile is disabled or its external encryption key is unavailable |
+| `METHOD_NOT_ALLOWED` | 405 | the HTTP method is not approved for the profile |
+| `DESTINATION_BLOCKED` | 403 | origin, DNS, redirect, or encoding crossed the Connection boundary |
+| `REQUEST_TOO_LARGE` / `RESPONSE_TOO_LARGE` | 413 / 502 | a Connection request or response exceeded its bound |
+| `CONNECTION_RATE_LIMIT` | 429 | a Connection-specific rate bucket is spent |
+| `UPSTREAM_TIMEOUT` / `UPSTREAM_UNAVAILABLE` | 504 / 502 | approved upstream timed out or failed |
 | `AI_STREAM_TRUNCATED` / `AI_UPSTREAM_ERROR` | 502 | AI stream ended early / provider error |
 | `REQUEST_FAILED` | 0 | failed with no specific code |
 
 Typed subclasses (`instanceof` works): `NotAuthenticatedError` (any 401),
 `CapabilityDisabledError` (403 with `CAPABILITY_DISABLED`; no capability property,
-and the message is the server's `.hint`), `NotFoundError` (any 404),
+and the message is the server's `.hint`), `NotFoundError` (every 404 except
+`CONNECTION_NOT_GRANTED`, which preserves its code on the base error),
 `QuotaExceededError` (`QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`,
 `CONNECTION_LIMIT`, and every 413; `.code` keeps the wire code), and
 `PublishFailedError` (authoring only; `.id` is the created canvas). Everything else,

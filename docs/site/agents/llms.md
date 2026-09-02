@@ -13,8 +13,8 @@ There are three ways in. Pick by what you hold.
 | You hold | Use | Reach |
 |---|---|---|
 | A per-canvas secret key (`cd_...`) | Deploy API at `{base}/v1/canvases/{id}/...` | that one canvas: deploy, read back, roll back, unpublish |
-| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 46 tools |
-| Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the five primitives for that canvas: KV, files, AI, identity, realtime |
+| An MCP-capable host | MCP at `{base}/mcp` (OAuth 2.1, no key to paste) | every canvas the signed-in account owns or edits; 47 tools |
+| Code running inside a canvas page | Browser SDK at `{base}/sdk/v1.js`, global `canvasdrop` | the six fixed primitives for that canvas: KV, files, AI, identity, realtime, Connections |
 
 Two verbs recur below. **Publish** turns the editor draft into an immutable
 version. **Deploy** (the Deploy API, `deploy_canvas`, the staged upload) publishes
@@ -123,7 +123,7 @@ deploy and publish with `NOT_ACTIVE`.
 | Read (`editor`) | `get_canvas`, `list_versions`, `get_canvas_file`, `get_canvas_usage`, `list_access`, `search_people` |
 | Deploy (`editor`; publishes live immediately) | `deploy_canvas`, `begin_deploy`, `add_files`, `finalize_deploy` |
 | Lifecycle (`editor` unless marked) | `rollback_canvas`, `unpublish_canvas`, `delete_version`, `archive_canvas`, `unarchive_canvas`, `delete_canvas` (owner), `transfer_canvas` (owner) |
-| Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key` |
+| Settings (`editor`) | `update_canvas`, `set_capabilities`, `set_canvas_slug`, `set_canvas_preview`, `regenerate_deploy_key`; `list_canvas_connections` reads the admin-granted profiles |
 | Sharing (`editor`) | `grant_access`, `invite_to_canvas`, `revoke_access`, `set_access_role` |
 | Draft loop (`editor`) | `get_draft`, `read_draft_file`, `write_draft_file`, `delete_draft_file`, `rename_draft_file`, `publish_draft`, `restore_draft` |
 | Teams (`any`) | `list_teams`, `create_team`, `rename_team`, `delete_team`, `add_team_member`, `remove_team_member`, `cancel_team_invite`, `list_team_members` |
@@ -243,6 +243,11 @@ sits behind the same sign-in as the canvas.
   `[{ id, name }]`, `onPresence`, `onJoin`, `onLeave`, and `close()`. One shared
   socket per page with automatic reconnect; 30 connections per canvas, 16 KiB per
   message. There is no generic `.on(...)`.
+- `connections.fetch(profile, path, init?)` makes a bounded server-side request through
+  an admin-granted profile. `path` must be root-relative; `init.method` must be one the
+  admin selected. The profile fixes one exact HTTPS DNS origin and adds write-only
+  protected headers last. Upstream 4xx/5xx remain normal `Response` objects; platform
+  policy failures throw. Public-link viewers remain static-only.
 - `canvases` (the `authoring` capability, off by default per canvas and per
   instance): `publish`, `update`, `list`, `revoke` let a signed-in viewer create
   and manage a share canvas from a page.
@@ -319,6 +324,7 @@ Defaults; each is an env var the operator can change.
 | Deploy API (`deploy`, `uploads` begin, `finalize`, `rollback`) | 10/min | canvas | `CANVAS_DROP_RATELIMIT_DEPLOY_PER_MIN` |
 | Runtime API `/v1/c/{slug}/...` | 120/min | user + canvas | `CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN` |
 | Runtime AI `/v1/c/{slug}/ai/...` | 10/min | user | `CANVAS_DROP_RATELIMIT_AI_PER_MIN` |
+| Runtime Connections | 60/min per actor/profile; 600/min per profile | actor + canvas + profile; profile | `CANVAS_DROP_CONNECTIONS_ACTOR_PER_MIN`, `CANVAS_DROP_CONNECTIONS_PROFILE_PER_MIN` |
 | MCP `/mcp` | 120/min | account | `CANVAS_DROP_RATELIMIT_CANVAS_API_PER_MIN` |
 
 For a packaged, installable version of this guidance, see the

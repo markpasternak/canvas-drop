@@ -344,6 +344,37 @@ whitespace value counts as unset.
 | `CANVAS_DROP_AI_USER_DAILY_USD` | `5` | Per-user daily spend cap. **Runtime-editable.** |
 | `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` | `50` | Per-canvas monthly spend cap. **Runtime-editable.** |
 
+## Outbound Connections (optional)
+
+Connections stays inert until an admin creates a profile and grants it to a
+canvas. The root key is optional on a clean instance and for profiles with no
+protected headers. Once protected values exist, store the same key with the
+deployment secrets on every restart and restore. It must be base64 for exactly
+32 decoded bytes (`openssl rand -base64 32`). Missing or malformed key material
+fails protected-header create/use closed without preventing an otherwise unused
+instance from booting.
+
+All rows are env-only and shown read-only in Admin → Configuration. Limits are
+per server process; the supported first-release deployment is one app process.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY` | unset | Write-only external AES-256-GCM root key. Not stored in canvas-drop backups. |
+| `CANVAS_DROP_CONNECTIONS_MAX_URL_BYTES` | `8192` | Relative path plus query. |
+| `CANVAS_DROP_CONNECTIONS_MAX_BODY_BYTES` | `262144` | Request body (256 KiB). |
+| `CANVAS_DROP_CONNECTIONS_MAX_RESPONSE_BYTES` | `2097152` | Buffered upstream body (2 MiB). |
+| `CANVAS_DROP_CONNECTIONS_TIMEOUT_MS` | `10000` | Total DNS, redirects, request, and response deadline. |
+| `CANVAS_DROP_CONNECTIONS_MAX_REDIRECTS` | `3` | Exact-origin redirects; `0` disables following. |
+| `CANVAS_DROP_CONNECTIONS_CANVAS_CONCURRENCY` | `5` | In-flight calls per canvas. |
+| `CANVAS_DROP_CONNECTIONS_INSTANCE_CONCURRENCY` | `50` | In-flight calls in one app process. |
+| `CANVAS_DROP_CONNECTIONS_ACTOR_PER_MIN` | `60` | Per server-resolved actor + canvas + profile. |
+| `CANVAS_DROP_CONNECTIONS_PROFILE_PER_MIN` | `600` | Instance-wide bucket for one profile. |
+| `CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADERS` | `32` | Canvas-supplied header count. |
+| `CANVAS_DROP_CONNECTIONS_MAX_CALLER_HEADER_BYTES` | `16384` | Combined canvas-supplied header names and values. |
+
+The [Connections SDK reference](/docs/sdk/connections) explains the grant,
+network, header, and response boundaries.
+
 ## Authoring (optional)
 
 The authoring capability lets a signed-in viewer create a new canvas from a backend-enabled

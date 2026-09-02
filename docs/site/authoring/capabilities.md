@@ -5,6 +5,9 @@ from the page will work. This page is for a canvas's owner or editor. A canvas
 is static until you switch **Enable backend** on in its **Backend** tab. With
 the backend on, five features toggle independently: KV, files, AI, realtime, and
 authoring. Identity (`me()`) has no toggle; it is on whenever the backend is on.
+Outbound Connections also has no owner-controlled feature toggle: each reusable
+profile is granted to the canvas by an instance administrator and remains gated
+by the same Backend master switch.
 
 ## Turn on the backend
 
@@ -58,6 +61,7 @@ live realtime sockets. A canvas an admin has disabled refuses the change with
 | File storage | `files` | on | Upload, list, delete, and serve files | [`files`](/docs/sdk/files) |
 | AI | `ai` | on | Server-side model calls; no provider key in the page | [`ai`](/docs/sdk/ai) |
 | Realtime | `realtime` | on | Ephemeral pub/sub and presence over WebSockets | [`realtime`](/docs/sdk/realtime) |
+| Connections | no feature flag | no grants | Bounded requests to exact HTTPS origins an admin attached to this canvas | [`connections`](/docs/sdk/connections) |
 | Authoring | `authoring` | off | A signed-in viewer creates and manages canvases from the page, as themselves | [`canvases`](/docs/sdk/authoring) |
 
 The feature toggles are disabled in the UI while the backend is off. Their
@@ -79,6 +83,7 @@ the outcome, and `effective` in the API is the same answer.
 | Files | yes | yes | none |
 | AI | yes | yes | An AI provider key is configured: `CANVAS_DROP_AI_API_KEY`, or the **Provider API key** an admin sets in Admin → Settings |
 | Realtime | yes | yes | `CANVAS_DROP_REALTIME=on` (the default) |
+| Connections | yes | an enabled profile is attached | `CANVAS_DROP_CONNECTIONS_ENCRYPTION_KEY` is available when protected headers are configured |
 | Authoring | yes | yes | `CANVAS_DROP_AUTHORING=on` (default `off`), or **Authoring enabled** set by an admin in Admin → Settings |
 
 KV and files have no instance switch: your two toggles are the whole story.
@@ -99,6 +104,7 @@ last column, not `CAPABILITY_DISABLED`; see [error codes](/docs/api/errors).
 | Files | 25 MB per file, 1 GB per canvas | both | `FILE_TOO_LARGE`, `QUOTA_EXCEEDED` |
 | AI | Models on the allowlist (`CANVAS_DROP_AI_MODELS`); spend caps of `CANVAS_DROP_AI_USER_DAILY_USD` (default `5`) per viewer per day and `CANVAS_DROP_AI_CANVAS_MONTHLY_USD` (default `50`) per canvas per month | allowlist and both caps | `MODEL_NOT_ALLOWED`, `QUOTA_EXCEEDED` |
 | Realtime | 30 concurrent connections per canvas, 16 KB per message | no | `CONNECTION_LIMIT` (socket close `4429`) |
+| Connections | 8 KiB URL; 32/16 KiB caller headers; 256 KiB request; 2 MiB response; 10 s; 3 redirects; 60/min actor+canvas+profile; 600/min profile; 5 concurrent/canvas; 50/process | env-only | `REQUEST_TOO_LARGE`, `RESPONSE_TOO_LARGE`, `UPSTREAM_TIMEOUT`, `CONNECTION_RATE_LIMIT`, `CONNECTION_LIMIT` |
 
 ## When a feature is off
 
@@ -184,5 +190,7 @@ turns the backend on when they need it.
 Capabilities are enforced by the server, per request, from the signed-in
 session: the canvas can ask, the server decides. Canvas files never carry a
 secret, and a static canvas has no backend surface at all. Turning a capability
-on is a per-canvas choice its owner or an editor makes; an admin controls only
-the instance switches above, not any canvas's toggles.
+on is normally a per-canvas choice its owner or an editor makes. Connections is
+the deliberate exception: only an admin defines profiles and attaches or revokes
+their grants, while owners and editors inspect the non-secret authority in the
+Backend tab.

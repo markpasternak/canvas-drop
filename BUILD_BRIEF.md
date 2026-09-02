@@ -14,11 +14,11 @@ People can now generate working web interfaces in minutes with AI, but there is 
 2. Upload it — drag a folder, paste HTML, or POST it.
 3. Get a secure, unguessable URL inside your org's trust boundary.
 4. Share it with colleagues.
-5. Add backend capability (KV storage, files, AI, identity, realtime) with zero configuration when needed.
+5. Add backend capability (KV storage, files, AI, identity, realtime, and admin-granted outbound connections) without running custom server code.
 
 This is not a hosting platform. It is an organization's creation-and-sharing layer for AI-generated tools, prototypes, dashboards, demos, microsites, games, and lightweight internal apps. The strategic value is cultural as much as technical: more experiments, more working artifacts instead of screenshots and slide decks, less dependence on engineering for every small internal tool.
 
-**The constraint is the product.** A small fixed set of primitives, done extremely well, beats a general-purpose platform. v1 optimizes for an open-source, self-hostable backend-primitives platform: the browser SDK, deploy API, and five primitives are in v1; the CLI and installable agent skill package come next.
+**The constraint is the product.** A small fixed set of primitives, done extremely well, beats a general-purpose platform. v1 shipped the browser SDK, deploy API, and the original five primitives; admin-granted outbound Connections is the sixth fixed primitive added post-v1. This is still not arbitrary backend execution.
 
 ---
 
@@ -64,7 +64,7 @@ canvas-drop exists to let members of an organization publish internal web artifa
 1. Turn static or AI-generated HTML into a live, secure internal URL in under a minute.
 2. Make sharing interactive ideas easier than sharing screenshots, decks, or Figma links.
 3. Give non-engineers a safe place to host AI-created internal tools.
-4. Provide five backend primitives (KV, files, AI, identity, realtime) so small apps need no custom infrastructure.
+4. Provide six fixed backend primitives (KV, files, AI, identity, realtime, and admin-granted outbound connections) so small apps need no custom infrastructure.
 5. Keep everything inside the org trust boundary — login on every request, secrets never in the browser.
 
 It replaces: ZIP files in chat, screenshots of prototypes, "can someone deploy this for me?", throwaway apps in production infra, and static docs where an interactive artifact would communicate better.
@@ -79,9 +79,9 @@ Constraint-led. Build the smallest internal publishing system that makes 80% of 
 
 **4.2 Internal trust boundary.** Every request is authenticated through the configured org-auth mode. Recommended production uses an upstream identity-aware proxy (D1/D16), so the app receives and verifies a trusted identity assertion. `oidc` exists for self-hosters without an IAP, and `dev` exists for zero-setup localhost. This deletes whole problem classes — spam, anonymous abuse, bots, public threat models — while keeping the product posture simple: "resolve the org identity, map to a user, enforce canvas access." Unlike Shopify Quick, canvases are *private by default* (D4), so canvas content is treated as potentially sensitive.
 
-**4.3 Static-first, API-optional.** A canvas is a folder of static files. No build step, no server-side code, ever. Backend capability comes only through the five platform primitives.
+**4.3 Static-first, API-optional.** A canvas is a folder of static files. No build step and no canvas-supplied server-side code, ever. Backend capability comes only through the six platform primitives.
 
-**4.4 Fixed primitives, not custom infrastructure.** v1: **KV storage, file storage, AI (Anthropic-first proxy behind a provider abstraction), identity, realtime (ephemeral pub/sub + presence).** Explicitly not: warehouse, cron, custom backends, persisted message history (D19). Realtime is deliberately the *thin* kind — broadcast and presence only; anything durable goes through KV. Get very good at saying no.
+**4.4 Fixed primitives, not custom infrastructure.** The current set is **KV storage, file storage, AI (Anthropic-first proxy behind a provider abstraction), identity, realtime (ephemeral pub/sub + presence), and admin-granted outbound Connections**. Connections forwards bounded requests only to one exact HTTPS origin selected by an admin; it does not execute canvas-supplied backend code. Explicitly not: warehouse, cron, custom backends, persisted message history (D19). Realtime is deliberately the *thin* kind — broadcast and presence only; anything durable goes through KV. Get very good at saying no.
 
 **4.5 AI agents are first-class authors.** Canvas code works zero-config (D7) so AI-generated HTML runs unmodified. The deploy API exists from day one so agents can ship without a human in the loop. SDK surface is small, predictable, documented in one agent-readable page (`/llms.txt`). The CLI and packaged agent skill are next, not required for v1.
 
@@ -253,6 +253,16 @@ Tags: **[v1]** · **[v1.1]** fast follow · **[later]** · **[never]** explicit 
 3. Shape versioned for later directory fields [v1]
 4. Group membership checks [later]
 5. Directory sync [later]
+
+### 6.8a Admin-granted outbound Connections primitive
+1. `canvasdrop.connections.fetch(profile, relativePath, init?)` forwards a request to one exact admin-approved HTTPS DNS origin [post-v1]
+2. Profiles are reusable; a global admin chooses the immutable key, origin, standard HTTP methods, protected headers, enabled state, and the individual canvas grants [post-v1]
+3. Protected header values are write-only, AES-256-GCM encrypted with an external root key, applied after canvas-supplied headers, and never returned to the browser, manager API, MCP, audit log, or usage log [post-v1]
+4. The canvas chooses only a root-relative path/query, an approved method, safe caller headers, and a bounded body; cross-origin redirects, IP literals, private/special DNS answers, compression, hop-by-hop headers, and upstream cookies are refused or stripped [post-v1]
+5. Every DNS resolution is all-address validated and the chosen public address is pinned to the TLS socket while preserving the approved hostname for certificate validation, SNI, and `Host` [post-v1]
+6. Live canvas access, password, lifecycle, Public-link static-only, Backend master, profile, and grant state are checked on every request. Detach/disable/revoke blocks the next request [post-v1]
+7. Default bounds: 8 KiB URL, 32 caller headers / 16 KiB header bytes, 256 KiB request body, 2 MiB response, 10 second total deadline, three same-origin redirects, 60 requests/minute per actor+canvas+profile, 600/minute per profile, five concurrent per canvas, 50 concurrent per process [post-v1]
+8. The approved upstream remains trusted and can reflect a protected value in its own response; operators must use least-privilege upstream credentials and defense-in-depth network egress policy [post-v1]
 
 ### 6.9 Dashboard (management app)
 1. My canvases first: title, slug, URL, status, last deploy, visit sparkline, with a dominant create action [v1]
@@ -564,6 +574,8 @@ canvasdrop.files.url(id): string
 canvasdrop.ai.chat(messages, { model?, maxTokens?, system? }): Promise<{ text, usage }>
 canvasdrop.ai.stream(messages, opts): AsyncIterable<string>   // SSE under the hood
 
+canvasdrop.connections.fetch(profile, relativePath, { method?, headers?, body?, signal? }): Promise<Response>
+
 canvasdrop.realtime.channel(name): Channel               // WebSocket under the hood, auto-reconnect
   channel.publish(event, data): void                    // ephemeral broadcast to this canvas's channel
   channel.subscribe((msg) => void): void                // msg: { event, data, from: { id, name } }
@@ -578,7 +590,7 @@ canvasdrop.realtime.channel(name): Channel               // WebSocket under the 
 Errors: typed `CanvasdropError { code, status, message }` base, with `CapabilityDisabledError` / `QuotaExceededError` / `NotFoundError` / `NotAuthenticatedError` subclasses — each catchable by `instanceof` and carrying a stable `code` (M6, plan 007; name aligned to the `canvasdrop` global).
 
 ### 11.2 Platform API (session-authenticated from canvases)
-`GET /v1/c/:slug/me` · `GET|PUT|DELETE /v1/c/:slug/kv/:key` (+ list, `:key/increment`, `kv/user/...`) · `POST|GET /v1/c/:slug/files` · `DELETE /v1/c/:slug/files/:id` · `GET /v1/c/:slug/files/:id/content` · `POST /v1/c/:slug/ai/chat` (SSE-capable) · `GET /v1/c/:slug/realtime` (WebSocket upgrade; authenticated at handshake, §9.7).
+`GET /v1/c/:slug/me` · `GET|PUT|DELETE /v1/c/:slug/kv/:key` (+ list, `:key/increment`, `kv/user/...`) · `POST|GET /v1/c/:slug/files` · `DELETE /v1/c/:slug/files/:id` · `GET /v1/c/:slug/files/:id/content` · `POST /v1/c/:slug/ai/chat` (SSE-capable) · `GET /v1/c/:slug/realtime` (WebSocket upgrade; authenticated at handshake, §9.7) · `GET|HEAD|POST|PUT|PATCH|DELETE /v1/c/:slug/connections/:profile/*` (only methods selected by the admin for that profile).
 
 ### 11.3 Management API (session-authenticated, same-origin only)
 Canvas CRUD, settings (incl. access rung, discoverability, team grants, **share revoke**, **share expiry**, password, SPA fallback, gallery opt-in), versions, rollback, slug regen, key regen, paste-HTML create, usage/stats queries. Admin routes (`/api/admin/...`) require `is_admin`.
@@ -622,7 +634,7 @@ Everything below serves these invariants. Beyond them we deliberately stay **sim
 - **Path mode:** all canvases share one origin with each other **and the dashboard**. A malicious or XSS'd canvas could issue same-origin requests toward management APIs (mitigated by `Sec-Fetch-Site`/header checks and SameSite, but not eliminable) and could touch other canvases' client-side state. *Acceptable for localhost and trusted own-hosting. Multi-user path mode requires `CANVAS_DROP_ALLOW_MULTI_USER_PATH_MODE=true`, an admin-visible warning, and docs that say the cross-canvas invariant is not as strong as subdomain mode.*
 
 ### 12.3 Rate limits and quotas (defaults, admin-tunable)
-Canvas API 60 req/min/user/canvas · AI 10 req/min/user · deploys 10/min/canvas · login 5/min/IP · password-gate 5/min/user with backoff · **realtime: 30 concurrent connections/canvas, 100 messages/min/user, 16 KB/message** (drop on breach). Quotas: 100 MB/canvas assets, 1 GB/canvas files, 10k KV keys, AI **$5/user/day, $50/canvas/month** (OPEN-4).
+Canvas API 120 req/min/user/canvas · AI 10 req/min/user · deploys 10/min/canvas · login 10/min/IP · password-gate 5/min/user with backoff · **realtime: 30 concurrent connections/canvas, 100 messages/min/user, 16 KB/message** (drop on breach) · **Connections: 60/min actor+canvas+profile, 600/min profile, 5 concurrent/canvas, 50 concurrent/process**. Quotas: 100 MB/canvas assets, 1 GB/canvas files, 10k KV keys, AI **$5/user/day, $50/canvas/month** (OPEN-4).
 
 ### 12.4 Headers
 Strict CSP on dashboard; canvas responses: `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, COOP, `frame-ancestors 'none'` default (embed opt-in later).
@@ -636,7 +648,7 @@ Because the app trusts identity asserted upstream, the single most important con
 This keeps the friendly-environment posture honest: open among colleagues, but no one can *become* another colleague.
 
 ### 12.6 Recovery and review
-Backup/restore documented and drilled per driver (SQLite snapshot, pg_dump, S3 versioning). **Right-sized security review before broad rollout/public release** — a focused internal review of the five invariants (§12.0), not a mandatory third-party pen-test. Review focus: auth gateway bypass, the realtime handshake taking the same authorization path as HTTP, share revoke/expiry honored live, cross-canvas access (both modes, HTTP **and** WebSocket), key handling, upload pipeline, SSRF (none should exist — server makes no user-directed fetches), and audit usefulness for trust-first shared apps.
+Backup/restore documented and drilled per driver (SQLite snapshot, pg_dump, S3 versioning). **Right-sized security review before broad rollout/public release** — a focused internal review of the five invariants (§12.0), not a mandatory third-party pen-test. Review focus: auth gateway bypass, the realtime handshake taking the same authorization path as HTTP, share revoke/expiry honored live, cross-canvas access (both modes, HTTP **and** WebSocket), key handling, upload pipeline, the Connections SSRF boundary (all-address validation, socket pinning, exact-origin redirects), and audit usefulness for trust-first shared apps.
 
 ---
 
@@ -712,7 +724,7 @@ Health: uptime; P95s vs §13; AI spend vs budget; rate-limit events; security in
 
 ## 18. Risks
 
-1. **Scope creep toward a bigger platform** → the fixed five primitives (KV, files, AI, identity, realtime) are the contract; new primitives require a written decision.
+1. **Scope creep toward a bigger platform** → the fixed six primitives (KV, files, AI, identity, realtime, Connections) are the contract; new primitives require a written decision.
 2. **Dual-dialect drift** (SQLite vs Postgres) → portable-schema rules (§10) + CI test matrix on both from week 1, not retrofitted.
 3. **Path mode in multi-user prod** → honest docs, dashboard notice, and subdomain mode kept genuinely easy (wildcard TLS + auth handled by the reverse-proxy/IAP) so the secure path is the lazy path.
 4. **AI-generated canvases with XSS** → origin isolation (subdomain mode) contains blast radius; private-by-default limits exposure; docs nudge `textContent` over `innerHTML`.

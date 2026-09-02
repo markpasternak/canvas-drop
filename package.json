@@ -2,7 +2,7 @@
   "name": "canvas-drop",
   "version": "0.0.0",
   "private": true,
-  "description": "Self-hostable platform where org members deploy and share small static web artifacts (\"canvases\"), with five built-in backend primitives: KV, files, AI, identity, realtime.",
+  "description": "Self-hostable platform where org members deploy and share small static web artifacts (\"canvases\"), with six built-in backend primitives: KV, files, AI, identity, realtime, and admin-granted outbound connections.",
   "license": "MIT",
   "author": "Mark Pasternak",
   "homepage": "https://github.com/markpasternak/canvas-drop#readme",

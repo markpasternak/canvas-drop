@@ -56,7 +56,17 @@ same order (each entry is `{ status, summary }`; `ErrorCode` is its key type).
 | `KEY_LIMIT` | 409 | The canvas hit its key-count limit. |
 | `NOT_NUMERIC` | 409 | `increment` was called on a non-numeric value. |
 | `QUOTA_EXCEEDED` | 429 | A spend or rate quota was exceeded. |
-| `CONNECTION_LIMIT` | 429 | Too many concurrent realtime connections. |
+| `CONNECTION_LIMIT` | 429 | A realtime or outbound connection concurrency limit was reached. |
+| `CONNECTION_RATE_LIMIT` | 429 | The outbound connection rate limit was reached. |
+| `CONNECTION_NOT_GRANTED` | 404 | The outbound connection is not granted to this canvas. |
+| `CONNECTION_DISABLED` | 503 | The outbound connection profile is disabled. |
+| `CONNECTION_KEY_UNAVAILABLE` | 503 | The protected-header encryption key is unavailable. |
+| `METHOD_NOT_ALLOWED` | 405 | The outbound method is unsupported or not allowed by the profile. |
+| `DESTINATION_BLOCKED` | 403 | The outbound origin, DNS answer, redirect, or encoding crossed the approved boundary. |
+| `UPSTREAM_TIMEOUT` | 504 | The total outbound deadline expired. |
+| `UPSTREAM_UNAVAILABLE` | 502 | DNS or the approved upstream failed. |
+| `RESPONSE_TOO_LARGE` | 502 | The upstream response exceeded its limit. |
+| `REQUEST_TOO_LARGE` | 413 | The connection URL, headers, or request body exceeded its limit. |
 | `AI_STREAM_TRUNCATED` | 502 | An AI stream ended before completion. |
 | `AI_UPSTREAM_ERROR` | 502 | The AI provider returned an error. |
 | `PUBLISH_FAILED` | 502 | `canvasdrop.canvases.publish` created the canvas but its deploy or share-config failed; the new canvas's id is returned so the caller can retry or revoke. |
@@ -125,7 +135,7 @@ response.
 |-------|---------|-----------|-------|
 | `NotAuthenticatedError` | `NOT_AUTHENTICATED` | 401 | |
 | `CapabilityDisabledError` | `CAPABILITY_DISABLED` | 403 | message and `.hint` from the server's `hint`; no `.capability` property |
-| `NotFoundError` | `NOT_FOUND` | 404 | |
+| `NotFoundError` | `NOT_FOUND` | 404 | Every 404 except `CONNECTION_NOT_GRANTED`. |
 | `QuotaExceededError` | `QUOTA_EXCEEDED` by default; see below | 429 by default; see below | message is always `quota exceeded` |
 | `PublishFailedError` | `PUBLISH_FAILED` | 502 | `.id`: the created canvas's id, when the failure happened after creation |
 | `UpdatePartialError` | `UPDATE_PARTIAL` | 502 | `.stage`: the stage that failed after the settings were saved; `.current`: the saved share state, when the server returned it |
@@ -135,18 +145,19 @@ The SDK picks the class from the HTTP response in this order (`errorFromResponse
 
 1. Status 401 → `NotAuthenticatedError` (any body `code` is ignored).
 2. Status 403 with `code: "CAPABILITY_DISABLED"` → `CapabilityDisabledError`.
-3. Status 404 → `NotFoundError` (any body `code` is ignored; see the next section).
+3. Status 404, except `code: "CONNECTION_NOT_GRANTED"`, → `NotFoundError` (the other body codes are ignored; see the next section).
 4. `code: "PUBLISH_FAILED"` → `PublishFailedError` with `.id` from the body.
 5. `code: "UPDATE_PARTIAL"` → `UpdatePartialError` with `.stage` and `.current` from the body.
-6. `code` of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, or `KEY_LIMIT`, or **any 413** →
+6. `code` of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT`, `CONNECTION_LIMIT`, or `CONNECTION_RATE_LIMIT`, or **any 413** →
    `QuotaExceededError`, keeping the body's `code` and the response's status.
-7. Anything else → `CanvasdropError` with the body's `code` (or `REQUEST_FAILED`),
+7. Anything else—including `CONNECTION_NOT_GRANTED` at 404—→ `CanvasdropError` with the body's `code` (or `REQUEST_FAILED`),
    the response status, and the body's `hint` or `message` as the message.
 
 So `QuotaExceededError` is the one limit-shaped class and it is reused: expect
 `.code` values of `QUOTA_EXCEEDED`, `GUEST_AI_CAP`, `KEY_LIMIT` (409),
 `KEY_TOO_LARGE`, `VALUE_TOO_LARGE`, `FILE_TOO_LARGE`, `BODY_TOO_LARGE`,
-`INVALID_BODY` (413), and, from realtime, `CONNECTION_LIMIT` (429). `NOT_NUMERIC`
+`INVALID_BODY` (413), `CONNECTION_LIMIT` (429, realtime or outbound admission), and
+`CONNECTION_RATE_LIMIT` (429). `NOT_NUMERIC`
 is a 409 but not a limit, so it stays on the base class. Never assume a
 `QuotaExceededError` is literally `QUOTA_EXCEEDED`; read `err.code`.
 

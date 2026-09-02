@@ -37,6 +37,7 @@
       { "path": "sdk/identity", "file": "sdk/identity.md", "title": "Identity" },
       { "path": "sdk/ai", "file": "sdk/ai.md", "title": "AI" },
       { "path": "sdk/realtime", "file": "sdk/realtime.md", "title": "Realtime" },
+      { "path": "sdk/connections", "file": "sdk/connections.md", "title": "Connections" },
       { "path": "sdk/authoring", "file": "sdk/authoring.md", "title": "Authoring" }
     ]
   },

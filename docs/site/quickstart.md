@@ -120,8 +120,8 @@ immutable version; the last 10 are kept, and identical files are stored once.
 
 ## Give it a backend (optional)
 
-The browser SDK gives a canvas the five primitives (KV, files, AI, identity,
-realtime) with no keys in the page. Identity comes from the signed-in session,
+The browser SDK gives a canvas six fixed primitives (KV, files, AI, identity,
+realtime, and admin-granted Connections) with no keys in the page. Identity comes from the signed-in session,
 and the SDK works out which canvas it is running in from the page URL:
 
 ```html
@@ -142,6 +142,11 @@ needs `CANVAS_DROP_AI_API_KEY` set on the server, realtime needs
 `CANVAS_DROP_REALTIME=on` (the default). A call to a primitive that is not live
 throws `CapabilityDisabledError`. See the [SDK overview](/docs/sdk/overview) and
 [Capabilities](/docs/authoring/capabilities).
+
+Connections are granted separately by an administrator. They let a canvas call one
+pre-approved HTTPS origin with controlled methods and protected headers—for example, a
+stock-data API that requires a server-side credential or fixed `User-Agent`. See
+[Connections](/docs/sdk/connections).
 
 ## Publish and share
 

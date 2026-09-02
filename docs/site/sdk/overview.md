@@ -2,8 +2,8 @@
 
 You have a static canvas and want it to keep data, accept files, call a model,
 know who is looking, or sync between viewers. One `<script>` tag gives the page a
-global, `canvasdrop`, carrying the five primitives (KV, files, AI, identity,
-realtime) plus authoring. There is no build step and nothing to configure in the
+global, `canvasdrop`, carrying the six fixed primitives (KV, files, AI, identity,
+realtime, and admin-granted outbound Connections) plus authoring. There is no build step and nothing to configure in the
 page: identity comes from the viewer's session, the canvas is identified from its
 own URL, and no key ever reaches the browser.
 
@@ -36,7 +36,7 @@ is not built yet: run `pnpm build` (or `pnpm --filter @canvas-drop/sdk build`).
 
 The script defines exactly one global, `window.canvasdrop`. There is no `cd`
 alias, no second name, and no version property on the object. The client has
-`me()`, `kv`, `files`, `ai`, `realtime`, and `canvases`, and nothing else.
+`me()`, `kv`, `files`, `ai`, `realtime`, `connections`, and `canvases`, and nothing else.
 
 The same client lives in the workspace package `@canvas-drop/sdk` (private, not
 published). Its module entry exports `createClient`, `detectContext`,
@@ -77,6 +77,7 @@ and three of them also depend on an operator setting for the instance:
 | Files | **File storage** | on | none |
 | AI | **AI** | on | an AI provider key (`CANVAS_DROP_AI_API_KEY`, or the admin override) |
 | Realtime | **Realtime** | on | `CANVAS_DROP_REALTIME` (default `on`) |
+| Connections | no canvas-owned toggle; each admin grant is the switch | no grants | an enabled admin profile attached to this canvas |
 | Authoring | **Authoring** | off | `CANVAS_DROP_AUTHORING` (default `off`), or the admin override in Admin → Configuration |
 
 A call to anything that is off throws `CapabilityDisabledError` (code
@@ -103,6 +104,7 @@ The [Capabilities](/docs/authoring/capabilities) page covers the tab.
 | `canvasdrop.files` | `upload(file)`, `list()`, `delete(id)`, and the synchronous `url(id)`. | [Files](/docs/sdk/files) |
 | `canvasdrop.ai` | `chat(messages, { model })` resolves `{ text, usage, cost }`; `stream(messages, { model })` yields text chunks. `model` is required; `system` and `maxTokens` are optional. | [AI](/docs/sdk/ai) |
 | `canvasdrop.realtime` | `channel(name)` returns a channel with `publish`, `subscribe`, `unsubscribe`, `presence`, `onPresence`, `onJoin`, `onLeave`, `close`, over one shared WebSocket that reconnects on its own. | [Realtime](/docs/sdk/realtime) |
+| `canvasdrop.connections` | `fetch(profile, relativePath, init?)` returns a native upstream `Response` through one exact origin an admin granted to the canvas. Protected headers stay server-side. | [Connections](/docs/sdk/connections) |
 | `canvasdrop.canvases` | `publish`, `update`, `list`, `revoke`: a signed-in viewer creates and manages canvases from the page, as themselves (the authoring capability). | [Authoring](/docs/sdk/authoring) |
 
 ## Errors
