@@ -307,7 +307,10 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         'most-recently-updated; pass sort="popular" to rank by trending views over the last ' +
         "30 days. Each item carries `recentViews` (trending count) plus lifetime `viewCount` " +
         "and `lastViewedAt`. Pass `access` to narrow by audience — the same filter the " +
-        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases.",
+        "dashboard's Your canvases list offers; `restricted` covers private and its legacy aliases. " +
+        "Use `scope='archived'` for the archive, the boolean state filters for the matching " +
+        "dashboard chips, and `limit` + `offset` to page. The result includes the dashboard's " +
+        "filter-independent inventory `summary`.",
       inputSchema: {
         role: z
           .enum(["owned", "edited"])
@@ -320,6 +323,14 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
             "Narrow by audience: restricted (private + its legacy aliases specific_people / team), " +
               "whole_org, or public_link. A single legacy value is accepted too.",
           ),
+        scope: z
+          .enum(["active", "archived"])
+          .optional()
+          .describe('Lifecycle scope (default "active"); use "archived" for archived canvases.'),
+        protected: z.boolean().optional().describe("Only password-protected canvases."),
+        listed: z.boolean().optional().describe("Only canvases listed in the gallery."),
+        template: z.boolean().optional().describe("Only canvases enabled as gallery templates."),
+        undeployed: z.boolean().optional().describe("Only canvases with no published version yet."),
         query: z
           .string()
           .optional()
@@ -336,26 +347,50 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           .optional()
           .describe('Sort order (default "updated"). "popular" = most trending views (30d).'),
         limit: z.number().int().min(1).max(100).optional().describe("Max results (default 50)."),
+        offset: z.number().int().min(0).optional().describe("Results to skip (default 0)."),
       },
     },
-    async ({ role, access, query, tags, sort, limit }) => {
+    async ({
+      role,
+      access,
+      scope,
+      protected: protectedOnly,
+      listed,
+      template,
+      undeployed,
+      query,
+      tags,
+      sort,
+      limit,
+      offset,
+    }) => {
       const recentSinceMs = Date.now() - POPULAR_WINDOW_MS;
-      const {
-        items,
-        total,
-        recentViews: rankedViews,
-      } = await deps.canvases.listForActorFiltered({
-        actorId: caller.userId,
-        scope: { tenancyActive: caller.tenancyActive, viewerOrgIds: caller.orgIds },
-        role,
-        access,
-        q: query,
-        tag: tags,
-        sort,
-        popularSinceMs: recentSinceMs,
-        limit: limit ?? 50,
-        offset: 0,
-      });
+      const resolvedLimit = limit ?? 50;
+      const resolvedOffset = offset ?? 0;
+      const actorScope = {
+        tenancyActive: caller.tenancyActive,
+        viewerOrgIds: caller.orgIds,
+      };
+      const [{ items, total, recentViews: rankedViews }, summary] = await Promise.all([
+        deps.canvases.listForActorFiltered({
+          actorId: caller.userId,
+          scope: actorScope,
+          role,
+          access,
+          protected: protectedOnly,
+          listed,
+          template,
+          neverDeployed: undeployed,
+          archived: scope === "archived",
+          q: query,
+          tag: tags,
+          sort,
+          popularSinceMs: recentSinceMs,
+          limit: resolvedLimit,
+          offset: resolvedOffset,
+        }),
+        deps.canvases.actorSummary(caller.userId, actorScope),
+      ]);
       // The popular sort already aggregated the page's counts — reuse them rather than
       // hitting usage_events twice (plan 004); other sorts aggregate the page here.
       const [previews, recentViews, owners] = await Promise.all([
@@ -370,6 +405,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       const ownerById = new Map(owners.map((u) => [u.id, u]));
       return ok({
         total,
+        limit: resolvedLimit,
+        offset: resolvedOffset,
+        summary,
         canvases: items.map((cv) => {
           const owner = ownerById.get(cv.ownerId);
           return {

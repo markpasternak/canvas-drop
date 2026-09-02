@@ -6,7 +6,10 @@ import { zipSync } from "fflate";
 import { pino } from "pino";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../app.js";
 import { createAuditLog } from "../audit/audit-log.js";
+import { devStrategy } from "../auth/dev.js";
+import { sessionService } from "../auth/session.js";
 import { cloneService } from "../canvas/clone-service.js";
 import { versionHistoryService } from "../canvas/version-history.js";
 import type { DbClient } from "../db/factory.js";
@@ -19,6 +22,7 @@ import { invitationsRepository } from "../db/repositories/invitations.js";
 import { orgMembersRepository } from "../db/repositories/org-members.js";
 import { orgsRepository } from "../db/repositories/orgs.js";
 import { screenshotsRepository } from "../db/repositories/screenshots.js";
+import { sessionsRepository } from "../db/repositories/sessions.js";
 import { teamsRepository } from "../db/repositories/teams.js";
 import { uploadSessionsRepository } from "../db/repositories/upload-sessions.js";
 import { usageEventsRepository } from "../db/repositories/usage-events.js";
@@ -40,6 +44,29 @@ const domainConfig = loadConfig({
   CANVAS_DROP_AUTH_MODE: "dev",
   CANVAS_DROP_ALLOWED_EMAIL_DOMAINS: "example.com",
 });
+
+/** Build the real management-list route for MCP parity assertions. */
+function managementApp(client: DbClient, cfg: ReturnType<typeof loadConfig>) {
+  const canvases = canvasesRepository(client);
+  const versions = versionsRepository(client);
+  const drafts = draftsRepository(client);
+  const storage = memStorage();
+  return buildApp({
+    config: cfg,
+    db: client,
+    rootLogger: silent,
+    strategy: devStrategy(cfg),
+    users: usersRepository(client),
+    canvases,
+    versions,
+    drafts,
+    storage,
+    engine: deployEngine({ config: cfg, canvases, versions, drafts, storage, log: silent }),
+    audit: createAuditLog(auditRepository(client), silent),
+    sessionSvc: sessionService(cfg, sessionsRepository(client)),
+    peerIp: () => "127.0.0.1",
+  });
+}
 
 async function seedUser(client: DbClient, email: string, isAdmin = false): Promise<string> {
   const u = await usersRepository(client).upsert({
@@ -1062,6 +1089,118 @@ describe.each(DIALECTS)("MCP tools [%s]", (dialect) => {
       await mcp.callTool({ name: "list_canvases", arguments: { access: "whole_org" } }),
     );
     expect(org.total).toBe(0);
+  });
+
+  it("list_canvases mirrors management scope, state chips, paging, summary, and literal access filters", async () => {
+    client = await makeTestDb(dialect);
+    const email = `list-${dialect}@example.com`;
+    const cfg = loadConfig({
+      CANVAS_DROP_AUTH_MODE: "dev",
+      CANVAS_DROP_DEV_USER_EMAIL: email,
+    });
+    const app = managementApp(client, cfg);
+    const headers = { host: "localhost:3000" };
+
+    // Materialize the same dev identity the HTTP list uses, then bind MCP to that
+    // server-derived account id.
+    expect((await app.request("/api/canvases", { headers })).status).toBe(200);
+    const actor = await usersRepository(client).findByEmail(email);
+    if (!actor) throw new Error("dev actor was not materialized");
+    const mcp = await connect(client, { userId: actor.id }, false, cfg);
+    const repo = canvasesRepository(client);
+
+    const make = async (title: string) =>
+      payload(await mcp.callTool({ name: "create_canvas", arguments: { title } })) as {
+        id: string;
+      };
+    const deployed = await make("A deployed");
+    await mcp.callTool({
+      name: "deploy_canvas",
+      arguments: { id: deployed.id, files: [{ path: "index.html", content: "ok" }] },
+    });
+    const protectedCanvas = await make("B protected");
+    await repo.setPassword(protectedCanvas.id, "argon2hash");
+    const listedCanvas = await make("C listed");
+    await repo.updateSettings(listedCanvas.id, { galleryListed: true });
+    const templateCanvas = await make("D template");
+    await repo.updateSettings(templateCanvas.id, {
+      galleryListed: true,
+      galleryTemplatable: true,
+    });
+    const undeployed = await make("E undeployed");
+    const archived = await make("F archived");
+    await repo.archive(archived.id);
+    const specific = await make("G specific");
+    await repo.setAccess(specific.id, "specific_people");
+    const team = await make("H team");
+    await repo.setAccess(team.id, "team");
+    const publicLink = await make("I public");
+    await repo.setAccess(publicLink.id, "public_link");
+
+    type ListBody = {
+      total: number;
+      limit: number;
+      offset: number;
+      summary: Record<string, number>;
+      canvases: Array<{ id: string; access: string }>;
+    };
+    const http = async (query = "") => {
+      const res = await app.request(`/api/canvases${query}`, { headers });
+      expect(res.status).toBe(200);
+      return (await res.json()) as ListBody;
+    };
+    const overMcp = async (arguments_: Record<string, unknown> = {}) =>
+      payload(await mcp.callTool({ name: "list_canvases", arguments: arguments_ })) as ListBody;
+    const sortedIds = (body: ListBody) => body.canvases.map((cv) => cv.id).sort();
+
+    const active = await overMcp();
+    expect(sortedIds(active)).not.toContain(archived.id);
+    const archivedMcp = await overMcp({ scope: "archived" });
+    const archivedHttp = await http("?scope=archived&limit=100");
+    expect(sortedIds(archivedMcp)).toEqual([archived.id]);
+    expect(sortedIds(archivedMcp)).toEqual(sortedIds(archivedHttp));
+
+    for (const [name, expectedId] of [
+      ["protected", protectedCanvas.id],
+      ["listed", listedCanvas.id],
+      ["template", templateCanvas.id],
+      ["undeployed", undeployed.id],
+    ] as const) {
+      const mcpBody = await overMcp({ [name]: true, limit: 100 });
+      const httpBody = await http(`?${name}=1&limit=100`);
+      expect(sortedIds(mcpBody), name).toEqual(sortedIds(httpBody));
+      expect(sortedIds(mcpBody), name).toContain(expectedId);
+      expect(mcpBody.total, name).toBe(httpBody.total);
+    }
+
+    const firstPage = await overMcp({ sort: "title", limit: 2, offset: 0 });
+    const secondPage = await overMcp({ sort: "title", limit: 2, offset: 2 });
+    const secondHttp = await http("?sort=title&limit=2&offset=2");
+    expect(secondPage.canvases.map((cv) => cv.id)).toEqual(secondHttp.canvases.map((cv) => cv.id));
+    expect(secondPage.total).toBe(firstPage.total);
+    expect(secondPage.limit).toBe(2);
+    expect(secondPage.offset).toBe(2);
+    expect(firstPage.canvases.map((cv) => cv.id)).not.toEqual(
+      secondPage.canvases.map((cv) => cv.id),
+    );
+
+    const httpSummary = (await http()).summary;
+    expect(active.summary).toEqual(httpSummary);
+
+    for (const access of ["private", "specific_people", "team", "public_link"] as const) {
+      const mcpBody = await overMcp({ access, limit: 100 });
+      const httpBody = await http(`?access=${access}&limit=100`);
+      expect(sortedIds(mcpBody), access).toEqual(sortedIds(httpBody));
+      expect(
+        mcpBody.canvases.every((cv) => cv.access === access),
+        access,
+      ).toBe(true);
+    }
+
+    const restricted = await overMcp({ access: "restricted", limit: 100 });
+    expect(restricted.canvases.map((cv) => cv.access)).toEqual(
+      expect.arrayContaining(["private", "specific_people", "team"]),
+    );
   });
 
   it("list_canvases query inherits the forgiving search (matches a tag, case/accent-insensitive)", async () => {
