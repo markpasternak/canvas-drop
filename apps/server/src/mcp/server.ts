@@ -20,7 +20,7 @@ import {
   OWNER_ONLY_MESSAGE,
 } from "../canvas/owner-guard.js";
 import { ownershipService } from "../canvas/ownership.js";
-import { hashPassword } from "../canvas/password.js";
+import { hashPasswordMutation } from "../canvas/password.js";
 import { PEOPLE_ERROR_STATUS, type PeopleError, peopleService } from "../canvas/people-service.js";
 import {
   accessRoleSchema,
@@ -1178,12 +1178,9 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
       if (!resolution.ok) return fail(`${resolution.code}: ${resolution.message}`);
       const { patch, password, targetAccess, warning } = resolution;
 
-      // Team grant flow (plan 003 U6) — the SAME shared resolver the management PATCH route
-      // uses (agent-native parity), run BEFORE the access write so a forbidden grant never
-      // leaves a team canvas with zero teams (a deny to everyone). Validates owner-team
-      // membership (KTD4), requires ≥1 team when sharing, lets an agent change the grant set
-      // without re-sending `access`, and clears on a rung change away from team.
+      // Resolve viewer-team grants before mutating, then commit them with the canvas row.
       let teamGranted = false;
+      let viewerTeamIds: string[] | undefined;
       {
         const grant = await resolveTeamGrant(deps.teams, caller.userId, {
           canvasOrgId: cv.orgId,
@@ -1199,19 +1196,22 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           );
         }
         if (grant.kind === "write") {
-          await deps.teams.setCanvasTeams(cv.id, grant.teamIds);
+          viewerTeamIds = grant.teamIds;
           teamGranted = true;
         } else if (grant.kind === "clear") {
-          await deps.teams.setCanvasTeams(cv.id, []);
+          viewerTeamIds = [];
         }
       }
 
       let updated = cv;
+      const passwordHash = await hashPasswordMutation(password);
+      if (password !== undefined || Object.keys(patch).length > 0 || viewerTeamIds !== undefined) {
+        updated = (await deps.canvases.updateSettingsAtomic(cv.id, patch, {
+          passwordHash,
+          viewerTeamIds,
+        })) as Canvas;
+      }
       if (password !== undefined) {
-        updated = await deps.canvases.setPassword(
-          cv.id,
-          password === null ? null : await hashPassword(password),
-        );
         deps.audit.recordAudit({
           action: "password_change",
           actorId: caller.userId,
@@ -1219,7 +1219,6 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
           meta: { cleared: password === null },
         });
       }
-      if (Object.keys(patch).length > 0) updated = await deps.canvases.updateSettings(cv.id, patch);
       // Leaving `custom` for auto/off drops the owner-uploaded renditions (mirrors the
       // dashboard's DELETE /:id/preview), else they orphan and serve.ts would hand the
       // stale custom image back under `auto`. Agent-native parity with the HTTP path.

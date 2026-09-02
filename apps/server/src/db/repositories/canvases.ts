@@ -126,6 +126,18 @@ export interface CanvasSettingsPatch {
   metadata?: Json;
 }
 
+/** Optional guards/secret mutation for one atomic settings write. */
+export interface AtomicCanvasSettingsOptions {
+  /** undefined preserves the current password; null clears it; a hash replaces it. */
+  passwordHash?: string | null;
+  /** Compare-and-swap token. A mismatch returns undefined without changing the row. */
+  expectedUpdatedAt?: number;
+  /** Publish this ready version in the same guarded canvas-row write. */
+  currentVersionId?: string;
+  /** Replace viewer-role team grants in the same transaction; editor grants survive. */
+  viewerTeamIds?: readonly string[];
+}
+
 /**
  * Gallery sort axes (plan 004; `featured`/`trending` added 2026-06-19). `published`
  * is the default and matches the legacy fixed order (most-recently-published first);
@@ -338,6 +350,8 @@ export function canvasesRepository(client: DbClient) {
   const teamMembersT =
     client.dialect === "sqlite" ? sqliteSchema.teamMembers : pgSchema.teamMembers;
   const teamsT = client.dialect === "sqlite" ? sqliteSchema.teams : pgSchema.teams;
+  const nextUpdatedAt = (now = Date.now()): SQL =>
+    sql`case when ${t.updatedAt} >= ${now} then ${t.updatedAt} + 1 else ${now} end`;
 
   /**
    * "Is `userId` an effective editor of this canvas row?" as ONE SQL predicate on `t`
@@ -721,6 +735,88 @@ export function canvasesRepository(client: DbClient) {
     return { items: rows, total: totalRows[0]?.value ?? 0 };
   }
 
+  /** Execute one settings write. Password + access share the same UPDATE, and an
+   * optional updatedAt precondition turns it into a compare-and-swap. */
+  async function applySettingsUpdate(
+    id: string,
+    patch: CanvasSettingsPatch,
+    options: AtomicCanvasSettingsOptions = {},
+  ): Promise<Canvas | undefined> {
+    const now = Date.now();
+    const set: Record<string, unknown> = {
+      updatedAt: nextUpdatedAt(now),
+    };
+    if (patch.title !== undefined) set.title = patch.title;
+    if (patch.description !== undefined) set.description = patch.description;
+    if (patch.spaFallback !== undefined) set.spaFallback = patch.spaFallback;
+    if (patch.previewMode !== undefined) set.previewMode = patch.previewMode;
+    if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
+    if (patch.galleryListed !== undefined) {
+      set.galleryListed = patch.galleryListed;
+      set.galleryPublishedAt = patch.galleryListed
+        ? sql`case when ${t.galleryListed} then ${t.galleryPublishedAt} else ${now} end`
+        : null;
+    }
+    if (patch.galleryTemplatable !== undefined) set.galleryTemplatable = patch.galleryTemplatable;
+    if (patch.galleryListed === false) set.galleryTemplatable = false;
+    if (patch.tags !== undefined) set.tags = patch.tags;
+    if (patch.metadata !== undefined) set.metadata = patch.metadata;
+    if (patch.access !== undefined) set.access = patch.access;
+    if (patch.discoverability !== undefined) set.discoverability = patch.discoverability;
+    if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
+    if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
+    if (options.passwordHash !== undefined) {
+      set.passwordHash = options.passwordHash;
+      set.passwordVersion = sql`${t.passwordVersion} + 1`;
+    }
+    if (options.currentVersionId !== undefined) {
+      set.currentVersionId = options.currentVersionId;
+      set.revokedAt = null;
+    }
+
+    const touchesSearchBlob =
+      patch.title !== undefined || patch.description !== undefined || patch.tags !== undefined;
+    const apply = async (exec: typeof db): Promise<Canvas | undefined> => {
+      if (touchesSearchBlob) {
+        const current = await searchTextInputs(id, exec);
+        if (current) {
+          set.searchText = mergedSearchText(current, {
+            title: patch.title,
+            description: patch.description,
+            tags: patch.tags,
+          });
+        }
+      }
+      const where =
+        options.expectedUpdatedAt === undefined
+          ? eq(t.id, id)
+          : and(eq(t.id, id), eq(t.updatedAt, options.expectedUpdatedAt));
+      const rows = (await exec.update(t).set(set).where(where).returning()) as Canvas[];
+      const updated = rows[0];
+      if (!updated || options.viewerTeamIds === undefined) return updated;
+      await exec
+        .delete(canvasTeamsT)
+        .where(and(eq(canvasTeamsT.canvasId, id), eq(canvasTeamsT.role, "viewer")));
+      if (options.viewerTeamIds.length > 0) {
+        await exec
+          .insert(canvasTeamsT)
+          .values(
+            options.viewerTeamIds.map((teamId) => ({
+              canvasId: id,
+              teamId,
+              role: "viewer" as const,
+              createdAt: now,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+      return updated;
+    };
+    return touchesSearchBlob || options.viewerTeamIds !== undefined
+      ? inTransaction(apply)
+      : apply(db);
+  }
+
   return {
     async create(input: CreateCanvasInput): Promise<Canvas> {
       const now = Date.now();
@@ -990,56 +1086,15 @@ export function canvasesRepository(client: DbClient) {
     },
 
     async updateSettings(id: string, patch: CanvasSettingsPatch): Promise<Canvas> {
-      const set: Record<string, unknown> = { updatedAt: Date.now() };
-      if (patch.title !== undefined) set.title = patch.title;
-      if (patch.description !== undefined) set.description = patch.description;
-      if (patch.spaFallback !== undefined) set.spaFallback = patch.spaFallback;
-      if (patch.previewMode !== undefined) set.previewMode = patch.previewMode;
-      if (patch.sharedExpiresAt !== undefined) set.sharedExpiresAt = patch.sharedExpiresAt;
-      if (patch.galleryListed !== undefined) {
-        set.galleryListed = patch.galleryListed;
-        // Stamp only the unlisted→listed transition: a settings save that re-sends
-        // an unchanged `listed: true` must keep the original date, or it would
-        // silently reorder the gallery's "recently published" sort.
-        set.galleryPublishedAt = patch.galleryListed
-          ? sql`case when ${t.galleryListed} then ${t.galleryPublishedAt} else ${Date.now()} end`
-          : null;
-      }
-      if (patch.galleryTemplatable !== undefined) set.galleryTemplatable = patch.galleryTemplatable;
-      // Invariant (KTD6): templatable ⊆ listed. Un-listing in this same patch always
-      // clears templatable, overriding any templatable=true in the same call.
-      if (patch.galleryListed === false) set.galleryTemplatable = false;
-      if (patch.tags !== undefined) set.tags = patch.tags;
-      if (patch.metadata !== undefined) set.metadata = patch.metadata;
-      if (patch.access !== undefined) set.access = patch.access;
-      if (patch.discoverability !== undefined) set.discoverability = patch.discoverability;
-      if (patch.guestAiEnabled !== undefined) set.guestAiEnabled = patch.guestAiEnabled;
-      if (patch.guestAiCap !== undefined) set.guestAiCap = patch.guestAiCap;
-      // Fold the search blob into the SAME write when this patch touches any of its
-      // inputs (title/description/tags — slug is owned by regenerateSlug). Compute it
-      // from the MERGED post-write state (current row + patch) so omitted-but-depended-on
-      // fields stay correct, and write it in the one UPDATE — atomic, no second round-trip.
-      const touchesSearchBlob =
-        patch.title !== undefined || patch.description !== undefined || patch.tags !== undefined;
-      // When the patch touches a search-blob input, the merge READS the current row and
-      // the patch UPDATEs it; run both in ONE transaction so a concurrent write can't
-      // slip between the read and the write and leave search_text reflecting pre-patch
-      // text (TOCTOU). The plain (non-blob) patch keeps the single UPDATE.
-      const apply = async (exec: typeof db): Promise<Canvas> => {
-        if (touchesSearchBlob) {
-          const current = await searchTextInputs(id, exec);
-          if (current) {
-            set.searchText = mergedSearchText(current, {
-              title: patch.title,
-              description: patch.description,
-              tags: patch.tags,
-            });
-          }
-        }
-        const rows = await exec.update(t).set(set).where(eq(t.id, id)).returning();
-        return rows[0] as Canvas;
-      };
-      return touchesSearchBlob ? inTransaction(apply) : apply(db);
+      return (await applySettingsUpdate(id, patch)) as Canvas;
+    },
+
+    updateSettingsAtomic(
+      id: string,
+      patch: CanvasSettingsPatch,
+      options: AtomicCanvasSettingsOptions,
+    ): Promise<Canvas | undefined> {
+      return applySettingsUpdate(id, patch, options);
     },
 
     /**
@@ -1080,7 +1135,7 @@ export function canvasesRepository(client: DbClient) {
             .update(t)
             .set({
               ownerId: input.toUserId,
-              updatedAt: now,
+              updatedAt: nextUpdatedAt(now),
               ...(input.newApiKeyHash ? { apiKeyHash: input.newApiKeyHash } : {}),
             })
             .where(and(eq(t.id, input.canvasId), eq(t.ownerId, input.fromUserId)))
@@ -1099,7 +1154,7 @@ export function canvasesRepository(client: DbClient) {
           if (input.revertPublicLink) {
             const reverted = (await q
               .update(t)
-              .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: now })
+              .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt(now) })
               .where(and(eq(t.id, input.canvasId), eq(t.access, "public_link")))
               .returning({ id: t.id })) as Array<{ id: string }>;
             publicLinkReverted = reverted.length > 0;
@@ -1126,7 +1181,7 @@ export function canvasesRepository(client: DbClient) {
         // galleryListed/galleryTemplatable/galleryPublishedAt set would keep stale
         // listed/template counts in ownerSummary and listByOwnerFiltered (which
         // match on galleryListed alone). Mirrors archive/unpublish.
-        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
+        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
         .where(and(eq(t.ownerId, ownerId), eq(t.access, "public_link")));
     },
 
@@ -1134,7 +1189,7 @@ export function canvasesRepository(client: DbClient) {
     async revertAllPublicLinks(): Promise<void> {
       await db
         .update(t)
-        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
+        .set({ ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
         .where(eq(t.access, "public_link"));
     },
 
@@ -1146,7 +1201,7 @@ export function canvasesRepository(client: DbClient) {
     async setFeatured(id: string, featured: boolean): Promise<Canvas> {
       const rows = await db
         .update(t)
-        .set({ galleryFeatured: featured, updatedAt: Date.now() })
+        .set({ galleryFeatured: featured, updatedAt: nextUpdatedAt() })
         .where(eq(t.id, id))
         .returning();
       return rows[0] as Canvas;
@@ -1157,7 +1212,7 @@ export function canvasesRepository(client: DbClient) {
     async setAccess(id: string, access: AccessRung): Promise<Canvas> {
       const rows = await db
         .update(t)
-        .set({ access, updatedAt: Date.now() })
+        .set({ access, updatedAt: nextUpdatedAt() })
         .where(eq(t.id, id))
         .returning();
       return rows[0] as Canvas;
@@ -1366,7 +1421,7 @@ export function canvasesRepository(client: DbClient) {
      * patch; turning backend off never clears the feature flags (KTD-2).
      */
     async updateCapabilities(id: string, patch: CanvasCapabilitiesPatch): Promise<Canvas> {
-      const set: Record<string, unknown> = { updatedAt: Date.now() };
+      const set: Record<string, unknown> = { updatedAt: nextUpdatedAt() };
       if (patch.backendEnabled !== undefined) set.backendEnabled = patch.backendEnabled;
       // Map each present feature flag to its column via the shared taxonomy, so the
       // cap→column mapping has one source of truth (FEATURE_COLUMN).
@@ -1387,7 +1442,7 @@ export function canvasesRepository(client: DbClient) {
         .set({
           passwordHash,
           passwordVersion: sql`${t.passwordVersion} + 1`,
-          updatedAt: Date.now(),
+          updatedAt: nextUpdatedAt(),
         })
         .where(eq(t.id, id))
         .returning();
@@ -1401,7 +1456,7 @@ export function canvasesRepository(client: DbClient) {
       const set: Record<string, unknown> = {
         slug: newSlug,
         slugCustom: custom,
-        updatedAt: Date.now(),
+        updatedAt: nextUpdatedAt(),
       };
       // Read-merge-write atomically so the blob can't reflect a row a concurrent write
       // changed between the SELECT and the UPDATE (TOCTOU); mirrors updateSettings.
@@ -1416,14 +1471,14 @@ export function canvasesRepository(client: DbClient) {
     async regenerateApiKey(id: string, apiKeyHash: string): Promise<Canvas> {
       const rows = await db
         .update(t)
-        .set({ apiKeyHash, updatedAt: Date.now() })
+        .set({ apiKeyHash, updatedAt: nextUpdatedAt() })
         .where(eq(t.id, id))
         .returning();
       return rows[0] as Canvas;
     },
 
     async setStatus(id: string, status: CanvasStatus): Promise<void> {
-      const set: Record<string, unknown> = { status, updatedAt: Date.now() };
+      const set: Record<string, unknown> = { status, updatedAt: nextUpdatedAt() };
       if (status === "deleted") set.deletedAt = Date.now();
       await db.update(t).set(set).where(eq(t.id, id));
     },
@@ -1442,7 +1497,7 @@ export function canvasesRepository(client: DbClient) {
         // Archiving leaves the published state, so it reverts sharing and gallery
         // listing too. Unarchive restores the canvas at the same URL; the owner
         // re-shares deliberately.
-        .set({ status: "archived", ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
+        .set({ status: "archived", ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1457,7 +1512,7 @@ export function canvasesRepository(client: DbClient) {
     async unarchive(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ status: "active", updatedAt: Date.now() })
+        .set({ status: "active", updatedAt: nextUpdatedAt() })
         .where(and(eq(t.id, id), eq(t.status, "archived")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1473,7 +1528,7 @@ export function canvasesRepository(client: DbClient) {
     async setDisabled(id: string, reason: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ status: "disabled", disabledReason: reason, updatedAt: Date.now() })
+        .set({ status: "disabled", disabledReason: reason, updatedAt: nextUpdatedAt() })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1487,7 +1542,7 @@ export function canvasesRepository(client: DbClient) {
     async enable(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ status: "active", disabledReason: null, updatedAt: Date.now() })
+        .set({ status: "active", disabledReason: null, updatedAt: nextUpdatedAt() })
         .where(and(eq(t.id, id), eq(t.status, "disabled")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1503,7 +1558,12 @@ export function canvasesRepository(client: DbClient) {
         .update(t)
         // Clear disabledReason too — a deleted canvas that was previously disabled
         // must not carry a stale takedown note onto the restored (active) row.
-        .set({ status: "active", deletedAt: null, disabledReason: null, updatedAt: Date.now() })
+        .set({
+          status: "active",
+          deletedAt: null,
+          disabledReason: null,
+          updatedAt: nextUpdatedAt(),
+        })
         .where(and(eq(t.id, id), eq(t.status, "deleted")))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1515,7 +1575,7 @@ export function canvasesRepository(client: DbClient) {
         // Publishing is the inverse of authoring revoke/unpublish. Clear the
         // marker atomically with the live-version pointer so status cannot stay
         // "revoked" after content is published again.
-        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: Date.now() })
+        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: nextUpdatedAt() })
         .where(eq(t.id, id));
     },
 
@@ -1531,7 +1591,7 @@ export function canvasesRepository(client: DbClient) {
     async setCurrentVersionIfReady(id: string, versionId: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: Date.now() })
+        .set({ currentVersionId: versionId, revokedAt: null, updatedAt: nextUpdatedAt() })
         .where(
           and(
             eq(t.id, id),
@@ -1565,7 +1625,7 @@ export function canvasesRepository(client: DbClient) {
     async unpublish(id: string): Promise<boolean> {
       const rows = (await db
         .update(t)
-        .set({ currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS, updatedAt: Date.now() })
+        .set({ currentVersionId: null, ...CLEARED_PUBLICATION_FIELDS, updatedAt: nextUpdatedAt() })
         .where(and(eq(t.id, id), eq(t.status, "active"), isNotNull(t.currentVersionId)))
         .returning({ id: t.id })) as Array<{ id: string }>;
       return rows.length > 0;
@@ -1574,18 +1634,23 @@ export function canvasesRepository(client: DbClient) {
     /**
      * Revoke a managed authoring share (authoring v2). Stamps `revoked_at`, clears
      * `current_version_id` so the public URL has no content to serve (404 → not readable),
-     * AND resets `access` to private so the anonymous-public surface (the social-preview
-     * card + the shared-CDN cache scope, both gated on `isAnonymouslyPublic`) closes too —
-     * a revoked share must not keep unfurling to crawlers. `status = active` and the
-     * tags/metadata are KEPT, so the record stays listed for the creator as status
-     * "revoked" (unlike `setStatus("deleted")`, which hides + purges it). Idempotent.
+     * AND clears every publication field (access, discovery, expiry, gallery/template
+     * flags) so a later republish starts private + unlisted instead of resurrecting stale
+     * exposure. `status = active` and the tags/metadata are KEPT, so the record stays
+     * listed for its managers as status "revoked" (unlike `setStatus("deleted")`, which
+     * hides + purges it). Idempotent.
      * Returns the updated row, or undefined if the canvas is not active (e.g. deleted).
      */
     async revoke(id: string): Promise<Canvas | undefined> {
       const now = Date.now();
       const rows = (await db
         .update(t)
-        .set({ revokedAt: now, currentVersionId: null, access: "private", updatedAt: now })
+        .set({
+          revokedAt: now,
+          currentVersionId: null,
+          ...CLEARED_PUBLICATION_FIELDS,
+          updatedAt: nextUpdatedAt(now),
+        })
         .where(and(eq(t.id, id), eq(t.status, "active")))
         .returning()) as Canvas[];
       return rows[0];
@@ -1611,7 +1676,10 @@ export function canvasesRepository(client: DbClient) {
      * references a row that no longer exists.
      */
     async clearCurrentVersion(id: string): Promise<void> {
-      await db.update(t).set({ currentVersionId: null, updatedAt: Date.now() }).where(eq(t.id, id));
+      await db
+        .update(t)
+        .set({ currentVersionId: null, updatedAt: nextUpdatedAt() })
+        .where(eq(t.id, id));
     },
 
     /** Find by API key hash (Bearer-key deploy API); active canvases only. */

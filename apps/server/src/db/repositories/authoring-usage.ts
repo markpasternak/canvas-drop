@@ -1,5 +1,5 @@
 import { pgSchema, sqliteSchema } from "@canvas-drop/shared/db";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import type { DbClient } from "../factory.js";
 
@@ -54,12 +54,13 @@ export function authoringUsageRepository(client: DbClient) {
       return countWhere(eq(t.actorId, actorId));
     },
 
-    /** The canvas ids a viewer authored, newest first (for the viewer-scoped `list`). */
-    async authoredIdsByActor(actorId: string): Promise<string[]> {
+    /** Keep only canonical authoring records from an already authorization-scoped id set. */
+    async authoredIdsAmong(canvasIds: readonly string[]): Promise<string[]> {
+      if (canvasIds.length === 0) return [];
       const rows = (await db
         .select({ id: t.authoredCanvasId })
         .from(t)
-        .where(eq(t.actorId, actorId))
+        .where(inArray(t.authoredCanvasId, [...canvasIds]))
         .orderBy(desc(t.createdAt))) as Array<{ id: string }>;
       return rows.map((r) => r.id);
     },
