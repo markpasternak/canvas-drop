@@ -84,16 +84,15 @@ export interface HubDeps {
   resolveCanvas(canvasId: string): Promise<Canvas | null>;
   /** Optional liveness check — false drops the socket (blocked / deleted user). */
   isUserActive?(userId: string): Promise<boolean>;
-  /** Allowlist membership for live re-auth of a `specific_people` canvas (U3/U9).
-   *  Matches a member by userId or a guest by email. When omitted, a
-   *  specific_people canvas re-authorizes as not-allowed (drops). */
+  /** People-list membership for live re-auth, consulted at EVERY rung (U3/U9; restricted
+   *  access model). Matches a member by userId or the canvas's own guest by email. When
+   *  omitted, nobody re-authorizes as listed (the rung alone decides). */
   isPrincipalAllowed?(
     canvasId: string,
     principal: { userId?: string; email?: string },
   ): Promise<boolean>;
-  /** team-rung match for live re-auth of a `team` canvas (plan 003 U4): a member of a
-   *  granted team AND of that team's org (live re-join). Omitted ⇒ a team canvas
-   *  re-authorizes as no-match (drops). */
+  /** Granted-team match for live re-auth, consulted at EVERY rung (plan 003 U4): a member
+   *  of a granted team AND of that team's org (live re-join). Omitted ⇒ no team matches. */
   teamMatch?(canvasId: string, userId: string, viewerOrgIds: Set<string>): Promise<boolean>;
   /** Effective-editor probe for live re-auth (editor-roles plan, KD6/R22) — the canvases
    *  repo's `isEffectiveEditor`, fed to the shared role resolver so the hub keeps editors
@@ -421,16 +420,22 @@ export function createHub(deps: HubDeps) {
           continue;
         }
         // Re-decide against the socket's actual principal (member or guest, U9) so a
-        // guest isn't mistaken for a member. Resolve allowlist membership for a
-        // specific_people canvas (member by id, guest by email).
+        // guest isn't mistaken for a member.
         const principal: Principal = conn.user.principal ?? {
           kind: "member",
           id: conn.user.id,
           isAdmin: conn.user.isAdmin,
           orgIds: conn.user.orgIds,
         };
+        // The people-and-teams list applies at EVERY rung (restricted access model): the
+        // same two lookups `resolveAccessContext` runs for an HTTP request, so the socket
+        // verdict can't drift from the request verdict — a direct grant for a member (by
+        // id) or this canvas's OWN guest (by email), and team membership for a member.
+        const canBeListed =
+          principal.kind === "member" ||
+          (principal.kind === "guest" && principal.canvasId === canvas.id);
         let isAllowed = false;
-        if (canvas.access === "specific_people" && deps.isPrincipalAllowed) {
+        if (canBeListed && deps.isPrincipalAllowed) {
           try {
             isAllowed = await deps.isPrincipalAllowed(canvas.id, principalLookupKey(principal));
           } catch (err) {
@@ -444,7 +449,7 @@ export function createHub(deps: HubDeps) {
           }
         }
         let teamMatch = false;
-        if (canvas.access === "team" && deps.teamMatch && principal.kind === "member") {
+        if (deps.teamMatch && principal.kind === "member") {
           try {
             teamMatch = await deps.teamMatch(canvas.id, principal.id, principal.orgIds);
           } catch (err) {
