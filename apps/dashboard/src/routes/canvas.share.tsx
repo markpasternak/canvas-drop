@@ -1,12 +1,10 @@
-import { ArrowSquareOut, Buildings, Globe, LockKey } from "@phosphor-icons/react";
+import { Buildings, Globe, LockKey } from "@phosphor-icons/react";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "../components/Button.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { CopyButton } from "../components/CopyButton.js";
 import { Field } from "../components/Field.js";
-import { IconLink } from "../components/IconButton.js";
 import { PasswordField } from "../components/PasswordField.js";
 import { PeopleAccessList } from "../components/PeopleAccessList.js";
 import { SettingsNav } from "../components/SettingsNav.js";
@@ -15,7 +13,13 @@ import { Skeleton } from "../components/Skeleton.js";
 import { InlineNotice, Panel } from "../components/Surface.js";
 import { useToast } from "../components/Toast.js";
 import { Toggle } from "../components/Toggle.js";
-import { type AccessRung, type AllowlistEntry, ApiError, isRestrictedRung } from "../lib/api.js";
+import {
+  type AccessRung,
+  type AllowlistEntry,
+  ApiError,
+  isRestrictedRung,
+  type TransferCandidate,
+} from "../lib/api.js";
 import { relativeTime, toDatetimeLocal } from "../lib/format.js";
 import { usePublishDraft, useTransferCanvas, useUpdateSettings } from "../lib/mutations.js";
 import { generatePassword } from "../lib/password.js";
@@ -23,21 +27,21 @@ import { useCanvas, useMe, useTeams } from "../lib/queries.js";
 import { useSectionNav } from "../lib/use-section-nav.js";
 
 const BASE_SECTIONS = [
-  { id: "share-link", label: "Share link" },
-  { id: "people", label: "People & teams" },
+  { id: "people", label: "Direct access" },
   { id: "access", label: "General access" },
-  { id: "locks", label: "Locks" },
+  { id: "locks", label: "Protection" },
   { id: "gallery", label: "Gallery" },
 ] as const;
 
 const PEOPLE_SECTIONS = [
-  { id: "share-link", label: "Share link" },
-  { id: "people", label: "People & teams" },
+  { id: "people", label: "Direct access" },
   { id: "access", label: "General access" },
-  { id: "locks", label: "Locks" },
+  { id: "locks", label: "Protection" },
   { id: "added-people-ai", label: "Added people" },
   { id: "gallery", label: "Gallery" },
 ] as const;
+
+const ADVANCED_SECTION = { id: "advanced", label: "Advanced" } as const;
 
 export default function Share() {
   const { id } = useParams({ strict: false }) as { id: string };
@@ -53,6 +57,10 @@ export default function Share() {
   const [revealPassword, setRevealPassword] = useState(false);
   const [description, setDescription] = useState("");
   const [confirm, setConfirm] = useState<null | "password-unlist">(null);
+  const [transferCandidates, setTransferCandidates] = useState<TransferCandidate[] | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTo, setTransferTo] = useState<string | null>(null);
+  const [peopleRefreshKey, setPeopleRefreshKey] = useState(0);
   // The people-and-teams list as the list component last loaded it: drives the Restricted
   // hint ("only you" vs "you and the N above") and the legacy-guest AI section. `null` until
   // the list for THIS canvas has loaded (and after a failed load), so the copy below never
@@ -61,6 +69,9 @@ export default function Share() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the mirror on canvas change only
   useEffect(() => {
     setPeople(null);
+    setTransferCandidates(null);
+    setTransferOpen(false);
+    setTransferTo(null);
   }, [id]);
   const listLoaded = people !== null;
   // Who can open the canvas TODAY through the list: a pending invite has no user yet, so it
@@ -71,7 +82,11 @@ export default function Share() {
   // The "AI for added people" controls gate LEGACY guest sessions (canvas-ai.ts keys on the
   // guest principal, at every rung), so they show exactly when such a guest is on the list.
   const hasLegacyGuest = (people ?? []).some((e) => e.kind === "guest");
-  const sections = hasLegacyGuest ? PEOPLE_SECTIONS : BASE_SECTIONS;
+  const isOwner = canvas?.role !== "editor";
+  const sections = [
+    ...(hasLegacyGuest ? PEOPLE_SECTIONS : BASE_SECTIONS),
+    ...(isOwner ? [ADVANCED_SECTION] : []),
+  ];
   const sectionIds = sections.map((s) => s.id);
   const { active: activeSection, select: selectSection } = useSectionNav(sectionIds, !!canvas);
 
@@ -107,6 +122,22 @@ export default function Share() {
       toast(err instanceof ApiError ? err.hint : "Couldn't update the gallery setting", "error");
     }
   };
+
+  async function transferOwnership() {
+    if (!transferTo) return;
+    try {
+      const result = await transfer.mutateAsync(transferTo);
+      setTransferOpen(false);
+      setPeopleRefreshKey((current) => current + 1);
+      toast(
+        result.publicLinkReverted
+          ? "Ownership transferred. The public link was turned off because the new owner's account can't publish publicly."
+          : "Ownership transferred. You're now an editor of this canvas.",
+      );
+    } catch (err) {
+      toast(err instanceof ApiError ? err.hint : "Couldn't transfer ownership", "error");
+    }
+  }
 
   // The gallery only ever lists Whole-org or Public-link canvases (mirrors the server's
   // galleryVisibilityFilters). A Restricted canvas can never appear, so
@@ -165,9 +196,6 @@ export default function Share() {
   // the server re-checks via resolveTeamGrant, so an incompatible pick surfaces as a toast
   // rather than being silently hidden here.
   const shareableTeams = (teams ?? []).filter((t) => t.mine);
-  // Owner unless the server says editor (legacy payloads carry no role; the server enforces).
-  const isOwner = canvas.role !== "editor";
-
   return (
     <TabContentFrame className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-8">
       <SettingsNav
@@ -177,54 +205,34 @@ export default function Share() {
         ariaLabel="Share sections"
       />
       <div className="space-y-6">
-        <Section
-          id="share-link"
-          title="Share link"
-          description="Copy the URL people will use once this canvas is open to them."
-        >
-          <Row
-            title="Canvas URL"
-            description={<span className="block truncate font-mono">{canvas.url}</span>}
-          >
-            <CopyButton value={canvas.url} label="Copy" toastMessage="Link copied" />
-            <IconLink href={canvas.url} target="_blank" rel="noreferrer" label="Open live canvas">
-              <ArrowSquareOut size={15} weight="bold" aria-hidden />
-            </IconLink>
-          </Row>
-        </Section>
+        <header className="space-y-1">
+          <h1 className="font-display text-h1 leading-tight tracking-[var(--display-tracking)] text-fg">
+            Sharing and permissions
+          </h1>
+          <p className="text-sm text-muted">
+            Control who can open this canvas and what they can do.
+          </p>
+        </header>
 
         <Section
           id="people"
-          title="Share with people and teams"
-          description="Add someone as a viewer or an editor. Editors manage the canvas with you."
+          title="People and teams with direct access"
+          description="Add a person or team, then choose whether they can view or edit."
         >
           <PeopleAccessList
             canvasId={canvas.id}
-            role={canvas.role}
             teams={shareableTeams}
             orgs={me?.orgs ?? []}
             onChanged={setPeople}
-            onTransfer={
-              isOwner
-                ? async (toUserId) => {
-                    try {
-                      const r = await transfer.mutateAsync(toUserId);
-                      toast(
-                        r.publicLinkReverted
-                          ? "Ownership transferred. The public link was turned off because the new owner's account can't publish publicly."
-                          : "Ownership transferred — you're now an editor of this canvas.",
-                      );
-                    } catch (err) {
-                      toast(
-                        err instanceof ApiError ? err.hint : "Couldn't transfer ownership",
-                        "error",
-                      );
-                      throw err;
-                    }
-                  }
-                : undefined
-            }
-            transferring={transfer.isPending}
+            refreshKey={peopleRefreshKey}
+            onTransferCandidatesChanged={(candidates) => {
+              setTransferCandidates(candidates);
+              setTransferTo((current) =>
+                current && candidates?.some((candidate) => candidate.id === current)
+                  ? current
+                  : (candidates?.[0]?.id ?? null),
+              );
+            }}
           />
         </Section>
 
@@ -293,8 +301,8 @@ export default function Share() {
 
         <Section
           id="locks"
-          title="Locks"
-          description="Add extra checks after the access choice grants someone the link."
+          title="Protection"
+          description="Require a password or stop access after a set time."
         >
           <div className="space-y-2">
             <PasswordField
@@ -476,6 +484,33 @@ export default function Share() {
             </>
           )}
         </Section>
+
+        {isOwner && (
+          <Section
+            id="advanced"
+            title="Advanced"
+            description="Owner-only actions that change who controls this canvas."
+          >
+            <Row
+              title="Transfer ownership"
+              description="Choose an existing editor as the new owner. The change takes effect immediately, and you remain an editor."
+            >
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={(transferCandidates?.length ?? 0) === 0}
+                title={
+                  (transferCandidates?.length ?? 0) === 0
+                    ? "Add an editor first. Ownership can only move to an editor."
+                    : undefined
+                }
+                onClick={() => setTransferOpen(true)}
+              >
+                Transfer ownership
+              </Button>
+            </Row>
+          </Section>
+        )}
       </div>
 
       <ConfirmDialog
@@ -492,6 +527,48 @@ export default function Share() {
         Gallery canvases must be openable without a password. Adding one will remove this canvas
         from the gallery and turn off its template setting. You can re-list it after clearing the
         password.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        onConfirm={() => void transferOwnership()}
+        title="Transfer ownership?"
+        actionLabel="Transfer ownership"
+        destructive
+        loading={transfer.isPending}
+      >
+        <div className="space-y-3">
+          <p>
+            The person you pick becomes the owner immediately. Sharing, the public-link entitlement,
+            and the deploy key follow their account. You keep editor access.
+          </p>
+          <fieldset className="space-y-1">
+            <legend className="text-xs font-medium text-fg">New owner</legend>
+            {(transferCandidates ?? []).map((candidate) => (
+              <label
+                key={candidate.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-surface-hover"
+              >
+                <input
+                  type="radio"
+                  name="transfer-to"
+                  checked={transferTo === candidate.id}
+                  onChange={() => setTransferTo(candidate.id)}
+                />
+                <span className="text-sm text-fg">{candidate.name || candidate.email}</span>
+                {candidate.name && candidate.email && (
+                  <span className="text-xs text-muted">{candidate.email}</span>
+                )}
+              </label>
+            ))}
+          </fieldset>
+          {(transferCandidates?.length ?? 0) === 0 && (
+            <InlineNotice tone="neutral" className="py-2 text-xs">
+              Add an editor first. Ownership can only move to an existing editor.
+            </InlineNotice>
+          )}
+        </div>
       </ConfirmDialog>
     </TabContentFrame>
   );

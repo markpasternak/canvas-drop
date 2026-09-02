@@ -525,7 +525,7 @@ const TEMPLATE_META: Record<string, { label: string; help: string }> = {
   },
   canvas_invite: {
     label: "Added to a canvas",
-    help: "Sent when a person is added to a canvas under Share with people and teams.",
+    help: "Sent when a person is added under People and teams with direct access.",
   },
   individual_canvas_invite: {
     label: "Individual canvas access",
