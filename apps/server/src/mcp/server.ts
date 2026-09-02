@@ -437,7 +437,7 @@ export function buildMcpServer(deps: McpToolDeps, caller: McpCaller): McpServer 
         "zipUpload, the staged upload URLs, readback, and a copy-paste `curl` command with the " +
         "key already filled in). If you can run shell commands, deploy with that curl — you do " +
         "NOT need to know or probe for the API host; it's in the block. The " +
-        "canvas starts empty (no live version) and private; its URL only serves content after a " +
+        "canvas starts empty (no live version) and Restricted (`private` in the API); its URL only serves content after a " +
         "deploy, and only to viewers allowed by its access rung (default: sign-in required).",
       inputSchema: {
         title: z.string().optional(),

@@ -468,7 +468,7 @@ export const CONFIG_FIELDS: readonly ConfigField[] = [
     env: "—",
     group: "Access",
     label: "Public links enabled",
-    help: "Instance-wide switch for the Public link rung. Off denies new public-link publishes for everyone and immediately returns existing public-link canvases to private.",
+    help: "Instance-wide switch for the Public link rung. Off denies new public-link publishes for everyone and immediately returns existing public-link canvases to Restricted.",
     type: "boolean",
     secret: false,
     editable: true,
