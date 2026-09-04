@@ -128,6 +128,9 @@ export interface Canvas {
   description: string | null;
   /** Access rung (D4). `shared` is the legacy boolean (access !== "private"). */
   access: AccessRung;
+  /** Current instance + owner public-sharing policy. Single-canvas responses only.
+   * Lifecycle, password and expiry apply separately; absent means unverified. */
+  publicLinkEnabled?: boolean;
   /** Whether Team/Whole-org shares are findable in Shared. */
   discoverability: CanvasDiscoverability;
   /** Teams this canvas is shared with (plan 003) — populated only when access==='team'

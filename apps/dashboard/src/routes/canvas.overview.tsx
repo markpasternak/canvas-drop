@@ -2,6 +2,7 @@ import { ArrowSquareOut, Info, WarningCircle } from "@phosphor-icons/react";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { accessRungLabel, PublicationBadge } from "../components/Badge.js";
+import { CanvasAudience } from "../components/CanvasAudience.js";
 import { CanvasCover, previewCoverUrl } from "../components/CanvasCover.js";
 import { TabContentFrame } from "../components/CanvasDetail.js";
 import { CopyButton } from "../components/CopyButton.js";
@@ -17,7 +18,7 @@ import { ApiError, type Canvas, type RootEntry, type VersionInfo } from "../lib/
 import { cn } from "../lib/cn.js";
 import { expiryLabel, formatBytes, fullTime, relativeTime, sourceLabel } from "../lib/format.js";
 import { useUpdateSettings } from "../lib/mutations.js";
-import { useCanvas, useDraft, useVersions } from "../lib/queries.js";
+import { useCanvas, useDraft, useMe, useVersions } from "../lib/queries.js";
 
 function rootWorks(entry?: RootEntry): boolean {
   return entry?.reason === "index" || entry?.reason === "single";
@@ -229,6 +230,7 @@ export default function Overview() {
   const { live } = useSearch({ strict: false }) as { live?: boolean };
   const toast = useToast();
   const { data: canvas, isLoading } = useCanvas(id);
+  const { data: me } = useMe();
   const { data: versions, isSuccess: versionsReady } = useVersions(id);
   const update = useUpdateSettings(id);
   const [title, setTitle] = useState("");
@@ -393,7 +395,7 @@ export default function Overview() {
                   {canvas.url}
                 </span>
               )}
-              <CopyButton value={canvas.url} label="Copy" toastMessage="Link copied" />
+              <CopyButton value={canvas.url} label="Copy link" toastMessage="Link copied" />
               {canvas.status === "active" && canvas.currentVersionId && (
                 <IconLink
                   href={canvas.url}
@@ -404,6 +406,9 @@ export default function Overview() {
                   <ArrowSquareOut size={15} weight="bold" aria-hidden />
                 </IconLink>
               )}
+            </div>
+            <div className="mt-2">
+              <CanvasAudience canvas={canvas} orgs={me?.orgs} isGuest={me?.isGuest} />
             </div>
           </Fact>
           <Fact label="Files">

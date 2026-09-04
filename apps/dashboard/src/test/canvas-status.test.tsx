@@ -215,7 +215,7 @@ describe("canvas Overview tab", () => {
 
     // Live-URL copy + open affordances are present and labelled in the header.
     const headerEl = header as HTMLElement;
-    expect(within(headerEl).getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(within(headerEl).getByRole("button", { name: "Copy link" })).toBeInTheDocument();
     expect(within(headerEl).getByRole("link", { name: "Open live canvas" })).toHaveAttribute(
       "href",
       CANVAS.url,

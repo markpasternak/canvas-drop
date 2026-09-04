@@ -9,6 +9,8 @@ Every canvas starts **Restricted**: only you, the owner, can open it. Sharing is
 3. Optionally add a **password** or a **share expiry** under **Protection**.
 4. Optionally opt into discovery: **List for your org** (the Shared page, Whole org only) or **List in the gallery**.
 
+The summary beside **Copy link** describes the current audience, password protection, and expiry. **People and teams** opens the direct-access section. A paused public-sharing policy is shown explicitly; changing that policy never removes existing direct grants.
+
 ## Share with one colleague
 
 1. Publish first. Until the canvas has a live version, the Share tab shows one locked panel with a **Publish** button.

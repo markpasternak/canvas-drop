@@ -10,6 +10,7 @@ import {
   isAnonymouslyReachable,
   principalLookupKey,
   resolveAccessContext,
+  resolvePublicLinkEnabled,
 } from "./authorization.js";
 
 const NOW = 1_000_000;
@@ -911,5 +912,26 @@ describe("resolveAccessContext — list lookups at every rung", () => {
     expect(await resolveAccessContext(d.canvases, d.teams, null, other)).toEqual({});
     expect(d.allowCalls).toEqual([]);
     expect(d.teamCalls).toEqual([]);
+  });
+});
+
+describe("public-link availability shared by management and content access", () => {
+  it.each([
+    { global: false, owner: true, expected: false },
+    { global: true, owner: false, expected: false },
+    { global: true, owner: true, expected: true },
+  ])("requires global=$global and owner=$owner", async ({ global, owner, expected }) => {
+    const repo = { isOwnerPublishEnabled: async () => owner };
+    expect(
+      await resolvePublicLinkEnabled(repo, canvas({ access: "public_link" }), async () => global),
+    ).toBe(expected);
+  });
+  it("does not resolve public policy for a Restricted canvas", async () => {
+    const repo = {
+      isOwnerPublishEnabled: async () => {
+        throw new Error("unexpected lookup");
+      },
+    };
+    expect(await resolvePublicLinkEnabled(repo, canvas())).toBe(false);
   });
 });

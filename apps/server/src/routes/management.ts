@@ -18,7 +18,7 @@ import type { AuditLog } from "../audit/audit-log.js";
 import type { GuestService } from "../auth/guest.js";
 import type { OrgMembershipResolver } from "../auth/org-membership.js";
 import { generateApiKey, hashApiKey } from "../canvas/api-key.js";
-import { memberPrincipal } from "../canvas/authorization.js";
+import { memberPrincipal, resolvePublicLinkEnabled } from "../canvas/authorization.js";
 import { isCloneEligibleForMember } from "../canvas/clone-eligibility.js";
 import type { CloneService } from "../canvas/clone-service.js";
 import { rotateDeployKey } from "../canvas/deploy-key.js";
@@ -390,10 +390,13 @@ export function managementRoutes(deps: ManagementDeps) {
       deps.teams ? deps.teams.listTeamIdsForCanvas(cv.id) : [],
       deps.users.findById(cv.ownerId),
     ]);
-    return ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds, {
-      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
-      role,
-    });
+    return {
+      ...ownerCanvasView(deps.config, cv, await resolveGlobals(), hasPreview, teamIds, {
+        owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : null,
+        role,
+      }),
+      publicLinkEnabled: await resolvePublicLinkEnabled(deps.canvases, cv, deps.publicLinksEnabled),
+    };
   }
 
   /** The role resolver's deps (editor-roles plan, KTD1/KTD2): the live org predicate
