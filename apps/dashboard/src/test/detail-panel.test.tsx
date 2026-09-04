@@ -104,12 +104,10 @@ describe("DetailPanel (plan P4 / U2)", () => {
     expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Whole org").length).toBeGreaterThan(0);
     // Details list facts.
-    expect(screen.getByText("Access")).toBeInTheDocument();
-    expect(screen.getByText("Visibility")).toBeInTheDocument();
-    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByText("Updated")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     // Recent activity derives from the last deploy.
-    expect(screen.getByText(/Published v3/)).toBeInTheDocument();
+    expect(screen.getByText(/Live version v3/)).toBeInTheDocument();
   });
 
   it("Open links to the canvas url and opens in a new tab", async () => {
@@ -118,6 +116,43 @@ describe("DetailPanel (plan P4 / U2)", () => {
     expect(open).toHaveAttribute("href", "http://x/c/my-slug");
     expect(open).toHaveAttribute("target", "_blank");
   });
+
+  it("keeps editing one click away beside Open and Share", async () => {
+    renderInRouter(<DetailPanel canvas={canvas({})} />);
+    expect(
+      await screen.findByRole("link", { name: "Edit draft for Three.js demo" }),
+    ).toHaveAttribute("href", "/canvases/cv-1/editor");
+  });
+
+  it("does not offer a dead live link after unpublishing a previous version", async () => {
+    renderInRouter(
+      <DetailPanel canvas={canvas({ currentVersionId: null, publicationState: "draft" })} />,
+    );
+    expect(
+      await screen.findByRole("link", { name: "Edit draft for Three.js demo" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Three.js demo" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Share Three.js demo" })).toBeNull();
+  });
+
+  it.each(["archived", "disabled"] as const)(
+    "explains %s state without offering active actions",
+    async (status) => {
+      renderInRouter(
+        <DetailPanel
+          canvas={canvas({ status, publicationState: status })}
+          onDuplicate={() => {}}
+        />,
+      );
+      expect(
+        await screen.findByRole("link", { name: "Full details for Three.js demo" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open Three.js demo" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Edit draft for Three.js demo" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Share Three.js demo" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Duplicate Three.js demo" })).toBeNull();
+    },
+  );
 
   it("Share links to the share route", async () => {
     renderInRouter(<DetailPanel canvas={canvas({})} />);

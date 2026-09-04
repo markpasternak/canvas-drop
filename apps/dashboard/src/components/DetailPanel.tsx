@@ -1,20 +1,12 @@
-import { ArrowSquareOut, Copy, DotsThree, UsersThree } from "@phosphor-icons/react";
+import { ArrowSquareOut, Copy, PencilSimple, UsersThree } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import type { CanvasListItem } from "../lib/api.js";
-import { fullTime, relativeTime } from "../lib/format.js";
-import { AccessBadge, accessRungLabel, PublicationBadge } from "./Badge.js";
+import { formatBytes, fullTime, relativeTime } from "../lib/format.js";
+import { AccessBadge, PublicationBadge } from "./Badge.js";
 import { CanvasCover, previewCoverUrl } from "./CanvasCover.js";
 import { canvasTitle, lastActivity, visibilityLabel } from "./CanvasList.js";
 import { coverType } from "./GenerativeCover.js";
-
-const PUBLICATION_LABEL: Record<CanvasListItem["publicationState"], string> = {
-  draft: "Draft",
-  published: "Published",
-  archived: "Archived",
-  disabled: "Disabled",
-  deleted: "Deleted",
-};
 
 const actionBase =
   "inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-3 text-[0.8125rem] " +
@@ -34,14 +26,6 @@ function DetailRow({ label, value, title }: { label: string; value: ReactNode; t
       <dd className="min-w-0 truncate text-right text-xs font-medium text-fg" title={title}>
         {value}
       </dd>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
-      {children}
     </div>
   );
 }
@@ -74,6 +58,10 @@ export function DetailPanel({
 
   const title = canvasTitle(canvas);
   const deploy = canvas.lastDeploy;
+  const active = canvas.status === "active";
+  const published = active && canvas.publicationState === "published" && !!canvas.currentVersionId;
+  const draftLabel = deploy ? "Edit draft" : "Continue setup";
+  const draftAriaLabel = deploy ? `Edit draft for ${title}` : `Continue setup for ${title}`;
   const previewUrl = canvas.hasPreview
     ? `${previewCoverUrl(canvas.url, "thumb")}&v=${canvas.updatedAt}`
     : undefined;
@@ -104,9 +92,9 @@ export function DetailPanel({
         </div>
       </div>
 
-      {/* Primary actions */}
+      {/* The next useful action follows the canvas lifecycle, not its history. */}
       <div className="flex flex-col gap-2">
-        {deploy ? (
+        {published && (
           <a
             href={canvas.url}
             target="_blank"
@@ -117,79 +105,101 @@ export function DetailPanel({
             Open
             <ArrowSquareOut size={14} weight="bold" aria-hidden />
           </a>
-        ) : (
-          <Link
-            to="/canvases/$id/editor"
-            params={{ id: canvas.id }}
-            className={primaryClass}
-            aria-label={`Continue setup for ${title}`}
-          >
-            Continue setup
-          </Link>
         )}
-        <div className="grid grid-cols-2 gap-2">
-          <Link
-            to="/canvases/$id/share"
-            params={{ id: canvas.id }}
-            className={secondaryClass}
-            aria-label={`Share ${title}`}
-          >
-            Share
-            <UsersThree size={14} weight="bold" aria-hidden />
-          </Link>
-          <button
-            type="button"
-            onClick={onDuplicate}
-            disabled={!onDuplicate}
-            className={`${secondaryClass} disabled:opacity-50 disabled:pointer-events-none`}
-            aria-label={`Duplicate ${title}`}
-          >
-            Duplicate
-            <Copy size={14} weight="bold" aria-hidden />
-          </button>
-        </div>
-        <Link
-          to="/canvases/$id"
-          params={{ id: canvas.id }}
-          className={secondaryClass}
-          aria-label={`Manage ${title}`}
-        >
-          Manage
-          <DotsThree size={16} weight="bold" aria-hidden />
-        </Link>
+        {active ? (
+          <>
+            <div className={published ? "grid grid-cols-2 gap-2" : ""}>
+              <Link
+                to="/canvases/$id/editor"
+                params={{ id: canvas.id }}
+                className={published ? secondaryClass : primaryClass}
+                aria-label={draftAriaLabel}
+              >
+                <PencilSimple size={14} weight="bold" aria-hidden />
+                {draftLabel}
+              </Link>
+              {published && (
+                <Link
+                  to="/canvases/$id/share"
+                  params={{ id: canvas.id }}
+                  className={secondaryClass}
+                  aria-label={`Share ${title}`}
+                >
+                  <UsersThree size={14} weight="bold" aria-hidden />
+                  Share
+                </Link>
+              )}
+            </div>
+            {!published && (
+              <p className="text-xs leading-relaxed text-muted">
+                Publish the draft to share a live link.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="rounded-md bg-surface-sunken p-3 text-sm leading-relaxed text-muted">
+            {canvas.status === "archived"
+              ? "This canvas is archived. Open its details to unarchive and resume work."
+              : "This canvas is disabled. Open its details for the reason and next steps."}
+          </p>
+        )}
       </div>
 
-      {/* Details list */}
-      <div className="flex flex-col gap-1">
-        <SectionTitle>Details</SectionTitle>
-        <dl className="divide-y divide-border/60">
-          <DetailRow label="Access" value={accessRungLabel(canvas.access)} />
+      <dl className="divide-y divide-border/60 border-y border-border/60 py-1">
+        <DetailRow
+          label="Updated"
+          value={relativeTime(lastActivity(canvas))}
+          title={fullTime(lastActivity(canvas))}
+        />
+        {deploy && (
+          <>
+            <DetailRow
+              label={`${published ? "Live" : "Saved"} version v${deploy.version}`}
+              value={relativeTime(deploy.createdAt)}
+              title={fullTime(deploy.createdAt)}
+            />
+            <DetailRow
+              label="Version files"
+              value={`${deploy.fileCount} ${deploy.fileCount === 1 ? "file" : "files"} · ${formatBytes(deploy.totalBytes)}`}
+            />
+          </>
+        )}
+      </dl>
+
+      <details className="text-xs text-muted">
+        <summary className="cursor-pointer rounded-md py-1.5 font-medium text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
+          More details
+        </summary>
+        <dl className="mt-1 divide-y divide-border/60">
           <DetailRow label="Visibility" value={visibilityLabel(canvas)} />
-          <DetailRow label="Status" value={PUBLICATION_LABEL[canvas.publicationState]} />
-          <DetailRow
-            label="Edited"
-            value={relativeTime(lastActivity(canvas))}
-            title={fullTime(lastActivity(canvas))}
-          />
           <DetailRow
             label="Created"
             value={relativeTime(canvas.createdAt)}
             title={fullTime(canvas.createdAt)}
           />
         </dl>
-      </div>
+      </details>
 
-      {/* Recent activity (derived; full feed deferred) */}
-      <div className="flex flex-col gap-1">
-        <SectionTitle>Recent activity</SectionTitle>
-        <ul className="flex flex-col gap-1 text-xs text-muted">
-          {deploy && (
-            <li title={fullTime(deploy.createdAt)}>
-              Published v{deploy.version} · {relativeTime(deploy.createdAt)}
-            </li>
-          )}
-          <li title={fullTime(canvas.updatedAt)}>Edited {relativeTime(canvas.updatedAt)}</li>
-        </ul>
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <Link
+          to="/canvases/$id"
+          params={{ id: canvas.id }}
+          className="rounded-md py-2 font-medium text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+          aria-label={`Full details for ${title}`}
+        >
+          Full details
+        </Link>
+        {active && onDuplicate && (
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="inline-flex items-center gap-1.5 rounded-md py-2 text-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50"
+            aria-label={`Duplicate ${title}`}
+          >
+            <Copy size={14} aria-hidden />
+            Duplicate
+          </button>
+        )}
       </div>
     </aside>
   );
