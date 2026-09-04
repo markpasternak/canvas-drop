@@ -30,6 +30,7 @@ export interface PublishBarProps {
   canPublish: boolean;
   /** Whether the draft has any files — distinguishes "nothing to publish" from "matches live". */
   hasFiles: boolean;
+  hasPublishedVersion: boolean;
   selectedPath: string | null;
   surface: EditorSurface;
   pane: EditorPane;
@@ -54,6 +55,7 @@ export function PublishBar({
   publishing,
   canPublish,
   hasFiles,
+  hasPublishedVersion,
   selectedPath,
   surface,
   pane,
@@ -83,7 +85,11 @@ export function PublishBar({
             ? { label: "Unpublished changes", tone: "text-muted", icon: FloppyDisk }
             : stale
               ? { label: "Behind the published version", tone: "text-warning", icon: WarningCircle }
-              : { label: "All changes published", tone: "text-subtle", icon: CheckCircle };
+              : {
+                  label: hasPublishedVersion ? "All changes published" : "Not published yet",
+                  tone: "text-subtle",
+                  icon: CheckCircle,
+                };
   const StatusIcon = status.icon;
 
   return (
@@ -139,7 +145,7 @@ export function PublishBar({
                   : "Add a file to the draft before publishing"
             }
           >
-            Publish
+            {hasPublishedVersion ? "Publish update" : "Publish"}
           </Button>
         </div>
       </div>

@@ -63,6 +63,7 @@ function mockStatus(canvas = CANVAS, versions: unknown[] = [VERSION]) {
       calls.push({ method, url: path, body: init?.body as string | undefined });
       if (path === "/api/canvases/c1") return json(canvas);
       if (path === "/api/canvases/c1/settings") return json(canvas);
+      if (path === "/api/canvases/c1/draft") return json({ files: [], dirty: false, stale: false });
       if (path === "/api/canvases/c1/versions") return json({ versions });
       return json({ error: "not_mocked" }, 500);
     }),
@@ -91,6 +92,25 @@ function renderStatus() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("canvas Overview tab", () => {
+  it("puts the canvas and draft actions before collapsed metadata", async () => {
+    mockStatus();
+    renderStatus();
+    const preview = await screen.findByRole("link", { name: "View published canvas" });
+    expect(preview).toHaveAttribute("href", CANVAS.url);
+    expect(screen.getByLabelText("Title")).not.toBeVisible();
+    expect(screen.getByRole("link", { name: "Edit draft" })).toHaveAttribute(
+      "href",
+      "/canvases/c1/editor",
+    );
+    expect(screen.getByRole("link", { name: "Manage access" })).toHaveAttribute(
+      "href",
+      "/canvases/c1/share",
+    );
+    expect(screen.getByText("Canvas URL")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Edit details"));
+    expect(screen.getByLabelText("Title")).toBeVisible();
+  });
+
   it("uses the new canvas workspace labels without changing route hrefs", async () => {
     mockStatus();
     renderStatus();
@@ -153,25 +173,20 @@ describe("canvas Overview tab", () => {
     mockStatus();
     renderStatus();
 
-    expect(await screen.findByText("Canvas is published")).toBeInTheDocument();
+    expect(await screen.findByText("Version 1")).toBeInTheDocument();
     // Header three-chip row (Publication · Visibility · Gallery) + the global
     // "New version" upload affordance (shown on every tab).
     // "Published" appears in both the header chip and the Publication fact.
     expect(screen.getAllByText("Published").length).toBeGreaterThan(0);
     expect(screen.getByText("Unlisted")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New version" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
     // "Whole org" appears in both the header access chip and the Access fact.
     expect(screen.getAllByText("Whole org").length).toBeGreaterThan(0);
     expect(screen.getByText(/v1 via folder upload/i)).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB")).toHaveLength(2);
     expect(screen.getByText("index.html")).toBeInTheDocument();
 
-    // Flat redesign (U3): the Basics group is a display-headed flat band, not a boxed
-    // Panel card — its section carries no rounded-xl/shadow wrapper.
-    const basics = screen.getByRole("heading", { level: 2, name: "Basics" });
-    expect(basics.className).toContain("font-display");
-    const basicsSection = basics.closest("section");
-    expect(basicsSection?.className ?? "").not.toMatch(/rounded-xl|shadow-/);
+    expect(screen.getByLabelText("Title")).not.toBeVisible();
   });
 
   it("edits the canvas title and description from Overview", async () => {
@@ -179,7 +194,8 @@ describe("canvas Overview tab", () => {
     const user = userEvent.setup();
     renderStatus();
 
-    await user.clear(await screen.findByLabelText("Title"));
+    await user.click(await screen.findByText("Edit details"));
+    await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Roadshow prototype");
     await user.tab();
 
@@ -218,7 +234,7 @@ describe("canvas Overview tab", () => {
       "href",
       "/canvases/c1/editor",
     );
-    expect(screen.getAllByRole("button", { name: "New version" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Upload new version" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("Entry file")).not.toBeInTheDocument();
   });
 
@@ -295,12 +311,12 @@ describe("canvas Overview tab", () => {
       "href",
       "/canvases/c1/editor",
     );
-    expect(within(header).getByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "Upload and publish" })).toBeInTheDocument();
 
     // A draft does NOT present the public URL as a live, reachable link, nor the
     // "New version" / "Open live canvas" live affordances.
     expect(within(header).queryByRole("link", { name: "Open live canvas" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "New version" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Upload new version" })).toBeNull();
     expect(within(header).queryByRole("link", { name: CANVAS.url })).toBeNull();
   });
 
@@ -317,10 +333,10 @@ describe("canvas Overview tab", () => {
       "href",
       CANVAS.url,
     );
-    expect(within(header).getByRole("button", { name: "New version" })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
     expect(within(header).queryByText(/not live yet/i)).toBeNull();
     expect(within(header).queryByRole("link", { name: "Open draft" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Publish" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Upload and publish" })).toBeNull();
   });
 
   it("keeps the disabled state explicit", async () => {
@@ -360,7 +376,8 @@ describe("canvas Overview tab", () => {
       const user = userEvent.setup();
       renderStatus();
 
-      await user.type(await screen.findByLabelText("Tags"), "Roadshow{Enter}");
+      await user.click(await screen.findByText("Edit details"));
+      await user.type(screen.getByLabelText("Tags"), "Roadshow{Enter}");
 
       await vi.waitFor(() => {
         const patch = calls.find(

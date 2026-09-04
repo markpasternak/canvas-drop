@@ -190,9 +190,8 @@ export function DraftPreview({
       <div className="space-y-1.5">
         <p className="text-sm font-medium text-fg">This canvas runs JavaScript</p>
         <p className="mx-auto max-w-[22rem] text-xs leading-relaxed text-subtle">
-          The inline preview is sandboxed for isolation. Most scripts run here, but ES modules,
-          signed-in API calls, and self-hosted fonts won't. Run it in the sandbox below, or open the
-          full preview in a new tab to see it exactly as it ships.
+          Run a limited preview here, or open the full preview to test modules, signed-in features,
+          and fonts. Your draft stays unpublished.
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">

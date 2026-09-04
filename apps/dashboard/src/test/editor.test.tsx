@@ -135,8 +135,8 @@ describe("Editor route", () => {
     // The Editor tab shows two distinct publish affordances: the editor bar's
     // "Publish" (publishes the draft) and the global header "New version" (uploads
     // fresh files as a new version), shown on every tab.
-    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New version" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish update" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload new version" })).toBeInTheDocument();
   });
 
   it("shows the stale notice when a newer version was published under the draft", async () => {
@@ -158,7 +158,7 @@ describe("Editor route", () => {
     });
     renderEditor();
     expect(await screen.findByText(/all changes published/i)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Publish update" })).toBeDisabled();
   });
 
   it("typing shows Unsaved changes immediately (local buffer truth beats the server dirty flag)", async () => {
@@ -178,7 +178,7 @@ describe("Editor route", () => {
     // Before any autosave lands, the bar must already say unsaved — and Publish
     // must be enabled (publishing flushes the buffer first).
     expect(await screen.findByText(/unsaved changes/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled();
   });
 
   it("a failed autosave surfaces 'Save failed' in the status bar instead of claiming published", async () => {
@@ -290,7 +290,7 @@ describe("Editor route", () => {
         json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
     });
     renderEditor();
-    const publishBtn = await screen.findByRole("button", { name: "Publish" });
+    const publishBtn = await screen.findByRole("button", { name: "Publish update" });
     await userEvent.click(publishBtn);
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
@@ -309,7 +309,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     // Wait for the editor to be live (Publish enabled) before firing the shortcut.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled(),
+    );
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
@@ -327,7 +329,9 @@ describe("Editor route", () => {
         json({ version: 2, versionId: "v2", fileCount: 1, totalBytes: 1 }),
     });
     renderEditor();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Publish update" })).toBeEnabled(),
+    );
     await userEvent.keyboard("{Control>}{Enter}{/Control}");
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST" && c.url === "/api/canvases/c1/publish")).toBe(
@@ -346,7 +350,9 @@ describe("Editor route", () => {
     });
     renderEditor();
     // Publish is disabled for a clean draft; the shortcut must respect the same gate.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Publish update" })).toBeDisabled(),
+    );
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     // Give any (incorrect) publish a chance to fire, then assert none did.
     await new Promise((r) => setTimeout(r, 50));

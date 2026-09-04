@@ -1052,6 +1052,7 @@ export default function Editor() {
         publishing={publish.isPending}
         canPublish={canPublish}
         hasFiles={draft.files.length > 0}
+        hasPublishedVersion={!!canvas?.currentVersionId}
         selectedPath={selected}
         surface={mode}
         pane={pane}
