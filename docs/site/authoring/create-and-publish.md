@@ -5,7 +5,7 @@ You have HTML, a folder of static files, or a build directory, and you want a li
 The shortest path, from a signed-in dashboard:
 
 1. Open `/new` and pick **Paste HTML**.
-2. Paste your markup, optionally give it a title, and click **Create and publish**.
+2. Paste your markup and review the document preview. Give it a title, choose its workspace and audience, then click **Create and publish**.
 3. Save the key from the dialog (it is shown once), then **Go to canvas**. The **Overview** tab has the URL: `{base}/c/{slug}/` in `path` mode, `https://{slug}.canvases.example.com/` in `subdomain` mode.
 
 The same from a terminal, with the canvas id and key shown when you create a canvas:
@@ -61,16 +61,20 @@ Owners and editors can do everything on this page. A viewer opens the canvas but
 After you pick a source, `/new` asks for:
 
 - **Title** (optional, up to 200 characters). Rename later from the **Overview** tab.
-- **Slug** (optional). Leave it empty for a readable random slug, or choose your own; availability is checked as you type. See [Custom slug](#custom-slug).
-- **Workspace**, shown only when your account belongs to an org. **Personal** means only you and the people you specifically add. Picking your org homes the canvas there so it can later open to the **Whole org** rung. This choice is fixed once the canvas exists: a Personal canvas cannot be opened to Whole org later. Guests never see this choice.
-- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. The audience is applied after the first publish; if that fails, the canvas stays Restricted and the key dialog says so (**Save key and open Share**). The full ladder, named people, teams, and expiry live on the **Share** tab.
-- **Enable backend** (off by default). Turns on identity and, subject to what your instance allows, KV, files, AI, and realtime. Change it any time on the **Backend** tab. See [Capabilities](/docs/authoring/capabilities).
+- **Slug** (under **Optional settings**). Leave it empty for a readable random slug, or choose your own; availability is checked as you type. See [Custom slug](#custom-slug).
+- **Workspace**, always visible. **Personal** means only you and the people you specifically add. Picking your org homes the canvas there so it can later open to the **Whole org** rung. This choice is fixed once the canvas exists: a Personal canvas cannot be opened to Whole org later. Accounts without an org can select only Personal.
+- **Audience** (not shown for **Use the API**). **Restricted** is the default: only you and people or teams you add can open it. A workspace canvas offers **Everyone in {workspace}** with a **List in Shared** toggle (off by default) so members can find it. A Personal canvas offers **Public link**, when the instance and your account allow public links, with an optional **Require password**. Changing the Workspace resets the audience to Restricted. The audience is applied after the first publish; if that fails, the published result reports Restricted and offers a route to Share after you save or explicitly skip the key. The full ladder, named people, teams, and expiry live on the **Share** tab.
+- **Enable backend** (under **Optional settings**, off by default). Turns on identity and, subject to what your instance allows, KV, files, AI, and realtime. Change it any time on the **Backend** tab. See [Capabilities](/docs/authoring/capabilities).
 
-For **Files or folder** and **Upload ZIP**, the create and the publish start as soon as you drop the files. If the publish fails, the empty canvas is removed and the error is shown so you can retry. On success the key is shown once; copy it if you plan to use the API.
+The **Upload files** source accepts files, a folder, or one ZIP. Selection stays in your browser until you click **Create and publish**; review the file paths or archive summary first. If publishing fails after creation, the empty canvas is removed and your selection remains available to retry.
+
+The published result leads with your canvas link and audience. Open the canvas or manage sharing in a new tab while the result stays available. The deploy key is optional for dashboard use: expand **Save your deploy key (shown once)** to copy it, or explicitly continue without saving it. It is never stored in your browser.
+
+Pasted HTML gets a layout-only document preview, with scripts, navigation, and external assets disabled. Its document title is suggested until you edit the title yourself. Files and ZIPs show a summary; use the editor’s full preview after creation to check the complete site.
 
 ## Files or folder
 
-Drop individual files or a whole folder, or use the file and folder pickers. Relative paths are preserved at the canvas root, so an `index.html` at the folder root is served at the canvas URL. Upload, version, and publish happen in one step, with progress shown while files transfer.
+Drop individual files or a whole folder, or use the file and folder pickers. Relative paths are preserved at the canvas root, so an `index.html` at the folder root is served at the canvas URL. On Create, select and review first, then click **Create and publish**. Progress appears while files transfer.
 
 ## Upload a ZIP
 

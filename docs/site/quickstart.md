@@ -79,14 +79,13 @@ Click **Create canvas** in the dashboard (or open `/new`). Pick a source:
 | Source | What happens |
 |--------|--------------|
 | **Paste HTML** | A single `index.html`, created and published in one step. |
-| **Files or folder** | Drag files or a folder; relative paths are kept from the canvas root. |
-| **Upload ZIP** | Extracted server-side; dotfiles are stripped, paths that escape the root are rejected. |
+| **Upload files** | Select files, a folder, or one ZIP, review the summary, then click **Create and publish**. Relative paths are preserved; archives are checked and extracted server-side. |
 | **Use the API** | Mints an empty canvas plus a per-canvas key (shown once) and a ready-to-run `curl` command. The canvas stays unpublished until your first deploy. |
 
-On the same screen you set a title, an optional custom slug (checked live for
-availability), the audience the canvas opens to once it publishes (**Restricted**
-by default), and **Enable backend (optional)**. The first three sources publish
-immediately.
+Review your content first, then set the title, workspace, and audience (**Restricted**
+by default). Custom slug and backend controls are under **Optional settings**. Paste
+and upload publish when you explicitly click **Create and publish**. The result shows
+your link and lets you save the optional deploy key or continue without it.
 
 Every canvas gets a slug and a URL. The default slug is random
 (`quiet-otter-x7k2`); a custom slug is lowercase letters, digits, and hyphens,

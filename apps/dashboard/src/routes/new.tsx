@@ -1,22 +1,19 @@
-import {
-  ArrowRight,
-  Code,
-  FileArchive,
-  FileHtml,
-  FolderOpen,
-  type Icon,
-  Key,
-} from "@phosphor-icons/react";
+import { ArrowRight, Code, FileHtml, FolderOpen, type Icon, Key } from "@phosphor-icons/react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
-import { ApiKeyReveal } from "../components/ApiKeyReveal.js";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CodeBox } from "../components/CodeBox.js";
 import { CopyButton } from "../components/CopyButton.js";
-import { FileDropOrProgress, folderFormFromFiles } from "../components/DeployFiles.js";
+import { CreatePreview, createDocumentPreview } from "../components/CreatePreview.js";
+import { CreateSuccess, type PublishedCanvasResult } from "../components/CreateSuccess.js";
+import {
+  canvasRelativePaths,
+  FileDropOrProgress,
+  folderFormFromFiles,
+} from "../components/DeployFiles.js";
 import { Field, TextareaField } from "../components/Field.js";
 import { SlugField } from "../components/SlugField.js";
-import { InlineNotice, PageHeader, Panel } from "../components/Surface.js";
+import { InlineNotice, PageHeader } from "../components/Surface.js";
 import { Toggle } from "../components/Toggle.js";
 import { ApiError, api } from "../lib/api.js";
 import { cn } from "../lib/cn.js";
@@ -31,7 +28,8 @@ import { deployCurl } from "../lib/deploy-curl.js";
 import { useMe } from "../lib/queries.js";
 import type { SlugStatus } from "../lib/use-slug-availability.js";
 
-type Method = "paste" | "folder" | "zip" | "api";
+type Method = "paste" | "upload" | "api";
+type SelectedUpload = { kind: "folder" | "zip"; files: File[]; paths: string[] };
 type MethodConfig = {
   id: Method;
   label: string;
@@ -52,20 +50,12 @@ const METHODS = [
     icon: FileHtml,
   },
   {
-    id: "folder",
-    label: "Files or folder",
-    blurb: "Best for static sites",
-    panelTitle: "Upload local files",
-    panelDescription: "Drag files or a folder. Relative paths are preserved at the canvas root.",
+    id: "upload",
+    label: "Upload files",
+    blurb: "Files, a folder, or a ZIP",
+    panelTitle: "Choose your files",
+    panelDescription: "Review your files, then publish when you’re ready.",
     icon: FolderOpen,
-  },
-  {
-    id: "zip",
-    label: "Upload ZIP",
-    blurb: "One packaged site",
-    panelTitle: "Ship a ZIP archive",
-    panelDescription: "Upload a ZIP when your site is already bundled and ready to serve.",
-    icon: FileArchive,
   },
   {
     id: "api",
@@ -81,12 +71,18 @@ export default function CreateCanvas() {
   const search = useSearch({ strict: false }) as { method?: string };
   const navigate = useNavigate();
 
-  const initial = (METHODS.find((m) => m.id === search.method)?.id ?? "paste") as Method;
+  const initial =
+    search.method === "folder" || search.method === "zip"
+      ? "upload"
+      : (METHODS.find((m) => m.id === search.method)?.id ?? "paste");
   const [method, setMethod] = useState<Method>(initial);
   const [title, setTitle] = useState("");
+  const [titleEdited, setTitleEdited] = useState(false);
   // Optional custom slug (plan 004). `slug` is the cosmetic-normalized value; `status`
   // gates submit — blocked when a slug is entered but not confirmed available.
-  const me = useMe().data;
+  const meQuery = useMe();
+  const me = meQuery.data;
+  const busyRef = useRef(false);
   const [slug, setSlug] = useState<{ slug: string; status: SlugStatus }>({
     slug: "",
     status: "idle",
@@ -104,24 +100,26 @@ export default function CreateCanvas() {
   const [backendEnabled, setBackendEnabled] = useState(false);
   const [audience, setAudience] = useState(defaultCreateAudience);
   const [html, setHtml] = useState("");
+  const [upload, setUpload] = useState<SelectedUpload | null>(null);
+  const preview = useMemo(
+    () => (method === "paste" ? createDocumentPreview(html) : null),
+    [html, method],
+  );
+  const canvasTitle = titleEdited ? title : (preview?.title ?? "");
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Upload progress: null = not uploading; 0-100 = % of bytes sent (100 = sent,
   // server now extracting/publishing).
   const [progress, setProgress] = useState<number | null>(null);
 
-  // Post-create state: key to reveal, and where to go on dismiss.
-  const [revealed, setRevealed] = useState<{
-    apiKey: string;
-    id: string;
-    deployed: boolean;
-    shareFailed: boolean;
-  } | null>(null);
+  const [revealed, setRevealed] = useState<PublishedCanvasResult | null>(null);
   const [apiResult, setApiResult] = useState<{ id: string; apiKey: string; url: string } | null>(
     null,
   );
 
   function fail(err: unknown) {
+    busyRef.current = false;
     setError(err instanceof ApiError ? err.hint : "Something went wrong. Try again.");
     setBusy(false);
     setProgress(null);
@@ -136,49 +134,60 @@ export default function CreateCanvas() {
     return false;
   }
 
-  async function revealPublished(id: string, apiKey: string) {
+  async function revealPublished(id: string, apiKey: string, url: string) {
     const outcome = await applyCreateAudience(id, audience, api.updateSettings);
     setBusy(false);
     setProgress(null);
-    setRevealed({ apiKey, id, deployed: true, shareFailed: outcome.kind === "failed" });
+    const shareFailed = outcome.kind === "failed";
+    const access =
+      shareFailed || audience.choice === "private"
+        ? "Restricted · Only you can open it"
+        : audience.choice === "workspace"
+          ? `Everyone in ${orgs.find((org) => org.id === homeOrgId)?.name ?? "your workspace"}`
+          : `Public link · Anyone with the link${audience.requirePassword ? " and password" : ""}`;
+    setRevealed({ apiKey, id, url, audience: access, shareFailed });
   }
 
   async function createPaste() {
+    if (busyRef.current || !html.trim() || meQuery.isPending || meQuery.isError) return;
     if (slugBlocked) {
       setError("Pick an available slug, or clear it for a random one.");
       return;
     }
     if (!validateAudience()) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const res = await api.pasteHtml({
         html,
-        title: title || undefined,
+        title: canvasTitle || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
         orgId: homeOrgId,
       });
-      await revealPublished(res.id, res.apiKey);
+      await revealPublished(res.id, res.apiKey, res.url);
     } catch (err) {
       fail(err);
     }
   }
 
   async function createWithUpload(kind: "folder" | "zip", files: File[]) {
+    if (busyRef.current || meQuery.isPending || meQuery.isError) return;
     if (files.length === 0) return;
     if (slugBlocked) {
       setError("Pick an available slug, or clear it for a random one.");
       return;
     }
     if (!validateAudience()) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setProgress(0);
     const onProgress = (f: number) => setProgress(Math.round(f * 100));
     try {
       const canvas = await api.createCanvas({
-        title: title || undefined,
+        title: canvasTitle || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
         orgId: homeOrgId,
@@ -198,22 +207,24 @@ export default function CreateCanvas() {
         await api.deleteCanvas(canvas.id).catch(() => {});
         throw deployErr;
       }
-      await revealPublished(canvas.id, canvas.apiKey);
+      await revealPublished(canvas.id, canvas.apiKey, canvas.url);
     } catch (err) {
       fail(err);
     }
   }
 
   async function createApiOnly() {
+    if (busyRef.current || meQuery.isPending || meQuery.isError) return;
     if (slugBlocked) {
       setError("Pick an available slug, or clear it for a random one.");
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const canvas = await api.createCanvas({
-        title: title || undefined,
+        title: canvasTitle || undefined,
         backendEnabled,
         slug: slug.slug || undefined,
         orgId: homeOrgId,
@@ -226,6 +237,9 @@ export default function CreateCanvas() {
   }
 
   function finish(id: string, deployed: boolean, shareFailed = false) {
+    setLeaving(true);
+    setRevealed(null);
+    setApiResult(null);
     if (shareFailed) {
       navigate({ to: "/canvases/$id/share", params: { id } });
       return;
@@ -233,241 +247,273 @@ export default function CreateCanvas() {
     navigate({ to: "/canvases/$id", params: { id }, search: deployed ? { live: true } : {} });
   }
 
+  function selectFiles(files: File[]) {
+    if (busyRef.current) return;
+    setUpload(null);
+    setError(null);
+    if (!files.length) return;
+    const archives = files.filter((file) => /\.zip$/i.test(file.name));
+    if (archives.length && (files.length !== 1 || files[0]?.size === 0)) {
+      setError("Choose one non-empty ZIP, or select the unpacked files and folders.");
+      return;
+    }
+    const paths = canvasRelativePaths(files);
+    if (new Set(paths).size !== paths.length) {
+      setError("Two files have the same path. Choose files with unique paths.");
+      return;
+    }
+    setUpload({ kind: archives.length ? "zip" : "folder", files, paths });
+  }
+
+  if (leaving) return <PageHeader title="Opening your canvas…" />;
   const activeMethod = METHODS.find((m) => m.id === method) ?? METHODS[0];
-  const ActiveIcon = activeMethod.icon;
+  const blocked =
+    slugBlocked || (method !== "api" && audienceBlocked) || meQuery.isPending || meQuery.isError;
+  if (revealed)
+    return (
+      <CreateSuccess
+        result={revealed}
+        onDone={() => finish(revealed.id, true, revealed.shareFailed)}
+      />
+    );
+  if (apiResult)
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <PageHeader
+          title="Your canvas is ready for the API"
+          description="Save your key, then publish your first version."
+        />
+        <ApiSnippet result={apiResult} onDone={() => finish(apiResult.id, false)} />
+      </div>
+    );
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Create a canvas"
-        description="Choose a source. canvas-drop handles the URL, secret key, and first publish."
+        description="Start with something you’ve made. Give it a home and a link."
       />
-
       {error && <InlineNotice tone="danger">{error}</InlineNotice>}
-
-      {/* Source-first create flow (plan U16): the source/method choice leads, then
-          name/slug, then the clearly-optional backend toggle, then create/publish.
-          The backend toggle deliberately no longer precedes the source choice. */}
-      <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <section
-          className="space-y-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-panel)] sm:p-5"
-          aria-label="Creation method"
-        >
-          <h2 className="text-[0.6875rem] font-medium uppercase tracking-wide text-subtle">
-            Source
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+      {meQuery.isError && (
+        <InlineNotice tone="danger">
+          Workspace information couldn’t load.{" "}
+          <button type="button" className="underline" onClick={() => meQuery.refetch()}>
+            Try again
+          </button>
+        </InlineNotice>
+      )}
+      <fieldset disabled={busy} className="min-w-0 space-y-7 border-0 p-0" aria-busy={busy}>
+        <section aria-label="Creation method" className="space-y-5">
+          <div className="flex flex-wrap gap-1 border-b border-border pb-2">
             {METHODS.map((m) => {
               const MethodIcon = m.icon;
-              const active = method === m.id;
               return (
                 <button
                   key={m.id}
                   type="button"
-                  aria-pressed={active}
+                  aria-pressed={method === m.id}
                   onClick={() => {
                     setMethod(m.id);
                     if (m.id === "api") setAudience(defaultCreateAudience());
                     setError(null);
-                    setApiResult(null);
                   }}
                   className={cn(
-                    "group flex min-h-16 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-100 [transition-timing-function:var(--ease-out)] active:translate-y-px",
-                    active
-                      ? "border-accent/45 bg-accent-subtle/75 text-fg shadow-[0_1px_3px_hsl(var(--shadow-color)/0.12)]"
-                      : "border-border bg-surface-raised text-muted shadow-xs hover:border-border-strong hover:bg-surface-hover hover:text-fg",
+                    "inline-flex min-h-11 items-center gap-2 rounded-md px-4 py-2 text-sm",
+                    method === m.id
+                      ? "bg-accent-subtle text-accent font-medium"
+                      : "text-muted hover:bg-surface-sunken hover:text-fg",
                   )}
                 >
-                  <span
-                    className={cn(
-                      "grid size-9 shrink-0 place-items-center rounded-lg border transition-colors duration-100 [transition-timing-function:var(--ease-out)]",
-                      active
-                        ? "border-accent/30 bg-surface text-accent"
-                        : "border-border bg-surface-sunken text-subtle group-hover:text-accent",
-                    )}
-                  >
-                    <MethodIcon size={18} weight="duotone" aria-hidden />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-fg">{m.label}</span>
-                    <span className="mt-0.5 block text-xs leading-snug text-muted">{m.blurb}</span>
-                  </span>
+                  <MethodIcon size={18} aria-hidden />
+                  {m.label}
                 </button>
               );
             })}
           </div>
-        </section>
-
-        <Panel className="space-y-5">
-          <div className="flex items-start gap-3 border-b border-border pb-5">
-            <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-accent/25 bg-accent-subtle text-accent">
-              <ActiveIcon size={21} weight="duotone" aria-hidden />
-            </span>
-            <div className="min-w-0 space-y-1">
-              <h2 className="text-base font-semibold tracking-tight text-fg">
-                {activeMethod.panelTitle}
-              </h2>
-              <p className="max-w-xl text-sm leading-relaxed text-muted">
-                {activeMethod.panelDescription}
-              </p>
+          {method === "paste" && (
+            <div className="grid gap-5 lg:grid-cols-2">
+              <TextareaField
+                label="HTML"
+                mono
+                rows={12}
+                className="h-72 resize-y"
+                value={html}
+                onChange={(e) => setHtml(e.target.value)}
+                placeholder={
+                  "<!doctype html>\n<title>My first canvas</title>\n<h1>Hello, team.</h1>"
+                }
+              />
+              <CreatePreview html={html} preview={preview} />
             </div>
-          </div>
-
+          )}
+          {method === "upload" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">
+                {activeMethod.panelDescription} Relative paths are preserved.
+              </p>
+              <FileDropOrProgress
+                busy={busy}
+                pct={progress}
+                label="Drop files, a folder, or one ZIP here"
+                variant="folder"
+                onFiles={selectFiles}
+              />
+              {upload && (
+                <section
+                  aria-label="Selected files"
+                  className="space-y-3 border-t border-border pt-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">
+                      {upload.kind === "zip"
+                        ? "ZIP archive ready"
+                        : `${upload.files.length} files ready`}{" "}
+                      <span className="font-normal text-muted">
+                        ·{" "}
+                        {Math.max(
+                          1,
+                          Math.ceil(upload.files.reduce((sum, file) => sum + file.size, 0) / 1024),
+                        )}{" "}
+                        KB
+                      </span>
+                    </p>
+                    <Button size="sm" variant="ghost" onClick={() => setUpload(null)}>
+                      Clear selection
+                    </Button>
+                  </div>
+                  <ul className="max-h-40 overflow-auto text-xs font-mono text-muted">
+                    {upload.paths.map((path) => (
+                      <li key={path} className="break-all py-1">
+                        {path}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted">
+                    {upload.kind === "zip"
+                      ? "The archive will be checked and unpacked when you publish."
+                      : "Files are staged here. Nothing has been uploaded yet."}{" "}
+                    Preview the full site in the editor after creating it.
+                  </p>
+                </section>
+              )}
+            </div>
+          )}
+          {method === "api" && (
+            <ApiPathIntro
+              me={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
+              slug={slug.slug}
+            />
+          )}
+        </section>
+        <div className="grid gap-7 border-t border-border pt-6 lg:grid-cols-2">
           <div className="space-y-5">
-            {/* Step 2 — name & slug (after the source choice). */}
             <Field
               label="Title"
               hint="optional"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              value={canvasTitle}
+              onChange={(e) => {
+                setTitleEdited(true);
+                setTitle(e.target.value);
+              }}
               placeholder="My prototype"
               maxLength={200}
             />
-
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium text-fg">Workspace</span>
+              <select
+                value={homeOrgId ?? ""}
+                onChange={(e) => {
+                  setWorkspace(e.target.value === "" ? null : e.target.value);
+                  setAudience(resetAudienceForDestination);
+                }}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+              >
+                <option value="">Personal</option>
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <span className="block text-xs text-muted">
+                Where this canvas lives. You can change sharing later; the workspace is fixed after
+                creation.
+              </span>
+            </label>
+          </div>
+          {method !== "api" && (
+            <CreateAudience
+              workspaceName={orgs.find((org) => org.id === homeOrgId)?.name}
+              canPublishPublic={me?.canPublishPublic ?? false}
+              audience={audience}
+              onChoice={(choice) => setAudience({ ...defaultCreateAudience(), choice })}
+              onListed={(listed) => setAudience((current) => ({ ...current, listed }))}
+              onRequirePassword={(requirePassword) =>
+                setAudience((current) => ({
+                  ...current,
+                  requirePassword,
+                  password: requirePassword ? current.password : "",
+                }))
+              }
+              onPassword={(password) => setAudience((current) => ({ ...current, password }))}
+            />
+          )}
+        </div>
+        <details className="space-y-5 border-t border-border pt-5">
+          <summary className="cursor-pointer text-sm font-medium text-fg">
+            Optional settings
+          </summary>
+          <div className="grid gap-6 lg:grid-cols-2">
             <SlugField
               instance={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
               onResolved={setSlug}
             />
-
-            {/* Workspace (plan 002 U6): where this canvas lives. Only shown when the caller
-                belongs to an org — a guest/personal-only user never sees it (and the server
-                rejects any org they don't belong to). Drives whether `whole_org` shares it
-                with the org or keeps it personal. */}
-            {orgs.length > 0 && (
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium text-fg">Workspace</span>
-                <select
-                  value={homeOrgId ?? ""}
-                  onChange={(e) => {
-                    setWorkspace(e.target.value === "" ? null : e.target.value);
-                    setAudience(resetAudienceForDestination);
-                  }}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-xs focus:border-accent focus:outline-none"
-                >
-                  <option value="">Personal</option>
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="block text-xs text-muted">
-                  <strong>Personal</strong> — only you and people you specifically add.{" "}
-                  <strong>A workspace</strong> — you can later share it with everyone in that org
-                  (the “Whole org” access level). This choice is fixed once the canvas is created.
-                </span>
-              </label>
-            )}
-
-            {method !== "api" && (
-              <CreateAudience
-                workspaceName={orgs.find((org) => org.id === homeOrgId)?.name}
-                canPublishPublic={me?.canPublishPublic ?? false}
-                audience={audience}
-                onChoice={(choice) =>
-                  setAudience({
-                    ...defaultCreateAudience(),
-                    choice,
-                  })
-                }
-                onListed={(listed) => setAudience((current) => ({ ...current, listed }))}
-                onRequirePassword={(requirePassword) =>
-                  setAudience((current) => ({
-                    ...current,
-                    requirePassword,
-                    password: requirePassword ? current.password : "",
-                  }))
-                }
-                onPassword={(password) => setAudience((current) => ({ ...current, password }))}
-              />
-            )}
-
-            {/* Step 3 — optional backend capability. Deliberately after the source
-                choice + naming so it reads as an optional add-on, not a gate. */}
-            <div className="rounded-xl border border-border bg-surface-sunken p-4">
-              <Toggle
-                label="Enable backend (optional)"
-                description="Let this canvas store data, serve files, call AI, and sync in realtime. Off keeps it a static page — you can change this any time in the Backend tab."
-                checked={backendEnabled}
-                onChange={setBackendEnabled}
-              />
-            </div>
-
-            {/* Step 4 — create/publish (the source-specific action). */}
-            {method === "paste" && (
-              <div className="space-y-4">
-                <TextareaField
-                  label="HTML"
-                  mono
-                  rows={9}
-                  value={html}
-                  onChange={(e) => setHtml(e.target.value)}
-                  placeholder={"<!doctype html>\n<h1>Hello</h1>"}
-                />
-                <Button
-                  onClick={createPaste}
-                  loading={busy}
-                  disabled={!html.trim() || slugBlocked || audienceBlocked}
-                >
-                  Create and publish
-                  <ArrowRight size={16} weight="bold" aria-hidden />
-                </Button>
-              </div>
-            )}
-
-            {method === "folder" && (
-              <FileDropOrProgress
-                busy={busy}
-                pct={progress}
-                label="Drag files or a folder here"
-                variant="folder"
-                onFiles={(files) => createWithUpload("folder", files)}
-              />
-            )}
-
-            {method === "zip" && (
-              <FileDropOrProgress
-                busy={busy}
-                pct={progress}
-                label="Drag a .zip here"
-                variant="zip"
-                onFiles={(files) => createWithUpload("zip", files)}
-              />
-            )}
-
-            {method === "api" &&
-              (apiResult ? (
-                <ApiSnippet result={apiResult} onDone={() => finish(apiResult.id, false)} />
-              ) : (
-                <ApiPathIntro
-                  me={me ? { urlMode: me.urlMode, baseUrl: me.baseUrl } : undefined}
-                  slug={slug.slug}
-                  onCreate={createApiOnly}
-                  busy={busy}
-                  disabled={slugBlocked}
-                />
-              ))}
+            <Toggle
+              label="Enable backend (optional)"
+              description="Add data, files, AI, and realtime. Off by default. You can change this later in Backend."
+              checked={backendEnabled}
+              onChange={setBackendEnabled}
+            />
           </div>
-        </Panel>
-      </div>
-
-      {/* Key reveal for paste/folder/zip. On dismiss, go to the live canvas. */}
-      {revealed && (
-        <ApiKeyReveal
-          apiKey={revealed.apiKey}
-          notice={
-            revealed.shareFailed
-              ? {
-                  title: "Sharing wasn't applied",
-                  description:
-                    "Your canvas is published and still Restricted. Save the key, then update access in Share.",
-                }
-              : undefined
-          }
-          actionLabel={revealed.shareFailed ? "Save key and open Share" : undefined}
-          onClose={() => finish(revealed.id, revealed.deployed, revealed.shareFailed)}
-        />
-      )}
+        </details>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5">
+          <Button
+            onClick={
+              method === "api"
+                ? createApiOnly
+                : method === "paste"
+                  ? createPaste
+                  : () => upload && createWithUpload(upload.kind, upload.files)
+            }
+            loading={busy}
+            disabled={
+              blocked || (method === "paste" ? !html.trim() : method === "upload" ? !upload : false)
+            }
+          >
+            {method === "api" ? (
+              <>
+                <Key size={16} aria-hidden />
+                Create key
+              </>
+            ) : (
+              <>
+                Create and publish
+                <ArrowRight size={16} aria-hidden />
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-muted">
+            Start another way:{" "}
+            <a href="/gallery?templatable=true" className="text-accent hover:underline">
+              find a template
+            </a>{" "}
+            ·{" "}
+            <a href="/docs/agents/mcp" className="text-accent hover:underline">
+              connect an agent
+            </a>
+          </p>
+        </div>
+      </fieldset>
     </div>
   );
 }
@@ -494,7 +540,7 @@ function CreateAudience({
   const publicDisabled = !workspaceName && !canPublishPublic;
 
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-surface-sunken p-4">
+    <section className="space-y-3">
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-fg">Audience</h3>
         <p className="text-xs text-muted">Choose who can open this canvas after it publishes.</p>
@@ -608,15 +654,9 @@ function CreateAudience({
 function ApiPathIntro({
   me,
   slug,
-  onCreate,
-  busy,
-  disabled,
 }: {
   me?: { urlMode: "path" | "subdomain"; baseUrl: string };
   slug: string;
-  onCreate: () => void;
-  busy: boolean;
-  disabled: boolean;
 }) {
   const origin = me ? new URL(me.baseUrl).origin : "https://your-instance.example";
   const previewUrl = `${origin}/c/${slug || "<id>"}`;
@@ -643,10 +683,6 @@ function ApiPathIntro({
           Your real canvas id and one-time key are filled in after you create the key below.
         </p>
       </div>
-      <Button onClick={onCreate} loading={busy} disabled={disabled}>
-        <Key size={16} weight="bold" aria-hidden />
-        Create key
-      </Button>
     </div>
   );
 }
