@@ -15,6 +15,7 @@ function canvas(over: Record<string, unknown> = {}) {
   const access = over.access ?? (over.shared ? "whole_org" : "private");
   return {
     id: "c1",
+    role: "owner",
     slug: "s1",
     url: "http://x/c/s1",
     title: "Canvas One",
@@ -54,6 +55,8 @@ function summaryFor(canvases: Array<ReturnType<typeof canvas>>) {
     listed: activeRows.filter((c) => c.galleryListed).length,
     templates: activeRows.filter((c) => c.galleryTemplatable).length,
     neverDeployed: activeRows.filter((c) => c.lastDeploy === null).length,
+    owned: activeRows.filter((c) => c.role !== "editor").length,
+    edited: activeRows.filter((c) => c.role === "editor").length,
   };
 }
 
@@ -220,14 +223,50 @@ beforeEach(() => {
 });
 
 describe("Your canvases — server-side filters (plan 005)", () => {
-  function expectMetric(label: string, value: string) {
-    const metric = screen
-      .getAllByText(label)
-      .find((el) => el.tagName.toLowerCase() === "dt")
-      ?.closest("div");
-    expect(metric).not.toBeNull();
-    expect(within(metric as HTMLElement).getByText(value)).toBeInTheDocument();
-  }
+  it("keeps advanced filters out of the initial tab order and exposes them on demand", async () => {
+    stub([canvas()]);
+    renderAt("/");
+    const toggle = await screen.findByRole("button", { name: "Filters" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("combobox", { name: /Filter by access/ })).toBeNull();
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("combobox", { name: /Filter by access/ })).toBeVisible();
+    await userEvent.click(toggle);
+    expect(screen.queryByRole("button", { name: "Shared" })).toBeNull();
+  });
+
+  it("keeps search reset visible without opening advanced filters", async () => {
+    stub([canvas()]);
+    const router = renderAt("/?q=Canvas");
+    const toggle = await screen.findByRole("button", { name: "Filters" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() => expect(router.state.location.search.q).toBeUndefined());
+  });
+
+  it("announces active filters even when collapsed and keeps focus on the toggle", async () => {
+    stub([canvas({ shared: true })]);
+    renderAt("/?shared=1");
+    const toggle = await screen.findByRole("button", { name: "Filters (1)" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Shared" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeVisible();
+  });
+
+  it("clears bulk selection when changing the ownership filter", async () => {
+    stub([canvas({ role: "owner" }), canvas({ id: "c2", title: "Edited canvas", role: "editor" })]);
+    renderAt("/");
+    await screen.findByRole("checkbox", { name: "Select Canvas One" });
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Canvas One" }));
+    expect(screen.getByText("1 canvas selected")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    await userEvent.click(screen.getByRole("button", { name: "Editing" }));
+    await waitFor(() => expect(screen.queryByText("1 canvas selected")).toBeNull());
+  });
 
   it("marks a canvas you edit but don't own with its owner, in the grid card and the list row (editor-roles plan F1)", async () => {
     stub([
@@ -270,12 +309,13 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     await screen.findByText("Private one");
     expect(within(rows()).getByText("Shared one")).toBeInTheDocument();
 
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await userEvent.click(screen.getByRole("button", { name: "Shared" }));
     expect(await within(rows()).findByText("Shared one")).toBeInTheDocument();
     expect(within(rows()).queryByText("Private one")).toBeNull();
   });
 
-  it("shows owner inventory counts on summary metrics and filter chips", async () => {
+  it("shows owner inventory counts once, with their filter controls", async () => {
     stub([
       canvas({ id: "a", title: "Shared one", shared: true }),
       canvas({ id: "b", title: "Protected one", hasPassword: true }),
@@ -290,9 +330,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     renderAt("/");
 
     await screen.findByText("Protected one");
-    expectMetric("Active", "3");
-    expectMetric("Templates", "1");
-    expectMetric("Never deployed", "1");
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(screen.getByRole("button", { name: "Shared" })).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "Protected" })).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "Templates" })).toHaveTextContent("1");
@@ -409,6 +447,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     stub([canvas({ id: "a", title: "Only one" })]);
     renderAt("/");
     await screen.findAllByText("Only one");
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(screen.queryByRole("button", { name: /unpublished/i })).toBeNull();
   });
 
@@ -440,7 +479,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     expect(screen.queryByRole("link", { name: "Open Archived one" })).toBeNull();
   });
 
-  it("colour-codes the stat strip + filter chips with concept dots, and the row badges (rebrand)", async () => {
+  it("preserves concept colours on filter chips and row badges", async () => {
     stub([
       canvas({
         id: "a",
@@ -453,34 +492,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     renderAt("/");
     await screen.findAllByText("Listed template");
 
-    // Stat strip: each stat carries its concept on a data attribute (the dot rides it).
-    // Scope to the <dt> (the stat label) — "Active"/"Archived" also appear in the
-    // scope toggle, so match on the strip's definition-term cells only.
-    const stripLabel = screen
-      .getAllByText("Active")
-      .find((el) => el.tagName.toLowerCase() === "dt");
-    const strip = stripLabel?.closest("dl");
-    expect(strip).not.toBeNull();
-    const concepts = within(strip as HTMLElement)
-      .getAllByText(/^(Active|Archived|Templates|Never deployed|Protected)$/)
-      .map((el) => el.closest("[data-concept]")?.getAttribute("data-concept"));
-    expect(concepts).toEqual(
-      expect.arrayContaining(["active", "archived", "templates", "neverDeployed", "protected"]),
-    );
-
-    // Each stat cell renders a per-concept accent icon TILE (the -subtle wash + the
-    // concept-coloured glyph) alongside its number — the visual upgrade. Spot-check
-    // the Templates cell: the tile carries the accent (teal) text + bg classes from
-    // the shared concept map, holds an svg glyph, and the cell shows its count.
-    const templatesLabel = within(strip as HTMLElement)
-      .getAllByText("Templates")
-      .find((el) => el.tagName.toLowerCase() === "dt");
-    const templatesCell = templatesLabel?.closest("[data-concept]") as HTMLElement;
-    expect(templatesCell).not.toBeNull();
-    const templatesTile = templatesCell.querySelector(".text-accent.bg-accent-subtle");
-    expect(templatesTile).not.toBeNull();
-    expect((templatesTile as HTMLElement).querySelector("svg")).not.toBeNull();
-    expect(within(templatesCell).getByText("1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
 
     // Filter chips carry the same concept colours: the Listed chip's dot is the
     // info (blue) tint that the Listed row badge also uses. (Several controls match
@@ -599,6 +611,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     stub([canvas({ id: "a", title: "Untagged", tags: null })]);
     renderAt("/");
     await screen.findAllByText("Untagged");
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     // TagFilter renders nothing when availableTags is empty.
     expect(screen.queryByRole("button", { name: "Filter by tag" })).toBeNull();
   });
@@ -611,6 +624,7 @@ describe("Your canvases — server-side filters (plan 005)", () => {
     const router = renderAt("/");
     await screen.findAllByText("Charts one");
 
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
     await userEvent.click(screen.getByRole("button", { name: "Filter by tag" }));
     await userEvent.click(await screen.findByRole("option", { name: /charts/i }));
 

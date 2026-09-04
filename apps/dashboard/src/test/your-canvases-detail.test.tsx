@@ -171,8 +171,11 @@ describe("Your canvases — row/card body click opens the detail page", () => {
     const router = renderAt("/");
     await screen.findAllByText("Row canvas");
 
-    // The slug line in the row is a non-interactive body region.
-    await userEvent.click(screen.getByText("row1"));
+    const row = screen
+      .getByRole("link", { name: "View details for Row canvas" })
+      .closest("li[data-canvas-item]");
+    if (!row) throw new Error("Row not found");
+    await userEvent.click(row);
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/row1"));
     expect(selectedAttr()).toBeNull();
@@ -183,20 +186,23 @@ describe("Your canvases — row/card body click opens the detail page", () => {
     const router = renderAt("/");
     await screen.findAllByText("Draft canvas");
 
-    await userEvent.click(screen.getByText("nd1"));
+    const row = screen
+      .getByRole("link", { name: "View details for Draft canvas" })
+      .closest("li[data-canvas-item]");
+    if (!row) throw new Error("Row not found");
+    await userEvent.click(row);
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/nd1"));
   });
 
-  it("Enter on the row body navigates to /canvases/$id", async () => {
+  it("Enter on the name link navigates to /canvases/$id", async () => {
     stub([canvas({ id: "kb", slug: "kb", title: "Keyboard canvas" })]);
     const router = renderAt("/");
     await screen.findAllByText("Keyboard canvas");
 
-    // Fire Enter from a non-interactive body element inside the row.
-    const body = screen.getByText("kb");
-    body.focus();
-    await userEvent.type(body, "{Enter}");
+    const link = screen.getByRole("link", { name: "View details for Keyboard canvas" });
+    link.focus();
+    await userEvent.keyboard("{Enter}");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/canvases/kb"));
     expect(selectedAttr()).toBeNull();

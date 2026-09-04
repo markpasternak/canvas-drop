@@ -94,7 +94,7 @@ function SharedCard({ item }: { item: SharedCanvas }) {
       title={sharedTitle(item)}
       coverType={coverType({ protectedByPassword: item.hasPassword })}
       status="published"
-      previewUrl={item.hasPreview ? previewCoverUrl(item.url) : undefined}
+      previewUrl={item.hasPreview ? `${previewCoverUrl(item.url)}&v=${item.updatedAt}` : undefined}
       onActivate={() => openLive(item)}
       nameLink={
         <a href={item.url} target="_blank" rel="noreferrer" className={cardNameLinkClass}>
@@ -115,7 +115,9 @@ function SharedRow({ item }: { item: SharedCanvas }) {
   return (
     <CanvasListRow
       seed={item.id}
-      previewUrl={item.hasPreview ? previewCoverUrl(item.url, "thumb") : undefined}
+      previewUrl={
+        item.hasPreview ? `${previewCoverUrl(item.url, "thumb")}&v=${item.updatedAt}` : undefined
+      }
       coverType={coverType({ protectedByPassword: item.hasPassword })}
       onActivate={() => openLive(item)}
       nameLink={
@@ -123,7 +125,7 @@ function SharedRow({ item }: { item: SharedCanvas }) {
           href={item.url}
           target="_blank"
           rel="noreferrer"
-          className="min-w-0 truncate rounded-sm font-display text-[0.95rem] text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
+          className="min-w-0 basis-full truncate rounded-sm font-display text-lg leading-snug text-fg underline-offset-2 outline-none transition-colors hover:text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/50"
         >
           {sharedTitle(item)}
         </a>
